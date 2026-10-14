@@ -43,8 +43,8 @@ export function humanChecklist(input: HumanChecklistInput): string[] {
   if (input.sendsMail) {
     items.push(
       input.mailFrom
-        ? `Verify ${input.mailFrom} in Catalyst console → Mail → Email Configuration; enter the verification code sent to that address, then deploy with --mail-sender-verified.`
-        : 'Choose the Catalyst Mail sender address, pass it as --mail-from <address>, then verify it in Catalyst console → Mail → Email Configuration by entering the code sent to that address; deploy with --mail-sender-verified.',
+        ? `Verify ${input.mailFrom} in Catalyst console → Mail → Email Configuration; enter the code sent to that address, then set mail.verified to true in c2c-deploy.json.`
+        : 'Choose the Catalyst Mail sender address and set mail.from in c2c-deploy.json; verify it in Catalyst console → Mail → Email Configuration by entering the code sent there, then set mail.verified to true.',
     );
   }
   if (input.connectionSecretKeys && input.connectionSecretKeys.length > 0) {
