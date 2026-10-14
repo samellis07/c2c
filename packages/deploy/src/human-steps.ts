@@ -12,6 +12,8 @@ export interface HumanChecklistInput {
   slate: boolean;
   /** The app's generated functions send mail — detected from the plan, not a flag. */
   sendsMail: boolean;
+  /** Configured Catalyst sender address, when provided. */
+  mailFrom?: string | null;
   /**
    * The run already confirmed Slate started (a Slate command completed, or
    * the slate-enable step is done). A re-run then drops the Slate start
@@ -40,7 +42,9 @@ export function humanChecklist(input: HumanChecklistInput): string[] {
   }
   if (input.sendsMail) {
     items.push(
-      'Verify the sender email (the app sends mail): Catalyst console → Mail → Email Configuration → add the sender address — the service mails a verification code to that address; enter it.',
+      input.mailFrom
+        ? `Verify ${input.mailFrom} in Catalyst console → Mail → Email Configuration; enter the verification code sent to that address, then deploy with --mail-sender-verified.`
+        : 'Choose the Catalyst Mail sender address, pass it as --mail-from <address>, then verify it in Catalyst console → Mail → Email Configuration by entering the code sent to that address; deploy with --mail-sender-verified.',
     );
   }
   if (input.connectionSecretKeys && input.connectionSecretKeys.length > 0) {

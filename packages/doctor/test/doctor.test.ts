@@ -28,6 +28,7 @@ import {
   resolveScope,
   maskEmail,
   runDoctorChecks,
+  checkMailSender,
   verifyVendorCli,
   verifyProbe,
   verifyVendorDir,
@@ -44,6 +45,7 @@ import { limitValue } from '../../schema/src/limits.js';
 import type { SchemaColumn, SchemaTable } from '../../schema/src/generator.js';
 import requiredTools from '../data/required-mcp-tools.json' with { type: 'json' };
 import { repoRoot } from '../../core/src/toolchain.js';
+import { deriveIr, parse } from '../../core/src/index.js';
 import { ALL_REQUIRED_MCP_TOOLS, MCP_TOOLS_GUIDANCE, NEVER_CALL_MCP_TOOLS, REQUIRED_MCP_TOOLS } from '../src/required-tools.js';
 import { VERIFIED_MCP_TOOL_REGISTRY, isVerifiedMcpTool } from '../../deploy/src/mcp-registry.js';
 import { findVendorRoot } from '../src/checks.js';
@@ -177,6 +179,51 @@ test('doctor offline coverage: conditional and warning checks return their docum
   const production = (await run({ local: false, scope: { ...scope, env: 'Production' } })).checks.find((check) => check.id === 'D-F2');
   assert.equal(production?.status, 'fail');
   assert.match(production!.fix!, /set "env": "Development"/);
+});
+
+const MAIL_APP = deriveIr(parse(`application "Mailer"
+{
+ forms
+ {
+  form Item
+  {
+   Title
+   (
+    type = text
+   )
+  }
+ }
+ workflow
+ {
+  form Item
+  {
+   on success
+   (
+    sendmail
+    [
+     from: zoho.adminuserid
+     to: "owner@example.com"
+     subject: "mail"
+     message: "hello"
+    ];
+   )
+  }
+ }
+}`));
+
+test('doctor checks sender verification offline from c2c-deploy.json fixtures', () => {
+  const dir = tmp('c2c-doctor-mail-');
+  const path = join(dir, 'c2c-deploy.json');
+  const check = () => checkMailSender(MAIL_APP, dir)[0]!;
+  writeFileSync(path, JSON.stringify({ mail: { from: 'sender@example.com', verified: true } }));
+  assert.equal(check().status, 'pass');
+  assert.equal(check().screen, 'mail sender s***@example.com is marked verified');
+  writeFileSync(path, JSON.stringify({ mail: { from: 'sender@example.com', verified: false } }));
+  assert.equal(check().status, 'fail');
+  assert.equal(check().screen, 'mail sender s***@example.com is not marked verified');
+  writeFileSync(path, JSON.stringify({ mail: { testRecipients: [] } }));
+  assert.equal(check().status, 'fail');
+  assert.match(check().detail, /no Catalyst Mail sender is set/);
 });
 
 const dirs: string[] = [];

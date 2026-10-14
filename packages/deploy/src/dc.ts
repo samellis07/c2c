@@ -37,12 +37,12 @@ export interface DeployConfigFile {
   /** Project id or project name. */
   project?: string;
   /** Test mail recipients for `--mail`. Omitted or empty means no test sends. */
-  mail?: { testRecipients?: string[] };
+  mail?: { testRecipients?: string[]; from?: string; verified?: boolean };
   /** Which UI the Slate app serves: react (default) or the vanilla tree as the fallback. */
   ui?: 'vanilla' | 'react';
 }
 
-/** `dc` / `zohoDc`, `org`, `project` and `mail.testRecipients` from a c2c-deploy.json. `dc` and `zohoDc` must agree. */
+/** `dc` / `zohoDc`, `org`, `project` and mail settings from a c2c-deploy.json. `dc` and `zohoDc` must agree. */
 export function readDeployConfig(path: string): DeployConfigFile {
   let parsed: unknown;
   try {
@@ -78,15 +78,19 @@ export function readDeployConfig(path: string): DeployConfigFile {
   };
 }
 
-/** `mail.testRecipients` from a c2c-deploy.json. Every entry must be a mail address; anything else is refused. */
-function readMailConfig(path: string, value: unknown): { testRecipients?: string[] } | undefined {
+/** Mail settings from a c2c-deploy.json. Recipients and sender addresses are validated; verification is an explicit boolean attestation. */
+function readMailConfig(path: string, value: unknown): { testRecipients?: string[]; from?: string; verified?: boolean } | undefined {
   if (value === undefined || value === null) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`${path} "mail" is not an object`);
   }
   const record = value as Record<string, unknown>;
   const raw = record.testRecipients;
-  if (raw === undefined || raw === null) return {};
+  const from = record.from;
+  const verified = record.verified;
+  if (from !== undefined && (typeof from !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(from.trim()))) throw new Error(`${path} "mail.from" is not a mail address`);
+  if (verified !== undefined && typeof verified !== 'boolean') throw new Error(`${path} "mail.verified" is not a boolean`);
+  if (raw === undefined || raw === null) return { ...(typeof from === 'string' && from.trim() ? { from: from.trim() } : {}), ...(typeof verified === 'boolean' ? { verified } : {}) };
   if (!Array.isArray(raw)) throw new Error(`${path} "mail.testRecipients" is not an array`);
   const recipients = raw.map((item) => {
     if (typeof item !== 'string' || !item.trim()) throw new Error(`${path} "mail.testRecipients" holds a non-string recipient`);
@@ -96,7 +100,7 @@ function readMailConfig(path: string, value: unknown): { testRecipients?: string
     }
     return address;
   });
-  return { testRecipients: recipients };
+  return { testRecipients: recipients, ...(typeof from === 'string' && from.trim() ? { from: from.trim() } : {}), ...(typeof verified === 'boolean' ? { verified } : {}) };
 }
 
 /** Test mail recipients from a c2c-deploy.json. Missing, unreadable or unset means nobody: no test sends. */
