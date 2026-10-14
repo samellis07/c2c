@@ -177,34 +177,62 @@ test('doctor offline coverage: conditional and warning checks return their docum
   assert.match(production!.fix!, /set "env": "Development"/);
 });
 
-const MAIL_APP = deriveIr(parse(`application "Mailer"
+const MAIL_APP = deriveIr(parse(`/*
+ * Author       : synthetic
+ * Generated on : 01-Jan-2025 12:00:00
+ * Version      : 1.0
+ */
+application "Mailer"
 {
- forms
- {
-  form Item
-  {
-   Title
-   (
-    type = text
-   )
-  }
- }
- workflow
- {
-  form Item
-  {
-   on success
-   (
-    sendmail
-    [
-     from: zoho.adminuserid
-     to: "owner@example.com"
-     subject: "mail"
-     message: "hello"
-    ];
-   )
-  }
- }
+	forms
+	{
+		form Item
+		{
+			Title
+			(
+				type = text
+				displayname = "Title"
+			)
+		}
+	}
+	reports
+	{
+		list All_Items
+		{
+			displayName = "All Items"
+			show all rows from Item
+			(
+				Title as "Title"
+			)
+		}
+	}
+	workflow
+	{
+		form
+		{
+			On_Add as "On add"
+			{
+				type = form
+				form = Item
+				on add
+				{
+					actions
+					{
+						on success
+						(
+							sendmail
+							[
+								from: zoho.adminuserid
+								to: "owner@example.com"
+								subject: "c2c-mail"
+								message: "hello"
+							];
+						)
+					}
+				}
+			}
+		}
+	}
 }`));
 
 test('doctor checks sender verification offline from c2c-deploy.json fixtures', () => {
