@@ -1812,6 +1812,22 @@ test('Field is this week compiles in a workflow criteria and keeps the week boun
   assert.deepEqual(await run('2026-10-10T18:29:00.000Z'), ['sat']);
 });
 
+test('workflow criteria accept the documented relative-day and period membership shapes', () => {
+  for (const value of ['today', 'this week', 'this month']) {
+    const t = translate(`rows = Invoices[Added_Time is ${value}];`);
+    assert.equal(t.todos.some((item) => item.construct === 'criteria-dynamic'), false, value);
+    assert.match(stripComments(t.server), new RegExp(`"__rel":"${value}"`));
+  }
+
+  // A relative period used with an unrelated comparison cannot be guessed as a window.
+  for (const value of ['this week', 'this month']) {
+    const t = translate(`rows = Invoices[Added_Time > ${value}];`);
+    assert.equal(t.todos.some((item) => item.construct === 'criteria-dynamic'), true, value);
+    assert.match(stripComments(t.server), /shim\.todo\(ctx, "criteria-dynamic"\)/);
+    assert.doesNotMatch(stripComments(t.server), /op: "true"/);
+  }
+});
+
 test('the bare-field criteria shorthand applies to a single name, not a member path', () => {
   const bare = translate('rows = FlagRow[Qty != 99 && Billable];');
   assert.match(stripComments(bare.server), /{ op: "==", field: "Billable", value: true }/);

@@ -22,7 +22,7 @@ The default UI is the React app: `c2c deploy` writes the React source under `c2c
 | Subform | Inline grid | Renders; each subform is a child table |
 | List report | Table view, server paging (ZCQL keyset), display names in headers | 300 rows per SELECT ([L-ZCQL-ROWS](../../references/limits.md#l-zcql-rows-zcql-rows-per-select) → split), 1-based offsets ([L-ZCQL-OFFSET](../../references/limits.md#l-zcql-offset-zcql-offset) → split), projection ≤ 20 columns ([L-ZCQL-WIDTH](../../references/limits.md#l-zcql-width-zcql-select-columns) → refuse). Headers showed link names and lookups as raw ROWIDs [TESTED]; #76 |
 | Kanban / calendar / timeline / spreadsheet / grouping / pivot | Generated views | A view type c2c cannot render yet falls back to a table and is reported as a TODO |
-| Report criteria | Translated to ZCQL; untranslatable → fail closed (TODO), never `true` | |
+| Report criteria | `Field is today`, `Field is this week`, and `Field is this month` bind in the application time zone; untranslatable criteria fail closed (TODO), never `true` | |
 | Pages / HTML snippets / ZML | Generated pages | Partial |
 | Widgets | TODO | Report as TODO |
 | File upload field | Upload to Stratus via the API | A live deploy must not show the "dry-run upload does not write bytes" text; if it does, the deploy ran in dry-run mode |
