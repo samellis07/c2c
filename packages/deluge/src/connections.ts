@@ -362,6 +362,25 @@ export function connectionsChecklist(appName: string, report: ConnectionsReport,
     out.push(`| \`${e.catalystName ?? '(choose a name)'}\` | ${e.serviceName ?? 'unknown (needs a human)'} | ${e.scopes.length ? e.scopes.map((s) => `\`${s}\``).join('<br>') : 'none derivable'} | ${e.link ? `\`${e.link}\`` : `(none: set \`${e.configKey}\`)`} | ${used} |`);
   }
   out.push('');
+  const manualUses = report.entries.flatMap((entry) => entry.uses.filter((use) => !use.adapter).map((use) => ({ entry, use })));
+  const detected = report.entries.reduce((n, entry) => n + entry.uses.length, 0);
+  const generated = detected - manualUses.length;
+  out.push(
+    '',
+    `## Integration coverage (${detected} detected calls)`,
+    '',
+    'Adapter-backed calls are generated. Calls without an adapter are counted below as manual work and remain dry-run only; the connection name and derivable scope are shown for each call.',
+    '',
+    `Generated calls: ${generated}. Manual integration calls: ${manualUses.length}. Manual connection setup steps: ${report.entries.length} (the owner must create and authorize each connection with their credentials).`,
+    '',
+  );
+  if (manualUses.length) {
+    out.push('### Manual integration calls', '');
+    for (const { entry, use } of manualUses) {
+      out.push(`- [ ] \`${use.task}\` in ${use.where}: connection \`${entry.catalystName ?? entry.configKey}\`; service ${entry.serviceName ?? 'unknown (identify by hand)'}; scope ${use.scope ? `\`${use.scope}\`` : 'not derivable (identify and authorize by hand)'}.`);
+    }
+    out.push('');
+  }
   const withEvidence = report.entries.filter((e) => e.link && evidence[e.link]);
   if (withEvidence.length) {
     out.push('## Creator scope evidence', '');

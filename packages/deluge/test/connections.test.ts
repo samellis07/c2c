@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { emptyApp, type App, type Workflow } from '../../core/src/index.js';
-import { analyzeConnections, declaredConnections, scriptUses } from '../src/connections.js';
+import { analyzeConnections, connectionsChecklist, declaredConnections, scriptUses } from '../src/connections.js';
 
 const Z = { start: 0, end: 0 };
 
@@ -138,4 +138,19 @@ test('a permissions value that is not scope-name shaped is reported but never ec
     assert.ok(!d.includes('https://'), `no URL may be echoed, got ${d}`);
     assert.ok(!d.includes('deadbeef') && !d.includes('1000.ABC'), `no sibling property may be echoed, got ${d}`);
   }
+});
+
+test('the checklist counts generated and manual calls and names the manual connection and unresolved scope', () => {
+  const demo = app({
+    workflows: [workflow({
+      name: 'Notify', form: 'Orders', event: 'on success',
+      deluge: { text: 'a = zoho.crm.createRecord("Leads", {"Last_Name":"x"}, Map(), "fs_crm"); b = zoho.sms.send("template", "123", "fs_sms");', span: Z },
+    })],
+  });
+  const report = analyzeConnections(demo);
+  const checklist = connectionsChecklist('Demo_App', report);
+  assert.match(checklist, /Integration coverage \(2 detected calls\)/);
+  assert.match(checklist, /Generated calls: 1\. Manual integration calls: 1\. Manual connection setup steps: 2/);
+  assert.match(checklist, /`sms\.send` in Notify \(on success\): connection `fs_sms`; service unknown \(identify by hand\); scope not derivable/);
+  assert.match(checklist, /`crm\.createRecord` in Notify \(on success\)/);
 });
