@@ -61,8 +61,10 @@ precheck rules 01 through 31 are implemented. Not yet implemented: precheck rule
 - **BLOCKING latent fault** → the fix belongs in Creator (it breaks Creator's own export/duplicate too). Recommend: fix in Creator, re-export, re-run precheck. c2c never auto-guesses missing arguments (precheck rule 01).
 - **The user wants to proceed anyway** → allowed only for rules whose component c2c converts to a TODO (record the user's choice in `c2c-out/<app>/decisions.json`). precheck rules 14, 15, and 16 parse failures cannot be skipped.
 - **Dialect:** C5 and C6 are detected heuristically; **C8 is not supported yet**. If analyze reports an unknown dialect, stop and tell the user.
-- **Out of scope (flag, never silently drop):** payments, Form Email, native mobile apps / MDM / offline (the PWA replaces them), marketplace publishing, Zia AI builder, on-prem Data Bridge, Cliq integration-function bots where Integration Functions are unavailable. Report them as out of scope.
-- **Zoho One / org SSO portals** → Catalyst has no native SAML/OIDC; precheck flags it; the fallback is Catalyst hosted/embedded auth plus re-invite or third-party JWT (`c2c-auth-and-access`).
+- **Not supported in this version (counted):** payments, offline (the PWA replaces offline), Form Email, the C8 dialect, and Cliq bots (Cliq integration-function bots where Integration Functions are unavailable). Say `not supported in this version (counted)`. Do not call these out of scope.
+- **Not applicable (out of scope):** marketplace publishing, the Zia AI builder, and on-prem Data Bridge. Label each `not applicable (out of scope)`. Do not count them as gaps or TODOs, and do not lower the readiness score for them.
+- Native mobile apps / MDM stay flagged, never silently dropped.
+- **Zoho One / org SSO portals** are a manual step, not a scope label. Catalyst has no native SAML/OIDC; the fallback is Catalyst hosted/embedded auth plus re-invite or third-party JWT (`c2c-auth-and-access`).
 - **Rule — default settings only (C2C.md rule 13).** No browser automation, no permission-rule changes, no supplied evidence — this step is fully offline, and anything it flags that needs a live check becomes a guided ask or a read-back, never a browser drive.
 
 ## Verification
