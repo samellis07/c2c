@@ -16,7 +16,8 @@ import { requiredCompositePart } from '../../schema/src/composite-parts.js';
 import { CURRENCY_CODES, fieldTypeRow, normalizeType, type FieldTypeRow } from '../../schema/src/mapping.js';
 import { criteriaHasTodo, sealRelativeCriteria } from '../../shims/src/criteria.js';
 import { LIMITS } from '../../shims/src/index.js';
-import { droppedStyleReason, droppedStyles, elementsFromZml, leaves, type UiElement } from './pages.js';
+import { droppedStyleReason, droppedStyles, elementsFromZml, leaves, type UiElement, type ZmlEnv } from './pages.js';
+import type { HtmlpageFile } from './htmlpage.js';
 
 export type Widget =
   | 'text'
@@ -373,11 +374,22 @@ const REPORT_VIEW: Record<string, UiReport['view']> = {
   summary: 'summary',
 };
 
+const UI_SNIPPET_FILES = Symbol('c2c.snippetFiles');
+
+/** Endpoint modules compiled from a model's server-side `htmlpage` snippets. */
+export function uiSnippetFiles(model: UiModel): HtmlpageFile[] {
+  return (((model as unknown) as Record<symbol, unknown>)[UI_SNIPPET_FILES] as HtmlpageFile[] | undefined) ?? [];
+}
+
 export function buildModel(app: App, delugeFiles: GeneratedFile[] = []): UiModel {
   const todos: UiTodo[] = [];
   const forms = app.forms.map((form) => buildForm(form, todos, app));
   const reports = app.reports.map((report) => buildReport(app, report, todos));
-  const pages = app.pages.map((page) => buildPage(page, todos));
+  const snippetFiles: HtmlpageFile[] = [];
+  const pages = app.pages.map((page) => {
+    const env: ZmlEnv = { app, page: page.name, emit: (file) => snippetFiles.push(file), seq: { n: 0 } };
+    return buildPage(page, todos, env);
+  });
   const handlers = handlersFrom(delugeFiles);
   for (const form of forms) {
     form.handlers = handlers.filter((handler) => handler.form === form.name);
@@ -410,6 +422,7 @@ export function buildModel(app: App, delugeFiles: GeneratedFile[] = []): UiModel
     todos,
     ...(dateFormat ? { dateFormat: unquote(dateFormat.value) } : {}),
   };
+  Object.defineProperty(model, UI_SNIPPET_FILES, { value: snippetFiles, enumerable: false });
   applyDecorations(model, app);
   return model;
 }
@@ -944,8 +957,12 @@ function hasLatLong(form: Form | undefined): boolean {
   return lat && lng;
 }
 
-function buildPage(page: App['pages'][number], todos: UiTodo[]): UiPage {
-  const elements = page.zml.length ? elementsFromZml(page.zml) : page.content?.trim() ? [{ tag: 'text', kind: 'text' as const, text: page.content, children: [] }] : [];
+function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): UiPage {
+  const elements = page.zml.length
+    ? elementsFromZml(page.zml, env)
+    : page.content?.trim()
+      ? [{ tag: 'text', kind: 'text' as const, text: page.content, children: [] }]
+      : [];
   const pageLeaves = leaves(elements);
   const todoLeaves = pageLeaves.filter((el) => el.kind === 'todo');
   for (const el of todoLeaves) {

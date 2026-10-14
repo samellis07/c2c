@@ -2487,8 +2487,12 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
   // (fetch example 4: https://www.zoho.com/deluge/help/fetch-records/fetch-collection-records.html
   // and https://www.zoho.com/deluge/help/data-access/update-records.html).
   // Queue during the loop and flush once when it leaves, including break, return, and throw.
+  // record.set is the only call that queues a pending field write, so a loop
+  // whose body never calls it gets no flush wrapper at all: an unconditional
+  // flush would put a write-capable shim call in code that only reads.
+  const queuesFieldWrite = /\bshim\.record\.set\(/.test(body.server);
   const serverLoop = body.server.trim()
-    ? col.query || rowSource
+    ? (col.query || rowSource) && queuesFieldWrite
       ? `try {\n${indent(`${head} {\n${indent(body.server)}\n}`)}\n} finally {\n${indent('await shim.datastore.flush(ctx);')}\n}`
       : `${head} {\n${indent(body.server)}\n}`
     : '';
@@ -2700,6 +2704,41 @@ function assignStmt(s: Extract<Stmt, { kind: 'assign' }>, scope: Scope, stats: T
   return assignTo(s.target, value, s.span, scope, stats, todos, s.declType, selfRef);
 }
 
+/**
+ * Path segments a write may never contain: they reach the object's shared
+ * prototype instead of an own key. A path holding one is refused outright —
+ * the same counted hole as any other unhandled write — and the runtime set
+ * refuses them too, so a computed segment cannot sneak one in.
+ */
+const UNSAFE_PATH_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function unsafePathRefusal(span: { start: number; end: number }, stats: TranslateStats, todos: TodoItem[]): Out {
+  account(stats, todos, { todo: true, shim: true, constructs: ['unsafe-path-key'] }, span);
+  const line = `await shim.todo(ctx, "unsafe-path-key");`;
+  return { server: line, client: '' };
+}
+
+/**
+ * An assignment target's member/index chain down to its root name. Member
+ * steps and string-literal index steps are static segments; any other index
+ * expression is a computed segment.
+ */
+function assignPath(e: Expr): { root: string; segments: Array<{ key?: string; index?: Expr }> } | null {
+  const segments: Array<{ key?: string; index?: Expr }> = [];
+  let cur: Expr = e;
+  for (;;) {
+    if (cur.kind === 'member') {
+      segments.unshift({ key: cur.property });
+      cur = cur.object;
+    } else if (cur.kind === 'index') {
+      segments.unshift(cur.index.kind === 'string' ? { key: cur.index.value } : { index: cur.index });
+      cur = cur.object;
+    } else break;
+  }
+  if (cur.kind === 'name') return { root: cur.name, segments };
+  return null;
+}
+
 function assignTo(target: Expr, value: Fx, span: { start: number; end: number }, scope: Scope, stats: TranslateStats, todos: TodoItem[], declType?: string, selfRef = false): Out {
   void declType;
   if (target.kind === 'name') {
@@ -2778,6 +2817,7 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
   }
   const path = aliasedPath(target, scope);
   if (path && (path.root === 'input' || path.root === 'row')) {
+    if (path.path.some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
     const api = path.root === 'input' ? 'input' : 'record';
     const base = path.root === 'input' ? '' : `${jsIdent(path.root)}, `;
     const code = `shim.${api}.set(ctx, ${base}${JSON.stringify(path.path)}, ${value.code})`.replace('set(ctx, ,', 'set(ctx,');
@@ -2789,11 +2829,13 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     return { server: fixed, client: value.serverOnly ? '' : fixed };
   }
   if (path && scope.query.has(path.root)) {
+    if (path.path.some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
     account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
     const line = `await shim.datastore.setField(ctx, ${jsIdent(path.root)}, ${JSON.stringify(path.path.join('.'))}, ${value.code});`;
     return { server: line, client: '' };
   }
   if (path && scope.row.has(path.root)) {
+    if (path.path.some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
     account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
     const line = `shim.record.set(${jsIdent(path.root)}, ${JSON.stringify(path.path)}, ${value.code});`;
     // The row itself is a server value: the client cannot write to it even when the value is client-side.
@@ -2804,15 +2846,44 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     // the folded read is a call result, which cannot take an assignment.
     const rowFields = scope.rowFields;
     if (rowFields?.names.has(path.root) && scope.row.has(rowFields.row)) {
+      if ([path.root, ...path.path].some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
       account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
       const line = `shim.record.set(${jsIdent(rowFields.row)}, ${JSON.stringify([path.root, ...path.path])}, ${value.code});`;
       return { server: line, client: value.serverOnly || scope.serverOnly.has(rowFields.row) ? '' : line };
     }
     if (scope.inputFields.has(path.root)) {
+      if ([path.root, ...path.path].some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
       account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
       const line = `shim.input.set(ctx, ${JSON.stringify([path.root, ...path.path])}, ${value.code});`;
       return { server: line, client: value.serverOnly ? '' : line };
     }
+  }
+  const indexed = assignPath(target);
+  if (indexed && indexed.segments.some((seg) => seg.key !== undefined && UNSAFE_PATH_KEYS.has(seg.key))) {
+    return unsafePathRefusal(span, stats, todos);
+  }
+  if (indexed && (indexed.root === 'input' || indexed.root === 'old') && indexed.segments.length) {
+    // An index path on `input` or `old` is the same record write a member
+    // path emits; routing it through the shim keeps a computed segment under
+    // the runtime key guard instead of indexing the record object raw.
+    const segFxs = indexed.segments.map((seg) => (seg.key !== undefined ? fx({ code: JSON.stringify(seg.key) }) : expr(seg.index!, scope)));
+    account(stats, todos, mergeFx('', [...segFxs, value]), span);
+    const api = indexed.root === 'input' ? 'shim.input.set' : 'shim.old.set';
+    const line = `${api}(ctx, [${segFxs.map((seg) => seg.code).join(', ')}], ${value.code});`;
+    const serverOnly = value.serverOnly || segFxs.some((seg) => seg.serverOnly);
+    return { server: line, client: serverOnly ? '' : line };
+  }
+  if (target.kind === 'index' || target.kind === 'member') {
+    // A computed key (and a member step that resolved to a local holding a
+    // prototype) goes through the guarded setter: it refuses the unsafe
+    // segment names and never writes onto a shared prototype object, so
+    // `m[k][f] = v` with `k` = "__proto__" from request input is inert.
+    const obj = expr(target.object, scope);
+    const key = target.kind === 'index' ? expr(target.index, scope) : fx({ code: JSON.stringify(target.property) });
+    account(stats, todos, mergeFx('', [obj, key, value]), span);
+    const line = `shim.set(${obj.code}, ${key.code}, ${value.code});`;
+    if (value.serverOnly || obj.serverOnly || key.serverOnly) return { server: line, client: '' };
+    return { server: line, client: line };
   }
   const left = expr(target, scope);
   account(stats, todos, mergeFx('', [left, value]), span);
@@ -3365,11 +3436,30 @@ function expr(e: Expr, scope: Scope): Fx {
       ) {
         return criteriaExpr({ kind: 'criteria', object: e.object, criteria: e.index, span: e.span }, scope);
       }
+      // `input["f"]` / `old["f"]` with a string-literal key read like the
+      // member form: the record getter walks own keys under the same key
+      // guard, keeps the `input.ID` rule, and stays the shape criteria
+      // compilation recognises. Any other key expression stays a guarded
+      // generic index read — the record root is still visible in the emitted
+      // code, so a criteria compiler cannot enumerate the field and fails
+      // closed exactly like a computed key did before.
+      if (e.object.kind === 'name' && (e.object.name === 'input' || e.object.name === 'old') && e.index.kind === 'string') {
+        const api = e.object.name === 'input' ? 'shim.input.get' : 'shim.old.get';
+        return fx({
+          code: `${api}(ctx, ${JSON.stringify(e.index.value)})`,
+          shim: true,
+          decimal: decimalLeaf([e.index.value], scope),
+          lookup: e.object.name === 'input' && scope.lookupFields.has(e.index.value),
+        });
+      }
       const o = expr(e.object, scope);
       const i = expr(e.index, scope);
       // A TODO is not a collection. Indexing it throws at runtime.
       if (o.todo) return untranslatedMethod('index', o, [i]);
-      return mergeFx(`${o.code}[${i.code}]`, [o, i]);
+      // Every index read is own-only through the shim: a computed `__proto__`,
+      // `constructor`, or `prototype` key must never hand back the shared
+      // prototype (or a function) for a later write.
+      return mergeFx(`shim.get(${o.code}, ${i.code})`, [o, i], { shim: true });
     }
     case 'criteria':
       return criteriaExpr(e, scope);
@@ -3991,9 +4081,14 @@ function memberExpr(e: Extract<Expr, { kind: 'member' }>, scope: Scope): Fx {
   if (path && scope.map.has(path.root)) {
     const onClient = scope.clientData.has(path.root);
     const serverOnly = scope.serverOnly.has(path.root);
+    // Member reads on a map are index reads: they go through the same
+    // own-only accessor so `m.__proto__` / `m.constructor` cannot hand a
+    // script the shared prototype for a later write.
+    const code = path.path.reduce((acc, p) => `shim.get(${acc}, ${JSON.stringify(p)})`, jsIdent(path.root));
     return fx({
-      code: `${jsIdent(path.root)}${path.path.map((p) => `[${JSON.stringify(p)}]`).join('')}`,
+      code,
       map: true,
+      shim: true,
       reads: [path.root],
       serverOnly,
       clientReady: onClient || !serverOnly,
@@ -4017,7 +4112,13 @@ function memberExpr(e: Extract<Expr, { kind: 'member' }>, scope: Scope): Fx {
       rowReads: fieldRowRead(e.object, e.property, call, scope),
     });
   }
-  return mergeFx(`${obj.code}.${jsIdent(e.property)}`, [obj], { decimal: path ? decimalLeaf(path.path, scope) : false });
+  // Any other member read is an index read on a runtime object: own-only
+  // through the shim, so `x.__proto__` on a call result or lookup cannot hand
+  // a script the shared prototype either.
+  return mergeFx(`shim.get(${obj.code}, ${JSON.stringify(e.property)})`, [obj], {
+    shim: true,
+    decimal: path ? decimalLeaf(path.path, scope) : false,
+  });
 }
 
 function zohoMember(path: string[], _scope: Scope): Fx {
@@ -4646,7 +4747,7 @@ function directMethod(method: string, recv: Fx, args: Fx[]): Fx | null {
   if (stringJs && textish) return mergeFx(`${recv.code}.${stringJs}(${argList})`, [recv, ...args]);
   if (method === REPLACE_FIRST) return mergeFx(`shim.string.replaceFirst(${recv.code}, ${argList})`, [recv, ...args], { shim: true });
   if (method === 'put' && recv.map && args.length >= 2) {
-    return mergeFx(`(${recv.code}[${args[0]!.code}] = ${args[1]!.code})`, [recv, ...args], { map: true });
+    return mergeFx(`(shim.set(${recv.code}, ${args[0]!.code}, ${args[1]!.code}))`, [recv, ...args], { map: true, shim: true });
   }
   // A computed receiver (ifnull, a fetched row, a getJson result) is still a
   // map at run time; the shim dispatches on the runtime shape.

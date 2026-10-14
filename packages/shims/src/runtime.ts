@@ -508,6 +508,19 @@ export function rangeSlotRequest(body: unknown): { slot?: string; from: number; 
 
 export interface Shim {
   todo(ctx: ShimContext, construct: string, detail?: unknown): Promise<unknown>;
+  /**
+   * Every generated `obj[key]` index read goes through this accessor: own
+   * keys only, and the prototype-path segment names (`__proto__`,
+   * `constructor`, `prototype`) read as undefined, so no compiled read can
+   * hand a script the shared prototype.
+   */
+  get(obj: unknown, key: unknown): unknown;
+  /**
+   * Every generated `obj[key] = v` / `obj.name = v` write on a value that is
+   * not the input/old record goes through this setter: it refuses the unsafe
+   * segment names and never writes onto a shared prototype object.
+   */
+  set(obj: unknown, key: unknown, value: unknown): unknown;
   input: {
     root(ctx: ShimContext): Record<string, unknown>;
     get(ctx: ShimContext, ...path: string[]): unknown;
@@ -518,7 +531,10 @@ export interface Shim {
      */
     insert(ctx: ShimContext, path: string[], value: unknown): unknown;
   };
-  old: { get(ctx: ShimContext, ...path: string[]): unknown };
+  old: {
+    get(ctx: ShimContext, ...path: string[]): unknown;
+    set(ctx: ShimContext, path: string[], value: unknown): unknown;
+  };
   compare: {
     /**
      * `Field == literal` equality: a lookup field stores a reference object
@@ -1023,27 +1039,93 @@ function firstRecord(row: unknown): unknown {
   return Array.isArray(row) ? (row.length ? row[0] : null) : row;
 }
 
+/**
+ * Path segments a get or set may never touch: reading them walks the shared
+ * prototype, and writing them either mutates it or reparents the record.
+ */
+const UNSAFE_PATH_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * The shared objects a generated write may never land on: mutating one would
+ * leak into every object in the process. Functions are refused too — a
+ * `prototype` segment is already refused, but a function itself is never a
+ * Deluge map.
+ */
+function sharedProtoTarget(value: unknown): boolean {
+  return value === Object.prototype || value === Function.prototype || typeof value === 'function';
+}
+
+/**
+ * Generated `obj[key]` index read: own keys only. A `__proto__`,
+ * `constructor`, or `prototype` segment — and any inherited member — reads as
+ * undefined, so no compiled read can hand a script the shared prototype.
+ */
+function indexGet(obj: unknown, key: unknown): unknown {
+  if (obj === null || obj === undefined || typeof obj === 'function') return undefined;
+  const k = String(key);
+  if (UNSAFE_PATH_KEYS.has(k)) return undefined;
+  const boxed = Object(obj) as Record<string, unknown>;
+  const got = Object.hasOwn(boxed, k) ? boxed[k] : undefined;
+  // A stored shared prototype is not a readable value either — handing it out
+  // would let a later step write through it.
+  return sharedProtoTarget(got) ? undefined : got;
+}
+
+/**
+ * Generated `obj[key] = v` (and `obj.name = v`): refuses the unsafe segment
+ * names and never writes onto a shared prototype object. Writing a key a read
+ * could then hand back out is the whole leak — keeping both under one guard
+ * means a stored object that is itself a prototype stays inert.
+ */
+function indexSet(obj: unknown, key: unknown, value: unknown): unknown {
+  if (obj === null || obj === undefined || (typeof obj !== 'object' && typeof obj !== 'function')) return value;
+  if (sharedProtoTarget(obj)) return value;
+  const k = String(key);
+  if (UNSAFE_PATH_KEYS.has(k)) return value;
+  (obj as Record<string, unknown>)[k] = value;
+  return value;
+}
+
 function getPath(root: unknown, path: string[]): unknown {
   let cur = root;
   for (const p of path) {
     if (cur === null || cur === undefined || typeof cur !== 'object') return undefined;
+    if (UNSAFE_PATH_KEYS.has(p)) return undefined;
     const record = cur as Record<string, unknown>;
     // `ID` is logical: a record's id reads as its Catalyst ROWID when the
     // object does not carry a literal ID key (docs/schema-mapping.md).
-    cur = p === 'ID' && !Object.hasOwn(record, 'ID') ? (record.ROWID ?? record.rowid) : record[p];
+    if (Object.hasOwn(record, p)) {
+      cur = record[p];
+    } else if (p === 'ID') {
+      cur = Object.hasOwn(record, 'ROWID') ? record.ROWID : Object.hasOwn(record, 'rowid') ? record.rowid : undefined;
+    } else {
+      return undefined;
+    }
   }
-  return cur;
+  // A stored shared prototype reads undefined: it is never a readable value.
+  return sharedProtoTarget(cur) ? undefined : cur;
 }
 
 function setPath(root: Record<string, unknown>, path: string[], value: unknown): unknown {
   if (!path.length) return value;
+  if (path.some((k) => UNSAFE_PATH_KEYS.has(k))) return value;
+  if (sharedProtoTarget(root)) return value;
   let cur: Record<string, unknown> = root;
   for (let i = 0; i < path.length - 1; i++) {
     const k = path[i]!;
-    const next = cur[k];
-    if (next === null || typeof next !== 'object') cur[k] = {};
-    cur = cur[k] as Record<string, unknown>;
+    const next = Object.hasOwn(cur, k) ? cur[k] : undefined;
+    if (next === null || next === undefined || typeof next !== 'object') {
+      const created: Record<string, unknown> = {};
+      cur[k] = created;
+      cur = created;
+    } else {
+      // An own value that IS a shared prototype (stored earlier) is not a
+      // walkable map — writing through it would mutate every object.
+      if (sharedProtoTarget(next)) return value;
+      cur = next as Record<string, unknown>;
+    }
   }
+  if (sharedProtoTarget(cur)) return value;
   cur[path[path.length - 1]!] = value;
   return value;
 }
@@ -2459,6 +2541,8 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       note({ op: 'todo', construct, detail: detail ?? null });
       return undefined;
     },
+    get: indexGet,
+    set: indexSet,
     input: {
       root(ctx) {
         return ctx.record;
@@ -2488,6 +2572,10 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     old: {
       get(ctx, ...path) {
         return getPath(ctx.old, path);
+      },
+      set(ctx, path, value) {
+        note({ op: 'old.set', path, value });
+        return setPath(ctx.old, path, value);
       },
     },
     compare: {
@@ -3297,11 +3385,13 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         const record: Record<string, unknown> = {};
         const callArgs = args.map((value, i) => {
           const param = params[i];
-          if (param === undefined) return value;
+          if (param === undefined || UNSAFE_PATH_KEYS.has(param)) return value;
           const bound = entry.recordParams?.[param] ? rowArgument(value) : value;
           return (record[param] = bound ?? null);
         });
-        for (const param of params) if (!(param in record)) record[param] = null;
+        // A parameter spelled `__proto__` reads undefined through input.get
+        // anyway; assigning it raw would reparent the record instead.
+        for (const param of params) if (!(param in record) && !UNSAFE_PATH_KEYS.has(param)) record[param] = null;
         const child: ShimContext = { ...ctx, record, old: {} };
         delete child.row;
         delete child.subformRow;

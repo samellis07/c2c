@@ -1,0 +1,1854 @@
+/**
+ * `htmlpage` snippets compile to read-only server-rendered endpoints: the
+ * value-slots and aggregate classes, against the fake datastore. Anything the
+ * compiler cannot prove stays the same counted TODO as before.
+ */
+
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { test } from 'node:test';
+import { JSDOM } from 'jsdom';
+import { deriveIr, parse, type App } from '../../core/src/index.js';
+import { mockDatastore } from '../../shims/test/zcql-mock.js';
+import { buildUi, generateUi } from '../src/index.js';
+import { compileHtmlpage, islandReadOnly, renderAuditSource } from '../src/htmlpage.js';
+import { renderedDocumentViolation, renderedHtmlElements } from '../../shims/src/rendered-guard.js';
+import { c2cUrlFunctionSource } from '../src/url-policy.js';
+import { uiSnippetFiles } from '../src/model.js';
+import { leaves } from '../src/pages.js';
+
+const ADMIN = { name: 'Administrator', type: 'Users_Permissions', properties: [], modules: [], span: { start: 0, end: 0 } };
+
+function appOf(body: string): App {
+  const app = deriveIr(parse(`application "Demo"\n{\n${body}\n}\n`));
+  app.profiles.push(ADMIN);
+  return app;
+}
+
+function pageWithSnippet(snippet: string): string {
+  const zml = `<zml><layout><row><column width='100%'><dsp id='hp1'><![CDATA[${snippet}]]></dsp></column></row></layout></zml>`;
+  // A Deluge string keeps \n, \t, \r, and any raw character. The \f escape is
+  // the letter f, and a \u escape is u plus the hex digits, so the page string
+  // keeps the original character instead of those escapes.
+  const literal = JSON.stringify(zml)
+    .replace(/(?<!\\)\\f/g, '\f')
+    .replace(/(?<!\\)\\u([0-9a-fA-F]{4})/g, (_m, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+  return `\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tContent=${literal}\n\t\t}\n\t}`;
+}
+
+const ORDERS = `\tform Orders
+\t{
+\t\tName
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tStatus
+\t\t(
+\t\t\ttype = picklist
+\t\t\tvalues = open,closed
+\t\t)
+\t\tAmount
+\t\t(
+\t\t\ttype = decimal
+\t\t)
+\t}`;
+
+/** Write all generated `functions/*` so sibling imports resolve, like deluge/test's loadTree. */
+async function loadTree(files: { path: string; data: string | Buffer }[], entry: string): Promise<Record<string, unknown>> {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-hp-'));
+  writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
+  mkdirSync(join(dir, 'node_modules'), { recursive: true });
+  symlinkSync(process.cwd(), join(dir, 'node_modules/creator-to-catalyst'));
+  for (const file of files.filter((f) => f.path.startsWith('functions/'))) {
+    const dest = join(dir, file.path);
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, file.data);
+  }
+  try {
+    return (await import(pathToFileURL(join(dir, entry)).href)) as Record<string, unknown>;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+async function invoke(handler: (req: unknown, res: unknown) => unknown, req: unknown) {
+  let status = 0;
+  let raw = '';
+  const res = {
+    writeHead(code: number) {
+      status = code;
+    },
+    end(body: string) {
+      raw = body;
+    },
+  };
+  await handler(req, res);
+  return { status, body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {} };
+}
+
+/** Live mode + injected fake datastore preloaded with rows; restore() in finally. */
+async function liveStore(rows: Record<string, Record<string, unknown>[]>) {
+  const { datastore } = mockDatastore({});
+  const realMode = process.env.C2C_DEPLOY_MODE;
+  const realZone = process.env.C2C_APP_TIMEZONE;
+  const realStore = (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+  process.env.C2C_DEPLOY_MODE = 'live';
+  process.env.C2C_APP_TIMEZONE = 'UTC';
+  (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = datastore;
+  for (const [form, list] of Object.entries(rows)) if (list.length) await datastore.insert(form, list);
+  return {
+    datastore,
+    restore() {
+      if (realMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+      else process.env.C2C_DEPLOY_MODE = realMode;
+      if (realZone === undefined) delete process.env.C2C_APP_TIMEZONE;
+      else process.env.C2C_APP_TIMEZONE = realZone;
+      if (realStore === undefined) delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+      else (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = realStore;
+    },
+  };
+}
+
+const USER = { user: { profile: 'Administrator', loginUser: 'ada@example.com', userId: 'u1' } };
+const CLERK = { user: { profile: 'Clerk', loginUser: 'ada@example.com', userId: 'u2' } };
+/** First row the fake datastore inserts. Creator `ID` matches that ROWID. */
+const FIRST_ID = '1000';
+
+function htmlElements(model: ReturnType<typeof buildUi>['model']) {
+  return leaves(model.pages[0].elements).filter((el) => el.kind === 'html');
+}
+
+test('value-slots: input, zoho.currentdate, literals and if compile and render', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<p>Hello <%= input.name %>, <%= zoho.currentdate %>, <%= zoho.loginuser %>, <%= zoho.appuri %></p>
+<%
+if (input.show == "yes") {
+%><b>shown</b><%
+} else {
+%><i>hidden</i><%
+}
+%>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const element = htmlElements(model)[0];
+  assert.equal(element.src, '/htmlpages/Home/s0');
+  const entry = uiSnippetFiles(model)[0];
+  assert.equal(entry.path, 'functions/htmlpages/home-s0.mjs');
+  const mod = await loadTree(files, entry.path);
+  const handler = mod.default as (req: unknown, res: unknown) => Promise<void>;
+
+  const live = await liveStore({});
+  try {
+    const shown = await invoke(handler, { ...USER, body: { input: { name: 'Ada', show: 'yes' } } });
+    assert.equal(shown.status, 200, JSON.stringify(shown.body));
+    assert.match(String(shown.body.html), /<p>Hello Ada, \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}, ada@example\.com, #<\/p>/);
+    assert.match(String(shown.body.html), /<b>shown<\/b>/);
+    assert.doesNotMatch(String(shown.body.html), /hidden/);
+
+    const hidden = await invoke(handler, { ...USER, body: { input: { name: 'Ada', show: 'no' } } });
+    assert.match(String(hidden.body.html), /<i>hidden<\/i>/);
+  } finally {
+    live.restore();
+  }
+});
+
+test('value-slots: interpolated input is escaped in text and attribute positions', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<p title="<%= input.tip %>"><%= input.name %></p><a href="<%= input.href %>">go</a>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({});
+  try {
+    const out = await invoke(mod.default as never, {
+      ...USER,
+      body: { input: { name: '<script>alert(1)</script>" onclick="x', tip: 'a "b" <c>', href: 'javascript:alert(1)' } },
+    });
+    assert.equal(out.status, 200);
+    const html = String(out.body.html);
+    assert.doesNotMatch(html, /<script/i);
+    assert.doesNotMatch(html, /" onclick="/);
+    assert.doesNotMatch(html, /javascript:/i);
+    assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+    assert.match(html, /title="a &quot;b&quot; &lt;c&gt;"/);
+    assert.match(html, /<a href=""[^>]*>go<\/a>/);
+  } finally {
+    live.restore();
+  }
+});
+
+test('aggregate: count/sum/avg/min/max with criteria, if and openUrl', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<%
+n = Orders[Status == "open"].count();
+s = Orders[Status == "open"].sum(Amount);
+a = Orders[Status == "open"].avg(Amount);
+lo = Orders[Status == "open"].min(Amount);
+hi = Orders[Status == "open"].max(Amount);
+if (n > 0) {
+%><p><%= n %>|<%= s %>|<%= a %>|<%= lo %>|<%= hi %></p><%
+} else {
+%><p>empty</p><%
+}
+openUrl("#Form:Orders","new window");
+openUrl("#Form:Orders","popup window");
+%>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({
+    Orders: [
+      { Status: 'open', Amount: 10 },
+      { Status: 'open', Amount: null },
+      { Status: 'open', Amount: 30 },
+      { Status: 'closed', Amount: 5 },
+    ],
+  });
+  try {
+    const out = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    const html = String(out.body.html);
+    // NULL rows count, but do not skew sum/avg/min/max over the live values.
+    assert.match(html, /3\|40\|20\|10\|30/);
+    assert.match(html, /<a href="#\/form\/Orders">Orders<\/a>/);
+    // The popup-window openUrl is lifted to a popup marker, not a link.
+    assert.equal(html.match(/<a href/g)?.length, 1);
+    const element = htmlElements(model)[0];
+    assert.deepEqual(
+      (element.popups ?? []).map((p) => [p.target, p.name, p.when]),
+      [['form', 'Orders', 'always']],
+    );
+  } finally {
+    live.restore();
+  }
+});
+
+test('aggregate: an empty form renders the else branch', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<%
+n = Orders[Status == "open"].count();
+if (n > 0) {
+%><p><%= n %></p><%
+} else {
+%><p>empty</p><%
+}
+%>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({ Orders: [] });
+  try {
+    const out = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(out.status, 200);
+    assert.match(String(out.body.html), /<p>empty<\/p>/);
+  } finally {
+    live.restore();
+  }
+});
+
+test('htmlpage endpoints: unauthenticated and unauthorized callers are refused, hidden forms too', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<p><%= Orders[Status == "open"].count() %></p>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const handler = mod.default as (req: unknown, res: unknown) => Promise<void>;
+  const live = await liveStore({ Orders: [{ Status: 'open', Amount: 1 }] });
+  try {
+    const anon = await invoke(handler, { body: { input: {} } });
+    assert.equal(anon.status, 401);
+    const denied = await invoke(handler, { user: { profile: 'Nobody' }, body: { input: {} } });
+    assert.equal(denied.status, 403);
+    const ok = await invoke(handler, { ...USER, body: { input: {} } });
+    assert.equal(ok.status, 200);
+    assert.match(String(ok.body.html), /<p>1<\/p>/);
+  } finally {
+    live.restore();
+  }
+});
+
+test('a record value with malicious markup is escaped in the rendered page', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<%
+v = Orders[ID != 0].distinct(Status);
+%><p><%= v %></p>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({ Orders: [{ Status: 'open"><script>alert(1)</script>', Amount: 1 }] });
+  try {
+    const out = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    const html = String(out.body.html);
+    assert.doesNotMatch(html, /<script/i);
+    assert.doesNotMatch(html, /" onclick="/);
+    assert.match(html, /&lt;script&gt;/);
+  } finally {
+    live.restore();
+  }
+});
+
+const SNIPPET_TODO = 'Server-side Deluge snippet requires manual translation';
+
+test('htmlpage slot positions retain their current context class and compile reason', () => {
+  const cases: Array<{ name: string; template: string; className?: 'T' | 'A' | 'C' | 'D'; reason?: string }> = [
+    { name: 'text', template: '<p><%= input.value %></p>', className: 'T' },
+    { name: 'double-quoted attribute', template: '<p title="<%= input.value %>">x</p>', className: 'A' },
+    { name: 'single-quoted attribute', template: "<p title='<%= input.value %>'>x</p>", className: 'A' },
+    { name: 'unquoted attribute', template: '<p title=<%= input.value %>>x</p>', className: 'A' },
+    { name: 'style attribute', template: '<p style="color:<%= input.value %>">x</p>', className: 'C' },
+    { name: 'tag name', template: '<p<%= input.value %>>x</p>', reason: 'island in an unsafe position' },
+    { name: 'HTML comment', template: '<!-- <%= input.value %> -->', className: 'D' },
+    { name: 'script body', template: '<script>const x = <%= input.value %>;</script>', reason: 'island in an unsafe position' },
+    { name: 'style body', template: '<style>.x { color: <%= input.value %>; }</style>', reason: 'island in an unsafe position' },
+  ];
+  for (const c of cases) {
+    const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n${c.template}`);
+    if (c.reason) {
+      assert.equal(compiled.ok, false, c.name);
+      assert.equal(compiled.reason, c.reason, c.name);
+    } else {
+      assert.equal(compiled.ok, true, c.name);
+      assert.match(compiled.file?.source ?? '', new RegExp(`\\[\\"k\\"\\]: \\\"${c.className}\\\"`), c.name);
+    }
+  }
+});
+
+const SEEDED = {
+  Orders: [
+    { Status: 'open', Amount: 1 },
+    { Status: 'open', Amount: 2 },
+    { Status: 'closed', Amount: 3 },
+  ],
+};
+
+/**
+ * A page render may not write. The island stays the counted snippet, no
+ * endpoint is emitted, and a live-mode render (when one was emitted) leaves
+ * every seeded row as it was.
+ */
+async function assertStaysSnippet(body: string, input: Record<string, unknown>) {
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n${body}`)}`));
+  const compiled = uiSnippetFiles(model);
+  const live = await liveStore(SEEDED);
+  let statuses: string[] = [];
+  try {
+    if (compiled.length) {
+      const mod = await loadTree(files, compiled[0].path);
+      await invoke(mod.default as never, { ...USER, body: { input } });
+    }
+    const rows = await live.datastore.query('Orders', 'true', 300);
+    statuses = rows.map((row) => String(row.Status));
+  } finally {
+    live.restore();
+  }
+  assert.equal(compiled.length, 0, `compiled endpoint; statuses=${statuses.join(',')}`);
+  assert.equal(model.todos.filter((todo) => todo.reason === SNIPPET_TODO).length, 1);
+  assert.deepEqual(statuses, ['open', 'open', 'closed']);
+}
+
+test('a query-root field assignment stays a snippet and does not update rows', async () => {
+  const cases: Array<[string, Record<string, unknown>]> = [
+    [
+      `<%
+q = Orders[Status == "open"];
+q.Status = input.payload;
+%>
+<p>x</p>`,
+      { payload: 'pwned' },
+    ],
+    [
+      `<%
+q = Orders[Status == "open"];
+q.Status = "pwned";
+%>
+<p>x</p>`,
+      {},
+    ],
+    [
+      `<%
+if (input.go == "yes") {
+  q = Orders[Status == "open"];
+  q.Status = "pwned";
+}
+%>
+<p>x</p>`,
+      { go: 'yes' },
+    ],
+    [
+      `<%
+r = Orders[Status == "open"];
+r.Status = "pwned";
+%>
+<p>x</p>`,
+      {},
+    ],
+  ];
+  for (const [body, input] of cases) await assertStaysSnippet(body, input);
+});
+
+test('getUrl stays a snippet and is not a compiled endpoint', async () => {
+  await assertStaysSnippet(`<p><%= getUrl("https://example.test/fetch") %></p>`, {});
+  await assertStaysSnippet(
+    `<%
+x = getUrl(input.u);
+%>
+<p><%= x %></p>`,
+    { u: 'https://example.test/fetch' },
+  );
+});
+
+test('a page href drops control characters and whitespace before the scheme check', async () => {
+  const payloads = ['java\nscript:alert(1)', 'java\tscript:alert(1)', 'data\n:text/html,x', '\u0000javascript:alert(1)'];
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<a href="<%= input.a %>">a</a><a href="<%= input.b %>">b</a><a href="<%= input.c %>">c</a><a href="<%= input.d %>">d</a>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const entry = uiSnippetFiles(model)[0];
+  const source = String(files.find((file) => file.path === entry.path)?.data ?? '');
+  assert.match(source, /replace\(\/\[\\u0000-\\u0020\]\+\/g, ""\)/);
+  assert.match(source, /flat\.startsWith\("http:"\)/);
+  assert.match(source, /flat\.startsWith\("https:"\)/);
+  assert.match(source, /flat\.startsWith\("mailto:"\)/);
+  const mod = await loadTree(files, entry.path);
+  const live = await liveStore({});
+  try {
+    const out = await invoke(mod.default as never, {
+      ...USER,
+      body: { input: { a: payloads[0], b: payloads[1], c: payloads[2], d: payloads[3] } },
+    });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    const html = String(out.body.html);
+    assert.equal(html.match(/<a href=""[^>]*>/g)?.length, 4, html);
+    assert.doesNotMatch(html, /javascript:|data:/i);
+    for (const payload of payloads) assert.equal(html.includes(payload), false, JSON.stringify(payload));
+  } finally {
+    live.restore();
+  }
+
+  const runtime = (await import(pathToFileURL(join(process.cwd(), 'packages/ui/src/client-runtime.js')).href)) as {
+    sanitizeSnippet(raw: string, doc: unknown): string;
+  };
+  const doc = new JSDOM('<!doctype html><body></body>').window.document;
+  for (const payload of payloads.slice(0, 3)) {
+    const client = runtime.sanitizeSnippet(`<a href="${payload}">go</a>`, doc);
+    assert.equal(client.includes('href'), false, JSON.stringify(payload));
+  }
+});
+
+test('a page href checks the whole assembled attribute value, not each island', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<a href="<%= input.a %><%= input.b %>">two</a><a href="javascript<%= input.c %>">pre</a><a href="java<%= input.d %>">mid</a><a href="<%= input.e %><%= input.f %>">ctl</a><a href="https://safe.example/<%= input.g %>">ok</a>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({});
+  try {
+    const out = await invoke(mod.default as never, {
+      ...USER,
+      body: {
+        input: {
+          a: 'javascript',
+          b: ':alert(1)',
+          c: ':alert(2)',
+          d: 'script:alert(3)',
+          e: 'java\t',
+          f: 'script:alert(4)',
+          g: 'p q',
+        },
+      },
+    });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    const html = String(out.body.html);
+    assert.doesNotMatch(html, /javascript:/i);
+    assert.equal(html.match(/<a href=""[^>]*>/g)?.length, 4, html);
+    assert.match(html, /<a href="https:\/\/safe\.example\/p q"[^>]*>ok<\/a>/);
+  } finally {
+    live.restore();
+  }
+});
+
+test('a page href checks the scheme when tag whitespace wraps the = sign', async () => {
+  // Any whitespace the markup allows inside a tag (space, tab, line feed,
+  // form feed, carriage return) around the = sign still makes the island a
+  // URL value slot, so the scheme check runs on the assembled value.
+  const cases: { name: string; template: string; input: Record<string, string> }[] = [];
+  for (const [name, gap] of [
+    ['line feed', '\n'],
+    ['CRLF', '\r\n'],
+    ['carriage return', '\r'],
+    ['form feed', '\f'],
+    ['mixed whitespace', ' \t\n\f\r '],
+  ] as const) {
+    cases.push({
+      name: `href ${name} on both sides`,
+      template: `<a href${gap}=${gap}"<%= input.a %>">x</a>`,
+      input: { a: 'javascript:alert(1)' },
+    });
+  }
+  cases.push({
+    name: 'static scheme pieces split by an island over a line break',
+    template: `<a href=\n"java<%= input.a %>script:alert(1)">x</a>`,
+    input: { a: '' },
+  });
+  cases.push({
+    name: 'img src with a line feed after =',
+    template: `<img src=\n"<%= input.a %>">`,
+    input: { a: 'javascript:alert(1)' },
+  });
+  const live = await liveStore({});
+  try {
+    for (const c of cases) {
+      const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n${c.template}`)}`));
+      const snippetFiles = uiSnippetFiles(model);
+      assert.equal(snippetFiles.length, 1, c.name);
+      const mod = await loadTree(files, snippetFiles[0].path);
+      const out = await invoke(mod.default as never, { ...USER, body: { input: c.input } });
+      assert.equal(out.status, 200, `${c.name}: ${JSON.stringify(out.body)}`);
+      const html = String(out.body.html);
+      assert.doesNotMatch(html, /javascript:|data:|vbscript:/i, `${c.name}: ${html}`);
+      if (c.name.startsWith('img')) assert.match(html, /<img src=""/, `${c.name}: ${html}`);
+      else assert.match(html, /<a href=""/, `${c.name}: ${html}`);
+      if (c.name.includes('form feed') || c.name.includes('mixed')) {
+        const page = pageWithSnippet(`htmlpage hp1()\ncontent\n${c.template}`);
+        assert.equal(page.includes('\f'), true, c.name);
+        assert.equal(page.includes('\\f'), false, c.name);
+      }
+    }
+  } finally {
+    live.restore();
+  }
+});
+
+test('a stray quote does not make the next unquoted URL slot a plain attribute', async () => {
+  const rows = [
+    `<img alt=Bob's src=<%= input.a %>>`,
+    `<img alt=Bob"s src=<%= input.a %>>`,
+    `<a title=it's href=<%= input.a %>>x</a>`,
+    `<a title=it"s href=<%= input.a %>>x</a>`,
+    `<a title=a"b href=<%= input.a %>>x</a>`,
+    `<a title=a'b href=<%= input.a %>>x</a>`,
+    `<a x"=1 href=<%= input.a %>>x</a>`,
+    `<a x'=1 href=<%= input.a %>>x</a>`,
+    `x < y" <a href=<%= input.a %>>x</a>`,
+    `x < y' <a href=<%= input.a %>>x</a>`,
+    `<a href=<%= input.a %>>x</a>`,
+  ];
+  for (const body of rows) await assertStaysSnippet(body, { a: 'javascript:alert(1)' });
+});
+
+test('a stray quote before a quoted URL attribute still runs the scheme check', async () => {
+  const rows = [
+    `<img alt=Bob's src="<%= input.a %>">`,
+    `<img alt=Bob"s src='<%= input.a %>'>`,
+    `<a title=a"b href="<%= input.a %>">x</a>`,
+    `<a title=a'b href='<%= input.a %>'>x</a>`,
+    `<a x"=1 href="<%= input.a %>">x</a>`,
+    `<a x'=1 href='<%= input.a %>'>x</a>`,
+    `x < y" <a href="<%= input.a %>">x</a>`,
+    `x < y' <a href='<%= input.a %>'>x</a>`,
+  ];
+  const live = await liveStore({});
+  try {
+    for (const template of rows) {
+      const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n${template}`)}`));
+      const compiled = uiSnippetFiles(model);
+      assert.equal(compiled.length, 1, template);
+      const mod = await loadTree(files, compiled[0].path);
+      const out = await invoke(mod.default as never, { ...USER, body: { input: { a: 'javascript:alert(1)' } } });
+      assert.equal(out.status, 200, `${template}: ${JSON.stringify(out.body)}`);
+      const html = String(out.body.html);
+      assert.doesNotMatch(html, /javascript:|data:|vbscript:/i, `${template}: ${html}`);
+      if (template.startsWith('<img')) assert.match(html, /src=""/, `${template}: ${html}`);
+      else assert.match(html, /href=""/, `${template}: ${html}`);
+    }
+  } finally {
+    live.restore();
+  }
+});
+
+test('a non-space control after = stays a relative URL and not a script scheme', async () => {
+  const live = await liveStore({});
+  try {
+    for (const gap of ['\0', '\v', '\u00A0', '\u2028']) {
+      const { files, model } = generateUi(
+        appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n<a href=${gap}"<%= input.a %>">x</a>`)}`),
+      );
+      const compiled = uiSnippetFiles(model);
+      assert.equal(compiled.length, 1, String(gap.codePointAt(0)));
+      const mod = await loadTree(files, compiled[0].path);
+      const out = await invoke(mod.default as never, { ...USER, body: { input: { a: 'javascript:alert(1)' } } });
+      assert.equal(out.status, 200, JSON.stringify(out.body));
+      const html = String(out.body.html);
+      assert.doesNotMatch(html, /href="javascript:/i, html);
+      assert.match(html, /&quot;javascript:alert\(1\)&quot;/, html);
+    }
+  } finally {
+    live.restore();
+  }
+});
+
+test('a quoted style attribute island renders through the CSS-value grammar', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<div style="width:<%= input.pct %>%;" title="w">w</div><div style='background:<%= input.c %>;border:1px <%= input.border %>;'>c</div>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({});
+  try {
+    const ok = await invoke(mod.default as never, {
+      ...USER,
+      body: { input: { pct: 75, c: '#a1b2c3', border: 'solid' } },
+    });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    const html = String(ok.body.html);
+    assert.match(html, /style="width:75%;"/, html);
+    assert.match(html, /style="background:#a1b2c3;border:1px solid;"/, html);
+    assert.deepEqual(ok.body.notes, []);
+
+    const palette = await invoke(mod.default as never, {
+      ...USER,
+      body: { input: { pct: 'rgb(12, 34, 200)', c: 'red', border: 'hsl(120, 50%, 50%)' } },
+    });
+    assert.match(String(palette.body.html), /width:rgb\(12, 34, 200\)%/, String(palette.body.html));
+    assert.match(String(palette.body.html), /1px hsl\(120, 50%, 50%\);"/, String(palette.body.html));
+    assert.deepEqual(palette.body.notes, []);
+
+    const bad = await invoke(mod.default as never, {
+      ...USER,
+      body: { input: { pct: 'red;background:url(x)', c: 'a"b', border: '"><script>alert(1)</script>' } },
+    });
+    assert.equal(bad.status, 200, JSON.stringify(bad.body));
+    const out = String(bad.body.html);
+    assert.doesNotMatch(out, /<script/i);
+    assert.doesNotMatch(out, /url\(|expression\(|javascript:/i);
+    assert.match(out, /style="width:%;"/, out);
+    assert.match(out, /style="background:;border:1px ;"/, out);
+    assert.equal((bad.body.notes as unknown[]).length >= 3, true, JSON.stringify(bad.body.notes));
+  } finally {
+    live.restore();
+  }
+});
+
+test('an island inside a style element or an unquoted style attribute stays a snippet', async () => {
+  await assertStaysSnippet(`<div style=<%= input.w %>>x</div>`, { w: '1px' });
+});
+
+const STYLE_VALUE_NOTE = 'a style island value was not a safe CSS value and rendered empty';
+
+type FragmentEl = {
+  attributes: ArrayLike<{ name: string }>;
+  getAttribute(name: string): string | null;
+};
+
+type FragmentDoc = {
+  querySelector(selector: string): FragmentEl | null;
+  querySelectorAll(selector: string): ArrayLike<FragmentEl>;
+};
+
+/** Parse endpoint HTML with the DOM parser and read attributes from the result. */
+function readFragment<T>(html: string, read: (doc: FragmentDoc) => T): T {
+  const dom = new JSDOM(`<!doctype html><body>${html}</body>`) as unknown as {
+    window: { document: FragmentDoc; close(): void };
+  };
+  try {
+    return read(dom.window.document);
+  } finally {
+    dom.window.close();
+  }
+}
+
+function parsedStyle(html: string): { style: string | null; onAttrs: string[] } {
+  return readFragment(html, (doc) => {
+    const onAttrs: string[] = [];
+    const nodes = doc.querySelectorAll('*');
+    for (let n = 0; n < nodes.length; n++) {
+      const el = nodes[n];
+      if (!el) continue;
+      for (let i = 0; i < el.attributes.length; i++) {
+        const name = el.attributes[i]?.name ?? '';
+        if (/^on/i.test(name)) onAttrs.push(name);
+      }
+    }
+    return { style: doc.querySelector('div')?.getAttribute('style') ?? null, onAttrs };
+  });
+}
+
+test('a quoted style expression renders only the CSS value the grammar allows', async () => {
+  const rejected = [
+    'red;background:url(//x)',
+    'expression(alert(1))',
+    '\\75 rl(x)',
+    '\\\\75 rl(x)',
+    '/**/',
+    'red/**/blue',
+    '}',
+    '{',
+    '"',
+    "'",
+    '</style><script>',
+    '"><img src=x onerror=1>',
+    "'><img src=x onerror=1>",
+    'ｕｒｌ(',
+    'rgb(1,2,3) url(x)',
+    '#fff\u0000',
+    'calc(1px)',
+    'var(--x)',
+    'attr(x)',
+    'image-set(',
+    '-moz-binding',
+    '-moz-binding:url(x)',
+    'u\u0000rl(x)',
+    'ex\u0000pression(alert(1))',
+    'ex pression(alert(1))',
+    'URL(x)',
+    'javascript:alert(1)',
+    'vbscript:alert(1)',
+    '@import',
+    'red !important',
+    '&quot;><img>',
+    'color:red',
+    'rgb(1 2 3 / 0.5)',
+    'rgb(1,2,3))',
+    'https://x.test/y onclick=alert(1)',
+    'https://x.test/y onclick=globalThis.__hit=1//',
+  ];
+  for (const gap of [' ', '\t', '\n', '\r', '\f', '\v', '\u00A0', '\u200B']) rejected.push(`url${gap}(x)`);
+
+  const kept: Array<[string, string]> = [
+    ['red', 'width:red;'],
+    ['  red  ', 'width:red;'],
+    ['#a1b2c3', 'width:#a1b2c3;'],
+    ['rgb(12, 34, 200)', 'width:rgb(12, 34, 200);'],
+    ['hsl(120, 50%, 50%)', 'width:hsl(120, 50%, 50%);'],
+    ['75', 'width:75;'],
+    ['1px solid', 'width:1px solid;'],
+    ['red/blue', 'width:red/blue;'],
+    ['red\nblue', 'width:red\nblue;'],
+  ];
+
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<div style="width:<%= input.v %>;" id="t">x</div>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const bare = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<div style="width:<% input.v %>;" id="t">x</div>`)}`),
+  );
+  assert.deepEqual(bare.model.todos, []);
+  const bareMod = await loadTree(bare.files, uiSnippetFiles(bare.model)[0].path);
+  const live = await liveStore({});
+  try {
+    for (const value of rejected) {
+      const out = await invoke(mod.default as never, { ...USER, body: { input: { v: value } } });
+      assert.equal(out.status, 200, JSON.stringify(value));
+      const html = String(out.body.html);
+      const parsed = parsedStyle(html);
+      assert.deepEqual(parsed.onAttrs, [], `${JSON.stringify(value)} ${html}`);
+      assert.equal(parsed.style, 'width:;', `${JSON.stringify(value)} ${html}`);
+      assert.deepEqual(out.body.notes, [STYLE_VALUE_NOTE], JSON.stringify(value));
+    }
+    for (const value of ['', '   ', '\n\t']) {
+      const out = await invoke(mod.default as never, { ...USER, body: { input: { v: value } } });
+      assert.equal(out.status, 200, JSON.stringify(value));
+      const parsed = parsedStyle(String(out.body.html));
+      assert.deepEqual(parsed.onAttrs, [], JSON.stringify(value));
+      assert.equal(parsed.style, 'width:;', JSON.stringify(value));
+      assert.deepEqual(out.body.notes, [], JSON.stringify(value));
+    }
+    for (const [value, style] of kept) {
+      const out = await invoke(mod.default as never, { ...USER, body: { input: { v: value } } });
+      assert.equal(out.status, 200, JSON.stringify(value));
+      const html = String(out.body.html);
+      const parsed = parsedStyle(html);
+      assert.deepEqual(parsed.onAttrs, [], `${JSON.stringify(value)} ${html}`);
+      assert.equal(parsed.style, style, `${JSON.stringify(value)} ${html}`);
+      assert.deepEqual(out.body.notes, [], JSON.stringify(value));
+    }
+    const plain = await invoke(bareMod.default as never, { ...USER, body: { input: { v: 'red' } } });
+    assert.equal(plain.status, 200, JSON.stringify(plain.body));
+    const plainHtml = String(plain.body.html);
+    const plainParsed = parsedStyle(plainHtml);
+    assert.deepEqual(plainParsed.onAttrs, [], plainHtml);
+    assert.equal(plainParsed.style, 'width:red;', plainHtml);
+    assert.deepEqual(plain.body.notes, []);
+  } finally {
+    live.restore();
+  }
+});
+
+test('a statement island inside a quoted attribute stays a snippet', async () => {
+  const input = { v: 'https://x.test/y onclick=globalThis.__hit=1//' };
+  const bodies = [
+    `<div style="color:<% openUrl(input.v, "new window"); %>">x</div>`,
+    `<div style='color:<% openUrl(input.v, "new window"); %>'>x</div>`,
+    `<div style="<% openUrl(input.v, "new window"); %>">x</div>`,
+    `<div style="color:<% if (input.v != "") { openUrl(input.v, "new window"); } %>">x</div>`,
+    `<div style="color:<% openUrl(input.v, "new window"); openUrl(input.v, "same window"); %>">x</div>`,
+    `<div style="color:<%{ openUrl(input.v, "new window"); }%>">x</div>`,
+    `<div style="color:<% for each row in Orders[ID != 0] { openUrl(input.v, "new window"); } %>">x</div>`,
+    `<div title="<% openUrl(input.v, "new window"); %>">x</div>`,
+    `<div class="<% openUrl(input.v, "new window"); %>">x</div>`,
+    `<a href="<% openUrl(input.v, "new window"); %>">x</a>`,
+    `<div title="<% x = input.v; %>">x</div>`,
+  ];
+  for (const body of bodies) await assertStaysSnippet(body, input);
+});
+
+test('a statement island inside a dropped element stays a snippet', async () => {
+  const v = 'https://x.test/y onclick=globalThis.__hit=1//';
+  const open = `<% openUrl(input.v, "new window"); %>`;
+  const bodies = [
+    `<div style="color:<%= input.c %>"><style>${open}</style></div>`,
+    `<div style='color:<%= input.c %>'><style>${open}</style></div>`,
+    `<div title="<%= input.c %>"><style>${open}</style></div>`,
+    `<div title='<%= input.c %>'><style>${open}</style></div>`,
+    `<a href="<%= input.c %>"><style>${open}</style></a>`,
+    `<img alt="<%= input.c %>"><style>${open}</style>`,
+    `<img src="<%= input.c %>"><style>${open}</style>`,
+    `<img width="<%= input.c %>"><style>${open}</style>`,
+  ];
+  for (const body of bodies) await assertStaysSnippet(body, { c: 'red', v });
+});
+
+test('an if-wrapped openUrl inside a dropped element stays a snippet', async () => {
+  const v = 'https://x.test/y onclick=globalThis.__hit=1//';
+  const bodies = [
+    `<div style="color:<%= input.c %>"><style><% if (input.v != "") { openUrl(input.v, "new window"); } %></style></div>`,
+    `<div title="<%= input.c %>"><script><% openUrl(input.v, "new window"); %></script></div>`,
+    `<div title="<%= input.c %>"><textarea><% openUrl(input.v, "new window"); %></textarea></div>`,
+    `<div title="<%= input.c %>"><xmp><% openUrl(input.v, "new window"); %></xmp></div>`,
+    `<div title="<%= input.c %>"><iframe><% openUrl(input.v, "new window"); %></iframe></div>`,
+    `<div title="<%= input.c %>"><template><% openUrl(input.v, "new window"); %></template></div>`,
+    `<div title="<%= input.c %>"><svg><% openUrl(input.v, "new window"); %></svg></div>`,
+    `<div title="<%= input.c %>"><section><% openUrl(input.v, "new window"); %></section></div>`,
+    `<div style="color:<%= input.c %>"><style><% openUrl(input.u, "new window"); %></style></div>`,
+  ];
+  const inputs = [
+    { c: 'red', v, u: 'https://x.test/y onerror=globalThis.__hit=1//' },
+  ];
+  for (const body of bodies) for (const input of inputs) await assertStaysSnippet(body, input);
+});
+
+test('an island inside a dropped element keeps handler text out of the parsed output', async () => {
+  const { model } = buildUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<div style="color:<%= input.c %>"><style><% openUrl(input.v, "new window"); %></style></div>`)}`),
+  );
+  assert.equal(uiSnippetFiles(model).length, 0);
+  assert.equal(model.todos.filter((todo) => todo.reason === SNIPPET_TODO).length, 1);
+});
+
+test('an openUrl in page text stays outside a quoted style expression', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<div style="color:<%= input.c %>" id="t">x</div><%
+openUrl(input.v, "new window");
+%>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({});
+  try {
+    const value = 'https://x.test/y onclick=globalThis.__hit=1//';
+    const out = await invoke(mod.default as never, { ...USER, body: { input: { c: 'red', v: value } } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    const html = String(out.body.html);
+    const parsed = parsedStyle(html);
+    assert.deepEqual(parsed.onAttrs, [], html);
+    assert.equal(parsed.style, 'color:red', html);
+    const href = readFragment(html, (doc) => doc.querySelector('a')?.getAttribute('href') ?? null);
+    assert.equal(href, value, html);
+  } finally {
+    live.restore();
+  }
+});
+
+test('a thisapp function call stays a snippet and is not a compiled endpoint', async () => {
+  await assertStaysSnippet(`<p><%= thisapp.myfn() %></p>`, {});
+  await assertStaysSnippet(
+    `<%
+x = thisapp.orders.mark(input.id);
+%>
+<p><%= x %></p>`,
+    { id: '1' },
+  );
+});
+
+test('the read-only island check refuses an await that is not a shim read', () => {
+  assert.equal(islandReadOnly('x = await shim.datastore.query(ctx, "Orders", c);'), true);
+  assert.equal(islandReadOnly('x = await shim.datastore.aggregate(ctx, q, "count", undefined);'), true);
+  assert.equal(islandReadOnly('x = await shim.datastore.field(ctx, q, "Name");'), true);
+  assert.equal(islandReadOnly('x = await shim.datastore.column(ctx, q, "Name");'), true);
+  assert.equal(islandReadOnly('x = await shim.datastore.rows(ctx, q);'), true);
+  assert.equal(
+    islandReadOnly(
+      'x = await shim.datastore.field(ctx, shim.datastore.query(ctx, "Orders", { op: "==", field: "Status", value: "a)b" }), "Name");',
+    ),
+    true,
+  );
+  assert.equal(islandReadOnly('await shim.datastore.field(ctx, q, "Name") = "x";'), false);
+  assert.equal(islandReadOnly('shim.list.add(await shim.datastore.field(ctx, rec, "Tags"), "x");'), false);
+  assert.equal(islandReadOnly('shim.list.add(local, "x");'), true);
+  assert.equal(islandReadOnly('await shim.datastore.column(ctx, q, "Name") = [];'), false);
+  assert.equal(islandReadOnly('await shim.datastore.setField(ctx, q, "Name", "x");'), false);
+  assert.equal(islandReadOnly('await shim.datastore.flush(ctx);'), false);
+  assert.equal(islandReadOnly('await shim.datastore.insert(ctx, "Orders", {});'), false);
+  assert.equal(islandReadOnly('await shim.datastore.update(ctx, "Orders", c, {});'), false);
+  assert.equal(islandReadOnly('await shim.datastore.delete(ctx, "Orders", c);'), false);
+  assert.equal(islandReadOnly('shim.input.set(ctx, ["Status"], "x");'), true);
+  assert.equal(islandReadOnly('shim.input.set(ctx, ["page"], shim.ifnull(shim.input.get(ctx, "page"), "1"));'), true);
+  assert.equal(islandReadOnly('shim.input.set(ctx, ["row"], await shim.datastore.insert(ctx, "Orders", {}));'), false);
+  assert.equal(islandReadOnly('shim.record.set(row, ["Status"], "x");'), false);
+  assert.equal(islandReadOnly('x = await foo(ctx);'), false);
+  assert.equal(islandReadOnly('x = await (foo(ctx));'), false);
+  assert.equal(islandReadOnly('x = await shim.thisapp.call(ctx, "f");'), false);
+});
+
+interface FieldGrant {
+  fields?: string[];
+  read?: boolean;
+}
+
+function rewritePolicy(files: { path: string; data: string | Buffer }[], profiles: Record<string, Record<string, FieldGrant>>): void {
+  const file = files.find((item) => item.path === 'functions/access-policy.json');
+  assert.ok(file, 'access policy is generated');
+  const policy = JSON.parse(String(file.data)) as { profiles: Record<string, unknown> };
+  Object.assign(policy.profiles, profiles);
+  file.data = JSON.stringify(policy);
+}
+
+async function renderLive(
+  snippet: string,
+  rows: Record<string, unknown>[],
+  input: Record<string, unknown>,
+  user: typeof USER = USER,
+  policy?: Record<string, Record<string, FieldGrant>>,
+) {
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n${snippet}`)}`));
+  const compiled = uiSnippetFiles(model);
+  assert.equal(compiled.length, 1, JSON.stringify(model.todos));
+  assert.equal(model.todos.filter((todo) => todo.reason === SNIPPET_TODO).length, 0);
+  if (policy) rewritePolicy(files, policy);
+  const source = String(files.find((file) => file.path === compiled[0]!.path)?.data ?? '');
+  const mod = await loadTree(files, compiled[0]!.path);
+  const live = await liveStore({ Orders: rows });
+  try {
+    const out = await invoke(mod.default as never, { ...user, body: { input } });
+    const stored = await live.datastore.query('Orders', 'true', 300);
+    return { out, source, stored };
+  } finally {
+    live.restore();
+  }
+}
+
+test('a criteria field read compiles to an endpoint and returns that record', async () => {
+  const { out, source, stored } = await renderLive(
+    '<p><%= Orders[ID == input.id].Name %></p>',
+    [{ Name: 'Ada', Status: 'open', Amount: 1 }],
+    { id: FIRST_ID },
+  );
+  assert.match(source, /shim\.datastore\.field\(/);
+  assert.match(source, /"forms":\["Orders"\]/);
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.match(String(out.body.html), /<p>Ada<\/p>/);
+  assert.equal(stored[0]?.Name, 'Ada');
+});
+
+test('a query variable field read compiles to an endpoint', async () => {
+  const { out, source } = await renderLive(
+    `<%
+rec = Orders[ID == input.id];
+%>
+<p><%= rec.Name %></p>`,
+    [{ Name: 'Ada', Status: 'open', Amount: 1 }],
+    { id: FIRST_ID },
+  );
+  assert.match(source, /shim\.datastore\.field\(/);
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.match(String(out.body.html), /<p>Ada<\/p>/);
+});
+
+test('getAll compiles to a column read of the matching records', async () => {
+  const { out, source } = await renderLive(
+    '<p><%= Orders[Status == "open"].Name.getAll() %></p>',
+    [
+      { Name: 'Ada', Status: 'open', Amount: 1 },
+      { Name: 'Bea', Status: 'open', Amount: 2 },
+      { Name: 'Cy', Status: 'closed', Amount: 3 },
+    ],
+    {},
+  );
+  assert.match(source, /shim\.datastore\.column\(/);
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.match(String(out.body.html), /<p>Ada, Bea<\/p>/);
+  assert.equal(String(out.body.html).includes('Cy'), false);
+});
+
+test('a caller without read access to the form gets no record data', async () => {
+  const { out, stored } = await renderLive(
+    '<p><%= Orders[ID == input.id].Name %></p>',
+    [{ Name: 'OnlyAda', Status: 'open', Amount: 1 }],
+    { id: FIRST_ID },
+    CLERK,
+    { Clerk: {} },
+  );
+  assert.equal(out.status, 403, JSON.stringify(out.body));
+  assert.equal(out.body.html, undefined);
+  assert.equal(JSON.stringify(out.body).includes('OnlyAda'), false);
+  assert.equal(stored[0]?.Name, 'OnlyAda');
+});
+
+test('a field outside the caller field list is not returned', async () => {
+  const denied = await renderLive(
+    '<p><%= Orders[ID == input.id].Name %></p>',
+    [{ Name: 'OnlyAda', Status: 'open', Amount: 1 }],
+    { id: FIRST_ID },
+    CLERK,
+    { Clerk: { Orders: { fields: ['Status'] } } },
+  );
+  assert.equal(denied.out.status, 403, JSON.stringify(denied.out.body));
+  assert.equal(JSON.stringify(denied.out.body).includes('OnlyAda'), false);
+  assert.equal(denied.stored[0]?.Name, 'OnlyAda');
+
+  const allowed = await renderLive(
+    '<p><%= Orders[ID == input.id].Status %></p>',
+    [{ Name: 'OnlyAda', Status: 'open', Amount: 1 }],
+    { id: FIRST_ID },
+    CLERK,
+    { Clerk: { Orders: { fields: ['Status'] } } },
+  );
+  assert.equal(allowed.out.status, 200, JSON.stringify(allowed.out.body));
+  assert.match(String(allowed.out.body.html), /<p>open<\/p>/);
+  assert.equal(String(allowed.out.body.html).includes('OnlyAda'), false);
+});
+
+test('assigning a criteria field stays a snippet and does not update rows', async () => {
+  await assertStaysSnippet(
+    `<%
+Orders[ID == input.id].Name = input.payload;
+%>
+<p>x</p>`,
+    { id: FIRST_ID, payload: 'pwned' },
+  );
+});
+
+test('an input assignment only changes the request-local values for this render', async () => {
+  const { out, source } = await renderLive(
+    `<%
+input.Status = "closed";
+%>
+<p><%= input.Status %></p>`,
+    [{ Name: 'Ada', Status: 'open', Amount: 1 }],
+    { Status: 'open' },
+  );
+  assert.match(source, /shim\.input\.set\(/);
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.match(String(out.body.html), /<p>closed<\/p>/);
+});
+
+test('an ifnull-style input default renders and feeds a bound criteria value', async () => {
+  const { out, source } = await renderLive(
+    `<%
+input.page = ifnull(input.page, "1");
+input.status = ifnull(input.status, "open");
+n = Orders[Status == input.status].count();
+%>
+<p><%= input.page %>|<%= n %></p>`,
+    [
+      { Name: 'Ada', Status: 'open', Amount: 1 },
+      { Name: 'Bea', Status: 'open', Amount: 2 },
+      { Name: 'Cy', Status: 'closed', Amount: 3 },
+    ],
+    {},
+  );
+  // The defaulted value reaches the read as a bound criteria parameter, never
+  // concatenated text.
+  assert.match(source, /\{ op: "==", field: "Status", value: shim\.input\.get\(ctx, "status"\) \}/);
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.match(String(out.body.html), /<p>1\|2<\/p>/);
+
+  const supplied = await renderLive(
+    `<%
+input.page = ifnull(input.page, "1");
+input.status = ifnull(input.status, "open");
+n = Orders[Status == input.status].count();
+%>
+<p><%= input.page %>|<%= n %></p>`,
+    [
+      { Name: 'Ada', Status: 'open', Amount: 1 },
+      { Name: 'Bea', Status: 'closed', Amount: 2 },
+    ],
+    { page: '7', status: 'closed' },
+  );
+  assert.match(String(supplied.out.body.html), /<p>7\|1<\/p>/);
+});
+
+test('a write through a prototype path stays a snippet on member and index targets', async () => {
+  const attempts = [
+    'input.__proto__.leaked = "x";',
+    'input.__proto__ = {"leaked":"x"};',
+    'input.constructor.prototype.leaked = "x";',
+    'input.a.__proto__.leaked = "x";',
+    'input["__proto__"]["leaked"] = "x";',
+    'input["constructor"]["prototype"]["leaked"] = "x";',
+    'old["constructor"]["prototype"]["leaked"] = "x";',
+  ];
+  for (const stmt of attempts) {
+    delete (Object.prototype as Record<string, unknown>).leaked;
+    await assertStaysSnippet(`<%\n${stmt}\n%>\n<p><%= input.leaked %></p>`, {});
+    assert.equal(({} as Record<string, unknown>).leaked, undefined, stmt);
+  }
+});
+
+test('an input write with a computed or escaped key compiles but cannot reach the prototype', async () => {
+  for (const stmt of ['k = "__proto__";\ninput[k] = {"leaked":"x"};', 'input["\\u005f\\u005fproto__"] = {"leaked":"x"};']) {
+    delete (Object.prototype as Record<string, unknown>).leaked;
+    const { out, source } = await renderLive(`<%\n${stmt}\n%>\n<p><%= input.leaked %></p>`, SEEDED.Orders, {});
+    assert.match(source, /shim\.input\.set\(ctx, \[/);
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.doesNotMatch(String(out.body.html), /x<\/p>/);
+    assert.equal(({} as Record<string, unknown>).leaked, undefined, stmt);
+  }
+});
+
+test('a prototype object is never a readable value or a writable target', async () => {
+  const attempts = [
+    // Index read of a prototype key, then a member write through the local.
+    'p = input["__proto__"];\np.leaked = "x";',
+    'k = "__proto__";\np = input[k];\np.leaked = "x";',
+    'k = "__proto__";\np = old[k];\np.leaked = "x";',
+    'c = input["constructor"];\np = c["prototype"];\np.leaked = "x";',
+    // Member read on a local map, then a member write.
+    'm = Map();\np = m.__proto__;\np.leaked = "x";',
+    // A stored prototype: the holder path must be inert on read and write.
+    'input.holder = input["__proto__"];\ninput.holder.leaked = "x";',
+    'input.holder = input["constructor"].prototype;\ninput.holder.leaked = "x";',
+    'input.holder = input["__proto__"];\np = input.holder;\np.leaked = "x";',
+  ];
+  for (const stmt of attempts) {
+    delete (Object.prototype as Record<string, unknown>).leaked;
+    const { out } = await renderLive(`<%\n${stmt}\n%>\n<p><%= input.leaked %></p>`, SEEDED.Orders, {});
+    assert.equal(out.status, 200, `${stmt}: ${JSON.stringify(out.body)}`);
+    assert.doesNotMatch(String(out.body.html), /x<\/p>/, stmt);
+    assert.equal(({} as Record<string, unknown>).leaked, undefined, stmt);
+  }
+});
+
+test('a computed map write cannot reach the prototype, including keys from request input', async () => {
+  const direct = await renderLive(
+    '<%\nm = Map();\nk = "__proto__";\nf = "leaked";\nm[k][f] = "x";\n%>\n<p><%= m.leaked %></p>',
+    SEEDED.Orders,
+    {},
+  );
+  assert.equal(direct.out.status, 200, JSON.stringify(direct.out.body));
+  assert.equal(({} as Record<string, unknown>).leaked, undefined);
+
+  // k, f, and v all arrive from the request.
+  const viaInput = await renderLive(
+    '<%\nm = Map();\nk = input.k;\nf = input.f;\nv = input.v;\nm[k][f] = v;\np = m[k];\np[f] = v;\n%>\n<p><%= m.leaked %></p>',
+    SEEDED.Orders,
+    { k: '__proto__', f: 'leaked', v: 'x' },
+  );
+  assert.equal(viaInput.out.status, 200, JSON.stringify(viaInput.out.body));
+  assert.equal(({} as Record<string, unknown>).leaked, undefined);
+
+  // Assigning the key itself cannot reparent the map.
+  const reparent = await renderLive(
+    '<%\nm = Map();\nm["safe"] = "yes";\nm[input.k] = {"leaked":"x"};\n%>\n<p><%= m.leaked %>|<%= m.safe %></p>',
+    SEEDED.Orders,
+    { k: '__proto__' },
+  );
+  assert.equal(reparent.out.status, 200, JSON.stringify(reparent.out.body));
+  assert.match(String(reparent.out.body.html), /<p>\|yes<\/p>/);
+  assert.equal(({} as Record<string, unknown>).leaked, undefined);
+});
+
+test('an inherited or unsafe key reads as undefined on input, old, and map index surfaces', async () => {
+  const spellings = ['__proto__', 'constructor', 'prototype', '__defineGetter__', '__lookupGetter__', 'toString', 'valueOf', 'hasOwnProperty'];
+  for (const key of spellings) {
+    // No own key: the inherited member must not render (a native source leak
+    // for `toString`, a writable prototype for the rest).
+    const plain = await renderLive(
+      `<%\nm = Map();\nm["safe"] = "yes";\n%>\n<p><%= input["${key}"] %>|<%= old["${key}"] %>|<%= m["${key}"] %></p>`,
+      SEEDED.Orders,
+      {},
+    );
+    assert.equal(plain.out.status, 200, `${key}: ${JSON.stringify(plain.out.body)}`);
+    assert.match(String(plain.out.body.html), /<p>\|\|<\/p>/, key);
+    assert.doesNotMatch(String(plain.out.body.html), /native code/, key);
+  }
+  for (const key of ['__proto__', 'constructor', 'prototype']) {
+    // Even an own key spelled like a prototype segment is refused by name.
+    const owned = await renderLive(
+      `<%\nm = Map();\n%>\n<p><%= input["${key}"] %>|<%= m["${key}"] %></p>`,
+      SEEDED.Orders,
+      { [key]: 'x' },
+    );
+    assert.equal(owned.out.status, 200, `${key}: ${JSON.stringify(owned.out.body)}`);
+    assert.match(String(owned.out.body.html), /<p>\|<\/p>/, key);
+  }
+});
+
+test('writing an inherited method name only sets an own key on the request values', async () => {
+  const { out } = await renderLive('<%\ninput.toString = "mine";\n%>\n<p><%= input.toString %></p>', SEEDED.Orders, {});
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.match(String(out.body.html), /<p>mine<\/p>/);
+  assert.equal(typeof ({} as Record<string, unknown>).toString, 'function');
+});
+
+test('an input assignment followed by a datastore write stays a snippet', async () => {
+  await assertStaysSnippet(
+    `<%
+input.Status = "open";
+insert into Orders [ Status : "open" ];
+%>
+<p>x</p>`,
+    {},
+  );
+  await assertStaysSnippet(
+    `<%
+input.Status = "open";
+row = insert into Orders [ Status : input.Status ];
+%>
+<p>x</p>`,
+    {},
+  );
+});
+
+test('a caller-supplied value assigned to input is escaped when rendered', async () => {
+  const { out } = await renderLive(
+    `<%
+input.x = ifnull(input.payload, "none");
+%>
+<p title="<%= input.x %>"><%= input.x %></p>`,
+    [],
+    { payload: '<script>alert(1)</script>" onclick="x' },
+  );
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  const html = String(out.body.html);
+  assert.doesNotMatch(html, /<script/i);
+  assert.doesNotMatch(html, /" onclick="/);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+});
+
+test('a list add on a fetched field stays a snippet', async () => {
+  const { model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<%
+rec = Orders[ID == input.id];
+rec.Tags.add("x");
+%>
+<p>x</p>`)}`),
+  );
+  assert.equal(uiSnippetFiles(model).length, 0);
+  assert.equal(model.todos.filter((todo) => todo.reason === SNIPPET_TODO).length, 1);
+});
+
+test('the browser runtime flattens the same characters and refuses the same schemes', () => {
+  const policy = readFileSync(join(process.cwd(), 'packages/ui/src/url-policy.ts'), 'utf8');
+  const client = readFileSync(join(process.cwd(), 'packages/ui/src/client-runtime.js'), 'utf8');
+  assert.match(policy, /\[\\u0000-\\u0020\]/);
+  assert.match(client, /\[\\u0000-\\u0020\]/);
+  for (const scheme of ['javascript:', 'data:', 'vbscript:']) {
+    assert.equal(policy.includes(`'${scheme}'`), true, scheme);
+    assert.equal(client.includes(`'${scheme}'`), true, scheme);
+  }
+  for (const scheme of ['http:', 'https:', 'mailto:']) {
+    assert.equal(policy.includes(`'${scheme}'`), true, scheme);
+  }
+});
+
+test('islands outside the handled classes keep the counted TODO', () => {
+  const writes = `htmlpage hp1()
+content
+<%
+row = insert into Orders [ Status : "open" ];
+%>`;
+  for (const snippet of [writes]) {
+    const { model } = buildUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
+    assert.equal(model.todos.length, 1, snippet);
+    assert.equal(model.todos[0].reason, 'Server-side Deluge snippet requires manual translation');
+    assert.equal(uiSnippetFiles(model).length, 0);
+  }
+});
+
+test('a for-each loop over a form query renders a row per record', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<ul><%
+for each row in Orders[Status == "open"] {
+%><li><%= row.Status %>:<%= row.Amount %></li><%
+}
+%></ul>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const entry = uiSnippetFiles(model)[0];
+  const source = String(files.find((file) => file.path === entry.path)?.data ?? '');
+  assert.match(source, /await shim\.datastore\.rows\(ctx/);
+  assert.doesNotMatch(source, /datastore\.flush/);
+  const mod = await loadTree(files, entry.path);
+  const live = await liveStore(SEEDED);
+  try {
+    const out = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    const html = String(out.body.html);
+    assert.equal(html.match(/<li>/g)?.length, 2, html);
+    assert.match(html, /<li>open:1<\/li>/);
+    assert.match(html, /<li>open:2<\/li>/);
+    assert.doesNotMatch(html, /closed/);
+  } finally {
+    live.restore();
+  }
+});
+
+test('a for-each loop over a plain list renders each element', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<ul><%
+for each v in {"alpha", "beta"} {
+%><li><%= v %></li><%
+}
+%></ul>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({});
+  try {
+    const out = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    const html = String(out.body.html);
+    assert.match(html, /<li>alpha<\/li><li>beta<\/li>/);
+  } finally {
+    live.restore();
+  }
+});
+
+test('comment island dropped', async () => {
+  const live = await liveStore({});
+  try {
+    const cases = [
+      {
+        template: '<p>before</p><!-- <%= input.secret %> --><p>after</p>',
+        input: { secret: '--> <script>alert(1)</script>' },
+        expected: '<p>before</p><p>after</p>',
+      },
+      {
+        template: '<b>shown</b><!-- <% x = 1; %> --><!-- <%= input.val %> --><i>also shown</i>',
+        input: { val: 'omitted' },
+        expected: '<b>shown</b><i>also shown</i>',
+      },
+    ];
+    for (const c of cases) {
+      const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n${c.template}`)}`));
+      const compiled = uiSnippetFiles(model);
+      assert.equal(compiled.length, 1, c.template);
+      const mod = await loadTree(files, compiled[0].path);
+      const out = await invoke(mod.default as never, { ...USER, body: { input: c.input } });
+      assert.equal(out.status, 200, JSON.stringify(out.body));
+      const html = String(out.body.html);
+      assert.equal(html, c.expected);
+      assert.doesNotMatch(html, /alert|script|-->|omitted/);
+    }
+  } finally {
+    live.restore();
+  }
+});
+
+test('a field value inside a loop is escaped in the rendered page', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<ul><%
+for each row in Orders[ID != 0] {
+%><li><%= row.Status %></li><%
+}
+%></ul>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({ Orders: [{ Status: 'x"><script>alert(1)</script>', Amount: 1 }] });
+  try {
+    const out = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    const html = String(out.body.html);
+    assert.doesNotMatch(html, /<script/i);
+    assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  } finally {
+    live.restore();
+  }
+});
+
+test('unquoted value with space/quote/> stays inside one quoted attribute', async () => {
+  const live = await liveStore({});
+  try {
+    const cases = [
+      {
+        template: '<div title=<%= input.v %>>text</div>',
+        input: { v: 'a "b" c > d' },
+        expected: '<div title="a &quot;b&quot; c &gt; d">text</div>',
+      },
+      {
+        template: '<span title=pre_<%= input.v %>_suf>text</span>',
+        input: { v: 'mid "quoted" > end' },
+        expected: '<span title="pre_mid &quot;quoted&quot; &gt; end_suf">text</span>',
+      },
+      {
+        template: '<img alt=<%= input.v %> src="https://example.com/p.png">',
+        input: { v: 'photo "view" > 1' },
+        expected: '<img alt="photo &quot;view&quot; &gt; 1" src="https://example.com/p.png">',
+      },
+    ];
+    for (const c of cases) {
+      const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n${c.template}`)}`));
+      const compiled = uiSnippetFiles(model);
+      assert.equal(compiled.length, 1, c.template);
+      const mod = await loadTree(files, compiled[0].path);
+      const out = await invoke(mod.default as never, { ...USER, body: { input: c.input } });
+      assert.equal(out.status, 200, JSON.stringify(out.body));
+      const html = String(out.body.html);
+      assert.equal(html, c.expected);
+      assert.doesNotMatch(html, /data-style-dropped/);
+    }
+  } finally {
+    live.restore();
+  }
+});
+
+test('a for-each loop that writes stays a snippet and does not update rows', async () => {
+  await assertStaysSnippet(
+    `<%
+for each row in Orders[Status == "open"] {
+  row.Status = "pwned";
+}
+%>
+<p>x</p>`,
+    {},
+  );
+  await assertStaysSnippet(
+    `<%
+for each row in Orders[ID != 0] {
+  insert into Orders [ Status : "open" ];
+}
+%>
+<p>x</p>`,
+    {},
+  );
+  // A request-local `input.<param>` write inside a loop is allowed like it is
+  // outside one: it rewrites only this render's input map, never a row.
+  {
+    const { files, model } = generateUi(
+      appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<%
+for each row in Orders[ID != 0] {
+  input.hack = "y";
+}
+%>
+<p>x</p>`)}`),
+    );
+    assert.deepEqual(model.todos, []);
+    const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+    const live = await liveStore(SEEDED);
+    try {
+      const out = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+      assert.equal(out.status, 200, JSON.stringify(out.body));
+      const rows = await live.datastore.query('Orders', 'true', 300);
+      assert.deepEqual(rows.map((row) => String(row.Status)), ['open', 'open', 'closed']);
+    } finally {
+      live.restore();
+    }
+  }
+});
+
+test('an unquoted island in a URL-bearing or handler attribute stays a counted snippet', async () => {
+  const cases = [
+    '<a href=<%= input.v %>>x</a>',
+    '<a HREF=<%= input.v %>>x</a>',
+    '<img src=<%= input.v %>>',
+    '<img srcset=<%= input.v %>>',
+    '<img SRCSET=<%= input.v %>>',
+    '<form action=<%= input.v %>><p>x</p></form>',
+    '<button formaction=<%= input.v %>>x</button>',
+    '<a xlink:href=<%= input.v %>>x</a>',
+    '<object data=<%= input.v %>></object>',
+    '<video poster=<%= input.v %>></video>',
+    '<body background=<%= input.v %>><p>x</p></body>',
+    '<q cite=<%= input.v %>>x</q>',
+    '<img longdesc=<%= input.v %>>',
+    '<a ping=<%= input.v %>>x</a>',
+    '<html manifest=<%= input.v %>><p>x</p></html>',
+    '<object codebase=<%= input.v %>></object>',
+    '<object archive=<%= input.v %>></object>',
+    '<img usemap=<%= input.v %>>',
+    '<img lowsrc=<%= input.v %>>',
+    '<img dynsrc=<%= input.v %>>',
+    '<iframe srcdoc=<%= input.v %>></iframe>',
+    '<div style=<%= input.v %>>x</div>',
+    '<div onclick=<%= input.v %>>x</div>',
+    '<img onerror=<%= input.v %>>',
+  ];
+  for (const body of cases) await assertStaysSnippet(body, { v: 'javascript:alert(1)' });
+});
+
+test('an island the attribute allowlist removes stays a counted snippet, quoted or unquoted', async () => {
+  const cases = [
+    '<img srcset="<%= input.v %>">',
+    "<img srcset='<%= input.v %>'>",
+    '<div id=<%= input.v %>>x</div>',
+    '<div id="<%= input.v %>">x</div>',
+    '<div class="<%= input.v %>">x</div>',
+    '<div data-x=<%= input.v %>>x</div>',
+    '<div width=<%= input.v %>>x</div>',
+    '<iframe srcdoc="<%= input.v %>"></iframe>',
+    '<a ping="<%= input.v %>" href="https://example.com/">x</a>',
+    '<a rel="<%= input.v %>" href="https://example.com/">x</a>',
+    '<div onclick="<%= input.v %>">x</div>',
+    '<img onerror=<%= input.v %> src="https://example.com/p.png">',
+    '<div title=a"b <%= input.v %>>x</div>',
+    '</div data-x=<%= input.v %>>',
+  ];
+  for (const body of cases) await assertStaysSnippet(body, { v: 'javascript:alert(1)' });
+});
+
+test('an island inside a raw-text element stays a counted snippet', async () => {
+  const cases = [
+    '<textarea><a href="<%= input.v %>"></a></textarea>',
+    '<textarea><%= input.v %></textarea>',
+    '<title><%= input.v %></title>',
+    '<title><a href="<%= input.v %>"></a></title>',
+    '<script><%= input.v %></script>',
+    '<script><% x = 1; %></script>',
+    '<style><%= input.v %></style>',
+    '<xmp><a href="<%= input.v %>"></a></xmp>',
+    '<noscript><a href="<%= input.v %>"></a></noscript>',
+    '<iframe><a href="<%= input.v %>"></a></iframe>',
+    '<noembed><%= input.v %></noembed>',
+    '<noframes><%= input.v %></noframes>',
+    '<template><a href="<%= input.v %>"></a></template>',
+    '<plaintext><a href="<%= input.v %>">',
+  ];
+  for (const body of cases) await assertStaysSnippet(body, { v: 'javascript:alert(1)' });
+});
+
+test('an island whose marker the sanitizer removes stays a counted snippet', async () => {
+  const cases = [
+    // Inside an element the allowlist drops entirely.
+    '<svg><a href="<%= input.v %>"></a></svg>',
+    '<math><a href="<%= input.v %>"></a></math>',
+    // An allowlisted attribute on a tag the sanitizer unwraps.
+    '<section title="<%= input.v %>">x</section>',
+    '<button title="<%= input.v %>">x</button>',
+    '<label title="<%= input.v %>">x</label>',
+    // A refused static scheme drops the attribute and the marker with it.
+    '<a href="javascript:<%= input.v %>">x</a>',
+    // A '<' restarts the tag in the slot scan but the parser keeps the island
+    // on the original tag's attribute, which the sanitizer then removes.
+    '<div title=<a href="<%= input.v %>">x</div>',
+    '<img alt=<a href="<%= input.v %>">',
+    '<img alt=x <a href="<%= input.v %>">',
+    '<div title="ok" <a href="<%= input.v %>">x</div>',
+    '<a href="https://example.com/" <img src="<%= input.v %>">x</a>',
+  ];
+  for (const body of cases) await assertStaysSnippet(body, { v: 'javascript:alert(1)' });
+});
+
+test('the endpoint render audit refuses elements and attributes outside the allowlist', () => {
+  const source = `${c2cUrlFunctionSource()}\n${renderAuditSource()}\nreturn c2cAuditViolation(html);`;
+  const audit = new Function('html', 'renderedHtmlElements', 'renderedDocumentViolation', source) as (
+    html: string,
+    walk: typeof renderedHtmlElements,
+    structural: typeof renderedDocumentViolation,
+  ) => string;
+  const refused = [
+    '<p onclick="alert(1)">x</p>',
+    "<a href='javascript:alert(1)'>x</a>",
+    '<a href="java\tscript:alert(1)">x</a>',
+    '<a href="&#106;avascript:alert(1)">x</a>',
+    '<a href="java&#x09;script:alert(1)">x</a>',
+    '<img src=x onerror=alert(1)>',
+    '<iframe srcdoc="<p>x</p>"></iframe>',
+    '<div id="x">x</div>',
+    '<div class="x">x</div>',
+    '<a ping="https://example.com/">x</a>',
+    '<div style="background:url(javascript:alert(1))">x</div>',
+    '<svg onload="alert(1)">x</svg>',
+    // Smuggled elements carry no attribute a name-only scan could refuse: a
+    // parsed audit still refuses them, because the tag itself is outside the
+    // allowlist.
+    '<div>x</div><script>alert(1)</scr' + 'ipt>',
+    '<div>x</div><style>body{display:none}</style>',
+    '<svg><script>alert(1)</script></svg>',
+    '<object data="https://x.test/y"></object>',
+    '<embed src="https://x.test/y.png">',
+    '<base href="https://x.test/">',
+    '<meta http-equiv="refresh" content="0">',
+    '<link rel="stylesheet" href="https://x.test/x.css">',
+    '<iframe src="https://x.test/"></iframe>',
+    '<form action="https://x.test/"><input></form>',
+    '<template><script>alert(1)</script></template>',
+    // The fragment walk drops these start tags, so only the document-level
+    // check sees the attributes a document consumer would run.
+    '<body onload=alert(1)><p>x</p>',
+    '<html onload=alert(1)><p>x</p>',
+    '<frameset onload=alert(1)>',
+    '<head onload=alert(1)><p>x</p>',
+  ];
+  for (const html of refused) assert.notEqual(audit(html, renderedHtmlElements, renderedDocumentViolation), '', html);
+  const kept = [
+    '<p>plain text</p>',
+    '<a href="https://example.com/" rel="noopener noreferrer">x</a>',
+    '<a href="">x</a>',
+    '<img src="https://example.com/p.png" alt="p" width="10" height="10">',
+    '<div title="a &quot;b&quot;" style="color: red">x</div>',
+    '<font color="red" face="serif" size="3">x</font>',
+    '<td colspan="2" title="t">x</td>',
+    'no markup at all',
+    'a < b and c > d',
+    '</p><p>x</p>',
+    '<!-- <div onclick=x> -->',
+  ];
+  for (const html of kept) assert.equal(audit(html, renderedHtmlElements, renderedDocumentViolation), '', html);
+});
+
+/** A page whose render is one static, one value island, one static. */
+function valuePage(): { files: { path: string; data: string | Buffer }[]; entry: string } {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet('htmlpage hp1()\ncontent\n<p><%= input.value %></p>')}`),
+  );
+  assert.deepEqual(model.todos, []);
+  return { files, entry: uiSnippetFiles(model)[0].path };
+}
+
+/** Replace one generated `c2c_static_N` literal with new markup. */
+function withStatic(source: string, index: number, html: string): string {
+  const needle = `const c2c_static_${index} = `;
+  const at = source.indexOf(needle);
+  assert.ok(at >= 0, `the generated endpoint has no c2c_static_${index}`);
+  const end = source.indexOf(';\n', at);
+  assert.ok(end > at, 'the generated static literal is unterminated');
+  return `${source.slice(0, at + needle.length)}${JSON.stringify(html)}${source.slice(end)}`;
+}
+
+function withEntrySource(
+  files: { path: string; data: string | Buffer }[],
+  entry: string,
+  mutate: (source: string) => string,
+): { path: string; data: string | Buffer }[] {
+  let changed = false;
+  const out = files.map((file) => {
+    if (file.path !== entry) return file;
+    changed = true;
+    return { ...file, data: mutate(String(file.data)) };
+  });
+  assert.ok(changed, `the generated tree has no ${entry}`);
+  return out;
+}
+
+test('a compiled endpoint returns its rendered page with notes', async () => {
+  const { files, entry } = valuePage();
+  const mod = await loadTree(files, entry);
+  const live = await liveStore({});
+  try {
+    const out = await invoke(mod.default as never, { ...USER, body: { input: { value: 'Ada' } } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.match(String(out.body.html), /<p>Ada<\/p>/);
+    assert.ok('notes' in out.body);
+  } finally {
+    live.restore();
+  }
+});
+
+test('a compiled endpoint refuses rendered markup its audit rejects', async () => {
+  // The audit is wired into the generated handler: a violation returns the
+  // refusal status instead of the page HTML.
+  const { files, entry } = valuePage();
+  const cases = [
+    // A script element the fragment walk sees.
+    `<scr${'ipt'}>alert(1)</scr${'ipt'}><p>`,
+    // A body handler only the document-level check sees: the fragment walk
+    // drops the tag, so this is the regression case for the structural check.
+    '<body onload=alert(1)><p>',
+  ];
+  for (const markup of cases) {
+    const mutated = withEntrySource(files, entry, (source) => withStatic(source, 0, markup));
+    const mod = await loadTree(mutated, entry);
+    const live = await liveStore({});
+    try {
+      const out = await invoke(mod.default as never, { ...USER, body: { input: { value: 'Ada' } } });
+      assert.equal(out.status, 500, markup);
+      assert.equal(out.body.error, 'rendered markup failed the output attribute check', markup);
+      assert.equal('html' in out.body, false, markup);
+    } finally {
+      live.restore();
+    }
+  }
+});
+
+test('a compiled endpoint fails closed when the markup parser cannot load', async () => {
+  // The audit helpers throw when parse5 is missing; the handler turns that
+  // into the same refusal — it never returns unaudited markup.
+  const { files, entry } = valuePage();
+  const stubPath = 'functions/htmlpages/c2c-audit-stub.mjs';
+  const stub = `export { createRuntime, jsonReplacer, principalFromRequest } from "creator-to-catalyst/shims";
+export function renderedHtmlElements() { throw new Error("Cannot find package parse5"); }
+export function renderedDocumentViolation() { throw new Error("Cannot find package parse5"); }
+`;
+  const mutated = withEntrySource(files, entry, (source) => {
+    assert.ok(source.includes('"creator-to-catalyst/shims"'), 'the generated endpoint has no shims import to stub');
+    return source.split('"creator-to-catalyst/shims"').join(JSON.stringify('./c2c-audit-stub.mjs'));
+  });
+  mutated.push({ path: stubPath, data: stub });
+  const mod = await loadTree(mutated, entry);
+  const live = await liveStore({});
+  try {
+    const out = await invoke(mod.default as never, { ...USER, body: { input: { value: 'Ada' } } });
+    assert.equal(out.status, 500, JSON.stringify(out.body));
+    assert.equal(out.body.error, 'rendered markup failed the output attribute check');
+    assert.equal('html' in out.body, false);
+  } finally {
+    live.restore();
+  }
+});
+
+test('a compiled endpoint fails closed when the markup parse itself throws', async () => {
+  // Deeply nested markup makes the real parser throw a RangeError, which the
+  // handler turns into the same refusal.
+  const { files, entry } = valuePage();
+  const mutated = withEntrySource(files, entry, (source) => withStatic(source, 0, `<div>${'<div>'.repeat(20000)}`));
+  const mod = await loadTree(mutated, entry);
+  const live = await liveStore({});
+  try {
+    const out = await invoke(mod.default as never, { ...USER, body: { input: { value: 'Ada' } } });
+    assert.equal(out.status, 500, JSON.stringify(out.body));
+    assert.equal(out.body.error, 'rendered markup failed the output attribute check');
+    assert.equal('html' in out.body, false);
+  } finally {
+    live.restore();
+  }
+});
+
+test('tag-name island refused', async () => {
+  const rejected = [
+    '<<%= input.a %>>x</p>',
+    '<d<%= input.a %>>x</d>',
+    '</<%= input.a %>>',
+    '</div<%= input.a %>>',
+    '<div /<%= input.a %>>',
+    '<div <%= input.a %>="1">x</div>',
+    '<div <%= input.a %>>x</div>',
+    '<div at<%= input.a %>="1">x</div>',
+    '<div attr <%= input.a %>>x</div>',
+  ];
+  for (const body of rejected) {
+    await assertStaysSnippet(body, { a: 'test' });
+  }
+});
+
+/**
+ * Shape A, minimized from a gallery lead board: the template sits in a
+ * `<html><body>` shell, a guarded query is bound per caller, and a `for each`
+ * over that query prints record fields. The sanitizer unwraps the shell and
+ * keeps its children, so the islands are text positions.
+ */
+const SHAPE_A = `htmlpage hp1()
+content
+<html><head><style>.c { color: #333; }</style></head>
+<body>
+<%{
+if (zoho.loginuserid == "u1") {
+  open = Orders[Status == "open"];
+} else {
+  open = Orders[Status == "archived"];
+}
+%><h3><%= open.count() %> open</h3><ul><%
+for each row in open {
+  %><li><%= row.Status %>:<%= row.Amount %></li><%
+}
+%></ul>
+<%}%>
+</body></html>`;
+const SHAPE_A_GOLDEN = join(process.cwd(), 'packages/ui/test/golden/htmlpage-shape-a.mjs');
+
+test('shape A golden: a query loop inside a <body> shell compiles to the pinned endpoint, byte-identical on regeneration', () => {
+  const build = () => generateUi(appOf(`${ORDERS}\n${pageWithSnippet(SHAPE_A)}`));
+  const first = build();
+  const second = build();
+  assert.deepEqual(first.model.todos, []);
+  const entry = uiSnippetFiles(first.model)[0];
+  assert.equal(entry.path, 'functions/htmlpages/home-s0.mjs');
+  const source = String(first.files.find((file) => file.path === entry.path)?.data ?? '');
+  assert.equal(source, String(second.files.find((file) => file.path === entry.path)?.data ?? ''));
+  assert.match(source, /shim\.datastore\.rows\(ctx, open\)/);
+  assert.match(source, /shim\.datastore\.query\(ctx, "Orders"/);
+  assert.doesNotMatch(source, /executeZCQLQuery|datastore\.(flush|insert|update|delete)\b/);
+  if (process.env.C2C_UPDATE_GOLDEN === '1') writeFileSync(SHAPE_A_GOLDEN, source);
+  assert.equal(source, readFileSync(SHAPE_A_GOLDEN, 'utf8'));
+});
+
+test('shape A renders one escaped row per record for the caller\'s query, and none for another caller', async () => {
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(SHAPE_A)}`));
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({ Orders: [...SEEDED.Orders, { Status: 'open', Amount: 4 }] });
+  try {
+    const out = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    const html = String(out.body.html).replace(/\s+/g, '');
+    assert.equal(html, '<h3>3open</h3><ul><li>open:1</li><li>open:2</li><li>open:4</li></ul>');
+    assert.doesNotMatch(html, /closed|<body|<html|<style/);
+    // Another caller binds the other arm's query, which matches no row.
+    const other = await invoke(mod.default as never, { user: { ...USER.user, userId: 'u2' }, body: { input: {} } });
+    assert.equal(other.status, 200, JSON.stringify(other.body));
+    assert.doesNotMatch(String(other.body.html), /<li/);
+    const anon = await invoke(mod.default as never, { body: { input: {} } });
+    assert.equal(anon.status, 401);
+  } finally {
+    live.restore();
+  }
+});
+
+test('shape A: a text island the sanitizer would not keep still stays the counted snippet', () => {
+  const loop = (wrap: (inner: string) => string) =>
+    `htmlpage hp1()\ncontent\n<%\nfor each row in Orders[ID != 0] {\n%>${wrap('<%= row.Status %>')}<%\n}\n%>`;
+  for (const wrap of [
+    (inner: string) => `<head><title>${inner}</title></head>`,
+    (inner: string) => `<noscript><body>${inner}</body></noscript>`,
+    (inner: string) => `<body><script>${inner}</script></body>`,
+    (inner: string) => `<body><text value="${inner}"></text></body>`,
+  ]) {
+    const snippet = loop(wrap);
+    const { model } = buildUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
+    assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], snippet);
+    assert.equal(uiSnippetFiles(model).length, 0, snippet);
+  }
+});

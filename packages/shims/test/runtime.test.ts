@@ -2112,6 +2112,71 @@ test('input.ID and old.ID resolve the request ROWID and stored row identity', ()
   assert.equal(runtime.shim.record.get(bound, 'ID'), '777');
 });
 
+test('record writes never traverse or create prototype keys, and reads stay own-only', () => {
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  const ctx = runtime.context({ record: {}, old: {} });
+  for (const key of ['__proto__', 'constructor', 'prototype']) {
+    runtime.shim.input.set(ctx, [key, 'leaked'], 'x');
+    runtime.shim.input.set(ctx, [key], { leaked: 'x' });
+    runtime.shim.old.set(ctx, [key, 'leaked'], 'x');
+    runtime.shim.record.set(ctx.record, [key, 'leaked'], 'x');
+    assert.equal(({} as Record<string, unknown>).leaked, undefined, key);
+    assert.equal(Object.hasOwn(ctx.record, key), false, key);
+    assert.equal(Object.hasOwn(ctx.old, key), false, key);
+  }
+  // A fresh runtime and a fresh object do not observe any leaked key.
+  const second = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  const fresh = second.context({ record: {}, old: {} });
+  assert.equal(second.shim.input.get(fresh, 'leaked'), undefined);
+  assert.equal(second.shim.input.get(fresh, 'toString'), undefined);
+  // Ordinary own keys still read and write.
+  second.shim.input.set(fresh, ['a', 'b'], 'v');
+  assert.equal(second.shim.input.get(fresh, 'a', 'b'), 'v');
+  assert.equal((ctx.record as Record<string, Record<string, unknown>>).a === undefined, true);
+});
+
+test('the generated index accessors never yield or write a shared prototype', () => {
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  const ctx = runtime.context({ record: {}, old: {} });
+  // Reads are own-only and refuse the prototype-path segment names.
+  assert.equal(runtime.shim.get({ a: 1 }, 'a'), 1);
+  for (const key of ['__proto__', 'constructor', 'prototype', '__defineGetter__', '__lookupGetter__', 'toString', 'valueOf', 'hasOwnProperty']) {
+    assert.equal(runtime.shim.get({ a: 1 }, key), undefined, key);
+  }
+  // An own key spelled like a prototype segment is still refused by name.
+  const ownKey: Record<string, unknown> = {};
+  Object.defineProperty(ownKey, '__proto__', { value: 'x', enumerable: true, writable: true, configurable: true });
+  assert.equal(runtime.shim.get(ownKey, '__proto__'), undefined);
+  // A stored shared prototype is not a readable value, and not a walk target.
+  runtime.shim.input.set(ctx, ['holder'], Object.prototype);
+  assert.equal(runtime.shim.input.get(ctx, 'holder'), undefined);
+  runtime.shim.input.set(ctx, ['holder', 'leaked'], 'x');
+  assert.equal((ctx.record.holder as Record<string, unknown>).leaked, undefined);
+  assert.equal(({} as Record<string, unknown>).leaked, undefined);
+  // The write side: unsafe names, prototype targets, and missing receivers.
+  runtime.shim.set(Object.prototype, 'leaked', 'x');
+  runtime.shim.set(Function.prototype, 'leaked', 'x');
+  const m: Record<string, unknown> = {};
+  runtime.shim.set(m, '__proto__', { leaked: 'x' });
+  runtime.shim.set(runtime.shim.get(m, '__proto__'), 'leaked', 'x');
+  runtime.shim.set(undefined, 'leaked', 'x');
+  assert.equal(Object.getPrototypeOf(m), Object.prototype);
+  assert.equal(({} as Record<string, unknown>).leaked, undefined);
+  // Ordinary keys still write.
+  runtime.shim.set(m, 'safe', 'y');
+  assert.equal(m.safe, 'y');
+  const list: unknown[] = [];
+  runtime.shim.set(list, 0, 'z');
+  assert.equal(list[0], 'z');
+  // Map helpers take the same guard.
+  const viaPut: Record<string, unknown> = {};
+  runtime.shim.list.put(viaPut, '__proto__', { leaked: 'x' });
+  runtime.shim.list.putAll(viaPut, JSON.parse('{"__proto__":{"leaked":"x"},"ok":1}'));
+  assert.equal(Object.getPrototypeOf(viaPut), Object.prototype);
+  assert.equal(viaPut.ok, 1);
+  assert.equal(({} as Record<string, unknown>).leaked, undefined);
+});
+
 test('the date shim maps non-date text to UnParsable date; untranslated criteria are named', () => {
   // Creator's message for text that is not a date: golden vectors date.rel.bad-eq, date.cmp.*-null-null.
   for (const bad of ['32-Foo-2020', 'not a date']) {

@@ -1940,7 +1940,7 @@ test('sendmail paren form, quoted zoho vars, and template attachment', () => {
   assert.equal(t.stats.todo, 0);
   assert.match(stripComments(t.server), /await shim\.mail\.send\(ctx, /);
   assert.match(stripComments(t.server), /"from": shim\.zoho\.adminUserId\(ctx\)/);
-  assert.match(stripComments(t.server), /"to": Customer\.Email/);
+  assert.match(stripComments(t.server), /"to": shim\.get\(Customer, "Email"\)/);
   assert.match(stripComments(t.server), /"attachments": \[\{ kind: "template", name: "Order_Invoice", form: null, record: shim\.input\.root\(ctx\), format: "pdf", rendered: "pdf" \}\]/);
   assert.deepEqual(
     t.todos.map((item: any) => item.construct),
@@ -1965,7 +1965,7 @@ test('sendmail bracket form: comma recipients, bcc, reply to, content type', () 
   const t = translate(src);
   assert.equal(t.stats.todo, 0);
   assert.equal(t.todos.length, 0);
-  assert.match(stripComments(t.server), /"to": \[getStaffRec\.Email, getRec\.Customer_Email\]/);
+  assert.match(stripComments(t.server), /"to": \[shim\.get\(getStaffRec, "Email"\), shim\.get\(getRec, "Customer_Email"\)\]/);
   assert.match(stripComments(t.server), /"bcc": shim\.zoho\.adminUserId\(ctx\)/);
   assert.match(stripComments(t.server), /"reply to": "support@zohocreator\.com"/);
   assert.match(stripComments(t.server), /"content type": "Plain Text"/);
@@ -2132,7 +2132,7 @@ test('Form[Field] with a bare field name is criteria shorthand for field == true
   assert.equal(got, 2);
   // A local still wins: it is a real index into the collection, not a field.
   const indexed = translate('i = 0;\nfirst = Orders[i];\nreturn first;', { formNames: ['Orders'] });
-  assert.match(stripComments(indexed.server), /\[i\]/);
+  assert.match(stripComments(indexed.server), /shim\.get\(shim\.datastore\.query\(ctx, "Orders", \{ op: "true" \}\), i\)/);
   assert.doesNotMatch(stripComments(indexed.server), /field: "i"/);
 });
 
@@ -2406,31 +2406,31 @@ test('Form[Field] index folding keeps real index semantics for locals, input, ol
   };
 
   // xs list param (assumed undeclared in this scope, so unmapped except keeping index)
-  check('return xs[k];', /return xs\[k\];/);
+  check('return xs[k];', /return shim\.get\(xs, k\);/);
 
   // list xs local
-  check('xs = List(); return xs[Audit_Require];', /xs\[Audit_Require\]/);
+  check('xs = List(); return xs[Audit_Require];', /shim\.get\(xs, Audit_Require\)/);
 
   // map m local
-  check('m = Map(); return m[Audit_Require];', /m\[Audit_Require\]/);
+  check('m = Map(); return m[Audit_Require];', /shim\.get\(m, Audit_Require\)/);
 
   // input
-  check('return input[Audit_Require];', /shim\.input\.root\(ctx\)\[Audit_Require\]/);
+  check('return input[Audit_Require];', /shim\.get\(shim\.input\.root\(ctx\), Audit_Require\)/);
 
   // old
-  check('return old[Audit_Require];', /ctx\.old\[Audit_Require\]/);
+  check('return old[Audit_Require];', /shim\.get\(ctx\.old, Audit_Require\)/);
 
   // row (subform row event)
-  check('return row[Audit_Require];', /return d_row\[Audit_Require\];/);
+  check('return row[Audit_Require];', /return shim\.get\(d_row, Audit_Require\);/);
 
   // undeclared name
-  check('return Mystery[Audit_Require];', /return Mystery\[Audit_Require\];/);
+  check('return Mystery[Audit_Require];', /return shim\.get\(Mystery, Audit_Require\);/);
 
   // Tasks[k] (k an undeclared free identifier) keeps real index semantics
-  check('return Tasks[k];', /shim\.datastore\.query\(ctx, "Tasks", \{ op: "true" \}\)\[k\]/);
+  check('return Tasks[k];', /shim\.get\(shim\.datastore\.query\(ctx, "Tasks", \{ op: "true" \}\), k\)/);
 
   // typed declaration 'text key' keeps real index semantics
-  check('text key = "foo"; return Tasks[key];', /shim\.datastore\.query\(ctx, "Tasks", \{ op: "true" \}\)\[key\]/);
+  check('text key = "foo"; return Tasks[key];', /shim\.get\(shim\.datastore\.query\(ctx, "Tasks", \{ op: "true" \}\), key\)/);
 });
 
 test('duration arithmetic matches all components in any order and unparseable throws', () => {
@@ -3824,7 +3824,7 @@ test('a bare field member path folds into the multi-arg get, so a null lookup re
   // A local still shadows the field: its member path is not a field read.
   const local = translate('Name = Map();\nx = Name.first_name;', { inputFields: ['Name'] });
   assert.doesNotMatch(local.server, /shim\.input\.get/);
-  assert.match(local.server, /Name\["first_name"\]/);
+  assert.match(local.server, /shim\.get\(Name, "first_name"\)/);
 });
 
 test('a bare field member write is a field set, not an assignment to a call result', () => {
