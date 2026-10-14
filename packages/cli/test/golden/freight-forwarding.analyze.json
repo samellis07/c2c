@@ -500,8 +500,8 @@
   "deluge": {
     "units": 54,
     "statements": 553,
-    "translated": 65,
-    "shimmed": 475,
+    "translated": 59,
+    "shimmed": 481,
     "todo": 14,
     "todoLocations": [
       {
@@ -686,7 +686,7 @@
   },
   "effort": {
     "estimate": true,
-    "hours": 189.5,
+    "hours": 190.1,
     "weights": {
       "hoursPerFeature": {
         "supported": 0,

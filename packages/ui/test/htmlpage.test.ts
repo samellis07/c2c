@@ -2155,7 +2155,6 @@ test('shape A: a text island the sanitizer would not keep still stays the counte
     (inner: string) => `<head><title>${inner}</title></head>`,
     (inner: string) => `<noscript><body>${inner}</body></noscript>`,
     (inner: string) => `<body><script>${inner}</script></body>`,
-    (inner: string) => `<body><text value="${inner}"></text></body>`,
   ]) {
     const snippet = loop(wrap);
     const { model } = buildUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));

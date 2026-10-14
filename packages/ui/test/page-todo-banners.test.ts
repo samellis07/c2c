@@ -26,7 +26,7 @@ function appOf(body: string): App {
 
 const SNIPPET_PAGE = `\tpage Home
 \t{
-\t\tContent="<zml><layout><panel><dspZml name=\\"Snippet\\" value=\\"<% info = 1; %>\\"/><text value=\\"Hello\\"/></panel></layout></zml>"
+\t\tContent="<zml><layout><panel><dspZml name=\\"Snippet\\" value=\\"<% while (x < 1) { z = 1; } %>\\"/><text value=\\"Hello\\"/></panel></layout></zml>"
 \t}`;
 
 function capturedConsole<T>(fn: (infos: string[]) => T): { result: T; infos: string[] } {
