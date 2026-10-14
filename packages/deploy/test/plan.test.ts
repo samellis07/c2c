@@ -20,7 +20,7 @@ import { buildOfflinePlan, planCli, PLAN_STEP_TOOLS, resolveDc, type ProvisionSt
 import { ALL_REQUIRED_MCP_TOOLS, REQUIRED_MCP_TOOLS } from '../../doctor/src/required-tools.js';
 import { loadApp, type Io } from '../src/cli.js';
 import { deriveIr, parse, parseFile, type App } from '../../core/src/index.js';
-import { generateSchema } from '../../schema/src/generator.js';
+import { generateSchema, type SourceTableData } from '../../schema/src/generator.js';
 import { limitValue, selectListOf } from '../../schema/src/limits.js';
 import { SOURCE_ID_COLUMN } from '../../schema/src/mapping.js';
 import { generateUi } from '../../ui/src/generate.js';
@@ -433,7 +433,7 @@ test('a table of 31 columns warns select-width, never fails: each generated read
   assert.equal(budget.table, 'Wide');
   assert.match(budget.detail, /widest generated read of Wide selects 30 columns per statement/);
   assert.match(budget.detail, /staged into 2 reads/);
-  assert.match(built.files.find((file) => file.path === 'plan.md')?.data ?? '', /\[WARN\] Wide: widest generated read of Wide selects 30 columns/);
+  assert.match(built.files.find((file) => file.path === 'plan.md')?.data ?? '', /\[WARN\] \(select-width\) Wide: widest generated read of Wide selects 30 columns/);
 
   const ui = generateUi(app);
   const report = ui.files.find((file) => file.path.includes('/reports/'));
@@ -506,6 +506,88 @@ test('the columns budget warns over the unverified default and fails only over t
   );
 });
 
+test('the plan budgets the mover write calls against the stated Dev write rate', () => {
+  const app = loadApp(writeDs());
+  const rows = (count: number) => ({ table: 'Item', rows: Array.from({ length: count }, () => ({ columns: {} })) });
+  const rate = limitValue('datastore.write_requests_per_minute');
+
+  const noSource = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false });
+  const unmeasured = noSource.plan.budgets.find((item) => item.id === 'dev-write-rate');
+  assert.ok(unmeasured, 'a dev-write-rate budget is listed');
+  assert.equal(unmeasured.status, 'pass');
+  assert.match(unmeasured.detail ?? '', /dev-api-calls budget carries the missing-source warning/);
+
+  const over = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: [rows(rate * 200)] });
+  const overBudget = over.plan.budgets.find((item) => item.id === 'dev-write-rate');
+  assert.ok(overBudget);
+  assert.equal(overBudget.status, 'warn');
+  assert.match(overBudget.detail ?? '', new RegExp(`${rate} insert calls`));
+  assert.match(overBudget.fix ?? '', /P-RATE/);
+
+  const under = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: [rows(10)] });
+  const underBudget = under.plan.budgets.find((item) => item.id === 'dev-write-rate');
+  assert.ok(underBudget);
+  assert.equal(underBudget.status, 'pass');
+  assert.match(underBudget.detail ?? '', /1 insert call/);
+});
+
+test('the write-rate warning says a minute or more at exactly the stated rate', () => {
+  const app = loadApp(writeDs());
+  const rows = (count: number) => ({ table: 'Item', rows: Array.from({ length: count }, () => ({ columns: {} })) });
+  const rate = limitValue('datastore.write_requests_per_minute');
+
+  // Exactly rate batches: rate calls at rate calls/min is exactly a minute, not more.
+  const atCap = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: [rows(rate * 200)] });
+  const atCapBudget = atCap.plan.budgets.find((item) => item.id === 'dev-write-rate');
+  assert.ok(atCapBudget);
+  assert.equal(atCapBudget.status, 'warn');
+  assert.match(atCapBudget.detail ?? '', /a minute or more at the cap/);
+
+  // One batch under the rate passes.
+  const below = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: [rows((rate - 1) * 200)] });
+  const belowBudget = below.plan.budgets.find((item) => item.id === 'dev-write-rate');
+  assert.ok(belowBudget);
+  assert.equal(belowBudget.status, 'pass');
+  assert.match(belowBudget.detail ?? '', new RegExp(`Item ${rate - 1} insert calls`));
+});
+
+test('missing source row counts warn once across the mover-call budgets', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-plan-ds-pair-'));
+  const dsPath = join(dir, 'app.ds');
+  writeFileSync(
+    dsPath,
+    'application "Widget"\n{\n\tform Author\n\t{\n\t\tName\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t}\n\tform Book\n\t{\n\t\tTitle\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t}\n}\n',
+  );
+  const app = loadApp(dsPath);
+  const schema = generateSchema(app);
+  const storeTables = schema.tables.filter((table) => !table.nosql && table.role !== 'system');
+  assert.deepEqual(
+    storeTables.map((table) => table.name).sort(),
+    ['Author', 'Book'],
+  );
+
+  // No source at all: only dev-api-calls warns; dev-write-rate refers to it.
+  const noSource = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false });
+  const apiWarn = noSource.plan.budgets.find((item) => item.id === 'dev-api-calls');
+  const rateRow = noSource.plan.budgets.find((item) => item.id === 'dev-write-rate');
+  assert.ok(apiWarn && rateRow);
+  assert.equal(apiWarn.status, 'warn');
+  assert.equal(rateRow.status, 'pass');
+  assert.match(rateRow.detail ?? '', /dev-api-calls/);
+
+  // Partial source: only dev-api-calls warns for the unmeasured table.
+  const partial: SourceTableData[] = storeTables.slice(1).map((table) => ({ table: table.name, rows: [{ columns: {} }] }));
+  const partialPlan = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: partial });
+  const apiPartial = partialPlan.plan.budgets.find((item) => item.id === 'dev-api-calls');
+  const ratePartial = partialPlan.plan.budgets.find((item) => item.id === 'dev-write-rate');
+  assert.ok(apiPartial && ratePartial);
+  assert.equal(apiPartial.status, 'warn');
+  assert.match(apiPartial.detail ?? '', new RegExp(`row counts are unknown for ${storeTables[0]!.name}`));
+  assert.equal(ratePartial.status, 'pass');
+  assert.match(ratePartial.detail ?? '', /counted in the dev-api-calls warning/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('the plan reports the app table count against the org-wide table limit', async () => {
   const ds = writeDs();
   const out = mkdtempSync(join(tmpdir(), 'c2c-plan-tables-'));
@@ -519,6 +601,106 @@ test('the plan reports the app table count against the org-wide table limit', as
   assert.match(budget.detail, /retry after 30\/60\/120 minutes/);
   assert.match(readFileSync(join(out, 'plan.md'), 'utf8'), /org-wide limit on table creates/);
   rmSync(out, { recursive: true, force: true });
+});
+
+test('the plan measures source string values against varchar column lengths', () => {
+  const app = loadApp(writeDs());
+  const item = generateSchema(app).tables.find((table) => table.name === 'Item');
+  assert.ok(item);
+  const name = item.columns.find((column) => column.name === 'Name');
+  assert.ok(name && name.dataType === 'VarChar', 'Name maps to a varchar column');
+  const cap = name.length ?? 255;
+  const rows = (value: string, complete?: boolean) => ({ table: 'Item', complete, rows: [{ columns: { [name.name]: value } }] });
+
+  const noSource = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false });
+  const unmeasured = noSource.plan.budgets.find((budget) => budget.id === 'varchar-length');
+  assert.ok(unmeasured, 'a varchar-length budget is listed');
+  assert.equal(unmeasured.status, 'warn');
+  assert.match(unmeasured.detail ?? '', /unmeasured/);
+  assert.match(unmeasured.fix ?? '', /--source-/);
+
+  const long = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: [rows('x'.repeat(cap + 1), true)] });
+  const budget = long.plan.budgets.find((item) => item.id === 'varchar-length');
+  assert.ok(budget, 'a varchar-length budget names the over-length value');
+  assert.equal(budget.status, 'warn');
+  assert.match(budget.detail ?? '', new RegExp(`Item\\.${name.name}`));
+  assert.match(budget.detail ?? '', new RegExp(`${cap + 1}/${cap}`));
+  assert.match(budget.detail ?? '', /silently truncat/);
+  assert.match(budget.fix ?? '', /shorten/);
+  assert.match(long.files.find((file) => file.path === 'plan.md')?.data ?? '', /\[WARN\] \(varchar-length\) source values over a varchar/);
+  assert.equal(long.plan.budgetsOk, true, 'a varchar-length warn never fails the plan');
+
+  const fits = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: [rows('ok', true)] });
+  const pass = fits.plan.budgets.find((item) => item.id === 'varchar-length');
+  assert.ok(pass);
+  assert.equal(pass.status, 'pass');
+});
+
+test('an incomplete source warns even when every observed varchar value fits', () => {
+  const app = loadApp(writeDs());
+  const item = generateSchema(app).tables.find((table) => table.name === 'Item');
+  assert.ok(item);
+  const name = item.columns.find((column) => column.name === 'Name');
+  assert.ok(name && name.dataType === 'VarChar');
+  const cap = name.length ?? 255;
+  const budgetOf = (source: { table: string; complete?: boolean; rows: { columns: Record<string, unknown> }[] }[]) =>
+    buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source }).plan.budgets.find((item) => item.id === 'varchar-length');
+
+  // A report/CSV source cannot prove it holds every record: observed fits
+  // are a sample, not a measurement — warn, never pass.
+  const partial = budgetOf([{ table: 'Item', rows: [{ columns: { Name: 'ok' } }] }]);
+  assert.ok(partial);
+  assert.equal(partial.status, 'warn');
+  assert.match(partial.detail ?? '', /not fully measured/);
+
+  // Observed offenders in a partial source still warn by name.
+  const partialOver = budgetOf([{ table: 'Item', rows: [{ columns: { Name: 'x'.repeat(cap + 1) } }] }]);
+  assert.ok(partialOver);
+  assert.equal(partialOver.status, 'warn');
+  assert.match(partialOver.detail ?? '', /Item\.Name/);
+  assert.match(partialOver.detail ?? '', /not fully measured/);
+
+  // Only a complete source can pass.
+  const complete = budgetOf([{ table: 'Item', complete: true, rows: [{ columns: { Name: 'ok' } }] }]);
+  assert.ok(complete);
+  assert.equal(complete.status, 'pass');
+});
+
+test('every varchar-length pass and warning explains unverified character semantics', () => {
+  const app = loadApp(writeDs());
+  const item = generateSchema(app).tables.find((table) => table.name === 'Item');
+  assert.ok(item);
+  const name = item.columns.find((column) => column.name === 'Name');
+  assert.ok(name && name.dataType === 'VarChar');
+  const cap = name.length ?? 255;
+  const budgetOf = (source?: { table: string; complete?: boolean; rows: { columns: Record<string, unknown> }[] }[]) =>
+    buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source }).plan.budgets.find((item) => item.id === 'varchar-length');
+  const cases = [
+    budgetOf(),
+    budgetOf([{ table: 'Item', complete: true, rows: [] }]),
+    budgetOf([{ table: 'Item', complete: true, rows: [{ columns: { Name: 'ok' } }] }]),
+    budgetOf([{ table: 'Item', rows: [{ columns: { Name: 'ok' } }] }]),
+    budgetOf([{ table: 'Item', complete: true, rows: [{ columns: { Name: 'x'.repeat(cap + 1) } }] }]),
+  ];
+  for (const budget of cases) {
+    assert.ok(budget);
+    assert.ok(budget.status === 'pass' || budget.status === 'warn');
+    assert.match(budget.detail, /JavaScript code points/);
+    assert.match(budget.detail, /unverified/);
+  }
+
+  // cap emoji are cap code points but 2*cap UTF-16 code units: they fit.
+  const emoji = budgetOf([{ table: 'Item', complete: true, rows: [{ columns: { Name: '😀'.repeat(cap) } }] }]);
+  assert.ok(emoji);
+  assert.equal(emoji.status, 'pass');
+
+  // cap - 2 emoji plus "tail" and CRLF: cap + 4 code points.
+  const over = budgetOf([{ table: 'Item', complete: true, rows: [{ columns: { Name: '😀'.repeat(cap - 2) + 'tail\r\n' } }] }]);
+  assert.ok(over);
+  assert.equal(over.status, 'warn');
+  assert.match(over.detail ?? '', /Item\.Name/);
+  assert.match(over.detail ?? '', /code points/);
+  assert.match(over.detail ?? '', /unverified/);
 });
 
 test('unique-varchar budget warns app-level extras and the plan still exits 0', async () => {
@@ -539,8 +721,182 @@ test('unique-varchar budget warns app-level extras and the plan still exits 0', 
   assert.match(budget.detail, /unique varchar/i);
   assert.match(budget.detail, /Checked by the c2c handler instead/);
   assert.match(budget.detail, /not atomic/);
-  assert.match(readFileSync(join(out, 'plan.md'), 'utf8'), /\[WARN\] Contact: .*unique varchar/i);
+  assert.match(readFileSync(join(out, 'plan.md'), 'utf8'), /\[WARN\] \(unique-varchar\) Contact: .*unique varchar/i);
   rmSync(out, { recursive: true, force: true });
+});
+
+test('the plan warns when Dev per-table row counts are unknown or measured', () => {
+  const app = loadApp(writeDs());
+  const rows = (count: number) => ({ table: 'Item', rows: Array.from({ length: count }, () => ({ columns: {} })) });
+
+  const noSource = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false });
+  const unmeasured = noSource.plan.budgets.find((item) => item.id === 'dev-row-cap');
+  assert.ok(unmeasured, 'a dev-row-cap budget is listed');
+  assert.equal(unmeasured.status, 'warn');
+  assert.match(unmeasured.detail ?? '', /source row counts/);
+  assert.match(unmeasured.fix ?? '', /--source-/);
+
+  const loaded = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: [rows(450)] });
+  const budget = loaded.plan.budgets.find((item) => item.id === 'dev-row-cap');
+  assert.ok(budget);
+  assert.equal(budget.status, 'warn');
+  assert.match(budget.detail ?? '', /Item 450 rows/);
+  assert.match(budget.detail ?? '', /3 insert batches/);
+  assert.match(budget.detail ?? '', /API_LIMIT_REACHED/);
+  assert.match(budget.fix ?? '', /rehearse/);
+
+  const empty = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: [rows(0)] });
+  const emptyBudget = empty.plan.budgets.find((item) => item.id === 'dev-row-cap');
+  assert.ok(emptyBudget);
+  assert.equal(emptyBudget.status, 'warn');
+  assert.match(emptyBudget.detail ?? '', /row counts are unknown for Item/);
+  assert.doesNotMatch(emptyBudget.detail ?? '', /figures are higher/);
+
+  const twoTableApp = loadApp(writeDs(DS.replace('\t\tlist Open_Items', '\t\tform Other\n\t\t{\n\t\t\tTitle (type = text)\n\t\t}\n\t\tlist Open_Items')));
+  const partial = buildOfflinePlan(twoTableApp, {
+    dc: 'in', dcSource: '--dc', mail: false,
+    source: [rows(2)],
+  });
+  const partialBudget = partial.plan.budgets.find((item) => item.id === 'dev-row-cap');
+  assert.ok(partialBudget);
+  assert.equal(partialBudget.status, 'warn');
+  assert.match(partialBudget.detail ?? '', /largest measured table\(s\): Item 2 rows/);
+  assert.match(partialBudget.detail ?? '', /row counts are unknown for .*Other/);
+
+  const complete = buildOfflinePlan(app, {
+    dc: 'in', dcSource: '--dc', mail: false,
+    source: [{ ...rows(0), complete: true }],
+  });
+  const completeBudget = complete.plan.budgets.find((item) => item.id === 'dev-row-cap');
+  assert.ok(completeBudget);
+  assert.equal(completeBudget.status, 'pass');
+  assert.match(completeBudget.detail ?? '', /no source rows/);
+});
+
+test('dev-api-calls budget warns without source and estimates mover calls with source', () => {
+  const app = loadApp(writeDs());
+  const noSource = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false });
+  const unknown = noSource.plan.budgets.find((budget) => budget.id === 'dev-api-calls');
+  assert.ok(unknown, 'a dev-api-calls budget is listed');
+  assert.equal(unknown.status, 'warn');
+  assert.match(unknown.detail, /needs source row counts/);
+  assert.match(unknown.detail, /api\.calls_dev/);
+  assert.equal(noSource.plan.budgetsOk, true);
+
+  const schema = generateSchema(app);
+  const measured = schema.tables.filter((table) => !table.nosql && table.role !== 'system');
+  assert.ok(measured.length > 0);
+  // 450 rows per table -> 3 batches of 200 plus 2 slices of 300 ids:
+  // 3 reconcile/insert/write-recount calls per batch and 3
+  // verification/remap/count reads per slice, plus a 2-call conservative
+  // allowance per non-empty table -> 17 mover calls per table.
+  const source: SourceTableData[] = measured.map((table) => ({
+    table: table.name,
+    rows: Array.from({ length: 450 }, () => ({ columns: {} })),
+  }));
+  const withSource = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source });
+  const budget = withSource.plan.budgets.find((item) => item.id === 'dev-api-calls');
+  assert.ok(budget);
+  assert.equal(budget.status, 'pass');
+  assert.match(budget.detail, new RegExp(`about ${17 * measured.length} API calls`));
+  assert.match(budget.detail, /per 200-row batch: reconcile read plus insert plus write-recount/);
+  assert.match(budget.detail, /per 300 ids: verification plus remap plus count reads/);
+  assert.match(budget.detail, /2 conservative fixed-call allowance per non-empty table/);
+  assert.match(withSource.files.find((file) => file.path === 'plan.md')?.data ?? '', /API calls/);
+});
+
+test('dev-api-calls budget counts verification, remap and count reads per 300 ids', () => {
+  const app = loadApp(writeDs());
+  const callsFor = (count: number): number => {
+    const source: SourceTableData[] = [{ table: 'Item', rows: Array.from({ length: count }, () => ({ columns: {} })) }];
+    const plan = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source });
+    const budget = plan.plan.budgets.find((item) => item.id === 'dev-api-calls');
+    assert.ok(budget);
+    const match = (budget.detail ?? '').match(/about (\d+) API calls/);
+    assert.ok(match, `no call estimate in: ${budget.detail}`);
+    return Number(match[1]);
+  };
+  // One table: 300 rows -> 2 batches + 1 id slice + 2 fixed = 11;
+  // 301 rows opens a second id slice for the verification, remap and count reads -> 14.
+  assert.equal(callsFor(300), 11);
+  assert.equal(callsFor(301), 14);
+});
+
+test('dev-api-calls budget counts zero calls for a measured empty table', () => {
+  const app = loadApp(writeDs());
+  const source: SourceTableData[] = [{ table: 'Item', rows: [] }];
+  const plan = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source });
+  const budget = plan.plan.budgets.find((item) => item.id === 'dev-api-calls');
+  assert.ok(budget);
+  assert.equal(budget.status, 'pass');
+  assert.match(budget.detail ?? '', /about 0 API calls/);
+});
+
+test('dev-api-calls budget counts a deferred-update write per batch for self-lookup tables', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-plan-ds-self-'));
+  const path = join(dir, 'app.ds');
+  writeFileSync(
+    path,
+    'application "Widget"\n{\n\tform Node\n\t{\n\t\tName\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t\tParent\n\t\t(\n\t\t\ttype = picklist\n\t\t\tvalues = Node.Name\n\t\t)\n\t}\n}\n',
+  );
+  const app = loadApp(path);
+  const source: SourceTableData[] = [{ table: 'Node', rows: Array.from({ length: 450 }, () => ({ columns: {} })) }];
+  const plan = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source });
+  const budget = plan.plan.budgets.find((item) => item.id === 'dev-api-calls');
+  assert.ok(budget);
+  // 17 base calls for 450 rows plus one deferred-update write per 200-row batch -> 20.
+  assert.match(budget.detail ?? '', /about 20 API calls/);
+  assert.match(budget.detail ?? '', /deferred-lookup updates on Node/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('dev-api-calls budget warns on unmeasured tables and at the Development allowance', () => {
+  const twoFormDs = DS.replace(
+    '\t\tlist Open_Items',
+    '\t\tform Other\n\t\t{\n\t\t\tTitle\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)\n\t\t}\n\t\tlist Open_Items',
+  );
+  const app = loadApp(writeDs(twoFormDs));
+  const schema = generateSchema(app);
+  const storeTables = schema.tables.filter((table) => !table.nosql && table.role !== 'system');
+  const partial: SourceTableData[] = storeTables.slice(1).map((table) => ({ table: table.name, rows: [{ columns: {} }] }));
+  const partialPlan = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: partial });
+  const missing = partialPlan.plan.budgets.find((budget) => budget.id === 'dev-api-calls');
+  assert.ok(missing);
+  assert.equal(missing.status, 'warn');
+  assert.match(missing.detail, /row counts are unknown for/);
+
+  // A source-shaped row count at the cap without materialising 20M rows:
+  // the budget reads only rows.length. The plan never iterates these rows
+  // because no source column is store-mandatory or store-unique. Each table
+  // counts far more than the old 2-calls-per-batch floor, so the old cap
+  // row count still lands well over the allowance.
+  const capCalls = limitValue('api.calls_dev');
+  const rowsPerTable = (capCalls / 2) * 200;
+  const over: SourceTableData[] = storeTables.map((table) => ({
+    table: table.name,
+    rows: { length: rowsPerTable } as unknown as SourceTableData['rows'],
+  }));
+  const overPlan = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: over });
+  const overBudget = overPlan.plan.budgets.find((budget) => budget.id === 'dev-api-calls');
+  assert.ok(overBudget);
+  assert.equal(overBudget.status, 'warn');
+  assert.match(overBudget.detail, /at or over the Development allowance/);
+
+  // An over-limit measured table must retain the missing-table explanation;
+  // otherwise dev-write-rate's cross-reference has no corresponding detail.
+  const overPartial: SourceTableData[] = [{
+    table: storeTables[0].name,
+    rows: { length: rowsPerTable } as unknown as SourceTableData['rows'],
+  }];
+  const overPartialPlan = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, source: overPartial });
+  const overPartialBudget = overPartialPlan.plan.budgets.find((budget) => budget.id === 'dev-api-calls');
+  assert.ok(overPartialBudget);
+  assert.equal(overPartialBudget.status, 'warn');
+  assert.match(overPartialBudget.detail, /at or over the Development allowance/);
+  assert.match(overPartialBudget.detail, new RegExp(`row counts are unknown for ${storeTables.slice(1).map((table) => table.name).join(', ')}`));
+  const overPartialWriteRate = overPartialPlan.plan.budgets.find((budget) => budget.id === 'dev-write-rate');
+  assert.ok(overPartialWriteRate);
+  assert.match(overPartialWriteRate.detail ?? '', /counted in the dev-api-calls warning/);
 });
 
 test('plan records the required MCP tool set and the probe list', async () => {
