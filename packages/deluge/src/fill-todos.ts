@@ -17,7 +17,7 @@
  * ordered with compareEnUs, never localeCompare.
  */
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compareEnUs } from '../../core/src/order.js';
 import { parseFile, parseProject } from '../../core/src/parse.js';
@@ -1510,18 +1510,55 @@ export function emitTodoFiles(app: App, dir: string): FillTask[] {
   return tasks;
 }
 
-export function readLock(path: string): FillLock {
-  if (!statSync(path, { throwIfNoEntry: false })?.isFile()) return { version: 1, entries: {} };
-  let parsed: Partial<FillLock>;
+interface LockFileFs {
+  openSync: (path: string, flags: 'r') => number;
+  fstatSync: (fd: number) => { isFile(): boolean };
+  readFileSync: (fd: number, encoding: 'utf8') => string;
+  closeSync: (fd: number) => void;
+}
+
+/** Default reader: one `fs.openSync`, then fstat and read on that descriptor. */
+const nodeLockFileFs: LockFileFs = {
+  openSync,
+  fstatSync,
+  readFileSync: (fd, encoding) => readFileSync(fd, encoding),
+  closeSync,
+};
+
+function errnoCode(err: unknown): string | undefined {
+  if (!err || typeof err !== 'object' || !('code' in err)) return undefined;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/**
+ * Open the lock once, then fstat and read that descriptor. A path check
+ * before the read would race a replacement. ENOENT, and EISDIR when a
+ * platform refuses to open a directory, is an absent lock.
+ */
+export function readLock(path: string, fsImpl: LockFileFs = nodeLockFileFs): FillLock {
+  let fd: number;
   try {
-    parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<FillLock>;
-  } catch {
-    throw new FillTodoError('lock file is not valid JSON');
+    fd = fsImpl.openSync(path, 'r');
+  } catch (err) {
+    if (errnoCode(err) === 'ENOENT' || errnoCode(err) === 'EISDIR') return { version: 1, entries: {} };
+    throw err;
   }
-  if (parsed.version !== 1 || !parsed.entries || typeof parsed.entries !== 'object' || Array.isArray(parsed.entries)) {
-    throw new FillTodoError('c2c.lock.json is not version 1');
+  try {
+    if (!fsImpl.fstatSync(fd).isFile()) return { version: 1, entries: {} };
+    let parsed: Partial<FillLock>;
+    try {
+      parsed = JSON.parse(fsImpl.readFileSync(fd, 'utf8')) as Partial<FillLock>;
+    } catch {
+      throw new FillTodoError('lock file is not valid JSON');
+    }
+    if (parsed.version !== 1 || !parsed.entries || typeof parsed.entries !== 'object' || Array.isArray(parsed.entries)) {
+      throw new FillTodoError('c2c.lock.json is not version 1');
+    }
+    return { version: 1, entries: parsed.entries };
+  } finally {
+    fsImpl.closeSync(fd);
   }
-  return { version: 1, entries: parsed.entries };
 }
 
 export function writeLock(path: string, lock: FillLock): void {
