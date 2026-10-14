@@ -40,20 +40,26 @@ These rules apply to every host (Claude Code, OpenAI Codex, Cursor) and every c2
 - Before the first write in a session: `List_All_Organizations` must include the org in `c2c-deploy.json`, and `catalyst --org <org> project:list` must list its project (doctor D-B7/D-C4 already did this; re-run only if context changed). Never call `CatalystbyZoho_List_All_Projects` or `CatalystbyZoho_Get_Project_By_Id`: they return project secrets (jwtSecret, clientSecret) into the transcript. Projects are read through the Catalyst CLI only (name and id).
 - After every MCP write, do the read-back named in `references/route-map.md` and record it with `c2c provision --record`.
 
-## 4. CLI surface c2c skills use
+## 4. Command map
 
-| Verb | Status | Purpose |
-|---|---|---|
-| `c2c doctor` | exists | Prerequisite gate |
-| `c2c precheck <ds> [--json]` | exists | Static blockers, exit 1 on BLOCKING |
-| `c2c analyze <ds> [--json] [--quality]` | exists | Readiness, Deluge coverage, estimate |
-| `c2c plan <ds> --out c2c-out/<app>` | exists | Full offline plan, no credentials |
-| `c2c provision --out <dir> [--next \| --record <step> --result <file> \| --status] [--confirm]` | exists | MCP-first infra with read-back |
-| `c2c deploy <ds> --out <dir> --confirm [--resume] --function-env <file\|new>` | exists | Code: functions, API Gateway, Slate |
-| `c2c migrate-data --source-csv <dir> --ds <ds> [--confirm] [--checkpoint <f>]` | exists | Data load |
-| `c2c smoke` | exists; not yet passing end to end | First live signal |
-| `c2c probe <P-…> --confirm` | **planned** | Empirical limit probes, scratch resources deleted |
-| `c2c verify --out <dir> [--confirm]` | **planned** | Export diff, probes, parity |
-| `c2c cutover …`, `c2c rollback --plan`, `c2c status` | **planned** | Cutover and recovery |
+| Command group | Slash command file | Skill | `c2c` verbs | Human step it may ask for |
+|---|---|---|---|---|
+| `doctor/preflight` | `commands/doctor.md` | `skills/c2c-preflight/SKILL.md` | `doctor` | none |
+| `analyze/plan` | `commands/analyze.md` | `skills/c2c-analyze-and-precheck/SKILL.md` | `analyze`, `precheck` | none |
+| `analyze/plan` | `commands/plan.md` | `skills/c2c-migrate/SKILL.md` | `plan` | none |
+| `analyze/plan` | none | `skills/c2c-edit/SKILL.md` | `edit` | none |
+| `provision/deploy` | `commands/migrate.md` | `skills/c2c-migrate/SKILL.md` | `provision`, `deploy` | Start Slate once, Accept the admin invite, Sign in once, Verify the mail sender |
+| `provision/deploy` | none | `skills/c2c-provision-and-deploy/SKILL.md` | `provision`, `deploy` | Start Slate once |
+| `provision/deploy` | none | `skills/c2c-auth-and-access/SKILL.md` | `auth`, `users` | Accept the admin invite, Sign in once |
+| `provision/deploy` | none | `skills/c2c-ui/SKILL.md` | `ui`, `ui-react` | Start Slate once, Sign in once |
+| `provision/deploy` | none | `skills/c2c-integrations/SKILL.md` | `deploy` | Verify the mail sender |
+| `data/cutover` | none | `skills/c2c-schema-and-data/SKILL.md` | `schema`, `migrate-data`, `seed`, `sync-delta` | none |
+| `data/cutover` | `commands/verify.md` | `skills/c2c-verify-and-cutover/SKILL.md` | `smoke`, `proof`, `cutover-checklist` | Run the in-app check and paste its code |
+| `data/cutover` | `commands/rollback.md` | `skills/c2c-verify-and-cutover/SKILL.md` | `rollback-export` | none |
+| `fill-todos` | none | `skills/c2c-logic/SKILL.md` | `fill-todos` | none |
+| `status/troubleshoot` | `commands/troubleshoot.md` | `skills/c2c-troubleshooting/SKILL.md` | none | none |
+| `status/troubleshoot` | none | `skills/c2c-status/SKILL.md` | `status` | none |
+
+The command map lists the current public CLI surface and all public command and skill files. Probe and verification work is guided by the verify skill; data rollback export is `c2c rollback-export`.
 
 Run the CLI as `"${CLAUDE_PLUGIN_ROOT}/bin/c2c"` in Claude Code and `<plugin-root>/bin/c2c` (or `npx -y creator-to-catalyst@<version>`) elsewhere.

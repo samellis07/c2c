@@ -20,7 +20,7 @@ c2c converts a Zoho Creator app (`.ds` export plus its records) into a Zoho Cata
 
 ## Flow
 
-`/c2c:doctor` → `/c2c:analyze` → `/c2c:plan` → `/c2c:migrate` (provision → deploy → data) → `/c2c:verify` (probes, parity, cutover). `/c2c:rollback` and `/c2c:troubleshoot` help when something goes wrong.
+`/c2c:doctor` → `/c2c:analyze` → `/c2c:plan` → `/c2c:migrate` (provision → deploy → data) → `/c2c:verify` (probes, parity, cutover). `/c2c:rollback` and `/c2c:troubleshoot` help when something goes wrong. See the [command map](C2C.md#4-command-map) for the mapping of command groups, slash commands, skills, CLI verbs, and human steps.
 
 ## Privacy
 
