@@ -2882,7 +2882,13 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     const key = target.kind === 'index' ? expr(target.index, scope) : fx({ code: JSON.stringify(target.property) });
     account(stats, todos, mergeFx('', [obj, key, value]), span);
     const line = `shim.set(${obj.code}, ${key.code}, ${value.code});`;
-    if (value.serverOnly || obj.serverOnly || key.serverOnly) return { server: line, client: '' };
+    if (value.serverOnly || obj.serverOnly || key.serverOnly) {
+      // A member write dropped client-side leaves the local collection's client
+      // value stale — the same taint a dropped mutating call applies.
+      const root = rootName(target.object);
+      if (root && scope.local.has(root)) scope.serverOnly.add(root);
+      return { server: line, client: '' };
+    }
     return { server: line, client: line };
   }
   const left = expr(target, scope);
@@ -2891,7 +2897,7 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
   if (value.serverOnly || left.serverOnly) {
     // A member write dropped client-side leaves the local collection's client
     // value stale — the same taint a dropped mutating call applies.
-    const root = path?.root ?? (target.kind === 'index' ? rootName(target.object) : null);
+    const root = path?.root ?? null;
     if (root && scope.local.has(root)) scope.serverOnly.add(root);
     return { server: line, client: '' };
   }
