@@ -20,6 +20,7 @@
  */
 import { restWithRetry } from './retry.js';
 import { slateApps, slateUrlOf } from './slate.js';
+import { coded } from '../../core/src/index.js';
 import { assertLiveProject, flag, type Io } from './cli.js';
 import type { RestCall, RestFn, RestResult } from './tables.js';
 
@@ -340,7 +341,7 @@ export function fakeStatusRest(projectId = '1000000000000123'): RestFn {
 export async function statusCli(args: readonly string[], io: Io): Promise<number> {
   const problem = statusArgsProblem(args);
   if (problem) {
-    io.stderr(`${problem}\n`);
+    io.stderr(coded('C2C-DEPLOY-021', problem));
     return 2;
   }
   const projectId = flag(args, '--project') as string;

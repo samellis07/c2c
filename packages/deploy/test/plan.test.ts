@@ -1388,7 +1388,7 @@ test('a plan with no data centre prints the plan prefix once', async (t) => {
     const trap = offlineIo({});
     const code = await planCli([join(cwd, 'app.ds'), '--out', out], trap.io);
     assert.equal(code, 2);
-    assert.equal(trap.stderr(), 'c2c plan: no data centre set (pass --dc <dc> or add "dc" to c2c-deploy.json)\n');
+    assert.equal(trap.stderr(), 'c2c plan: no data centre set (pass --dc <dc> or add "dc" to c2c-deploy.json) [C2C-DEPLOY-002]\nSee plugin/references/error-index.md#c2c-deploy-002\n');
   } finally {
     process.chdir(previous);
   }

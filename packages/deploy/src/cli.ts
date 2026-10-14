@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
-import { LockedExportError, parseFileWithSidecars, parseProject, widgetCommandStatus, type App } from '../../core/src/index.js';
+import { C2cError, coded, codedError, LockedExportError, parseFileWithSidecars, parseProject, widgetCommandStatus, type App } from '../../core/src/index.js';
 import { seedCompositeMap } from '../../data/src/seed.js';
 import { stratusRestSink } from '../../data/src/files.js';
 import { emptyCheckpoint, type Checkpoint, type FetchLike, type MigrateResult } from '../../data/src/migrate.js';
@@ -400,7 +400,7 @@ export function catalystSpawn(command: string, args: string[], opts: { cwd: stri
 export function defaultIo(): Io {
   return {
     stdout: (text) => process.stdout.write(text),
-    stderr: (text) => process.stderr.write(`${text.trimEnd()} [C2C-DEPLOY-001]\nSee plugin/references/error-index.md#c2c-deploy-001\n`),
+    stderr: (text) => process.stderr.write(text),
     env: process.env,
     spawn: catalystSpawn,
     fetch: (url, init) => globalThis.fetch(url, init) as ReturnType<Io['fetch']>,
@@ -484,8 +484,7 @@ async function verifyFirstUseGates(io: Io, rest: RestFn, guard: GuardOk, gates: 
       io.stdout(`${check.message}\n`);
       continue;
     }
-    io.stderr(`c2c: ${check.message}\n`);
-    io.stderr(`c2c: nothing was written; after the console step ${rerun}\n`);
+    io.stderr(coded('C2C-DEPLOY-011', `c2c: ${check.message}\nc2c: nothing was written; after the console step ${rerun}`));
     return false;
   }
   return true;
@@ -496,18 +495,22 @@ function redact(text: string, secret: string | undefined): string {
   return text.split(secret).join('[credential]');
 }
 
-export function fail(io: Io, err: unknown): number {
+export function fail(io: Io, err: unknown, code: string): number {
+  if (err instanceof C2cError) {
+    io.stderr(codedError(err));
+    return err.exitCode ?? 1;
+  }
   if (err instanceof GuardError) {
-    io.stderr(`c2c: ${err.message}\n`);
+    io.stderr(coded('C2C-DEPLOY-012', `c2c: ${err.message}`));
     return 2;
   }
   // A locked Marketplace export is a usage-grade refusal, never a plan failure.
   if (err instanceof LockedExportError) {
-    io.stderr(`c2c: ${err.message}\n`);
+    io.stderr(coded('C2C-CLI-003', `c2c: ${err.message}`));
     return 2;
   }
   const message = err instanceof Error ? err.message : 'command failed';
-  io.stderr(`c2c: ${message}\n`);
+  io.stderr(coded(code, `c2c: ${message}`));
   return 1;
 }
 
@@ -754,11 +757,13 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
   const { target, rest } = targetOf(args);
   if (!target) {
     io.stderr(
+      coded('C2C-DEPLOY-021',
       'usage: c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address> --mail-sender-verified]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--subset-shims] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>]\n' +
         '       c2c deploy <file|dir> --backfill-shadows [--confirm] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
         '       --source-* measures the Creator data so is_mandatory/is_unique are provisioned only where the records allow it\n' +
         '       org: --org, else c2c-deploy.json, else the project registry (--projects), else the Catalyst CLI login (active_org)\n' +
         '       project: --project, else c2c-deploy.json, else the project registry map (--projects)\n',
+      ),
     );
     return 2;
   }
@@ -775,7 +780,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     if (log.edits.length > 0) {
       const blocked = unsupportedSchemaOps(generateSchema(source), generateSchema(app), edited.renames);
       if (blocked.length > 0) {
-        io.stderr(`c2c deploy: the edits log changes Data Store in a way the live deploy cannot apply; nothing was changed\n${blocked.map((b) => `- ${b}`).join('\n')}`);
+        io.stderr(coded('C2C-DEPLOY-015', `c2c deploy: the edits log changes Data Store in a way the live deploy cannot apply; nothing was changed\n${blocked.map((b) => `- ${b}`).join('\n')}`));
         return 1;
       }
     }
@@ -788,7 +793,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     const srcCsv = flag(rest, '--source-csv');
     const srcJson = flag(rest, '--source-json');
     const named = [srcBackup, srcCsv, srcJson].filter((value) => value !== undefined).length;
-    if (named > 1) throw new Error('pass at most one of --source-backup, --source-csv, or --source-json');
+    if (named > 1) throw new C2cError('C2C-CLI-012', 'c2c: pass at most one of --source-backup, --source-csv, or --source-json', { exitCode: 2 });
     if (rest.includes('--backfill-shadows')) {
       if (named) throw new Error('--backfill-shadows does not take a data source');
       return await backfillCli(app, guard, rest, confirm, io);
@@ -855,7 +860,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     }, deployMailRecipients(findDeployConfig(target, flag(rest, '--config'))), deploySource?.sourceData, ui, rest.includes('--async-on-success'), subsetShims);
     const mailBlockers = bundle.mailFindings.filter((finding) => finding.severity === 'blocker');
     if (confirm && mailBlockers.length) {
-      for (const finding of mailBlockers) io.stderr(`blocker ${finding.check}: ${finding.message}. ${finding.fix} ${finding.see}\n`);
+      for (const finding of mailBlockers) io.stderr(coded('C2C-DEPLOY-013', `blocker ${finding.check}: ${finding.message}. ${finding.fix} ${finding.see}`));
       return 1;
     }
     // Deploy-time trigger gate: the record trigger is project configuration
@@ -864,7 +869,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     const triggerBlocker = asyncLaneBlocker(bundle.usesEvents, rest.includes('--triggers-wired'));
     if (triggerBlocker) {
       if (confirm) {
-        io.stderr(`blocker event-async-triggers: ${triggerBlocker}\n`);
+        io.stderr(coded('C2C-DEPLOY-014', `blocker event-async-triggers: ${triggerBlocker}`));
         return 1;
       }
       io.stderr(`warning event-async-triggers: ${triggerBlocker}\n`);
@@ -1092,7 +1097,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
       return report.exitCode;
     };
     if (tableError) {
-      io.stderr(`c2c: ${tableError}\n`);
+      io.stderr(coded('C2C-DEPLOY-016', `c2c: ${tableError}`));
       return finish(1);
     }
     for (const command of bundle.commands) {
@@ -1119,7 +1124,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
           // written for the same reason (a clean build would drop it).
           const dist = join(cwd, 'web', 'dist');
           if (!existsSync(join(dist, 'index.html'))) {
-            io.stderr(`c2c: ${join('web', 'dist')} does not hold a built app — the web/ build step did not leave one\n`);
+            io.stderr(coded('C2C-DEPLOY-017', `c2c: ${join('web', 'dist')} does not hold a built app — the web/ build step did not leave one`));
             return await finish(1);
           }
           writeFileSync(join(cwd, 'web', 'public', 'c2c-config.js'), config);
@@ -1195,7 +1200,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
           const detail = redact(`${result.stdout}\n${result.stderr}`, secret).trim();
           const lines = detail ? detail.split(/\r?\n/).filter((l) => l.trim().length > 0) : [];
           const tail = lines.slice(-20);
-          io.stderr(`c2c: build command failed: ${commandLine(command)}\n`);
+          io.stderr(coded('C2C-DEPLOY-018', `c2c: build command failed: ${commandLine(command)}`));
           if (tail.length > 0) {
             io.stderr(`last ${tail.length} lines:\n${tail.join('\n')}\n`);
           }
@@ -1208,7 +1213,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         // failure — name the console action and the provision step that tracks it.
         if (command.id === 'slate' && SLATE_SERVICE_CLOSED.test(combined)) {
           const slateConsole = `${dcEndpoints(guard.dc).console}/baas/${guard.org}/project/${guard.projectId}/Development#/slate`;
-          io.stderr(`c2c: the Slate service was never opened on this project — Catalyst console → Slate → Start Exploring (${slateConsole}; provision step slate-enable), then re-run deploy\n`);
+          io.stderr(coded('C2C-DEPLOY-019', `c2c: the Slate service was never opened on this project — Catalyst console → Slate → Start Exploring (${slateConsole}; provision step slate-enable), then re-run deploy`));
         }
         return await finish(result.code || 1);
       }
@@ -1229,7 +1234,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     }
     return await finish(0);
   } catch (err) {
-    return fail(io, err);
+    return fail(io, err, 'C2C-DEPLOY-001');
   }
 }
 
@@ -1372,7 +1377,7 @@ function writeFidelityReport(dir: string, result: MigrateResult): void {
 
 function logRefusals(io: Io, integrity: IntegrityReport | undefined): void {
   for (const group of integrity?.refusedByRule ?? []) {
-    for (const row of group.rows) io.stderr(`c2c: ${row.table}.${row.column} ${row.sourceId} refused ${group.rule}\n`);
+    for (const row of group.rows) io.stderr(coded('C2C-DEPLOY-020', `c2c: ${row.table}.${row.column} ${row.sourceId} refused ${group.rule}`));
   }
 }
 
@@ -1391,7 +1396,7 @@ function refuseMissingSchema(
   const missing = tables.filter((table) => !(columnsByTable[table.table]?.length)).map((table) => table.table);
   if (!missing.length) return undefined;
   const verb = missing.length === 1 ? 'has' : 'have';
-  io.stderr(`c2c: ${missing.join(', ')} ${verb} no schema columns in the export\n`);
+  io.stderr(coded('C2C-DEPLOY-022', `c2c: ${missing.join(', ')} ${verb} no schema columns in the export`));
   return 2;
 }
 
@@ -1406,17 +1411,19 @@ export function seedMigrateArgsProblem(args: readonly string[]): string | undefi
 export async function seedMigrateCli(args: readonly string[], io: Io): Promise<number> {
   const problem = seedMigrateArgsProblem(args);
   if (problem !== undefined && problem !== 'usage') {
-    io.stderr(`${problem}\n`);
+    io.stderr(coded('C2C-DEPLOY-021', problem));
     return 2;
   }
   const seedPath = flag(args, '--seed');
   if (problem === 'usage' || !seedPath) {
     io.stderr(
+      coded('C2C-DEPLOY-021',
       'usage: c2c migrate-data --seed <file> --ds <file|dir> [--app <link>] [--project <id-or-name>] [--org <id>] [--env Development] [--confirm] [--checkpoint <file>] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--login-user <email>]\n' +
         '       app: --app, else the application name in --ds\n' +
         '       org: --org, else c2c-deploy.json, else the project registry (--projects), else the Catalyst CLI login (active_org)\n' +
         '       project: --project, else c2c-deploy.json, else the project registry map (--projects)\n' +
         '       blocked tables in the seed file are named and keep the exit non-zero\n',
+      ),
     );
     return 2;
   }
@@ -1463,7 +1470,7 @@ export async function seedMigrateCli(args: readonly string[], io: Io): Promise<n
     if (!tables.length) return 1;
     const ds = flag(args, '--ds');
     if (!ds) {
-      io.stderr('c2c: migrate-data --seed --confirm requires --ds <file|dir> so writes are checked against the table schema\n');
+      io.stderr(coded('C2C-DEPLOY-023', 'c2c: migrate-data --seed --confirm requires --ds <file|dir> so writes are checked against the table schema'));
       return 2;
     }
     // A seed that names an unknown table or lookup is refused before the project check and before any write.
@@ -1484,13 +1491,13 @@ export async function seedMigrateCli(args: readonly string[], io: Io): Promise<n
       const ensured = await ensureSeedBucket(restFn, guard.projectId, seedBucket);
       if (ensured.outcome === 'console-step') {
         io.stderr(
-          `c2c: the Stratus service was never opened on this project — Catalyst console → the project → Stratus → Start Exploring, then create bucket ${seedBucket} (provision step bucket), then re-run migrate-data\n`,
+          coded('C2C-DEPLOY-024', `c2c: the Stratus service was never opened on this project — Catalyst console → the project → Stratus → Start Exploring, then create bucket ${seedBucket} (provision step bucket), then re-run migrate-data`),
         );
         return 1;
       }
       if (ensured.outcome === 'failed') {
         io.stderr(
-          `c2c: seed bucket ${seedBucket} is missing and could not be created (HTTP ${ensured.httpStatus}${ensured.detail ? ` — ${ensured.detail}` : ''}); create it with provision step bucket or Catalyst console → Stratus → Create Bucket, then re-run migrate-data\n`,
+          coded('C2C-DEPLOY-024', `c2c: seed bucket ${seedBucket} is missing and could not be created (HTTP ${ensured.httpStatus}${ensured.detail ? ` — ${ensured.detail}` : ''}); create it with provision step bucket or Catalyst console → Stratus → Create Bucket, then re-run migrate-data`),
         );
         return 1;
       }
@@ -1500,7 +1507,7 @@ export async function seedMigrateCli(args: readonly string[], io: Io): Promise<n
     let checkpoint = emptyCheckpoint();
     if (checkpointPath && statSync(checkpointPath, { throwIfNoEntry: false })?.isFile()) {
       const parsed = JSON.parse(readFileSync(checkpointPath, 'utf8')) as Checkpoint;
-      if (parsed.version !== 1 || !parsed.tables) throw new Error('checkpoint is not version 1');
+      if (parsed.version !== 1 || !parsed.tables) throw new C2cError('C2C-CLI-006', 'c2c: checkpoint is not version 1', { exitCode: 2 });
       checkpoint = parsed;
     }
     const scope = await resolveScope(io, guard.org, guard.projectId);
@@ -1537,13 +1544,13 @@ export async function seedMigrateCli(args: readonly string[], io: Io): Promise<n
     writeLoaderReport(dirname(seedPath), result.integrity);
     writeFidelityReport(dirname(seedPath), result);
     logRefusals(io, result.integrity);
-    if (result.error) io.stderr(`c2c: ${result.error}\n`);
+    if (result.error) io.stderr(coded('C2C-DEPLOY-025', `c2c: ${result.error}`));
     for (const table of result.tables) {
       io.stdout(`${table.table}: source ${table.sourceCount} written ${table.writtenCount} mismatch ${table.mismatch}\n`);
       if (table.filledNulls) io.stdout(`${table.table}: filled ${table.filledNulls} null column value(s)\n`);
       if (table.correctedLookups) io.stdout(`${table.table}: corrected ${table.correctedLookups} lookup value(s)\n`);
-      if (table.error) io.stderr(`c2c: ${table.table}: ${table.error}\n`);
-      if (table.duplicateIds?.length) io.stderr(`c2c: ${table.table}: repeated source ids ${table.duplicateIds.slice(0, 10).join(', ')}\n`);
+      if (table.error) io.stderr(coded('C2C-DEPLOY-025', `c2c: ${table.table}: ${table.error}`));
+      if (table.duplicateIds?.length) io.stderr(coded('C2C-DEPLOY-026', `c2c: ${table.table}: repeated source ids ${table.duplicateIds.slice(0, 10).join(', ')}`));
     }
     for (const line of formatSkipped([])) io.stdout(`${line}\n`);
     const complete = result.ok && result.tables.every((table) => table.sourceCount === table.writtenCount && !table.mismatch);
@@ -1551,7 +1558,7 @@ export async function seedMigrateCli(args: readonly string[], io: Io): Promise<n
     // The unblocked tables still load; a named-but-blocked table keeps the run non-zero.
     return blocked.length && exit === 0 ? 1 : exit;
   } catch (err) {
-    return fail(io, err);
+    return fail(io, err, 'C2C-DEPLOY-005');
   }
 }
 
@@ -1571,18 +1578,20 @@ export async function sourceCsvCli(args: readonly string[], io: Io): Promise<num
   const jsonDir = flag(args, '--source-json');
   const problem = sourceCsvArgsProblem(args);
   if (problem !== undefined && problem !== 'usage') {
-    io.stderr(`${problem}\n`);
+    io.stderr(coded('C2C-DEPLOY-021', problem));
     return 2;
   }
   const dir = jsonDir ?? csvDir;
   const ds = flag(args, '--ds');
   if (problem === 'usage' || !dir || !ds) {
     io.stderr(
+      coded('C2C-DEPLOY-021',
       'usage: c2c migrate-data --source-csv <dir> --ds <file|dir> [--project <id-or-name>] [--org <id>] [--app <link>] [--env Development] [--confirm] [--allow-empty] [--checkpoint <file>] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
         '       c2c migrate-data --source-json <dir> --ds <file|dir> [--project <id-or-name>] [--org <id>] [--app <link>] [--env Development] [--confirm] [--allow-empty] [--checkpoint <file>] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
         '       org: --org, else c2c-deploy.json, else the project registry (--projects), else the Catalyst CLI login (active_org)\n' +
         '       project: --project, else c2c-deploy.json, else the project registry map (--projects)\n' +
         '       The JSON export always carries record ids; a CSV carries them only when it includes the ID column, otherwise source ids are derived (the plan lists them under derived ids). A directory passed to --source-csv that contains a JSON report is read as JSON.\n',
+      ),
     );
     return 2;
   }
@@ -1602,7 +1611,7 @@ export async function sourceCsvCli(args: readonly string[], io: Io): Promise<num
       // Plan reports the same refusal confirm would raise. Non-zero so a caller
       // can gate on it; nothing was written either way.
       if (loaded.missingMandatory.length) {
-        io.stderr(`c2c: ${loaded.missingMandatory.length} mandatory value(s) missing; a confirmed run would refuse before any write\n`);
+        io.stderr(coded('C2C-DEPLOY-027', `c2c: ${loaded.missingMandatory.length} mandatory value(s) missing; a confirmed run would refuse before any write`));
         return 1;
       }
       return 0;
@@ -1630,7 +1639,7 @@ export async function sourceCsvCli(args: readonly string[], io: Io): Promise<num
       logRefusals(io, integrity);
       const names = [...new Set(missing.map((item) => `${item.table}.${item.column}`))].join(', ');
       io.stderr(
-        `c2c: refused: ${missing.length} mandatory value(s) missing; nothing was written. ${names} is store-mandatory; fix the source or re-provision the column without the constraint\n`,
+        coded('C2C-DEPLOY-027', `c2c: refused: ${missing.length} mandatory value(s) missing; nothing was written. ${names} is store-mandatory; fix the source or re-provision the column without the constraint`),
       );
       return 1;
     }
@@ -1638,7 +1647,7 @@ export async function sourceCsvCli(args: readonly string[], io: Io): Promise<num
     let checkpoint = emptyCheckpoint();
     if (checkpointPath && statSync(checkpointPath, { throwIfNoEntry: false })?.isFile()) {
       const parsed = JSON.parse(readFileSync(checkpointPath, 'utf8')) as Checkpoint;
-      if (parsed.version !== 1 || !parsed.tables) throw new Error('checkpoint is not version 1');
+      if (parsed.version !== 1 || !parsed.tables) throw new C2cError('C2C-CLI-006', 'c2c: checkpoint is not version 1', { exitCode: 2 });
       checkpoint = parsed;
     }
     const scope = await resolveScope(io, guard.org, guard.projectId);
@@ -1658,13 +1667,13 @@ export async function sourceCsvCli(args: readonly string[], io: Io): Promise<num
     writeLoaderReport(dir, result.integrity);
     writeFidelityReport(dir, result);
     logRefusals(io, result.integrity);
-    if (result.error) io.stderr(`c2c: ${result.error}\n`);
+    if (result.error) io.stderr(coded('C2C-DEPLOY-025', `c2c: ${result.error}`));
     for (const table of result.tables) {
       io.stdout(`${table.table}: source ${table.sourceCount} written ${table.writtenCount} mismatch ${table.mismatch}\n`);
       if (table.filledNulls) io.stdout(`${table.table}: filled ${table.filledNulls} null column value(s)\n`);
       if (table.correctedLookups) io.stdout(`${table.table}: corrected ${table.correctedLookups} lookup value(s)\n`);
-      if (table.error) io.stderr(`c2c: ${table.table}: ${table.error}\n`);
-      if (table.duplicateIds?.length) io.stderr(`c2c: ${table.table}: repeated source ids ${table.duplicateIds.slice(0, 10).join(', ')}\n`);
+      if (table.error) io.stderr(coded('C2C-DEPLOY-025', `c2c: ${table.table}: ${table.error}`));
+      if (table.duplicateIds?.length) io.stderr(coded('C2C-DEPLOY-026', `c2c: ${table.table}: repeated source ids ${table.duplicateIds.slice(0, 10).join(', ')}`));
     }
     for (const count of result.counts) {
       io.stdout(`${count.form}: catalyst ${count.catalyst} expected ${count.expected} mismatch ${count.mismatch}\n`);
@@ -1676,7 +1685,7 @@ export async function sourceCsvCli(args: readonly string[], io: Io): Promise<num
     for (const line of result.warnings ?? []) io.stdout(`warning: ${line}\n`);
     return confirmedLoadExit(result.ok, result.integrity);
   } catch (err) {
-    return fail(io, err);
+    return fail(io, err, 'C2C-DEPLOY-005');
   }
 }
 
@@ -1732,21 +1741,23 @@ export async function sourceBackupCli(args: readonly string[], io: Io): Promise<
   const source = flag(args, '--source-backup');
   for (const other of ['--seed', '--source-csv', '--source-json']) {
     if (args.includes(other)) {
-      io.stderr(`c2c: pass either --source-backup or ${other}, not both\n`);
+      io.stderr(coded('C2C-CLI-012', `c2c: pass either --source-backup or ${other}, not both`));
       return 2;
     }
   }
   if (args.includes('--dry-run')) {
-    io.stderr('c2c: source backup does not take --dry-run; omit --confirm to plan\n');
+    io.stderr(coded('C2C-DEPLOY-021', 'c2c: source backup does not take --dry-run; omit --confirm to plan'));
     return 2;
   }
   const ds = flag(args, '--ds');
   if (!source || !ds) {
     io.stderr(
+      coded('C2C-DEPLOY-021',
       'usage: c2c migrate-data --source-backup <zip|dir> --ds <file|dir> [--project <id-or-name>] [--org <id>] [--app <link>] [--env Development] [--confirm] [--allow-empty] [--checkpoint <file>] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
         '       org: --org, else c2c-deploy.json, else the project registry (--projects), else the Catalyst CLI login (active_org)\n' +
         '       project: --project, else c2c-deploy.json, else the project registry map (--projects)\n' +
         '       the backup is the complete data source: every field, lookup record ids, and subform rows.\n',
+      ),
     );
     return 2;
   }
@@ -1764,7 +1775,7 @@ export async function sourceBackupCli(args: readonly string[], io: Io): Promise<
       // Plan reports the same refusal confirm would raise. Non-zero so a caller
       // can gate on it; nothing was written either way.
       if (loaded.missingMandatory.length) {
-        io.stderr(`c2c: ${loaded.missingMandatory.length} mandatory value(s) missing; a confirmed run would refuse before any write\n`);
+        io.stderr(coded('C2C-DEPLOY-027', `c2c: ${loaded.missingMandatory.length} mandatory value(s) missing; a confirmed run would refuse before any write`));
         return 1;
       }
       return 0;
@@ -1790,14 +1801,14 @@ export async function sourceBackupCli(args: readonly string[], io: Io): Promise<
         error: `refused ${missing.length} missing mandatory value(s) before any write`,
       });
       logRefusals(io, integrity);
-      io.stderr(`c2c: refused: ${missing.length} mandatory value(s) missing; nothing was written\n`);
+      io.stderr(coded('C2C-DEPLOY-027', `c2c: refused: ${missing.length} mandatory value(s) missing; nothing was written`));
       return 1;
     }
     const checkpointPath = flag(args, '--checkpoint');
     let checkpoint = emptyCheckpoint();
     if (checkpointPath && statSync(checkpointPath, { throwIfNoEntry: false })?.isFile()) {
       const parsed = JSON.parse(readFileSync(checkpointPath, 'utf8')) as Checkpoint;
-      if (parsed.version !== 1 || !parsed.tables) throw new Error('checkpoint is not version 1');
+      if (parsed.version !== 1 || !parsed.tables) throw new C2cError('C2C-CLI-006', 'c2c: checkpoint is not version 1', { exitCode: 2 });
       checkpoint = parsed;
     }
     const scope = await resolveScope(io, guard.org, guard.projectId);
@@ -1818,8 +1829,8 @@ export async function sourceBackupCli(args: readonly string[], io: Io): Promise<
       io.stdout(`${table.table}: source ${table.sourceCount} written ${table.writtenCount} mismatch ${table.mismatch}\n`);
       if (table.filledNulls) io.stdout(`${table.table}: filled ${table.filledNulls} null column value(s)\n`);
       if (table.correctedLookups) io.stdout(`${table.table}: corrected ${table.correctedLookups} lookup value(s)\n`);
-      if (table.error) io.stderr(`c2c: ${table.table}: ${table.error}\n`);
-      if (table.duplicateIds?.length) io.stderr(`c2c: ${table.table}: repeated source ids ${table.duplicateIds.slice(0, 10).join(', ')}\n`);
+      if (table.error) io.stderr(coded('C2C-DEPLOY-025', `c2c: ${table.table}: ${table.error}`));
+      if (table.duplicateIds?.length) io.stderr(coded('C2C-DEPLOY-026', `c2c: ${table.table}: repeated source ids ${table.duplicateIds.slice(0, 10).join(', ')}`));
     }
     for (const count of result.counts) {
       io.stdout(`${count.form}: catalyst ${count.catalyst} expected ${count.expected} mismatch ${count.mismatch}\n`);
@@ -1831,7 +1842,7 @@ export async function sourceBackupCli(args: readonly string[], io: Io): Promise<
     for (const line of result.warnings ?? []) io.stdout(`warning: ${line}\n`);
     return confirmedLoadExit(result.ok, result.integrity);
   } catch (err) {
-    return fail(io, err);
+    return fail(io, err, 'C2C-DEPLOY-005');
   }
 }
 
@@ -1941,13 +1952,13 @@ function smokeResultCli(input: { io: Io; ds: string; app: App; appLink: string; 
   const { io, ds, app, appLink, rest, reportPath } = input;
   const byCode = rest.includes('--result-code');
   if (byCode && rest.includes('--result')) {
-    io.stderr('c2c: pass --result <file> or --result-code <code>, not both\n');
+    io.stderr(coded('C2C-DEPLOY-028', 'c2c: pass --result <file> or --result-code <code>, not both'));
     return 2;
   }
   const valueOf = (name: string) => flag(rest, name) ?? (rest[rest.indexOf(name) + 1] === '-' ? '-' : undefined);
   const source = byCode ? valueOf('--result-code') : valueOf('--result');
   if (!source) {
-    io.stderr(byCode ? "c2c: --result-code needs the code the app's #/admin/smoke page shows, or - to read it from stdin\n" : 'c2c: --result needs a file path, or - to read the block from stdin\n');
+    io.stderr(coded('C2C-DEPLOY-028', byCode ? "c2c: --result-code needs the code the app's #/admin/smoke page shows, or - to read it from stdin" : 'c2c: --result needs a file path, or - to read the block from stdin'));
     return 2;
   }
   for (const other of ['--in-browser', '--owner-session', '--cdp', '--browser-cdp', '--auth-token', '--session-cookie']) {
@@ -1966,7 +1977,7 @@ function smokeResultCli(input: { io: Io; ds: string; app: App; appLink: string; 
   } else if (urlFlag !== undefined) {
     origin = assertSmokeUrl(urlFlag).origin;
   } else {
-    io.stderr(`c2c: --result needs the app it checks: no ${DEPLOY_REPORT} beside the source or in the current directory; pass --url <app-url> (the slate url c2c deploy printed)\n`);
+    io.stderr(coded('C2C-DEPLOY-028', `c2c: --result needs the app it checks: no ${DEPLOY_REPORT} beside the source or in the current directory; pass --url <app-url> (the slate url c2c deploy printed)`));
     return 2;
   }
   const projectFlag = guard.projectOrigin === '--project' && /^[0-9]{1,24}$/.test(guard.projectId) ? guard.projectId : undefined;
@@ -1975,7 +1986,7 @@ function smokeResultCli(input: { io: Io; ds: string; app: App; appLink: string; 
   }
   const projectId = binding?.projectId ?? projectFlag;
   if (!projectId) {
-    io.stderr(`c2c: --result needs the project it checks: ${binding ? `${DEPLOY_REPORT} names no project id` : `no ${DEPLOY_REPORT}`}; pass --project <project-id>\n`);
+    io.stderr(coded('C2C-DEPLOY-028', `c2c: --result needs the project it checks: ${binding ? `${DEPLOY_REPORT} names no project id` : `no ${DEPLOY_REPORT}`}; pass --project <project-id>`));
     return 2;
   }
   let text: string;
@@ -1999,7 +2010,7 @@ function smokeResultCli(input: { io: Io; ds: string; app: App; appLink: string; 
     maxAgeMinutes,
   });
   for (const line of check.lines) io.stdout(`${line}\n`);
-  for (const reason of check.reasons) io.stderr(`c2c: refused: ${reason}\n`);
+  for (const reason of check.reasons) io.stderr(coded('C2C-DEPLOY-029', `c2c: refused: ${reason}`));
   if (check.ok) io.stdout(`result: verified — every step passed on ${origin} for project ${projectId}\n`);
   io.stdout(`state: ${check.ok ? 'passed' : 'failed'}\n`);
   writeSmokeReport(reportPath, {
@@ -2017,6 +2028,7 @@ export async function smokeCli(args: readonly string[], io: Io, opts?: { browser
   const ds = target ?? flag(rest, '--ds');
   if (!ds) {
     io.stderr(
+      coded('C2C-DEPLOY-021',
       'usage: c2c smoke <file|dir> [--project <id-or-name>] [--org <id>] [--url <app-url>] [--env Development] [--confirm] [--report <file>] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
         '       c2c smoke <file|dir> --result <file|-> [--project <id>] [--url <app-url>] [--max-age <minutes>] [--report <file>]\n' +
         '       c2c smoke <file|dir> --result-code <code|-> [--project <id>] [--url <app-url>] [--max-age <minutes>] [--report <file>]\n' +
@@ -2025,12 +2037,13 @@ export async function smokeCli(args: readonly string[], io: Io, opts?: { browser
         '       --confirm: prints one step — open <app url>#/admin/smoke in your own browser, signed in to the app once, and copy the result code it shows — and exits 4\n' +
         '       --result-code: verifies that code (this app origin and project, the plan, freshness, every step) and writes --report; never takes a token or cookie\n' +
         '       --result: the same check on the c2c-smoke/1 block the page shows, saved to a file (or - for stdin)\n',
+      ),
     );
     return 2;
   }
   const reportPath = flag(rest, '--report');
   if (rest.includes('--report') && !reportPath) {
-    io.stderr('c2c: --report needs a file path\n');
+    io.stderr(coded('C2C-DEPLOY-021', 'c2c: --report needs a file path'));
     return 2;
   }
   try {
@@ -2109,7 +2122,7 @@ export async function smokeCli(args: readonly string[], io: Io, opts?: { browser
           log: (line) => io.stderr(`${line}\n`),
         });
       } catch (err) {
-        io.stderr(`c2c: could not reach the browser over CDP: ${err instanceof Error ? err.message : 'connection failed'}; check --browser-cdp <endpoint>\n`);
+        io.stderr(coded('C2C-DEPLOY-030', `c2c: could not reach the browser over CDP: ${err instanceof Error ? err.message : 'connection failed'}; check --browser-cdp <endpoint>`));
         io.stdout(guidedStep(ds, rest, inBrowser).text);
         return 1;
       }
@@ -2158,7 +2171,7 @@ export async function smokeCli(args: readonly string[], io: Io, opts?: { browser
     writeSmokeReport(reportPath, { version: 'c2c-smoke-report/1', ok: result.ok, session: 'credential', lines: result.lines });
     return result.ok ? 0 : 1;
   } catch (err) {
-    return fail(io, err);
+    return fail(io, err, 'C2C-DEPLOY-007');
   }
 }
 
@@ -2193,7 +2206,7 @@ async function ownerSessionSmoke(input: {
   try {
     page = await openOnOrigin(browser, `${fnBase}/`, input.sleep ? { sleep: input.sleep } : {});
   } catch (err) {
-    io.stderr(`c2c: could not reach the browser over CDP: ${err instanceof Error ? err.message : 'connection failed'}; check --browser-cdp <endpoint>\n`);
+    io.stderr(coded('C2C-DEPLOY-030', `c2c: could not reach the browser over CDP: ${err instanceof Error ? err.message : 'connection failed'}; check --browser-cdp <endpoint>`));
     io.stdout(input.guided());
     return 1;
   }
@@ -2285,15 +2298,17 @@ export async function usersCli(args: readonly string[], io: Io): Promise<number>
   const ds = flag(rest, '--ds');
   if ((sub !== 'plan' && sub !== 'invite') || !source || !ds) {
     io.stderr(
+      coded('C2C-DEPLOY-021',
       'usage: c2c users plan --source-backup <zip|dir> --ds <file|dir> [--app <link>] [--out <dir>] [--state <file>] [--salt <s>] [--social <a,b>] [--json]\n' +
         '       c2c users invite --source-backup <zip|dir> --ds <file|dir> --project <id> --org <org> [--app <link>] [--slate-domain <host>] [--role-ids <name=id,...>] [--state <file>] [--salt <s>] --confirm [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
         '       identities are read from the backup at run time only; plans and reports name users by usr_<hash> id\n' +
         '       invite sends POST /project-user per pending user (the console Add User call) with redirect_url = the Slate app URL\n',
+      ),
     );
     return 2;
   }
   if (rest.includes('--dry-run')) {
-    io.stderr('c2c: users does not take --dry-run; plan is the default and invite needs --confirm\n');
+    io.stderr(coded('C2C-DEPLOY-021', 'c2c: users does not take --dry-run; plan is the default and invite needs --confirm'));
     return 2;
   }
   try {
@@ -2319,11 +2334,12 @@ export async function usersCli(args: readonly string[], io: Io): Promise<number>
     } else if (explicitSalt) {
       salt = explicitSalt;
       if (state) {
-        io.stderr(`c2c: ${statePath} has no salt — recording this run's salt; user ids from an earlier run will not match\n`);
+        io.stderr(/* uncoded: progress notice, not an error */ `c2c: ${statePath} has no salt — recording this run's salt; user ids from an earlier run will not match\n`);
       }
     } else {
       salt = newUsersSalt();
       io.stderr(
+        /* uncoded: salt-minting notice, not an error */
         state
           ? `c2c: ${statePath} has no salt — a fresh random salt was generated and stored; user ids from an earlier run will not match\n`
           : `c2c: no users state file yet — a fresh random salt was generated and stored in ${statePath}; user ids from an earlier run will not match\n`,
@@ -2352,7 +2368,7 @@ export async function usersCli(args: readonly string[], io: Io): Promise<number>
       } else {
         io.stdout(rest.includes('--json') ? usersPlanJson(plan) : usersPlanMarkdown(plan));
       }
-      if (sub === 'invite') io.stderr('c2c: invite is a dry print without --confirm; nothing was sent\n');
+      if (sub === 'invite') io.stderr(/* uncoded: dry-run notice, not an error */ 'c2c: invite is a dry print without --confirm; nothing was sent\n');
       return 0;
     }
 
@@ -2395,6 +2411,6 @@ export async function usersCli(args: readonly string[], io: Io): Promise<number>
     io.stdout(formatInviteResult(result));
     return result.ok ? 0 : 1;
   } catch (err) {
-    return fail(io, err);
+    return fail(io, err, 'C2C-DEPLOY-006');
   }
 }

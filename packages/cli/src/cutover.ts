@@ -12,7 +12,7 @@
 import { createHash } from 'node:crypto';
 import { closeSync, mkdirSync, opendirSync, openSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import type { App } from '../../core/src/index.js';
+import { coded, type App } from '../../core/src/index.js';
 import { authPlan } from '../../auth/src/index.js';
 import {
   DELTA_SOURCES,
@@ -543,7 +543,7 @@ export const CUTOVER_USAGE =
 export function cutoverCli(args: readonly string[], io: Pick<Io, 'stdout' | 'stderr'>, which: 'checklist' | 'proof'): number {
   const [target, ...rest] = args;
   if (!target || target.startsWith('--')) {
-    io.stderr(CUTOVER_USAGE);
+    io.stderr(coded('C2C-CLI-001', CUTOVER_USAGE));
     return 2;
   }
   try {
@@ -551,7 +551,7 @@ export function cutoverCli(args: readonly string[], io: Pick<Io, 'stdout' | 'std
   } catch (err) {
     const code = (err as { code?: unknown } | null)?.code;
     if (code === 'ENOENT' || code === 'ENOTDIR') {
-      io.stderr(`c2c: no such file or directory: ${target}\n`);
+      io.stderr(coded('C2C-CLI-002', `c2c: no such file or directory: ${target}`));
       return 3;
     }
     // Let the regular loader produce its established error for an existing

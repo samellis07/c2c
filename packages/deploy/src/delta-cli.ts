@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { dirname, join } from 'node:path';
 import type { App } from '../../core/src/ir.js';
 import { generateSchema } from '../../schema/src/generator.js';
+import { coded } from '../../core/src/index.js';
 import { assertLiveProject, fail, flag, loadApp, planGuard, prepareGuard, resolveScope, STATE_FILE, type Io } from './cli.js';
 import { readSourceBackup } from './backup.js';
 import { readSourceCsv, readSourceJson, type CsvLoad } from './csv.js';
@@ -83,7 +84,7 @@ export async function syncDeltaCli(args: readonly string[], io: Io): Promise<num
     const ds = flag(args, '--ds');
     const since = flag(args, '--since');
     if (!source || !ds || !since) {
-      io.stderr(SYNC_USAGE);
+      io.stderr(coded('C2C-DEPLOY-021', SYNC_USAGE));
       return 2;
     }
     const app = loadApp(ds);
@@ -129,7 +130,7 @@ export async function syncDeltaCli(args: readonly string[], io: Io): Promise<num
       io.stdout(`${table.table}: inserted ${table.inserted} updated ${table.updated} unchanged-in-store ${table.same} deleted ${table.deleted}\n`);
     }
     if (!result.ok) {
-      io.stderr(`c2c: ${result.error ?? 'sync-delta failed'}\nc2c: checkpoint not recorded; re-run to resume (rows already written are matched by source id)\n`);
+      io.stderr(coded('C2C-DEPLOY-008', `c2c: ${result.error ?? 'sync-delta failed'}\nc2c: checkpoint not recorded; re-run to resume (rows already written are matched by source id)`));
       return 1;
     }
     writeDeltaCheckpoint(statePath, withDeletionsApplied(plan.next, result.appliedDeletes));
@@ -137,7 +138,7 @@ export async function syncDeltaCli(args: readonly string[], io: Io): Promise<num
     io.stdout(`applied: ${applied} upsert(s)\ncheckpoint: recorded\n`);
     return 0;
   } catch (err) {
-    return fail(io, err);
+    return fail(io, err, 'C2C-DEPLOY-008');
   }
 }
 
@@ -151,7 +152,7 @@ export async function rollbackExportCli(args: readonly string[], io: Io): Promis
     const ds = flag(args, '--ds');
     const out = flag(args, '--out');
     if (!ds || !out) {
-      io.stderr(ROLLBACK_USAGE);
+      io.stderr(coded('C2C-DEPLOY-021', ROLLBACK_USAGE));
       return 2;
     }
     const app = loadApp(ds);
@@ -191,6 +192,6 @@ export async function rollbackExportCli(args: readonly string[], io: Io): Promis
     io.stdout(`wrote ${result.files.length} files to ${out}\n`);
     return 0;
   } catch (err) {
-    return fail(io, err);
+    return fail(io, err, 'C2C-DEPLOY-009');
   }
 }

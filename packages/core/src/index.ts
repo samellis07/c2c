@@ -8,3 +8,4 @@ export * from './coverage.js';
 export * from './zml.js';
 export * from './features.js';
 export * from './dialect.js';
+export * from './errors.js';

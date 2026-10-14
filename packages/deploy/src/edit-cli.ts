@@ -12,7 +12,7 @@
  *
  * Common: [--dc <dc>] [--edits <file>] [--out <dir>] [--json] [--apply] [--confirm]
  */
-import { LockedExportError } from '../../core/src/source.js';
+import { C2cError, coded, codedError, LockedExportError } from '../../core/src/index.js';
 import { flag, loadSource, type Io } from './cli.js';
 import { deltaFiles, formatDelta, modelPlan, planDelta, writeDeltaTree } from './delta.js';
 import { applyEdit, applyEdits, EditError, editsPathFor, readEdits, writeEdits, type EditOp } from './edit.js';
@@ -119,27 +119,27 @@ export function opFromArgs(name: string, words: readonly string[], args: readonl
 export function editCli(args: readonly string[], io: Pick<Io, 'stdout' | 'stderr'>, cwd = process.cwd()): number {
   for (const arg of args) {
     if (arg.startsWith('--') && !VALUE_FLAGS.has(arg) && !BOOL_FLAGS.has(arg)) {
-      io.stderr(`c2c edit: unknown option ${arg}\n${USAGE}`);
+      io.stderr(coded('C2C-DEPLOY-021', `c2c edit: unknown option ${arg}\n${USAGE}`));
       return 2;
     }
   }
   const [target, name, ...words] = positionals(args);
   if (!target || !name || ARITY[name] === undefined || words.length !== ARITY[name]) {
-    io.stderr(USAGE);
+    io.stderr(coded('C2C-DEPLOY-021', USAGE));
     return 2;
   }
   let dc: string;
   try {
     dc = resolveDc(args, cwd).dc;
   } catch (err) {
-    io.stderr(`c2c edit: ${err instanceof Error ? err.message.replace(/^c2c plan: /, '') : 'data centre lookup failed'}\n`);
+    io.stderr(coded('C2C-DEPLOY-004', `c2c edit: ${err instanceof Error ? err.message.replace(/^c2c plan: /, '') : 'data centre lookup failed'}`));
     return 2;
   }
   let op: EditOp;
   try {
     op = opFromArgs(name, words, args);
   } catch (err) {
-    io.stderr(`c2c edit: ${err instanceof Error ? err.message : String(err)}\n${USAGE}`);
+    io.stderr(coded('C2C-DEPLOY-021', `c2c edit: ${err instanceof Error ? err.message : String(err)}\n${USAGE}`));
     return 2;
   }
   const editsPath = flag(args, '--edits') ?? editsPathFor(target);
@@ -163,22 +163,26 @@ export function editCli(args: readonly string[], io: Pick<Io, 'stdout' | 'stderr
       return 0;
     }
     if (delta.needsConfirm && !args.includes('--confirm')) {
-      io.stderr('c2c edit: this edit drops data store columns or tables; pass --confirm with --apply to record it\n');
+      io.stderr(coded('C2C-DEPLOY-032', 'c2c edit: this edit drops data store columns or tables; pass --confirm with --apply to record it'));
       return 1;
     }
     writeEdits(editsPath, { version: 1, edits: [...log.edits, op] });
     io.stdout(`recorded: edit ${log.edits.length + 1} in ${editsPath}\n`);
     return 0;
   } catch (err) {
+    if (err instanceof C2cError) {
+      io.stderr(codedError(err));
+      return err.exitCode ?? 1;
+    }
     if (err instanceof EditError) {
-      io.stderr(`c2c edit: refused: ${err.message}\n`);
+      io.stderr(coded('C2C-DEPLOY-033', `c2c edit: refused: ${err.message}`));
       return 1;
     }
     if (err instanceof LockedExportError) {
-      io.stderr(`c2c: ${err.message}\n`);
+      io.stderr(coded('C2C-CLI-003', `c2c: ${err.message}`));
       return 2;
     }
-    io.stderr(`c2c edit: ${err instanceof Error ? err.message : 'edit failed'}\n`);
+    io.stderr(coded('C2C-DEPLOY-004', `c2c edit: ${err instanceof Error ? err.message : 'edit failed'}`));
     return 1;
   }
 }

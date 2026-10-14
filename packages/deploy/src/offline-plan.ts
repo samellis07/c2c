@@ -25,6 +25,7 @@ import { fieldTypeRow, UNIQUE_VARCHAR_MAX_PER_TABLE } from '../../schema/src/map
 import { jobPoolName, LIMITS } from '../../shims/src/runtime.js';
 import { buildUi } from '../../ui/src/generate.js';
 import { principalRoleMap } from '../../auth/src/apply.js';
+import { C2cError, coded, codedError } from '../../core/src/index.js';
 import { flag, hasReportJson, loadApp, type Io } from './cli.js';
 import { ZCQL_IN_LIMIT } from '../../data/src/migrate.js';
 import { cyclicForeignKeys, foreignKeyId, tableCreatePlan } from './tables.js';
@@ -1402,8 +1403,8 @@ function everyEmittedStep(): ProvisionStep[] {
 function kindFrom(step: ProvisionStep): StepKind {
   const grant = (!!step.tool && GRANT_STEP_TOOLS.has(step.tool)) || (!!step.readBack.tool && GRANT_STEP_TOOLS.has(step.readBack.tool));
   const validateMatch = grant ? isPerRowGrantMatch : MATCH_FOR[step.id];
-  if (!validateMatch) throw new Error(`c2c plan step ${step.id} has no match validator`);
-  if (!validateMatch(step.readBack.match)) throw new Error(`c2c plan step ${step.id} match does not pass its validator`);
+  if (!validateMatch) throw new C2cError('C2C-DEPLOY-002', `c2c plan step ${step.id} has no match validator`);
+  if (!validateMatch(step.readBack.match)) throw new C2cError('C2C-DEPLOY-002', `c2c plan step ${step.id} match does not pass its validator`);
   return {
     id: step.id,
     pattern: new RegExp(`^${step.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
@@ -1418,7 +1419,7 @@ const EMITTED_STEPS = everyEmittedStep();
 
 export const STEP_KINDS: readonly StepKind[] = (() => {
   const ids = EMITTED_STEPS.map((step) => step.id);
-  if (new Set(ids).size !== ids.length) throw new Error(`c2c plan emitted a duplicate step id (${ids.join(', ')})`);
+  if (new Set(ids).size !== ids.length) throw new C2cError('C2C-DEPLOY-002', `c2c plan emitted a duplicate step id (${ids.join(', ')})`);
   return EMITTED_STEPS.map(kindFrom);
 })();
 
@@ -1741,8 +1742,10 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
   const unknown = args.filter((arg) => arg === '--confirm');
   if (!target || !out || unknown.length > 0) {
     io.stderr(
+      coded('C2C-DEPLOY-021',
       'usage: c2c plan <file|dir> --out <dir> [--dc <dc>] [--mail] [--project <id>] [--production] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--allow-budget-fail]\n' +
         '       --source-* measures the Creator data so is_mandatory/is_unique are provisioned only where the records allow it\n',
+      ),
     );
     return 2;
   }
@@ -1750,7 +1753,7 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
   try {
     dc = resolveDc(args, process.cwd());
   } catch (err) {
-    io.stderr(planFailure(err, 'data centre lookup failed'));
+    io.stderr(coded('C2C-DEPLOY-002', planFailure(err, 'data centre lookup failed').trimEnd()));
     return 2;
   }
   try {
@@ -1759,7 +1762,7 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
     const srcCsv = flag(args, '--source-csv');
     const srcJson = flag(args, '--source-json');
     const named = [srcBackup, srcCsv, srcJson].filter((value) => value !== undefined).length;
-    if (named > 1) throw new Error('pass at most one of --source-backup, --source-csv, or --source-json');
+    if (named > 1) throw new C2cError('C2C-CLI-012', 'c2c: pass at most one of --source-backup, --source-csv, or --source-json', { exitCode: 2 });
     const allowEmpty = args.includes('--allow-empty');
     const source = srcBackup !== undefined
       ? readSourceBackup(srcBackup, app, allowEmpty).sourceData
@@ -1771,7 +1774,7 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
     const appKey = app.name ?? 'app';
     let configuredProject = flag(args, '--project');
     if (configuredProject !== undefined && !/^[0-9]+$/.test(configuredProject)) {
-      io.stderr('c2c plan: --project must be a decimal id\n');
+      io.stderr(coded('C2C-DEPLOY-021', 'c2c plan: --project must be a decimal id'));
       return 2;
     }
     if (configuredProject === undefined) {
@@ -1810,18 +1813,22 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
     if (!plan.budgetsOk && !args.includes('--allow-budget-fail')) {
       const fails = plan.budgets.filter(b => b.status === 'fail');
       for (const fail of fails) {
-        io.stderr(`c2c plan: budget failed: ${fail.id}: ${fail.detail}\n`);
+        io.stderr(coded('C2C-DEPLOY-031', `c2c plan: budget failed: ${fail.id}: ${fail.detail}`));
       }
       return 1;
     }
     return widgetCommandStatus(app.widgets);
   } catch (err) {
     // A locked Marketplace export is refused, never planned: exit 2.
+    if (err instanceof C2cError) {
+      io.stderr(codedError(err));
+      return err.exitCode ?? 1;
+    }
     if (err instanceof LockedExportError) {
-      io.stderr(`c2c: ${err.message}\n`);
+      io.stderr(coded('C2C-CLI-003', `c2c: ${err.message}`));
       return 2;
     }
-    io.stderr(planFailure(err, 'plan failed'));
+    io.stderr(coded('C2C-DEPLOY-002', planFailure(err, 'plan failed').trimEnd()));
     return 1;
   }
 }

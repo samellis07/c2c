@@ -28,7 +28,7 @@ function usage() {
 }
 
 function cliError(message) {
-  console.error(`${message.trimEnd()} [C2C-CLI-001]\nSee plugin/references/error-index.md#c2c-cli-001`);
+  console.error(`${message.trimEnd()} [C2C-CLI-021]\nSee plugin/references/error-index.md#c2c-cli-021`);
 }
 
 export function extractCites(rows) {

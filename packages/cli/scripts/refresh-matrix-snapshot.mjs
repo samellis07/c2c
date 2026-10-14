@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { checkCites, extractCites } from './check-matrix-citations.mjs';
 
 function cliError(message) {
-  process.stderr.write(`${message.trimEnd()} [C2C-CLI-001]\nSee plugin/references/error-index.md#c2c-cli-001\n`);
+  process.stderr.write(`${message.trimEnd()} [C2C-CLI-021]\nSee plugin/references/error-index.md#c2c-cli-021\n`);
 }
 
 const sourcePath = process.argv[2];

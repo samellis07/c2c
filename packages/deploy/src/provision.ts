@@ -23,6 +23,7 @@
 import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { slateHost } from '../../auth/src/slate-host.js';
+import { C2cError, coded, codedError } from '../../core/src/index.js';
 import { assertLiveProject, flag, type Io } from './cli.js';
 import { resolveProvisionScope, type ProvisionScope } from './provision-config.js';
 import { CUSTOMER_STEPS } from './customer-steps.js';
@@ -1708,15 +1709,15 @@ async function gatesBefore(ctx: Ctx, id: string): Promise<string | undefined> {
 async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> {
   const step = findStep(ctx.plan, id);
   if (!step) {
-    ctx.io.stderr(`c2c provision: no step "${id}" in provision/plan.json\n`);
+    ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: no step "${id}" in provision/plan.json\n`));
     return 2;
   }
   if (step.via !== 'cli') {
-    ctx.io.stderr(`c2c provision: --run is for cli steps; ${id} is via ${step.via}${step.via === 'mcp' ? ' (the host agent calls it; c2c never calls MCP)' : ' (the user does it in the console)'}\n`);
+    ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: --run is for cli steps; ${id} is via ${step.via}${step.via === 'mcp' ? ' (the host agent calls it; c2c never calls MCP)' : ' (the user does it in the console)'}\n`));
     return 2;
   }
   if (!confirm) {
-    ctx.io.stderr(`c2c provision: --run ${id} performs live REST calls; pass --confirm\n`);
+    ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: --run ${id} performs live REST calls; pass --confirm\n`));
     return 2;
   }
   const current = stepStatus(ctx.state, id);
@@ -1728,27 +1729,27 @@ async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> 
   if (id === 'import' && ctx.scope.projectId) {
     // The import POSTs a NEW project. With a configured (or learned) id the
     // plan is for an existing project — importing now would mint an orphan.
-    ctx.io.stderr(
+    ctx.io.stderr(coded('C2C-DEPLOY-003', 
       `c2c provision: the import step creates a new project, but a project id is already configured (${ctx.scope.sources.projectId ?? 'scope'}) — re-run c2c plan without a configured project, into a fresh --out\n`,
-    );
+    ));
     return 2;
   }
   if (!ctx.scope.projectId && id !== 'import') {
-    ctx.io.stderr(`c2c provision: no project id for ${ctx.plan.app} — record the project read-back, or set apps.${ctx.plan.app}.project in c2c-deploy.json, or pass --project\n`);
+    ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: no project id for ${ctx.plan.app} — record the project read-back, or set apps.${ctx.plan.app}.project in c2c-deploy.json, or pass --project\n`));
     return 2;
   }
   if (!ctx.scope.org) {
-    ctx.io.stderr('c2c provision: no org — pass --org or set "org" in c2c-deploy.json\n');
+    ctx.io.stderr(coded('C2C-DEPLOY-003', 'c2c provision: no org — pass --org or set "org" in c2c-deploy.json\n'));
     return 2;
   }
   if (!ctx.scope.dc) {
-    ctx.io.stderr('c2c provision: no data centre — pass --dc, set "dc" in c2c-deploy.json, or re-run c2c plan with --dc (a live call must know which DC the CLI logged into)\n');
+    ctx.io.stderr(coded('C2C-DEPLOY-003', 'c2c provision: no data centre — pass --dc, set "dc" in c2c-deploy.json, or re-run c2c plan with --dc (a live call must know which DC the CLI logged into)\n'));
     return 2;
   }
   const missing: string[] = [];
   const args = resolveTokens(step.args, ctx, missing) as Record<string, unknown>;
   if (missing.length) {
-    ctx.io.stderr(`c2c provision: step ${id} has unresolved inputs ${missing.join(', ')} — fill provision/inputs.json (or the step's spec file), or record the prerequisite steps first\n`);
+    ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: step ${id} has unresolved inputs ${missing.join(', ')} — fill provision/inputs.json (or the step's spec file), or record the prerequisite steps first\n`));
     return 2;
   }
   try {
@@ -1758,7 +1759,7 @@ async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> 
     if (id !== 'import') {
       const waiting = await gatesBefore(ctx, id);
       if (waiting) {
-        ctx.io.stderr(`c2c provision: ${waiting}\n`);
+        ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: ${waiting}\n`));
         return 1;
       }
     }
@@ -1816,7 +1817,7 @@ async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> 
     if (id === 'import') printImportFields(ctx);
     return 0;
   } catch (err) {
-    ctx.io.stderr(`c2c provision: ${err instanceof Error ? redactString(err.message) : 'run failed'}\n`);
+    ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: ${err instanceof Error ? redactString(err.message) : 'run failed'}\n`));
     return 1;
   }
 }
@@ -1824,7 +1825,7 @@ async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> 
 async function recordStep(ctx: Ctx, id: string, resultPath: string | undefined, appliedFlag: boolean): Promise<number> {
   const step = findStep(ctx.plan, id);
   if (!step) {
-    ctx.io.stderr(`c2c provision: no step "${id}" in provision/plan.json\n`);
+    ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: no step "${id}" in provision/plan.json\n`));
     return 2;
   }
   const prior = ctx.state.steps[id];
@@ -1840,16 +1841,16 @@ async function recordStep(ctx: Ctx, id: string, resultPath: string | undefined, 
   if (gate) {
     // A first-use gate is verified by c2c's own read, never by a result file.
     if (resultPath !== undefined || appliedFlag) {
-      ctx.io.stderr(`c2c provision: ${id} is verified by c2c itself — run c2c provision --record ${id} with no --result or --applied once the console step is done\n`);
+      ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: ${id} is verified by c2c itself — run c2c provision --record ${id} with no --result or --applied once the console step is done\n`));
       return 2;
     }
     if (!ctx.scope.projectId || !ctx.scope.org) {
-      ctx.io.stderr('c2c provision: the gate read-back needs a project id and org (config or flags)\n');
+      ctx.io.stderr(coded('C2C-DEPLOY-003', 'c2c provision: the gate read-back needs a project id and org (config or flags)\n'));
       return 2;
     }
     const check = await verifyGateStep(ctx, step, gate);
     if (check.verdict !== 'open') {
-      ctx.io.stderr(`c2c provision: ${check.message} The step stays open.\n`);
+      ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: ${check.message} The step stays open.\n`));
       return 1;
     }
     const next = ctx.plan.steps.find((item) => !['done', 'existing'].includes(stepStatus(ctx.state, item.id)));
@@ -1863,37 +1864,37 @@ async function recordStep(ctx: Ctx, id: string, resultPath: string | undefined, 
     try {
       parsed = parseJsonExact(readFileSync(resultPath, 'utf8'));
     } catch {
-      ctx.io.stderr(`c2c provision: --result ${resultPath} is not readable JSON\n`);
+      ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: --result ${resultPath} is not readable JSON\n`));
       return 2;
     }
     result = unwrapResult(parsed);
   } else if (step.readBack.via === 'cli' && isProjectStep(step.id) && step.readBack.args === undefined) {
     if (!ctx.scope.org) {
-      ctx.io.stderr('c2c provision: the project read-back needs an org (config or --org)\n');
+      ctx.io.stderr(coded('C2C-DEPLOY-003', 'c2c provision: the project read-back needs an org (config or --org)\n'));
       return 2;
     }
     try {
       result = await cliProjectReadBack(ctx, ctx.scope.org);
     } catch (err) {
-      ctx.io.stderr(`c2c provision: cli read-back for ${id} failed: ${redactString(err instanceof Error ? err.message : String(err))}\n`);
+      ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: cli read-back for ${id} failed: ${redactString(err instanceof Error ? err.message : String(err))}\n`));
       return 1;
     }
   } else if (step.readBack.via === 'cli') {
     const call = isRecord(step.readBack.args) ? step.readBack.args.call : undefined;
     if (!isRecord(call) || typeof call.path !== 'string') {
-      ctx.io.stderr(`c2c provision: step ${id} has no cli read-back call — pass --result <file>\n`);
+      ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: step ${id} has no cli read-back call — pass --result <file>\n`));
       return 2;
     }
     if (call.method !== undefined && call.method !== 'GET') {
-      ctx.io.stderr(`c2c provision: the cli read-back for ${id} must be a GET (a read-back never writes) — fix provision/plan.json\n`);
+      ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: the cli read-back for ${id} must be a GET (a read-back never writes) — fix provision/plan.json\n`));
       return 2;
     }
     if (!ctx.scope.projectId || !ctx.scope.org) {
-      ctx.io.stderr('c2c provision: the cli read-back needs a project id and org (config or flags)\n');
+      ctx.io.stderr(coded('C2C-DEPLOY-003', 'c2c provision: the cli read-back needs a project id and org (config or flags)\n'));
       return 2;
     }
     if (!ctx.scope.dc) {
-      ctx.io.stderr('c2c provision: the cli read-back needs a data centre — pass --dc, set "dc" in c2c-deploy.json, or re-run c2c plan with --dc\n');
+      ctx.io.stderr(coded('C2C-DEPLOY-003', 'c2c provision: the cli read-back needs a data centre — pass --dc, set "dc" in c2c-deploy.json, or re-run c2c plan with --dc\n'));
       return 2;
     }
     try {
@@ -1901,11 +1902,11 @@ async function recordStep(ctx: Ctx, id: string, resultPath: string | undefined, 
       const answer = await checkedRetry(ctx, { method: 'GET', path: materialiseCliPath(call.path, ctx.scope.projectId) });
       result = answer.result.body;
     } catch (err) {
-      ctx.io.stderr(`c2c provision: cli read-back for ${id} failed: ${redactString(err instanceof Error ? err.message : String(err))}\n`);
+      ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: cli read-back for ${id} failed: ${redactString(err instanceof Error ? err.message : String(err))}\n`));
       return 1;
     }
   } else {
-    ctx.io.stderr(`c2c provision: --record ${id} needs --result <file> (the read-back is via ${step.readBack.via}; the host agent or the user produces it)\n`);
+    ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: --record ${id} needs --result <file> (the read-back is via ${step.readBack.via}; the host agent or the user produces it)\n`));
     return 2;
   }
 
@@ -1913,16 +1914,16 @@ async function recordStep(ctx: Ctx, id: string, resultPath: string | undefined, 
   const match = resolveTokens(step.readBack.match ?? {}, ctx, missing) as Record<string, unknown>;
   const { evidence, checked, ambiguous } = prepareReadBack(ctx, step, result, match, missing);
   if (missing.length) {
-    ctx.io.stderr(`c2c provision: read-back match for ${id} has unresolved inputs ${[...new Set(missing)].join(', ')} — fill provision/inputs.json or record the prerequisite steps first\n`);
+    ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: read-back match for ${id} has unresolved inputs ${[...new Set(missing)].join(', ')} — fill provision/inputs.json or record the prerequisite steps first\n`));
     return 2;
   }
   if (ambiguous) {
-    ctx.io.stderr(`c2c provision: read-back for ${id} matches more than one project entry — c2c will not pick an id from a same-named crowd; set apps.${ctx.plan.app}.project in c2c-deploy.json or pass --project\n`);
+    ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: read-back for ${id} matches more than one project entry — c2c will not pick an id from a same-named crowd; set apps.${ctx.plan.app}.project in c2c-deploy.json or pass --project\n`));
     return 1;
   }
   const check = matchReadBack(checked, match);
   if (!check.ok) {
-    ctx.io.stderr(`c2c provision: read-back for ${id} does not match the plan — the step stays open:\n${check.missing.map((line) => `  - ${line}`).join('\n')}\n`);
+    ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: read-back for ${id} does not match the plan — the step stays open:\n${check.missing.map((line) => `  - ${line}`).join('\n')}\n`));
     return 1;
   }
   learnIds(stripPersonFields(evidence), ctx.state.learned);
@@ -1936,7 +1937,7 @@ async function recordStep(ctx: Ctx, id: string, resultPath: string | undefined, 
     try {
       assertProtectedProject(ctx.scope.protectedProjects ?? {}, { id: projectId, name: wanted });
     } catch (err) {
-      ctx.io.stderr(`c2c provision: ${err instanceof Error ? err.message : String(err)}\n`);
+      ctx.io.stderr(coded('C2C-DEPLOY-003', `c2c provision: ${err instanceof Error ? err.message : String(err)}\n`));
       return 2;
     }
     if (projectId) {
@@ -2028,7 +2029,7 @@ export function provisionArgsProblem(args: readonly string[]): string | undefine
 export async function provisionCli(args: readonly string[], io: Io, opts: { now?: () => string } = {}): Promise<number> {
   const problem = provisionArgsProblem(args);
   if (problem) {
-    io.stderr(problem);
+    io.stderr(coded('C2C-DEPLOY-021', problem));
     return 2;
   }
   const out = flag(args, '--out') as string;
@@ -2040,18 +2041,18 @@ export async function provisionCli(args: readonly string[], io: Io, opts: { now?
   try {
     ({ plan, sha: planSha } = loadProvisionPlan(out));
   } catch (err) {
-    io.stderr(`c2c provision: ${err instanceof Error ? err.message : 'no plan'}\n`);
+    io.stderr(coded('C2C-DEPLOY-003', `c2c provision: ${err instanceof Error ? err.message : 'no plan'}\n`));
     return 2;
   }
   let state: ProvisionState | undefined;
   try {
     state = readProvisionState(out);
   } catch (err) {
-    io.stderr(`c2c provision: ${err instanceof Error ? err.message : 'state.json is unreadable'}\n`);
+    io.stderr(coded('C2C-DEPLOY-003', `c2c provision: ${err instanceof Error ? err.message : 'state.json is unreadable'}\n`));
     return 1;
   }
   if (state && (state.planSha256 !== planSha || state.app !== plan.app)) {
-    io.stderr('c2c provision: provision/plan.json or a pinned side file (tables.json, crons.json, iac/*) changed since provision/state.json was written — re-run c2c plan into a fresh --out or delete provision/state.json\n');
+    io.stderr(coded('C2C-DEPLOY-003', 'c2c provision: provision/plan.json or a pinned side file (tables.json, crons.json, iac/*) changed since provision/state.json was written — re-run c2c plan into a fresh --out or delete provision/state.json\n'));
     return 1;
   }
   state ??= { version: 1, app: plan.app, planSha256: planSha, learned: { byName: {} }, steps: {} };
@@ -2061,7 +2062,7 @@ export async function provisionCli(args: readonly string[], io: Io, opts: { now?
     scope = resolveProvisionScope({ args, cwd: process.cwd(), app: plan.app, ...(plan.dc ? { planDc: plan.dc } : {}), ...(state.learned.projectId ? { learnedProjectId: state.learned.projectId } : {}) });
     inputs = readProvisionInputs(out);
   } catch (err) {
-    io.stderr(`c2c provision: ${err instanceof Error ? err.message : 'config failed'}\n`);
+    io.stderr(coded('C2C-DEPLOY-003', `c2c provision: ${err instanceof Error ? err.message : 'config failed'}\n`));
     return 2;
   }
   // --domain is validated at the door like inputs.json slateDomain: the value
@@ -2069,7 +2070,7 @@ export async function provisionCli(args: readonly string[], io: Io, opts: { now?
   const domainFlag = flag(args, '--domain');
   const slateDomainFlag = domainFlag === undefined ? undefined : slateHost(domainFlag);
   if (domainFlag !== undefined && !slateDomainFlag) {
-    io.stderr('c2c provision: --domain must be a Slate app host — a bare hostname or the https App Url slate:link prints\n');
+    io.stderr(coded('C2C-DEPLOY-003', 'c2c provision: --domain must be a Slate app host — a bare hostname or the https App Url slate:link prints\n'));
     return 2;
   }
   const ctx: Ctx = {
@@ -2090,7 +2091,7 @@ export async function provisionCli(args: readonly string[], io: Io, opts: { now?
   };
   const reopened = revalidateRecorded(ctx);
   if (reopened.length) {
-    io.stderr(`c2c provision: provision/inputs.json changed since ${reopened.join(', ')} was recorded — the stored read-back no longer proves the resolved match; the step(s) reopened, re-run/read-back and record again\n`);
+    io.stderr(coded('C2C-DEPLOY-003', `c2c provision: provision/inputs.json changed since ${reopened.join(', ')} was recorded — the stored read-back no longer proves the resolved match; the step(s) reopened, re-run/read-back and record again\n`));
   }
   if (runId !== undefined) return runStep(ctx, runId, args.includes('--confirm'));
   if (recordId !== undefined) return recordStep(ctx, recordId, flag(args, '--result'), args.includes('--applied'));

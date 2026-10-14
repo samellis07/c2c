@@ -16,6 +16,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { basename } from 'node:path';
+import { coded } from '../../core/src/index.js';
 import { runDoctorChecks, type DoctorContext } from './checks.js';
 import { listCatalystProjects, peekCliTokenTag, refreshCliAccessToken } from '../../deploy/src/rest.js';
 import { EvidenceRejected, EvidenceStale, mcpRecord, parseEvidence, type McpEvidence } from './evidence.js';
@@ -78,7 +79,7 @@ export function doctorSpawn(command: string, args: string[], opts: { cwd: string
 export function defaultDoctorIo(): DoctorIo {
   return {
     stdout: (text) => process.stdout.write(text),
-    stderr: (text) => process.stderr.write(`${text.trimEnd()} [C2C-DOCTOR-001]\nSee plugin/references/error-index.md#c2c-doctor-001\n`),
+    stderr: (text) => process.stderr.write(text),
     env: process.env,
     spawn: doctorSpawn,
     stdin: () => readStdinBounded(),
@@ -113,17 +114,17 @@ function parseArgs(args: readonly string[], io: DoctorIo): DoctorArgs | 'usage' 
   const known = new Set(['--app', '--dc', '--org', '--project', '--config', '--creator-dc', '--creator-host', '--source-csv', '--ui', '--record-mcp', '--mcp-observed', '--mcp-begin', '--operator', '--json', '--local', '--quiet']);
   for (const arg of args) {
     if (arg.startsWith('--') && !known.has(arg)) {
-      io.stderr(`c2c doctor: unknown flag ${arg}\n${USAGE}`);
+      io.stderr(coded('C2C-DOCTOR-001', `c2c doctor: unknown flag ${arg}\n${USAGE}`));
       return 'usage';
     }
   }
   if (args.includes('--record-mcp') && flag(args, '--record-mcp') === undefined) {
-    io.stderr(`c2c doctor: --record-mcp needs an evidence file\n${USAGE}`);
+    io.stderr(coded('C2C-DOCTOR-001', `c2c doctor: --record-mcp needs an evidence file\n${USAGE}`));
     return 'usage';
   }
   const ui = flag(args, '--ui');
   if (ui !== undefined && ui !== 'vanilla' && ui !== 'react') {
-    io.stderr(`c2c doctor: --ui must be vanilla or react\n${USAGE}`);
+    io.stderr(coded('C2C-DOCTOR-001', `c2c doctor: --ui must be vanilla or react\n${USAGE}`));
     return 'usage';
   }
   return {
@@ -180,7 +181,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
       hooks: cliHooks,
     });
   } catch (err) {
-    io.stderr(`c2c doctor: ${err instanceof Error ? err.message : String(err)}\n`);
+    io.stderr(coded('C2C-DOCTOR-002', `c2c doctor: ${err instanceof Error ? err.message : String(err)}`));
     return 2;
   }
   // The app's own link name (the .ds `application` name or the file name) for scope.app.
@@ -218,7 +219,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
   let origin: { source: 'observed'; observed: Observed } | { source: 'operator' } | undefined;
   if (parsed.mcpObserved !== undefined) {
     if (parsed.mcpObserved !== '-' || !io.stdin) {
-      io.stderr(`c2c doctor: --mcp-observed reads the observation from standard input only: --mcp-observed -\n${USAGE}`);
+      io.stderr(coded('C2C-DOCTOR-001', `c2c doctor: --mcp-observed reads the observation from standard input only: --mcp-observed -\n${USAGE}`));
       return 2;
     }
     try {
@@ -249,19 +250,22 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
       }
     } catch (err) {
       if (err instanceof EvidenceStale) {
-        io.stderr(`c2c doctor: ${err.message}\n`);
+        io.stderr(coded('C2C-DOCTOR-003', `c2c doctor: ${err.message}`));
         return 1;
       }
       if (err instanceof EvidenceRejected) {
-        io.stderr(`c2c doctor: observation rejected: ${err.message}\n`);
+        io.stderr(coded('C2C-DOCTOR-004', `c2c doctor: observation rejected: ${err.message}`));
         return 1;
       }
       throw err;
     }
   } else if (parsed.recordMcp !== undefined && !parsed.operator) {
     io.stderr(
-      'c2c doctor: --record-mcp reads a supplied evidence file and is operator-only (add --operator).\n' +
-        'The plugin records MCP evidence from calls made in this session: run c2c doctor --mcp-begin, make the calls it names, then pipe the results into c2c doctor --mcp-observed -\n',
+      coded(
+        'C2C-DOCTOR-001',
+        'c2c doctor: --record-mcp reads a supplied evidence file and is operator-only (add --operator).\n' +
+          'The plugin records MCP evidence from calls made in this session: run c2c doctor --mcp-begin, make the calls it names, then pipe the results into c2c doctor --mcp-observed -',
+      ),
     );
     return 2;
   }
@@ -269,18 +273,18 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
     origin = { source: 'operator' };
     const st = statSync(parsed.recordMcp, { throwIfNoEntry: false });
     if (!st?.isFile()) {
-      io.stderr(`c2c doctor: no such evidence file: ${parsed.recordMcp}\n`);
+      io.stderr(coded('C2C-DOCTOR-006', `c2c doctor: no such evidence file: ${parsed.recordMcp}`));
       return 2;
     }
     try {
       evidence = parseEvidence(readFileSync(parsed.recordMcp, 'utf8'));
     } catch (err) {
       if (err instanceof EvidenceStale) {
-        io.stderr(`c2c doctor: ${err.message}\n`);
+        io.stderr(coded('C2C-DOCTOR-003', `c2c doctor: ${err.message}`));
         return 1;
       }
       if (err instanceof EvidenceRejected) {
-        io.stderr(`c2c doctor: evidence rejected: ${err.message}\n`);
+        io.stderr(coded('C2C-DOCTOR-005', `c2c doctor: evidence rejected: ${err.message}`));
         return 1;
       }
       throw err;
@@ -348,16 +352,16 @@ export async function doctorCli(args: readonly string[], io: DoctorIo, opts?: { 
 export function verifyVendorCli(args: readonly string[], io: DoctorIo): number {
   const dir = args[0] && !args[0].startsWith('--') ? args[0] : flag(args, '--verify-vendor') ?? args[1];
   if (!dir || args.length > 2) {
-    io.stderr(USAGE);
+    io.stderr(coded('C2C-DOCTOR-001', USAGE));
     return 2;
   }
   const verdict = verifyVendorDir(dir);
   if (verdict.error) {
-    io.stderr(`c2c: ${verdict.error}\n`);
+    io.stderr(coded('C2C-DOCTOR-007', `c2c: ${verdict.error}`));
     return 6;
   }
   if (!verdict.ok) {
-    io.stderr(`c2c: the c2c plugin files were modified or are incomplete (${verdict.mismatched.length} files differ). Reinstall the plugin.\n`);
+    io.stderr(coded('C2C-DOCTOR-008', `c2c: the c2c plugin files were modified or are incomplete (${verdict.mismatched.length} files differ). Reinstall the plugin.`));
     return 6;
   }
   return 0;
