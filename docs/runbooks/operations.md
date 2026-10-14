@@ -91,11 +91,11 @@ Data Store schema, optional Slate web client — and that `<dc>`, `<org-id>`,
   `plugin/references/facts/projects.md`).
 - [ ] Social-login client secrets apply to Development only — re-enter them
   in Production after promotion (rule: `plugin/references/facts/projects.md`).
-- [ ] App-user capacity differs: assume ~25 app users in Development,
-  ~1000 in Production (unverified rules: `plugin/references/facts/limits.md`,
-  `plugin/references/facts/auth.md`, check `D-F6` in
-  `packages/doctor/src/checks.ts`; raisable by the customer). `c2c doctor` /
-  `c2c plan` reads the reported limit before invites.
+- [ ] App-user capacity differs: plan for 25 app users in Development [DOC]
+  and 1000 in Production [UNVERIFIED] (rules:
+  `plugin/references/facts/limits.md`; the Production limit is raisable by the
+  customer per `plugin/references/facts/auth.md`). `c2c doctor` / `c2c plan`
+  reads the reported limit before invites.
 - [ ] While Production is enabled, project delete is refused
   (`400 INVALID_OPERATION`; rules: `plugin/references/facts/projects.md`,
   `plugin/references/facts/errors.md`); the operator disables Production in the
@@ -113,12 +113,13 @@ Data Store schema, optional Slate web client — and that `<dc>`, `<org-id>`,
   repeatability. It also checks plugin versions and hygiene, runs the shipped
   licence gate, and validates plugin and marketplace manifests
   (`.github/workflows/ci.yml`). The hygiene scan checks for machine paths,
-  non-placeholder email addresses and long numeric ids; it is not a configured
-  organization-secret denylist (`scripts/vendor-plugin.mjs`).
+  non-placeholder email addresses and long numeric ids (`scripts/vendor-plugin.mjs`).
 - [ ] Security scanning: `.github/workflows/codeql.yml` runs CodeQL.
-- [ ] Local equivalent before handing off: `npm test` plus
-  `npm run determinism:check` (or `npm run check` for both; scripts defined in
-  `package.json`).
+- [ ] Local equivalent before handing off: run both `npm run check` and
+  `npm run determinism:check`. `npm run check` runs `npm test && bash
+  tools/determinism-gate.sh`; it does not run `npm run determinism:check`.
+  CI runs both commands as separate steps (`package.json`,
+  `.github/workflows/ci.yml`).
 - [ ] **[gap]** No deployment pipeline for converted apps — deploys are
   operator-run `c2c`/`catalyst` commands against a signed-in CLI, not a CI
   job, and must stay that way (the CLI credential allows exactly one
