@@ -22,7 +22,7 @@ import { generateSchema, type SchemaPlan } from '../../schema/src/generator.js';
 import { EXTENSION_KEY, limitValue, planReportQuery, planZcql, ZcqlLimitError } from '../../schema/src/limits.js';
 import { fieldTypeRow } from '../../schema/src/mapping.js';
 import { buildSlate, type OutFile } from './build.js';
-import { buildModel, slug, smokeMarkerField, smokeNumberField, summarize, type UiModel, type UiSummary } from './model.js';
+import { buildModel, slug, smokeMarkerField, smokeNumberField, summarize, uiSnippetFiles, type UiModel, type UiSummary } from './model.js';
 import { iconColorRgb, paletteFor } from './theme-map.js';
 import { pwaFiles, pwaServiceWorkerSource } from './pwa.js';
 import { BASE_CSS, SHELL_BACKGROUND } from './styles.js';
@@ -76,6 +76,8 @@ export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
     }
     files.push({ path: file.path, data: file.source });
   }
+
+  for (const file of uiSnippetFiles(model)) files.push({ path: file.path, data: file.source });
 
   files.push({ path: 'slate/assets/model.js', data: modelModule(model) });
   files.push({

@@ -1,0 +1,1269 @@
+/**
+ * `htmlpage` / server-side Deluge snippets (`<dsp>`/`<dspZml>` and `<% %>`
+ * islands) → a generated read-only endpoint that renders the template
+ * server-side. The browser element keeps a sanitized static shell and fetches
+ * the rendered HTML, which the client sanitizes again before inserting.
+ *
+ * Design: one endpoint that returns finished HTML (not a data endpoint plus a
+ * client template). The template's control flow (`if`) wraps static markup,
+ * so the markup must be emitted by the script itself — a client render would
+ * need the same Deluge evaluation in the browser. The islands translate with
+ * the shared `translateInApp`, so form reads go through the same scopeRead /
+ * authorizeRead path and criteria use bound parameter objects, never string
+ * concatenation. Every interpolated value is HTML-escaped; the static markup
+ * passes through the same allowlist sanitizer as every other snippet.
+ *
+ * An island the compiler cannot prove stays a manual TODO (the same counted
+ * construct as before), never silently dropped. A statement island inside a
+ * quoted attribute value is one of those: only an expression island is
+ * rendered there. A style expression is limited to the CSS value grammar.
+ */
+
+import type { App } from '../../core/src/ir.js';
+import { lex } from '../../deluge/src/lexer.js';
+import { parse } from '../../deluge/src/parser.js';
+import type { Expr, Stmt } from '../../deluge/src/ast.js';
+import { translateInApp } from '../../deluge/src/generate.js';
+import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, sanitizeSnippet } from './pages.js';
+import { toolchainBannerLines } from '../../core/src/toolchain.js';
+import { c2cUrlFunctionSource } from './url-policy.js';
+
+export interface HtmlpageFile {
+  path: string;
+  source: string;
+}
+
+export interface HtmlpageCompiled {
+  ok: boolean;
+  /** Sanitized static shell for the element (`el.html`). */
+  html?: string;
+  /** Endpoint path the client posts to. */
+  src?: string;
+  /** The generated endpoint module. */
+  file?: HtmlpageFile;
+  /** Why this template is not compiled (the element keeps its TODO). */
+  reason?: string;
+}
+
+/** Decode the XML entities the ZML attribute escapes the template with. */
+export function decodeXmlEntities(raw: string): string {
+  return String(raw ?? '').replace(/&(lt|gt|quot|apos|amp|#\d+|#x[0-9a-fA-F]+);/g, (whole, body: string) => {
+    if (body === 'lt') return '<';
+    if (body === 'gt') return '>';
+    if (body === 'quot') return '"';
+    if (body === 'apos') return "'";
+    if (body === 'amp') return '&';
+    const code = body.startsWith('#x') || body.startsWith('#X') ? parseInt(body.slice(2), 16) : body.startsWith('#') ? parseInt(body.slice(1), 10) : 0;
+    return code > 0 ? String.fromCodePoint(code) : whole;
+  });
+}
+
+interface Chunk {
+  kind: 'static' | 'expr' | 'stmts';
+  text: string;
+  /** Where the island sits in the markup. */
+  context?: 'text' | 'attr' | 'url' | 'style' | 'comment' | 'reject';
+}
+
+const MARK_SPLIT = /ZZC2CSLOT\d+ZZ/g;
+const MARK_MATCH = /ZZC2CSLOT(\d+)ZZ/g;
+const MARK_CHECK = /ZZC2CSLOT\d+ZZ/;
+
+function marker(i: number): string {
+  return `ZZC2CSLOT${i}ZZ`;
+}
+
+function localSlug(value: string): string {
+  const out = String(value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return out || 'page';
+}
+
+/** The `htmlpage <name>(<params>)` header, optional property lines, then `content`. */
+function splitTemplate(decoded: string): { name: string; params: string[]; template: string } {
+  const head = /^[ \t]*htmlpage\b[ \t]*([A-Za-z_]\w*)?[ \t]*(\(([^)]*)\))?/i.exec(decoded);
+  if (!head) return { name: '', params: [], template: decoded };
+  const name = head[1] ?? '';
+  const params = (head[3] ?? '')
+    .split(',')
+    .map((p) => p.trim().split(/\s+/).pop() ?? '')
+    .filter((p) => /^[A-Za-z_]\w*$/.test(p));
+  const rest = decoded.slice(head[0].length);
+  const content = /(?:^|\r?\n)[ \t]*content\b/.exec(rest);
+  let template: string;
+  if (content) {
+    let after = rest.slice(content.index + content[0].length);
+    const eq = /^[ \t]*[=:]/.exec(after);
+    if (eq) after = after.slice(eq[0].length);
+    template = after.replace(/^[ \t]*\r?\n/, '');
+  } else {
+    const nl = rest.indexOf('\n');
+    template = nl < 0 ? '' : rest.slice(nl + 1);
+  }
+  const trimmed = template.trim();
+  if (trimmed.length > 1 && trimmed.startsWith('"') && trimmed.endsWith('"')) template = trimmed.slice(1, -1);
+  return { name, params, template };
+}
+
+const URL_ATTRS =
+  /^(href|src|srcset|action|formaction|xlink:href|poster|cite|background|longdesc|profile|usemap|data|ping|manifest|codebase|archive|lowsrc|dynsrc|srcdoc)$/i;
+
+/** Whitespace allowed inside a tag: tab, line feed, form feed, carriage return, space. */
+const TAG_WS_CHARS = '\t\n\f\r ';
+/** The same characters, as a source character class for the URL-value opener. */
+const TAG_WS = '\\t\\n\\f\\r ';
+
+function isTagWs(c: string): boolean {
+  return TAG_WS_CHARS.includes(c);
+}
+
+/**
+ * Elements whose contents the HTML parser keeps as raw text or RCDATA rather
+ * than markup. An island inside one sits in text the sanitizer cannot place
+ * as a real tag or attribute, so it stays a counted snippet, like any other
+ * position the compiler cannot prove.
+ */
+const RAW_TEXT_TAGS = new Set([
+  'script',
+  'style',
+  'textarea',
+  'title',
+  'xmp',
+  'iframe',
+  'noembed',
+  'noframes',
+  'noscript',
+  'template',
+  'plaintext',
+  'listing',
+]);
+
+/** Document-shell elements the sanitizer unwraps, keeping their children. */
+const DOCUMENT_SHELL_TAGS = new Set(['html', 'body']);
+
+/** Elements whose open tag ends before any content (HTML void elements). */
+const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+
+type SlotMode =
+  | 'data'
+  | 'tag-open'
+  | 'tag-name'
+  | 'end-name'
+  | 'before-attr'
+  | 'attr-name'
+  | 'after-attr'
+  | 'before-value'
+  | 'value-dq'
+  | 'value-sq'
+  | 'value-unquoted'
+  | 'after-value'
+  | 'self-close'
+  | 'comment'
+  | 'markup'
+  | 'bogus';
+
+/**
+ * Where an island lands: a text node, an attribute, an HTML comment, or a
+ * position output cannot fill safely.
+ *
+ * A quote opens a value only in the before-value state, which is the state
+ * right after '=' once tag whitespace is skipped. An island in an unquoted
+ * attribute value is emitted as a quoted attribute with the HTML-attribute
+ * escaper. An island inside an HTML comment produces no output (dropped).
+ * An island in tag-name or attribute-name position stays refused, as does an
+ * island inside an attribute the sanitizer allowlist will remove (a dropped
+ * island must stay a counted item, never vanish from a compiled page).
+ */
+function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'comment' | 'reject' {
+  let mode: SlotMode = 'data';
+  let tag = '';
+  let name = '';
+  let quotedName = '';
+  let unquotedQuote = false;
+  let endBuf = '';
+  const stack: string[] = [];
+  const top = () => (stack.length ? stack[stack.length - 1] : '');
+  // Push the just-closed open tag, pop through its end tag. Content of a
+  // raw-text or sanitizer-removed element is never a text position.
+  const openTag = () => {
+    const t = tag.toLowerCase();
+    if (t && !VOID_TAGS.has(t)) stack.push(t);
+    mode = 'data';
+  };
+  const closeTag = () => {
+    const at = stack.lastIndexOf(endBuf.toLowerCase());
+    if (at >= 0) stack.length = at;
+    mode = 'data';
+  };
+  for (let i = 0; i < prefix.length; i++) {
+    const c = prefix[i];
+    switch (mode) {
+      case 'data':
+        if (c === '<') {
+          // Inside a raw-text element the HTML parser keeps '<' as text until
+          // the matching end tag, so a '<a href="' there is not a tag.
+          const t = top();
+          if (!RAW_TEXT_TAGS.has(t) || new RegExp(`^</${t}(?=[${TAG_WS}/>])`, 'i').test(prefix.slice(i)))
+            mode = 'tag-open';
+        }
+        break;
+      case 'tag-open':
+        tag = '';
+        endBuf = '';
+        if (/[A-Za-z]/.test(c)) {
+          tag = c;
+          mode = 'tag-name';
+        } else if (c === '/') {
+          mode = 'end-name';
+        } else if (c === '!') {
+          if (prefix.startsWith('--', i + 1)) {
+            mode = 'comment';
+            i += 2;
+          } else {
+            mode = 'markup';
+          }
+        } else if (c === '?') {
+          mode = 'bogus';
+        } else {
+          mode = 'before-attr';
+          i -= 1;
+        }
+        break;
+      case 'tag-name':
+        if (isTagWs(c)) mode = 'before-attr';
+        else if (c === '/') mode = 'self-close';
+        else if (c === '>') openTag();
+        else tag += c;
+        break;
+      case 'end-name':
+        if (isTagWs(c)) mode = 'before-attr';
+        else if (c === '>') closeTag();
+        else if (/[A-Za-z]/.test(c)) endBuf += c;
+        else mode = 'bogus';
+        break;
+      case 'before-attr':
+        if (c === '<') {
+          tag = '';
+          mode = 'tag-open';
+          break;
+        }
+        if (isTagWs(c)) break;
+        if (c === '/') {
+          mode = 'self-close';
+          break;
+        }
+        if (c === '>') {
+          openTag();
+          break;
+        }
+        if (c === '=') {
+          name = '';
+          mode = 'before-value';
+          break;
+        }
+        name = '';
+        mode = 'attr-name';
+        i -= 1;
+        break;
+      case 'attr-name':
+        if (c === '<') {
+          tag = '';
+          mode = 'tag-open';
+          break;
+        }
+        if (isTagWs(c)) mode = 'after-attr';
+        else if (c === '/') mode = 'self-close';
+        else if (c === '>') openTag();
+        else if (c === '=') mode = 'before-value';
+        else name += c;
+        break;
+      case 'after-attr':
+        if (c === '<') {
+          tag = '';
+          mode = 'tag-open';
+          break;
+        }
+        if (isTagWs(c)) break;
+        if (c === '/') mode = 'self-close';
+        else if (c === '=') mode = 'before-value';
+        else if (c === '>') openTag();
+        else {
+          mode = 'before-attr';
+          i -= 1;
+        }
+        break;
+      case 'before-value':
+        if (c === '<') {
+          tag = '';
+          mode = 'tag-open';
+          break;
+        }
+        if (isTagWs(c)) break;
+        if (c === '"') {
+          quotedName = name;
+          mode = 'value-dq';
+        } else if (c === "'") {
+          quotedName = name;
+          mode = 'value-sq';
+        } else if (c === '>') openTag();
+        else {
+          unquotedQuote = false;
+          mode = 'value-unquoted';
+          i -= 1;
+        }
+        break;
+      case 'value-dq':
+        if (c === '"') mode = 'after-value';
+        break;
+      case 'value-sq':
+        if (c === "'") mode = 'after-value';
+        break;
+      case 'value-unquoted':
+        if (c === '<') {
+          tag = '';
+          mode = 'tag-open';
+          unquotedQuote = false;
+          break;
+        }
+        if (isTagWs(c)) {
+          unquotedQuote = false;
+          mode = 'before-attr';
+        } else if (c === '>') {
+          unquotedQuote = false;
+          openTag();
+        } else if (c === '"' || c === "'") unquotedQuote = true;
+        break;
+      case 'after-value':
+        if (c === '<') {
+          tag = '';
+          mode = 'tag-open';
+          break;
+        }
+        if (isTagWs(c)) mode = 'before-attr';
+        else if (c === '/') mode = 'self-close';
+        else if (c === '>') openTag();
+        else {
+          mode = 'before-attr';
+          i -= 1;
+        }
+        break;
+      case 'self-close':
+        if (c === '<') {
+          tag = '';
+          mode = 'tag-open';
+          break;
+        }
+        if (c === '>') {
+          // The HTML parser ignores the self-closing mark on a raw-text
+          // element: it stays open and its content is raw text.
+          if (RAW_TEXT_TAGS.has(tag.toLowerCase())) openTag();
+          else mode = 'data';
+        } else {
+          mode = 'before-attr';
+          i -= 1;
+        }
+        break;
+      case 'comment':
+        if (c === '-' && prefix.startsWith('-->', i)) {
+          mode = 'data';
+          i += 2;
+        }
+        break;
+      case 'markup':
+      case 'bogus':
+        if (c === '>') mode = 'data';
+        break;
+    }
+  }
+  if (mode === 'comment') return 'comment';
+  // An attribute the sanitizer drops (not in the allowlist, an on* handler,
+  // srcdoc) would remove the island marker after compile: refuse instead so
+  // the page stays a counted snippet. An inline-style value or a URL-bearing
+  // attribute is unsafe the same way.
+  const keptAttr = (n: string) => !!n && allowedAttr(tag.toLowerCase(), n.toLowerCase());
+  if (mode === 'value-dq' || mode === 'value-sq') {
+    if (!keptAttr(quotedName)) return 'reject';
+    if (/^style$/i.test(quotedName)) return 'style';
+    return URL_ATTRS.test(quotedName) ? 'url' : 'attr';
+  }
+  if (mode === 'value-unquoted' && unquotedQuote) {
+    // A quote inside an unquoted value is part of that value, so the value is
+    // already polluted: the island is emitted as an escaped plain attribute
+    // (the same as any unquoted value), but only when the attribute itself
+    // survives the allowlist.
+    if (!keptAttr(name) || /^style$/i.test(name)) return 'reject';
+    return 'attr';
+  }
+  if (mode === 'before-value' || mode === 'value-unquoted') {
+    if (!keptAttr(name) || /^style$/i.test(name) || URL_ATTRS.test(name)) return 'reject';
+    return 'attr';
+  }
+  if (mode === 'data') {
+    // `<html>` / `<body>` are the document shell: the sanitizer unwraps them
+    // and keeps their children, so text under them is text of the element
+    // they sit in (the snippet root when nothing else encloses them).
+    let at = stack.length - 1;
+    while (at >= 0 && DOCUMENT_SHELL_TAGS.has(stack[at])) at -= 1;
+    const t = at >= 0 ? stack[at] : '';
+    if (t && (DROPPED_TAGS.has(t) || RAW_TEXT_TAGS.has(t) || !ALLOWED_TAGS.has(t))) return 'reject';
+    return 'text';
+  }
+  return 'reject';
+}
+
+/** Split the decoded template into static markup and `<% %>` / `<%{ }%>` / `<%= %>` islands. */
+function splitChunks(template: string): Chunk[] | null {
+  const out: Chunk[] = [];
+  let at = 0;
+  for (;;) {
+    const open = template.indexOf('<%', at);
+    if (open < 0) {
+      out.push({ kind: 'static', text: template.slice(at) });
+      return out;
+    }
+    if (open > at) out.push({ kind: 'static', text: template.slice(at, open) });
+    if (template.startsWith('<%{', open)) {
+      // `<%{ ... }%>` is a paired block island in some templates; in others the
+      // `{` is an ordinary brace inside a `<% %>` island. Take the first closer.
+      const brace = template.indexOf('%}', open + 3);
+      const plain = template.indexOf('%>', open + 3);
+      if (brace < 0 && plain < 0) return null;
+      if (brace >= 0 && (plain < 0 || brace < plain)) {
+        out.push({ kind: 'stmts', text: template.slice(open + 3, brace) });
+        at = brace + 2;
+        continue;
+      }
+      out.push({ kind: 'stmts', text: template.slice(open + 2, plain) });
+      at = plain + 2;
+      continue;
+    }
+    const expr = template.startsWith('<%=', open);
+    const close = template.indexOf('%>', open + 2);
+    if (close < 0) return null;
+    out.push({ kind: expr ? 'expr' : 'stmts', text: template.slice(open + (expr ? 3 : 2), close) });
+    at = close + 2;
+  }
+}
+
+const ALLOWED_STMTS = new Set(['block', 'if', 'assign', 'expr', 'forEach']);
+const ALLOWED_EXPRS = new Set([
+  'number',
+  'string',
+  'date',
+  'name',
+  'list',
+  'map',
+  'unary',
+  'binary',
+  'member',
+  'call',
+  'index',
+  'criteria',
+  'paren',
+  'ifExpr',
+  'relative',
+]);
+
+/** True when the assignment target is a field of `Form[criteria]`. */
+function assignsCriteriaField(target: Expr): boolean {
+  if (target.kind !== 'member') return false;
+  let cur: Expr = target;
+  while (cur.kind === 'member' || cur.kind === 'paren') {
+    cur = cur.kind === 'member' ? cur.object : cur.expr;
+  }
+  return cur.kind === 'criteria';
+}
+
+function stmtOk(s: Stmt): boolean {
+  if (!ALLOWED_STMTS.has(s.kind)) return false;
+  switch (s.kind) {
+    case 'block':
+      return s.body.every(stmtOk);
+    case 'if':
+      return (
+        exprOk(s.test) &&
+        stmtOk(s.then) &&
+        s.elifs.every((elif) => exprOk(elif.test) && stmtOk(elif.body)) &&
+        (!s.else || stmtOk(s.else))
+      );
+    case 'assign':
+      // `Form[criteria].Field = x` writes that record. It is not a read.
+      return exprOk(s.target) && exprOk(s.value) && !assignsCriteriaField(s.target);
+    case 'expr':
+      return exprOk(s.expr);
+    case 'forEach':
+      return exprOk(s.collection) && stmtOk(s.body);
+    default:
+      return false;
+  }
+}
+
+function fieldNameOk(value: string | undefined): boolean {
+  return value === undefined || /^[A-Za-z_]\w*$/.test(value);
+}
+
+function exprOk(e: Expr): boolean {
+  if (!ALLOWED_EXPRS.has(e.kind)) return false;
+  switch (e.kind) {
+    case 'list':
+      return e.elements.every(exprOk);
+    case 'map':
+      return e.entries.every((en) => exprOk(en.key) && exprOk(en.value));
+    case 'unary':
+      return exprOk(e.expr);
+    case 'binary':
+      return exprOk(e.left) && exprOk(e.right);
+    case 'member':
+      return exprOk(e.object);
+    case 'call':
+      return exprOk(e.callee) && e.args.every(exprOk);
+    case 'index':
+      return exprOk(e.object) && exprOk(e.index);
+    case 'criteria':
+      return (
+        exprOk(e.object) &&
+        exprOk(e.criteria) &&
+        (!e.sort || (fieldNameOk(e.sort.field) && (e.sort.fields ?? []).every((f) => fieldNameOk(f.field)))) &&
+        (!e.range || (exprOk(e.range.from) && exprOk(e.range.to)))
+      );
+    case 'paren':
+      return exprOk(e.expr);
+    case 'ifExpr':
+      return exprOk(e.test) && exprOk(e.then) && (!e.else || exprOk(e.else));
+    default:
+      return true;
+  }
+}
+
+/**
+ * `openUrl(...)` statements inside an island. Popup-window targets stay lifted
+ * by the snippet popup lifter and are removed from the script; every other
+ * openUrl becomes a rendered link part at its position in the output.
+ */
+function rewriteOpenUrls(src: string): string | null {
+  let tokens;
+  try {
+    tokens = lex(src);
+  } catch {
+    return null;
+  }
+  const edits: { start: number; end: number; text: string }[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.kind !== 'ident' || t.text.toLowerCase() !== 'openurl') continue;
+    const open = tokens[i + 1];
+    if (!open || open.kind !== 'punct' || open.text !== '(') continue;
+    let depth = 0;
+    let end = -1;
+    const commas: number[] = [];
+    for (let j = i + 1; j < tokens.length; j++) {
+      const tk = tokens[j];
+      if (tk.kind === 'punct' && tk.text === '(') depth++;
+      else if (tk.kind === 'punct' && tk.text === ')') {
+        depth--;
+        if (depth === 0) {
+          end = j;
+          break;
+        }
+      } else if (depth === 1 && tk.kind === 'punct' && tk.text === ',') commas.push(j);
+    }
+    if (end < 0) return null;
+    const args: string[] = [];
+    for (let a = 0; a <= commas.length; a++) {
+      const from = a === 0 ? open.end : tokens[commas[a - 1]].end;
+      const to = a === commas.length ? tokens[end].start : tokens[commas[a]].start;
+      args.push(src.slice(from, to).trim());
+    }
+    const stmtEnd =
+      tokens[end + 1] && tokens[end + 1].kind === 'punct' && tokens[end + 1].text === ';' ? tokens[end + 1].end : tokens[end].end;
+    const target = (args[1] ?? '').replace(/^['"]|['"]$/g, '');
+    if (/popup/i.test(target)) {
+      edits.push({ start: t.start, end: stmtEnd, text: '' });
+      continue;
+    }
+    if (!args[0]) return null;
+    edits.push({ start: t.start, end: stmtEnd, text: `c2c_out.add({"k":"L","v":(${args[0]})});` });
+  }
+  if (!edits.length) return src;
+  let out = '';
+  let at = 0;
+  for (const e of edits) {
+    out += src.slice(at, e.start) + e.text;
+    at = e.end;
+  }
+  return out + src.slice(at);
+}
+
+/**
+ * `c2cAuditViolation` in a generated page endpoint: the last check before the
+ * rendered HTML leaves. A full document parse first refuses structural markup
+ * the fragment walk cannot see (attributes on the `html`/`head`/`body`
+ * elements, or a `frameset` element the parser built). Then the joined markup
+ * is parsed once more with a real HTML parser and every parsed element and
+ * attribute must be inside the sanitized allowlist — no scriptable elements
+ * (`script`, `style`, `iframe`, `object`, `embed`, `base`, `meta`, `link`,
+ * and everything else outside the tag set), no `on*` handler or `srcdoc`,
+ * no attribute the allowlist removes, no refused scheme in a URL-bearing
+ * attribute's whole assembled value, and no script scheme flattened into an
+ * inline style. A violation refuses the render instead of returning the HTML.
+ */
+export function renderAuditSource(): string {
+  const attrs: Record<string, string[]> = {};
+  for (const [tag, set] of Object.entries(ALLOWED_ATTRS).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+    attrs[tag] = [...set].sort();
+  // The sanitizer adds rel="noopener noreferrer" to rendered anchors, so the
+  // rendered document carries it even though templates cannot author it.
+  attrs['a'] = [...(attrs['a'] ?? []), 'rel'];
+  return `const C2C_AUDIT_TAGS = new Set(${JSON.stringify([...ALLOWED_TAGS].sort())});
+const C2C_AUDIT_ATTRS = ${JSON.stringify(attrs)};
+const C2C_AUDIT_URLS = ${URL_ATTRS};
+function c2cAttrAuditOk(tag, name, value) {
+  const attr = String(name).toLowerCase();
+  if (attr.slice(0, 2) === "on" || attr === "srcdoc") return false;
+  if (attr === "style") {
+    const flat = String(value == null ? "" : value).replace(/[\\u0000-\\u0020]+/g, "").toLowerCase();
+    return flat.indexOf("javascript:") < 0 && flat.indexOf("vbscript:") < 0;
+  }
+  const specific = C2C_AUDIT_ATTRS[tag];
+  if (!(specific && specific.indexOf(attr) >= 0) && C2C_AUDIT_ATTRS["*"].indexOf(attr) < 0) return false;
+  if (C2C_AUDIT_URLS.test(attr) && !c2cUrlOk(value)) return false;
+  return true;
+}
+function c2cAuditViolation(html) {
+  const structural = renderedDocumentViolation(html);
+  if (structural) return structural;
+  for (const el of renderedHtmlElements(html)) {
+    if (!C2C_AUDIT_TAGS.has(el.tag)) return "element " + el.tag;
+    for (const attr of el.attributes) {
+      if (!c2cAttrAuditOk(el.tag, attr.name, attr.value)) return el.tag + " " + attr.name;
+    }
+  }
+  return "";
+}`;
+}
+
+/** The generated endpoint module. */
+function endpointModule(opts: {
+  page: string;
+  id: string;
+  name: string;
+  path: string;
+  forms: string[];
+  server: string;
+  statics: string[];
+}): string {
+  const banner = `/**\n${[
+    `htmlpage ${opts.name || opts.id} on page ${opts.page}: a server-side snippet compiled to a read-only endpoint.`,
+    `Advanced I/O POST ${opts.path}`,
+    'Static markup was sanitized with the snippet allowlist at generation; every interpolated value is HTML-escaped',
+    'for its context (text or attribute). The client sanitizes the response again before inserting it.',
+    'Reads go through the runtime scopeRead (profile grants, record filters, hidden forms), like the report endpoints.',
+    'Page input values are bound criteria/parameters only; nothing is concatenated into ZCQL.',
+    'openUrl actions in the template render as links; "popup window" targets stay lifted popup triggers.',
+    'Dry run unless deploy mode is live (c2c-deploy.json or C2C_DEPLOY_MODE) and a datastore is configured.',
+    ...toolchainBannerLines(),
+  ]
+    .map((line) => ` * ${line}`)
+    .join('\n')}\n */\n`;
+  const statics = opts.statics.map((s, i) => `const c2c_static_${i} = ${JSON.stringify(s)};`).join('\n');
+  const indented = opts.server
+    .split('\n')
+    .map((line) => (line.trim() ? `  ${line}` : line))
+    .join('\n');
+  return `${banner}import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createRuntime, jsonReplacer, principalFromRequest, renderedDocumentViolation, renderedHtmlElements } from "creator-to-catalyst/shims";
+
+const policyPath = join(dirname(fileURLToPath(import.meta.url)), "../access-policy.json");
+export const access = JSON.parse(readFileSync(policyPath, "utf8"));
+
+export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(opts.path)}, dryRun: true };
+export const htmlpage = ${JSON.stringify({ page: opts.page, name: opts.name || opts.id, forms: opts.forms })};
+
+${statics}
+
+function isHidden(name) {
+  return !!name && Array.isArray(access.hidden) && access.hidden.includes(name);
+}
+
+function send(res, status, body) {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(body, jsonReplacer));
+}
+
+function c2cStr(v) {
+  if (v == null) return "";
+  if (typeof v === "object") {
+    if (typeof v.zoho === "string") return v.zoho === "appuri" ? "#" : "";
+    if (Array.isArray(v)) return v.map(c2cStr).join(", ");
+    if (typeof v.y === "number" && typeof v.m === "number" && typeof v.d === "number") return v.toString();
+    if (typeof v.label === "string") return v.label;
+    try {
+      return JSON.stringify(v, jsonReplacer);
+    } catch (err) {
+      return "";
+    }
+  }
+  return String(v);
+}
+
+function c2cEsc(v) {
+  return String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// An island inside a quoted style attribute renders only a strict CSS value:
+// numbers with a unit, #hex, rgb()/rgba()/hsl()/hsla() with numeric arguments,
+// and a keyword allowlist, joined by whitespace, commas or '/'. Semicolons,
+// quotes, backslashes, comments, braces, url(), expression() and every other
+// function can never come from a value — it renders empty and is reported as
+// a note instead.
+const C2C_CSS_WORDS = new Set((${JSON.stringify(
+    'auto none normal inherit initial unset revert solid dashed dotted double groove ridge inset outset hidden visible ' +
+      'block inline inline-block flex inline-flex grid inline-grid table table-row table-cell list-item run-in ' +
+      'absolute relative fixed static sticky center left right top bottom middle baseline sub super text-top text-bottom ' +
+      'start end first last only even odd nowrap wrap wrap-reverse pre pre-wrap pre-line break-word italic oblique ' +
+      'underline overline line-through wavy capitalize uppercase lowercase full-width small-caps all-small-caps ' +
+      'transparent currentcolor cover contain repeat repeat-x repeat-y no-repeat space round scroll local ' +
+      'serif sans-serif monospace cursive fantasy system-ui ui-serif ui-sans-serif ui-monospace ui-rounded math emoji fangsong ' +
+      'pointer default move text wait help crosshair not-allowed grab grabbing zoom-in zoom-out ' +
+      'col-resize row-resize e-resize w-resize n-resize s-resize ne-resize nw-resize se-resize sw-resize ew-resize ns-resize nesw-resize nwse-resize ' +
+      'bold bolder lighter thin medium thick collapse separate show row row-reverse column column-reverse ' +
+      'flex-start flex-end space-between space-around space-evenly stretch open closed both horizontal vertical ltr rtl ' +
+      'forwards backwards alternate alternate-reverse infinite running paused ' +
+      'ease linear ease-in ease-out ease-in-out step-start step-end jump-start jump-end jump-none jump-both ' +
+      'border-box content-box padding-box margin-box fill-box stroke-box view-box flat preserve-3d ' +
+      'aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood ' +
+      'cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod ' +
+      'darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon ' +
+      'darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray ' +
+      'dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green ' +
+      'greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon ' +
+      'lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon ' +
+      'lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen ' +
+      'magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue ' +
+      'mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy ' +
+      'oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip ' +
+      'peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon ' +
+      'sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue ' +
+      'tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen',
+  )}).split(" "));
+
+const C2C_CSS_VALUE =
+  /^(?:[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:px|em|rem|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ex|ch|s|ms|deg|rad|grad|turn|fr|%)?|#[0-9a-fA-F]{3,8}|(?:rgb|rgba|hsl|hsla)\\(\\s*[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)%?\\s*(?:,\\s*[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)%?\\s*){2,3}\\)|[A-Za-z][A-Za-z0-9-]*)(?:[\\s,/]+(?:[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:px|em|rem|vh|vw|vmin|vmax|cm|mm|in|pt|pc|ex|ch|s|ms|deg|rad|grad|turn|fr|%)?|#[0-9a-fA-F]{3,8}|(?:rgb|rgba|hsl|hsla)\\(\\s*[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)%?\\s*(?:,\\s*[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)%?\\s*){2,3}\\)|[A-Za-z][A-Za-z0-9-]*))*$/i;
+
+function c2cCss(v) {
+  const text = String(v == null ? "" : v).trim();
+  if (!text) return "";
+  if (/[;\\\\{}<>&'"!@]/.test(text) || text.includes("/*") || text.includes("*/")) return "";
+  const flat = text.replace(/[\\u0000-\\u0020]+/g, "").toLowerCase();
+  if (flat.includes("url(") || flat.includes("expression") || flat.includes("javascript:") || flat.includes("vbscript:")) return "";
+  if (!C2C_CSS_VALUE.test(text)) return "";
+  const words =
+    text
+      .replace(/(?:rgb|rgba|hsl|hsla)\\([^()]*\\)/gi, " ")
+      .replace(/#[0-9a-fA-F]{3,8}/g, " ")
+      .replace(/[-+]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[a-zA-Z]{1,5}|%)?/g, " ")
+      .match(/[A-Za-z][A-Za-z0-9-]*/g) || [];
+  if (!words.every((w) => C2C_CSS_WORDS.has(w.toLowerCase()))) return "";
+  return text;
+}
+
+${c2cUrlFunctionSource()}
+
+${renderAuditSource()}
+
+function c2cLink(url) {
+  const text = String(url || "").trim();
+  let href = "";
+  let label = text;
+  const internal = /^#(Form|Report):(.+)$/.exec(text);
+  if (internal) {
+    href = "#/" + internal[1].toLowerCase() + "/" + encodeURIComponent(internal[2]);
+    label = internal[2].replace(/_/g, " ");
+  } else if (/^https?:\\/\\//i.test(text)) {
+    href = text;
+  }
+  if (!href) return "";
+  return '<a href="' + c2cEsc(href) + '">' + c2cEsc(label) + "</a>";
+}
+
+async function render(ctx) {
+  const shim = ctx.shim;
+${indented}
+  const c2c_parts = [];
+  const c2c_notes = [];
+  // A URL attribute value may span several parts (static pieces and islands).
+  // The scheme check runs on the whole joined value, so the pieces accumulate
+  // until the next non-URL part; a dropped island inside the value does not
+  // break the accumulation.
+  let c2c_url_on = false;
+  let c2c_url_raw = "";
+  let c2c_url_esc = "";
+  const c2c_urlFlush = () => {
+    if (!c2c_url_on) return;
+    c2c_parts.push(c2cUrlOk(c2c_url_raw) ? c2c_url_esc : "");
+    c2c_url_on = false;
+    c2c_url_raw = "";
+    c2c_url_esc = "";
+  };
+  for (const item of c2c_out) {
+    if (item && typeof item === "object" && !Array.isArray(item) && (item.k === "V" || item.k === "W")) {
+      const piece = item.k === "V" ? c2cStr(item.v) : String(item.v == null ? "" : item.v);
+      c2c_url_on = true;
+      c2c_url_raw += piece;
+      c2c_url_esc += item.k === "V" ? c2cEsc(piece) : piece;
+      continue;
+    }
+    if (item && typeof item === "object" && !Array.isArray(item) && item.k === "D") continue;
+    c2c_urlFlush();
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    if (item.k === "H") c2c_parts.push(item.v == null ? "" : String(item.v));
+    else if (item.k === "T") c2c_parts.push(c2cEsc(c2cStr(item.v)));
+    else if (item.k === "A") c2c_parts.push(c2cEsc(c2cStr(item.v)));
+    else if (item.k === "L") c2c_parts.push(c2cLink(c2cStr(item.v)));
+    else if (item.k === "C") {
+      const piece = c2cStr(item.v);
+      const css = c2cCss(piece);
+      if (!css && piece.trim()) c2c_notes.push("a style island value was not a safe CSS value and rendered empty");
+      c2c_parts.push(css);
+    } else if (item.k === "N") c2c_notes.push(String(item.v == null ? "" : item.v));
+  }
+  c2c_urlFlush();
+  return { html: c2c_parts.join(""), notes: c2c_notes };
+}
+
+function modeOverride() {
+  const value = typeof process !== "undefined" && process.env ? process.env.C2C_DEPLOY_MODE : undefined;
+  return value === "live" || value === "dry-run" ? value : "";
+}
+
+function deployConfig() {
+  try {
+    const file = join(dirname(fileURLToPath(import.meta.url)), "../c2c-deploy.json");
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    const mode = modeOverride() || (parsed && parsed.mode === "live" ? "live" : "dry-run");
+    const appTimeZone = parsed && typeof parsed.appTimeZone === "string" ? parsed.appTimeZone : "";
+    return { mode, appTimeZone };
+  } catch (err) {
+    return { mode: modeOverride() || "dry-run", appTimeZone: "" };
+  }
+}
+
+async function liveDatastore() {
+  try {
+    const mod = await import("../c2c-store.mjs");
+    if (mod && typeof mod.getDatastore === "function") {
+      const stored = mod.getDatastore();
+      if (stored) return stored;
+    }
+  } catch (err) {
+    /* store module is absent when this file is loaded alone */
+  }
+  try {
+    if (globalThis.__c2cDatastore) return globalThis.__c2cDatastore;
+  } catch (err) {
+    /* no injected global */
+  }
+  return null;
+}
+
+export default async function handler(req, res) {
+  const principal = principalFromRequest(req);
+  if (!principal?.profile) {
+    send(res, 401, { dryRun: true, error: "authenticated caller required" });
+    return;
+  }
+  for (const form of htmlpage.forms) {
+    if (isHidden(form)) {
+      send(res, 403, { dryRun: true, error: "hidden form" });
+      return;
+    }
+  }
+  const deploy = deployConfig();
+  const live = deploy.mode === "live";
+  const datastore = live ? await liveDatastore() : null;
+  const appTimeZone = process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined;
+  const body = req && typeof req.body === "object" && req.body && !Array.isArray(req.body) ? req.body : {};
+  const input = body && typeof body.input === "object" && body.input && !Array.isArray(body.input) ? body.input : {};
+  try {
+    const runtime = createRuntime({
+      dryRun: !live,
+      appTimeZone,
+      access,
+      ...(datastore ? { datastore } : {}),
+    });
+    const ctx = runtime.context({ record: input, old: {}, principal, appTimeZone });
+    const rendered = await render(ctx);
+    let violation = "";
+    try {
+      violation = c2cAuditViolation(rendered.html);
+    } catch (err) {
+      violation = "markup audit unavailable";
+    }
+    if (violation) {
+      send(res, 500, { dryRun: !live, error: "rendered markup failed the output attribute check" });
+      return;
+    }
+    send(res, 200, { dryRun: !live, html: rendered.html, notes: rendered.notes, transcript: runtime.transcript });
+  } catch (err) {
+    const denied = err && err.code === "RECORD_ACCESS_DENIED";
+    send(res, denied ? 403 : 500, { dryRun: !live, error: denied ? err.message : "render failed" });
+  }
+}
+`;
+}
+
+/**
+ * Shim calls a rendered page may make. Value slots, record reads and
+ * aggregates through the caller's read policy, and pure helpers (dates,
+ * text, lists already in memory). A write, a queued write, a flush, a
+ * fetch, mail, or another function call is not in this set.
+ *
+ * `datastore.field`, `datastore.column` and `datastore.rows` are the same
+ * scopeRead path as `datastore.aggregate`: the runtime authorizes with the
+ * caller's principal, then returns only the fields that grant allows.
+ *
+ * `input.set` is the request-local `input.<param> = value` defaulting idiom:
+ * it only rewrites the input map for this render — nothing is persisted, and
+ * the value reaches any read as a bound criteria parameter. `input.insert`
+ * and subform `clear` stay refused.
+ *
+ * `get`/`set` are the generated index accessors: `get` is a pure own-key
+ * read, and `set` is the same class of request-local write as `input.set` —
+ * it mutates only its receiver, never a persisted row. A `set` whose
+ * receiver is a datastore read is refused below.
+ */
+const READ_ONLY_SHIM = new Set([
+  'get',
+  'set',
+  'datastore.query',
+  'datastore.aggregate',
+  'datastore.field',
+  'datastore.column',
+  'datastore.rows',
+  'each',
+  'input.get',
+  'input.root',
+  'input.set',
+  'old.get',
+  'zoho.currentDate',
+  'zoho.currentTime',
+  'zoho.loginUser',
+  'zoho.loginUserId',
+  'zoho.adminUser',
+  'zoho.adminUserId',
+  'zoho.appUri',
+  'zoho.ipAddress',
+  'zoho.appName',
+  'isNull',
+  'isBlank',
+  'isNumber',
+  'ifnull',
+  'list.add',
+  'list.get',
+  'list.contains',
+  'list.containsKey',
+  'list.containsValue',
+  'list.length',
+  'list.size',
+  'list.indexOf',
+  'list.lastIndexOf',
+  'list.keys',
+  'list.values',
+  'list.aggregate',
+  'list.column',
+  'list.distinct',
+  'number.largest',
+  'number.smallest',
+  'decimal.cmp',
+  'compare.eq',
+  'compare.ne',
+  'record.get',
+  'record.system',
+]);
+
+const READ_ONLY_PREFIX = ['date.', 'string.', 'convert.'];
+
+function readOnlyShim(path: string): boolean {
+  if (READ_ONLY_SHIM.has(path)) return true;
+  return READ_ONLY_PREFIX.some((prefix) => path.startsWith(prefix) && /^[A-Za-z_][\w]*$/.test(path.slice(prefix.length)));
+}
+
+/**
+ * Index of the `)` that closes the `(` at `open`, skipping quoted text.
+ * Returns -1 when the call is unfinished.
+ */
+function matchingParen(source: string, open: number): number {
+  let depth = 0;
+  let quote = '';
+  for (let i = open; i < source.length; i++) {
+    const ch = source[i] ?? '';
+    if (quote) {
+      if (ch === '\\') {
+        i++;
+        continue;
+      }
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      continue;
+    }
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Assigning through a fetched field, column, or row list is not a read.
+ * The translator writes that as `await shim.datastore.field(...) = value`.
+ */
+function assignsDatastoreRead(server: string): boolean {
+  const re = /\b(?:await\s+)?shim\.datastore\.(?:field|column|rows)\s*\(/g;
+  for (const match of server.matchAll(re)) {
+    const open = (match.index ?? 0) + match[0].length - 1;
+    const close = matchingParen(server, open);
+    if (close >= 0 && /^\s*=(?!=)/.test(server.slice(close + 1))) return true;
+  }
+  return false;
+}
+
+/**
+ * `list.add` on a value already in memory is a local edit, and `set` on a
+ * local is a request-local write. The same calls whose receiver is a
+ * datastore read would change a fetched record.
+ */
+function mutatesFetchedRead(server: string): boolean {
+  return /\bshim\.(?:list\.add|set)\s*\(\s*(?:await\s+)?shim\.datastore\.(?:field|column|rows)\b/.test(server);
+}
+
+/** True when every shim call is read-only and every await is one of those calls. */
+export function islandReadOnly(server: string): boolean {
+  if (/\bfunctions\./.test(server)) return false;
+  for (const match of server.matchAll(/\bshim\.([A-Za-z_][\w.]*)\s*\(/g)) {
+    const name = match[1] ?? '';
+    if (!readOnlyShim(name)) return false;
+  }
+  if (assignsDatastoreRead(server) || mutatesFetchedRead(server)) return false;
+  if (/\bawait\s+(?!shim\.)/.test(server)) return false;
+  return true;
+}
+
+/**
+ * Compile a decoded `htmlpage` template into a generated endpoint plus the
+ * sanitized static shell. Returns `{ ok: false }` for anything outside the
+ * handled classes; the caller keeps the same manual TODO as before.
+ */
+export function compileHtmlpage(
+  app: App,
+  page: string,
+  elementName: string,
+  decoded: string,
+  opts: { id?: string } = {},
+): HtmlpageCompiled {
+  const fail = (reason: string): HtmlpageCompiled => ({ ok: false, reason });
+  const head = splitTemplate(decoded);
+  const chunks = splitChunks(head.template);
+  if (!chunks || !chunks.some((c) => c.kind !== 'static')) return fail('no Deluge islands');
+  if (MARK_CHECK.test(head.template) || /\bc2c_(out|parts|static|str|esc|link|notes|css)\b/i.test(head.template))
+    return fail('marker collision');
+
+  // Context for every island, from the static markup that precedes it.
+  {
+    let prefix = '';
+    for (const chunk of chunks) {
+      if (chunk.kind === 'static') prefix += chunk.text;
+      else {
+        chunk.context = slotContext(prefix);
+        prefix += 'x';
+      }
+    }
+  }
+  if (chunks.some((c) => c.context === 'reject')) return fail('island in an unsafe position');
+
+  // Islands that parse as a lone expression print like `<%= %>` did.
+  const islands = chunks.map((c, i) => ({ ...c, i })).filter((c) => c.kind !== 'static');
+  for (const isl of islands) {
+    if (isl.kind !== 'stmts') continue;
+    try {
+      const script = parse(isl.text.trim());
+      if (script.body.length === 1 && script.body[0].kind === 'expr') isl.kind = 'expr';
+    } catch {
+      /* stays a statement island */
+    }
+  }
+
+  // A quoted attribute value accepts an expression island only. A statement
+  // island is written into the value, and an openUrl there becomes a link
+  // between the quotes. The page stays the counted snippet.
+  for (const isl of islands) {
+    if (isl.kind !== 'expr' && isl.context !== 'text' && isl.context !== 'comment') return fail('island in an unsafe position');
+  }
+
+  // Marker-sanitize-split: sanitize the whole document once, then read which
+  // island slots survived and where the static fragments landed.
+  let combined = '';
+  for (const chunk of chunks) combined += chunk.kind === 'static' ? chunk.text : marker(islandOrdinal(chunks, chunk));
+  const nIslands = islands.length;
+  const sanitized = sanitizeSnippet(combined);
+  MARK_SPLIT.lastIndex = 0;
+  MARK_MATCH.lastIndex = 0;
+  const pieces = sanitized.split(MARK_SPLIT);
+  const surviving = [...sanitized.matchAll(MARK_MATCH)].map((m) => Number(m[1]));
+  const cleanStatics: string[] = new Array(nIslands + 1).fill('');
+  {
+    const bounds = [...surviving, nIslands];
+    for (let i = 0; i < pieces.length; i++) {
+      const gap = Math.min(bounds[i] ?? nIslands, nIslands);
+      cleanStatics[gap] += pieces[i];
+    }
+  }
+  const survived = new Set(surviving);
+  // An island whose marker the sanitizer removed sat in text or an attribute
+  // the allowlist drops (a dropped tag, a refused attribute, a refused URL
+  // scheme). Emitting nothing for it would compile a page that silently lost
+  // a Deluge slot, so the whole template stays the counted snippet. Comment
+  // islands are the documented exception: they produce no output by design.
+  for (let i = 0; i < islands.length; i++) {
+    if (islands[i].context !== 'comment' && !survived.has(i)) return fail('island in an unsafe position');
+  }
+
+  // Reassemble the Deluge script: static pushes, verbatim statement islands,
+  // expr islands as escaped output parts, openUrl rewritten to link parts.
+  // A URL attribute value may span islands and static fragments. Those pieces
+  // are emitted as "V" (escaped island value) and "W" (literal static) parts
+  // so the generated render joins them and applies the scheme rule to the
+  // whole assembled value, not to each island alone.
+  const scriptParts: string[] = ['c2c_out = List();'];
+  for (const param of head.params) scriptParts.push(`${param} = input.${param};`);
+  const URL_VALUE_OPEN = new RegExp(`([A-Za-z_:][\\w:.-]*)[${TAG_WS}]*=[${TAG_WS}]*("|')`, 'g');
+  let inUrl = false;
+  let urlQuote = '';
+  const pushPart = (kind: string, i: number, text: string) => {
+    scriptParts.push(`c2c_out.add({"k":"${kind}","v":${text === cleanStatics[i] ? `c2c_static_${i}` : JSON.stringify(text)}});`);
+  };
+  for (let i = 0; i <= islands.length; i++) {
+    const isl = i < islands.length ? islands[i] : undefined;
+    let rest = cleanStatics[i];
+    // A static piece can hold the end of one attribute value and the start
+    // of the next (`" ... href="`), so the region close runs first, then
+    // this island's own opener inside the same piece.
+    if (inUrl && rest) {
+      const end = rest.indexOf(urlQuote);
+      if (end < 0) {
+        pushPart('W', i, rest);
+        rest = '';
+      } else {
+        if (end > 0) pushPart('W', i, rest.slice(0, end));
+        rest = rest.slice(end);
+        inUrl = false;
+      }
+    }
+    if (isl && isl.kind === 'expr' && isl.context === 'url' && survived.has(i) && !inUrl) {
+      // The island opens a URL attribute value: the last `name="` of the
+      // static before it starts the value, and any static tail after that
+      // quote is the first piece of the value itself.
+      URL_VALUE_OPEN.lastIndex = 0;
+      let open: RegExpExecArray | null = null;
+      for (let m = URL_VALUE_OPEN.exec(rest); m; m = URL_VALUE_OPEN.exec(rest)) open = m;
+      if (!open || !URL_ATTRS.test(open[1])) return fail('url attribute boundary not found');
+      urlQuote = open[2];
+      const valueStart = open.index + open[0].length;
+      const headText = rest.slice(0, valueStart);
+      const tailText = rest.slice(valueStart);
+      if (headText) pushPart('H', i, headText);
+      if (tailText) pushPart('W', i, tailText);
+      inUrl = true;
+    } else if (rest) {
+      pushPart('H', i, rest);
+    }
+    if (!isl) break;
+    if (isl.context === 'comment') {
+      // An island inside an HTML comment produces no output (drop it, with a note).
+      scriptParts.push('c2c_out.add({"k":"D","v":0});');
+    } else if (isl.kind === 'expr') {
+      if (survived.has(i)) {
+        const kind = isl.context === 'url' ? 'V' : isl.context === 'attr' ? 'A' : isl.context === 'style' ? 'C' : 'T';
+        scriptParts.push(`c2c_out.add({"k":"${kind}","v":(${isl.text.trim()})});`);
+      } else if (isl.context === 'style') {
+        scriptParts.push('c2c_out.add({"k":"N","v":"a style island did not survive markup sanitization and rendered empty"});');
+      } else {
+        scriptParts.push('c2c_out.add({"k":"D","v":0});');
+      }
+    } else {
+      // A statement island's output is spliced only at a surviving marker.
+      // A marker the sanitizer removed (a dropped element swallowed it) has
+      // no output position: the island stays the counted snippet rather than
+      // appending its output at a later gap.
+      if (!survived.has(i)) return fail('island in an unsafe position');
+      const rewritten = rewriteOpenUrls(isl.text);
+      if (rewritten === null) return fail('openUrl could not be rewritten');
+      scriptParts.push(rewritten);
+    }
+  }
+  const script = scriptParts.join('\n');
+
+  let ast;
+  try {
+    ast = parse(script);
+  } catch {
+    return fail('Deluge islands do not parse');
+  }
+  if (!ast.body.every(stmtOk)) return fail('island outside the handled classes');
+
+  let tr;
+  try {
+    tr = translateInApp(app, script);
+  } catch {
+    return fail('island translation failed');
+  }
+  if (tr.todos.length || tr.stats.todo > 0) return fail('island needs manual translation');
+  // The translator may also emit a client projection of the same code (slot
+  // conditions, list pushes). Only a real client action — a UI effect the
+  // endpoint cannot perform — is out of scope.
+  if (/actions\.push\(/.test(tr.client)) return fail('island needs a client step');
+  const server = tr.server;
+  if (/shim\.todo\(/.test(server)) return fail('untranslated construct');
+  // A rendered page only reads: value slots, one record field, a column,
+  // the rows of a query, aggregates, and pure helpers. Any other shim call,
+  // a functions.* call, an assignment through a fetched value, or an await
+  // that is not one of those reads stays the same counted snippet.
+  if (!islandReadOnly(server)) return fail('island is not a read-only render');
+
+  const forms = [
+    ...server.matchAll(/shim\.datastore\.(?:query|aggregate)\(ctx, "([^"]+)"/g),
+    ...server.matchAll(/compileCriteria\(ctx\.shim, "([^"]+)"/g),
+  ].map((m) => m[1]);
+  const id = opts.id ?? 's0';
+  const path = `/htmlpages/${encodeURIComponent(page)}/${encodeURIComponent(id)}`;
+  const file: HtmlpageFile = {
+    path: `functions/htmlpages/${localSlug(page)}-${localSlug(id)}.mjs`,
+    source: endpointModule({
+      page,
+      id,
+      name: head.name || elementName,
+      path,
+      forms: [...new Set(forms)].sort(),
+      server,
+      statics: cleanStatics,
+    }),
+  };
+  return { ok: true, html: cleanStatics.join(''), src: path, file };
+}
+
+function islandOrdinal(chunks: Chunk[], target: Chunk): number {
+  let n = -1;
+  for (const c of chunks) {
+    if (c.kind !== 'static') n++;
+    if (c === target) return n;
+  }
+  return n;
+}

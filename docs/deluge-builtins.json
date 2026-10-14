@@ -5920,8 +5920,8 @@
       ],
       "arity": 2,
       "docUrl": "https://www.zoho.com/deluge/help/functions/map/put.html",
-      "status": "supported",
-      "mapsTo": "var x = ({ [\"k\"]: \"v\" }[\"x\"] = \"x\")",
+      "status": "shimmed",
+      "mapsTo": "shim.set",
       "snippet": "x = {\"k\": \"v\"}.put(\"x\", \"x\");"
     },
     {
@@ -5933,8 +5933,8 @@
       ],
       "arity": 2,
       "docUrl": "https://www.zoho.com/deluge/help/map-manipulations/put.html",
-      "status": "supported",
-      "mapsTo": "var x = ({ [\"k\"]: \"v\" }[\"x\"] = \"x\")",
+      "status": "shimmed",
+      "mapsTo": "shim.set",
       "snippet": "x = {\"k\": \"v\"}.put(\"x\", \"x\");"
     },
     {

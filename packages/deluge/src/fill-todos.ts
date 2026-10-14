@@ -58,10 +58,13 @@ const MIGRATION_NOTE = new Set(['blank-date-rel', 'for-each-null']);
 
 const SHIM_UNSORTED = [
   'shim.todo',
+  'shim.get',
+  'shim.set',
   'shim.input.root',
   'shim.input.get',
   'shim.input.set',
   'shim.old.get',
+  'shim.old.set',
   'shim.record.bind',
   'shim.record.get',
   'shim.record.set',

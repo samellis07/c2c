@@ -655,7 +655,8 @@ function renderElement(el, doc, parentReport, appModel) {
           `<span data-popup-trigger data-popup-target="${escapeHtml(popup.target)}" data-popup-name="${escapeHtml(popup.name)}" data-popup-when="${escapeHtml(popup.when)}"${popup.whenForm ? ` data-popup-when-form="${escapeHtml(popup.whenForm)}"` : ''} hidden></span>`,
       )
       .join('');
-    return `${clean.trim() || markers ? `<div class="snippet">${clean}${markers}</div>` : ''}${kids}`;
+    const inner = el.src ? `<div data-snippet-src="${escapeHtml(el.src)}">${clean}</div>` : clean;
+    return `${inner.trim() || markers ? `<div class="snippet">${inner}${markers}</div>` : ''}${kids}`;
   }
   if (el.kind === 'todo') {
     // A page TODO is a migration note for the developer, not app content: it
@@ -913,6 +914,58 @@ export function hydratePopups(root, appModel, viewRef) {
       .then((body) => {
         const rows = body && Array.isArray(body.rows) ? body.rows : [];
         if (!rows.length) open();
+      })
+      .catch(() => {});
+  }
+}
+
+/** Page input for server-rendered snippets: the URL's query parameters. */
+export function snippetPageInput(docRef) {
+  const out = {};
+  const loc = docRef && docRef.location;
+  if (!loc) return out;
+  const read = (query) => {
+    try {
+      for (const [key, value] of new URLSearchParams(query)) if (!(key in out)) out[key] = value;
+    } catch (err) {
+      /* malformed query */
+    }
+  };
+  read(loc.search || '');
+  const hash = loc.hash || '';
+  const q = hash.indexOf('?');
+  if (q >= 0) read(hash.slice(q + 1));
+  return out;
+}
+
+/**
+ * Server-rendered `htmlpage` snippets: the element left a sanitized static
+ * shell plus `data-snippet-src`. Fetch the rendered HTML and sanitize it again
+ * before inserting. 404/405/501 (a static host) keep the shell.
+ */
+export function hydrateSnippets(root, appModel, viewRef) {
+  if (!root || !root.querySelectorAll) return;
+  const call = (viewRef && viewRef.fetch) || globalThis.fetch;
+  if (typeof call !== 'function') return;
+  const docRef = root.ownerDocument || null;
+  const input = snippetPageInput(docRef);
+  for (const host of root.querySelectorAll('[data-snippet-src]')) {
+    if (host.getAttribute('data-snippet-done') === 'true') continue;
+    host.setAttribute('data-snippet-done', 'true');
+    const src = host.getAttribute('data-snippet-src') || '';
+    if (!src) continue;
+    apiCall(call, viewRef, src, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ input }),
+    })
+      .then((res) => {
+        if (!res || res.status === 404 || res.status === 405 || res.status === 501) return null;
+        if (!res.ok) return null;
+        return responseJson(res);
+      })
+      .then((body) => {
+        if (body && typeof body.html === 'string') host.innerHTML = sanitizeSnippet(body.html, docRef || undefined);
       })
       .catch(() => {});
   }
@@ -2280,6 +2333,56 @@ export async function apiCall(call, viewRef, endpoint, init) {
   return call(url, { ...init, headers, credentials: 'include' });
 }
 
+/** Key spellings a generated index access may never touch: they reach the shared prototype. */
+const UNSAFE_INDEX_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** Shared objects a generated write may never land on (same rule as the server shim). */
+function clientSharedTarget(value) {
+  return value === Object.prototype || value === Function.prototype || typeof value === 'function';
+}
+
+/** Generated `obj[key]` read: own keys only — same as indexGet in packages/shims/src/runtime.ts. */
+function clientIndexGet(obj, key) {
+  if (obj == null || typeof obj === 'function') return undefined;
+  const k = String(key);
+  if (UNSAFE_INDEX_KEYS.has(k)) return undefined;
+  const boxed = Object(obj);
+  const got = Object.prototype.hasOwnProperty.call(boxed, k) ? boxed[k] : undefined;
+  return clientSharedTarget(got) ? undefined : got;
+}
+
+/** Generated `obj[key] = v`: refuses unsafe names and shared-prototype targets — same as indexSet in packages/shims/src/runtime.ts. */
+function clientIndexSet(obj, key, value) {
+  if (obj == null || (typeof obj !== 'object' && typeof obj !== 'function')) return value;
+  if (clientSharedTarget(obj)) return value;
+  const k = String(key);
+  if (UNSAFE_INDEX_KEYS.has(k)) return value;
+  obj[k] = value;
+  return value;
+}
+
+/** `path` walk for input/record set: own keys only, no unsafe names, no shared-prototype targets. Returns whether the write landed. */
+function clientSetPath(root, parts, value) {
+  if (!parts.length || parts.some((p) => UNSAFE_INDEX_KEYS.has(String(p)))) return false;
+  if (clientSharedTarget(root)) return false;
+  let cur = root;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const k = String(parts[i]);
+    const next = Object.prototype.hasOwnProperty.call(cur, k) ? cur[k] : undefined;
+    if (next == null || typeof next !== 'object') {
+      const created = {};
+      cur[k] = created;
+      cur = created;
+    } else {
+      if (clientSharedTarget(next)) return false;
+      cur = next;
+    }
+  }
+  if (clientSharedTarget(cur)) return false;
+  cur[String(parts[parts.length - 1])] = value;
+  return true;
+}
+
 export function browserShim(fetchImpl) {
   const call = fetchImpl || globalThis.fetch;
   let seq = 0;
@@ -2340,6 +2443,8 @@ export function browserShim(fetchImpl) {
       get(_obj, prop) {
         if (prop === 'then') return (resolve) => resolve(undefined);
         if (prop === 'client') return client;
+        if (prop === 'get') return clientIndexGet;
+        if (prop === 'set') return clientIndexSet;
         if (prop === 'todo') return async () => undefined;
         if (prop === 'each') return (_ctx, value) => clientEach(value);
         if (prop === 'decimal') return clientDecimal();
@@ -2379,7 +2484,7 @@ export function browserShim(fetchImpl) {
               // getPath in packages/shims/src/runtime.ts).
               for (const part of path) {
                 if (cur == null || typeof cur !== 'object') return undefined;
-                cur = part === 'ID' && !Object.hasOwn(cur, 'ID') ? (cur.ROWID ?? cur.rowid) : cur[part];
+                cur = part === 'ID' && !Object.hasOwn(cur, 'ID') ? (cur.ROWID ?? cur.rowid) : clientIndexGet(cur, part);
               }
               return cur;
             },
@@ -2387,14 +2492,9 @@ export function browserShim(fetchImpl) {
               const target = valuesOf(row);
               if (!target || typeof target !== 'object') return value;
               const parts = Array.isArray(path) ? path : [path];
-              let cur = target;
-              for (let i = 0; i < parts.length - 1; i++) {
-                if (!cur[parts[i]] || typeof cur[parts[i]] !== 'object') cur[parts[i]] = {};
-                cur = cur[parts[i]];
-              }
-              cur[parts[parts.length - 1]] = value;
+              const wrote = clientSetPath(target, parts, value);
               // `row.Field = v` in a subform row event shows in that row's cell.
-              const at = rowRefs.get(target);
+              const at = wrote ? rowRefs.get(target) : undefined;
               if (at && at.ctx.form && parts.length === 1) {
                 writeFieldValue(at.ctx.form, `${at.field}.${parts[0]}`, value, at.index);
               }
@@ -2444,22 +2544,17 @@ export function browserShim(fetchImpl) {
               let cur = ctx.record || {};
               for (const part of path) {
                 if (cur == null || typeof cur !== 'object') return undefined;
-                cur = part === 'ID' && !Object.hasOwn(cur, 'ID') ? (cur.ROWID ?? cur.rowid) : cur[part];
+                cur = part === 'ID' && !Object.hasOwn(cur, 'ID') ? (cur.ROWID ?? cur.rowid) : clientIndexGet(cur, part);
               }
               return cur;
             },
             set(ctx, path, value) {
               if (!ctx.record) ctx.record = {};
               const parts = Array.isArray(path) ? path : [path];
-              let cur = ctx.record;
-              for (let i = 0; i < parts.length - 1; i++) {
-                if (!cur[parts[i]] || typeof cur[parts[i]] !== 'object') cur[parts[i]] = {};
-                cur = cur[parts[i]];
-              }
-              cur[parts[parts.length - 1]] = value;
+              const wrote = clientSetPath(ctx.record, parts, value);
               // `input.X = v` is Creator's set-value: the control on the open
               // form shows the script's value, not just ctx.record.
-              const root = ctx && ctx.form;
+              const root = wrote ? ctx && ctx.form : undefined;
               if (root && parts.length) {
                 if (parts.length === 1) writeFieldValue(root, parts[0], value);
                 else if (parts.length >= 2) writeFieldValue(root, `${parts[0]}.${parts[parts.length - 1]}`, value);
@@ -3596,6 +3691,7 @@ export function boot(appModel, doc) {
     if (route.name === 'page') {
       hydrateCharts(main, appModel, view);
       hydratePopups(main, appModel, view);
+      hydrateSnippets(main, appModel, view);
     }
     if (route.name === 'smoke') mountSmoke(appModel, main, view);
     if (route.name === 'report') {

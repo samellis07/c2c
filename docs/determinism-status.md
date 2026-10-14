@@ -101,6 +101,10 @@ clears the app. The count is apps, not items.
       "count": 4
     },
     {
+      "construct": "Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)",
+      "count": 4
+    },
+    {
       "construct": "method:(app identifier)",
       "count": 4
     },
@@ -324,21 +328,14 @@ clears the app. The count is apps, not items.
         "client-condition-uses-server",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 3
+      "items": 2
     },
     {
       "constructs": [
         "client-condition-uses-server",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 3
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 3
+      "items": 4
     },
     {
       "constructs": [
@@ -401,7 +398,7 @@ clears the app. The count is apps, not items.
         "client-condition-uses-server",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 13
+      "items": 14
     },
     {
       "constructs": [
@@ -462,7 +459,7 @@ clears the app. The count is apps, not items.
         "report-criteria",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 7
+      "items": 6
     },
     {
       "constructs": [
@@ -471,6 +468,12 @@ clears the app. The count is apps, not items.
         "Server-side Deluge snippet requires manual translation"
       ],
       "items": 8
+    },
+    {
+      "constructs": [
+        "Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)"
+      ],
+      "items": 1
     },
     {
       "constructs": [
@@ -491,37 +494,37 @@ clears the app. The count is apps, not items.
       "constructs": [
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 1
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 1
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 1
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 1
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation"
-      ],
       "items": 2
     },
     {
       "constructs": [
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 3
+      "items": 1
+    },
+    {
+      "constructs": [
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 1
+    },
+    {
+      "constructs": [
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 1
+    },
+    {
+      "constructs": [
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 1
+    },
+    {
+      "constructs": [
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 1
     },
     {
       "constructs": [

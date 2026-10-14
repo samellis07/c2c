@@ -286,11 +286,11 @@ ${field('Place', 'address', '\t\t\tlatitude\n\t\t\t(\n\t\t\t\ttype = decimal\n\t
   assert.equal(leaves(searchTree).length, 1);
   assert.equal(leaves(searchTree)[0].kind, 'search');
 
-  // A server-side dspZml nests a manual TODO that counts on the page.
+  // A server-side dspZml whose island the compiler cannot prove nests a manual TODO that counts on the page.
   const snippetPage = buildUi(
     appOf(`\tpage Home
 \t{
-\t\tContent="<zml><layout><panel><dspZml name=\\"Snippet\\" value=\\"<% info = 1; %>\\"/></panel></layout></zml>"
+\t\tContent="<zml><layout><panel><dspZml name=\\"Snippet\\" value=\\"<% while (x < 1) { z = 1; } %>\\"/></panel></layout></zml>"
 \t}`),
   );
   assert.equal(snippetPage.model.pages[0].status, 'partial');

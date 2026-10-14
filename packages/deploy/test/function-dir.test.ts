@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
+import { generateUi } from '../../ui/src/generate.js';
 import { decimal } from '../../shims/src/decimal.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from '../src/guards.js';
@@ -1267,5 +1268,30 @@ test('deploy runs install, functions, slate in order and --resume skips finished
   } finally {
     rmSync(dsDir, { recursive: true, force: true });
     rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('an htmlpage endpoint pins parse5 and ships no jsdom', () => {
+  // The generated page endpoints re-parse their HTML through parse5, so a
+  // function tree with htmlpages/ handlers pins the parser. The client-side
+  // DOM library stays a generation-time tool only: it is neither a pinned
+  // dependency nor present in any shipped file.
+  const admin = { name: 'Administrator', type: 'Users_Permissions', properties: [], modules: [], span: { start: 0, end: 0 } };
+  const zml = `<zml><layout><row><column width='100%'><dsp id='hp1'><![CDATA[htmlpage hp1()\ncontent\n<p><%= input.value %></p>]]></dsp></column></row></layout></zml>`;
+  const app: App = deriveIr(
+    parse(`application "Demo"\n{\n\tform Orders\n\t{\n\t\tName\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t}\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tContent=${JSON.stringify(zml)}\n\t\t}\n\t}\n}\n`),
+  );
+  app.profiles.push(admin);
+  const { files, model } = generateUi(app);
+  assert.deepEqual(model.todos, []);
+  const generated = files.filter((file) => file.path.startsWith('functions/'));
+  assert.ok(generated.some((file) => file.path.startsWith('functions/htmlpages/')), 'the app has no htmlpage endpoint');
+  const tree = functionDir(generated, { mode: 'live' });
+  const pkg = JSON.parse(text(tree, 'functions/c2c_api/package.json')) as { dependencies: Record<string, string> };
+  assert.equal(pkg.dependencies.parse5, '7.3.0');
+  assert.equal('jsdom' in pkg.dependencies, false);
+  for (const file of tree) {
+    if (typeof file.data !== 'string') continue;
+    assert.equal(file.data.includes('jsdom'), false, file.path);
   }
 });

@@ -30,6 +30,12 @@ export const FUNCTION_STACK = 'node20';
  * integrity is sha512-+hjLHve+BeQdSd9rt8MgugMrfVKfBO9kZO58e+Uwakmn7SrasqOJDyWffECxMAVfemMPSSQOpRx/aAbghdOQIA==.
  */
 export const FUNCTION_DEPENDENCIES: Readonly<Record<string, string>> = { 'zcatalyst-sdk-node': '3.4.0' };
+/**
+ * Generated htmlpage endpoints re-parse their rendered HTML through parse5
+ * before returning it, so a function that ships htmlpages/ handlers also
+ * pins the parser. Functions without them keep FUNCTION_DEPENDENCIES only.
+ */
+export const HTMLPAGE_DEPENDENCIES: Readonly<Record<string, string>> = { ...FUNCTION_DEPENDENCIES, parse5: '7.3.0' };
 /** The only Catalyst role -> Creator profile mapping. A role named like a profile is not mapped by its name. */
 export const DEFAULT_ROLE_MAP: Readonly<Record<string, string>> = { 'App Administrator': 'Administrator', 'App User': 'User' };
 
@@ -286,13 +292,20 @@ export function functionDir(generated: readonly FunctionFile[], opts: FunctionDi
   });
   inner.push({
     path: 'package.json',
-    data: json({ name: API_FUNCTION, version: '1.0.0', private: true, main: 'index.js', dependencies: FUNCTION_DEPENDENCIES }),
+    data: json({
+      name: API_FUNCTION,
+      version: '1.0.0',
+      private: true,
+      main: 'index.js',
+      dependencies: inner.some((file) => file.path.startsWith('htmlpages/')) ? HTMLPAGE_DEPENDENCIES : FUNCTION_DEPENDENCIES,
+    }),
   });
   // The function ships its lockfile, so the transitive dependencies pinned in
   // packages/deploy/fn/package-lock.json are what deploys — nothing floats.
   // The lock root carries the same name, version, and exact pins as
   // package.json above; the grep gate in test/function-dir.test.ts enforces it.
-  inner.push({ path: 'package-lock.json', data: readFileSync(join(assets, 'package-lock.json'), 'utf8') });
+  const htmlpages = inner.some((file) => file.path.startsWith('htmlpages/'));
+  inner.push({ path: 'package-lock.json', data: readFileSync(join(assets, htmlpages ? 'package-lock-htmlpage.json' : 'package-lock.json'), 'utf8') });
   const paths = inner.map((file) => file.path).sort(byPath);
   inner.push({ path: 'c2c-manifest.json', data: json({ function: API_FUNCTION, files: paths }) });
   return inner

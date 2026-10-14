@@ -493,7 +493,7 @@ test('a page holding a server-side Deluge snippet counts one named UI blocker', 
 {
 \tpage Home
 \t{
-\t\tContent="<zml><layout><panel><dspZml name=\\"Snippet\\" value=\\"<% info = 1; %>\\"/></panel></layout></zml>"
+\t\tContent="<zml><layout><panel><dspZml name=\\"Snippet\\" value=\\"<% while (x < 1) { z = 1; } %>\\"/></panel></layout></zml>"
 \t}
 }
 `),
