@@ -16,7 +16,7 @@ const factsDir = path.join(repo, 'plugin', 'references', 'facts');
 const file = path.join(factsDir, 'projects.md');
 
 const EVIDENCE_LABEL = /\[[A-Z][A-Z0-9 -]{1,14}\]/;
-const RULE_LABEL = /^Rule: .*\[(DOC|CLI|MCP-LISTED|TESTED|UNVERIFIED)\]/m;
+const RULE_LABEL = /^Rule: .*\[(DOC|CLI|MCP-LISTED|TESTED|UNVERIFIED)\]\s*$/;
 const ALLOWED_LABEL = /\[(DOC|CLI|MCP-LISTED|TESTED|UNVERIFIED)\]/g;
 const FIELD_LABEL = /^\s*[-*]?\s*\*{0,2}(status|evidence|verified|source|date)\s*\*{0,2}\s*:/im;
 const ISO_DATE = /\b20\d\d-\d\d-\d\d\b/;
@@ -77,9 +77,14 @@ test('rule headings are unique and each rule has a Rule: line or a recipe', () =
     const hasRuleLine = /^Rule:/m.test(section.body);
     const hasRecipe = /\b(GET|POST|PUT|PATCH|DELETE)\s+\/?[\w/<>?&=.-]+|catalyst \w/m.test(section.body);
     assert.ok(hasRuleLine || hasRecipe, `rule "${section.heading}" has no Rule: line and no recipe`);
-    if (hasRuleLine) {
-      assert.match(section.body, RULE_LABEL, `${section.heading} Rule: line lacks an evidence label`);
-    }
+  }
+});
+
+test('every Rule: line has an evidence label', () => {
+  const ruleLines = text().split('\n').filter((line) => /^Rule:/.test(line));
+  assert.ok(ruleLines.length > 0, 'expected at least one Rule: line');
+  for (const line of ruleLines) {
+    assert.match(line, RULE_LABEL, `Rule: line lacks a trailing evidence label: ${line}`);
   }
 });
 
