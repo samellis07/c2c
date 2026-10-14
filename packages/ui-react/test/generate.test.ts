@@ -386,21 +386,20 @@ test('route chunk budgets allow a 5% gzip increase and reject larger growth', ()
   const budgets = { version: 1, tolerance: ROUTE_CHUNK_BUDGETS.tolerance, samples: [], chunks: { 'runtime.js': 100 } };
   assert.deepEqual(chunkBudgetProblems({ 'assets/runtime.ABCDEFGH.js': 105 }, budgets), [], 'exactly 5% is allowed');
   assert.match(chunkBudgetProblems({ 'assets/runtime.ABCDEFGH.js': 106 }, budgets)[0]!, /over its 100 byte budget by more than 5%/);
-  assert.deepEqual(chunkBudgetProblems({}, budgets), [], 'unrelated generated apps may emit different chunk sets');
 });
 
 test('an emitted chunk with no budget entry fails, named with its size', () => {
   const budgets = { version: 1, tolerance: ROUTE_CHUNK_BUDGETS.tolerance, samples: [], chunks: { 'runtime.js': 100 } };
-  for (const strict of [false, true]) {
-    const problems = chunkBudgetProblems({ 'assets/unexpected.ABCDEFGH.js': 20 }, budgets, strict);
-    assert.match(problems[0]!, /unbudgeted route chunk unexpected\.js \(20 bytes gzipped\)/);
-  }
+  assert.match(
+    chunkBudgetProblems({ 'assets/runtime.Ab1Cd2Ef.js': 100, 'assets/unexpected.Xy9Zw8Vu.js': 20 }, budgets)[0]!,
+    /unbudgeted route chunk unexpected\.js \(20 bytes gzipped\)/,
+  );
+  assert.match(chunkBudgetProblems({}, budgets).join(' '), /missing budgeted route chunk runtime.js/);
   assert.deepEqual(
-    chunkBudgetProblems({ 'assets/runtime.ABCDEFGH.js': 100 }, budgets),
+    chunkBudgetProblems({ 'assets/runtime.Ab1Cd2Ef.js': 100 }, budgets),
     [],
     'every emitted chunk budgeted and inside tolerance passes',
   );
-  assert.match(chunkBudgetProblems({}, budgets, true).join(' '), /missing budgeted route chunk runtime.js/);
 });
 
 test('the committed route chunk budgets record the two sample apps and are self-consistent', () => {

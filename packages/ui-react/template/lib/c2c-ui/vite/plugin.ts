@@ -10,10 +10,12 @@
  *    scorer does exactly that.
  * 2. Bundle budget. Gzipped JavaScript the entry loads eagerly (entry, model
  *    and the chunks they statically import) plus all CSS must stay under the
- *    budget, or the build fails. Every emitted chunk must also match an entry
- *    in route-chunk-budgets.json (compared by its stable route name, without
- *    the content hash): an unbudgeted or over-budget chunk fails the build
- *    with the chunk name and size. dist/c2c-build.json records the sizes.
+ *    budget, or the build fails. For the sample apps in
+ *    route-chunk-budgets.json (built with C2C_BUDGET_STRICT=1) every emitted
+ *    chunk must also match a budget entry by its stable route name, without
+ *    the content hash: an unbudgeted, over-budget or missing chunk fails the
+ *    build with the chunk name and size. dist/c2c-build.json records the
+ *    sizes.
  * 3. Offline. dist/sw.js is the c2c service worker (same rules as the vanilla
  *    target: network-first shell, cache-first hashed assets, never the sign-in,
  *    SDK or API paths) with this build's precache list and cache id.
@@ -60,13 +62,20 @@ export const ROUTE_CHUNK_BUDGETS: RouteChunkBudgets = JSON.parse(
 ) as RouteChunkBudgets;
 
 function stableChunkName(fileName: string): string {
-  return fileName.replace(/\.[A-Z0-9_-]{8}(?=\.(?:js|css)$)/, '');
+  return fileName.replace(/\.[A-Za-z0-9_-]{8}(?=\.(?:js|css)$)/, '');
 }
 
+/**
+ * The strict per-chunk gate, applied to the budget file's sample apps. Every
+ * emitted chunk must have a budget entry (matched by stable route name, not
+ * the content hash), every budgeted chunk must be emitted, and no chunk may
+ * exceed its budget by more than `tolerance`. Arbitrary apps are not gated
+ * per chunk — their chunk mix differs from the samples by design; the
+ * aggregate DEFAULT_BUDGET ceiling still applies to every build.
+ */
 export function chunkBudgetProblems(
   sizes: Record<string, number>,
   budgets: RouteChunkBudgets = ROUTE_CHUNK_BUDGETS,
-  requireComplete = false,
 ): string[] {
   const stableSizes = Object.fromEntries(Object.entries(sizes).map(([name, size]) => [stableChunkName(name.split('/').pop() ?? name), size]));
   const problems: string[] = [];
@@ -78,10 +87,8 @@ export function chunkBudgetProblems(
       problems.push(`${name} is ${actual} bytes gzipped, over its ${limit} byte budget by more than 5%`);
     }
   }
-  if (requireComplete) {
-    for (const name of Object.keys(budgets.chunks).sort()) {
-      if (stableSizes[name] === undefined) problems.push(`missing budgeted route chunk ${name}`);
-    }
+  for (const name of Object.keys(budgets.chunks).sort()) {
+    if (stableSizes[name] === undefined) problems.push(`missing budgeted route chunk ${name}`);
   }
   return problems;
 }
@@ -165,8 +172,8 @@ export function c2cBuild(opts: { budget?: Budget; swTemplate: string }): Plugin 
         } else css += gz;
       }
       // C2C_BUDGET_STRICT=1 (set by tools/ui-react-check.mjs for the budget
-      // file's `samples`) also fails the build when a budgeted chunk is absent.
-      problems.push(...chunkBudgetProblems(sizes, ROUTE_CHUNK_BUDGETS, process.env.C2C_BUDGET_STRICT === '1'));
+      // file's `samples`) gates every emitted chunk against the budgets.
+      if (process.env.C2C_BUDGET_STRICT === '1') problems.push(...chunkBudgetProblems(sizes));
       if (js > budget.js) problems.push(`JavaScript is ${js} bytes gzipped, over the ${budget.js} byte budget`);
       if (css > budget.css) problems.push(`CSS is ${css} bytes gzipped, over the ${budget.css} byte budget`);
       const styles = Object.values(bundle).filter((file) => file.type === 'asset' && file.fileName.endsWith('.css')).map((file) => file.fileName).sort();
