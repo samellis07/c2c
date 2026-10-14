@@ -565,6 +565,7 @@ const CONFIG_BLOCKS = new Set([
   'preference',
   'theme',
   'connections',
+  'configuration',
   'reports configuration',
   'datasources',
   'variables',

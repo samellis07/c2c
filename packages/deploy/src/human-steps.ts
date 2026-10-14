@@ -18,6 +18,11 @@ export interface HumanChecklistInput {
    * item; the rest keep contiguous numbering.
    */
   slateStarted?: boolean;
+  /**
+   * Third-party secret keys declared on connections that need manual user entry in function-env.json.
+   * Listed as at most ONE item naming the keys; secret values are kept out of chat and logs.
+   */
+  connectionSecretKeys?: readonly string[];
 }
 
 /** The ordered items. Numbering is the formatter's job, so callers can store this list verbatim. */
@@ -35,6 +40,13 @@ export function humanChecklist(input: HumanChecklistInput): string[] {
   if (input.sendsMail) {
     items.push(
       'Verify the sender email (the app sends mail): Catalyst console → Mail → Email Configuration → add the sender address — the service mails a verification code to that address; enter it.',
+    );
+  }
+  if (input.connectionSecretKeys && input.connectionSecretKeys.length > 0) {
+    items.push(
+      input.connectionSecretKeys.length === 1
+        ? `Fill connection secret in function-env.json (${input.connectionSecretKeys[0]}): keep secret values out of chat and logs.`
+        : `Fill connection secrets in function-env.json (${input.connectionSecretKeys.join(', ')}): keep secret values out of chat and logs.`,
     );
   }
   return items;

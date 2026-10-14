@@ -25,6 +25,7 @@ import { API_FUNCTION, FUNCTION_DIR, envVariables } from './function-dir.js';
 import { buildDeploy, commandLine, deployFiles, migrateCatalystJson, writeDeployTree, type DeployCommand, type DeployFile, type DeployUi } from './plan.js';
 import { asyncLaneBlocker } from './events.js';
 import { humanChecklist } from './human-steps.js';
+import { readConnectionSecretKeys } from './function-env.js';
 import { CONSOLE_SERVICES, formatPostDeploySteps, postDeploySteps, servicesTouched, type ConsoleService, type PostDeployStep } from './post-deploy.js';
 import { appTimeZone, generateUi, slateConfigSource } from '../../ui/src/generate.js';
 import { emptyRegistry, type ProjectRegistry } from './registry.js';
@@ -1049,7 +1050,12 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
           ...(op.detail ? { message: op.detail } : {}),
         })),
         postDeploySteps: steps,
-        humanChecklist: humanChecklist({ slate: services.includes('Web Client Hosting (Slate)'), sendsMail: bundle.sendsMail, slateStarted }),
+        humanChecklist: humanChecklist({
+          slate: services.includes('Web Client Hosting (Slate)'),
+          sendsMail: bundle.sendsMail,
+          slateStarted,
+          connectionSecretKeys: readConnectionSecretKeys(cwd),
+        }),
         // appUrl prefers the deploy output's "App Url:"; the Slate API read-back is the fallback source.
         slate: { ...(slateUrl ?? state.slateUrl ? { appUrl: slateUrl ?? state.slateUrl } : {}), ...(slateNotice ? { notice: slateNotice } : {}) },
         // The function base the app calls (what `c2c smoke --owner-session --url` takes).
