@@ -153,6 +153,31 @@ test('form schedules share one sweeper Job with a Periodic cron, a checkpoint ta
   assert.deepEqual(again.files.map((f) => [f.path, f.source]), g.files.map((f) => [f.path, f.source]));
 });
 
+test('a form schedule over a form with decimal columns passes them to the sweep spec', () => {
+  const g = generate(
+    snippet(`\tform Invoice
+\t{
+\t\tDue_Date
+\t\t(
+\t\t\ttype = date
+\t\t)
+\t\tAmount
+\t\t(
+\t\t\ttype = decimal
+\t\t)
+\t}
+\tworkflow
+\t{
+\t\tschedule
+\t\t{
+${schedule('Due_Reminder', ['form = Invoice[Amount < 10]', 'start = before 1 days from Due_Date at "09:00:00"', ZONE], 'x = 1;')}
+\t\t}
+\t}`),
+  );
+  const due = file(g, 'functions/job/due-reminder.mjs')!.source;
+  assert.match(stripComments(due), /"decimalColumns":\{"Amount":\{"shadow":"Amount__n","scale":2\}\}/);
+});
+
 test('a payment-named form schedule is a payment stub, never a sweep, and plans no checkpoint table', () => {
   const ir = appWith([
     `\t\t\t"Payment Reminder"

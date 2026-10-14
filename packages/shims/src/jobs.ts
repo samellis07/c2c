@@ -24,7 +24,7 @@
  * injected by the generated Job function, and only in live deploy mode.
  */
 import { DelugeDate, addDays, addMonths, asDate, epochMillis, partsInZone } from './date.js';
-import { compileCriteria, type Criteria } from './criteria.js';
+import { compileCriteria, exactFilter, type Criteria, type DecimalColumns } from './criteria.js';
 
 export const SWEEP_PAGE_ROWS = 300;
 
@@ -46,6 +46,7 @@ export interface FormScheduleSpec {
   end?: string;
   criteria?: Criteria;
   timeZone: string;
+  decimalColumns?: DecimalColumns;
 }
 
 export interface SweepCheckpoint {
@@ -193,7 +194,7 @@ export function sweepWhere(spec: FormScheduleSpec, from: number, until: number, 
   } else {
     parts.push(`${spec.field} >= ${literal(fieldDay(from, spec, -2), spec.fieldType, false)}`, `${spec.field} <= ${hi}`);
   }
-  if (spec.criteria && spec.criteria.op !== 'true') parts.push(`(${compileCriteria(spec.criteria)})`);
+  if (spec.criteria && spec.criteria.op !== 'true') parts.push(`(${compileCriteria(spec.criteria, undefined, spec.decimalColumns)})`);
   if (cursor) parts.push(`ROWID > ${cursor}`);
   return parts.join(' AND ');
 }
@@ -210,6 +211,7 @@ export async function sweepFormSchedules(opts: SweepOptions): Promise<SweepRepor
     let cursor = saved?.pending ? saved.pending.cursor : '';
     const item: SweepScheduleReport = { name: spec.name, from, until, pages: 0, fired: 0, done: false };
     report.schedules.push(item);
+    const exact = spec.criteria && spec.decimalColumns ? exactFilter(spec.criteria, spec.decimalColumns) : null;
     for (;;) {
       if (clock() >= opts.deadline) {
         await opts.checkpoints.put(spec.name, { watermark: from, pending: { until, cursor } });
@@ -220,6 +222,7 @@ export async function sweepFormSchedules(opts: SweepOptions): Promise<SweepRepor
       item.pages++;
       for (const row of page) {
         if (!firesIn(spec, row, from, until)) continue;
+        if (exact && !exact(row)) continue;
         await opts.fire(spec, row);
         item.fired++;
       }

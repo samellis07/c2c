@@ -34,6 +34,7 @@ import {
 import { epochMillis, parseLiteral, type DelugeDate } from '../../shims/src/date.js';
 import type { FormScheduleSpec, OffsetUnit, Repeat } from '../../shims/src/jobs.js';
 import { jobPoolName } from '../../shims/src/runtime.js';
+import { decimalColumnsOf } from './generate.js';
 
 export const SWEEP_PERIOD_MINUTES = 5;
 /** Below the period, so two sweeps never overlap. Job functions allow 15 min. */
@@ -146,6 +147,7 @@ function planForm(app: App, w: Workflow, name: string, form: string, criteria: F
   const unit = (m[3] ? m[3].replace(/s?$/, 's') : 'days') as OffsetUnit;
   const amount = m[2] ? Number(m[2]) * (m[1] === 'before' ? -1 : 1) : 0;
   const at = m[5] ? `${m[5].padStart(2, '0')}:${m[6]}:${m[7] ?? '00'}` : undefined;
+  const decimals = decimalColumnsOf(app)[form];
   const sweep: FormScheduleSpec = {
     name,
     form,
@@ -156,6 +158,7 @@ function planForm(app: App, w: Workflow, name: string, form: string, criteria: F
     ...(frequency ? { repeat: frequency as Repeat } : {}),
     ...(end ? { end } : {}),
     ...(criteria ? { criteria } : {}),
+    ...(decimals && Object.keys(decimals).length ? { decimalColumns: decimals } : {}),
     timeZone: zone,
   };
   return { kind: 'form', module, sweep, gap: null };

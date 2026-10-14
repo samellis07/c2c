@@ -172,3 +172,33 @@ test('datastoreCheckpoints inserts once, then updates the same row', async () =>
   assert.equal(tables.get('C2CJobCheckpoint')!.length, 1);
   assert.deepEqual(await store.get("it's"), { watermark: 2, pending: { until: 3, cursor: '9' } });
 });
+
+test('a schedule criteria Amount < 10 over rows 9.5 and 10.5 selects only 9.5', async () => {
+  const spec: FormScheduleSpec = {
+    ...due,
+    criteria: { op: '<', field: 'Amount', value: 10 },
+    decimalColumns: { Amount: { shadow: 'Amount__n', scale: 2 } },
+  };
+  const where = sweepWhere(spec, at('2026-10-09T08:55:00Z'), at('2026-10-09T09:00:00Z'), '');
+  assert.match(where, /Amount__n <= 10\.01/);
+
+  const { datastore } = mockDatastore({ Invoice: ['ROWID', 'Amount__n'] });
+  await datastore.insert('Invoice', [
+    { Due_Date: '2026-10-10', Name: 'under', Amount: '9.5', Amount__n: 9.5 },
+    { Due_Date: '2026-10-10', Name: 'over', Amount: '10.5', Amount__n: 10.5 },
+  ]);
+  const checkpoints = memoryCheckpoints();
+  const fired: unknown[] = [];
+  const report = await sweepFormSchedules({
+    schedules: [spec],
+    query: datastore.query,
+    checkpoints,
+    now: at('2026-10-09T09:02:00Z'),
+    periodMs: 300_000,
+    deadline: at('2026-10-09T09:06:00Z'),
+    clock: () => at('2026-10-09T09:02:00Z'),
+    fire: async (_s, row) => fired.push(row.Name),
+  });
+  assert.equal(report.done, true);
+  assert.deepEqual(fired, ['under']);
+});
