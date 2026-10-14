@@ -150,7 +150,64 @@ test('the checklist counts generated and manual calls and names the manual conne
   const report = analyzeConnections(demo);
   const checklist = connectionsChecklist('Demo_App', report);
   assert.match(checklist, /Integration coverage \(2 detected calls\)/);
-  assert.match(checklist, /Generated calls: 1\. Manual integration calls: 1\. Manual connection setup steps: 2/);
+  assert.match(checklist, /Generated calls: 1\. Adapter-backed calls: 0\. Manual integration calls: 1\. Manual connection setup steps: 1/);
   assert.match(checklist, /`sms\.send` in Notify \(on success\): connection `fs_sms`; service unknown \(identify by hand\); scope not derivable/);
   assert.match(checklist, /`crm\.createRecord` in Notify \(on success\)/);
+});
+
+const KINDS_SCRIPT = [
+  'a = zoho.crm.createRecord("Leads", {"Last_Name":"x"}, Map(), "lnk_crm");',
+  'b = zoho.desk.create("7000", "tickets", {"subject":"s"}, "lnk_desk");',
+  'c = zoho.books.createRecord("contacts", "900", {"name":"n"}, "lnk_books");',
+  'd = zoho.cliq.postToChannel("general", "hi", "lnk_cliq");',
+  'e = invokeurl[url: "https://www.zohoapis.in/crm/v7/Leads" type: GET connection: "lnk_crm"];',
+  'f = invokeurl[url: "https://example.test/hook" type: GET];',
+  'g = zoho.sms.send("template", "123", "lnk_sms");',
+].join(' ');
+
+function kindsApp(): App {
+  return app({
+    workflows: [workflow({ name: 'Kinds', form: 'Orders', event: 'on success', deluge: { text: KINDS_SCRIPT, span: Z } })],
+  });
+}
+
+test('each call kind lands in its own coverage bucket with the right connection and scope', () => {
+  const report = analyzeConnections(kindsApp());
+  const byLink = new Map(report.entries.map((e) => [e.configKey, e]));
+  assert.deepEqual([...byLink.keys()].sort(), ['default:unknown', 'lnk_books', 'lnk_cliq', 'lnk_crm', 'lnk_desk', 'lnk_sms']);
+  assert.deepEqual(byLink.get('lnk_crm')!.scopes, ['ZohoCRM.modules.leads.CREATE', 'ZohoCRM.modules.leads.READ']);
+  assert.deepEqual(byLink.get('lnk_desk')!.scopes, ['Desk.tickets.CREATE']);
+  assert.deepEqual(byLink.get('lnk_books')!.scopes, ['ZohoBooks.contacts.CREATE']);
+  assert.deepEqual(byLink.get('lnk_cliq')!.scopes, ['ZohoCliq.Webhooks.CREATE']);
+  assert.equal(byLink.get('lnk_crm')!.serviceName, 'Zoho CRM');
+  assert.equal(byLink.get('lnk_desk')!.serviceName, 'Zoho Desk');
+  assert.equal(byLink.get('lnk_books')!.serviceName, 'Zoho Books');
+  assert.equal(byLink.get('lnk_cliq')!.serviceName, 'Zoho Cliq');
+  const checklist = connectionsChecklist('Demo_App', report);
+  assert.match(checklist, /Integration coverage \(7 detected calls\)/);
+  // 4 generated (crm/desk/books/cliq adapters), 1 adapter-backed (connected
+  // invokeurl), 2 manual (connectionless invokeurl + sms.send with no adapter).
+  assert.match(checklist, /Generated calls: 4\. Adapter-backed calls: 1\. Manual integration calls: 2\. Manual connection setup steps: 3/);
+  assert.match(checklist, /### Adapter-backed calls \(configure the connection\)/);
+  assert.match(checklist, /`invokeurl GET` in Kinds \(on success\): connection `lnk_crm`; service Zoho CRM; scope `ZohoCRM\.modules\.leads\.READ`/);
+  assert.match(checklist, /`invokeurl GET` in Kinds \(on success\): connection `default:unknown`/);
+  assert.match(checklist, /`sms\.send` in Kinds \(on success\): connection `lnk_sms`/);
+});
+
+test('dropping a call from the report changes the coverage counts (mutation guard)', () => {
+  const report = analyzeConnections(kindsApp());
+  const drop = (task: string) => {
+    const entries = report.entries
+      .map((e) => ({ ...e, uses: e.uses.filter((u) => u.task !== task) }))
+      .filter((e) => e.uses.length);
+    return connectionsChecklist('Demo_App', { ...report, entries });
+  };
+  // A manual call dropped: the manual and setup counts fall with the total.
+  assert.match(drop('sms.send'), /Integration coverage \(6 detected calls\)/);
+  assert.match(drop('sms.send'), /Manual integration calls: 1\. Manual connection setup steps: 2/);
+  // An adapter-backed call dropped: the adapter-backed bucket empties.
+  assert.match(drop('invokeurl GET'), /Integration coverage \(5 detected calls\)/);
+  assert.match(drop('invokeurl GET'), /Generated calls: 4\. Adapter-backed calls: 0\. Manual integration calls: 1\. Manual connection setup steps: 1/);
+  // A generated call dropped: only the generated count falls.
+  assert.match(drop('desk.create'), /Generated calls: 3\. Adapter-backed calls: 1\. Manual integration calls: 2\. Manual connection setup steps: 3/);
 });
