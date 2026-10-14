@@ -158,6 +158,59 @@ test('convertSyntheticSeed refuses flattened-table collisions instead of merging
   );
 });
 
+test('convertSyntheticSeed keeps Order__Lines when every row shares that one source', () => {
+  const converted = convertSyntheticSeed({
+    app_name: 'orders',
+    forms: {
+      Product: [{ SKU: 'a' }, { SKU: 'b' }],
+      Order: [
+        { Lines: [{ $ref: 'Product', key: 'SKU', index: 0 }, { $ref: 'Product', key: 'SKU', index: 1 }] },
+        { Lines: [{ $ref: 'Product', key: 'SKU', index: 1 }] },
+      ],
+    },
+  }, { today: '2026-01-15' });
+  assert.deepEqual(converted.Order__Lines, [
+    { c2c_source_id: 'Order__Lines#1#1', parent_id: 'Order#1', row_order: '0', Lines: 'Product#1' },
+    { c2c_source_id: 'Order__Lines#1#2', parent_id: 'Order#1', row_order: '1', Lines: 'Product#2' },
+    { c2c_source_id: 'Order__Lines#2#1', parent_id: 'Order#2', row_order: '0', Lines: 'Product#2' },
+  ]);
+  const reordered = convertSyntheticSeed({
+    app_name: 'orders',
+    forms: {
+      Product: [{ SKU: 'a' }, { SKU: 'b' }],
+      Order: [{ Lines: [
+        { $ref: 'Product', key: 'SKU', index: 1 },
+        { $ref: 'Product', key: 'SKU', index: 0 },
+      ] }],
+    },
+  }, { today: '2026-01-15' });
+  assert.deepEqual(reordered.Order__Lines?.map((row) => [row.row_order, row.Lines]), [
+    ['0', 'Product#2'],
+    ['1', 'Product#1'],
+  ]);
+  const dropped = convertSyntheticSeed({
+    app_name: 'orders',
+    forms: {
+      Product: [{ SKU: 'a' }, { SKU: 'b' }],
+      Order: [{ Lines: [{ $ref: 'Product', key: 'SKU', index: 0 }] }],
+    },
+  }, { today: '2026-01-15' });
+  assert.deepEqual(dropped.Order__Lines?.map((row) => row.c2c_source_id), ['Order__Lines#1#1']);
+});
+
+test('convertSyntheticSeed refuses two sources that write one generated table name', () => {
+  assert.throws(
+    () => convertSyntheticSeed({
+      app_name: 'two-sources',
+      forms: {
+        A: [{ 'B__C': [{ N: 1 }] }],
+        'A__B': [{ C: [{ N: 2 }] }],
+      },
+    }, { today: '2026-01-15' }),
+    /A__B__C.*collides with another table/,
+  );
+});
+
 test('convertSyntheticSeed explodes multi-lookup arrays to Form__Field junction rows', () => {
   const converted = convertSyntheticSeed(
     {
