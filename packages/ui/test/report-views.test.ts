@@ -126,6 +126,9 @@ test('kanban with nothing to group is a counted manual TODO without an invented 
   assert.equal(bare.status, 'todo');
   assert.match(bare.todo ?? '', /needs a group-by field or a dropdown column/);
   assert.equal(bare.groupField, undefined);
+  assert.deepEqual(model.todos.filter((item) => item.area === 'report' && item.name === 'Bare'), [
+    { area: 'report', name: 'Bare', reason: bare.todo },
+  ]);
   const { runtime } = await bootReport(model, 'Bare', [{ Title: 'A', Note: 'B' }]);
   assert.doesNotThrow(() => runtime.renderReport(bare));
 });
