@@ -51,7 +51,7 @@ The same tokens are committed as a standalone stylesheet, `packages/ui/tokens/c2
 
 `packages/ui/test/visual-baseline.json` pins the computed styles of key shell, form and report elements for three apps, plus themed and dark variants, at 1440 and 390 px. The test boots the generated shell and runtime in jsdom against a fake data API. It resolves media widths, custom properties and selector specificity itself, so no browser is involved. When a visual change is intended, run `C2C_UPDATE_VISUAL_BASELINE=1 npm test` and review the JSON diff with the change.
 
-`packages/ui/test/visual-pages.json` does the same for the page surfaces: the first list report and the first report with sample rows loaded (table cells, card rows, toolbar and pagination), the first form, and the first ZML page (layout containers, panels, KPI tiles and embeds) for every app that has one. Single lengths pass inside half a css px; every other value must match exactly. The same `C2C_UPDATE_VISUAL_BASELINE=1` regenerates it.
+`packages/ui/test/visual-pages.json` does the same for the page surfaces: the first list report and the first report with sample rows loaded (table cells, card rows, toolbar and pagination), the first form, each generated report view (kanban, calendar and timeline board lanes; summary, spreadsheet, map and pivot grids), and the first ZML page (layout containers, panels, KPI tiles and embeds) for every app that has one, plus the rail-theme and dark variants of the page-bearing app. Single lengths pass inside half a css px; every other value must match exactly. The same `C2C_UPDATE_VISUAL_BASELINE=1` regenerates it.
 
 ## Auth
 

@@ -1,9 +1,11 @@
 /**
- * Visual regression baseline for the generated page surfaces of three apps:
- * the first list report with rows loaded, the first form, the first report,
- * and the first ZML page where the app has one — at desktop (1440 px) and
- * phone (390 px) widths, reading the computed styles of shell, list, form
- * and page elements (see visual-snapshot.ts).
+ * Visual regression baseline for the generated page surfaces: the first
+ * list report with rows loaded, the first form, the first report, the first
+ * ZML page where the app has one, each generated report view (kanban,
+ * calendar, timeline, summary, spreadsheet, map, pivot), and the themed
+ * and dark variants of the page-bearing app — at desktop (1440 px) and
+ * phone (390 px) widths, reading the computed styles of shell, list, form,
+ * board and page elements (see visual-snapshot.ts).
  *
  * The baseline lives in visual-pages.json next to this file. Compared
  * values match exactly except for single lengths, which pass inside
@@ -18,7 +20,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { deriveIr, parse } from '../../core/src/index.js';
-import { KEY_ELEMENTS, PAGE_ELEMENTS, snapshotApp, type Snapshot } from './visual-snapshot.js';
+import { KEY_ELEMENTS, PAGE_ELEMENTS, snapshotApp, type Snapshot, type SnapshotOptions } from './visual-snapshot.js';
 
 const FREIGHT = 'fixtures/redistributable/freight-forwarding/Creator_app_source_code.ds';
 const LIBRARY = 'fixtures/redistributable/library-application-system/library_application.ds';
@@ -27,14 +29,73 @@ const GOLDEN = 'tests/golden/c2c-golden.ds';
 /** Sample rows the fake data API answers every report query with. */
 const SAMPLE_ROWS = 3;
 
-/** Snapshot name -> source app and the screens it is expected to render. */
-export const PAGE_APPS: Record<string, { path: string; screens: string[] }> = {
+function field(name: string, type: string, extra = ''): string {
+  return `\t\t${name}\n\t\t(\n\t\t\ttype = ${type}${extra ? `\n${extra}` : ''}\n\t\t)`;
+}
+
+function viewReport(kind: string, name: string, options: string, extra = ''): string {
+  return `\t${kind} ${name}
+\t{
+\t\tshow all rows from Booking
+\t\t(
+\t\t\tGuest
+\t\t\tRoom
+\t\t)
+${extra}\t\toptions
+\t\t(
+${options
+  .split('\n')
+  .filter(Boolean)
+  .map((line) => `\t\t\t${line}`)
+  .join('\n')}
+\t\t)
+\t}`;
+}
+
+/**
+ * One form plus one generated report per non-list view, so the baseline can
+ * pin each view's markup. The committed app corpus paints only list and
+ * kanban, so calendar, timeline, summary, spreadsheet, map and pivot come
+ * from this small fixture.
+ */
+const VIEWS_SOURCE = `application "Views"
+{
+\tform Booking
+\t{
+${field('Guest', 'text')}${field('Room', 'text')}${field('Status', 'picklist', '\t\t\tvalues = {"Open","Done"}')}${field('Product', 'picklist', '\t\t\tvalues = {"A","B"}')}${field('Check_In', 'datetime')}${field('Check_Out', 'datetime')}${field('Lat', 'decimal')}${field('Lng', 'decimal')}
+\t}
+${viewReport('calendar', 'Cal', 'display field = Room\nstart date = Check_In\nend date = Check_Out')}
+${viewReport('timeline', 'Line', 'display field = Guest\nstart date = Check_In')}
+${viewReport('summary', 'Sum', '')}
+${viewReport('spreadsheet', 'Sheet', '')}
+${viewReport('map', 'Map', '')}
+${viewReport('pivottable', 'Piv', '', '\t\tgroup by\n\t\t(\n\t\t\tProduct\n\t\t)\n')}
+}
+`;
+
+const VIEWS_SCREENS = ['view:calendar', 'view:timeline', 'view:summary', 'view:spreadsheet', 'view:map', 'view:pivot'];
+
+/** Snapshot name -> source app, any forced <html> attributes, and the screens it is expected to render. */
+export const PAGE_APPS: Record<string, { path?: string; source?: string; opts?: SnapshotOptions; screens: string[] }> = {
   'freight-forwarding': { path: FREIGHT, screens: ['list', 'form', 'report'] },
-  'library-application-system': { path: LIBRARY, screens: ['list', 'form', 'report', 'page'] },
+  'library-application-system': { path: LIBRARY, screens: ['list', 'form', 'report', 'page', 'view:kanban'] },
   golden: { path: GOLDEN, screens: ['form'] },
+  views: { source: VIEWS_SOURCE, screens: VIEWS_SCREENS },
+  // The same app re-skinned with a rail-menu theme palette, and the dark
+  // colour scheme — the variants the shell baseline already pins.
+  'library-application-system@theme-9': {
+    path: LIBRARY,
+    opts: { rootAttrs: { 'data-theme': '9', 'data-menu': 'rail' } },
+    screens: ['list', 'form', 'report', 'page', 'view:kanban'],
+  },
+  'library-application-system@dark': {
+    path: LIBRARY,
+    opts: { rootAttrs: { 'data-color-scheme': 'dark' } },
+    screens: ['list', 'form', 'report', 'page', 'view:kanban'],
+  },
 };
 
-const SCREENS = ['list', 'form', 'report', 'page'];
+const SCREENS = ['list', 'form', 'report', 'page', ...VIEWS_SCREENS, 'view:kanban'];
 const ELEMENTS = [...KEY_ELEMENTS, ...PAGE_ELEMENTS];
 const BASELINE = join(process.cwd(), 'packages/ui/test/visual-pages.json');
 
@@ -59,9 +120,9 @@ export function sameValue(want: unknown, got: unknown): boolean {
 
 async function current(): Promise<Record<string, Snapshot>> {
   const out: Record<string, Snapshot> = {};
-  for (const [name, { path }] of Object.entries(PAGE_APPS)) {
-    const app = deriveIr(parse(readFileSync(join(process.cwd(), path), 'utf8')));
-    out[name] = await snapshotApp(app, { screens: SCREENS, elements: ELEMENTS, rows: SAMPLE_ROWS });
+  for (const [name, { path, source, opts }] of Object.entries(PAGE_APPS)) {
+    const app = deriveIr(parse(source ?? readFileSync(join(process.cwd(), path!), 'utf8')));
+    out[name] = await snapshotApp(app, { screens: SCREENS, elements: ELEMENTS, rows: SAMPLE_ROWS, ...opts });
   }
   return out;
 }
@@ -76,7 +137,7 @@ function diff(want: unknown, got: unknown, path: string, out: string[]): void {
   for (const key of [...keys].sort()) diff((want as Record<string, unknown>)[key], (got as Record<string, unknown>)[key], `${path}/${key}`, out);
 }
 
-test('visual pages: list, form, report (and page) screens of three apps x 1440/390 px match the recorded computed styles', async () => {
+test('visual pages: list, form, report, page and report-view screens (plus themed and dark variants) x 1440/390 px match the recorded computed styles', async () => {
   const got = await current();
   if (process.env.C2C_UPDATE_VISUAL_BASELINE === '1') {
     writeFileSync(BASELINE, JSON.stringify(got, null, 1) + '\n');
@@ -110,6 +171,16 @@ test('visual pages: the snapshot covers every expected screen with shell, popula
         assert.ok(page['article[data-page] [data-zml]'], `${app}: page layout elements not captured at ${width}`);
         assert.ok(page['article[data-page] [data-zml="panel"]'], `${app}: page panels not captured at ${width}`);
         assert.ok(page['article[data-page] .kpi'], `${app}: page KPI tiles not captured at ${width}`);
+      }
+      for (const screen of screens) {
+        const view = /^view:(.+)$/.exec(screen);
+        if (!view) continue;
+        const shot = shots[`${screen}@${width}`]!;
+        if (view[1] === 'kanban' || view[1] === 'calendar' || view[1] === 'timeline') {
+          assert.ok(shot['[data-board]'] && shot['[data-board] [data-lane]'], `${app}: ${screen} board lanes not captured at ${width}`);
+        } else {
+          assert.ok(shot['section[data-report]'] && shot['tbody tr'] && shot['td'], `${app}: ${screen} rows not captured at ${width}`);
+        }
       }
     }
   }
