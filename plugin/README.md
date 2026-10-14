@@ -8,7 +8,7 @@ c2c converts a Zoho Creator app (`.ds` export plus its records) into a Zoho Cata
 2. **The Catalyst CLI** ≥ 1.27.2, signed in (`catalyst login --dc <your dc>`) to the same org and data centre.
 3. **Node.js 20 or 22** (`>=20.20 <23`; 20.20.1 recommended).
 4. A Creator `.ds` export of your app (and, to move data, CSV exports of its reports).
-5. A free Catalyst project slot (one project per migrated app; an account allows 50).
+5. A free Catalyst project slot (one project per migrated app; an account allows 50 projects [DOC](https://docs.catalyst.zoho.com/en/cli/v1/initialize-resources/initialize-new-project/)).
 
 ## Install
 

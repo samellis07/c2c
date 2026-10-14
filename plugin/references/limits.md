@@ -150,7 +150,7 @@ Value: unpublished number and window; `403 API_LIMIT_REACHED … for table` has 
 
 ### L-PROJECTS: Projects per account
 
-Value: 50. Label: [DOC]. Behaviour: refuse — fail in doctor D-F1 when no slot. Probe: none.
+Value: 50. Label: [DOC] (https://docs.catalyst.zoho.com/en/cli/v1/initialize-resources/initialize-new-project/ states "You can create upto 50 projects in your account"). Behaviour: refuse — fail in doctor D-F1 when no slot. Probe: none.
 
 ### L-DEV-USERS: App users in Development
 

@@ -8,7 +8,8 @@ you only need to point, click, and sign in where asked.
 - Your Catalyst account must be in a known **data centre** (US, EU,
   India, and others) and have an **organisation** the AI can use.
 - Each migrated app needs **its own project** (one app = one
-  project), in **Development**. An account allows 50 projects.
+  project), in **Development**. An account allows 50 projects
+  [DOC](https://docs.catalyst.zoho.com/en/cli/v1/initialize-resources/initialize-new-project/).
 - In the Catalyst console, create a project named
   `c2c-<your-app>` (one app = one project, Development). The AI
   reads the project back, records its id, and checks your

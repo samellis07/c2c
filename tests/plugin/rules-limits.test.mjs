@@ -4,7 +4,7 @@
  * explicit Rule: line and a Recipe: line. The file passes the generic hygiene scan.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -86,4 +86,110 @@ test('limits state the budgets c2c plan enforces', () => {
 
 test('shipped rules pass the generic hygiene scan', () => {
   assert.deepEqual(scanText('rules.md', load()), []);
+});
+
+test('projects-per-account label agrees across facts, limits index, and doctor spec', () => {
+  const DOC_URL = 'https://docs.catalyst.zoho.com/en/cli/v1/initialize-resources/initialize-new-project/';
+  const factsRule = ruleBodies(load()).find((rule) => rule.title === 'Projects per account');
+  assert.ok(factsRule, 'facts limits lack a Projects per account rule');
+  const factsLabel = factsRule.body.match(/^Rule: .*?\[(DOC|TESTED|UNVERIFIED)\]/m)?.[1];
+  assert.equal(factsLabel, 'DOC', `facts Projects per account is [${factsLabel}]`);
+  assert.ok(factsRule.body.includes(DOC_URL), 'facts Projects per account names no docs source URL');
+
+  const index = readFileSync(path.join(repo, 'plugin/references/limits.md'), 'utf8');
+  const indexRow = index.match(/^### L-PROJECTS:.*\n\nValue:.*Label: \[(DOC|TESTED|UNVERIFIED)\]/m);
+  assert.ok(indexRow, 'limits index lacks an L-PROJECTS row with a label');
+  assert.ok(index.includes(DOC_URL), 'limits index L-PROJECTS names no docs source URL');
+
+  const spec = readFileSync(path.join(repo, 'plugin/references/doctor-spec.md'), 'utf8');
+  const dF1 = spec.split('\n').find((line) => line.startsWith('| D-F1 |'));
+  assert.ok(dF1, 'doctor spec lacks a D-F1 row');
+  const specLabel = dF1.match(/Cap 50 per account \[(DOC|TESTED|UNVERIFIED)\]/)?.[1];
+  assert.ok(specLabel, 'D-F1 states no evidence label for the 50-project cap');
+  assert.ok(dF1.includes('references/facts/limits.md'), 'D-F1 does not cite the facts entry');
+
+  assert.deepEqual(
+    [factsLabel, indexRow[1], specLabel],
+    ['DOC', 'DOC', 'DOC'],
+    'projects-per-account label diverged between facts, limits index, and doctor spec',
+  );
+});
+
+/** Phrases that state the account project cap. The docs quotation "upto 50 projects" is not one of these. */
+const CAP_ASSERTION = /50 projects per account|Cap 50 per account|allows 50 projects|account allows 50(?! projects)|50\/50 projects used/g;
+const CAP_LABEL = /\[(DOC|TESTED|UNVERIFIED|CLI|MCP-LISTED)\]/;
+const CAP_DOC_URL = 'https://docs.catalyst.zoho.com/en/cli/v1/initialize-resources/initialize-new-project/';
+const CAP_SURFACES = [
+  'docs/guide/02-before-you-start.md',
+  'docs/guide/06-troubleshooting.md',
+  'plugin/README.md',
+  'plugin/references/doctor-spec.md',
+  'plugin/references/facts/limits.md',
+  'plugin/references/route-map.md',
+  'plugin/skills/c2c-provision-and-deploy/SKILL.md',
+];
+
+function scanProjectCapLabels(rel, text) {
+  const issues = [];
+  for (const match of text.matchAll(new RegExp(CAP_ASSERTION.source, 'g'))) {
+    const after = text.slice(match.index + match[0].length, match.index + match[0].length + 320);
+    const label = after.match(CAP_LABEL);
+    if (!label) {
+      issues.push(`${rel}: "${match[0]}" has no evidence label`);
+      continue;
+    }
+    if (label[1] !== 'DOC') issues.push(`${rel}: "${match[0]}" is [${label[1]}], not [DOC]`);
+    const window = text.slice(match.index, match.index + match[0].length + 320);
+    if (!window.includes(CAP_DOC_URL)) issues.push(`${rel}: "${match[0]}" does not cite ${CAP_DOC_URL}`);
+  }
+  return issues;
+}
+
+function* markdownUnder(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const child = path.join(dir, entry.name);
+    if (entry.isDirectory()) yield* markdownUnder(child);
+    else if (entry.isFile() && entry.name.endsWith('.md')) yield child;
+  }
+}
+
+test('every 50-project cap mention is [DOC] with the CLI docs URL', () => {
+  const issues = [];
+  for (const root of ['docs', 'plugin']) {
+    for (const file of markdownUnder(path.join(repo, root))) {
+      const rel = path.relative(repo, file);
+      issues.push(...scanProjectCapLabels(rel, readFileSync(file, 'utf8')));
+    }
+  }
+  assert.deepEqual(issues, []);
+
+  for (const rel of CAP_SURFACES) {
+    const hits = readFileSync(path.join(repo, rel), 'utf8').match(new RegExp(CAP_ASSERTION.source, 'g'));
+    assert.ok(hits && hits.length >= 1, `${rel} no longer states the 50-project cap`);
+  }
+
+  const index = readFileSync(path.join(repo, 'plugin/references/limits.md'), 'utf8');
+  const indexSection = index.match(/### L-PROJECTS:[\s\S]*?(?=\n### )/);
+  assert.ok(indexSection, 'limits index lacks an L-PROJECTS section');
+  assert.match(indexSection[0], /Label: \[DOC\]/);
+  assert.ok(indexSection[0].includes(CAP_DOC_URL), 'L-PROJECTS section dropped the docs URL');
+  assert.doesNotMatch(indexSection[0], /\[(TESTED|UNVERIFIED)\]/);
+
+  const projects = readFileSync(path.join(repo, 'plugin/references/facts/projects.md'), 'utf8');
+  assert.deepEqual(scanProjectCapLabels('plugin/references/facts/projects.md', projects), []);
+  assert.match(projects, /the account project cap is the Projects per account rule in `references\/facts\/limits\.md`/);
+  assert.doesNotMatch(projects, /assume 50/);
+});
+
+test('project-cap scan rejects a different label, a missing label, and a missing URL', () => {
+  const badLabel = scanProjectCapLabels('x.md', `An account allows 50 projects [TESTED] (${CAP_DOC_URL}).`);
+  assert.ok(badLabel.some((issue) => issue.includes('[TESTED]')));
+  const unverified = scanProjectCapLabels('x.md', `50 projects per account [UNVERIFIED] (${CAP_DOC_URL}).`);
+  assert.ok(unverified.some((issue) => issue.includes('[UNVERIFIED]')));
+  const missing = scanProjectCapLabels('x.md', 'An account allows 50 projects.');
+  assert.ok(missing.some((issue) => issue.includes('no evidence label')));
+  const noUrl = scanProjectCapLabels('x.md', 'Cap 50 per account [DOC].');
+  assert.ok(noUrl.some((issue) => issue.includes('does not cite')));
+  const good = scanProjectCapLabels('x.md', `50/50 projects used [DOC](${CAP_DOC_URL}).`);
+  assert.deepEqual(good, []);
 });

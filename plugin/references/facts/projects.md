@@ -147,7 +147,7 @@ Rule: Catalyst does not keep your source. Web Client Hosting downloads serve bui
 
 ### Budget quotas yourself — there is no limits API
 
-Rule: assume 50 projects per account; table creates are capped org-wide across projects by a limit whose number and window are not published, so `API_LIMIT_REACHED` for table is the signal, not a count. `c2c doctor`/`c2c plan` counts projects via `GET /baas/v1/project` and tables via `List_All_Tables` before creating either, and warns on that refusal rather than near a guessed cap. The plausible quota endpoints answer `404 INVALID_URL_PATTERN` — do not probe for one. Never create burner projects to measure quota. [UNVERIFIED]
+Rule: the account project cap is the Projects per account rule in `references/facts/limits.md`; table creates are capped org-wide across projects by a limit whose number and window are not published, so `API_LIMIT_REACHED` for table is the signal, not a count. `c2c doctor`/`c2c plan` counts projects via `GET /baas/v1/project` and tables via `List_All_Tables` before creating either, and warns on that refusal rather than near a guessed cap. The plausible quota endpoints answer `404 INVALID_URL_PATTERN` — do not probe for one. Never create burner projects to measure quota. [UNVERIFIED]
 
 ### Probe service availability per DC — there is no availability API
 
