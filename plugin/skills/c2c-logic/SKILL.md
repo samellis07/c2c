@@ -11,6 +11,8 @@ Load `catalyst-functions` for handler signatures, `catalyst-config.json`, and Jo
 
 **Rule — default settings only (C2C.md rule 13):** no browser automation, no permission-rule changes, no supplied evidence — MCP writes happen only behind the host's own approval; what no call can do is a guided ask the user performs, verified by read-back.
 
+ZCQL query runtime rules are indexed in `plugin/references/facts/zcql.md`: [ZC-01], [ZC-02], [ZC-03], [ZC-04], [ZC-07], [ZC-09], [ZC-11].
+
 ## What c2c generates
 
 | Creator | Catalyst | Status |
@@ -20,7 +22,7 @@ Load `catalyst-functions` for handler signatures, `catalyst-config.json`, and Jo
 | Custom functions (`thisapp.<fn>`) | Exported functions in the same bundle, dispatched by name | Generated |
 | Schedules (form/date/custom) | **Job functions** + Job Scheduling **crons** in one **job pool** | Definitions generated; automatic bootstrap planned |
 | Batch workflows (10–1,000 records) | Job function with checkpointed chunks, self-resubmitting | Planned |
-| Work that can exceed ~25 s | HTTP route enqueues a Job, returns 202 + id; client polls | 30 s cap on Advanced I/O and AppSail, not raisable [DOC][TESTED]; Job functions 15 min [DOC] |
+| Work that can exceed ~25 s | HTTP route enqueues a Job, returns 202 + id; client polls | 30 s cap on Advanced I/O and AppSail, not raisable [DOC][TESTED] ([L-REQUEST-TIME](../../references/limits.md#l-request-time-advanced-io--appsail-request) → split); Job functions 15 min [DOC] ([L-JOB-TIME](../../references/limits.md#l-job-time-job-function) → split) |
 | Approvals / blueprints | Persisted state machine (Status + history tables), generated transitions | Generated; SLA timers via dynamic crons are planned. Circuits is not available in every data centre [DOC] |
 | Data Store triggers between forms | **In-function dispatch** following Creator's event × source rules | Signals rules are console-only and locked in Prod [DOC][TESTED]: never on the critical path |
 
@@ -38,17 +40,17 @@ Load `catalyst-functions` for handler signatures, `catalyst-config.json`, and Jo
    - Job functions deploy with the code (`catalyst deploy --only functions`).
    - **crons**: CLI token `POST /job_scheduling/cron` works once the pool exists [TESTED]; target type Function must be a **Job** function [DOC][TESTED]. Created disabled, enabled after verify. Read-back MCP `List_All_Crons`.
    - Generated Job code calls `closeWithSuccess()` / `closeWithFailure()` in `finally` (else it shows as a 15-min timeout or "In Progress" for hours [UNVERIFIED]).
-5. **Env values** the logic needs (API keys for invokeurl, etc.) go into `c2c-out/<app>/function-env.json`, filled by the user; `c2c deploy --function-env <file>` merges them (deploy otherwise **replaces** the function's env vars).
+5. **Env values** the logic needs (API keys for invokeurl, etc.) go into `c2c-out/<app>/function-env.json`, filled by the user; `c2c deploy <ds> --function-env <file>` merges them (deploy otherwise **replaces** the function's env vars).
 
 ## Runtime rules the generated code must follow (check them in review)
 
 - **Errors are surfaced, not hidden.** Every handler maps Catalyst errors to Creator-like messages with the right HTTP status and logs a structured line (no secrets, no record values). A handler that returns `500 {"dryRun":true,"error":"request failed"}` for a duplicate (409), a missing field (403) and a bad date (400) alike, and logs nothing, breaks this rule [TESTED]; if you see it, tell the user errors will be generic until the code is regenerated.
 - **No `dryRun: true` on a live deploy** (`C2C_DEPLOY_MODE=live` is set on `--confirm` [TESTED]).
 - **Blank optional values** are omitted or `null`, never `""` [TESTED].
-- **ZCQL:** `LIKE` uses `*` (a `%` pattern silently matches nothing [TESTED]); paging is keyset by ROWID (offsets are 1-based [TESTED]); UPDATE/DELETE loop until the affected count is 0 (300-row silent cap); re-read after any write error.
+- **ZCQL:** unwrap every result row by table name ([ZC-01]); `LIKE` uses `*` (a `%` pattern silently matches nothing [TESTED; ZC-02]; [L-ZCQL-LIKE](../../references/limits.md#l-zcql-like-zcql-like) → map); paging is keyset by ROWID (300 rows per SELECT, offsets 1-based [TESTED; ZC-03/ZC-04]; [L-ZCQL-ROWS](../../references/limits.md#l-zcql-rows-zcql-rows-per-select) / [L-ZCQL-OFFSET](../../references/limits.md#l-zcql-offset-zcql-offset) → split); UPDATE/DELETE loop until the affected count is 0 (300-row silent cap; [L-ZCQL-WRITE-BATCH](../../references/limits.md#l-zcql-write-batch-zcql-updatedelete) → batch; [ZC-09]); use IN-subqueries for traversal filters ([L-ZCQL-SUBQUERIES](../../references/limits.md#l-zcql-subqueries-zcql-subqueries-in-where) → allow; [ZC-07]); re-read after any write error ([L-ZCQL-WRITE-VERIFY](../../references/limits.md#l-zcql-write-verify-zcql-insert-error-after-write) → verify; error-after-write [TESTED; ZC-11]).
 - **No transactions:** multi-table writes use the compensation journal; parent + children + on-success can half-apply otherwise.
 - **Statement-limit semantics:** Creator saves the record and rolls back On Success on its 5,000-statement limit (code 3000). The port neither reproduces nor hides this; it reports the partial result.
-- **Concurrency:** bounded fan-out ≤ 10 [UNVERIFIED]; never use a unique column or conditional update as a lock [TESTED].
+- **Concurrency:** bounded fan-out ≤ 10 [UNVERIFIED] ([L-FUNCTION-CONCURRENCY](../../references/limits.md#l-function-concurrency-function-concurrency) → cap); never use a unique column or conditional update as a lock [TESTED] ([L-UNIQUE-RACE](../../references/limits.md#l-unique-race-unique-under-concurrency) → refuse).
 - **Trigger semantics:** on user input / add row do not fire for API inserts; approval associates before On Success; subform events do not fire for script-inserted rows. The dispatch table encodes this; do not "simplify" it.
 
 ## Verification

@@ -13,14 +13,14 @@ Load `catalyst-slate` for Slate config and deploy, `catalyst-authentication` for
 
 ## What c2c generates
 
-The default UI is the React app: `c2c deploy` writes the React source under `c2c-out/<app>/web/`, builds it to `web/dist`, and Slate serves `dist/`. The vanilla fallback (`c2c ui`, or `c2c deploy --ui vanilla`) is a static PWA (vanilla ES modules, manifest, service worker, content-hashed assets) under `c2c-out/<app>/slate/`, plus `c2c-config.js` with the API base. Both call the `c2c_api` function cross-origin: Slate is served on `*.onslate.<dc>`, functions on `*.catalystserverless.<dc>` [TESTED], so the Slate host must be an **Authorized Domain** (CORS) and the user must be signed in (`c2c-auth-and-access`).
+The default UI is the React app: `c2c deploy` writes the React source under `c2c-out/<app>/web/`, builds it to `web/dist`, and Slate serves `dist/`. The vanilla fallback (`c2c ui`, or `c2c deploy <ds> --ui vanilla`) is a static PWA (vanilla ES modules, manifest, service worker, content-hashed assets) under `c2c-out/<app>/slate/`, plus `c2c-config.js` with the API base. Both call the `c2c_api` function cross-origin: Slate is served on `*.onslate.<dc>`, functions on `*.catalystserverless.<dc>` [TESTED], so the Slate host must be an **Authorized Domain** (CORS) and the user must be signed in (`c2c-auth-and-access`).
 
 | Creator | Slate | Status / gap |
 |---|---|---|
 | Form (fields, validation, initial values, on user input) | Generated form; client validation; server re-validates | Renders [TESTED]. The server re-checks mandatory fields |
 | Lookup field | `<select>` filled from `/lookups/<Form>/<Field>` | An empty dropdown means the lookups route is missing or unrouted: check the deployed function routes [TESTED] |
 | Subform | Inline grid | Renders; each subform is a child table |
-| List report | Table view, server paging (ZCQL keyset), display names in headers | Headers use display names; lookups show the parent's display value, not the raw ROWID |
+| List report | Table view, server paging (ZCQL keyset), display names in headers | 300 rows per SELECT ([L-ZCQL-ROWS](../../references/limits.md#l-zcql-rows-zcql-rows-per-select) → split), 1-based offsets ([L-ZCQL-OFFSET](../../references/limits.md#l-zcql-offset-zcql-offset) → split), projection ≤ 20 columns ([L-ZCQL-WIDTH](../../references/limits.md#l-zcql-width-zcql-select-columns) → refuse). Headers showed link names and lookups as raw ROWIDs [TESTED]; #76 |
 | Kanban / calendar / timeline / spreadsheet / grouping / pivot | Generated views | A view type c2c cannot render yet falls back to a table and is reported as a TODO |
 | Report criteria | Translated to ZCQL; untranslatable → fail closed (TODO), never `true` | |
 | Pages / HTML snippets / ZML | Generated pages | Partial |
@@ -31,12 +31,12 @@ The default UI is the React app: `c2c deploy` writes the React source under `c2c
 ## Steps
 
 1. **Review** the UI section of `plan.md`: forms, reports by view type, pages, TODOs. Show the user which views degrade to tables.
-2. **Deploy** happens in `c2c deploy --confirm` (`c2c-provision-and-deploy`): `catalyst slate:link` then `catalyst deploy slate`.
+2. **Deploy** happens in `c2c deploy <ds> --confirm --function-env <file>` (`c2c-provision-and-deploy`): `catalyst slate:link` then `catalyst deploy slate`.
    - `catalyst.json` must contain `"slate": [ … ]` (an **array**). An object makes zcatalyst-cli crash in `addExistingSlate` with `TypeError: existingSlates.findIndex is not a function`, shown as `An unexpected error has occurred. Kindly contact Catalyst support` [TESTED]; c2c writes an array. If you see it on an older c2c, do not hand-edit generated files: upgrade c2c.
    - `slate:link` writes an absolute local `source` path into `catalyst.json` [TESTED]; that file is workspace-only, never committed with customer paths.
 3. **Record the App URL.** c2c must print and store `App Url: https://<name>.onslate.<dc>` in `c2c-deploy-report.json`. Without it, you cannot add the Authorized Domain. A deploy that printed the URL and then `HTTP Error: 404, No such app with the given id exists` was live anyway [TESTED]: verify by fetching the URL, not by the CLI exit code alone.
 4. **Authorized Domain** for the App URL host (`c2c-auth-and-access` step 3).
-5. **Cache:** Slate serves `/` and `index.html` with `cache-control: public, max-age=31536000` [TESTED]. c2c's hashed assets and versioned service worker handle redeploys; tell the user a hard refresh may be needed once after a redeploy. (Console "Web Cache" toggle effect: [UNVERIFIED].)
+5. **Cache:** Slate serves `/` and `index.html` with `cache-control: public, max-age=31536000` [TESTED] ([L-SLATE-CACHE](../../references/limits.md#l-slate-cache-slate-indexhtml-cache) → version). c2c's hashed assets and versioned service worker handle redeploys; tell the user a hard refresh may be needed once after a redeploy. (Console "Web Cache" toggle effect: [UNVERIFIED].)
 
 ## Verification
 

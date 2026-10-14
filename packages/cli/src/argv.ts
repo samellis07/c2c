@@ -9,7 +9,7 @@
  * functions the commands run), so a caller that builds c2c argv — a
  * script or a CI job — can validate it without a network call or a login.
  */
-import { provisionArgsProblem, readFunctionEnv, seedMigrateArgsProblem, smokeArgsProblems, sourceCsvArgsProblem } from '../../deploy/src/index.js';
+import { provisionArgsProblem, readFunctionEnv, seedMigrateArgsProblem, smokeArgsProblems, sourceCsvArgsProblem, statusArgsProblem } from '../../deploy/src/index.js';
 
 type Arity = 'value' | 'bool';
 
@@ -246,6 +246,10 @@ export function argvProblems(cmd: string, args: readonly string[]): string[] {
   }
   if (cmd === 'seed') {
     const problem = seedArgsProblem(rest);
+    if (problem) problems.push(problem);
+  }
+  if (cmd === 'status') {
+    const problem = trimmed(statusArgsProblem(args));
     if (problem) problems.push(problem);
   }
   return problems;

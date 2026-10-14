@@ -417,14 +417,42 @@ const EVAL_CASES = [
   { dir: 'router-red-doctor-refuses', graderMustMention: ['red', 'refus', 'plan'] },
   { dir: 'router-no-login-no-secrets', graderMustMention: ['login', 'secret', 'refus'] },
   { dir: 'router-offline-plan-preview', graderMustMention: ['preview', 'red', 'plan'] },
+  {
+    dir: 'skill-provision-and-deploy', graderMustMention: ['read back', 'create-missing', 'yes'],
+    verbatimCitations: [
+      '- **Plan → apply → read back → record.** Nothing is "done" until its read-back matches.',
+      '- **List → match → create-missing.** Never delete, rename or alter existing resources. Update mode is create-missing only.',
+      '- **Every write needs the user\'s yes.** Batch the yes per phase ("create these 4 resources?"), not per HTTP call, but never across phases.',
+    ],
+  },
+  {
+    dir: 'skill-schema-and-data', graderMustMention: ['budget', 'fail', 'foreign-key'],
+    verbatimCitations: ['### Budgets (the plan fails closed)', '- Any budget FAIL in the plan.'],
+  },
+  {
+    dir: 'skill-status', graderMustMention: ['read-only', 'checklist', 'fake'],
+    verbatimCitations: ['The status command reports the read-only health and status of a Catalyst project.'],
+  },
+  {
+    dir: 'skill-troubleshooting', graderMustMention: ['exact', 'read-only', 'unsupported'],
+    verbatimCitations: ['6. **Not in the index?** Say so. Collect the exact text and context, mark the step blocked, and suggest a probe or a report to the maintainers via the issue tracker. Do not declare the feature unsupported (C2C.md rule 9).'],
+  },
+  {
+    dir: 'skill-ui', graderMustMention: ['app url', 'stop', 'authorized domain'],
+    verbatimCitations: ['- No App URL recorded → stop before auth (the domain cannot be authorized).'],
+  },
+  {
+    dir: 'skill-verify-and-cutover', graderMustMention: ['explicit yes', 'production', 'console'],
+    verbatimCitations: ["Requires a green doctor. Every probe and every cutover action needs the user's explicit yes.", '2. **Production promotion is a console action by the user:** Catalyst console → Deploy to Production (a payment method is required). c2c cannot do it: no CLI/API for functions or schema [TESTED]. The CLI does have `catalyst deploy slate --production` and `ds:import --production` [CLI] for later updates.'],
+  },
 ];
 
 /** Tools a deterministic offline eval prompt may use: read-only, no network. */
 const EVAL_SAFE_TOOLS = new Set(['Read', 'Glob', 'Grep', 'Skill']);
 
-test('plugin/evals holds one prompt.md + graders case per router rule', () => {
+test('plugin/evals cases have offline-safe prompts and graders with pinned skill rules', () => {
   const failures = [];
-  for (const { dir, graderMustMention } of EVAL_CASES) {
+  for (const { dir, graderMustMention, verbatimCitations = [] } of EVAL_CASES) {
     const caseDir = path.join(evalsDir, dir);
     let prompt;
     try {
@@ -470,6 +498,112 @@ test('plugin/evals holds one prompt.md + graders case per router rule', () => {
       if (!graderText.toLowerCase().includes(keyword)) {
         failures.push(`${dir}: no grader pins "${keyword}" (a violating run could pass)`);
       }
+    }
+    for (const citation of verbatimCitations) {
+      const skill = read(path.join(skillsDir, dir.replace(/^skill-/, 'c2c-') + '/SKILL.md'));
+      if (!skill.includes(citation)) failures.push(`${dir}: test citation is not present verbatim in its skill`);
+      if (!graderText.includes(citation)) failures.push(`${dir}: no grader cites the skill line verbatim`);
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('every eval dir in plugin/evals has prompt.md and graders/criteria.md', () => {
+  const entries = readdirSync(evalsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.ok(entries.length >= 11, `expected at least 11 eval dirs, got ${entries.length}`);
+  const failures = [];
+  for (const dir of entries) {
+    const caseDir = path.join(evalsDir, dir);
+    let prompt;
+    try {
+      prompt = read(path.join(caseDir, 'prompt.md'));
+    } catch {
+      failures.push(`${dir}: prompt.md is missing`);
+      continue;
+    }
+    const { fm, body } = splitFrontmatter(prompt);
+    if (!fm) failures.push(`${dir}/prompt.md: missing frontmatter block`);
+    const maxTurns = Number(fmGet(fm, 'max_turns'));
+    if (!Number.isInteger(maxTurns) || maxTurns < 1 || maxTurns > 25) {
+      failures.push(`${dir}/prompt.md: max_turns must be an integer 1..25`);
+    }
+    const toolsMatch = fm.match(/^allowed_tools:\s*\[(.*)\]\s*$/m);
+    if (!toolsMatch) {
+      failures.push(`${dir}/prompt.md: allowed_tools [...] is missing`);
+    } else {
+      for (const tool of toolsMatch[1].split(',').map((name) => name.trim()).filter(Boolean)) {
+        if (!EVAL_SAFE_TOOLS.has(tool)) {
+          failures.push(`${dir}/prompt.md: tool "${tool}" is not offline-safe (allowed: Read, Glob, Grep, Skill)`);
+        }
+      }
+    }
+    if (!body.trim()) failures.push(`${dir}/prompt.md: prompt body is empty`);
+
+    let grader;
+    try {
+      grader = read(path.join(caseDir, 'graders/criteria.md'));
+    } catch {
+      failures.push(`${dir}: graders/criteria.md is missing`);
+      continue;
+    }
+    const { fm: graderFm, body: graderBody } = splitFrontmatter(grader);
+    if (!fmGet(graderFm, 'type')) failures.push(`${dir}/graders/criteria.md: grader frontmatter type is missing`);
+    if (!graderBody.trim()) failures.push(`${dir}/graders/criteria.md: grader body is empty`);
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('skill eval criteria cite skill lines verbatim', () => {
+  const skillRules = [
+    {
+      evalDir: 'c2c-analyze-and-precheck',
+      skill: 'c2c-analyze-and-precheck',
+      verbatim: "- **BLOCKING latent fault** → the fix belongs in Creator (it breaks Creator's own export/duplicate too). Recommend: fix in Creator, re-export, re-run precheck. c2c never auto-guesses missing arguments (precheck rule 01).",
+    },
+    {
+      evalDir: 'c2c-auth-and-access',
+      skill: 'c2c-auth-and-access',
+      verbatim: "- **Creator portal users:** re-invited, never imported with passwords. Users missing in Catalyst must not fall back to a super admin silently; list them as pending.",
+    },
+    {
+      evalDir: 'c2c-edit',
+      skill: 'c2c-edit',
+      verbatim: 'Generated files are never edited by hand: a hand edit is lost on the next regenerate.',
+    },
+    {
+      evalDir: 'c2c-integrations',
+      skill: 'c2c-integrations',
+      verbatim: '- Never call Creator from a generated Catalyst function in the request path.',
+    },
+    {
+      evalDir: 'c2c-logic',
+      skill: 'c2c-logic',
+      verbatim: '- **ZCQL:** unwrap every result row by table name ([ZC-01]); `LIKE` uses `*` (a `%` pattern silently matches nothing [TESTED; ZC-02]; [L-ZCQL-LIKE](../../references/limits.md#l-zcql-like-zcql-like) → map); paging is keyset by ROWID (300 rows per SELECT, offsets 1-based [TESTED; ZC-03/ZC-04]; [L-ZCQL-ROWS](../../references/limits.md#l-zcql-rows-zcql-rows-per-select) / [L-ZCQL-OFFSET](../../references/limits.md#l-zcql-offset-zcql-offset) → split); UPDATE/DELETE loop until the affected count is 0 (300-row silent cap; [L-ZCQL-WRITE-BATCH](../../references/limits.md#l-zcql-write-batch-zcql-updatedelete) → batch; [ZC-09]); use IN-subqueries for traversal filters ([L-ZCQL-SUBQUERIES](../../references/limits.md#l-zcql-subqueries-zcql-subqueries-in-where) → allow; [ZC-07]); re-read after any write error ([L-ZCQL-WRITE-VERIFY](../../references/limits.md#l-zcql-write-verify-zcql-insert-error-after-write) → verify; error-after-write [TESTED; ZC-11]).',
+    },
+    {
+      evalDir: 'c2c-migrate',
+      skill: 'c2c-migrate',
+      verbatim: "- **One app = one project.** If the target project holds tables not in this app's plan (doctor D-F3), stop and ask the user to create a new project `c2c-<app-link>` in the console. Never merge apps.",
+    },
+    {
+      evalDir: 'c2c-preflight',
+      skill: 'c2c-preflight',
+      verbatim: 'Doctor is green only when the CLI says so after `--mcp-observed`. Never declare green from your own reading.',
+    },
+  ];
+
+  const failures = [];
+  for (const { evalDir, skill, verbatim } of skillRules) {
+    const skillContent = read(path.join(skillsDir, skill, 'SKILL.md'));
+    if (!skillContent.includes(verbatim)) {
+      failures.push(`${skill}: verbatim line not found in SKILL.md: "${verbatim}"`);
+    }
+    const criteriaContent = read(path.join(evalsDir, evalDir, 'graders/criteria.md'));
+    if (!criteriaContent.includes(verbatim)) {
+      failures.push(`${evalDir}: graders/criteria.md does not cite skill line verbatim: "${verbatim}"`);
     }
   }
   assert.deepEqual(failures, []);

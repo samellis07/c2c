@@ -9,6 +9,8 @@ metadata:
 
 Load `catalyst-datastore` for ZCQL and SDK syntax and `catalyst-stratus` for buckets/objects. This skill adds the migration decisions.
 
+ZCQL schema, planning, and data-load rules are indexed in `plugin/references/facts/zcql.md`: [ZC-05], [ZC-06], [ZC-08], [ZC-10], [ZC-12] (with write rules [ZC-09], [ZC-11]).
+
 ## Part A — Schema (offline, in `c2c plan`)
 
 ### Mapping rules
@@ -16,7 +18,7 @@ Load `catalyst-datastore` for ZCQL and SDK syntax and `catalyst-stratus` for buc
 | Creator | Catalyst Data Store | Notes |
 |---|---|---|
 | Form (stateful) | 1 table named after the form link name | Stateless forms get **no** table |
-| Single line ≤ 255 | `varchar(255)` | > 255 or unknown → `text` (not searchable). REST inserts **truncate silently** [TESTED]: c2c validates length before writing |
+| Single line ≤ 255 | `varchar(255)` | > 255 or unknown → `text` (not searchable). ZCQL rejects over-length varchar honestly; REST inserts **truncate silently** [TESTED]: c2c validates length before writing ([ZC-10]) |
 | Multi line / rich text | `text` (≤ 10,000 [UNVERIFIED]) | Larger → Stratus object + key |
 | Number / Decimal / Currency / Percent | `bigint` / exact `varchar(64)` + `double` shadow `<Field>__n` | Catalyst has no decimal type [TESTED]. `double(15,2)` rounds silently on write (`0.105→0.10`) [TESTED]: round HALF_UP client-side first |
 | Date / Date-time | `date` / `datetime` | Send `yyyy-MM-dd` / `yyyy-MM-dd HH:mm:ss` only. `05-10-2026` is stored as `0011-04-18` [TESTED]. Blank → omit or `null`, never `""` (`400 INVALID_INPUT … date value expected`) [TESTED] |
@@ -35,11 +37,21 @@ Reserved ZCQL words (`FROM`, `TO`, …) as column names are renamed with a mappi
 
 ### Budgets (the plan fails closed)
 
-`c2c plan` checks every table; see `references/limits.md`.
-- columns ≤ 100 per table in Development [DOC] → else split into 1:1 side tables (splitter);
-- unique varchar ≤ 2 [TESTED] → the user picks which fields keep DB uniqueness; the rest are enforced by the handler and the loader;
-- JOINs per report ≤ 4 [DOC]; projection ≤ 20 columns until P-WIDTH is measured; never `SELECT *`;
-- org table-create limit (unpublished number and window, not a count cap [TESTED]) and Dev row cap [UNVERIFIED] → WARN only, with the probe to run; on `API_LIMIT_REACHED` for table, stop creates and retry after 30/60/120 min.
+`c2c plan` checks every table against [the limits table](../../references/limits.md); each budget below names its limit id, the c2c behaviour, and the row.
+- [L-COLUMNS](../../references/limits.md#l-columns-columns-per-table-development): columns ≤ 100 per table in Development [DOC] → refuse, else split into 1:1 side tables (splitter);
+- [L-UNIQUE-VARCHAR](../../references/limits.md#l-unique-varchar-unique-varchar-columns-per-table): unique varchar ≤ 2 [TESTED] → refuse; the user picks which fields keep DB uniqueness; the rest are enforced by the handler and the loader;
+- [L-FOREIGN-KEYS](../../references/limits.md#l-foreign-keys-foreign-keys-per-table): FKs ≤ 15 per table [UNVERIFIED] → warn; extra lookups as plain `bigint` ROWID;
+- [L-TEXT-COLUMNS](../../references/limits.md#l-text-columns-text-type-columns-per-table): text-type columns ≤ 130 per table [UNVERIFIED] → warn;
+- [L-VARCHAR-LENGTH](../../references/limits.md#l-varchar-length-varchar-length): single line ≤ 255, else `text` [TESTED] → split (REST truncates silently: validate before write);
+- [L-TEXT-LENGTH](../../references/limits.md#l-text-length-text-length): `text` ≤ 10,000 and not searchable [UNVERIFIED] → warn; larger values go to Stratus with a key column;
+- [L-DATE-WRITE](../../references/limits.md#l-date-write-date-strictness) / [L-DOUBLE-ROUNDING](../../references/limits.md#l-double-rounding-double-rounding): dates normalised to `yyyy-MM-dd`, doubles rounded HALF_UP client-side [TESTED] → normalize before write;
+- [L-ZCQL-JOINS](../../references/limits.md#l-zcql-joins-zcql-joins): JOINs per report ≤ 4 [DOC], each with one condition across declared foreign keys [ZC-06] → refuse, staged reads; [L-ZCQL-WIDTH](../../references/limits.md#l-zcql-width-zcql-select-columns): projection ≤ 20 columns until P-WIDTH is measured [ZC-05] → refuse; never `SELECT *`; assume no user-tunable indexes and a capped execution budget [ZC-12];
+- [L-ROW-BATCH](../../references/limits.md#l-row-batch-row-insert-batch): `/row` batches ≤ 200 [TESTED] → batch; [L-WRITE-RATE](../../references/limits.md#l-write-rate-data-store-write-rate): mover rate cap with `Retry-After` [UNVERIFIED] → cap;
+- [L-BULK-WRITE](../../references/limits.md#l-bulk-write-bulk-write): bulk job only after P-BULK passes [DOC] → refuse until probed;
+- [L-DEV-API-CALLS](../../references/limits.md#l-dev-api-calls-dev-api-calls): 200k Dev calls per app [DOC] → warn with the mover's call estimate;
+- [L-STRATUS-OBJECT](../../references/limits.md#l-stratus-object-stratus-single-object): single Stratus object 250 GB [UNVERIFIED] → note;
+- [L-UNIQUE-RACE](../../references/limits.md#l-unique-race-unique-under-concurrency): never a unique column as a lock [TESTED] → refuse; autonumber claim protocol;
+- [L-TABLE-CREATES](../../references/limits.md#l-table-creates-table-creates-per-org): org table-create limit [TESTED] and [L-DEV-ROW-CAP](../../references/limits.md#l-dev-row-cap-dev-per-table-row-cap): Dev row cap [UNVERIFIED] → warn only, with the probe to run; on `API_LIMIT_REACHED` for table, stop creates and retry after 30/60/120 min.
 
 ### Steps
 
@@ -49,7 +61,7 @@ Reserved ZCQL words (`FROM`, `TO`, …) as column names are renamed with a mappi
 
 ## Part B — Creating tables (live)
 
-Done by `c2c deploy --confirm` / `c2c provision` (see `c2c-provision-and-deploy`): CLI REST, diff-based, create-missing only (a second run prints `created-tables: none`) [TESTED]. Table permissions and scopes are set via MCP (`c2c-auth-and-access`).
+ Done by `c2c deploy <ds> --confirm --function-env <file>` / the `c2c provision` workflow (see `c2c-provision-and-deploy`): CLI REST, diff-based, create-missing only [TESTED]. Table permissions and scopes are set via MCP (`c2c-auth-and-access`).
 
 **Rule — default settings only (C2C.md rule 13):** no browser automation, no permission-rule changes, no supplied evidence — loads run through the CLI token and are verified by read-back counts and samples, never by a drive of the user's browser.
 
@@ -85,7 +97,7 @@ Default: the user's own Creator report exports as **JSON** — the JSON export a
    c2c migrate-data --source-csv exports/<app>-data --ds exports/<app>.ds --project <id> --org <org> --checkpoint c2c-out/<app>/state/data.json
    ```
    Check: every report maps to a table; per-table row counts equal `counts.json`; FK columns reference parents in the load order; dates/decimals/booleans parse; no value exceeds its column.
-2. Ask the user; then the same command with `--confirm`. Parents first, children after; FK values remapped from Creator ID to parent ROWID; IDs kept as **strings** (19-digit Creator IDs exceed JS numbers; ROWIDs are 17 digits and come back as strings from ZCQL [TESTED]).
+2. Ask the user; then the same command with `--confirm`. Parents first, children after; FK values remapped from Creator ID to parent ROWID; IDs and aggregate results kept and parsed as **strings** (19-digit Creator IDs exceed JS numbers; ROWIDs are 17 digits and aggregate values come back as strings from ZCQL: parse before comparing [ZC-08]).
 3. After each table: `SELECT COUNT(ROWID) FROM <t>` (MCP `Execute_Query`) = expected; FK resolution 100% (no child row with a non-null Creator lookup and a null FK); sample 20 rows field-by-field against the export.
 4. Interrupted? Re-run with the same `--checkpoint` (resumes after the last acknowledged batch; the loader refuses repeated source IDs).
 
@@ -97,7 +109,7 @@ The row endpoint is `/table/<t>/row`; `/table/<t>/rows` answers `404 INVALID_URL
 - A column batch error during table creation.
 - Count mismatch, FK resolution < 100%, or any per-row error in a batch (`data[]` echo shorter than the batch).
 - `API_LIMIT_REACHED` (do not assume quota; it has also been a platform bug [UNVERIFIED]); show the raw code and table, and stop. For a table create the limit is org-wide with no published number: keep created tables, continue table-free work, and retry after 30/60/120 min.
-- A ZCQL write error: re-read before retrying (error-after-write [TESTED]).
+- A ZCQL write error: re-read before retrying; a 400 can follow a write (error-after-write [TESTED]; [L-ZCQL-WRITE-VERIFY](../../references/limits.md#l-zcql-write-verify-zcql-insert-error-after-write)).
 
 ## What to ask the user
 

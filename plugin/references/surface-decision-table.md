@@ -44,7 +44,7 @@ Surface: Catalyst CLI
 
 Recipe: `catalyst project:list --org <org-id>`. The same list is GET /baas/v1/project with headers Authorization, Accept, and CATALYST-ORG. The GET listing carries other projects' authentication secrets — record only the target project's id and name, never the raw listing.
 
-Read-back: The printed project id and name match `catalyst --org <org> project:list` (c2c provision --record reads it itself). Never MCP CatalystbyZoho_List_All_Projects (it returns project secrets).
+Read-back: The printed project id and name match `catalyst --org <org> project:list` (c2c provision --out c2c-out/<app> --record reads it itself). Never MCP CatalystbyZoho_List_All_Projects (it returns project secrets).
 
 ### Export a project
 
@@ -112,7 +112,7 @@ Rule: Do not ask the user to click Start Exploring for Data Store, Functions, or
 
 Surface: guided console step; verified by a REST read c2c runs with the CLI token
 
-Recipe: c2c probes each gate the app needs (Cloud Scale GET /baas/v1/project/<project-id>/table, Stratus GET /baas/v1/project/<project-id>/bucket, SmartBrowz grid list, Slate GET /slate/v1/project/<project-id>/app). Open: continue with no human step. Closed: print one line (console → the project → <service> → Start Exploring), stop before any write, and probe again on the re-run (`c2c provision --record <gate>-enable`, or deploy `--resume`). The console enable has no token equivalent (`401 AUTHENTICATION_FAILURE`) and no IaC component pre-enables it.
+Recipe: c2c probes each gate the app needs (Cloud Scale GET /baas/v1/project/<project-id>/table, Stratus GET /baas/v1/project/<project-id>/bucket, SmartBrowz grid list, Slate GET /slate/v1/project/<project-id>/app). Open: continue with no human step. Closed: print one line (console → the project → <service> → Start Exploring), stop before any write, and probe again on the re-run (`c2c provision --out c2c-out/<app> --record <gate>-enable`, or deploy `--resume`). The console enable has no token equivalent (`401 AUTHENTICATION_FAILURE`) and no IaC component pre-enables it.
 
 Read-back: the gate probe answers `200` with a success envelope; then `catalyst deploy slate` finishes and the App URL serves.
 

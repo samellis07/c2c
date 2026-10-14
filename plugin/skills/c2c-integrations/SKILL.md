@@ -15,11 +15,11 @@ Load `catalyst-authentication` (Connections section) and `catalyst-functions` (A
 |---|---|---|---|---|
 | Connection (`zoho.*`, invokeurl with `connection:`) | Catalyst Connection, credentials fetched in code with `getConnectionCredentials` | **Console + user consent** (no API: `POST /connections` → `INVALID_REQUEST_METHOD` [TESTED]; no MCP tool). Zoho Creator is listed among the console's default services [TESTED] | CLI `GET /connections` → the name is listed [TESTED]; probe route that calls `getConnectionCredentials` and returns only `ok` | Checklist + probe |
 | `zoho.*` integration tasks (~290 kinds) | Adapters on the Node SDK / REST | Generated code | Unit vectors; probe per connection | 16 adapters; others → TODO with the task name |
-| `invokeurl` | Wrapper with timeout, retry with fixed backoff, idempotency key | Generated code | — | Planned |
+| `invokeurl` | Wrapper with timeout, retry with fixed backoff, idempotency key | Generated code | — | Lane 8 s1 (`agent/lane8-invokeurl`); calls out live under the 30 s request bound ([L-REQUEST-TIME](../../references/limits.md#l-request-time-advanced-io--appsail-request) → split) |
 | Custom APIs | API Gateway routes to `c2c_api` | `catalyst apig:enable` [CLI] + MCP `Configure_API_Gateway_Route` [MCP-LISTED] | MCP `List_All_API_route` / `Get_API_route`; one call per route | Planned (currently counted only) |
 | `sendmail` | Catalyst Mail from a verified sender | MCP `Create_Email_Configuration` (+ `Create_Domain`) [MCP-LISTED]; the **user** enters the 6-character verification code | MCP list of email configs → verified; P-MAIL (one real send) only with the user's OK | Generated. A gmail sender stayed "Domain Verification Pending" [TESTED]; public-domain sender behaviour **[UNVERIFIED]** |
 | Record templates / PDF | LiquidJS templates + SmartBrowz HTML→PDF → Stratus | Generated code; SmartBrowz stored templates are console-only | Render one PDF, check page size | Planned. `@page{size:A4}` ignored and `landscape` only as the string `"true"` [TESTED] |
-| Catalyst → Creator calls (dual run) | Queued client with 429 backoff | Generated code; run from the customer machine during migration | — | 429 at ~1 req/min from Catalyst egress [UNVERIFIED]: never on a hot path |
+| Catalyst → Creator calls (dual run) | Queued client with 429 backoff | Generated code; run from the customer machine during migration | — | 429 at ~1 req/min from Catalyst egress [UNVERIFIED] ([L-CREATOR-EGRESS](../../references/limits.md#l-creator-egress-creator-api-from-catalyst) → queue): never on a hot path |
 
 ## Steps
 

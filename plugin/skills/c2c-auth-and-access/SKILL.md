@@ -43,7 +43,7 @@ Every generated API call needs a signed-in Catalyst app user with role App Admin
    7. the **user** opens the invite email, confirms, sets a password, and signs in once on the App URL;
    8. read back `is_confirmed: true` (`GET /project-user`) and `project-user/current` → 200 from the page. Before sign-in the app shows a clear signed-out state, and the framed sign-in page renders the login form — if it shows the app shell, the service worker is answering `/accounts/`, `/__catalyst/`, `/baas/`, `/server/` or cross-origin navigations it must bypass. After sign-in the user lands on the app root — a landing on `/app/` (404) means the app's `signIn(elementId, …)` call is missing `{service_url:<app url>}`; Slate has no redirect field in `catalyst.json` (`login_redirect` is Web Client Hosting only).
 4. **Security rule:** until c2c writes it, add a checklist item: Console → Functions → `c2c_api` → Security Rules → authentication required. The CLI has no command or import path for it and `catalyst deploy` leaves the function `optional` unless the rule arrived through the IaC import — check it after every deploy; verify with P-401 — `curl -s -o /dev/null -w '%{http_code}' <function-url>` prints `401` with no session involved.
-5. Record every result in `c2c-out/<app>/provision/state.json` via `c2c provision --record`.
+5. Record every result in `c2c-out/<app>/provision/state.json` via `c2c provision --out c2c-out/<app> --record <step-id> --result <file>`.
 
 ## Decision rules
 

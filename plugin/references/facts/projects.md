@@ -160,7 +160,7 @@ Rule: no API or CLI command opens a service on a project ("Start Exploring") —
 | SmartBrowz | the app renders PDF | the project → SmartBrowz → Start Exploring | the SmartBrowz browser-grid list | same | `200` |
 | Slate | the app ships a Slate client | the project → Slate → Start Exploring | `GET /slate/v1/project/<project-id>/app` | `400` "Please access the Slate service in your project's console before deploying via the CLI." | `200` `{"status":"success","data":[...]}` |
 
-- Provision: `c2c provision --record <gate>-enable` runs the probe; any later `--run` probes every unverified gate before it and stops on a closed one. Deploy `--confirm` and `migrate-data --seed --confirm` probe the gates they need before the first write; re-run (deploy: `--resume`) after the console step.
+- Provision: `c2c provision --out c2c-out/<app> --record <gate>-enable` runs the probe; any later `--run` probes every unverified gate before it and stops on a closed one. Deploy `--confirm` and `migrate-data --seed --confirm` probe the gates they need before the first write; re-run (deploy: `--resume`) after the console step.
 - Data Store, Functions and Authentication calls usually work on a fresh project before any click, so the Cloud Scale probe normally answers open and no human step is printed.
 - An unrecognised probe answer (`401`, `5xx`, a failure envelope without the refusal text) is unverified, never open.
 - Project services are opt-in — the first console open of a service (Start Exploring) enables it for the project.

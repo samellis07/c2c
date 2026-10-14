@@ -7,7 +7,7 @@ metadata:
 
 # Status
 
-The `c2c status` command reports the read-only health and status of a Catalyst project.
+The status command reports the read-only health and status of a Catalyst project.
 
 ## Usage
 

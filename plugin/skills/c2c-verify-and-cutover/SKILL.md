@@ -17,7 +17,7 @@ Requires a green doctor. Every probe and every cutover action needs the user's e
 
 ### A1. Probes (Rule: verify limits empirically)
 
-`c2c probe <id…> --confirm` creates scratch resources named `c2c_probe_<h8>` in the app's project, measures, deletes them, reads back the deletion, and writes `c2c-out/<app>/verify/limits.measured.json`.
+There is no `c2c probe` CLI command yet. The probe rows below describe checks that need a future implementation; do not present them as runnable CLI operations.
 
 | Probe | Measures | Why |
 |---|---|---|
@@ -54,16 +54,16 @@ The parity runner (planned) executes the app's given/when/then cases against the
 
 ### A4. Structure and data
 
-- `c2c verify --out c2c-out/<app> --confirm` (planned): `catalyst iac:export` → `iac:status export --id <job>` → download → **redact in memory** (exports hold function env values and cron headers in clear [TESTED]) → normalize (drop ids, timestamps, defaults) → diff against `verify/expected.normalized.json`; plus the provision read-backs. Exit 0 exact, 1 missing/changed, 2 extra. Delete the raw zip.
+- `c2c proof <app> --out c2c-out/<app>` writes a proof report from available source facts, counts, checksums and smoke results. The automated Catalyst IaC export diff is not implemented yet.
 - Counts per table equal `counts.json`; FK resolution 100%; file objects counted.
 
-**Green = probes recorded, smoke (or the manual smoke) passes, parity cases pass, verify exit 0, counts equal.** Write `verify/report.json` and summarise it for the user, including the per-app maintenance list (what they now own: N Deluge functions as Node code, M connections, …).
+**Green = required checks are recorded, smoke (or the manual smoke) passes, parity cases pass, the proof is reviewed, and counts equal.** Summarise the evidence for the user, including the per-app maintenance list (what they now own: N Deluge functions as Node code, M connections, …).
 
 ## Part B — Cutover (the user drives; c2c checks)
 
 1. **Rehearse** the full data volume outside Development if the app is large (Dev row cap [UNVERIFIED]).
-2. **Production promotion is a console action by the user:** Catalyst console → Deploy to Production (a payment method is required). c2c cannot do it: no CLI/API for functions or schema [TESTED]. The CLI does have `catalyst deploy slate --production` and `ds:import --production` [CLI src] for later updates.
-3. **Post-promotion verify** (`c2c cutover --promote-check`, planned):
+2. **Production promotion is a console action by the user:** Catalyst console → Deploy to Production (a payment method is required). c2c cannot do it: no CLI/API for functions or schema [TESTED]. The CLI does have `catalyst deploy slate --production` and `ds:import --production` [CLI] for later updates.
+3. **Post-promotion verify** (manual; there is no `c2c cutover` CLI command):
    - `catalyst iac:export --production` diff against the template;
    - every function deployed; crons and the job pool present (pre-defined crons migrate with the deployment [TESTED]; Stratus/Job Scheduling/Signals promotion: [UNVERIFIED]);
    - auth login works in Prod (embedded auth has failed with `invalid_client` only in Prod [UNVERIFIED]); re-configure social logins; record the new ZAID;
@@ -76,7 +76,7 @@ The parity runner (planned) executes the app's given/when/then cases against the
 
 ## Part C — Rollback
 
-c2c never deletes projects, tables, rows or buckets on its own. Teardown happens only on the user's explicit request, or on a failure before the Slate "Start Exploring" step — a project that has taken a human or console step is kept (C2C.md rule 15). `c2c rollback --plan` (planned) prints the steps; the user performs the destructive ones.
+c2c never deletes projects, tables, rows or buckets on its own. Teardown happens only on the user's explicit request, or on a failure before the Slate "Start Exploring" step — a project that has taken a human or console step is kept (C2C.md rule 15). There is no `c2c rollback` CLI command. `c2c rollback-export` exports Data Store rows for Creator report import; it is not an automated rollback plan.
 
 | Situation | Rollback |
 |---|---|

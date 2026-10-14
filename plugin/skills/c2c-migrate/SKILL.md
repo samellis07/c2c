@@ -19,9 +19,9 @@ This is the routing layer and the order of work. Do not do a step from memory: l
 | 3 | Provision (infra) | `c2c-provision-and-deploy` | `c2c provision` + MCP tools + guided console steps | Every item `done` with a read-back |
 | 4 | Deploy (code) | `c2c-provision-and-deploy` | `c2c deploy --confirm --function-env …` | Functions + Slate live; App URL recorded; 401 probe passes |
 | 5 | Auth + access | `c2c-auth-and-access` | CLI + MCP + guided | Auth config, authorized domain, roles/permissions, first admin read back |
-| 6 | Data | `c2c-schema-and-data` | `c2c migrate-data --confirm` | Per-table counts equal Creator's `counts.json`; FK resolution 100% |
-| 7 | Verify | `c2c-verify-and-cutover` | `c2c verify`, `c2c probe`, `c2c smoke` | Verify exit 0; probes recorded; parity cases pass |
-| 8 | Cutover (optional, user-driven) | `c2c-verify-and-cutover` | console promotion + `c2c cutover` | Post-promotion verify green; Creator frozen; links switched |
+| 6 | Data | `c2c-schema-and-data` | `c2c migrate-data --source-csv <data-dir> --ds <app.ds> --project <id> --org <org> --confirm` | Per-table counts equal Creator's `counts.json`; FK resolution 100% |
+| 7 | Verify | `c2c-verify-and-cutover` | `c2c cutover-checklist`, `c2c proof`, `c2c smoke` | Proof reviewed; smoke and required manual checklist items pass |
+| 8 | Cutover (optional, user-driven) | `c2c-verify-and-cutover` | console promotion, performed by the user | Post-promotion checks pass; Creator frozen; links switched |
 | any | Something failed | `c2c-troubleshooting` | — | Root cause named from the error index, fix applied, step re-run with `--resume` |
 
 ## Session start
@@ -31,7 +31,7 @@ This is the routing layer and the order of work. Do not do a step from memory: l
    - give the user the exact fixes it printed, grouped by who does what;
    - you may still run steps 1–2 (offline) if the user wants, and say clearly "doctor is red: this is a preview, nothing will be created";
    - refuse anything past `plan` while doctor is red: stop before step 3.
-3. Run `c2c status --out c2c-out/<app>` (planned verb; until it exists, read `c2c-out/<app>/state/*.json`) to see where an earlier run stopped. Resume from there; never start a finished step again without `--resume`.
+3. Run `c2c status --project <project-id> --org <org-id>` to inspect project health. Read `c2c-out/<app>/state/*.json` to see where an earlier run stopped; never start a finished step again without `--resume`.
 
 ## Decision rules
 
@@ -40,7 +40,7 @@ This is the routing layer and the order of work. Do not do a step from memory: l
 - **Greenfield vs update:** empty project → greenfield (IaC template import is an option; see `c2c-provision-and-deploy`). Project already holds this app's tables → update mode (create-missing only, never drop or alter).
 - **Data before or after auth?** Deploy and auth come before data, so the app can be signed into and smoke-tested on an empty store first. Large data loads (> 200k rows or > Dev caps) wait until probes P-RATE/P-BULK pass.
 - **When a step needs the console:** tell the user the exact path (from `references/route-map.md`), wait for "done", then run the read-back. Never mark a guided step done without its read-back.
-- **When something is unverified:** say "unverified: needs a probe", offer `c2c probe <id>`, and ask before running it (it creates and deletes scratch resources).
+- **When something is unverified:** say "unverified: needs a probe" and ask before proposing an empirical check. The CLI probe command is not available yet.
 - **Rule — default settings only:** the user runs c2c with default host settings and no browser automation — never drive a browser or console, never change permission rules, never use a pre-made or supplied evidence file. Every fact comes from CLI/API/MCP calls made live in the current session; what no call can do is a guided ask (exact console path, what to click, how it is read back), collected into one batched checklist (C2C.md rule 13).
 - **One credential, one refresher (C2C.md rule 14):** serialize every `catalyst`/`c2c` call — no parallel runs and no keep-fresh loop beside a run; a second refresher on the same login rotates the refresh token out from under both. On a read-only `401 INVALID_TOKEN`, re-read the stored token rather than forcing a refresh.
 - **Teardown boundary (C2C.md rule 15):** a failed step never means deleting the project to retry — teardown happens only on the user's explicit request, or on a failure before the Slate "Start Exploring" step. Anything that has taken a human or console step is kept; stop, report, resume with `--resume`.
