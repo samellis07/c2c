@@ -1,6 +1,6 @@
 {
   "source": "https://www.zoho.com/deluge/help/",
-  "note": "Hand-maintained after a Zoho help scrape. Edit names, receivers, arity, docUrl, and snippet. Status is NOT stored here — packages/deluge/scripts/builtins-catalogue.ts derives it from the translator.",
+  "note": "Hand-maintained after a Zoho help scrape. Edit names, receivers, arity, docUrl, and snippet. Status is NOT stored here — packages/deluge/scripts/builtins-catalogue.ts derives it from the translator. Known to-text page discrepancies: (1) [UNVERIFIED] functions/common/to-text.html shows the Europe/Moscow example for 01-Jan-2019 10:15:30 ending in \"Fri\", but 1 January 2019 was a Tuesday and the implementation returns \"Tue\" — the doc example is inconsistent with the calendar. (2) The same page's formatted epoch-milliseconds example ('S' letter / number receiver with a format) is out of scope: 'S' is refused with DelugeRuntimeError — a refusal counted as a TODO, not a silent null — and a formatted number receiver stays a shim.todo hole.",
   "entries": [
     {
       "name": "add",

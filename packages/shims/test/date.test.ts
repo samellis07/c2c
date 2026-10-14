@@ -60,6 +60,47 @@ test('formatJava refuses letters whose text is not exact here', async () => {
   }
 });
 
+test('shim.date.toText pins the documented Moscow example to the real weekday', async () => {
+  const { createRuntime } = await import('../src/runtime.js');
+  const { DelugeDate } = await import('../src/date.js');
+  const rt = createRuntime({ dryRun: true, appTimeZone: 'Asia/Kolkata' });
+  const ctx = rt.context({});
+  const value = new DelugeDate(2019, 1, 1, 10, 15, 30);
+  // functions/common/to-text.html documents this call as returning
+  // "... 07:45:30, Fri". The doc example is inconsistent with the calendar:
+  // 1 January 2019 was a Tuesday, so the implementation returns Tue and this
+  // test pins Tuesday.
+  assert.equal(rt.shim.date.toText(value, "MMM dd, yy 'at' hh:mm:ss, E", 'Europe/Moscow', ctx), 'Jan 01, 19 at 07:45:30, Tue');
+});
+
+// 'S' stays a refusal counted as a TODO: a value holds whole seconds, so the
+// letter is refused with DelugeRuntimeError rather than silently returning
+// null. Marked todo so the unimplemented letter is counted, not hidden.
+test("formatJava 'S' millisecond letter stays a counted todo refusal", { todo: "'S' is refused: a value holds whole seconds" }, async () => {
+  const { DelugeDate, formatJava } = await import('../src/date.js');
+  const { DelugeRuntimeError } = await import('../src/errors.js');
+  assert.throws(
+    () => formatJava(new DelugeDate(2020, 1, 2, 3, 4, 5), 'S'),
+    (e: unknown) => e instanceof DelugeRuntimeError,
+  );
+});
+
+// functions/common/to-text.html also documents a formatted epoch-milliseconds
+// call, toText(millis, "MMM dd, yy 'at' hh:mm:ss, E", "Europe/Moscow") ->
+// "Aug 06, 20 at 03:41:11, Thu". Formatted milliseconds are out of scope: a
+// number receiver is refused with DelugeRuntimeError (the 'S' letter likewise),
+// never a silent null, and the translation of a formatted number receiver is a
+// counted shim.todo hole. This todo test keeps the documented example visible
+// until it is implemented.
+test('shim.date.toText formats epoch milliseconds (documented example)', { todo: 'formatted-milliseconds toText is out of scope' }, async () => {
+  const { createRuntime } = await import('../src/runtime.js');
+  const rt = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  assert.equal(
+    rt.shim.date.toText(1596674471000, "MMM dd, yy 'at' hh:mm:ss, E", 'Europe/Moscow', rt.context({})),
+    'Aug 06, 20 at 03:41:11, Thu',
+  );
+});
+
 test('shim.date.toText converts from the app time zone into the given zone', async () => {
   const { createRuntime } = await import('../src/runtime.js');
   const { DelugeDate } = await import('../src/date.js');
