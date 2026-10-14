@@ -156,7 +156,7 @@ async function bootReport(model: UiModel, name: string, rows: unknown[]) {
     return { ok: true, status: 200, json: async () => ({ rows: body.op === 'query' ? rows : [] }) };
   }) as unknown as typeof fetch;
   await runtime.boot(model, win.document);
-  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   return { doc: win.document, bodies, runtime };
 }
 
@@ -572,7 +572,7 @@ async function bootDecorated(name: string, rows: Record<string, unknown>[], kind
 async function until(pred: () => boolean) {
   for (let i = 0; i < 40; i++) {
     if (pred()) return;
-    await new Promise((resolve) => setTimeout(resolve, 15));
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 }
 
@@ -777,7 +777,7 @@ test('a painted report labels every cell for the phone card layout', async () =>
   const cells = () => Array.from(win.document.querySelectorAll('section[data-report="All_Items"] tbody td'));
   await until(() => cells().length === 4);
   // Let every scheduled repaint finish before reading the final cells.
-  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 15));
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(
     cells().map((td) => [td.getAttribute('data-th'), td.textContent]),
     [
@@ -973,7 +973,7 @@ test('an empty or failed report load shows no chrome', async () => {
   const { doc } = await bootChrome([]);
   await until(() => !!doc.querySelector('[data-state="empty"]'));
   // The report-view enhance pass runs on a timer after the rows land.
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const section = doc.querySelector('[data-report]') as HTMLElement;
   assert.equal((section.querySelector('[data-report-tools]') as HTMLElement).hidden, true);
   assert.equal((section.querySelector('[data-pages]') as HTMLElement).hidden, true);

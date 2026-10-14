@@ -102,7 +102,7 @@ function setup(hash: string, options: { submitOk: boolean; rows?: unknown[] }) {
 }
 
 async function settle(): Promise<void> {
-  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 test('runtime renders checkbox groups as checkbox inputs and submits the checked values', async () => {
@@ -208,7 +208,7 @@ function authDom(auth: unknown, url = 'http://localhost/slate/index.html'): { wi
     url,
   }).window as unknown as AuthWindow;
   win.catalyst = { auth };
-  win.C2C_LOGIN_WAIT_MS = 5;
+  win.C2C_LOGIN_WAIT_MS = 0;
   return { win, doc: win.document };
 }
 

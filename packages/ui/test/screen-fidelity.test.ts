@@ -461,7 +461,9 @@ test('G5: opening the app lands on the first menu target', async () => {
   const view = dom(shell('#/'), 'http://127.0.0.1/slate/index.html#/');
   const win = view.window as unknown as { location: { hash: string }; document: Document };
   await client.boot(PO_MODEL(), win.document);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+  // fetch resolution: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(win.location.hash, '#/form/Purchase_Order', 'home redirects to the first menu item');
 });
 
@@ -551,14 +553,18 @@ test('G9: a report without a data endpoint shows the empty state, live errors re
   };
   const preview = build(async () => ({ ok: false, status: 404, text: async () => 'not found' }));
   await client.boot(model, preview.document);
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+  // fetch resolution: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const state = preview.document.querySelector('[data-state]');
   assert.match(state?.textContent ?? '', /no records/i, 'an unavailable endpoint shows the empty state');
   assert.equal(state?.querySelector('[data-retry]'), null, 'no retry under a static host');
 
   const live = build(async () => ({ ok: false, status: 500, text: async () => 'server error' }));
   await client.boot(model, live.document);
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+  // fetch resolution: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const liveState = live.document.querySelector('[data-state]');
   assert.ok(liveState?.querySelector('[data-retry]'), 'a real failure keeps Retry');
 });
@@ -609,7 +615,9 @@ test('G10: the dashboard draws KPI outputs and resolves report embeds', async ()
       }),
   });
   await client.boot(model, win.document);
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+  // fetch resolution: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const article = win.document.querySelector('article[data-page="Dashboard"]');
   assert.ok(article);
   const text = article.textContent ?? '';
@@ -651,7 +659,9 @@ test('G11: rendered dashboard tiles carry the export colors and sizes', async ()
   win.C2C_APP_TIMEZONE = 'Asia/Kolkata';
   win.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ rows: [{ ROWID: '1', Qty_Purchased: '7' }] }) });
   await client.boot(model, win.document);
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+  // fetch resolution: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const article = win.document.querySelector('article[data-page="Dashboard"]');
   assert.ok(article);
   const output = article.querySelector('output[data-kpi-fn]');
@@ -767,7 +777,9 @@ test('G12: an empty guarded form opens the popup form as a modal', async () => {
     text: async () => JSON.stringify({ rows: target.includes('Firm_Details') ? [] : [{ ROWID: '1', Qty_Purchased: '7' }] }),
   });
   await client.boot(model, win.document);
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+  // fetch resolution: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const modal = win.document.querySelector('[data-modal-form="Add_Firm"]');
   assert.ok(modal, 'an empty Add_Firm opens the modal form');
   assert.ok(modal?.querySelector('form[data-form="Add_Firm"]'), 'the modal renders the form');
@@ -806,7 +818,9 @@ test('G12: a popup to a hidden-section target asks the server before opening', a
       return { ok: true, status: 200, text: async () => JSON.stringify({ rows: [] }) };
     };
     await client.boot(model, win.document);
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+    // fetch resolution: a few timer turns, not a wall-clock wait.
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
     return { win, calls };
   };
 
@@ -861,7 +875,9 @@ test('G12: a hidden-section report popup gates before it reads rows', async () =
       return { ok: true, status: 200, text: async () => JSON.stringify({ rows: [] }) };
     };
     await client.boot(model, win.document);
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+    // fetch resolution: a few timer turns, not a wall-clock wait.
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
     return { win, calls };
   };
 
@@ -892,7 +908,9 @@ test('G12: a populated guarded form does not open the modal', async () => {
   win.C2C_APP_TIMEZONE = 'Asia/Kolkata';
   win.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ rows: [{ ROWID: '1', Firm_Name: 'Acme' }] }) });
   await client.boot(model, win.document);
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+  // fetch resolution: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(win.document.querySelector('[data-modal-form]'), null, 'a non-empty guard form opens no modal');
 });
 
@@ -923,7 +941,9 @@ test('G14: a static-host 404 on the guard report still opens the popup', async (
       ? { ok: false, status: 404, text: async () => '' }
       : { ok: true, status: 200, text: async () => JSON.stringify({ rows: [{ ROWID: '1', Qty_Purchased: '7' }] }) };
   await client.boot(model, win.document);
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+  // fetch resolution: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.ok(win.document.querySelector('[data-modal-form="Add_Firm"]'), 'a host without the data function means no rows yet');
 });
 
@@ -937,7 +957,9 @@ test('G15: sections closed unless they hold the active entry', async () => {
   win.C2C_APP_TIMEZONE = 'Asia/Kolkata';
   win.fetch = async () => ({ ok: false, status: 404, text: async () => '' });
   await client.boot(model, win.document);
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+  // fetch resolution: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const open = win.document.querySelectorAll('#nav details[open]');
   assert.equal(open.length, 0, 'the flat Dashboard link leaves every section closed, like Creator');
 });
@@ -959,11 +981,15 @@ test('G16: navigating away closes the popup modal the page opened', async () => 
   win.C2C_APP_TIMEZONE = 'Asia/Kolkata';
   win.fetch = async () => ({ ok: false, status: 404, text: async () => '' });
   await client.boot(model, win.document);
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+  // fetch resolution: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.ok(win.document.querySelector('[data-modal-form]'), 'the empty guard opened the modal');
   win.location.hash = '#/report/Firm_Details';
   win.dispatchEvent(new win.Event('hashchange'));
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+  // fetch resolution: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(win.document.querySelector('[data-modal-form]'), null, 'the modal closes when its page is no longer shown');
 });
 
@@ -1003,13 +1029,19 @@ test('G17: a view answer that lands after the route moved on opens no modal', as
     return Promise.resolve({ ok: true, status: 200, text: async () => JSON.stringify({ rows: [] }) });
   };
   await client.boot(model, win.document);
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+  // fetch resolution: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(win.document.querySelector('[data-modal-form]'), null, 'the view check is still in flight');
   win.location.hash = '#/form/Form_Products';
   win.dispatchEvent(new win.Event('hashchange'));
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+  // fetch resolution: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   answer({ ok: true, status: 200, text: async () => '{}' });
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // Deferred runtime work is scheduled on 0ms timers, possibly chained behind a
+  // fetch resolution: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(win.document.querySelector('[data-modal-form]'), null, 'a popup belongs to the page that asked for it');
   assert.equal(win.document.querySelector('form[data-form="Form_Products"]') !== null, true, 'the new route painted');
 });

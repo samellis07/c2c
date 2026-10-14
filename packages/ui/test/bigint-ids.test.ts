@@ -49,7 +49,7 @@ test('a report row with bare 17- and 19-digit ids renders the exact digits', asy
   // A fetch Response: json() is JSON.parse of the same text.
   win.fetch = async () => ({ ok: true, status: 200, text: async () => body, json: async () => JSON.parse(body) });
   await runtime.boot(model, win.document);
-  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const cells = Array.from(win.document.querySelectorAll('[data-rows] tbody td')).map((td) => td.textContent);
   assert.deepEqual(cells, [ROWID_17, CREATOR, '2']);
 });

@@ -203,12 +203,12 @@ test('the record view shows a Print button and the sheet fills from the record',
   }) as unknown as typeof fetch;
   runtime.installReportViews(model, win.document);
   await runtime.boot(model, win.document);
-  for (let i = 0; i < 8; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  for (let i = 0; i < 8; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const doc = win.document;
   const button = doc.querySelector('[data-print-record]');
   assert.ok(button, 'the record view offers a Print button');
   (button as HTMLElement).dispatchEvent(new (win as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent('click', { bubbles: true }));
-  for (let i = 0; i < 8; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  for (let i = 0; i < 8; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const sheet = doc.querySelector('[data-print-sheet]');
   assert.ok(sheet, 'the print sheet opens');
   assert.match(sheet?.textContent ?? '', /Ada Lovelace/);

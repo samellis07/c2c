@@ -12,6 +12,9 @@ import { CREATOR_TEXT, precheck, precheckAsJson, precheckAsText, type PrecheckRe
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const fixtureDir = path.join(repo, 'packages/cli/test/fixtures/precheck');
 const cli = path.join(repo, 'dist/cli/src/c2c.js');
+// The many `node c2c.js` children below share a V8 compile cache so each e2e
+// spawn does not recompile the whole CLI (ignored on runtimes without it).
+process.env.NODE_COMPILE_CACHE ??= path.join(tmpdir(), 'c2c-node-compile-cache');
 
 function load(name: string): PrecheckReport {
   const file = path.join(fixtureDir, name);

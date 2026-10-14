@@ -10,6 +10,10 @@ import { generate } from '../../deluge/src/generate.js';
 import { analyze } from '../src/analyze.js';
 import { buildMigrationReport } from '../src/migration-report.js';
 
+// The `node c2c.js` children below share a V8 compile cache so each e2e spawn
+// does not recompile the whole CLI (ignored on runtimes without it).
+process.env.NODE_COMPILE_CACHE ??= join(tmpdir(), 'c2c-node-compile-cache');
+
 /**
  * Every hole `generate` counts, `analyze` and `c2c migration-report` count too.
  * These apps have no workflow Deluge text, so a text-only walk sees nothing.
