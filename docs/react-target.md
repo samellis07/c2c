@@ -447,7 +447,12 @@ elements, of which 186 are server-side snippets (`dsp` 137, `dspZml` 49).
 
 The plugin gzips every emitted JS and CSS file at level 9 and fails the build
 over budget: JavaScript 250 KiB, CSS 24 KiB (`DEFAULT_BUDGET`). `dist/c2c-build.json`
-records the numbers. Skeleton measurements (gzip):
+records the numbers. Per chunk, `lib/c2c-ui/vite/route-chunk-budgets.json` is
+the reviewed gate: an emitted chunk with no budget entry, or over its entry by
+more than the 5% tolerance, fails the build naming the chunk and its size, and
+for the apps in `samples` a budgeted chunk missing from the output fails too
+(`C2C_BUDGET_STRICT=1`, set by `tools/ui-react-check.mjs`). Raising a budget
+means editing that file in the pull request. Skeleton measurements (gzip):
 
 | app | JS | CSS |
 |---|---:|---:|

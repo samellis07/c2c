@@ -109,6 +109,20 @@ with a reviewed reason, stated in the pull request.
 
 Full detail: [docs/contributing/determinism.md](docs/contributing/determinism.md).
 
+## Bundle budget
+
+The generated React app's Vite build fails when a gzipped chunk beats its
+budget. The one reviewed budget source is
+`packages/ui-react/template/lib/c2c-ui/vite/route-chunk-budgets.json`: every
+emitted chunk must have an entry there (matched by its stable route name, not
+the content hash), and a chunk over its entry by more than the 5% `tolerance`
+fails the build. No tool writes this file — raising a budget or adding a chunk
+means editing it in the pull request that changes the bundle, so the reviewer
+sees the gate move. CI builds the apps listed in `samples` through
+`tools/ui-react-check.mjs` with the strict gate (a budgeted chunk missing from
+the output also fails); keep that list in step with the apps the budget file
+describes.
+
 ## Dependencies and licences
 
 The tool itself has zero runtime dependencies. The generated React app is the

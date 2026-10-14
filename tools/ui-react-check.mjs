@@ -34,6 +34,13 @@ const flag = (name) => {
 const target = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--out');
 const out = flag('--out');
 const modules = join(root, 'packages/ui-react/template/node_modules');
+// The one reviewed budget file; the check never writes it. Apps listed in its
+// `samples` build with C2C_BUDGET_STRICT=1: a budgeted chunk missing from the
+// output fails the build (unbudgeted chunks fail every build).
+const budgetsFile = join(root, 'packages/ui-react/template/lib/c2c-ui/vite/route-chunk-budgets.json');
+const sampleApps = new Set(
+  (JSON.parse(readFileSync(budgetsFile, 'utf8')).samples ?? []).map((sample) => resolve(root, sample)),
+);
 if (!existsSync(join(modules, '.bin', 'vite'))) {
   process.stderr.write('ui-react-check: run `npm ci --prefix packages/ui-react/template` first\n');
   process.exit(2);
@@ -64,8 +71,8 @@ function treeHash(dir, skip = new Set()) {
   return { files: lines.length, sha256: createHash('sha256').update(lines.join('\n')).digest('hex') };
 }
 
-function run(cmd, argv, cwd) {
-  const res = spawnSync(cmd, argv, { cwd, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
+function run(cmd, argv, cwd, env = {}) {
+  const res = spawnSync(cmd, argv, { cwd, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1', ...env } });
   return { ok: res.status === 0, output: `${res.stdout ?? ''}${res.stderr ?? ''}` };
 }
 
@@ -98,10 +105,11 @@ async function checkApp(target, out) {
   const source = treeHash(out, new Set(['node_modules']));
 
   const bin = (name) => join(modules, '.bin', name);
+  const strictEnv = sampleApps.has(resolve(target)) || sampleApps.has(resolve(root, target)) ? { C2C_BUDGET_STRICT: '1' } : {};
   const tsc = run(bin('tsc'), ['-p', 'tsconfig.json', '--noEmit'], out);
-  const build1 = run(bin('vite'), ['build', '--logLevel', 'warn'], out);
+  const build1 = run(bin('vite'), ['build', '--logLevel', 'warn'], out, strictEnv);
   const dist1 = build1.ok ? treeHash(join(out, 'dist')) : undefined;
-  const build2 = build1.ok ? run(bin('vite'), ['build', '--logLevel', 'warn'], out) : { ok: false, output: '' };
+  const build2 = build1.ok ? run(bin('vite'), ['build', '--logLevel', 'warn'], out, strictEnv) : { ok: false, output: '' };
   const dist2 = build2.ok ? treeHash(join(out, 'dist')) : undefined;
   const budget = build1.ok ? JSON.parse(readFileSync(join(out, 'dist/c2c-build.json'), 'utf8')) : undefined;
 

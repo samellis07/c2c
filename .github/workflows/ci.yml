@@ -54,6 +54,14 @@ jobs:
       - name: Determinism manifests check
         run: npm run determinism:check
 
+      # Per-chunk bundle budget gate: builds both sample apps listed in
+      # packages/ui-react/template/lib/c2c-ui/vite/route-chunk-budgets.json;
+      # an unbudgeted or over-budget chunk fails the build.
+      - name: React bundle budget check (sample apps)
+        run: |
+          node tools/ui-react-check.mjs fixtures/dialects/d1-minimal.ds --out "$RUNNER_TEMP/ui-react-d1"
+          node tools/ui-react-check.mjs fixtures/dialects/d2-minimal.ds --out "$RUNNER_TEMP/ui-react-d2"
+
       - name: Vendor plugin twice (manifests must match) and check versions
         run: |
           node scripts/vendor-plugin.mjs

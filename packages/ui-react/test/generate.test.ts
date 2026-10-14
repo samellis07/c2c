@@ -386,9 +386,20 @@ test('route chunk budgets allow a 5% gzip increase and reject larger growth', ()
   const budgets = { version: 1, tolerance: ROUTE_CHUNK_BUDGETS.tolerance, samples: [], chunks: { 'runtime.js': 100 } };
   assert.deepEqual(chunkBudgetProblems({ 'assets/runtime.ABCDEFGH.js': 105 }, budgets), [], 'exactly 5% is allowed');
   assert.match(chunkBudgetProblems({ 'assets/runtime.ABCDEFGH.js': 106 }, budgets)[0]!, /over its 100 byte budget by more than 5%/);
-  assert.deepEqual(chunkBudgetProblems({ 'assets/unexpected.ABCDEFGH.js': 20 }, budgets), []);
-  assert.match(chunkBudgetProblems({ 'assets/unexpected.ABCDEFGH.js': 20 }, budgets, true).join(' '), /unbudgeted route chunk unexpected.js/);
   assert.deepEqual(chunkBudgetProblems({}, budgets), [], 'unrelated generated apps may emit different chunk sets');
+});
+
+test('an emitted chunk with no budget entry fails, named with its size', () => {
+  const budgets = { version: 1, tolerance: ROUTE_CHUNK_BUDGETS.tolerance, samples: [], chunks: { 'runtime.js': 100 } };
+  for (const strict of [false, true]) {
+    const problems = chunkBudgetProblems({ 'assets/unexpected.ABCDEFGH.js': 20 }, budgets, strict);
+    assert.match(problems[0]!, /unbudgeted route chunk unexpected\.js \(20 bytes gzipped\)/);
+  }
+  assert.deepEqual(
+    chunkBudgetProblems({ 'assets/runtime.ABCDEFGH.js': 100 }, budgets),
+    [],
+    'every emitted chunk budgeted and inside tolerance passes',
+  );
   assert.match(chunkBudgetProblems({}, budgets, true).join(' '), /missing budgeted route chunk runtime.js/);
 });
 
@@ -396,6 +407,10 @@ test('the committed route chunk budgets record the two sample apps and are self-
   assert.deepEqual(routeChunkBudgets.samples, ['fixtures/dialects/d1-minimal.ds', 'fixtures/dialects/d2-minimal.ds']);
   assert.equal(routeChunkBudgets.tolerance, 0.05);
   assert.ok(Object.keys(routeChunkBudgets.chunks).length > 0);
+  const repo = join(TEMPLATE_DIR, '..', '..', '..');
+  for (const sample of routeChunkBudgets.samples) {
+    assert.ok(existsSync(join(repo, sample)), `budget sample ${sample} is not in the repository`);
+  }
   const template = generateReactApp(appOf());
   assert.equal(text(template, 'lib/c2c-ui/vite/route-chunk-budgets.json'), JSON.stringify(routeChunkBudgets, null, 2) + '\n');
 });
