@@ -85,6 +85,15 @@ into `catalyst-config.json`. If a generated `--out` tree with real secret
 values was committed anywhere, rotate those values and remove them from the
 committed file — the next deploy writes only their names.
 
+## Environment variables
+
+The deployed function reads configuration from its environment variables, set in `catalyst-config.json` (`env_variables`) via `--function-env`:
+
+- `C2C_ADMIN_USER`: The Creator application owner's username or email (e.g. `<owner-email>`).
+- `C2C_ADMIN_USERID`: The Creator application owner's user id.
+
+Each variable affects only the filters that use it: when `C2C_ADMIN_USER` is unset, report filters on `zoho.adminuser` match nothing; when `C2C_ADMIN_USERID` is unset, report filters on `zoho.adminuserid` match nothing. The runtime never guesses the owner, and these values are never read from a client request.
+
 ## Outbound invokeurl (`outboundHosts`)
 
 A live `invokeurl` without `connection:` (a third-party URL) is deny by
