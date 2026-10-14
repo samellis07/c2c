@@ -1,0 +1,77 @@
+{
+  "schema": "c2c-fixture-migration-report/1",
+  "fixture": "redistributable/freight-forwarding/Creator_app_source_code",
+  "app": "Freight Forwarding and Feeder Solution",
+  "scope": [
+    {
+      "feature": "Payments",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Offline",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Form Email",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "C8 dialect",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Cliq bots",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Marketplace publishing",
+      "label": "not applicable (out of scope)"
+    },
+    {
+      "feature": "Zia AI builder",
+      "label": "not applicable (out of scope)"
+    },
+    {
+      "feature": "On-prem Data Bridge",
+      "label": "not applicable (out of scope)"
+    }
+  ],
+  "todoCount": 14,
+  "todoKinds": [
+    {
+      "construct": "client-condition-uses-server",
+      "count": 13
+    },
+    {
+      "construct": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
+      "count": 1
+    }
+  ],
+  "manualSteps": [
+    {
+      "severity": "warning",
+      "check": "converter-gap",
+      "count": 13
+    },
+    {
+      "severity": "warning",
+      "check": "duplicate-name",
+      "count": 12
+    },
+    {
+      "severity": "warning",
+      "check": "pivot-analytics",
+      "count": 1
+    },
+    {
+      "severity": "warning",
+      "check": "sendmail-sender",
+      "count": 1
+    },
+    {
+      "severity": "warning",
+      "check": "unique-varchar-budget",
+      "count": 1
+    }
+  ]
+}

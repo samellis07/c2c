@@ -26,6 +26,7 @@ import { dedupeTodos, generate, reportLock, residualDeterminism, type FillLock, 
 import { generateSchema } from '../../schema/src/index.js';
 import { buildUi, type UiTodo } from '../../ui/src/index.js';
 import { FEATURE_MATRIX, MATRIX_SNAPSHOT, type MatrixSnapshot } from './feature-matrix.js';
+import { ownerScope, type ScopeEntry } from './scope-labels.js';
 
 export type Verdict = 'supported' | 'adapter' | 'needs-assessment' | 'gap' | 'blocker';
 
@@ -134,6 +135,8 @@ export interface AnalyzeReport {
     used: FeatureUse[];
     counts: Record<Verdict, number>;
     needsAssessment: { id: number; area: string; feature: string; uses: number }[];
+    /** Owner scope. Same list on every app; it is not a usage count. */
+    scope: ScopeEntry[];
     excluded: number;
     unmapped: { area: string; feature: string; uses: number }[];
     notObservable: number;
@@ -425,6 +428,7 @@ export function analyze(app: App, options?: { lock?: FillLock }): AnalyzeReport 
       used: feat.used,
       counts,
       needsAssessment: feat.used.filter((u) => u.verdict === 'needs-assessment').map((u) => ({ id: u.id, area: u.area, feature: u.feature, uses: u.uses })),
+      scope: ownerScope(),
       excluded: feat.excluded,
       unmapped: feat.unmapped,
       notObservable: feat.notObservable,
@@ -464,6 +468,7 @@ export function analyzeAsText(r: AnalyzeReport): string {
     `matrix: ${r.matrix.matrix} snapshot ${r.matrix.snapshotDate}  sha256 ${r.matrix.sourceSha256.slice(0, 12)}${r.matrix.provisional ? '  (provisional)' : ''}`,
     `score: ${r.score.readiness}/100 ${r.score.band}  (features ${r.score.features}, deluge ${r.score.deluge})`,
     `features used: ${r.features.used.length}  supported ${f.supported}  adapter ${f.adapter}  needs-assessment ${f['needs-assessment']}  gap ${f.gap}  blocker ${f.blocker}  not-a-creator-feature ${r.features.excluded}`,
+    ...r.features.scope.map((item) => `scope: ${item.feature} — ${item.label}`),
     `deluge: ${r.deluge.statements} statements  translated ${r.deluge.translated}  shimmed ${r.deluge.shimmed}  todo ${r.deluge.todo}  (${r.deluge.units} units)`,
     `deterministic: ${r.determinism.deterministic ? 'yes' : 'no'}  (todo items ${r.determinism.todoCount}, lock fills ${r.determinism.fillLockEntries}; UI TODO stubs ${r.determinism.uiTodoCount}, included in the todo items)`,
     `blockers: ${r.blockers.length}`,

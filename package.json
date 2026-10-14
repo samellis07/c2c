@@ -29,6 +29,7 @@
     "matrix:fetch-help": "node tools/fetch-help-sitemap.mjs",
     "determinism:gallery": "npm run build && node dist/determinism/src/gallery.js",
     "determinism:status": "npm run build && node dist/determinism/src/status.js",
+    "migration-reports:update": "npm run build && node packages/cli/scripts/update-fixture-migration-reports.mjs",
     "determinism:update": "npm run build && node dist/determinism/src/manifests.js --update",
     "determinism:check": "npm run build && node dist/determinism/src/manifests.js --check",
     "tables:budget": "npm run build && node dist/determinism/src/table-budget.js",

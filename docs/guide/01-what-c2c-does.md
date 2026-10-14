@@ -29,13 +29,20 @@ Some Creator pieces have no Catalyst equivalent and are flagged,
 never silently dropped ([no-silent-drop rule](../../docs/no-silent-drop.md),
 rule 8 in [the c2c rules](../../plugin/C2C.md)):
 
-- Payments, form email, native mobile apps and offline mode,
-  marketplace publishing, the Zia AI builder, on-prem Data Bridge,
-  and some chat integrations are **out of scope** (marked
-  `OUT-OF-SCOPE` with a reason code).
-- **Single sign-on (Zoho One / SAML)** has no native Catalyst
-  equivalent. The fallback is Catalyst's own hosted/embedded sign-in
-  plus re-inviting your users — the AI will ask you to choose.
+- **Not supported in this version (counted):** payments, offline
+  mode, Form Email, the C8 Deluge dialect, and Cliq bots. The
+  migration report uses that phrase for these, and they still appear
+  in the report's feature counts and TODOs.
+- **Not applicable (out of scope):** marketplace publishing, the Zia
+  AI builder, and on-prem Data Bridge. They do not count as gaps or
+  TODOs and do not reduce the readiness score.
+- **Single sign-on (Zoho One / SAML)** is a manual step, not a label
+  on the list. The fallback is Catalyst's own hosted or embedded
+  sign-in plus re-inviting your users, or the documented third-party
+  JWT route — the AI will ask you to choose.
+- Native mobile apps and some chat integrations are separate from
+  those two labels. The migration report still lists whatever the
+  converter cannot carry, and nothing is dropped without a trace.
 - Anything the converter cannot translate becomes a numbered TODO
   in your migration report with per-construct counts, e.g.
   `2 (2 sendmail-attachment:template)` — two spots need a human to
