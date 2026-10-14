@@ -455,7 +455,7 @@ export const ZOHO_TOKEN_RE = /\b[0-9]{3,}\.[0-9a-zA-Z]{8,}[0-9a-zA-Z._-]*/g;
  * quotes: `client_secret="…"`, `"refresh_token=…"`.
  */
 export const PARAM_SECRET_RE =
-  /((?:^|["'=+?&#\s;,:<>)\]}]))((?:[^=\s&"'<>)\]}:]*)(?:token|secret|key|sig|code|pass|pw|otp)(?:[^=\s&"'<>)\]}:]*))(["']?)(\s*[:=]\s*["']?)([^&\s"'<>)\]},]+)/gi;
+  /((?:^|["'=+?&#\s;,:<>)\]}]))((?:[^=\s&"'<>)\]}:]*)(?:secret|token|password|passwd|pwd|credentials?|authorization|auth|api[-_]?key|session|cookie|private[-_]?key|signature|key|sig|code|pw|otp)(?:[^=\s&"'<>)\]}:]*))(["']?)(\s*[:=]\s*["']?)([^&\s"'<>)\]},]+)/gi;
 /** Long hex, base64, or token-shaped credential runs. */
 export const HEX_B64_TOKEN_RE =
   /\b(?:[A-Za-z0-9+/]{16,}={1,2}|(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{16,}|(?=[A-Za-z0-9._-]*[0-9])(?=[A-Za-z0-9._-]*[A-Za-z])[A-Za-z0-9._-]{20,}|(?=[A-Za-z0-9._-]*[0-9])[A-Za-z0-9._-]*(?:token|secret|passwd|password|apikey|oauth)[A-Za-z0-9._-]*)/gi;
