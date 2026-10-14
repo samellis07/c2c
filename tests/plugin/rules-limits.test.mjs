@@ -46,7 +46,7 @@ test('limits rules file exists with unique headings and a recipe on every rule',
   for (const rule of rules) {
     assert.match(rule.body, /^Rule: /m, `${rule.title} lacks a Rule: line`);
     assert.match(rule.body, /^Recipe: /m, `${rule.title} lacks a Recipe: line`);
-    assert.match(rule.body, /^Rule: .*\[(DOC|TESTED|UNVERIFIED)\]/m, `${rule.title} Rule: line lacks an evidence label`);
+    assert.match(rule.body, /^Rule: .*\[(DOC|CLI|MCP-LISTED|TESTED|UNVERIFIED)\]/m, `${rule.title} Rule: line lacks an evidence label`);
   }
 });
 
