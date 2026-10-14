@@ -21,19 +21,23 @@ node scripts/vendor-plugin.mjs
 ```
 
 - **Claude Code:** `claude plugin marketplace add "$PWD/plugin"` then `claude plugin install c2c@creator-to-catalyst` (or the same two steps as `/plugin` commands inside Claude Code). Then run `/c2c:doctor`.
-- **OpenAI Codex:** unpack the plugin once (clone the repo and build it as above, or copy the `plugin/` folder somewhere stable), then copy its skills and commands into the host's folders:
+- **OpenAI Codex:** unpack the plugin once (clone the repo and build it as above, or copy the `plugin/` folder somewhere stable), then copy its skills and commands into the host's folders — from the repo root:
   ```sh
+  PLUGIN_DIR="$PWD/plugin"   # path to the unpacked plugin/ folder
   mkdir -p ~/.codex/skills ~/.codex/prompts
-  cp -R <plugin>/skills/* ~/.codex/skills/
-  for c in <plugin>/commands/*.md; do cp "$c" ~/.codex/prompts/c2c-$(basename "$c"); done
+  cp -R "$PLUGIN_DIR"/skills/* ~/.codex/skills/
+  for c in "$PLUGIN_DIR"/commands/*.md; do cp "$c" ~/.codex/prompts/c2c-$(basename "$c"); done
   ```
   Start OpenAI Codex in your workspace, run `/prompts:c2c-doctor`.
-- **Cursor:** unpack the plugin once (as above) and point the project at it with the rule template:
+- **Cursor:** unpack the plugin once (as above) and point the project at it with the rule template — from the repo root:
   ```sh
+  PLUGIN_DIR="$PWD/plugin"   # path to the unpacked plugin/ folder
   mkdir -p .cursor/rules
-  sed "s|<c2c-plugin>|<path-to-plugin>|g" <plugin>/templates/cursor-rule.mdc > .cursor/rules/c2c.mdc
+  sed "s|<c2c-plugin>|$PLUGIN_DIR|g" "$PLUGIN_DIR"/templates/cursor-rule.mdc > .cursor/rules/c2c.mdc
   ```
-  (Replace `<path-to-plugin>` with the unpacked `plugin/` folder path.) Then ask the agent to run the c2c doctor.
+  Then ask the agent to run the c2c doctor.
+
+If your build ships `plugin/bin/c2c install-host <host>`, run that instead — it performs these steps for you; the commands above are the manual fallback.
 
 Installing never edits your MCP configuration; paste the snippet for your host yourself (see `templates/mcp-snippets.md`).
 
