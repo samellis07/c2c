@@ -469,6 +469,9 @@ export function elementFromZml(
     if (/^\s*htmlpage\b/i.test(decoded) || /<%/.test(decoded) || /<%/.test(source)) {
       const id = env ? `s${env.seq ? env.seq.n++ : 0}` : 's0';
       const compiled = env ? compileHtmlpage(env.app, env.page, name ?? tag, decoded, { id }) : null;
+      if (compiled?.ok && compiled.staticOnly) {
+        return { tag, kind, ...(name ? { name } : {}), html: compiled.html ?? '', ...(popups.length ? { popups } : {}), children };
+      }
       if (compiled?.ok && compiled.file && compiled.src !== undefined) {
         env?.emit?.(compiled.file);
         return {

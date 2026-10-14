@@ -165,6 +165,66 @@ if (input.show == "yes") {
   }
 });
 
+test('scalar Shape E: getSuffix, concatenation, member checks and app URI compile and render', async () => {
+  const { files, model } = generateUi(
+    appOf(`${pageWithSnippet(`htmlpage hp1()
+content
+<p><%= "archive.tar.gz".getSuffix(".") %></p>
+<% value = "catalyst" + "-app";
+if (input.mode == "full") {
+%><a href="<%= zoho.appuri %>"><%= value %></a><%
+} else {
+%><i>compact</i><%
+}
+%>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const element = htmlElements(model)[0];
+  assert.ok(element.src, 'scalar snippets use the generated htmlpage renderer');
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const live = await liveStore({});
+  try {
+    const full = await invoke(mod.default as never, { ...USER, body: { input: { mode: 'full' } } });
+    assert.equal(full.status, 200);
+    assert.match(String(full.body.html), /<p>tar\.gz<\/p>/);
+    assert.match(String(full.body.html), /<a href="#"[^>]*>catalyst-app<\/a>/);
+
+    const compact = await invoke(mod.default as never, { ...USER, body: { input: { mode: 'compact' } } });
+    assert.equal(compact.status, 200);
+    assert.match(String(compact.body.html), /<i>compact<\/i>/);
+  } finally {
+    live.restore();
+  }
+});
+
+test('empty server wrappers keep sanitized static markup without an endpoint', () => {
+  const emptyBodies = [
+    '',
+    ' \n\t ',
+    '// comment only\n',
+    '// <img src=x onerror=alert(1)><a href="javascript:alert(1)">x</a>secret_api_key\n',
+  ];
+  for (const body of emptyBodies) {
+    const snippet = `htmlpage hp1()\ncontent\n<%{${body}%}>\n<p>static</p><script>unsafe()</script>`;
+    const source = `${ORDERS}\n${pageWithSnippet(snippet)}`;
+    const first = generateUi(appOf(source));
+    const second = generateUi(appOf(source));
+    assert.deepEqual(first.files, second.files, 'generation is byte-identical');
+    assert.deepEqual(first.model.todos, [], `empty body ${JSON.stringify(body)}`);
+    assert.deepEqual(uiSnippetFiles(first.model), [], 'static markup needs no endpoint');
+    const html = htmlElements(first.model)[0].html ?? '';
+    assert.match(html, /<p>static<\/p>/);
+    assert.doesNotMatch(html, /%|&lt;%|<script|unsafe|htmlpage|comment only|secret_api_key|<img|javascript:/i);
+  }
+});
+
+test('server wrappers with an expression or assignment do not use the empty-wrapper path', () => {
+  for (const body of ['<%= input.name %>', '<%{ value = input.name; %}>']) {
+    const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n${body}\n<p>static</p>`);
+    assert.notEqual(compiled.staticOnly, true, body);
+  }
+});
+
 test('value-slots: interpolated input is escaped in text and attribute positions', async () => {
   const { files, model } = generateUi(
     appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
