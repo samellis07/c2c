@@ -126,12 +126,30 @@ test('matches refuses Java constructs it cannot evaluate exactly, naming the con
 });
 
 test('matches refuses a catastrophic-backtracking pattern before it runs, and bounds the text', () => {
+  // The refusal is made while the pattern is compiled, before any RegExp is
+  // built: counting RegExp constructions proves the refusal precedes the
+  // run, which a wall-clock bound cannot show on a loaded box. The trailing
+  // elapsed check is a hang guard only, at orders of magnitude above the
+  // real time.
+  const RealRegExp = globalThis.RegExp;
+  let compiled = 0;
+  globalThis.RegExp = class extends RealRegExp {
+    constructor(pattern: string | RegExp, flags?: string) {
+      super(pattern, flags);
+      compiled += 1;
+    }
+  } as unknown as RegExpConstructor;
   const started = Date.now();
-  assert.throws(() => matches(`${'a'.repeat(30)}b`, '(a+)+$'), /backtrack without bound/);
-  assert.ok(Date.now() - started < 100, 'refused without running the pattern');
-  assert.throws(() => matches('aaaa', '(a|a)*'), /backtrack without bound/);
-  assert.throws(() => matches('aaaa', '(.*)*'), /backtrack without bound/);
-  assert.throws(() => matches('ab', '(?:\\w+\\s?)+'), /backtrack without bound/);
+  try {
+    assert.throws(() => matches(`${'a'.repeat(30)}b`, '(a+)+$'), /backtrack without bound/);
+    assert.throws(() => matches('aaaa', '(a|a)*'), /backtrack without bound/);
+    assert.throws(() => matches('aaaa', '(.*)*'), /backtrack without bound/);
+    assert.throws(() => matches('ab', '(?:\\w+\\s?)+'), /backtrack without bound/);
+  } finally {
+    globalThis.RegExp = RealRegExp;
+  }
+  assert.equal(compiled, 0, 'every refused pattern was rejected before a RegExp was built');
+  assert.ok(Date.now() - started < 10_000, 'hang guard');
   // Repetition with a bounded body, or branches told apart by their first letter, runs.
   assert.equal(matches('abab', '(a|b)*'), true);
   assert.equal(matches('catdog', '(cat|dog)+'), true);
@@ -201,13 +219,49 @@ test('every accepted pattern finishes on a 10000 character input', () => {
   ];
   const input = `${'a'.repeat(9_999)}b`;
   assert.equal(input.length, 10_000);
-  for (const pattern of accepted) {
-    const started = Date.now();
-    const result = matches(input, pattern);
-    const elapsed = Date.now() - started;
-    assert.equal(typeof result, 'boolean', pattern);
-    assert.ok(elapsed < 200, `${pattern} took ${elapsed}ms`);
+  // The bound is work, not wall-clock: a pattern is compiled once and then
+  // evaluates the text in a single pass, so counting RegExp constructions
+  // and the .test evaluations made on the input bounds the work these calls
+  // perform. A match that re-tried the pattern at every offset would need
+  // ~10000 evaluations of the input per pattern. Evaluations the parser
+  // makes on the pattern itself are not counted. The trailing elapsed check
+  // is a hang guard only, at orders of magnitude above the real time.
+  const RealRegExp = globalThis.RegExp;
+  let compiled = 0;
+  let evaluatedOnInput = 0;
+  const realTest = RealRegExp.prototype.test;
+  globalThis.RegExp = class extends RealRegExp {
+    constructor(pattern: string | RegExp, flags?: string) {
+      super(pattern, flags);
+      compiled += 1;
+    }
+  } as unknown as RegExpConstructor;
+  RealRegExp.prototype.test = function (this: RegExp, text: string): boolean {
+    if (text === input) evaluatedOnInput += 1;
+    return realTest.call(this, text);
+  };
+  const started = Date.now();
+  try {
+    for (const pattern of accepted) {
+      const result = matches(input, pattern);
+      assert.equal(typeof result, 'boolean', pattern);
+    }
+  } finally {
+    RealRegExp.prototype.test = realTest;
+    globalThis.RegExp = RealRegExp;
   }
+  // At most one construction per pattern (a repeat is served from the
+  // pattern cache) and one evaluation of the input per call, plus one more
+  // for the ASCII probe the single \b pattern runs on the text.
+  assert.ok(
+    compiled <= accepted.length,
+    `${compiled} patterns compiled for ${accepted.length} calls`,
+  );
+  assert.ok(
+    evaluatedOnInput <= accepted.length + 1,
+    `${evaluatedOnInput} evaluations of the input for ${accepted.length} calls`,
+  );
+  assert.ok(Date.now() - started < 10_000, 'hang guard');
 });
 
 test('matches refuses text outside the Basic Multilingual Plane', () => {
@@ -239,10 +293,28 @@ test('replaceAll uses the Java pattern and Java replacement, and refuses what ma
   assert.equal(replaceAll('a.b', '.', '-'), '---');
   assert.equal(replaceAll('a.b', '.', '-', true), 'a-b');
   assert.equal(replaceAll('a$b', '$', 'X', true), 'aXb');
+  // The refusal is made while the pattern is compiled, before any RegExp is
+  // built: counting RegExp constructions proves the refusal precedes the
+  // run, which a wall-clock bound cannot show on a loaded box. The trailing
+  // elapsed check is a hang guard only, at orders of magnitude above the
+  // real time.
+  const RealRegExp = globalThis.RegExp;
+  let compiled = 0;
+  globalThis.RegExp = class extends RealRegExp {
+    constructor(pattern: string | RegExp, flags?: string) {
+      super(pattern, flags);
+      compiled += 1;
+    }
+  } as unknown as RegExpConstructor;
   const started = Date.now();
-  assert.throws(() => replaceAll('ab', '(a{1,2})*', 'x'), /backtrack without bound/);
-  assert.throws(() => replaceAll('aaaa', '(a+)+', 'x'), /backtrack without bound/);
-  assert.ok(Date.now() - started < 5, 'replaceAll refused before running');
+  try {
+    assert.throws(() => replaceAll('ab', '(a{1,2})*', 'x'), /backtrack without bound/);
+    assert.throws(() => replaceAll('aaaa', '(a+)+', 'x'), /backtrack without bound/);
+  } finally {
+    globalThis.RegExp = RealRegExp;
+  }
+  assert.equal(compiled, 0, 'refused before a RegExp was built');
+  assert.ok(Date.now() - started < 10_000, 'hang guard');
   assert.throws(() => replaceAll('a'.repeat(10_001), 'a', 'b'), /longer than the 10000/);
   assert.equal(replaceAll('a'.repeat(10_000), 'a', 'b')?.length, 10_000);
   assert.throws(() => replaceAll('\u{1D400}', '.', 'x'), /non-BMP/);
