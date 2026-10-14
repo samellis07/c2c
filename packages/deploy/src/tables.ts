@@ -10,6 +10,7 @@
  * are created not mandatory. The gap text is `mandatory relaxed: <table>.<column>`.
  */
 import { staticDefault } from '../../core/src/ir.js';
+import { compareEnUs } from '../../core/src/order.js';
 import type { ConstraintDecision, SchemaColumn, SchemaPlan, SchemaTable } from '../../schema/src/generator.js';
 import { ORG_TABLE_LIMIT_RECOVERY } from '../../schema/src/limits.js';
 import { UNIQUE_VARCHAR_MAX_PER_TABLE, isReservedColumnName } from '../../schema/src/mapping.js';
@@ -511,7 +512,7 @@ async function applySteps(projectId: string, steps: readonly TableCreateStep[], 
       }
     }
   }
-  diff.tables = [...live.entries()].map(([name, remote]) => ({ table_name: name, table_id: remote.id })).sort((a, b) => a.table_name.localeCompare(b.table_name));
+  diff.tables = [...live.entries()].map(([name, remote]) => ({ table_name: name, table_id: remote.id })).sort((a, b) => compareEnUs(a.table_name, b.table_name));
   return diff;
 }
 

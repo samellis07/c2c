@@ -11,6 +11,7 @@
  */
 
 import { unquote, type App, type Field, type Form, type Report } from '../../core/src/ir.js';
+import { compareEnUs } from '../../core/src/order.js';
 import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
 
 /** Report Import Data article. Limitation 2: subform import is not supported. */
@@ -489,7 +490,7 @@ function topoOrder(forms: Form[], deps: Map<string, Set<string>>): { order: stri
       children.get(dep)!.push(name);
     }
   }
-  const ready = names.filter((n) => indegree.get(n) === 0).sort((a, b) => a.localeCompare(b));
+  const ready = names.filter((n) => indegree.get(n) === 0).sort(compareEnUs);
   const order: string[] = [];
   while (ready.length) {
     const next = ready.shift()!;
@@ -499,12 +500,12 @@ function topoOrder(forms: Form[], deps: Map<string, Set<string>>): { order: stri
       indegree.set(child, left);
       if (left === 0) {
         ready.push(child);
-        ready.sort((a, b) => a.localeCompare(b));
+        ready.sort(compareEnUs);
       }
     }
   }
   const cycles: string[] = [];
-  for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
+  for (const name of [...names].sort(compareEnUs)) {
     if (!order.includes(name)) {
       order.push(name);
       cycles.push(name);
