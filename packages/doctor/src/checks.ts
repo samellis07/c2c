@@ -31,18 +31,6 @@ import { invalidTokenOutput, readWithNewerToken } from '../../deploy/src/retry.j
 import { FIDELITY_JSON, LOADER_REPORT, hasReportJson } from '../../deploy/src/csv.js';
 import { localRefreshAllowed } from '../../deploy/src/rest.js';
 
-/** Public checklist consumed by the doctor-spec parity test. */
-export const DOCTOR_CHECK_IDS = [
-  'D-A1', 'D-A2', 'D-A3', 'D-A4',
-  'D-B1', 'D-B2', 'D-B3', 'D-B4', 'D-B5', 'D-B6', 'D-B7',
-  'D-C1', 'D-C2', 'D-C3', 'D-C4', 'D-C5',
-  'D-D1', 'D-D2', 'D-D3',
-  'D-E1', 'D-E2', 'D-E3', 'D-E4',
-  'D-F1', 'D-F2', 'D-F3', 'D-F4', 'D-F5', 'D-F6',
-  'D-R1', 'D-R2', 'D-R3', 'D-R4',
-  'D-V1', 'D-V2', 'D-V3',
-] as const;
-
 export interface DoctorContext {
   io: DoctorIo;
   /** Workspace (c2c-out lives here). */
