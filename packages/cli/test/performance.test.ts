@@ -35,7 +35,8 @@ function filesDigest(dir: string): string {
   return hash.digest('hex');
 }
 
-const io: Io = { stderr: () => undefined, stdout: () => undefined };
+const refuse = async (): Promise<never> => { throw new Error('unexpected network/process call in offline plan'); };
+const io: Io = { stderr: () => undefined, stdout: () => undefined, env: {}, spawn: refuse, fetch: refuse };
 
 test('generate, plan and analyze stay deterministic within large-app time and memory budgets', async () => {
   const temp = mkdtempSync(path.join(os.tmpdir(), 'c2c-perf-large-app-'));
