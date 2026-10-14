@@ -137,7 +137,7 @@ export function ReportView({ report, row }: { report: ReportSpec; row?: string }
   return <ReportList report={report} />;
 }
 
-/** A non-list view: a visible stub beside the generated `.todo` note, never a silent list. */
+/** A non-list view stays visibly pending until its renderer is implemented. */
 function ViewStub({ report }: { report: ReportSpec }) {
   const custom = useCustomization();
   const own = custom.reports?.[report.name];
@@ -266,6 +266,10 @@ function ReportList({ report }: { report: ReportSpec }) {
   const initialSort: SortState | undefined = report.sort[0]
     ? { key: report.sort[0].field, direction: /desc/i.test(report.sort[0].order ?? '') ? 'desc' : 'asc' }
     : undefined;
+  const actionNameFor = (endpoint: string, fallback: string) => report.customActions.find((a) => a.endpoint === endpoint)?.name ?? fallback;
+  const recordCustomActions = report.customActions.filter(
+    (action) => !action.header && !report.columns.some((c) => c.action === action.endpoint),
+  );
   const columns: DataColumn<Row>[] = report.columns.map((column, index) => ({
     key: column.field,
     label: column.label,
@@ -274,8 +278,19 @@ function ReportList({ report }: { report: ReportSpec }) {
     ...(column.action ? { sortable: false as const } : column.numeric ? { numeric: true } : {}),
     render: (value: unknown, row: Row): ReactNode => {
       if (column.action) {
+        const actionName = actionNameFor(column.action, column.label);
+        const actionLabel = actionName.toLowerCase().includes(column.label.toLowerCase())
+          ? actionName
+          : `${column.label}: ${actionName}`;
         return (
-          <Button type="button" variant="secondary" size="sm" data-action={column.action} onClick={() => runAction(column.label, column.action!, row.ROWID === undefined ? undefined : String(row.ROWID))}>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            data-action={column.action}
+            aria-label={actionLabel}
+            onClick={() => runAction(column.label, column.action!, row.ROWID === undefined ? undefined : String(row.ROWID))}
+          >
             {column.label}
           </Button>
         );
@@ -292,29 +307,50 @@ function ReportList({ report }: { report: ReportSpec }) {
       return paint ? <span style={paint}>{text}</span> : text;
     },
   }));
-  const editable = report.form && report.rowActions.edit;
-  const deletable = report.form && report.rowActions.delete && report.deleteEndpoint;
-  if (editable || deletable || own?.rowActions) {
+  const hasForm = !!report.form;
+  const editable = hasForm && report.rowActions.edit;
+  const deletable = hasForm && report.rowActions.delete && report.deleteEndpoint;
+      const showRowActions = hasForm || recordCustomActions.length > 0 || own?.rowActions;
+  if (showRowActions) {
     columns.push({
       key: '__actions',
       label: 'Actions',
       sortable: false,
       phone: true,
-      render: (_value: unknown, row: Row): ReactNode => (
-        <span className="c2c-row-actions">
-          {editable && row.ROWID !== undefined ? (
-            <a className="c2c-row-open" href={hrefFor('form', report.form!, 'edit', String(row.ROWID))} aria-label={`Edit record ${String(row.ROWID)}`}>
-              Edit
-            </a>
-          ) : null}
-          {deletable && row.ROWID !== undefined ? (
-            <Button type="button" variant="secondary" size="sm" data-row-delete="" onClick={() => removeRow(String(row.ROWID))}>
-              Delete
-            </Button>
-          ) : null}
-          {own?.rowActions?.(row)}
-        </span>
-      ),
+      render: (_value: unknown, row: Row): ReactNode => {
+        const id = row.ROWID !== undefined && row.ROWID !== '' ? String(row.ROWID) : '';
+        return (
+          <span className="c2c-row-actions">
+            {id && (editable || report.detail) ? (
+              <a
+                className="c2c-row-open"
+                href={editable ? hrefFor('form', report.form!, 'edit', id) : hrefFor('report', report.name, 'row', id)}
+                aria-label={`${editable ? 'Edit' : 'Open'} record ${id}`}
+              >
+                {editable ? 'Edit' : 'Open'}
+              </a>
+            ) : null}
+            {deletable && id ? (
+              <Button type="button" variant="secondary" size="sm" data-row-delete="" onClick={() => removeRow(id)}>
+                Delete
+              </Button>
+            ) : null}
+            {recordCustomActions.map((action) => (
+              <Button
+                key={action.name}
+                type="button"
+                variant="secondary"
+                size="sm"
+                data-action={action.endpoint}
+                onClick={() => runAction(action.name, action.endpoint, id || undefined)}
+              >
+                {action.name}
+              </Button>
+            ))}
+            {own?.rowActions?.(row)}
+          </span>
+        );
+      },
     });
   }
   const Table = custom.components?.ReportTable;
