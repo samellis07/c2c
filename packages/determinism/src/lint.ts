@@ -41,7 +41,12 @@ const ROOTS = [
   'packages/core/src/toolchain.ts',
   // Seed file order is a generator tie-break. migrate.ts in the same folder is runtime, not codegen.
   'packages/data/src/seed.ts',
+  // These runtime paths publish ordered output; check locale-sensitive comparisons only.
+  'packages/data/src/seed-import.ts',
+  'packages/deploy/src/tables.ts',
 ];
+
+const LOCALE_ONLY_ROOTS = new Set(['packages/data/src/seed-import.ts', 'packages/deploy/src/tables.ts']);
 
 /**
  * Generators that write a committed file but also use source-order Set spreads
@@ -64,7 +69,8 @@ export function lintCodegen(root = repoRoot()): Finding[] {
   const findings: Finding[] = [];
   for (const abs of files) {
     const rel = relative(root, abs).split(sep).join('/');
-    findings.push(...scanSource(rel, readFileSync(abs, 'utf8')));
+    const scanned = scanSource(rel, readFileSync(abs, 'utf8'));
+    findings.push(...(LOCALE_ONLY_ROOTS.has(rel) ? scanned.filter((finding) => finding.kind === 'locale') : scanned));
   }
   for (const rel of LOCALE_FILES) {
     const abs = join(root, rel);

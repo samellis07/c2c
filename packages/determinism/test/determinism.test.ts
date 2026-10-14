@@ -91,6 +91,31 @@ test('a file-level iteration allow does not cover localeCompare', () => {
   assert.equal(findings.some((f) => f.kind === 'locale' && f.line === 2), true);
 });
 
+test('Creator import and live-table diff order do not depend on LANG', () => {
+  const script = `
+    import { deriveIr, parse } from './dist/core/src/index.js';
+    import { generateCreatorImport } from './dist/data/src/index.js';
+    import { applyTablePlan } from './dist/deploy/src/tables.js';
+    const source = ['application "LocaleOrder"', '{', ...['Ångström', 'Aardvark', 'Æther', 'Zulu'].flatMap((name) => ['form ' + name, '{', 'Name', '(', 'type = text', ')', '}']), '}', ''].join('\\n');
+    const app = deriveIr(parse(source));
+    const imported = generateCreatorImport(app).order;
+    const names = ['Zulu', 'Æther', 'Ångström', 'Aardvark'];
+    const diff = await applyTablePlan('1001', [], async () => ({ status: 200, body: { data: names.map((table_name, i) => ({ table_name, table_id: String(i + 1), columns: [] })) } }));
+    process.stdout.write(JSON.stringify({ imported, live: diff.tables?.map((table) => table.table_name) }));
+  `;
+  const output = (lang: string) => {
+    const env = { ...process.env, LANG: lang, LC_ALL: lang };
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: root,
+      env,
+      encoding: 'utf8',
+    });
+    assert.equal(child.status, 0, child.stderr || child.stdout);
+    return child.stdout;
+  };
+  assert.equal(output('da_DK.UTF-8'), output('C'));
+});
+
 test('the loaded model replays the edits log beside the export', () => {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-tree-'));
   try {
