@@ -16,7 +16,7 @@ function runAnalyze(...args: string[]) {
 function assertLockError(args: string[], message: string) {
   const result = runAnalyze(...args);
   assert.equal(result.status, 2);
-  assert.equal(result.stderr.trim(), `c2c: ${message}`);
+  assert.equal(result.stderr.trim(), `c2c: ${message} [C2C-CLI-001]\nSee plugin/references/error-index.md#c2c-cli-001`);
   assert.doesNotMatch(result.stderr, /^\s*at /m);
 }
 
