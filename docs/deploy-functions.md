@@ -295,8 +295,12 @@ is `no test recipients configured`. Each entry must be a mail address;
 anything else stops the run before any spawn. The generated
 `functions/c2c-mail.mjs` bakes in exactly that list and refuses a
 `c2c-mail.json` that differs, so a tampered config still sends nowhere.
-A verified Catalyst Mail sender (`--mail-from` and `--mail-sender-verified`)
-is still required before a confirmed `--mail` deploy will send.
+A verified Catalyst Mail sender is still required before a confirmed `--mail`
+deploy will send. Set `mail.from` and `mail.verified: true` in
+`c2c-deploy.json`, or pass `--mail-from <address> --mail-sender-verified`.
+The human checklist names the sender address and the verification-code step.
+Doctor checks this local attestation offline; the Catalyst console state is
+[UNVERIFIED] until the operator verifies the address there.
 
 ## Data centre
 
