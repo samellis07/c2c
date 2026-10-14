@@ -251,6 +251,15 @@ test('a table name longer than the longest kept name is table-name-length-unveri
   assert.equal(row?.verified, false);
 });
 
+test('the table-name gate passes at 34 characters and blocks at 35', () => {
+  assert.equal(LONGEST_KEPT_TABLE_NAME.length, 34);
+  assert.equal(tableNameLengthBlocker('Item', 'Details__Asset_Information'), undefined);
+  assert.equal(tableNameLengthBlocker('Item', 'Add_Vendor__Current_Contracts'), undefined);
+  assert.equal(tableNameLengthBlocker('Item', 'D'.repeat(34)), undefined);
+  const over = tableNameLengthBlocker('Item', 'D'.repeat(35));
+  assert.equal(over?.limitId, 'table-name-length-unverified');
+});
+
 function nameForm(formName: string, parts: readonly string[]): string {
   const inner = parts.map((part) => `\t\t\t${part}\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)`).join('\n');
   return `\tform ${formName}\n\t{\n\t\tWho\n\t\t(\n\t\t\ttype = name\n${inner}\n\t\t)\n\t}`;

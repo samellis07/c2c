@@ -35,8 +35,8 @@ Rules:
   value, so the same inputs repeat. `parent_id` is the parent row's source id and `row_order`
   is the 0-based position under that parent. A multi-lookup inside a subform follows the same
   rule. Its junction is `<Child>__<identifier>`, so every seed table is a table the schema
-  plans. A table name longer than the longest name a create has been seen to keep
-  (25 characters) is a `table-name-length-unverified` blocker on the schema plan and on the seed.
+  plans. A table name longer than the longest name a create has kept (`Rate_Your_Vendors__Product_Service`,
+  34 characters) is a `table-name-length-unverified` blocker on the schema plan and on the seed.
   No published Data Store table-name maximum is recorded, and the table is still emitted.
   A grid that looks up another form does not add a
   child table; it fills the back-reference column on that form.
