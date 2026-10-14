@@ -1057,6 +1057,222 @@ export function islandReadOnly(server: string): boolean {
   return true;
 }
 
+function cleanCssVal(v: string | undefined): string {
+  return String(v || '').replace(/;+$/, '').trim();
+}
+
+function zmlSizeToCss(size: string | undefined): string {
+  if (!size) return '';
+  const s = String(size).trim();
+  if (/^\d+$/.test(s)) {
+    const n = Number(s);
+    const map: Record<number, string> = { 1: '12px', 2: '14px', 3: '16px', 4: '18px', 5: '24px', 6: '32px' };
+    return map[n] || `${n * 4}px`;
+  }
+  return cleanCssVal(s);
+}
+
+function zmlAttributesToStyle(attrs: Record<string, string>): string {
+  const styles: string[] = [];
+  if (attrs.style) styles.push(cleanCssVal(attrs.style));
+  if (attrs.width) {
+    const w = cleanCssVal(attrs.width);
+    if (w === 'fill') styles.push('flex:1;min-width:0');
+    else if (w === 'auto') styles.push('width:auto');
+    else styles.push(`width:${w}`);
+  }
+  if (attrs.height) {
+    const h = cleanCssVal(attrs.height);
+    if (h === 'fill') styles.push('height:100%');
+    else if (h === 'auto') styles.push('height:auto');
+    else styles.push(`height:${h}`);
+  }
+  if (attrs.bgcolor) styles.push(`background-color:${cleanCssVal(attrs.bgcolor)}`);
+  if (attrs.color) styles.push(`color:${cleanCssVal(attrs.color)}`);
+  if (attrs.size) {
+    const sz = zmlSizeToCss(attrs.size);
+    if (sz) styles.push(`font-size:${sz}`);
+  }
+  if (attrs.bold === 'true') styles.push('font-weight:bold');
+  else if (attrs.bold === 'false') styles.push('font-weight:normal');
+  if (attrs.italic === 'true') styles.push('font-style:italic');
+  if (attrs.textalign || attrs.halign) {
+    const a = cleanCssVal(attrs.textalign || attrs.halign).toLowerCase();
+    if (a === 'center' || a === 'left' || a === 'right') styles.push(`text-align:${a}`);
+  }
+  if (attrs.valign) {
+    const va = cleanCssVal(attrs.valign).toLowerCase();
+    if (va === 'middle' || va === 'top' || va === 'bottom') styles.push(`vertical-align:${va}`);
+  }
+  if (attrs.padding) styles.push(`padding:${cleanCssVal(attrs.padding)}`);
+  if (attrs.paddingleft) styles.push(`padding-left:${cleanCssVal(attrs.paddingleft)}`);
+  if (attrs.paddingright) styles.push(`padding-right:${cleanCssVal(attrs.paddingright)}`);
+  if (attrs.paddingtop) styles.push(`padding-top:${cleanCssVal(attrs.paddingtop)}`);
+  if (attrs.paddingbottom) styles.push(`padding-bottom:${cleanCssVal(attrs.paddingbottom)}`);
+  if (attrs.marginleft) styles.push(`margin-left:${cleanCssVal(attrs.marginleft)}`);
+  if (attrs.marginright) styles.push(`margin-right:${cleanCssVal(attrs.marginright)}`);
+  if (attrs.margintop) styles.push(`margin-top:${cleanCssVal(attrs.margintop)}`);
+  if (attrs.marginbottom) styles.push(`margin-bottom:${cleanCssVal(attrs.marginbottom)}`);
+  if (attrs.cornerradius) styles.push(`border-radius:${cleanCssVal(attrs.cornerradius)}`);
+  const safe = styles.filter(Boolean).join(';');
+  return safe ? ` style="${safe}"` : '';
+}
+
+function parseZmlAttributes(attrText: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  let i = 0;
+  while (i < attrText.length) {
+    while (i < attrText.length && /\s/.test(attrText[i] ?? '')) i++;
+    if (i >= attrText.length || attrText[i] === '/' || attrText[i] === '>') break;
+    let name = '';
+    while (i < attrText.length && !/[\s=/]/.test(attrText[i] ?? '')) {
+      name += attrText[i++];
+    }
+    if (!name) break;
+    while (i < attrText.length && /\s/.test(attrText[i] ?? '')) i++;
+    if (attrText[i] !== '=') {
+      attrs[name.toLowerCase()] = '';
+      continue;
+    }
+    i++;
+    while (i < attrText.length && /\s/.test(attrText[i] ?? '')) i++;
+    if (i >= attrText.length) break;
+    const q = attrText[i];
+    if (q === '"' || q === "'") {
+      i++;
+      let val = '';
+      while (i < attrText.length && attrText[i] !== q) {
+        val += attrText[i++];
+      }
+      if (i < attrText.length) i++;
+      attrs[name.toLowerCase()] = val;
+    } else {
+      let val = '';
+      while (i < attrText.length && !/[\s>]/.test(attrText[i] ?? '')) {
+        val += attrText[i++];
+      }
+      attrs[name.toLowerCase()] = val;
+    }
+  }
+  return attrs;
+}
+
+export function convertZmlSnippetToHtml(template: string): string {
+  if (!/<\/?(panel|pr|pc|prefix|suffix|text|row|column)\b/i.test(template)) {
+    return template;
+  }
+  let out = '';
+  let at = 0;
+  const tagStack: { tag: string; isContainer: boolean }[] = [];
+
+  while (at < template.length) {
+    if (template.startsWith('<%', at)) {
+      const isBlock = template.startsWith('<%{', at);
+      const close = isBlock
+        ? (template.indexOf('%}', at + 3) >= 0 ? template.indexOf('%}', at + 3) + 2 : template.indexOf('%>', at + 3) + 2)
+        : template.indexOf('%>', at + 2) + 2;
+      const end = close > 1 ? close : template.length;
+      out += template.slice(at, end);
+      at = end;
+      continue;
+    }
+
+    if (template[at] === '<') {
+      if (template.startsWith('<!--', at)) {
+        const end = template.indexOf('-->', at + 4);
+        const stop = end < 0 ? template.length : end + 3;
+        out += template.slice(at, stop);
+        at = stop;
+        continue;
+      }
+
+      const m = /^<\/?([A-Za-z][\w-]*)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>/.exec(template.slice(at));
+      if (m) {
+        const full = m[0];
+        const rawTag = m[1];
+        const tag = rawTag.toLowerCase();
+        const attrStr = m[2];
+        const isSelfClosing = m[3] === '/' || full.endsWith('/>');
+        const isClosing = full.startsWith('</');
+
+        if (tag === 'prefix' || tag === 'suffix') {
+          if (isClosing) {
+            at += full.length;
+            continue;
+          }
+          const attrs = parseZmlAttributes(attrStr);
+          const val = attrs.value || '';
+          const style = zmlAttributesToStyle(attrs);
+          out += `<span${style}>${val}</span>`;
+          at += full.length;
+          const after = template.slice(at);
+          const closeMatch = new RegExp(`^\\s*<\\/${tag}>`, 'i').exec(after);
+          if (closeMatch) at += closeMatch[0].length;
+          continue;
+        }
+
+        if (tag === 'text') {
+          if (isClosing) {
+            const popped = tagStack.pop();
+            if (popped?.isContainer) {
+              out += '</div>';
+            }
+            at += full.length;
+            continue;
+          }
+          const attrs = parseZmlAttributes(attrStr);
+          const style = zmlAttributesToStyle(attrs);
+          if (isSelfClosing) {
+            const val = attrs.value || '';
+            out += `<div${style}>${val}</div>`;
+            at += full.length;
+            continue;
+          }
+          const after = template.slice(at + full.length);
+          if (/^\s*<(prefix|suffix)\b/i.test(after)) {
+            tagStack.push({ tag: 'text', isContainer: true });
+            out += `<div${style}>`;
+            at += full.length;
+          } else {
+            const val = attrs.value || '';
+            out += `<div${style}>${val}</div>`;
+            at += full.length;
+            const closeMatch = /^\s*<\/text>/i.exec(template.slice(at));
+            if (closeMatch) {
+              at += closeMatch[0].length;
+            } else {
+              tagStack.push({ tag: 'text', isContainer: false });
+            }
+          }
+          continue;
+        }
+
+        if (tag === 'panel' || tag === 'pr' || tag === 'pc' || tag === 'row' || tag === 'column') {
+          if (isClosing) {
+            out += '</div>';
+            at += full.length;
+            continue;
+          }
+          const attrs = parseZmlAttributes(attrStr);
+          const style = zmlAttributesToStyle(attrs);
+          out += `<div data-zml="${tag}"${style}>`;
+          if (isSelfClosing) out += '</div>';
+          at += full.length;
+          continue;
+        }
+
+        out += full;
+        at += full.length;
+        continue;
+      }
+    }
+
+    out += template[at++];
+  }
+
+  return out;
+}
+
 /**
  * Compile a decoded `htmlpage` template into a generated endpoint plus the
  * sanitized static shell. Returns `{ ok: false }` for anything outside the
@@ -1071,6 +1287,7 @@ export function compileHtmlpage(
 ): HtmlpageCompiled {
   const fail = (reason: string): HtmlpageCompiled => ({ ok: false, reason });
   const head = splitTemplate(decoded);
+  head.template = convertZmlSnippetToHtml(head.template);
   const chunks = splitChunks(head.template);
   if (!chunks || !chunks.some((c) => c.kind !== 'static')) return fail('no Deluge islands');
   if (MARK_CHECK.test(head.template) || /\bc2c_(out|parts|static|str|esc|link|notes|css)\b/i.test(head.template))
