@@ -354,11 +354,11 @@ Read-back: MCP CatalystbyZoho_Get_Authentication_Configurations shows embedded a
 
 ### Update authentication configuration
 
-Rule: The token PUT of /authentication/configuration returns 401. Change url_preference and the rest with MCP, or in the console under Authentication.
+Rule: The token PUT of /authentication/configuration returns 401. Change url_preference and the rest in the console under Authentication (there is no verified MCP update tool).
 
-Surface: MCP CatalystbyZoho_Update_Authentication_Configuration
+Surface: guided console step
 
-Recipe: Body from ZohoMCP_getSchema. Embedded sign-in does not require a custom url_preference.
+Recipe: Update settings in the Catalyst console under Authentication. Embedded sign-in does not require a custom url_preference.
 
 Read-back: MCP CatalystbyZoho_Get_Authentication_Configurations shows the field you changed.
 

@@ -39,6 +39,7 @@ import {
 import requiredTools from '../data/required-mcp-tools.json' with { type: 'json' };
 import { repoRoot } from '../../core/src/toolchain.js';
 import { ALL_REQUIRED_MCP_TOOLS, MCP_TOOLS_GUIDANCE, NEVER_CALL_MCP_TOOLS, REQUIRED_MCP_TOOLS } from '../src/required-tools.js';
+import { VERIFIED_MCP_TOOL_REGISTRY, isVerifiedMcpTool } from '../../deploy/src/mcp-registry.js';
 
 const ORG = '10000000000';
 const PROJECT = '10000000000013200';
@@ -805,10 +806,10 @@ test('D-B5: a subset server lists exactly the missing tools, split doctor / plan
     steps: [{ id: 'jobs', via: 'mcp', tool: 'CatalystbyZoho_Create_Job_Pool', readBack: { via: 'mcp', tool: 'CatalystbyZoho_List_All_Jobpools' } }],
   });
   assert.equal(check.status, 'fail');
-  assert.equal(
-    check.detail,
-    `the Catalyst MCP server is missing tools — needed by doctor (3): ${dropped.join(', ')}; needed by this app's plan (3): Create_Email_Configuration, Create_Job_Pool, List_All_Jobpools`,
-  );
+  assert.match(check.detail, /needed by doctor \(3\): Execute_Query, Get_Table_Permissions, Update_Table_Permissions/);
+  assert.match(check.detail, /Create_Email_Configuration \(fallback: .+\)/);
+  assert.match(check.detail, /Create_Job_Pool \(fallback: .+\)/);
+  assert.match(check.detail, /List_All_Jobpools \(fallback: .+\)/);
   assert.equal(check.fix, MCP_TOOLS_GUIDANCE);
   assert.match(text, /mcp\.zoho\.com\), open your server, Tools, Config Tools/);
   assert.match(text, /restart your AI chat session/);
@@ -838,6 +839,24 @@ test('D-B5: a base-complete server with a feature-free plan passes; a full tool 
   assert.match(noPlan.check.detail, /no plan yet/);
 });
 
+test('D-B5: missing Add_User gets a named fallback, not a bare FAIL; full registry tools pass', async () => {
+  const base = [...prefixed(REQUIRED_MCP_TOOLS.base), ...META];
+  const missingAddUser = await runD_B5(base, {
+    mcpTools: { plan: ['CatalystbyZoho_Add_User'] },
+    steps: [{ id: 'app-users', via: 'cli', command: 'c2c provision --confirm --run app-users' }],
+  });
+  assert.equal(missingAddUser.check.status, 'fail');
+  assert.match(missingAddUser.check.detail, /Add_User \(fallback: .+\)/);
+  assert.doesNotMatch(missingAddUser.check.detail, /needed by this app's plan \(1\): Add_User$/);
+
+  const allTools = [...new Set([...REQUIRED_MCP_TOOLS.base, ...ALL_REQUIRED_MCP_TOOLS, 'Add_User'])];
+  const allPass = await runD_B5([...prefixed(allTools), ...META], {
+    mcpTools: { plan: ['CatalystbyZoho_Add_User'] },
+  });
+  assert.equal(allPass.check.status, 'pass');
+  assert.match(allPass.check.detail, /plan tools all present/);
+});
+
 test('D-B5: the plugin copy of the required tool list is identical to the doctor data', () => {
   const root = repoRoot();
   assert.equal(
@@ -856,6 +875,44 @@ test('D-B5: the MCP project tools are never required — they return project sec
   const without = await runD_B5([...prefixed(REQUIRED_MCP_TOOLS.base), ...META]);
   assert.equal(without.check.status, 'pass', without.check.detail);
   assert.doesNotMatch(without.text, /List_All_Projects|Get_Project_By_Id/);
+});
+
+test('D-B5: every registry entry cites a facts-ledger row or reference file line that mentions the tool', () => {
+  const root = repoRoot();
+  assert.ok(VERIFIED_MCP_TOOL_REGISTRY.length >= 25, 'registry should contain at least 25 verified tools');
+  for (const entry of VERIFIED_MCP_TOOL_REGISTRY) {
+    assert.ok(entry.source, `${entry.name} lacks a source citation`);
+    const [relPath, lineStr] = entry.source.split(':');
+    const fullPath = join(root, relPath);
+    assert.ok(existsSync(fullPath), `${entry.name} cites non-existent file: ${relPath}`);
+    const content = readFileSync(fullPath, 'utf8');
+    assert.ok(content.includes(entry.name), `${entry.name} not found in cited file: ${relPath}`);
+    if (lineStr) {
+      const lineNum = parseInt(lineStr, 10);
+      const lines = content.split('\n');
+      assert.ok(lineNum > 0 && lineNum <= lines.length, `${entry.name} line ${lineNum} out of range in ${relPath}`);
+    }
+    assert.ok(entry.fallback, `${entry.name} lacks a documented fallback`);
+  }
+  // No unverified tool is added to registry
+  assert.equal(isVerifiedMcpTool('Update_Authentication_Configuration'), false, 'Update_Authentication_Configuration must not be in verified registry');
+});
+
+test('D-B5: docs, skill text and the registry agree (parity test)', () => {
+  const root = repoRoot();
+  const skillText = readFileSync(join(root, 'plugin', 'skills', 'c2c-preflight', 'SKILL.md'), 'utf8');
+  assert.match(skillText, /references\/required-mcp-tools\.json/);
+  // Verify doctor data and plugin copy agree
+  const docData = JSON.parse(readFileSync(join(root, 'packages', 'doctor', 'data', 'required-mcp-tools.json'), 'utf8'));
+  const pluginData = JSON.parse(readFileSync(join(root, 'plugin', 'references', 'required-mcp-tools.json'), 'utf8'));
+  assert.deepEqual(docData, pluginData);
+  // Verify all required tools are in registry
+  const allDocTools = [...docData.base, ...Object.values(docData.byFeature).flat()];
+  for (const tool of allDocTools) {
+    assert.ok(isVerifiedMcpTool(tool as string), `required tool ${tool} is not in the verified registry`);
+  }
+  // Update_Authentication_Configuration must not be in required-mcp-tools
+  assert.equal(allDocTools.includes('Update_Authentication_Configuration'), false, 'Update_Authentication_Configuration must not be in required tools');
 });
 
 test('D-A2 reads claude plugin list: enabled passes, disabled fails, absent skips', async () => {

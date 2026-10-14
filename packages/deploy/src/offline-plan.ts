@@ -38,6 +38,7 @@ import { functionSources } from './plan.js';
 import { readDeployConfig } from './provision-config.js';
 import { FIRST_USE_GATES, type FirstUseGate } from './first-use.js';
 import { buildFunctionEnv, extractConnectionSecrets, writeOrUpdateFunctionEnv } from './function-env.js';
+import { isVerifiedMcpTool } from './mcp-registry.js';
 import { MCP_TOOL_PREFIX, REQUIRED_MCP_TOOLS } from '../../doctor/src/required-tools.js';
 
 /** Data centres the Catalyst MCP and CLI address (doctor D-B2/D-C5). No default. */
@@ -1465,19 +1466,18 @@ function buildProbes(signals: PlanSignals): PlanProbe[] {
 
 /**
  * The plan's extra MCP needs: only groups a signal fires, and only tools a
- * provision step or a shipped skill calls — the JSON lists no fallback
- * surface (Create_Table/Create_Column are a CLI fallback, never demanded).
+ * provision step or a shipped skill calls from the verified MCP tool registry.
+ * Capabilities without a verified MCP tool map to CLI/IaC paths or manual items.
  */
 function mcpPlanSet(signals: PlanSignals, roles: number, portalUsers: number, mailStep: boolean): string[] {
   const set = new Set<string>();
-  if (signals.schedules > 0) for (const tool of PLAN_MCP_BY_FEATURE.schedules_or_long_work ?? []) set.add(tool);
+  if (signals.schedules > 0) for (const tool of PLAN_MCP_BY_FEATURE.schedules_or_long_work ?? []) if (isVerifiedMcpTool(tool)) set.add(tool);
   if (signals.files.length > 0) {
-    for (const tool of PLAN_MCP_BY_FEATURE.files_or_bulk_load ?? []) set.add(tool);
+    for (const tool of PLAN_MCP_BY_FEATURE.files_or_bulk_load ?? []) if (isVerifiedMcpTool(tool)) set.add(tool);
   }
-  if (signals.customApis.length > 0) for (const tool of PLAN_MCP_BY_FEATURE.custom_apis ?? []) set.add(tool);
-  if (mailStep) for (const tool of PLAN_MCP_BY_FEATURE.sendmail ?? []) set.add(tool);
-  if (roles > 0) for (const tool of PLAN_MCP_BY_FEATURE.auth_config_update ?? []) set.add(tool);
-  if (portalUsers > 0) for (const tool of PLAN_MCP_BY_FEATURE.user_invites ?? []) set.add(tool);
+  if (signals.customApis.length > 0) for (const tool of PLAN_MCP_BY_FEATURE.custom_apis ?? []) if (isVerifiedMcpTool(tool)) set.add(tool);
+  if (mailStep) for (const tool of PLAN_MCP_BY_FEATURE.sendmail ?? []) if (isVerifiedMcpTool(tool)) set.add(tool);
+  if (portalUsers > 0) for (const tool of PLAN_MCP_BY_FEATURE.user_invites ?? []) if (isVerifiedMcpTool(tool)) set.add(tool);
   return [...set].sort();
 }
 
