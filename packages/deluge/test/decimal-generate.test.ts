@@ -130,7 +130,7 @@ test('bill-of-materials arithmetic on currency fields goes through shim.decimal 
   ].join('\n');
   const { result: tr, audit } = withDecimalAudit(() => translate(src, BOM));
   for (const code of [tr.server, tr.client]) {
-    assert.match(stripComments(code), /shim\.decimal\.add\(shim\.decimal\.mul\(d_row\.Unit_Price, d_row\.Quantity\), 100\)/);
+    assert.match(stripComments(code), /shim\.decimal\.add\(shim\.decimal\.mul\(shim\.get\(d_row, "Unit_Price"\), shim\.get\(d_row, "Quantity"\)\), 100\)/);
     assert.match(stripComments(code), /subtotal = shim\.decimal\.add\(subtotal, /);
     assert.doesNotMatch(stripComments(code), /d_row\.Unit_Price \* d_row\.Quantity/);
   }

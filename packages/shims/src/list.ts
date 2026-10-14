@@ -65,6 +65,9 @@ export function getJson(value: unknown, key: unknown): unknown {
   throw new DelugeRuntimeError('getJson: input is not a key-value collection');
 }
 
+/** Key spellings a map write may never use: they reach the shared prototype. */
+const UNSAFE_MAP_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /**
  * `m.put(key, value)` inserts or overwrites the pair and returns the map
  * (deluge-docs map-manipulations/put). An array receiver takes
@@ -72,7 +75,7 @@ export function getJson(value: unknown, key: unknown): unknown {
  */
 export function put(value: unknown, key: unknown, val?: unknown): unknown {
   if (isPlain(value)) {
-    if (key != null) value[String(key)] = val ?? null;
+    if (key != null && !UNSAFE_MAP_KEYS.has(String(key))) value[String(key)] = val ?? null;
     return value;
   }
   if (Array.isArray(value)) {
@@ -246,7 +249,9 @@ export function insertAll(value: unknown, a?: unknown, b?: unknown): unknown {
 
 export function putAll(value: unknown, extra: unknown): unknown {
   if (isPlain(value) && isPlain(extra)) {
-    Object.assign(value, extra);
+    for (const key of Object.keys(extra)) {
+      if (!UNSAFE_MAP_KEYS.has(key)) value[key] = extra[key];
+    }
   }
   return value;
 }

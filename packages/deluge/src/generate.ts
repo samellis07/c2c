@@ -2334,6 +2334,19 @@ function recordFieldRoots(body: string): (string | null)[] {
   };
 
   for (const match of body.matchAll(/\bshim\.(?:input|old)\.get\(ctx,\s*("(?:[^"\\]|\\.)*")/g)) addKey(match[1]);
+  // Generated `obj[key]` reads emit `shim.get(<receiver>, <key>)`: the same
+  // classification as a bracket index — a recognised record receiver counts
+  // the key, a mixed or unkeyed one fails closed.
+  for (const match of body.matchAll(/\bshim\.get\(/g)) {
+    const args = callArgs(body, match.index + match[0].length - 1);
+    if (args.length !== 2) continue;
+    const argStart = body.indexOf(args[0]!, match.index);
+    const cls = argStart < 0 ? classifyRecordReceiver(args[0]!) : accountReceiver(args[0]!, argStart);
+    if (cls === 'mixed' || cls === 'root') {
+      if (cls === 'mixed') roots.add(null);
+      else addKey(args[1]);
+    }
+  }
   for (const match of body.matchAll(/\bshim\.list\.(?:get|containsKey|getJson)\(/g)) {
     const args = callArgs(body, match.index + match[0].length - 1);
     if (args.length > 1) {

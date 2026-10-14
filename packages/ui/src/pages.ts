@@ -8,9 +8,24 @@
  */
 
 import { createRequire } from 'node:module';
+import type { App } from '../../core/src/ir.js';
 import type { ZmlElement } from '../../core/src/zml.js';
+import { compileHtmlpage, decodeXmlEntities, type HtmlpageFile } from './htmlpage.js';
+import { safeUrl } from './url-policy.js';
 
 const require = createRequire(import.meta.url);
+
+/** Context elementsFromZml needs to compile server-side snippets. */
+export interface ZmlEnv {
+  /** The app the page belongs to (form names, aggregates, criteria). */
+  app: App;
+  /** The page name, for endpoint paths. */
+  page: string;
+  /** Collects generated endpoint modules. */
+  emit?: (file: HtmlpageFile) => void;
+  /** Counter for unique snippet ids within a page. */
+  seq?: { n: number };
+}
 
 export interface UiElement {
   tag: string;
@@ -22,6 +37,8 @@ export interface UiElement {
   criteria?: string;
   /** Allowlisted HTML. The runtime sanitizes again before inserting it. */
   html?: string;
+  /** Endpoint the runtime POSTs to for a server-rendered snippet (`data-snippet-src`). */
+  src?: string;
   href?: string;
   todo?: string;
   /** Column or panel width copied from the export, such as `24%`. */
@@ -92,7 +109,7 @@ const NAMED: Record<string, UiElement['kind']> = {
   htmlsnippet: 'html',
 };
 
-const ALLOWED_TAGS = new Set([
+export const ALLOWED_TAGS = new Set([
   'a', 'abbr', 'b', 'blockquote', 'br', 'caption', 'code', 'col', 'colgroup', 'dd', 'del', 'div', 'dl', 'dt',
   'em', 'figcaption', 'figure', 'font', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'ins', 'kbd',
   'li', 'mark', 'ol', 'p', 'pre', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody',
@@ -100,12 +117,12 @@ const ALLOWED_TAGS = new Set([
 ]);
 
 /** Dropped with their descendants. Unwrapping these would surface script or style text. */
-const DROPPED_TAGS = new Set([
+export const DROPPED_TAGS = new Set([
   'script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'frame', 'frameset', 'noscript',
   'noembed', 'template', 'svg', 'math', 'title', 'head', 'html', 'body',
 ]);
 
-const ALLOWED_ATTRS: Record<string, Set<string>> = {
+export const ALLOWED_ATTRS: Record<string, Set<string>> = {
   a: new Set(['href', 'title']),
   img: new Set(['src', 'alt', 'title', 'width', 'height']),
   font: new Set(['color', 'face', 'size']),
@@ -183,12 +200,6 @@ function listOf<T>(items: ArrayLike<T> | undefined): T[] {
   return out;
 }
 
-function safeUrl(value: string): boolean {
-  const flat = value.replace(/[\u0000-\u0020]+/g, '').toLowerCase();
-  if (!flat) return true;
-  return !flat.startsWith('javascript:') && !flat.startsWith('data:') && !flat.startsWith('vbscript:');
-}
-
 function flatCss(value: string): string {
   return String(value ?? '').replace(/[\u0000-\u0020]+/g, '').toLowerCase();
 }
@@ -254,7 +265,7 @@ function safeStyleValue(raw: string, prop?: string): boolean {
   return !/[()]/.test(rest);
 }
 
-function allowedAttr(tag: string, name: string): boolean {
+export function allowedAttr(tag: string, name: string): boolean {
   if (name.startsWith('on') || name === 'srcdoc') return false;
   if (name === 'style') return true;
   const specific = ALLOWED_ATTRS[tag];
@@ -407,7 +418,13 @@ function namedAttr(attributes: Record<string, string>, keys: string[]): string |
   return found[0]?.value;
 }
 
-export function elementFromZml(tag: string, attributes: Record<string, string>, children: UiElement[], text?: string): UiElement {
+export function elementFromZml(
+  tag: string,
+  attributes: Record<string, string>,
+  children: UiElement[],
+  text?: string,
+  env?: ZmlEnv,
+): UiElement {
   const key = tag.toLowerCase();
   const name = namedAttr(attributes, ['linkName', 'formLinkName', 'componentLinkName', 'elementName', 'name', 'id']);
   const width = attr(attributes, ['width']);
@@ -446,14 +463,28 @@ export function elementFromZml(tag: string, attributes: Record<string, string>, 
   }
   if (kind === 'html') {
     const source = body ?? attr(attributes, ['value', 'content', 'html', 'text']) ?? '';
-    const popups = popupActions(source);
-    let raw = source;
-    // A server-side `htmlpage`/Deluge block is not client markup: drop it whole.
-    if (/^\s*htmlpage\b/i.test(raw) || /<%/.test(raw)) {
+    const decoded = decodeXmlEntities(source);
+    const popups = popupActions(decoded);
+    // The attribute is XML-escaped, so `<% %>` islands show up as `&lt;%`.
+    if (/^\s*htmlpage\b/i.test(decoded) || /<%/.test(decoded) || /<%/.test(source)) {
+      const id = env ? `s${env.seq ? env.seq.n++ : 0}` : 's0';
+      const compiled = env ? compileHtmlpage(env.app, env.page, name ?? tag, decoded, { id }) : null;
+      if (compiled?.ok && compiled.file && compiled.src !== undefined) {
+        env?.emit?.(compiled.file);
+        return {
+          tag,
+          kind,
+          ...(name ? { name } : {}),
+          html: compiled.html ?? '',
+          src: compiled.src,
+          ...(popups.length ? { popups } : {}),
+          children,
+        };
+      }
       const todo = { tag, kind: 'todo' as const, ...(name ? { name } : {}), todo: 'Server-side Deluge snippet requires manual translation', children: [] };
       return { tag, kind, ...(name ? { name } : {}), html: '', ...(popups.length ? { popups } : {}), children: [todo, ...children] };
     }
-    return { tag, kind, ...(name ? { name } : {}), html: sanitizeSnippet(raw), ...(popups.length ? { popups } : {}), children };
+    return { tag, kind, ...(name ? { name } : {}), html: sanitizeSnippet(source), ...(popups.length ? { popups } : {}), children };
   }
   if (kind === 'text' || kind === 'gauge' || kind === 'button' || kind === 'search') {
     if ((attr(attributes, ['type']) || '').toLowerCase() === 'form data') {
@@ -485,8 +516,8 @@ export function elementFromZml(tag: string, attributes: Record<string, string>, 
   return { tag, kind, ...(name ? { name } : {}), ...(href ? { href } : {}), children };
 }
 
-export function elementsFromZml(roots: ZmlElement[]): UiElement[] {
-  const walk = (node: ZmlElement): UiElement => elementFromZml(node.tag, node.attributes, node.children.map(walk), node.text);
+export function elementsFromZml(roots: ZmlElement[], env?: ZmlEnv): UiElement[] {
+  const walk = (node: ZmlElement): UiElement => elementFromZml(node.tag, node.attributes, node.children.map(walk), node.text, env);
   return roots.map(walk);
 }
 

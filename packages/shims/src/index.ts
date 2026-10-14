@@ -224,6 +224,7 @@ export {
   type WorkStep,
 } from './long-work.js';
 export { actualname, getFileName, type HeldFile } from './file-values.js';
+export { renderedDocumentViolation, renderedHtmlElements, type RenderedElement } from './rendered-guard.js';
 export {
   cleanPrintStyle,
   recordSummaryHtml,
