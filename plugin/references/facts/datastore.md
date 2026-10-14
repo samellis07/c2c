@@ -15,32 +15,32 @@ from the customer config file; never hard-code it. `<org-id>` and
 
 ### Create tables, then diff against the list on re-runs
 
-Recipe: `POST /baas/v1/project/<project-id>/table` creates a table;
+Recipe: [UNVERIFIED] `POST /baas/v1/project/<project-id>/table` creates a table;
 success is HTTP 200 with the new table id in the body. Read back with
 `GET /baas/v1/project/<project-id>/table` and treat that list as the
 source of truth.
 
-Rule: c2c plan diffs the desired tables against the live list, so a
+Rule: [UNVERIFIED] c2c plan diffs the desired tables against the live list, so a
 re-run creates nothing new. A mid-batch failure can leave a half-built
 table; fix the cause and re-run the diff rather than recreating by hand.
 
 ### Re-read after a 5xx before re-sending a schema write
 
-Recipe: a table or column create can answer `5xx` and still have
+Recipe: [UNVERIFIED] a table or column create can answer `5xx` and still have
 applied; the error means the response was lost, not that the write
 failed.
 
-Rule: on a `5xx` from `POST .../table` or
+Rule: [UNVERIFIED] on a `5xx` from `POST .../table` or
 `POST .../table/<table-id>/column`, re-read the table or column list
 before re-sending. A blind retry can create a duplicate name error or
 leave a half-built object to reconcile.
 
 ### Create columns with a JSON array body
 
-Recipe: `POST /baas/v1/project/<project-id>/table/<table-id>/column`
+Recipe: [UNVERIFIED] `POST /baas/v1/project/<project-id>/table/<table-id>/column`
 with the column definition wrapped in a single-element JSON array.
 
-Rule: always send the array form. A plain JSON object is rejected with
+Rule: [UNVERIFIED] always send the array form. A plain JSON object is rejected with
 `400 JSON_PARSE_ERROR` ("Check if the input json is proper").
 
 ### 250-column hard cap and 100-column default
@@ -56,25 +56,25 @@ before any write.
 
 ### Assume varchar stores at most 255 characters and truncates silently
 
-Recipe: `POST /baas/v1/project/<project-id>/table/<table-id>/row`
+Recipe: [UNVERIFIED] `POST /baas/v1/project/<project-id>/table/<table-id>/row`
 returns HTTP 200 while storing only the leading characters of an
 over-length varchar value.
 
-Rule: clamp every varchar value to its `max_length` (assume 255 when
+Rule: [UNVERIFIED] clamp every varchar value to its `max_length` (assume 255 when
 the column definition carries none) before any write, and read back
 byte-exact after the write. Never treat a 200 as "stored what was
 sent".
 
 ### Assume text stores at most 10,000 characters and is not searchable
 
-Rule: assume a text column holds at most 10,000 characters and cannot
+Rule: [UNVERIFIED] assume a text column holds at most 10,000 characters and cannot
 be search-indexed. Keep searchable strings in varchar; move longer
 rich text to a Stratus object and store the key. `c2c plan` warns when
 a mapped field exceeds the budget.
 
 ### At most 2 unique varchar columns per table; unique int and bigint are free
 
-Recipe: `POST .../table/<table-id>/column` with a unique varchar as the
+Recipe: [UNVERIFIED] `POST .../table/<table-id>/column` with a unique varchar as the
 third such column returns `403 INVALID_OPERATION` ("Reached max number
 of columns of Unique varchar type"). Unique `int` and unique `bigint`
 columns return 200. Unique `text` returns 400 ("Text column cannot be
@@ -83,19 +83,19 @@ type (the encrypted type is `encrypted text`); a column create with
 either name returns 400 `PATTERN_NOT_MATCHED` even with `is_unique`
 set. That code is an invalid-type error, not a uniqueness failure.
 
-Rule: model the migration idempotency key (numeric Creator ids fit in
+Rule: [UNVERIFIED] model the migration idempotency key (numeric Creator ids fit in
 int64) as a unique bigint. `c2c plan` fails closed when more than two
 unique text fields are required and enforces the rest at app level.
 
 ### Assume at most 15 foreign-key columns per table
 
-Recipe: `POST .../table/<table-id>/column` with body
+Recipe: [UNVERIFIED] `POST .../table/<table-id>/column` with body
 `[{"column_name": ..., "data_type": "foreign key", "parent_table":
 "<parent-table-id>", "constraint_type": "ON-DELETE-CASCADE"}]` returns
 200; `ON-DELETE-SET-NULL` is the nulling alternative. The spaced token
 is rejected: always send the hyphenated enum.
 
-Rule: assume a table holds at most 15 foreign-key columns. Map the
+Rule: [UNVERIFIED] assume a table holds at most 15 foreign-key columns. Map the
 first 15 lookups as real foreign keys with the parent table id and
 `ON-DELETE-CASCADE`; store any further lookups as plain bigint ROWID
 values without a constraint. `c2c plan` warns past the count. Declare
@@ -106,23 +106,23 @@ declared key.
 
 ### Insert rows in batches of at most 200 per call
 
-Recipe: `POST /baas/v1/project/<project-id>/table/<table-id>/row`
+Recipe: [UNVERIFIED] `POST /baas/v1/project/<project-id>/table/<table-id>/row`
 accepts an array body; send at most 200 rows per call. A `/rows`
 (plural) path answers `404 INVALID_URL_PATTERN`. Success is HTTP 200
 with a `data` list holding one created record per sent row; assert the
 count equals the sent count, and re-read when the shape is absent.
 
-- `updateRows` and `deleteRows` cap at 200 ids per call as well
+- [UNVERIFIED] `updateRows` and `deleteRows` cap at 200 ids per call as well
 (`403 INVALID_OPERATION` on update, `400 INVALID_INPUT` "Length of ids
 cannot be more than 200" on delete). A missing ROWID inside an update
 or delete batch is silently skipped — the call returns fewer affected
 rows with no error, so assert on the affected count.
-- Success returns each row with `ROWID`, `CREATORID`, `CREATEDTIME`
+- [UNVERIFIED] Success returns each row with `ROWID`, `CREATORID`, `CREATEDTIME`
 and column defaults applied — read them back from the response rather
 than re-querying.
-- `deleteRow(<missing id>)` answers `404 INVALID_ID` ("No such row
+- [UNVERIFIED] `deleteRow(<missing id>)` answers `404 INVALID_ID` ("No such row
 with the given id exists"); `deleteRows` silently ignores missing ids.
-- A varchar column keeps a 19-digit source id verbatim; remap lookup
+- [UNVERIFIED] A varchar column keeps a 19-digit source id verbatim; remap lookup
 fields to the parent ROWID before insert, convert `dd-MMM-yyyy` to
 `yyyy-MM-dd`, carry decimals in `double` and booleans as JSON
 `true`/`false` — a manual `/row` load with those transforms stores
@@ -130,14 +130,14 @@ every row and a ZCQL join resolves the remapped keys.
 
 ### Take migrated rows from the JSON report export — it always carries record ids
 
-Recipe: a Creator report exported as JSON carries each record's `ID`;
+Recipe: [UNVERIFIED] a Creator report exported as JSON carries each record's `ID`;
 the same report's CSV export carries it only when the export includes
 the `ID` column. All three forms occur (a CSV with the ID
 column, a CSV without it, and JSON), so prefer JSON.
 Lookup fields export as their display values, and subform rows arrive flattened
 into the parent record's columns.
 
-Rule: pull source rows from the JSON report export so the
+Rule: [UNVERIFIED] pull source rows from the JSON report export so the
 `c2c_source_id` remap keys are real record ids. A CSV without an `ID`
 column still loads, but its ids are derived from unique/mapped columns
 (the plan lists them under `derived ids`): lookups then match on display
@@ -148,7 +148,7 @@ than one parent row — a display value is not a key.
 
 ### Validate every value client-side; the store coerces silently
 
-Recipe: the following inputs all return HTTP 200 with a mutated stored
+Recipe: [UNVERIFIED] the following inputs all return HTTP 200 with a mutated stored
 value: varchar longer than `max_length` (truncated); date
 `"05-10-2026"` (stored as `0011-04-18`); `"2026-13-45"` (rolled to
 `2027-02-14`); `"2026-02-30"` (rolled to `2026-03-02`); double `0.105`
@@ -163,37 +163,37 @@ display strings and epoch values answer `400 INVALID_INPUT`
 ("datetime value expected"). Values are stored and compared as naive
 wall-clock strings on both paths.
 
-Rule: normalise every date to `yyyy-MM-dd` with a real calendar check,
+Rule: [UNVERIFIED] normalise every date to `yyyy-MM-dd` with a real calendar check,
 round every double with HALF_UP to the column's decimal digits, bound
 doubles to `max_length`, and clamp every varchar before any write.
 Read back after the write.
 
 ### Set column default_value and also send defaults in the payload
 
-Recipe: REST inserts apply a column's `default_value` when the column
+Recipe: [UNVERIFIED] REST inserts apply a column's `default_value` when the column
 was created with one. A blank stored value means the column create
 omitted `default_value`, not that the insert path ignored it.
 
-Rule: set `default_value` on the column at creation and also send the
+Rule: [UNVERIFIED] set `default_value` on the column at creation and also send the
 value in the mover payload.
 
 ### Surface duplicate and mandatory failures with field name and status
 
-Recipe: inserting a duplicate unique value returns `409
+Recipe: [UNVERIFIED] inserting a duplicate unique value returns `409
 DUPLICATE_VALUE` ("Duplicate value for ..."); omitting a mandatory
 column returns `403 MANDATORY_MISSING` ("Column ... is mandatory and
 cannot be empty").
 
-Rule: surface both shapes in the handler with the field name and the
+Rule: [UNVERIFIED] surface both shapes in the handler with the field name and the
 original status code. Never collapse them into one opaque 500.
 
 ### Keep ids and integers as strings end to end
 
-Recipe: `ROWID`, `CREATORID`, `int`, and `bigint` columns arrive as
+Recipe: [UNVERIFIED] `ROWID`, `CREATORID`, `int`, and `bigint` columns arrive as
 JSON strings; `double` arrives as a JSON number; `boolean` arrives as
 a JSON boolean. A 19-digit bigint already exceeds float precision.
 
-Rule: carry every id, int, and bigint as a string from read through
+Rule: [UNVERIFIED] carry every id, int, and bigint as a string from read through
 write; never parse one into a Number. Parse doubles as numbers only
 inside 15 digits.
 
@@ -203,21 +203,21 @@ without a signed-in app user fails `no user credentials present`.
 
 ### Read CREATEDTIME and MODIFIEDTIME as project-zone strings
 
-Recipe: system columns are stored and compared in the project time
+Recipe: [UNVERIFIED] system columns are stored and compared in the project time
 zone as `yyyy-MM-dd HH:mm:ss:SSS` (colon before milliseconds). The
 function runtime itself is UTC; the project zone arrives in
 `CATALYST_PROJECT_TIMEZONE`.
 
-Rule: format and parse both with the project zone; a UTC literal
+Rule: [UNVERIFIED] format and parse both with the project zone; a UTC literal
 misses a row in a non-UTC window.
 
 ### There is no decimal, currency, or percent column type
 
-Recipe: `POST .../column` with `data_type` of `decimal`, `numeric`,
+Recipe: [UNVERIFIED] `POST .../column` with `data_type` of `decimal`, `numeric`,
 `currency`, `percent`, `float`, `bigdecimal`, or `number` returns 400
 `PATTERN_NOT_MATCHED`.
 
-Rule: store currency in a `double` with `max_length` 15 and
+Rule: [UNVERIFIED] store currency in a `double` with `max_length` 15 and
 `decimal_digits` 2 (exact equality and `SUM` inside that budget) with
 client-side HALF_UP rounding before write, and keep an exact-string
 shadow column for values beyond 15 digits or 4 decimal places.
@@ -226,7 +226,7 @@ shadow column for values beyond 15 digits or 4 decimal places.
 
 ### Grant App User writes per table in the console
 
-Rule: the App User role carries SELECT by default; enable INSERT,
+Rule: [UNVERIFIED] the App User role carries SELECT by default; enable INSERT,
 UPDATE, and DELETE per table under Table Scopes and Permissions for
 every table app users must write. Never assign the App Administrator
 role to end users; it grants full access to all tables. Permission and
@@ -236,12 +236,12 @@ template or the console.
 
 ### Plan schema against Development only; load rows anywhere
 
-Recipe: under the `X-CATALYST-Environment: Production` header, row
+Recipe: [UNVERIFIED] under the `X-CATALYST-Environment: Production` header, row
 inserts and all reads return 200 while `POST /table` and
 `POST /table/<table-id>/column` return `406 INVALID_OPERATION` ("You
 cannot perform this operation for current environment").
 
-Rule: never plan table or column creation against the Production
+Rule: [UNVERIFIED] never plan table or column creation against the Production
 header. Load rows straight into Production after the console
 promotion instead.
 
@@ -249,12 +249,12 @@ promotion instead.
 
 ### Never rely on unique columns or read-modify-write under concurrency
 
-Recipe: parallel inserts of one unique value store duplicates with a
+Recipe: [UNVERIFIED] parallel inserts of one unique value store duplicates with a
 mix of 200, 409, and 429 responses. `UPDATE ... SET cnt = cnt + 1`
 returns 200 while landing a fraction of the increments; 20 parallel
 read-modify-write cycles leave a counter at 1.
 
-Rule: never use a unique column for mutual exclusion or dedup under
+Rule: [UNVERIFIED] never use a unique column for mutual exclusion or dedup under
 load, and never sequence through a counter column. Allocate ids
 client-side (key shards, claimed ranges) or serialise through one
 writer. Treat unique columns as best-effort with a reconciler.
@@ -264,7 +264,7 @@ succeed — so a cache key cannot be a mutex either.
 
 ### There is no multi-call transaction; design resumable steps
 
-Rule: atomicity covers one call only; no endpoint groups calls. Build
+Rule: [UNVERIFIED] atomicity covers one call only; no endpoint groups calls. Build
 the mover as idempotent, resumable per-call steps with a journal, and
 roll back with compensation on error. Never emit a "transaction"
 assumption in generated code.
@@ -275,17 +275,17 @@ written. Rows written by an earlier call are never rolled back.
 
 ### Assume about 100 writes per minute per table; back off on 429
 
-Rule: assume roughly 100 write requests per minute per table. Send
+Rule: [UNVERIFIED] assume roughly 100 write requests per minute per table. Send
 bulk loads through bulk write, bound client concurrency to 10 or
 fewer, honour `Retry-After`, and retry 429s idempotently. Never write
 rows from the browser in bursts; go through a function or a batch.
 
 ### There is no quota read endpoint; surface limit codes raw
 
-Recipe: guessed quota paths (`/limits`, `/quota`, `/usage`,
+Recipe: [UNVERIFIED] guessed quota paths (`/limits`, `/quota`, `/usage`,
 per-table limits) all return `404 INVALID_URL_PATTERN`.
 
-Rule: budget projects, tables, columns, and calls manually; `c2c
+Rule: [UNVERIFIED] budget projects, tables, columns, and calls manually; `c2c
 doctor` reports the counts it can read. On `API_LIMIT_REACHED`,
 surface the raw code with the affected table; never assume quota ran
 out. Assume Development tables may refuse rows past an undisclosed
@@ -295,12 +295,12 @@ full-volume loads outside Development.
 
 ### NoSQL tables are console-only; prefer child tables
 
-Recipe: `POST /baas/v1/project/<project-id>/nosqltable` answers
+Recipe: [UNVERIFIED] `POST /baas/v1/project/<project-id>/nosqltable` answers
 `401 OAUTH_SCOPE_MISMATCH` ("invalid oauth scope to access this URL")
 while `GET` on the same path returns `200 {"status":"success","data":[]}`.
 A NoSQL table answers on its partition key only.
 
-Rule: keep report data in relational child tables, not NoSQL. Create
+Rule: [UNVERIFIED] keep report data in relational child tables, not NoSQL. Create
 a NoSQL table in the console only when nothing else fits.
 
 ### Bulk-write `records_processed` counts attempted rows, not written rows [UNVERIFIED]
