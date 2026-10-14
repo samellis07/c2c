@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { closeSync, existsSync, fstatSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { test as nodeTest, type TestContext } from 'node:test';
 import { deriveIr, parse } from '../../core/src/index.js';
 import { emptyApp, type App, type Workflow } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
@@ -34,6 +34,12 @@ import {
 } from '../src/fill-todos.js';
 
 const Z = { start: 0, end: 0 };
+const TEST_TIMEOUT_MS = 60_000;
+const CHILD_PROCESS_TIMEOUT_MS = 60_000;
+
+function test(name: string, fn: (t: TestContext) => void | Promise<void>): Promise<void> {
+  return nodeTest(name, { timeout: TEST_TIMEOUT_MS }, fn);
+}
 
 function stripComments(s: string) { return (s || '').replace(/^\s*\/\/ Deluge: .*\n?/gm, ''); }
 
@@ -864,7 +870,12 @@ test('emit is byte-stable under LANG=da_DK.UTF-8', () => {
   try {
     emitTodoFiles(loadApp(ds), parentDir);
     const env = { ...process.env, LANG: 'da_DK.UTF-8', LC_ALL: 'da_DK.UTF-8' };
-    const child = spawnSync(process.execPath, [script, ds, childDir], { encoding: 'utf8', env, cwd: repoRoot() });
+    const child = spawnSync(process.execPath, [script, ds, childDir], {
+      encoding: 'utf8',
+      env,
+      cwd: repoRoot(),
+      timeout: CHILD_PROCESS_TIMEOUT_MS,
+    });
     assert.equal(child.status, 0, child.stderr);
     const names = readdirSync(parentDir).filter((name) => name.endsWith('.json')).sort((a, b) => compareEnUs(a, b));
     assert.deepEqual(
@@ -920,7 +931,10 @@ test('c2c fill-todos emit, accept, and report from the CLI', async () => {
   );
   writeFileSync(fill, 'shim.input.get(ctx, "A")');
   const cli = join(repoRoot(), 'dist/cli/src/c2c.js');
-  const run = (args: string[]) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+  const run = (args: string[]) => spawnSync(process.execPath, [cli, ...args], {
+    encoding: 'utf8',
+    timeout: CHILD_PROCESS_TIMEOUT_MS,
+  });
   try {
     const emitted = run(['fill-todos', ds, '--emit', emit]);
     assert.equal(emitted.status, 0, emitted.stderr);
@@ -988,7 +1002,10 @@ test('c2c fill-todos --accept rejects a fill with no Creator vector coverage and
   );
   writeFileSync(fill, 'shim.log.info(ctx, "filled");\n');
   const cli = join(repoRoot(), 'dist/cli/src/c2c.js');
-  const run = (args: string[]) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+  const run = (args: string[]) => spawnSync(process.execPath, [cli, ...args], {
+    encoding: 'utf8',
+    timeout: CHILD_PROCESS_TIMEOUT_MS,
+  });
   try {
     const emit = join(dir, 'tasks');
     assert.equal(run(['fill-todos', ds, '--emit', emit]).status, 0);
