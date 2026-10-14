@@ -85,8 +85,20 @@ export function auditLockfile({ root = repoRoot, dir, label, deps } = {}) {
   const problems = [];
   if (!existsSync(manifestPath)) return { label, packages: [], problems: [`${label}: ${manifestPath} is missing`] };
   const manifest = readJson(manifestPath);
-  const packages = existsSync(lockPath) ? readJson(lockPath).packages ?? {} : {};
+  const lock = existsSync(lockPath) ? readJson(lockPath) : undefined;
+  const packages = lock?.packages ?? {};
   if (!existsSync(lockPath)) problems.push(`${label}: ${lockPath} is missing; licences cannot be verified deterministically`);
+  for (const [key, entry] of Object.entries(packages)) {
+    if (!key || entry.link === true || entry.dev === true) continue;
+    const id = `${key} (${entry.version ?? 'unknown version'})`;
+    if (typeof entry.integrity !== 'string' || !entry.integrity.trim()) {
+      problems.push(`${label}: ${id} has no integrity hash`);
+    }
+    if (typeof entry.resolved === 'string' && /^(?:git(?:\+[^:]+)?:|https?:)/i.test(entry.resolved)
+      && !/^https:\/\/(?:registry\.npmjs\.org|registry\.yarnpkg\.com)\//i.test(entry.resolved)) {
+      problems.push(`${label}: ${id} uses a non-registry tarball source ${entry.resolved}`);
+    }
+  }
   const exceptions = loadExceptions(root);
   problems.push(...exceptions.problems.map((p) => `${label}: ${p}`));
   const findException = (name, version, license) =>
