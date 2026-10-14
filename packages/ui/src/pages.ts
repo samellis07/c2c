@@ -92,7 +92,7 @@ const NAMED: Record<string, UiElement['kind']> = {
   htmlsnippet: 'html',
 };
 
-const ALLOWED_TAGS = new Set([
+export const ALLOWED_TAGS = new Set([
   'a', 'abbr', 'b', 'blockquote', 'br', 'caption', 'code', 'col', 'colgroup', 'dd', 'del', 'div', 'dl', 'dt',
   'em', 'figcaption', 'figure', 'font', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'ins', 'kbd',
   'li', 'mark', 'ol', 'p', 'pre', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody',
@@ -100,7 +100,7 @@ const ALLOWED_TAGS = new Set([
 ]);
 
 /** Dropped with their descendants. Unwrapping these would surface script or style text. */
-const DROPPED_TAGS = new Set([
+export const DROPPED_TAGS = new Set([
   'script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'frame', 'frameset', 'noscript',
   'noembed', 'template', 'svg', 'math', 'title', 'head', 'html', 'body',
 ]);
