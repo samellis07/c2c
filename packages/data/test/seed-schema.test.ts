@@ -106,9 +106,56 @@ test('convertSyntheticSeed flattens grids to Form__Field child tables with paren
   );
   assert.deepEqual(converted.Order, [{ c2c_source_id: 'Order#1', Title: 'O1' }]);
   assert.deepEqual(converted.Order__Lines, [
-    { c2c_source_id: 'Order__Lines#1#1', parent_id: 'Order#1', Product: 'Product#1', Qty: 2 },
-    { c2c_source_id: 'Order__Lines#1#2', parent_id: 'Order#1', Product: 'Product#2', Qty: 1 },
+    { c2c_source_id: 'Order__Lines#1#1', parent_id: 'Order#1', row_order: '0', Product: 'Product#1', Qty: 2 },
+    { c2c_source_id: 'Order__Lines#1#2', parent_id: 'Order#1', row_order: '1', Product: 'Product#2', Qty: 1 },
   ]);
+});
+
+test('convertSyntheticSeed flattens nested subforms and resolves their lookups to large-form targets', () => {
+  const converted = convertSyntheticSeed({
+    app_name: 'nested',
+    forms: {
+      Catalog: Array.from({ length: 1200 }, (_, index) => ({ SKU: `S${index}` })),
+      Order: [{ Lines: [
+        { Product: { $ref: 'Catalog', key: 'SKU', index: 1199 }, Adjustments: [{ Amount: 3 }, { Amount: 1 }] },
+        { Product: { $ref: 'Catalog', key: 'SKU', index: 0 }, Adjustments: [{ Amount: -2 }] },
+      ] }, { Lines: [{ Product: { $ref: 'Catalog', key: 'SKU', index: 5 }, Adjustments: [] }] }],
+    },
+  }, { today: '2026-01-15', now: '2026-01-15 00:00:00' });
+  assert.equal(converted.Order__Lines?.[0]?.Product, 'Catalog#1200');
+  assert.deepEqual(converted.Order__Lines?.map((row) => row.row_order), ['0', '1', '0']);
+  assert.deepEqual(converted.Order__Lines__Adjustments?.map((row) => [row.parent_id, row.row_order, row.Amount]), [
+    ['Order__Lines#1#1', '0', 3],
+    ['Order__Lines#1#1', '1', 1],
+    ['Order__Lines#1#2', '0', -2],
+  ]);
+  assert.equal(converted.Order__Lines?.[2]?.parent_id, 'Order#2');
+  const reduced = convertSyntheticSeed({ app_name: 'nested', forms: {
+    Catalog: [{ SKU: 'S0' }],
+    Order: [{ Lines: [{ Product: { $ref: 'Catalog', key: 'SKU', index: 0 }, Adjustments: [{ Amount: 1 }] }] }],
+  } }, { today: '2026-01-15' });
+  assert.equal(reduced.Order__Lines?.length, 1, 'removed parent subform row is absent on regeneration');
+  assert.deepEqual(reduced.Order__Lines__Adjustments?.map((row) => [row.parent_id, row.row_order]), [['Order__Lines#1#1', '0']]);
+});
+
+test('convertSyntheticSeed identifies orphan references with the exact source row id', () => {
+  assert.throws(
+    () => convertSyntheticSeed({ app_name: 'orphan', forms: {
+      Parent: [{ Name: 'exists' }],
+      Order: [{ Lines: [{ Parent: { $ref: 'Parent', key: 'Name', index: 4 } }] }],
+    } }, { today: '2026-01-15' }),
+    /Order\.Lines\.Parent row Order__Lines#1#1 index 4 is out of range/,
+  );
+});
+
+test('convertSyntheticSeed refuses flattened-table collisions instead of merging rows', () => {
+  assert.throws(
+    () => convertSyntheticSeed({ app_name: 'collision', forms: {
+      Order: [{ Lines: [{ Qty: 1 }] }],
+      Order__Lines: [{ Qty: 99 }],
+    } }, { today: '2026-01-15' }),
+    /Order__Lines.*collides with another table/,
+  );
 });
 
 test('convertSyntheticSeed explodes multi-lookup arrays to Form__Field junction rows', () => {
