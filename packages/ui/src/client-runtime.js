@@ -662,6 +662,21 @@ function renderElement(el, doc, parentReport, appModel) {
     const spec = el.embed || {};
     const url = typeof spec.url === 'string' && /^https:\/\//i.test(spec.url) ? spec.url : '';
     if (!url) return kids;
+    let parsed;
+    try { parsed = new URL(url); } catch { return kids; }
+    // Sandboxed browser PDF viewers and script-dependent map widgets often
+    // render blank. Link these recognized formats/providers out instead of
+    // granting them sandbox capabilities. Unknown HTTPS embeds stay locked.
+    const pdf = /\.pdf$/i.test(parsed.pathname);
+    const map =
+      (parsed.hostname === 'maps.google.com' ||
+        (parsed.hostname === 'www.google.com' && /^\/maps(?:\/|$)/i.test(parsed.pathname))) ||
+      ((parsed.hostname === 'openstreetmap.org' || parsed.hostname === 'www.openstreetmap.org') &&
+        /^\/export\/embed\.html$/i.test(parsed.pathname));
+    if (pdf || map) {
+      const label = el.name || (pdf ? 'Open PDF' : 'Open map');
+      return `<div class="embed"><a href="${escapeHtml(url)}" rel="noreferrer">${escapeHtml(label)}</a></div>${kids}`;
+    }
     const embedWidth = /^[0-9]+$/.test(spec.width || '') ? ` width="${spec.width}"` : '';
     const embedHeight = /^[0-9]+$/.test(spec.height || '') ? ` height="${spec.height}"` : '';
     return `<iframe class="embed" src="${escapeHtml(url)}" sandbox=""${embedWidth}${embedHeight} loading="lazy" referrerpolicy="no-referrer" title="${escapeHtml(el.name || el.tag)}"></iframe>${kids}`;
