@@ -4707,7 +4707,7 @@ function namedCall(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fal
         });
       }
       if ((aggregateCall === 'average' || aggregateCall === 'median') && !q.list) {
-        return mergeFx(`shim.number.${aggregateCall}(${q.code})`, [q], { shim: true });
+        return mergeFx(`await shim.todo(ctx, ${JSON.stringify('call:' + aggregateCall)})`, [q], { shim: true, todo: true, constructs: [`call:${aggregateCall}`] });
       }
       // In-memory lists only. A string or other non-list stays an untranslated call
       // (`sum("x")` is not `shim.list.aggregate`). A map member is not a list of rows:
