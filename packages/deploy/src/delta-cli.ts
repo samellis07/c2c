@@ -103,7 +103,7 @@ export async function syncDeltaCli(args: readonly string[], io: Io): Promise<num
     const loaded = DELTA_SOURCES[source.kind]!(source.path, app, args.includes('--allow-empty'));
     const statePath = stateFilePath(since);
     const plan = computeDelta(app, loaded, readDeltaCheckpoint(statePath), source.kind);
-    io.stdout(formatDeltaPlan(plan, { source: source.kind, applyDeletes, scope: planScopeLines(guard), loaded, allowMassDelete, maxDeletePercent }));
+    io.stdout(formatDeltaPlan(plan, { source: source.kind, applyDeletes, scope: planScopeLines(guard), loaded, confirm, allowMassDelete, maxDeletePercent }));
     if (!confirm) return 0;
     const totals = deltaTotals(plan);
     if (totals.upserts === 0 && (!applyDeletes || totals.deleted === 0)) {
@@ -133,7 +133,8 @@ export async function syncDeltaCli(args: readonly string[], io: Io): Promise<num
       return 1;
     }
     writeDeltaCheckpoint(statePath, withDeletionsApplied(plan.next, result.appliedDeletes));
-    io.stdout('checkpoint: recorded\n');
+    const applied = result.tables.reduce((sum, table) => sum + table.inserted + table.updated, 0);
+    io.stdout(`applied: ${applied} upsert(s)\ncheckpoint: recorded\n`);
     return 0;
   } catch (err) {
     return fail(io, err);

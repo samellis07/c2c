@@ -262,7 +262,7 @@ export function withDeletionsApplied(next: DeltaCheckpoint, applied: Readonly<Re
 
 export function formatDeltaPlan(
   plan: DeltaPlan,
-  opts: { source: string; applyDeletes: boolean; scope: string[]; loaded: CsvLoad; allowMassDelete?: boolean; maxDeletePercent?: number },
+  opts: { source: string; applyDeletes: boolean; scope: string[]; loaded: CsvLoad; confirm?: boolean; allowMassDelete?: boolean; maxDeletePercent?: number },
 ): string {
   const lines = [
     'c2c sync-delta plan v1',
@@ -287,7 +287,7 @@ export function formatDeltaPlan(
     lines.push(`  ${refusal.table}: ${refusal.reason}`);
   }
   if (plan.next.since) lines.push(`next checkpoint: since ${plan.next.since}`);
-  lines.push('writes: no', '');
+  lines.push(opts.confirm ? `writes: yes (${totals.upserts} planned upserts)` : 'writes: no', '');
   return `${lines.join('\n')}\n`;
 }
 
