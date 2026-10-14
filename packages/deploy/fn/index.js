@@ -163,7 +163,23 @@ function routeSearch(rawUrl) {
   }
 }
 
+/** Return the normalized request media type without parameters. */
+function requestMediaType(req) {
+  const headers = req && typeof req.headers === 'object' ? req.headers : {};
+  const value = headers['content-type'] ?? headers['Content-Type'];
+  return String(Array.isArray(value) ? value[0] ?? '' : (value ?? ''))
+    .split(';', 1)[0]
+    .trim()
+    .toLowerCase();
+}
+
 async function readBody(req) {
+  // Simple cross-site form content types do not require CORS preflight. Refuse
+  // them on writes so cookie-authenticated requests cannot reach a handler.
+  const method = String((req && req.method) || 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS' && requestMediaType(req) !== 'application/json') {
+    throw Object.assign(new Error('content type must be application/json'), { status: 415 });
+  }
   if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) return req.body;
   let raw = '';
   if (typeof req.body === 'string') raw = req.body;
