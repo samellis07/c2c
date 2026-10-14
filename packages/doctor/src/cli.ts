@@ -78,7 +78,7 @@ export function doctorSpawn(command: string, args: string[], opts: { cwd: string
 export function defaultDoctorIo(): DoctorIo {
   return {
     stdout: (text) => process.stdout.write(text),
-    stderr: (text) => process.stderr.write(`[C2C-DOCTOR-001] ${text.trimEnd()}\nSee plugin/references/error-index.md#c2c-doctor-001\n`),
+    stderr: (text) => process.stderr.write(`${text.trimEnd()} [C2C-DOCTOR-001]\nSee plugin/references/error-index.md#c2c-doctor-001\n`),
     env: process.env,
     spawn: doctorSpawn,
     stdin: () => readStdinBounded(),

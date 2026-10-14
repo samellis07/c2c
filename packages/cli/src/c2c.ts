@@ -189,7 +189,7 @@ import { bundleFromDir, bundleFromFiles, scoreFileOf, scoreUi, uiScoreAsText } f
 const CLI_ERROR_CODE = 'C2C-CLI-001';
 const ERROR_INDEX_HINT = 'See plugin/references/error-index.md';
 function writeCliError(message: string): void {
-  process.stderr.write(`[${CLI_ERROR_CODE}] ${message.trimEnd()}\n${ERROR_INDEX_HINT}#${CLI_ERROR_CODE.toLowerCase()}\n`);
+  process.stderr.write(`${message.trimEnd()} [${CLI_ERROR_CODE}]\n${ERROR_INDEX_HINT}#${CLI_ERROR_CODE.toLowerCase()}\n`);
 }
 
 function usage(): never {
