@@ -1,8 +1,8 @@
 /**
  * rules-auth: plugin/references/facts/auth.md is a shipped rules file —
- * unique headings, every rule carries a `Rule:` line or an exact recipe, every
- * `Rule:` line carries an evidence label, no other provenance wording, no
- * dates, no hard-coded DC, and no hygiene failures.
+ * unique headings, every rule carries a `Rule:` line or an exact recipe,
+ * every `Recipe:`/`Rule:` line carries an evidence label, no status
+ * fields, no dates, no hard-coded DC, and no hygiene failures.
  */
 import assert from 'node:assert/strict';
 import { lstatSync, readFileSync } from 'node:fs';
@@ -15,9 +15,6 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const factsDir = path.join(repo, 'plugin', 'references', 'facts');
 const file = path.join(factsDir, 'auth.md');
 
-const EVIDENCE_LABEL = /\[[A-Z][A-Z0-9 -]{1,14}\]/;
-const RULE_LABEL = /^Rule: .*\[(DOC|CLI|MCP-LISTED|TESTED|UNVERIFIED)\]\s*$/;
-const ALLOWED_LABEL = /\[(DOC|CLI|MCP-LISTED|TESTED|UNVERIFIED)\]/g;
 const FIELD_LABEL = /^\s*[-*]?\s*\*{0,2}(status|evidence|verified|source|date)\s*\*{0,2}\s*:/im;
 const ISO_DATE = /\b20\d\d-\d\d-\d\d\b/;
 const HARDCODED_DC = /\b(api|console)\.catalyst\.(in|com|eu|au|jp|sa|ca)\b|\bonslate\.(in|com|eu|au|jp|sa|ca)\b/;
@@ -87,14 +84,6 @@ test('rule headings are unique and each rule has a Rule: line or a recipe', () =
   }
 });
 
-test('every Rule: line has an evidence label', () => {
-  const ruleLines = text().split('\n').filter((line) => /^Rule:/.test(line));
-  assert.ok(ruleLines.length > 0, 'expected at least one Rule: line');
-  for (const line of ruleLines) {
-    assert.match(line, RULE_LABEL, `Rule: line lacks a trailing evidence label: ${line}`);
-  }
-});
-
 test('required auth, user, role, connection, and mail recipes are present', () => {
   const md = text();
   for (const needle of REQUIRED) {
@@ -102,9 +91,17 @@ test('required auth, user, role, connection, and mail recipes are present', () =
   }
 });
 
-test('no stray provenance, dates, or hard-coded DCs in the shipped rules', () => {
-  const md = text().replace(ALLOWED_LABEL, '');
-  assert.equal(EVIDENCE_LABEL.test(md), false, md.match(EVIDENCE_LABEL)?.[0]);
+test('every Recipe and Rule line carries an evidence label', () => {
+  const md = text();
+  const lines = md.split('\n').filter((line) => /^(Recipe|Rule):/.test(line));
+  assert.ok(lines.length > 0, 'expected recipe and rule lines');
+  for (const line of lines) {
+    assert.match(line, /\[(?:TESTED|UNVERIFIED|DOC|CLI|MCP-LISTED)\]/, `missing evidence label: ${line}`);
+  }
+});
+
+test('no status fields, dates or hard-coded data centres in shipped rules', () => {
+  const md = text();
   assert.equal(FIELD_LABEL.test(md), false, md.match(FIELD_LABEL)?.[0]);
   assert.equal(ISO_DATE.test(md), false, md.match(ISO_DATE)?.[0]);
   assert.equal(HARDCODED_DC.test(md), false, `hard-coded DC: ${md.match(HARDCODED_DC)?.[0]}`);

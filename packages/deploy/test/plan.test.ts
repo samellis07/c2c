@@ -537,7 +537,7 @@ test('doctor, plan and the limits facts agree at the 250-column hard cap', () =>
   const columnsRule = /^Rule: (.+)$/m.exec(facts)?.[1];
   assert.ok(columnsRule, 'facts ledger must have a Rule line for columns per table');
   const documentedCap = /Plan for (\d+) columns per table \[UNVERIFIED\]/.exec(columnsRule)?.[1];
-  const documentedDefault = /stated default is (\d+) columns per table \[UNVERIFIED\]/.exec(columnsRule)?.[1];
+  const documentedDefault = /stated default is (\d+) columns per table \[DOC\]/.exec(columnsRule)?.[1];
   assert.ok(documentedCap, 'facts ledger must document the raised column cap');
   assert.ok(documentedDefault, 'facts ledger must document the default column cap');
   assert.equal(Number(documentedCap), cap, 'facts ledger raised cap must match the code');
