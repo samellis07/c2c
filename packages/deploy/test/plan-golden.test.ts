@@ -1,6 +1,6 @@
 /** Byte-for-byte offline plan goldens for every checked-in synthetic app. */
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync, mkdtempSync, rmSync } from 'node:fs';
+import { readdirSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { test } from 'node:test';
@@ -42,8 +42,14 @@ test('every in-repo synthetic app produces pinned offline plan goldens determini
         const second = readFileSync(join(outputs[1]!, file), 'utf8');
         assert.equal(second, first, `${relativeApp}: ${file} changed between runs`);
         const golden = join(goldenDir, file);
-        assert.ok(statSync(golden, { throwIfNoEntry: false })?.isFile(), `${relativeApp}: missing golden ${file}; run npm run golden:offline-plan:update`);
-        assert.equal(first, readFileSync(golden, 'utf8'), `${relativeApp}: ${file} differs from its readable golden`);
+        let pinned;
+        try {
+          pinned = readFileSync(golden, 'utf8');
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+        assert.ok(pinned !== undefined, `${relativeApp}: missing golden ${file}; run npm run golden:offline-plan:update`);
+        assert.equal(first, pinned, `${relativeApp}: ${file} differs from its readable golden`);
       }
     } finally {
       for (const out of outputs) rmSync(out, { recursive: true, force: true });
