@@ -44,6 +44,8 @@ export interface DoctorContext {
   local: boolean;
   /** Evidence merged this run (observed MCP calls, or an user-supplied file). */
   evidence?: McpEvidence;
+  /** Evidence origin matters: local transports are trusted only from the nonce-bound observed flow. */
+  evidenceSource?: 'observed' | 'operator';
   /** CLI login-store readers; injectable for tests. */
   cliDc?: () => string | undefined;
   cliOrg?: () => string | undefined;
@@ -822,7 +824,19 @@ function checkB(ctx: DoctorContext, evidence: McpEvidence, cliProjects: string[]
   const out: CheckResult[] = [];
   const mcpFix = `disable the broken copy and add a correct entry, e.g. claude mcp add --transport http catalyst-by-zoho https://catalystbyzoho.zohomcp.<dc>/mcp/message; restart; complete the browser sign-in`;
   const hostOfUrl = typeof evidence.host_of_url === 'string' && evidence.host_of_url !== '' ? evidence.host_of_url : undefined;
-  if (!hostOfUrl) {
+  const localTransport = evidence.transport === 'stdio' || evidence.transport === 'local';
+  // The submitted call results are caller-controlled; for a local transport
+  // the only proof the connector is bound to this org/DC/project is the
+  // doctor's own REST read-back of the nonce-named probe write.
+  const bound = evidence.binding?.status === 'verified';
+  const bindingFix = 'run c2c doctor --mcp-begin, make every call it names (the probe write first), then c2c doctor --mcp-observed -';
+  if (localTransport && ctx.evidenceSource !== 'observed') {
+    out.push(fail('D-B1', 'stdio/local MCP evidence must come from an observed live tool call; run c2c doctor --mcp-begin and --mcp-observed', 'run /c2c:doctor again and record the live MCP call with c2c doctor --mcp-begin'));
+  } else if (localTransport && !bound) {
+    out.push(fail('D-B1', `stdio/local MCP is not proved bound to this org/DC/project: ${evidence.binding?.detail ?? 'no server-side probe was read back'}`, bindingFix));
+  } else if (localTransport) {
+    out.push(pass('D-B1', `catalyst MCP: ${evidence.server ?? 'catalyst-by-zoho'} (${evidence.transport}) — bound by the probe write`));
+  } else if (!hostOfUrl) {
     out.push(
       fail('D-B1', evidence.host_of_url === undefined ? 'no Catalyst MCP server was recorded' : 'the recorded MCP host is not a host name; re-record the evidence', mcpFix),
     );
@@ -830,15 +844,30 @@ function checkB(ctx: DoctorContext, evidence: McpEvidence, cliProjects: string[]
     out.push(pass('D-B1', `catalyst MCP: ${evidence.server ?? 'catalyst-by-zoho'} → ${hostOfUrl} (${evidence.transport ?? 'http'})`));
   }
 
-  const mcpDc = dcOfMcpHost(hostOfUrl);
+  let mcpDc = dcOfMcpHost(hostOfUrl);
+  let dcSource: 'MCP host' | 'project write probe' = 'MCP host';
+  if (localTransport) {
+    // A verified probe write places the nonce inside the very project the
+    // CLI credential sees — that read-back is the org/DC proof. Caller-
+    // submitted org hosts or the CLI's own selection never attest the
+    // connector, so without the probe the DC stays unproven.
+    if (bound) {
+      mcpDc = normalizeDc(ctx.scope.dc);
+      dcSource = 'project write probe';
+    }
+  }
   if (!mcpDc) {
-    out.push(hostOfUrl ? fail('D-B2', `cannot read a DC from MCP host ${hostOfUrl}`, mcpFix) : skip('D-B2', 'no MCP host recorded'));
+    if (localTransport) {
+      out.push(fail('D-B2', `cannot prove the Catalyst MCP data center for org ${ctx.scope.org ?? '?'}: the probe write was not read back in the selected project (${evidence.binding?.detail ?? 'no probe ran'})`, bindingFix));
+    } else {
+      out.push(hostOfUrl ? fail('D-B2', `cannot read a DC from MCP host ${hostOfUrl}`, mcpFix) : skip('D-B2', 'no MCP host recorded'));
+    }
   } else if (!ctx.scope.dc) {
     out.push(warn('D-B2', `MCP DC = ${mcpDc}; the target DC is not set`));
   } else if (mcpDc !== ctx.scope.dc) {
     out.push(fail('D-B2', `the Catalyst MCP points at ${mcpDc} but your Catalyst account is in ${ctx.scope.dc}`, `change the URL to the ${ctx.scope.dc} endpoint and restart, or run the official /catalyst-by-zoho:switch-dc ${ctx.scope.dc.toUpperCase()}`));
   } else {
-    out.push(pass('D-B2', `MCP DC = ${mcpDc}`));
+    out.push(pass('D-B2', `MCP DC = ${mcpDc} (proved by ${dcSource})`));
   }
 
   const toolList = recordedList(evidence.tools);

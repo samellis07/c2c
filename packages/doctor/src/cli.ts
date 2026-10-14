@@ -20,6 +20,8 @@ import { runDoctorChecks, type DoctorContext } from './checks.js';
 import { peekCliTokenTag, refreshCliAccessToken } from '../../deploy/src/rest.js';
 import { EvidenceRejected, EvidenceStale, mcpRecord, parseEvidence, type McpEvidence } from './evidence.js';
 import { beginMcpRequest, closeMcpRequest, mcpRequestInstructions, parseObservation, readStdinBounded, type Observed } from './observed.js';
+import { clearPendingCleanup, probeDeleteCall, probeNameOf, readPendingCleanups, verifyProbe, writePendingCleanup, type ProbeTarget } from './mcp-probe.js';
+import { catalystRestCall } from '../../deploy/src/rest.js';
 import { c2cVersion, detectHost, workspaceDir, writeDoctorFile } from './report.js';
 import { cliStoreHooks, resolveScope, type ScopeHooks } from './scope.js';
 import { verifyVendorDir } from './vendor.js';
@@ -159,24 +161,6 @@ function formatTable(checks: CheckResult[], file: DoctorFile): string {
 
 async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks): Promise<number> {
   const workspace = workspaceDir(io.env);
-  // The request needs no scope: the observation is bound to the scope of the run that records it.
-  if (parsed.mcpBegin) {
-    const request = beginMcpRequest(workspace);
-    const ask = mcpRequestInstructions(request);
-    if (parsed.json) {
-      io.stdout(`${JSON.stringify(ask, null, 2)}\n`);
-    } else {
-      io.stdout(
-        `MCP request ${ask.request} (answer before ${ask.expires})\n` +
-          `1. In this session, call ${ask.calls.join(', ')}; approve each call when asked. Never call ${ask.neverCall.join(' or ')}: they return project secrets into the transcript, and the doctor lists projects through the Catalyst CLI.\n` +
-          `2. Pipe the observation — this request id, the Catalyst server, host and tool names the session lists, and each call's result verbatim — into:\n` +
-          `   ${ask.command}\n` +
-          `${JSON.stringify(ask.observation, null, 2)}\n`,
-      );
-    }
-    return 0;
-  }
-
   const cliHooks = hooks ?? cliStoreHooks(io.env);
   let scope;
   try {
@@ -201,6 +185,32 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
   if (!scope.app && parsed.app) {
     scope.app = basename(parsed.app).replace(/\.ds$/i, '');
   }
+  const probeTarget: ProbeTarget = {
+    ...(scope.org !== undefined ? { org: scope.org } : {}),
+    ...(scope.project !== undefined ? { project: scope.project } : {}),
+  };
+
+  if (parsed.mcpBegin) {
+    const request = beginMcpRequest(workspace);
+    const ask = mcpRequestInstructions(request, probeTarget);
+    const pending = readPendingCleanups(workspace);
+    if (parsed.json) {
+      io.stdout(`${JSON.stringify({ ...ask, ...(pending.length ? { pendingCleanup: pending.map((p) => probeDeleteCall(p.name, p)) } : {}) }, null, 2)}\n`);
+    } else {
+      const callLines = ask.calls.map((call) => `   ${JSON.stringify(call)}`).join('\n');
+      io.stdout(
+        `MCP request ${ask.request} (answer before ${ask.expires})\n` +
+          `1. In this session, make these calls; approve each call when asked. Never call ${ask.neverCall.join(' or ')}: they return project secrets into the transcript, and the doctor lists projects through the Catalyst CLI.\n${callLines}\n` +
+          `   The first call writes a short-lived probe bucket (${ask.probe}) the doctor reads back over the Catalyst REST API with your CLI credential — the echoed nonce alone proves nothing.\n` +
+          `2. Pipe the observation — this request id, the Catalyst server, host and tool names the session lists, and each call's result verbatim — into:\n` +
+          `   ${ask.command}\n` +
+          `${JSON.stringify(ask.observation, null, 2)}\n` +
+          `3. Afterwards remove the probe bucket: call ${JSON.stringify(ask.cleanup)}\n` +
+          pending.map((p) => `cleanup still pending from an earlier run: call ${JSON.stringify(probeDeleteCall(p.name, p))}\n`).join(''),
+      );
+    }
+    return 0;
+  }
 
   let evidence: McpEvidence | undefined;
   let origin: { source: 'observed'; observed: Observed } | { source: 'operator' } | undefined;
@@ -215,7 +225,26 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
       origin = { source: 'observed', observed: result.observed };
       // A --local run persists nothing, so it must not consume the request;
       // the run that writes doctor.json closes it first (fail closed), atomically.
-      if (!parsed.local) closeMcpRequest(workspace, result.observed.request);
+      if (!parsed.local) {
+        // The submitted results are caller-controlled: the binding is the
+        // doctor's own REST read-back of the probe bucket, not the echoed
+        // nonce. Runs before closeMcpRequest so a rejected observation can
+        // never consume the request (parse already threw by this point).
+        const probe = probeNameOf(result.observed.request);
+        const rest = io.rest ?? ((call: { method: 'GET' | 'POST'; path: string }) => catalystRestCall(io.env, probeTarget.org ?? '', probeTarget.project ?? '', call));
+        const binding = await verifyProbe(rest, probeTarget, probe);
+        evidence.binding = binding;
+        if (binding.status === 'absent') clearPendingCleanup(workspace, probe);
+        else writePendingCleanup(workspace, probe, probeTarget);
+        // Earlier runs' probes owe a delete too: each is re-checked and its
+        // reminder drops only once the read-back shows it is actually gone.
+        for (const pending of readPendingCleanups(workspace)) {
+          if (pending.name === probe || !pending.project || !/^[0-9]+$/.test(pending.project)) continue;
+          const leftover = await verifyProbe(rest, pending, pending.name);
+          if (leftover.status === 'absent') clearPendingCleanup(workspace, pending.name);
+        }
+        closeMcpRequest(workspace, result.observed.request);
+      }
     } catch (err) {
       if (err instanceof EvidenceStale) {
         io.stderr(`c2c doctor: ${err.message}\n`);
@@ -264,6 +293,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
     ...(parsed.sourceCsv !== undefined ? { sourceCsv: parsed.sourceCsv } : {}),
     local: parsed.local,
     ...(evidence ? { evidence } : {}),
+    ...(origin ? { evidenceSource: origin.source } : {}),
     cliDc: cliHooks.cliDc,
     cliOrg: cliHooks.cliOrg,
   };
@@ -294,6 +324,12 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
       io.stdout(formatTable(run.checks, file));
       if (path) io.stdout(`doctor.json: ${path}\n`);
       else io.stdout('(local run; doctor.json not updated)\n');
+    }
+    // Cleanup always runs: while a probe bucket may exist, the delete call is
+    // re-printed on every run (each pending record clears only when a REST
+    // read-back confirms that bucket is gone).
+    for (const pending of readPendingCleanups(workspace)) {
+      io.stdout(`cleanup: remove the probe bucket ${pending.name} — in this session call ${JSON.stringify(probeDeleteCall(pending.name, pending))}\n`);
     }
   }
   if (run.integrityFailed) return 6;

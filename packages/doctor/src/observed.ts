@@ -6,12 +6,21 @@
  *   1. `c2c doctor --mcp-begin` opens a one-time request
  *      (`c2c-out/.c2c/mcp-request.json`: a random id and when it was issued)
  *      and prints the calls to make;
- *   2. the agent calls `CatalystbyZoho_List_All_Organizations` in the
- *      session — never the MCP project tools, which return project secrets
- *      (the doctor lists projects through the Catalyst CLI, D-C4);
+ *   2. the agent calls `CatalystbyZoho_Create_Bucket` (a short-lived probe
+ *      bucket named after the request id — a write only the connector bound
+ *      to the project can make) and `CatalystbyZoho_List_All_Organizations`
+ *      in the session — never the MCP project tools, which return project
+ *      secrets (the doctor lists projects through the Catalyst CLI, D-C4);
  *   3. the agent pipes an observation — the request id, the session's
  *      Catalyst server/host/tool names, and each call's verbatim result — into
  *      `c2c doctor --mcp-observed -`.
+ *
+ * The echo of the nonce inside the submitted JSON proves nothing: the call
+ * results are caller-controlled. The binding comes from the server side —
+ * the doctor reads the probe bucket back over the Catalyst REST API with the
+ * user's own CLI credential (`binding`), and a stdio/local transport goes
+ * green only on that match. The observation results are still checked for
+ * error envelopes and reduced to ids/digests.
  *
  * The doctor derives the org ids from the call results itself, stamps
  * `at` and the workspace itself, and records a sha256 digest of each result.
@@ -26,6 +35,8 @@ import { mkdirSync, readdirSync, readFileSync, readSync, rmSync, writeFileSync }
 import { dirname, join } from 'node:path';
 import { EvidenceRejected, EvidenceStale, entryIdOf, parseEvidence, shortToolName, type McpEvidence } from './evidence.js';
 import { NEVER_CALL_MCP_TOOLS } from './required-tools.js';
+import { dcOfCreatorHost, type Dc } from './scope.js';
+import { PROBE_CREATE_CALL, probeCreateCall, probeDeleteCall, probeNameOf, type ProbeTarget } from './mcp-probe.js';
 
 export const OBSERVATION_KIND = 'c2c-mcp-observation';
 export const OBSERVATION_SCHEMA = 1;
@@ -39,11 +50,12 @@ export const MCP_RESULT_MAX_BYTES = 1024 * 1024;
 const PAYLOAD_MAX_DEPTH = 12;
 
 export const ORGS_CALL = 'CatalystbyZoho_List_All_Organizations';
+export const PROBE_CALL = PROBE_CREATE_CALL;
 
 /** Fields the agent reports from its session; everything else is derived or refused. */
 const PASSTHROUGH = ['host', 'server', 'host_of_url', 'transport', 'shape', 'features', 'tools', 'schemas', 'catalyst_skills_visible', 'servers', 'tables', 'orgTableCount'];
 /** Fields only the doctor writes. A caller that supplies one has edited the observation. */
-const DERIVED = ['orgs', 'projects', 'at', 'workspace'];
+const DERIVED = ['orgs', 'projects', 'at', 'workspace', 'binding'];
 const ENVELOPE = ['kind', 'schema', 'request', 'calls'];
 /** A calls[] entry carries exactly these keys. */
 const CALL_KEYS = ['tool', 'result'];
@@ -198,20 +210,40 @@ function entriesOf(payload: unknown, depth = 0): Record<string, unknown>[] | und
   return undefined;
 }
 
+/** A DC is retained only after it is derived from an org's observed console/API host. */
+function orgHostDc(entry: Record<string, unknown>): Dc | undefined {
+  for (const key of ['console_url', 'consoleUrl', 'console_host', 'consoleHost', 'api_url', 'apiUrl', 'api_host', 'apiHost']) {
+    const value = entry[key];
+    if (typeof value !== 'string') continue;
+    let host = value;
+    try {
+      if (/^https?:\/\//i.test(value)) host = new URL(value).host;
+    } catch {
+      continue;
+    }
+    const dc = dcOfCreatorHost(host);
+    if (dc) return dc;
+  }
+  return undefined;
+}
+
 /** The decimal ids a list call's verbatim result names; nothing else in the result is kept. */
-function idsOfResult(result: unknown, tool: string): string[] {
+function idsOfResult(result: unknown, tool: string): { ids: string[]; orgDcs: Record<string, Dc> } {
   // The envelope checks in payloadOf only see the top object: scan the whole
   // result first, so a flag in a later block, entry or list is still refused.
   rejectIfErrorFlag(result, tool);
   const entries = entriesOf(payloadOf(result, tool));
   if (!entries) throw new ObservationRejected(`the ${tool} result holds no list of entries`);
   const ids: string[] = [];
+  const orgDcs: Record<string, Dc> = {};
   for (const entry of entries) {
     const id = entryIdOf(entry);
     if (id === undefined) throw new EvidenceStale(`the ${tool} result holds an entry with no decimal id`);
     ids.push(id);
+    const dc = orgHostDc(entry);
+    if (dc) orgDcs[id] = dc;
   }
-  return ids;
+  return { ids, orgDcs };
 }
 
 /** sha256 of a result exactly as observed (a string as-is, anything else as its JSON text). */
@@ -280,6 +312,7 @@ export function parseObservation(text: string, input: { workspace: string; now?:
   if (!Array.isArray(record.calls)) throw new ObservationRejected('the observation has no calls list');
   const calls: ObservedCall[] = [];
   let orgs: string[] | undefined;
+  let orgDcs: Record<string, Dc> = {};
   for (const [index, call] of record.calls.entries()) {
     if (!call || typeof call !== 'object' || Array.isArray(call)) throw new ObservationRejected(`calls[${index}] is not a call`);
     for (const key of Object.keys(call as Record<string, unknown>)) {
@@ -294,31 +327,45 @@ export function parseObservation(text: string, input: { workspace: string; now?:
     const short = shortToolName(tool);
     if (NEVER_CALL_MCP_TOOLS.includes(short)) {
       throw new ObservationRejected(
-        `calls[${index}] is ${short}: c2c never calls the MCP project tools — they return project secrets into the transcript; the doctor lists projects through the Catalyst CLI. Run c2c doctor --mcp-begin again and send only ${ORGS_CALL}`,
+        `calls[${index}] is ${short}: c2c never calls the MCP project tools — they return project secrets into the transcript; the doctor lists projects through the Catalyst CLI. Run c2c doctor --mcp-begin again and send only the calls it names`,
       );
     }
-    if (short === shortToolName(ORGS_CALL)) orgs = idsOfResult(result, ORGS_CALL);
-    else throw new ObservationRejected(`calls[${index}] is not a call the MCP request asked for`);
+    if (short === shortToolName(ORGS_CALL)) {
+      const listed = idsOfResult(result, ORGS_CALL);
+      orgs = listed.ids;
+      orgDcs = listed.orgDcs;
+    } else if (short === shortToolName(PROBE_CALL)) {
+      // The probe write is attested by the doctor's own REST read-back, never
+      // by this result: it is checked for an error envelope and digested.
+      rejectIfErrorFlag(result, PROBE_CALL);
+    } else throw new ObservationRejected(`calls[${index}] is not a call the MCP request asked for`);
     calls.push({ tool: short, digest: resultDigest(result) });
   }
   if (!orgs) throw new ObservationRejected(`the observation has no ${ORGS_CALL} result`);
+  if (!calls.some((call) => call.tool === shortToolName(PROBE_CALL))) {
+    throw new ObservationRejected(`the observation has no ${PROBE_CALL} result; run c2c doctor --mcp-begin and make every call it names`);
+  }
 
   // The session facts go through the evidence validator (no URL path, no email, Catalyst tool names only).
   const session: Record<string, unknown> = {};
   for (const key of PASSTHROUGH) if (record[key] !== undefined) session[key] = record[key];
   const evidence = parseEvidence(JSON.stringify(session));
   evidence.orgs = orgs;
+  if (Object.keys(orgDcs).length) evidence.orgDcs = orgDcs;
   evidence.at = now.toISOString();
   evidence.workspace = input.workspace;
   return { evidence, observed: { request: open.request, orgs, calls } };
 }
 
 /** What the agent is asked to do, for the --mcp-begin output. */
-export function mcpRequestInstructions(request: McpRequest): { request: string; expires: string; calls: string[]; neverCall: string[]; command: string; observation: Record<string, unknown> } {
+export function mcpRequestInstructions(request: McpRequest, target: ProbeTarget = {}): { request: string; expires: string; probe: string; calls: Record<string, unknown>[]; cleanup: Record<string, unknown>; neverCall: string[]; command: string; observation: Record<string, unknown> } {
+  const probe = probeNameOf(request.request);
   return {
     request: request.request,
     expires: new Date(Date.parse(request.at) + MCP_REQUEST_MAX_AGE_MS).toISOString(),
-    calls: [ORGS_CALL],
+    probe,
+    calls: [probeCreateCall(probe, target), { tool: ORGS_CALL }],
+    cleanup: probeDeleteCall(probe, target),
     neverCall: NEVER_CALL_MCP_TOOLS.map((name) => `CatalystbyZoho_${name}`),
     command: 'c2c doctor --mcp-observed -',
     observation: {
@@ -326,11 +373,14 @@ export function mcpRequestInstructions(request: McpRequest): { request: string; 
       schema: OBSERVATION_SCHEMA,
       request: request.request,
       server: '<the Catalyst MCP server name>',
-      host_of_url: '<the host of its URL, no path>',
-      transport: 'http',
+      host_of_url: '<the host of its URL, no path; omit for stdio/local>',
+      transport: 'http, stdio, or local',
       shape: '<meta or direct>',
       tools: ['<every Catalyst tool name the session lists>'],
-      calls: [{ tool: ORGS_CALL, result: '<the call result, verbatim>' }],
+      calls: [
+        { tool: PROBE_CALL, result: '<the call result, verbatim>' },
+        { tool: ORGS_CALL, result: '<the call result, verbatim>' },
+      ],
     },
   };
 }
