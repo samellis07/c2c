@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -1224,6 +1224,85 @@ test('accept takes fills with ordinary non-ASCII letters, marks, and a tab', asy
       () => acceptTodo({ app: demo, taskId: task.id, fill: 'shim.input.get(ctx, "​")', lockPath }),
       /parse: invalid whitespace\/format character U\+200B/,
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('readLock opens a lock and does not stat or read the path', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-lock-open-'));
+  const lockPath = join(dir, 'c2c.lock.json');
+  writeFileSync(lockPath, '{"version":1,"entries":{}}\n');
+  const calls: string[] = [];
+  try {
+    const lock = readLock(lockPath, {
+      openSync(path, flags) {
+        calls.push('open');
+        return openSync(path, flags);
+      },
+      fstatSync(fd) {
+        calls.push('fstat');
+        return fstatSync(fd);
+      },
+      readFileSync(fd, encoding) {
+        calls.push(typeof fd === 'number' ? 'read-fd' : 'read-path');
+        return readFileSync(fd, encoding);
+      },
+      closeSync(fd) {
+        calls.push('close');
+        closeSync(fd);
+      },
+    });
+    assert.deepEqual(lock, { version: 1, entries: {} });
+    assert.deepEqual(calls, ['open', 'fstat', 'read-fd', 'close']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('readLock treats ENOENT from open as an absent lock and does not read a path that exists', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-lock-enoent-'));
+  const lockPath = join(dir, 'c2c.lock.json');
+  writeFileSync(lockPath, '{"version":1,"entries":{"marker":{"id":"marker"}}}\n');
+  const calls: string[] = [];
+  try {
+    const lock = readLock(lockPath, {
+      openSync() {
+        calls.push('open');
+        const err = new Error('missing') as NodeJS.ErrnoException;
+        err.code = 'ENOENT';
+        throw err;
+      },
+      fstatSync() {
+        calls.push('fstat');
+        throw new Error('fstat should not run');
+      },
+      readFileSync() {
+        calls.push('read');
+        throw new Error('read should not run');
+      },
+      closeSync() {
+        calls.push('close');
+      },
+    });
+    assert.deepEqual(lock, { version: 1, entries: {} });
+    assert.deepEqual(calls, ['open']);
+    assert.deepEqual(readLock(join(dir, 'missing.json')), { version: 1, entries: {} });
+    assert.deepEqual(readLock(dir), { version: 1, entries: {} });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('readLock still rejects malformed JSON and a wrong version', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-lock-bad-'));
+  const malformed = join(dir, 'malformed.json');
+  const wrongVersion = join(dir, 'wrong-version.json');
+  writeFileSync(malformed, '{');
+  writeFileSync(wrongVersion, '{"version":2,"entries":{}}');
+  try {
+    assert.throws(() => readLock(malformed), { name: 'FillTodoError', message: 'lock file is not valid JSON' });
+    assert.throws(() => readLock(wrongVersion), { name: 'FillTodoError', message: 'c2c.lock.json is not version 1' });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
