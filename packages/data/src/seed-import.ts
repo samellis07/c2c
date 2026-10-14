@@ -420,7 +420,7 @@ function scalarValue(col: Column, i: number, rng: () => number, seen: Set<string
     }
     case 'datetime': {
       const d = new Date(Date.UTC(2025, Math.floor(rng() * 20), 1 + Math.floor(rng() * 28)));
-      return `${fmtDate(d)} ${String(Math.floor(rng() * 24)).padStart(2, '0')}:${String(Math.floor(rng() * 60)).padStart(2, '0')}`;
+      return `${fmtDate(d)} ${String(Math.floor(rng() * 24)).padStart(2, '0')}:${String(Math.floor(rng() * 60)).padStart(2, '0')}:${String(Math.floor(rng() * 60)).padStart(2, '0')}`;
     }
     case 'time':
       return `${String(Math.floor(rng() * 24)).padStart(2, '0')}:${String(Math.floor(rng() * 60)).padStart(2, '0')}`;
@@ -1107,7 +1107,7 @@ function readmeFor(
   lines.push('');
   lines.push('## Conventions');
   lines.push('');
-  lines.push('- Dates: `dd-MMM-yyyy` (e.g. `05-Oct-2026`); date-times `dd-MMM-yyyy HH:mm`.');
+  lines.push('- Dates: `dd-MMM-yyyy` (e.g. `05-Oct-2026`); date-times `dd-MMM-yyyy HH:mm:ss`.');
   lines.push('- Lookups: the cell holds the **display value** of the parent record — the value');
   lines.push('  shown in the lookup field (its `displayformat`), which Creator resolves on import.');
   lines.push(`  See Zoho's report import article: ${IMPORT_HELP}`);
