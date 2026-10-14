@@ -27,7 +27,7 @@ function fixtureTree(t, { deps, lockEntries, exceptions = [] }) {
 }
 
 const lockEntry = (name, license, dependencies) => ({
-  [`node_modules/${name}`]: { version: '1.0.0', ...(license === undefined ? {} : { license }), ...(dependencies ? { dependencies } : {}) },
+  [`node_modules/${name}`]: { version: '1.0.0', integrity: 'sha512-fixture', ...(license === undefined ? {} : { license }), ...(dependencies ? { dependencies } : {}) },
 });
 
 test('allowlist contains the project list and nothing else', () => {
@@ -55,6 +55,36 @@ test('an OR expression that chooses an allowed licence passes; AND needs all', (
   assert.equal(licenseAllowed(undefined), false);
 });
 
+test('lockfile integrity hashes are required and non-registry tarballs are rejected', (t) => {
+  const dir = fixtureTree(t, {
+    deps: { unhashed: '1.0.0', remote: '2.0.0' },
+    lockEntries: {
+      ...lockEntry('unhashed', 'MIT'),
+      'node_modules/remote': {
+        version: '2.0.0', integrity: 'sha512-valid-looking-hash',
+        resolved: 'https://example.invalid/remote.tgz', license: 'MIT',
+      },
+    },
+  });
+  const { problems } = auditLockfile({ root: dir, dir: '.', label: 'fixture' });
+  assert.ok(problems.some((p) => /unhashed.*has no integrity hash/.test(p)), problems.join('\n'));
+  assert.ok(problems.some((p) => /node_modules\/remote.*non-registry tarball source/.test(p)), problems.join('\n'));
+});
+
+test('registry tarballs with integrity hashes pass lockfile source checks', (t) => {
+  const dir = fixtureTree(t, {
+    deps: { regular: '1.0.0' },
+    lockEntries: {
+      'node_modules/regular': {
+        version: '1.0.0', integrity: 'sha512-valid-looking-hash',
+        resolved: 'https://registry.npmjs.org/regular/-/regular-1.0.0.tgz', license: 'MIT',
+      },
+    },
+  });
+  const { problems } = auditLockfile({ root: dir, dir: '.', label: 'fixture' });
+  assert.deepEqual(problems, []);
+});
+
 test('planted GPL dependency fails the lockfile audit', (t) => {
   const dir = fixtureTree(t, {
     deps: { evil: '1.0.0' },
@@ -76,7 +106,7 @@ test('planted SSPL dependency fails the lockfile audit', (t) => {
 test('a dependency with no licence fails', (t) => {
   const dir = fixtureTree(t, {
     deps: { silent: '1.0.0' },
-    lockEntries: lockEntry('silent', undefined),
+    lockEntries: { 'node_modules/silent': { version: '1.0.0', integrity: 'sha512-fixture', license: undefined } },
   });
   const { problems } = auditLockfile({ root: dir, dir: '.', label: 'fixture' });
   assert.ok(problems.some((p) => /silent@1\.0\.0 declares no licence/.test(p)), problems.join('\n'));
@@ -106,7 +136,7 @@ test('transitive deps and nested lockfile paths are walked; dev entries are not'
     deps: { top: '1.0.0', devtool: '1.0.0' },
     lockEntries: {
       ...lockEntry('top', 'MIT', { mid: '1.0.0' }),
-      'node_modules/top/node_modules/mid': { version: '1.0.0', license: '(MIT OR GPL-3.0-only)' },
+      'node_modules/top/node_modules/mid': { version: '1.0.0', integrity: 'sha512-fixture', license: '(MIT OR GPL-3.0-only)' },
       'node_modules/devtool': { version: '1.0.0', dev: true, license: 'GPL-3.0-only' },
     },
   });
