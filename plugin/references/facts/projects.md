@@ -13,7 +13,7 @@ Rule: every Catalyst admin REST call goes to `https://api.catalyst.<dc>` with he
 
 ### One CLI credential, one refresher
 
-Rule: a zcatalyst-cli login credential tolerates exactly one refresher — the refresh token rotates on refresh, so a second process refreshing the same credential breaks it for both (`Error when refreshing the access token`, or a stored token that reads back empty). Serialize CLI use per credential. [TESTED]
+Rule: a zcatalyst-cli login credential tolerates exactly one refresher — the refresh token rotates on refresh, so a second process refreshing the same credential breaks it for both (`Error when refreshing the access token`, or a stored token that reads back empty). Serialize CLI use per credential. [UNVERIFIED]
 
 - One `catalyst`/`c2c` run at a time against the credential — no parallel runs, and never a background keep-fresh loop beside a run.
 - A credential copied to a second machine, profile or checkout is two refreshers on one login: same breakage. Keep a single login per workspace.
@@ -43,7 +43,7 @@ Rule: `POST /baas/v1/project` is refused — `400 PROJECT_CREATION_NOT_ALLOWED` 
 
 ### Verify the project before depending on it
 
-Rule: after creation, read the project back and record the id before any resource step. [TESTED]
+Rule: after creation, read the project back and record the id before any resource step. [UNVERIFIED]
 
 - `GET /baas/v1/project` lists the org's projects (`id`, `project_name`, `environment_details.env_type`); match by name, never by position. c2c reads it through the Catalyst CLI (`catalyst --org <org> project:list`, or the CLI-token GET) and keeps only id, name and env. Never call MCP `Get_Project_By_Id` / `List_All_Projects`: they return project secrets (jwtSecret, clientSecret) into the transcript.
 - CLI: `catalyst project:list --org <org-id>`; `catalyst project:use <project-id>` writes the local project link.
@@ -79,7 +79,7 @@ Rule: ship one ZIP with `project-template-1.0.0.json` at the root (YAML also acc
 
 ### Export is the configuration read-back — treat the ZIP as secret-bearing
 
-Rule: verify a project's configuration by exporting it, then delete the ZIP. [TESTED]
+Rule: verify a project's configuration by exporting it, then delete the ZIP. [UNVERIFIED]
 
 1. `POST /baas/v1/project/<project-id>/export` body `{"template_format":"JSON"}`.
 2. Poll `GET /baas/v1/project/<project-id>/export/status` until `Completed`.
@@ -96,8 +96,9 @@ Rule: `DELETE /baas/v1/project/<project-id>` → `200`; while the Production env
 
 ### A project still 'Importing' is skipped and not written to
 
-Rule: Assume a project whose `project_type` stays `Importing` keeps holding its name, and assume `DELETE /baas/v1/project/<project-id>` keeps failing `400 INVALID_OPERATION` ("Your project is importing. Kindly wait for some time") for as long as the import does [UNVERIFIED]. c2c does not call that delete [TESTED].
+Rule: Assume a project whose `project_type` stays `Importing` keeps holding its name, and assume `DELETE /baas/v1/project/<project-id>` keeps failing `400 INVALID_OPERATION` ("Your project is importing. Kindly wait for some time") for as long as the import does [UNVERIFIED]
 
+- c2c does not call that delete [TESTED].
 - Before posting an import, c2c lists the org's projects and skips every name a listed project still shows as `Importing`. The next suffix (`<name>-2`, `<name>-3`, …) is tried instead of colliding [TESTED].
 - A provision step refuses a project still `Importing` when the known age is at least 6 hours, and when the age cannot be read [TESTED]. Deploy and resume call that same guard before a write [TESTED]. At least 6 hours is treated as stuck — the run prints one guided step (check the project in the Catalyst console; if it stays Importing, contact Catalyst support) and stops that branch [TESTED]. If the age is unknown, writes remain stopped with neutral guidance to check its status in the Catalyst console and re-run later; doctor warns instead of failing [TESTED]. A known age under 6 hours is refused before any write as well [UNVERIFIED].
 
@@ -112,7 +113,7 @@ Rule: c2c tears a project down only when the user explicitly asks, or when a fai
 
 ### Run the Development→Production flow in the console
 
-Rule: enabling the Production environment, Deploy to Production (a diff-driven promote), pipelines and disabling Production are console steps the user performs — token calls answer `401 AUTHENTICATION_FAILURE` or return a sign-in page. [TESTED]
+Rule: enabling the Production environment, Deploy to Production (a diff-driven promote), pipelines and disabling Production are console steps the user performs — token calls answer `401 AUTHENTICATION_FAILURE` or return a sign-in page. [UNVERIFIED]
 
 - Token-side Production routes that do work: `catalyst deploy slate --production`, `catalyst ds:import --production`, `catalyst ds:export --production`, `catalyst iac:export --production`.
 - Promotion is the persistent `Deploy to Production` header action; pre-defined crons migrate with it and social logins must be re-entered on the Production side.
@@ -182,7 +183,7 @@ Rule: never depend on APM or alerts in generated code or plans — read build fa
 
 ### Link and deploy the Slate app through the CLI only
 
-Rule: Slate has no create/deploy REST or MCP route — `catalyst slate:link` records the app, `catalyst deploy slate` publishes it. [TESTED]
+Rule: Slate has no create/deploy REST or MCP route — `catalyst slate:link` records the app, `catalyst deploy slate` publishes it. [UNVERIFIED]
 
 - In `catalyst.json`, `slate` must be an array (`"slate": []` before linking). If the key holds an object, `slate:link` crashes with `TypeError: existingSlates.findIndex is not a function` — fix the JSON and retry.
 - `slate:link` writes the build path as an absolute `source` in `catalyst.json` — rewrite it to a relative path before the tree leaves the machine.
@@ -196,7 +197,7 @@ Rule: after `catalyst deploy slate`, read `GET /slate/v1/project/<project-id>/ap
 
 ### Serve content-hashed assets — the index document is cached for a year
 
-Rule: `*.onslate.<dc>` serves `/` and `/index.html` with `cache-control: public, max-age=31536000` — effectively immutable for a year. [TESTED]
+Rule: `*.onslate.<dc>` serves `/` and `/index.html` with `cache-control: public, max-age=31536000` — effectively immutable for a year. [UNVERIFIED]
 
 - Every asset URL must carry a content hash; fetch runtime config and API responses network-first; version the service worker.
 - The console Web Cache toggle does not change this header — verify any caching claim with `curl -I <app-url>` on the deployed app, not by toggling.
