@@ -4,10 +4,10 @@ The AI cannot click in the console, open mail, or sign in for you —
 and it is forbidden from trying
 ([rules 2 and 13](../../plugin/C2C.md)). So instead of interrupting
 you piecemeal, the run collects everything only you can do into
-**five** steps, printed as one numbered `human checklist:` at the
-end of provisioning and deploying. The invite is always on the
-list; each other item appears only when your app actually needs
-it. Steps 1–3 and 5 match the checklist items in
+**five** steps. Up to four are printed as one numbered
+`human checklist:` at the end of provisioning and deploying — the
+invite is always on the list, each other item appears only when your
+app actually needs it, and they match the checklist items in
 [human-steps.ts](../../packages/deploy/src/human-steps.ts); step 4
 is the in-app check from the verify flow, asked while verifying.
 
