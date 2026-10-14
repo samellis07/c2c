@@ -350,7 +350,7 @@ export async function crawlHelpSitemap(options) {
     }
   }
 
-  const list = [...sections.values()].sort((a, b) => a.id.localeCompare(b.id));
+  const list = [...sections.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const complete = !truncated && !fetcher.truncated && !fetcher.skippedHop && pageUrls.length > 0 && seeds.length > 0;
   return {
     version: 1,
