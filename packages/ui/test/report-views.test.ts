@@ -71,6 +71,23 @@ test('calendar and timeline take start, end and title from the options block', (
   assert.equal(r.Line.titleField, 'Guest');
 });
 
+test('gantt remains one counted manual TODO without an invented timeline', async () => {
+  const model = buildUi(appOf([FORM, report('gantt', 'Plan', 'display field = Room')].join('\n'))).model;
+  const plan = model.reports.find((item) => item.name === 'Plan');
+  assert.ok(plan);
+  assert.equal(plan.status, 'todo');
+  assert.equal(plan.view, 'todo');
+  assert.match(plan.todo ?? '', /Report type gantt is not generated/);
+  assert.deepEqual(model.todos.filter((item) => item.area === 'report' && item.name === 'Plan'), [
+    { area: 'report', name: 'Plan', reason: plan.todo },
+  ]);
+  const runtime = await loadRuntime();
+  assert.doesNotThrow(() => runtime.renderReport(plan));
+  const html = runtime.renderReport(plan);
+  assert.match(html, /data-view="todo"/);
+  assert.doesNotMatch(html, /data-view="timeline"|<table/);
+});
+
 test('calendar start and end must be date columns of the form, else TODO', () => {
   const r = reportsOf(
     report('calendar', 'TextStart', 'start date = Note'),
