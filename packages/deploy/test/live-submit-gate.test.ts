@@ -171,21 +171,26 @@ async function liveSubmit(ds: string): Promise<{ status: number; body: Record<st
   }
 }
 
-test('a 500 never leaks an internal error: an uncaptured for-each throw replies "request failed"', async () => {
+test('a 500 hides handler details after an uncaptured for-each throw', async () => {
   const res = await liveSubmit(DS_INTERNAL);
   assert.equal(res.status, 500, JSON.stringify(res.body));
   assert.equal(res.body.code, 'INTERNAL_ERROR');
   assert.equal(res.body.wrote, true, 'the row write precedes the on-success script');
   assert.equal(res.body.message, 'Internal server error', 'an internal error message must not reach the client');
+  assert.match(String(res.body.correlationId), /^[0-9a-f-]{36}$/i);
+  assert.deepEqual(Object.keys(res.body).sort(), ['code', 'correlationId', 'message', 'wrote']);
   assert.equal(Object.hasOwn(res.body, 'error'), false);
   assert.equal(res.rows.length, 1, 'the write is not rolled back');
 });
 
-test('a Creator-text Deluge error is sanitized after the write', async () => {
+test('a Creator-text Deluge error stays out of the client response after the write', async () => {
   const res = await liveSubmit(DS_DELUGE);
   assert.equal(res.status, 500, JSON.stringify(res.body));
   assert.equal(res.body.code, 'INTERNAL_ERROR');
   assert.equal(res.body.wrote, true);
   assert.equal(res.body.message, 'Internal server error');
+  assert.match(String(res.body.correlationId), /^[0-9a-f-]{36}$/i);
+  assert.deepEqual(Object.keys(res.body).sort(), ['code', 'correlationId', 'message', 'wrote']);
+  assert.doesNotMatch(JSON.stringify(res.body), /Unable to cast|abc/);
   assert.equal(Object.hasOwn(res.body, 'error'), false);
 });
