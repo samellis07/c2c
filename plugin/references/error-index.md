@@ -75,6 +75,7 @@ must not continue until fixed.
 | `ORGID_HEADER_UNAVAILABLE` (QuickML) | [§](facts/errors.md#orgid_header_unavailable) |
 | `cron_url_details cannot be null` | [§](facts/errors.md#cron_url_details-cannot-be-null) |
 | `403 VERIFICATION_NEEDED` / `You need to verify the email domain` | [§](facts/errors.md#403-verification_needed-on-mail-send) |
+| `mail-sender-unverified` / `the app sends mail and sender <masked> is not marked verified` | The generated runtime's refusal (also deploy precheck `mail-sender-unverified`): the sender is not VERIFIED in Catalyst Mail — verify it in the console (Mail → Email Configuration), then re-run `c2c deploy --confirm` so the live read-back records it; `mail.verified` is only the attestation |
 | `403 PUBLIC_SIGNUP_ERROR` / `You cannot perform this action. Public Signup restricted.` | [§](facts/errors.md#403-public_signup_error) |
 | `401 {"error":"sign in required"}` / a browser `project-user/current` 401 | [§](facts/errors.md#401-errorsign-in-required) |
 | `401 NO_ACCESS` on a function URL | [§](facts/errors.md#401-no_access-on-a-function-url) |

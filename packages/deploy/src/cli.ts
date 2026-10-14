@@ -25,6 +25,7 @@ import { slateHost } from '../../auth/src/slate-host.js';
 import { API_FUNCTION, FUNCTION_DIR, envVariables, secretEnvValues } from './function-dir.js';
 import { buildDeploy, commandLine, deployFiles, migrateCatalystJson, writeDeployTree, type DeployCommand, type DeployFile, type DeployUi } from './plan.js';
 import { asyncLaneBlocker } from './events.js';
+import { mailSenderEvidenceVerified, observeMailSenders, readMailSenderEvidence } from './mail.js';
 import { humanChecklist } from './human-steps.js';
 import { applyFunctionEnvSecrets, readConnectionSecretKeys } from './function-env.js';
 import { CONSOLE_SERVICES, formatPostDeploySteps, postDeploySteps, servicesTouched, type ConsoleService, type PostDeployStep } from './post-deploy.js';
@@ -848,9 +849,26 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     const deployConfig = uiConfigPath ? readDeployConfig(uiConfigPath) : undefined;
     const ui: DeployUi = uiFlag ?? deployConfig?.ui ?? 'react';
     const subsetShims = rest.includes('--subset-shims') || io.env.C2C_SUBSET_SHIMS === '1';
+    const mailFrom = flag(rest, '--mail-from') ?? deployConfig?.mail?.from;
+    // --mail-sender-verified / mail.verified records the owner's attestation
+    // only: a sender counts as verified when the live Catalyst read-back —
+    // refreshed by a confirmed deploy and persisted under c2c-out/.c2c/ —
+    // lists it VERIFIED. A read-back that cannot run leaves the attestation
+    // unverified; a confirmed deploy is then still refused by the blocker.
+    let mailVerified = false;
+    if (mailFrom && rest.includes('--mail')) {
+      const observed = confirm
+        ? await observeMailSenders(
+            io.rest ?? ((call: RestCall) => catalystRestCall(io.env, guard.org, guard.projectId, call, { log: (line) => io.stderr(`${line}\n`) })),
+            guard.projectId,
+            process.cwd(),
+          )
+        : undefined;
+      mailVerified = mailSenderEvidenceVerified(observed ?? readMailSenderEvidence(process.cwd()), mailFrom);
+    }
     const bundle = buildDeploy(app, guard, rest.includes('--mail'), confirm, apiBase, functionEnv, {
-      from: flag(rest, '--mail-from') ?? deployConfig?.mail?.from,
-      verified: rest.includes('--mail-sender-verified') || deployConfig?.mail?.verified === true,
+      from: mailFrom,
+      verified: mailVerified,
     }, {
       ...(slateDomain ? { slateDomain } : {}),
       ...(admin ? { admin } : {}),

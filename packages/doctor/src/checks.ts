@@ -35,6 +35,7 @@ import { localRefreshAllowed } from '../../deploy/src/rest.js';
 import { importingAgeMs, importingAgeState, isStuckImporting, stuckImportGuidedStep, STUCK_IMPORT_MAX_AGE_HOURS, unknownImportAgeGuidedStep, type ListedProject } from '../../deploy/src/stuck-import.js';
 import { fallbackForTool } from '../../deploy/src/mcp-registry.js';
 import { readDeployConfig } from '../../deploy/src/dc.js';
+import { mailSenderTag, readMailSenderEvidence } from '../../deploy/src/mail.js';
 import { generate as generateDeluge } from '../../deluge/src/generate.js';
 
 export interface DoctorContext {
@@ -492,7 +493,13 @@ function checkD1(ctx: DoctorContext): { result: CheckResult; ir?: App } {
   return { result: pass('D-D1', `export: ${basename(target)} ${Math.round(bytes.length / 1024)} KB, shape ${ir.shape}, parses`), ir };
 }
 
-/** Offline sender state check, using the same c2c-deploy.json fields as deploy. */
+/**
+ * Sender state check. `mail.verified` in c2c-deploy.json is only the operator's
+ * attestation — D-M1 reports `verified` solely from the live Catalyst
+ * read-back a confirmed deploy persisted (c2c-out/.c2c/mail-sender.json,
+ * sender tags only). An attestation without that record is reported as
+ * attested, not verified.
+ */
 export function checkMailSender(app: App, workspace: string): CheckResult[] {
   const sendsMail = generateDeluge(app).files.some((file) => file.source.includes('shim.mail.send('));
   if (!sendsMail) return [];
@@ -504,12 +511,38 @@ export function checkMailSender(app: App, workspace: string): CheckResult[] {
     return [fail('D-M1', 'mail sender configuration could not be read', `fix ${path}: ${err instanceof Error ? err.message : 'invalid configuration'}`)];
   }
   if (!sender?.from) {
-    return [fail('D-M1', 'the app sends mail and no Catalyst Mail sender is set', 'set mail.from in c2c-deploy.json, verify it in Catalyst Mail, then set mail.verified to true')];
+    return [fail('D-M1', 'the app sends mail and no Catalyst Mail sender is set', 'set mail.from in c2c-deploy.json, verify it in Catalyst Mail, then run c2c deploy --confirm so the live read-back is recorded')];
   }
-  if (sender.verified !== true) {
-    return [{ ...fail('D-M1', 'the app sends mail and its sender is not marked verified', 'verify mail.from in Catalyst Mail, then set mail.verified to true in c2c-deploy.json'), screen: `mail sender ${maskEmail(sender.from)} is not marked verified` }];
+  const observed = readMailSenderEvidence(workspace)?.senders[mailSenderTag(sender.from)];
+  if (observed?.toUpperCase() === 'VERIFIED') {
+    return [{ ...pass('D-M1', 'the app sends mail and its sender is verified by the live Catalyst read-back'), screen: `mail sender ${maskEmail(sender.from)} is verified (live read-back)` }];
   }
-  return [{ ...pass('D-M1', 'the app sends mail and its sender is marked verified'), screen: `mail sender ${maskEmail(sender.from)} is marked verified` }];
+  if (observed !== undefined) {
+    return [
+      {
+        ...fail('D-M1', `the app sends mail and the live read-back lists its sender as ${observed}`, 'verify mail.from in Catalyst Mail (console → Mail → Email Configuration), then re-run c2c deploy --confirm'),
+        screen: `mail sender ${maskEmail(sender.from)} read back as ${observed}`,
+      },
+    ];
+  }
+  if (sender.verified === true) {
+    return [
+      {
+        ...warn(
+          'D-M1',
+          'the app sends mail and its sender verification is attested in c2c-deploy.json but no live read-back confirmed it',
+          'run c2c deploy --confirm; it reads the sender state back from Catalyst and records it',
+        ),
+        screen: `mail sender ${maskEmail(sender.from)} is attested, not confirmed by a live read-back`,
+      },
+    ];
+  }
+  return [
+    {
+      ...fail('D-M1', 'the app sends mail and its sender is not marked verified', 'verify mail.from in Catalyst Mail, set mail.verified to true in c2c-deploy.json, then run c2c deploy --confirm so the live read-back is recorded'),
+      screen: `mail sender ${maskEmail(sender.from)} is not marked verified`,
+    },
+  ];
 }
 
 function checkD2(ctx: DoctorContext): CheckResult {

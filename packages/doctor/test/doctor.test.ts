@@ -44,6 +44,7 @@ import {
 import { limitValue } from '../../schema/src/limits.js';
 import type { SchemaColumn, SchemaTable } from '../../schema/src/generator.js';
 import requiredTools from '../data/required-mcp-tools.json' with { type: 'json' };
+import { MAIL_SENDER_EVIDENCE, mailSenderTag, writeMailSenderEvidence } from '../../deploy/src/index.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { deriveIr, parse } from '../../core/src/index.js';
 import { ALL_REQUIRED_MCP_TOOLS, MCP_TOOLS_GUIDANCE, NEVER_CALL_MCP_TOOLS, REQUIRED_MCP_TOOLS } from '../src/required-tools.js';
@@ -239,13 +240,28 @@ application "Mailer"
 	}
 }`));
 
-test('doctor checks sender verification offline from c2c-deploy.json fixtures', () => {
+test('doctor reports the sender verified only from the recorded live read-back', () => {
   const dir = tmp('c2c-doctor-mail-');
   const path = join(dir, 'c2c-deploy.json');
   const check = () => checkMailSender(MAIL_APP, dir)[0]!;
+  const evidence = (status: string) =>
+    writeMailSenderEvidence(dir, { version: 1, at: new Date().toISOString(), senders: { [mailSenderTag('sender@example.com')]: status } });
+
+  // The attestation alone is reported as attested, never verified.
   writeFileSync(path, JSON.stringify({ mail: { from: 'sender@example.com', verified: true } }));
+  assert.equal(check().status, 'warn');
+  assert.equal(check().screen, 'mail sender s***@example.com is attested, not confirmed by a live read-back');
+
+  // The recorded read-back decides: VERIFIED passes, anything else fails.
+  evidence('VERIFIED');
   assert.equal(check().status, 'pass');
-  assert.equal(check().screen, 'mail sender s***@example.com is marked verified');
+  assert.equal(check().screen, 'mail sender s***@example.com is verified (live read-back)');
+  evidence('PENDING');
+  assert.equal(check().status, 'fail');
+  assert.equal(check().screen, 'mail sender s***@example.com read back as PENDING');
+
+  // No attestation and no read-back: still a failure.
+  rmSync(join(dir, MAIL_SENDER_EVIDENCE), { force: true });
   writeFileSync(path, JSON.stringify({ mail: { from: 'sender@example.com', verified: false } }));
   assert.equal(check().status, 'fail');
   assert.equal(check().screen, 'mail sender s***@example.com is not marked verified');

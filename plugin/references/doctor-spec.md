@@ -93,11 +93,11 @@ Status words: **PASS**, **WARN** (continues), **FAIL** (red), **SKIP** (not appl
 
 ### M. Catalyst Mail sender
 
-The console verification state cannot be read offline [UNVERIFIED]. `mail.verified` is the operator attestation used by deploy; doctor checks that this local state is set and never calls Catalyst Mail. The sender is masked in doctor output.
+Verification is observable only by a live Catalyst read-back (`GET /baas/v1/project/<id>/email`, the same list `List_All_Emails_Configuration` answers). `mail.verified` is the operator's attestation — it never counts as verified. A `c2c deploy --confirm` refreshes the read-back and records it under `c2c-out/.c2c/mail-sender.json` (sender tags only, no addresses); D-M1 consumes that record and never calls Catalyst Mail itself. The sender is masked in doctor output.
 
 | id | Check | Command | PASS | FAIL → fix |
 |---|---|---|---|---|
-| D-M1 | Sender configured and marked verified (only when the app sends mail) | Generated sendmail plus `mail.from` and `mail.verified` in `c2c-deploy.json` | `mail sender s***@example.com is marked verified` | `FAIL D-M1: sender missing or not marked verified.` → set `mail.from`, verify it in Catalyst Mail, then set `mail.verified` to `true`. |
+| D-M1 | Sender verified by the live read-back (only when the app sends mail) | Generated sendmail plus `mail.from` in `c2c-deploy.json`; the recorded read-back (`c2c-out/.c2c/mail-sender.json`) lists the sender VERIFIED | `mail sender s***@example.com is verified (live read-back)` | `FAIL D-M1: sender missing or not verified.` → set `mail.from`, verify it in Catalyst Mail, then run `c2c deploy --confirm` so the live read-back is recorded. `WARN D-M1: attested, not confirmed` — `mail.verified` is set but no read-back recorded yet → run `c2c deploy --confirm`. |
 
 ### E. Node and the plugin itself
 

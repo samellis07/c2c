@@ -9,6 +9,7 @@ import { freeIdentifiers } from '../../quality/src/scope.js';
 import { allowedGlobals } from '../../quality/src/static.js';
 import {
   MAIL_LOG_TABLE,
+  MAIL_SENDER_EVIDENCE,
   MAIL_SENDER_RULE,
   buildDeploy,
   buildOfflinePlan,
@@ -17,8 +18,12 @@ import {
   deployCli,
   mailConfig,
   mailSenderPrecheck,
+  mailSenderTag,
+  maskMailAddress,
+  readMailSenderEvidence,
   recipientsOf,
   writeDeployTree,
+  writeMailSenderEvidence,
   type Io,
 } from '../src/index.js';
 
@@ -153,7 +158,9 @@ test('precheck: an app that sends mail with no verified sender is a blocker when
   assert.match(none[0].message, /no Catalyst Mail sender/);
   const unverified = mailSenderPrecheck(app, mailConfig(true, { from: OWNER }));
   assert.equal(unverified[0].severity, 'blocker');
-  assert.match(unverified[0].message, new RegExp(`${OWNER} is not marked verified`));
+  assert.match(unverified[0].message, new RegExp(`${maskMailAddress(OWNER)} is not marked verified`));
+  // The sender address never leaks into a finding.
+  assert.doesNotMatch(unverified[0].message, /owner@example\.com/);
   assert.deepEqual(mailSenderPrecheck(app, mailConfig(true, { from: OWNER, verified: true })), []);
   // Mail off: nothing is sent, so the gap is a warning, not a blocker.
   assert.equal(mailSenderPrecheck(app, mailConfig(false))[0].severity, 'warning');
@@ -174,6 +181,111 @@ test('deploy --confirm --mail refuses an unverified sender before any catalyst c
   assert.equal(await deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--mail'], dry.io), 0);
   assert.match(dry.out(), new RegExp(`precheck: blocker ${MAIL_SENDER_RULE}`));
   rmSync(dir, { recursive: true, force: true });
+});
+
+const MAILER_DS_LIVE = MAIL_DS.replace('application "Mailer"\n{\n', 'application "Mailer"\n{\n\ttime zone = "Asia/Kolkata"\n');
+
+function liveMailSetup() {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-mail-ds-'));
+  const ws = mkdtempSync(join(tmpdir(), 'c2c-mail-ws-'));
+  const ds = join(dir, 'mailer.ds');
+  writeFileSync(ds, MAILER_DS_LIVE);
+  return {
+    dir,
+    ws,
+    ds,
+    cleanup: () => {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(ws, { recursive: true, force: true });
+    },
+  };
+}
+
+function mailRestIo(body: unknown) {
+  const cap = io();
+  const calls: string[] = [];
+  cap.io.rest = async (call) => {
+    calls.push(`${call.method} ${call.path}`);
+    if (call.method === 'GET' && call.path === '/baas/v1/project/1001/email') return { status: 200, body };
+    throw new Error('rest refused in this test');
+  };
+  return { cap, calls };
+}
+
+async function inWorkspace<T>(ws: string, run: () => Promise<T>): Promise<T> {
+  const cwd = process.cwd();
+  process.chdir(ws);
+  try {
+    return await run();
+  } finally {
+    process.chdir(cwd);
+  }
+}
+
+test('a confirmed deploy marks the sender verified only from the live read-back, and records it', async () => {
+  const { ds, ws, cleanup } = liveMailSetup();
+  try {
+    const { cap, calls } = mailRestIo({ data: [{ email_address: OWNER, status: 'PENDING' }] });
+    const code = await inWorkspace(ws, () =>
+      deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--confirm', '--function-env', 'new', '--mail', '--mail-from', OWNER, '--mail-sender-verified'], cap.io),
+    );
+    assert.equal(code, 1);
+    // The attestation flag alone does not verify: the read-back (PENDING) rules.
+    assert.match(cap.err(), new RegExp(`blocker ${MAIL_SENDER_RULE}`));
+    assert.deepEqual(calls, ['GET /baas/v1/project/1001/email']);
+    const evidence = readMailSenderEvidence(ws);
+    assert.equal(evidence?.senders[mailSenderTag(OWNER)], 'PENDING');
+    // The persisted record holds tags only — never the address.
+    assert.doesNotMatch(readFileSync(join(ws, MAIL_SENDER_EVIDENCE), 'utf8'), /@/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('a VERIFIED read-back clears the sender blocker without the attestation flag', async () => {
+  const { ds, ws, cleanup } = liveMailSetup();
+  try {
+    const { cap } = mailRestIo({ data: [{ email_address: OWNER, status: 'VERIFIED' }] });
+    const code = await inWorkspace(ws, () =>
+      deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--confirm', '--function-env', 'new', '--mail', '--mail-from', OWNER], cap.io),
+    );
+    // The mail blocker is gone; the run stops later, on the refused project read.
+    assert.equal(code, 1);
+    assert.doesNotMatch(cap.err(), new RegExp(`blocker ${MAIL_SENDER_RULE}`));
+    assert.equal(readMailSenderEvidence(ws)?.senders[mailSenderTag(OWNER)], 'VERIFIED');
+  } finally {
+    cleanup();
+  }
+});
+
+test('a dry run consumes the persisted read-back: evidence verifies, the bare attestation does not', async () => {
+  const { ds, ws, cleanup } = liveMailSetup();
+  try {
+    writeMailSenderEvidence(ws, { version: 1, projectId: '1001', at: new Date().toISOString(), senders: { [mailSenderTag(OWNER)]: 'VERIFIED' } });
+    const seen = io();
+    assert.equal(
+      await inWorkspace(ws, () => deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--mail', '--mail-from', OWNER], seen.io)),
+      0,
+    );
+    assert.doesNotMatch(seen.out(), new RegExp(`precheck: blocker ${MAIL_SENDER_RULE}`));
+    assert.match(seen.out(), new RegExp(`mail from: ${OWNER.replace(/[.@]/g, '\\$&')} \\(verified\\)`));
+
+    const bare = mkdtempSync(join(tmpdir(), 'c2c-mail-ws-'));
+    try {
+      const attested = io();
+      assert.equal(
+        await inWorkspace(bare, () =>
+          deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--mail', '--mail-from', OWNER, '--mail-sender-verified'], attested.io),
+        ),
+        0,
+      );
+      assert.match(attested.out(), new RegExp(`precheck: blocker ${MAIL_SENDER_RULE}`));
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  } finally {
+    cleanup();
+  }
 });
 
 test('a verified sender reaches the function env, the function config and the plan', () => {
@@ -305,15 +417,29 @@ test('live send: cc, bcc and reply to map to the Catalyst config', async () => {
   cleanup();
 });
 
-test('live send: an unverified sender is refused, logged, and names the precheck rule', async () => {
+test('live send: an unverified sender is refused, logged, and names the precheck rule — with the address masked', async () => {
   const { mod, calls, cleanup } = await loadModule({ ...VERIFIED, verifiedSenders: [] });
   const result = await mod.c2cGuardedMail(MESSAGE, {});
-  assert.equal(result.performed, false);
-  assert.equal(result.status, 'refused');
-  assert.equal(result.code, MAIL_SENDER_RULE);
-  assert.match(result.reason, new RegExp(`the app sends mail and sender ${OWNER} is not marked verified \\(precheck ${MAIL_SENDER_RULE}\\)`));
+  assert.deepEqual(result, {
+    performed: false,
+    status: 'refused',
+    code: MAIL_SENDER_RULE,
+    reason: `the app sends mail and sender ${maskMailAddress(OWNER)} is not marked verified (precheck ${MAIL_SENDER_RULE})`,
+    logged: true,
+  });
+  assert.doesNotMatch(JSON.stringify(result), /owner@example\.com/);
   assert.deepEqual(calls.sendMail, []);
-  assert.equal(calls.rows[0].row.status, 'refused');
+  assert.equal(calls.rows.length, 1);
+  const { sent_at, ...row } = calls.rows[0].row;
+  assert.match(String(sent_at), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  // A refused send never persists the full sender address.
+  assert.deepEqual(row, {
+    status: 'refused',
+    reason: `the app sends mail and sender ${maskMailAddress(OWNER)} is not marked verified (precheck ${MAIL_SENDER_RULE})`,
+    from_email: maskMailAddress(OWNER),
+    to_email: OWNER,
+    subject: 'c2c-mail',
+  });
   cleanup();
 });
 
