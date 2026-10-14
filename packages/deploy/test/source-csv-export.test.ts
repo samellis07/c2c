@@ -66,6 +66,45 @@ Vendor as "Vendor"
 }
 `;
 
+const MULTI_LOOKUP = `application "Widget"
+{
+form Member
+{
+must have Name
+(
+type = text
+)
+}
+form Team
+{
+must have Name
+(
+type = text
+)
+Members
+(
+type = list
+values = Member.ID
+)
+}
+list All_Members
+{
+show all rows from Member
+(
+Name
+)
+}
+list All_Teams
+{
+show all rows from Team
+(
+Name
+Members
+)
+}
+}
+`;
+
 const MERGE = `application "Widget"
 {
 form Item
@@ -942,6 +981,27 @@ test('a confirmed migrate links each child row to its own parent ROWID', async (
   assert.equal(String(stored('Order__Items', `${t1}__Items__0`)!.parent_id), String(stored('Order', t1)!.ROWID));
   assert.equal(String(stored('Order__Items', `${t2}__Items__0`)!.parent_id), String(stored('Order', t2)!.ROWID));
   assert.notEqual(String(stored('Order__Items', `${t1}__Items__0`)!.parent_id), String(stored('Order', t2)!.ROWID));
+});
+
+test('multi lookup import stores mapped ROWIDs in junction rows and preserves value order', async () => {
+  const app = appOf(MULTI_LOOKUP);
+  const dir = dirOf({
+    'All_Members.csv': 'ID,Name\n31,Ada\n32,Lin\n33,Sam\n',
+    'All_Teams.csv': 'ID,Name,Members\n9,Core,"33,31,32"\n',
+  });
+  const store = quirkRowServer();
+  const result = await migrateCsv({ app, dir, dc: 'in', catalystBase: 'https://api.catalyst.zoho.in', fetch: store.fetch, checkpoint: emptyCheckpoint(), scope: SCOPE });
+  assert.equal(result.ok, true, JSON.stringify(result.tables));
+  const loaded = readSourceCsv(dir, app);
+  const junction = loaded.tables.find((table) => table.table.includes('__Members'))!;
+  const parent = store.stored.get(`Team\0${loaded.tables.find((table) => table.table === 'Team')!.rows[0]!.id}`)!;
+  const linked = junction.rows.map((row) => store.stored.get(`${junction.table}\0${row.id}`)!);
+  const members = ['33', '31', '32'].map((id) => String(store.stored.get(`Member\0${id}`)!.ROWID));
+  assert.deepEqual(linked.map((row) => String(row.parent_id)), [String(parent.ROWID), String(parent.ROWID), String(parent.ROWID)]);
+  assert.deepEqual(linked.map((row) => String(row.row_order)), ['0', '1', '2']);
+  assert.deepEqual(linked.map((row) => String(row.Members)), members);
+  assert.ok(linked.every((row) => !['31', '32', '33'].includes(String(row.parent_id))));
+  assert.ok(linked.every((row) => !['31', '32', '33'].includes(String(row.Members))));
 });
 
 const RETURNS = `application "Widget"

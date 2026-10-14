@@ -123,6 +123,7 @@ export {
   jobPoolName,
   needsExactRead,
   queryExact,
+  readMultiLookupValues,
   rangeSlotRequest,
   type PrefetchResult,
   type SlotRowsResult,

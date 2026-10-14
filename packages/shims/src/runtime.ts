@@ -212,6 +212,8 @@ export interface RuntimeOptions {
    * ZCQL, then {@link queryExact} filters and orders on the exact varchar.
    */
   decimalColumns?: Record<string, DecimalColumns>;
+  /** Generated multi-lookup junctions, keyed by Creator form then field link name. */
+  multiLookups?: Record<string, Record<string, { table: string; parentColumn: string; valueColumn: string; orderColumn: string }>>;
   /**
    * form → Creator unique fields the store does not enforce (schema `appUnique`, over the
    * Data Store unique varchar limit). A live insert or update reads for an existing row
@@ -478,8 +480,10 @@ export interface SlotRowsResult {
  * deferred read; `range.from`/`range.to` are client-evaluated bounds. Both must
  * be integers; anything else is a refusal (`error`). The bounds are clamped to
  * `1 <= from <= to <= from + LIMITS.zcqlRowsPerQuery` — the existing ZCQL page
- * cap — and a `to` that precedes the clamped `from` is an empty range, not an
- * error. No `slot` key is an ordinary prefetch (`slot` absent).
+ * cap — and to `to <= LIMITS.zcqlMaxRows`. A `from` past `LIMITS.zcqlMaxRows`
+ * is a refusal: the read offset never exceeds the paged-read refusal bound.
+ * A `to` that precedes the clamped `from` is an empty range, not an error.
+ * No `slot` key is an ordinary prefetch (`slot` absent).
  */
 export function rangeSlotRequest(body: unknown): { slot?: string; from: number; to: number; empty: boolean; error?: string } {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { from: 0, to: 0, empty: false };
@@ -494,8 +498,11 @@ export function rangeSlotRequest(body: unknown): { slot?: string; from: number; 
   if (typeof from !== 'number' || !Number.isSafeInteger(from) || typeof to !== 'number' || !Number.isSafeInteger(to)) {
     return { from: 0, to: 0, empty: false, error: 'prefetch range: from and to must be integers' };
   }
+  if (from > LIMITS.zcqlMaxRows) {
+    return { from: 0, to: 0, empty: false, error: `prefetch range: from must not exceed ${LIMITS.zcqlMaxRows}` };
+  }
   const start = Math.max(1, from);
-  const end = Math.min(to, start + LIMITS.zcqlRowsPerQuery);
+  const end = Math.min(to, start + LIMITS.zcqlRowsPerQuery, LIMITS.zcqlMaxRows);
   return { slot: raw, from: start, to: end, empty: end < start };
 }
 
@@ -1739,18 +1746,48 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     });
     const seeded = await readSeed(seed, dryRun, query.form, scoped.criteria, query.sort, query.range, decimalsOf(query.form));
     if (seeded) {
-      return seeded.map((raw) => shim.record.bind(ctx, scopedRow(raw, fields), query.form));
+      const hydrated = await Promise.all(seeded.map((raw) => readMultiLookups(query.form, raw, fields)));
+      return hydrated.map((raw) => shim.record.bind(ctx, scopedRow(raw, fields), query.form));
     }
     if (dryRun || !options.datastore?.query) {
       refuseLive('fetch');
       return [];
     }
     const got = await readLive(query, scoped.criteria, where, query.range, query.sort);
-    return got.map((raw) => {
+    const hydrated = await Promise.all(got.map((raw) => readMultiLookups(query.form, raw, fields)));
+    return hydrated.map((raw) => {
       const row = shim.record.bind(ctx, scopedRow(raw, fields), query.form);
       fetchedRows.set(row, { form: query.form, rowid: rowIdentity(raw), principal: ctx.principal });
       return row;
     });
+  }
+
+  async function readMultiLookups(form: string, row: Record<string, unknown>, fields?: readonly string[]): Promise<Record<string, unknown>> {
+    const specs = options.multiLookups?.[form];
+    const parentId = rowIdentity(row);
+    if (!specs || parentId == null) return row;
+    const out = { ...row };
+    for (const [field, spec] of Object.entries(specs)) {
+      if (fields && !fields.includes(field)) continue;
+      let values: unknown[];
+      if (dryRun && seed && Object.hasOwn(seed, spec.table)) {
+        const junctionRows = (seed[spec.table] ?? [])
+          .filter((junctionRow) => String(junctionRow[spec.parentColumn]) === String(parentId))
+          .map((junctionRow, index) => ({ row: junctionRow, id: String(junctionRow.ROWID ?? junctionRow.rowid ?? index + 1) }))
+          .sort((a, b) => {
+            const order = Number(a.row[spec.orderColumn]) - Number(b.row[spec.orderColumn]);
+            return (Number.isNaN(order) || order === 0 ? 0 : order) || compareIds(a.id, b.id);
+          })
+          .map(({ row }) => row);
+        values = await readMultiLookupValues(async (_table, _where, limit, offset = 0) => junctionRows.slice(offset, offset + limit), spec, parentId);
+      } else if (!dryRun && options.datastore?.query) {
+        values = await readMultiLookupValues(options.datastore.query, spec, parentId);
+      } else {
+        continue;
+      }
+      out[field] = values;
+    }
+    return out;
   }
 
   function readDate(value: unknown): dates.DelugeDate | null {
@@ -3985,6 +4022,23 @@ export async function queryExact(
   }
   const out = window ? kept.slice(window.offset, window.offset + window.count) : kept;
   return out.map((row) => stripShadows(row, decimals));
+}
+
+/** Read one generated lookup junction in Creator's stored value order. */
+export async function readMultiLookupValues(
+  query: NonNullable<RuntimeOptions['datastore']>['query'],
+  junction: { table: string; parentColumn: string; valueColumn: string; orderColumn: string },
+  parentRowId: unknown,
+): Promise<string[]> {
+  if (!query) throw new Error(`multi lookup ${junction.table} needs a datastore query adapter`);
+  const id = String(parentRowId).replace(/\\/g, '\\\\').replace(/'/g, "''");
+  const values: string[] = [];
+  for (let offset = 0; offset < LIMITS.zcqlMaxRows; offset += LIMITS.zcqlRowsPerQuery) {
+    const rows = await query(junction.table, `${junction.parentColumn} = '${id}'`, LIMITS.zcqlRowsPerQuery, offset, `ORDER BY ${junction.orderColumn}, ROWID`);
+    values.push(...rows.map((row) => row[junction.valueColumn]).filter((value): value is string | number => typeof value === 'string' || typeof value === 'number').map(String));
+    if (rows.length < LIMITS.zcqlRowsPerQuery) return values;
+  }
+  throw new ZcqlRowCapError(junction.table, LIMITS.zcqlMaxRows);
 }
 
 function sortDirection(dir: string | undefined): string | undefined {

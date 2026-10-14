@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
+import { loadGeneratedModule } from '../../core/test/support/generated-module.js';
 import { deriveIr, parse, type App, type Workflow } from '../../core/src/index.js';
 import { createRuntime, type RuntimeOptions } from '../../shims/src/runtime.js';
 import { withDecimalAudit } from '../src/audit.js';
@@ -20,19 +17,6 @@ function snippet(body: string): App {
 
 function workflow(partial: Partial<Workflow> & Pick<Workflow, 'name' | 'event'>): Workflow {
   return { deluge: null, properties: [], span: Z, ...partial };
-}
-
-async function loadModule(source: string): Promise<Record<string, unknown>> {
-  const dir = mkdtempSync(join(tmpdir(), 'c2c-decimal-'));
-  writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
-  mkdirSync(join(dir, 'node_modules'), { recursive: true });
-  symlinkSync(process.cwd(), join(dir, 'node_modules/creator-to-catalyst'));
-  writeFileSync(join(dir, 'handler.mjs'), source);
-  try {
-    return (await import(pathToFileURL(join(dir, 'handler.mjs')).href)) as Record<string, unknown>;
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
 }
 
 const POS_FORMS = `\tform Add_Discount
@@ -76,11 +60,12 @@ test('generated handlers pass each form’s shadow columns, and the point-of-sal
       },
     }),
   );
-  const file = generate(ir).files.find((f) => f.path.startsWith('functions/aio/add-invoice/') && f.source.includes('Add_Discount'));
+  const generated = generate(ir);
+  const file = generated.files.find((f) => f.path.startsWith('functions/aio/add-invoice/') && f.source.includes('Add_Discount'));
   assert.ok(file);
   assert.match(stripComments(file.source), /createRuntime\(\{[^\n]*decimalColumns: \{"Add_Discount":\{"Total_price":\{"shadow":"Total_price__n","scale":2\}/);
   const decimalColumns = JSON.parse(/decimalColumns: (\{.*?\}\}\})/.exec(file.source)![1]!) as RuntimeOptions['decimalColumns'];
-  const mod = (await loadModule(file.source)) as { handle: (ctx: unknown) => Promise<unknown> };
+  const mod = (await loadGeneratedModule(generated.files, file.path)) as { handle: (ctx: unknown) => Promise<unknown> };
   const runtime = createRuntime({
     dryRun: true,
     appTimeZone: 'UTC',

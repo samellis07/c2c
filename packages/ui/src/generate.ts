@@ -40,6 +40,8 @@ export interface UiGenerateOptions {
   dc?: string;
   /** The schema plan provisioned for this deploy; generated runtime rules match its store constraints. */
   schema?: SchemaPlan;
+  /** Opt-in async on-success lane: emit the event function, dead-letter store and sweep Job (docs/event-deadletter.md). */
+  asyncOnSuccess?: boolean;
 }
 
 export function clientRuntimeSource(): string {
@@ -60,7 +62,7 @@ export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
   // so this first model pass supplies them before the Deluge pass writes
   // migration-report.json with them counted.
   const uiTodos = buildModel(app).todos;
-  const deluge = generateDeluge(app, { schema: opts.schema, uiTodos });
+  const deluge = generateDeluge(app, { schema: opts.schema, uiTodos, ...(opts.asyncOnSuccess ? { asyncOnSuccess: true } : {}) });
   const model = buildModel(app, deluge.files);
   const summary = summarize(model);
   const files: OutFile[] = [];
@@ -126,7 +128,7 @@ export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
     if (!covered.has(form.submitEndpoint)) {
       files.push({
         path: `functions/aio/${slug(form.name)}/submit.mjs`,
-        data: submitStub(app, form, form.submitEndpoint, deluge.files, opts.schema),
+        data: submitStub(app, form, form.submitEndpoint, deluge.files, opts.schema, !!opts.asyncOnSuccess),
       });
     }
     files.push({
@@ -1683,7 +1685,7 @@ function writeFieldOf(field: UiModel['forms'][number]['fields'][number]): WriteF
   return node;
 }
 
-function submitStub(app: App, form: UiModel['forms'][number], path: string, delugeFiles: GeneratedFile[], schema?: SchemaPlan): string {
+function submitStub(app: App, form: UiModel['forms'][number], path: string, delugeFiles: GeneratedFile[], schema?: SchemaPlan, deferSuccess = false): string {
   const fields = fieldNamesOf(form.fields);
   const ruleDenied = fieldRuleDenials(app, form.name);
   const zone = appTimeZone(app);
@@ -1770,6 +1772,9 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
     'Policy file: functions/access-policy.json. This module embeds it as access.',
     'When functions/c2c-deploy.json mode is "live" and a datastore is injected, accepted values are written after validate and before on-success scripts. Dry run does not write and does not run those scripts. On success sees the inserted row, including ID (the stored ROWID) and system fields. If an on-success script throws after the write, the row stays: a Deluge runtime or refused-connection error reports its text; any other failure replies 500 request failed.',
     'Creator runs On Success after the record is submitted (https://help.zoho.com/portal/en/kb/creator/developer-guide/workflows/create-and-manage-on-success-action/articles/understand-on-success-action): "The actions that you define in the On success event will be executed when a new record is successfully submitted to the database or when an existing record is updated or deleted from the database." Whether Creator rolls that row back when On Success throws is unverified; this port leaves the row.',
+    ...(deferSuccess
+      ? ['Async on-success opt-in: in live mode this endpoint validates and stores the row, then replies without running the on-success modules. The after-commit event function (functions/events/after-commit.mjs) runs them when the record trigger fires; a failure dead-letters to C2CEventDeadLetter for the sweep Job (docs/event-deadletter.md).']
+      : []),
   ])}${policyPrelude('../../access-policy.json', false, `import { ${[...new Set(['applyInitialValues', 'createRuntime', 'projectReadable', 'replyStoreError', ...fieldStoreImports(storeShape)])].sort().join(', ')} } from "creator-to-catalyst/shims";\n`)}
 export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(path)}, dryRun: true };
 export const formName = ${JSON.stringify(form.name)};
@@ -1873,7 +1878,12 @@ ${stageCheck}    // API and import inserts never saw the Slate prefill. Absent
     // fields fall back to their Creator initial values on insert only.
     if (!ctx.rowId && ctx.writeOp !== "update") applyInitialValues(ctx.record, fields);
 ${validateRun}${flowBegin}    await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
-${flowCommit}    try {
+${flowCommit}${deferSuccess
+        ? `    // Async on-success opt-in: the on-success modules are not run here. The
+    // record trigger fires the after-commit event function on the committed
+    // row, which runs them once; a failure dead-letters for the sweep Job.
+`
+        : `    try {
       for (const spec of eventSpecs(successAdd, successEdit, ctx.rowId)) {
         const mod = await import(spec);
         if (mod && typeof mod.handle === "function") await mod.handle(ctx);
@@ -1890,7 +1900,7 @@ ${flowCommit}    try {
       send(res, denied ? 403 : 500, { dryRun: false, wrote: true, error: message, values: projectReadable(access, principal, formName, ctx.record, submitted) });
       return;
     }
-    // Live replies never carry the runtime transcript: it holds record
+`}    // Live replies never carry the runtime transcript: it holds record
     // values, table names and ops.
     send(res, 200, { dryRun: false, wrote: true, values: projectReadable(access, principal, formName, ctx.record, submitted) });
   } catch (err) {

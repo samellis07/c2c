@@ -82,8 +82,10 @@ async function run(dir: string, req: unknown): Promise<{ status: number; body: R
 }
 
 test('generated handlers wire outboundHttp only when an invokeurl has no connection (others are byte-unchanged)', () => {
-  const src = files(outboundApp()).get(HANDLER)!;
-  assert.match(src, /import \{ authorizeRead, authorizeWrite, applyInitialValues, compileCriteria, createRuntime, jsonReplacer, outboundHttp, principalFromRequest, projectFields, projectReadable, replyStoreError \} from "creator-to-catalyst\/shims";/);
+  const generated = files(outboundApp());
+  const src = generated.get(HANDLER)!;
+  assert.match(src, /import \{ authorizeRead, authorizeWrite, applyInitialValues, compileCriteria, createRuntime, outboundHttp, principalFromRequest, projectFields, projectReadable, replyStoreError \} from "creator-to-catalyst\/shims";/);
+  assert.match(generated.get('functions/aio/_lib.mjs')!, /import \{ jsonReplacer \} from "creator-to-catalyst\/shims";[\s\S]*JSON\.stringify\(body, jsonReplacer\)/);
   assert.match(src, /\.\.\.\(live \? \{ http: outboundHttp\(outboundConfig\(req\)\) \} : \{\}\),/);
   assert.match(src, /parsed\.outboundHosts/);
   const withConnection = files(deriveIr(parse(connectionsApp('c2c-conn-rest-getpost')))).get(HANDLER)!;

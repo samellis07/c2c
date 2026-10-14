@@ -464,6 +464,8 @@ test('a confirmed migrate through the loaded shape reuses the guarded loader', a
   // The lookup column holds the target ROWID, not the Creator id.
   assert.equal(String(stored('Order_Form', ORDER_A)!.Vendor), String(stored('Vendor', VENDOR_A)!.ROWID));
   assert.equal(String(stored('Order_Form__Lines', LINE_A)!.parent_id), String(stored('Order_Form', ORDER_A)!.ROWID));
+  assert.equal(String(stored('Order_Form__Lines', LINE_A)!.row_order), '0');
+  assert.equal(String(stored('Order_Form__Lines', LINE_B)!.row_order), '1');
   assert.equal(String(stored('Order_Form__Tags', `${ORDER_A}__Tags__${VENDOR_B}`)!.Tags), String(stored('Vendor', VENDOR_B)!.ROWID));
 });
 

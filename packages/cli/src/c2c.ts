@@ -93,7 +93,7 @@
  *                                   counts, checksums, smoke result and readiness (% automatic plus the manual items).
  *   c2c rollback-export --ds <file|dir> --out <dir> (--rows <dir> | --project <id> --org <org> --confirm)
  *                                   Data Store rows as CSV files for Creator's report import, ids in a side file.
- *   c2c deploy <file|dir> --project <id> --org <org> [--confirm] [--out <dir>] [--mail] [--ui vanilla|react]
+ *   c2c deploy <file|dir> --project <id> --org <org> [--confirm] [--out <dir>] [--mail] [--ui vanilla|react] [--async-on-success [--triggers-wired]]
  *                                   Catalyst app dir and a full plan. Development only. CLI deploy runs only with --confirm.
  *                                   react is the default (web/ built to web/dist); --ui vanilla keeps the previous target as the fallback.
  *   c2c plan <file|dir> --out <dir> [--dc <dc>] [--mail]

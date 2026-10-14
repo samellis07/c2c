@@ -454,6 +454,30 @@ export const TASK_ADAPTERS: Readonly<Record<string, TaskAdapter>> = {
     },
     evidence: '[TESTED] (Deluge value = {code:3000, data:[...]})',
   },
+  // https://www.zoho.com/creator/help/api/v2.1/update-record-by-id.html (PATCH, {data:{...}} plus other_api_params keys)
+  'creator.updateRecord': {
+    service: 'creator',
+    params: ['owner_name', 'app_link_name', 'report_link_name', 'record_id', 'new_input_values', 'other_api_params', 'connection_link_name'],
+    connectionIndex: 6,
+    help: 'https://www.zoho.com/deluge/help/creator/update-record.html',
+    scope: () => 'ZohoCreator.report.UPDATE',
+    request(args, dc) {
+      return {
+        method: 'PATCH',
+        url: `${serviceBase('creator', dc)}/data/${seg(args[0])}/${seg(args[1])}/report/${seg(args[2])}/${seg(args[3])}`,
+        headers: { ...JSON_HEADERS },
+        // Extras first so a `data` key in other_api_params cannot replace the record.
+        body: JSON.stringify({ ...queryMap(args[5]), data: plain(args[4] ?? {}) }),
+      };
+    },
+    response(reply) {
+      // Deluge's task does not throw on a non-3000 code (errors.md#3100): the
+      // script reads the code, so return what Creator sent, as siblings do.
+      if (isMap(reply.body) && reply.body.code === 3000) return { code: 3000, data: plain(reply.body.data ?? {}) };
+      return plain(reply.body);
+    },
+    evidence: '[DOC] help-page success/failure shapes (code 3000 vs 2892/1110/2894/3100); not captured',
+  },
   // https://www.zoho.com/crm/developer/docs/api/v7/get-records.html
   'crm.getRecordById': {
     service: 'crm',

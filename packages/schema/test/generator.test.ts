@@ -158,7 +158,10 @@ test('multi lookup is a junction table', () => {
   const junction = plan.tables.find((table) => table.role === 'junction');
   assert.ok(junction);
   assert.equal(junction.columns[0].relation?.onDelete, 'ON-DELETE-CASCADE');
-  assert.equal(junction.columns[1].dataType, 'Foreign Key');
+  assert.equal(junction.columns[1].name, 'row_order');
+  assert.equal(junction.columns[1].dataType, 'Int');
+  assert.equal(junction.columns[1].matrixId, 'lookup-multi-order');
+  assert.equal(junction.columns[2].dataType, 'Foreign Key');
   assert.deepEqual(
     plan.tables.find((table) => table.form === 'Book' && table.role === 'form')!.columns.map((column) => column.matrixId),
     ['c2c-system-field', 'c2c-system-field', 'c2c-system-field', 'c2c-system-field', 'c2c-source-id'],

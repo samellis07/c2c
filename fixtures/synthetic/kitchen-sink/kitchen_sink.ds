@@ -1,0 +1,663 @@
+/*
+ * Author       : synthetic
+ * Generated on : 01-Jan-2026 09:00:00
+ * Version      : 1.0
+ */
+application "Kitchen_Sink_Studio"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Kolkata"
+	time format = "24-hr"
+
+	forms
+	{
+		form Room
+		{
+			displayname = "Room"
+			must have unique Room_Code
+			(
+				type = text
+				displayname = "Room Code"
+				maxchar = 20
+			)
+			Capacity
+			(
+				type = number
+				displayname = "Capacity"
+			)
+		}
+		form Gear
+		{
+			displayname = "Gear"
+			must have Gear_Label
+			(
+				type = text
+				displayname = "Gear Label"
+			)
+			Daily_Rate
+			(
+				type = USD
+				displayname = "Daily Rate"
+				decimalplace = 2
+			)
+		}
+		form Session_Log
+		{
+			displayname = "Session Log"
+			Entry
+			(
+				type = text
+				displayname = "Entry"
+			)
+			Logged_On
+			(
+				type = datetime
+				displayname = "Logged On"
+			)
+		}
+		form Booking
+		{
+			displayname = "Booking"
+			Intro
+			(
+				type = plaintext
+				value = "<p>Synthetic booking sheet.</p>"
+			)
+			Details
+			(
+				type = section
+				displayname = "Details"
+			)
+			must have Title
+			(
+				type = text
+				displayname = "Title"
+				maxchar = 120
+			)
+			Brief
+			(
+				type = textarea
+				displayname = "Brief"
+			)
+			Headcount
+			(
+				type = number
+				displayname = "Headcount"
+			)
+			Hours
+			(
+				type = decimal
+				displayname = "Hours"
+				decimalplace = 2
+			)
+			Discount
+			(
+				type = percent
+				displayname = "Discount"
+				decimalplace = 1
+			)
+			Deposit
+			(
+				type = INR
+				displayname = "Deposit"
+				decimalplace = 2
+			)
+			Session_Date
+			(
+				type = date
+				displayname = "Session Date"
+			)
+			Starts_At
+			(
+				type = datetime
+				displayname = "Starts At"
+			)
+			Confirmed
+			(
+				type = checkbox
+				displayname = "Confirmed"
+				initial value = false
+			)
+			Status
+			(
+				type = picklist
+				displayname = "Status"
+				values = {"Draft","Held","Closed"}
+			)
+			Tier
+			(
+				type = radiobuttons
+				displayname = "Tier"
+				values = {"Basic","Plus"}
+			)
+			Room_Ref
+			(
+				type = picklist
+				displayname = "Room"
+				values = Room.ID
+				displayformat = [Room_Code]
+			)
+			Gear_Refs
+			(
+				type = list
+				displayname = "Gear"
+				values = Gear.ID
+				displayformat = [Gear_Label]
+			)
+			Lines
+			(
+				type = grid
+				displayname = "Lines"
+				Line_Item
+				(
+					type = text
+					displayname = "Line Item"
+				)
+				Line_Qty
+				(
+					type = number
+					displayname = "Line Qty"
+				)
+			)
+		}
+		form Guest
+		{
+			displayname = "Guest"
+			must have Guest_Name
+			(
+				type = text
+				displayname = "Guest Name"
+			)
+			Contact_Email
+			(
+				type = email
+				displayname = "Contact Email"
+			)
+			Contact_Phone
+			(
+				type = phonenumber
+				displayname = "Contact Phone"
+			)
+			Tags
+			(
+				type = list
+				displayname = "Tags"
+				values = {"Audio","Video","Photo"}
+			)
+			Extras
+			(
+				type = checkboxes
+				displayname = "Extras"
+				values = {"Tea","Parking"}
+			)
+			Door_Opens
+			(
+				type = time
+				displayname = "Door Opens"
+			)
+			Access_Code
+			(
+				type = encrypted
+				displayname = "Access Code"
+			)
+			Organiser
+			(
+				type = name
+				displayname = "Organiser"
+				first_name
+				(
+					type = first_name
+					displayname = "First Name"
+				)
+				last_name
+				(
+					type = last_name
+					displayname = "Last Name"
+				)
+			)
+			Venue_Address
+			(
+				type = address
+				displayname = "Venue Address"
+				address_line_1
+				(
+					type = address_line_1
+					displayname = "Line 1"
+				)
+				district_city
+				(
+					type = district_city
+					displayname = "City"
+				)
+				postal_Code
+				(
+					type = postal_Code
+					displayname = "Postal Code"
+				)
+			)
+		}
+		form Media_Kit
+		{
+			displayname = "Media Kit"
+			must have Kit_Name
+			(
+				type = text
+				displayname = "Kit Name"
+			)
+			Booking_Ref
+			(
+				type = picklist
+				displayname = "Booking"
+				values = Booking.ID
+				displayformat = [Title]
+			)
+			Host
+			(
+				type = users
+				displayname = "Host"
+			)
+			Contract
+			(
+				type = upload file
+				displayname = "Contract"
+			)
+			Cover
+			(
+				type = image
+				displayname = "Cover"
+			)
+			Voice_Note
+			(
+				type = audio
+				displayname = "Voice Note"
+			)
+			Walkthrough
+			(
+				type = video
+				displayname = "Walkthrough"
+			)
+			Sign_Off
+			(
+				type = signature
+				displayname = "Sign Off"
+			)
+			Portfolio
+			(
+				type = url
+				displayname = "Portfolio"
+			)
+			Notes
+			(
+				type = richtext
+				displayname = "Notes"
+			)
+			Total_Hours
+			(
+				type = formula
+				displayname = "Total Hours"
+				value = Hours * 2
+			)
+			Ticket
+			(
+				type = autonumber
+				displayname = "Ticket"
+			)
+		}
+	}
+
+	reports
+	{
+		list All_Bookings
+		{
+			displayName = "All Bookings"
+			show all rows from Booking
+			(
+				Title as "Title"
+				Status as "Status"
+				Session_Date as "Session Date"
+			)
+		}
+		list Held_Bookings
+		{
+			displayName = "Held Bookings"
+			show all rows from Booking [Status == "Held" && Headcount > 2]
+			(
+				Title as "Title"
+				Headcount as "Headcount"
+			)
+			sort by
+			(
+				Session_Date descending
+			)
+		}
+		list All_Rooms
+		{
+			displayName = "All Rooms"
+			show all rows from Room
+			(
+				Room_Code as "Room Code"
+				Capacity as "Capacity"
+			)
+		}
+		list All_Gear
+		{
+			displayName = "All Gear"
+			show all rows from Gear
+			(
+				Gear_Label as "Gear Label"
+				Daily_Rate as "Daily Rate"
+			)
+		}
+		list All_Media_Kits
+		{
+			displayName = "All Media Kits"
+			show all rows from Media_Kit
+			(
+				Kit_Name as "Kit Name"
+				Booking_Ref as "Booking"
+			)
+		}
+		list All_Guests
+		{
+			displayName = "All Guests"
+			show all rows from Guest
+			(
+				Guest_Name as "Guest Name"
+				Contact_Email as "Contact Email"
+			)
+		}
+		list All_Logs
+		{
+			displayName = "All Logs"
+			show all rows from Session_Log
+			(
+				Entry as "Entry"
+				Logged_On as "Logged On"
+			)
+		}
+	}
+
+	pages
+	{
+		page Front_Desk
+		{
+			displayname = "Front Desk"
+			Content="<zml>\n\t<layout width=\"100%\">\n\t\t<row>\n\t\t\t<column width=\"100%\">\n\t\t\t\t<panel elementName='Held_Panel'>\n\t\t\t\t\t<pr width='fill' height='fill'>\n\t\t\t\t\t\t<pc>\n\t\t\t\t\t\t\t<report linkName='Held_Bookings'></report>\n\t\t\t\t\t\t</pc>\n\t\t\t\t\t</pr>\n\t\t\t\t</panel>\n\t\t\t</column>\n\t\t</row>\n\t</layout>\n</zml>"
+		}
+	}
+
+	workflow
+	{
+		form
+		{
+			Booking_Open as "Booking open"
+			{
+				type = form
+				form = Booking
+				record event = on add
+				on load
+				{
+					actions
+					{
+						custom deluge script
+						(
+							input.Status = "Draft";
+						)
+					}
+				}
+			}
+			Booking_Status as "Booking status"
+			{
+				type = form
+				form = Booking
+				record event = on add
+				on user input of Status
+				{
+					actions
+					{
+						custom deluge script
+						(
+							if(input.Status == "Held")
+							{
+								input.Confirmed = true;
+							}
+						)
+					}
+				}
+			}
+			Booking_Submit as "Booking submit"
+			{
+				type = form
+				form = Booking
+				on add
+				{
+					actions
+					{
+					on validate
+					(
+						if(input.Headcount < 0)
+						{
+							alert "Headcount cannot be negative";
+							cancel submit;
+						}
+					)
+					on success
+					(
+						insert into Session_Log
+						[
+							Added_User = zoho.loginuser
+							Entry = "Booking added: " + input.Title
+							Logged_On = zoho.currenttime
+						];
+					)
+					}
+				}
+			}
+			Booking_Edit as "Booking edit"
+			{
+				type = form
+				form = Booking
+				on edit
+				{
+					actions
+					{
+						input.Brief = "Edited";
+					}
+				}
+			}
+			Booking_Remove as "Booking remove"
+			{
+				type = form
+				form = Booking
+				on delete
+				{
+					actions
+					{
+						insert into Session_Log
+						[
+							Added_User = zoho.loginuser
+							Entry = "Booking removed"
+							Logged_On = zoho.currenttime
+						];
+					}
+				}
+			}
+			Booking_Check as "Booking check"
+			{
+				type = form
+				form = Booking
+				on add
+				{
+					actions
+					{
+					on click
+					(
+						input.Confirmed = true;
+					)
+					}
+				}
+			}
+			Booking_Lines_Add as "Booking lines add"
+			{
+				type = form
+				form = Booking
+				record event = on add
+				on add row of Lines
+				{
+					actions
+					{
+						custom deluge script
+						(
+							row.Line_Qty = 1;
+						)
+					}
+				}
+			}
+			Booking_Lines_Remove as "Booking lines remove"
+			{
+				type = form
+				form = Booking
+				record event = on add
+				on delete row of Lines
+				{
+					actions
+					{
+						custom deluge script
+						(
+							input.Headcount = 0;
+						)
+					}
+				}
+			}
+			Booking_Rules as "Booking rules"
+			{
+				type = form
+				form = Booking
+				field rules
+				{
+					actions (Status == "Closed")
+					{
+						hide Tier;
+						disable Deposit;
+					}
+				}
+			}
+		}
+		schedule
+		{
+			Daily_Sweep as "Daily sweep"
+			{
+				type = schedule
+				start = "01-Jan-2026 06:00:00"
+				frequency = daily
+				time zone = "Asia/Kolkata"
+				on start
+				{
+					actions
+					{
+					on load
+					(
+						insert into Session_Log
+						[
+							Added_User = zoho.adminuser
+							Entry = "Daily sweep"
+							Logged_On = zoho.currenttime
+						];
+					)
+					}
+				}
+			}
+		}
+	}
+
+	share_settings
+	{
+		"Administrator"
+		{
+			name = "Administrator"
+			type = Users_Permissions
+			permissions = {Chat:true, Predefined:true, ApiAccess:true, PIIAccess:true, ePHIAccess:true}
+			description = "Every permission."
+		}
+		"Desk_Staff"
+		{
+			name = "Desk_Staff"
+			type = Users_Permissions
+			permissions = {Chat:false, ApiAccess:false}
+			ModulePermissions
+			{
+				Booking
+				{
+					enabled = true
+					ReportPermissions
+					{
+						All_Bookings = {"View","Edit"}
+						Held_Bookings = {"View"}
+					}
+				}
+			}
+		}
+		roles
+		{
+			"Studio_Lead"
+			{
+				description = "Sees every booking."
+			}
+			"Studio_Crew"
+			{
+				description = "Sees own bookings."
+				reports to = "Studio_Lead"
+			}
+		}
+	}
+
+	web
+	{
+		menu
+		{
+			section Studio
+			{
+				displayname = "Studio"
+				form Booking
+				{
+				}
+				list All_Bookings
+				{
+				}
+				list Held_Bookings
+				{
+				}
+				page Front_Desk
+				{
+				}
+				form Room
+				{
+				}
+				list All_Rooms
+				{
+				}
+				form Gear
+				{
+				}
+				list All_Gear
+				{
+				}
+				form Guest
+				{
+				}
+				list All_Guests
+				{
+				}
+				form Media_Kit
+				{
+				}
+				list All_Media_Kits
+				{
+				}
+				list All_Logs
+				{
+				}
+			}
+		}
+	}
+}

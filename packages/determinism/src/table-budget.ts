@@ -29,6 +29,7 @@ import { listReportApps } from '../../cli/src/migration-report.js';
 import type { GuardOk } from '../../deploy/src/guards.js';
 import { MAIL_LOG_TABLE } from '../../deploy/src/mail.js';
 import { deployFiles, deployTableSteps } from '../../deploy/src/plan.js';
+import { AsyncOnSuccessRefusedError } from '../../deluge/src/events.js';
 import { resolveStatusDir } from './status.js';
 
 export interface AppTableBudget {
@@ -42,6 +43,8 @@ export interface AppTableBudget {
   mailLogWithMail: number;
   /** C2CJobCheckpoint for an app with a form schedule. */
   jobCheckpoint: number;
+  /** C2CEventDeadLetter and C2CEventProcessed under --async-on-success. */
+  asyncEventTables: number;
 }
 
 // Placeholder scope: the counts depend only on the app.
@@ -58,6 +61,14 @@ const uniqueTables = (steps: readonly { table: string; nosql: boolean }[]): Set<
 
 export function appTableBudget(app: App): AppTableBudget {
   const { schema, sendsMail } = deployFiles(app, GUARD, false);
+  let asyncEventTables = 0;
+  try {
+    const asyncBundle = deployFiles(app, GUARD, false, { asyncOnSuccess: true });
+    const asyncTables = uniqueTables(deployTableSteps(asyncBundle.schema, asyncBundle.sendsMail, false, asyncBundle.usesEvents));
+    asyncEventTables = [...asyncTables].filter((name) => name === 'C2CEventDeadLetter' || name === 'C2CEventProcessed').length;
+  } catch (error) {
+    if (!(error instanceof AsyncOnSuccessRefusedError)) throw error;
+  }
   // The generated system tables, by canonical name — allocated names can carry a
   // suffix when a form takes the base name first.
   const system = new Map(schema.tables.filter((table) => table.role === 'system' && !table.nosql).map((table) => [table.name, table.form]));
@@ -70,6 +81,7 @@ export function appTableBudget(app: App): AppTableBudget {
     mailLogDefault: off.has(MAIL_LOG_TABLE) ? 1 : 0,
     mailLogWithMail: on.has(MAIL_LOG_TABLE) ? 1 : 0,
     jobCheckpoint: created('C2CJobCheckpoint'),
+    asyncEventTables,
   };
 }
 
@@ -81,12 +93,13 @@ export function computeTableBudget(dir: string): AppTableBudget[] {
 }
 
 /** Support tables a deploy creates. */
-const support = (row: AppTableBudget, mail: boolean): number => row.flowHistory + row.jobCheckpoint + (mail ? row.mailLogWithMail : row.mailLogDefault);
+const support = (row: AppTableBudget, mail: boolean, asyncOnSuccess = false): number => row.flowHistory + row.jobCheckpoint + (mail ? row.mailLogWithMail : row.mailLogDefault) + (asyncOnSuccess ? row.asyncEventTables : 0);
 const sum = (rows: readonly AppTableBudget[], pick: (row: AppTableBudget) => number): number => rows.reduce((n, row) => n + pick(row), 0);
 
 export function renderTableBudgetDoc(rows: readonly AppTableBudget[]): string {
   const totalBefore = sum(rows, (row) => row.appTables + support(row, true));
   const totalAfter = sum(rows, (row) => row.appTables + support(row, false));
+  const totalAsync = sum(rows, (row) => row.appTables + support(row, false, true));
   return [
     '# Table budget',
     '',
@@ -105,6 +118,8 @@ export function renderTableBudgetDoc(rows: readonly AppTableBudget[]): string {
     '| `C2C_Flow_History` | the app has an approval or a blueprint | `c2c plan` (import) and `c2c deploy` |',
     '| `C2CJobCheckpoint` | the app has a form schedule (the sweeper\'s checkpoints) | `c2c plan` (import) and `c2c deploy` |',
     '| `c2c_mail_log` | the app\'s functions send mail **and** the deploy ran with `--mail` | `c2c deploy --mail` |',
+    '| `C2CEventDeadLetter` | the deploy ran with `--async-on-success` (the async on-success event lane) | `c2c deploy --async-on-success` |',
+    '| `C2CEventProcessed` | the deploy ran with `--async-on-success` (the per-module completion ledger that fences replays) | `c2c deploy --async-on-success` |',
     '',
     'An app without the feature gets no table, and its functions never reference it: a',
     'deploy of an app that sends no mail ships no mail module, and a deploy without `--mail`',
@@ -114,16 +129,17 @@ export function renderTableBudgetDoc(rows: readonly AppTableBudget[]): string {
     '`c2c_mail_log`, with or without `--mail`: the "with `--mail`" columns below. After, a',
     'default deploy creates it only with `--mail`: the "default" columns.',
     '',
-    '| | default deploy (after) | with `--mail` (before) |',
-    '|---|---:|---:|',
-    `| corpus apps | ${rows.length} | ${rows.length} |`,
-    `| app tables | ${sum(rows, (row) => row.appTables)} | ${sum(rows, (row) => row.appTables)} |`,
-    `| \`C2C_Flow_History\` | ${sum(rows, (row) => row.flowHistory)} | ${sum(rows, (row) => row.flowHistory)} |`,
-    `| \`C2CJobCheckpoint\` | ${sum(rows, (row) => row.jobCheckpoint)} | ${sum(rows, (row) => row.jobCheckpoint)} |`,
-    `| \`c2c_mail_log\` | ${sum(rows, (row) => row.mailLogDefault)} | ${sum(rows, (row) => row.mailLogWithMail)} |`,
-    `| support tables | ${sum(rows, (row) => support(row, false))} | ${sum(rows, (row) => support(row, true))} |`,
-    `| **all tables** | **${totalAfter}** | **${totalBefore}** |`,
-    `| largest app | ${Math.max(0, ...rows.map((row) => row.appTables + support(row, false)))} | ${Math.max(0, ...rows.map((row) => row.appTables + support(row, true)))} |`,
+    '| | default deploy (after) | with `--mail` (before) | default + `--async-on-success` |',
+    '|---|---:|---:|---:|',
+    `| corpus apps | ${rows.length} | ${rows.length} | ${rows.length} |`,
+    `| app tables | ${sum(rows, (row) => row.appTables)} | ${sum(rows, (row) => row.appTables)} | ${sum(rows, (row) => row.appTables)} |`,
+    `| \`C2C_Flow_History\` | ${sum(rows, (row) => row.flowHistory)} | ${sum(rows, (row) => row.flowHistory)} | ${sum(rows, (row) => row.flowHistory)} |`,
+    `| \`C2CJobCheckpoint\` | ${sum(rows, (row) => row.jobCheckpoint)} | ${sum(rows, (row) => row.jobCheckpoint)} | ${sum(rows, (row) => row.jobCheckpoint)} |`,
+    `| \`c2c_mail_log\` | ${sum(rows, (row) => row.mailLogDefault)} | ${sum(rows, (row) => row.mailLogWithMail)} | ${sum(rows, (row) => row.mailLogDefault)} |`,
+    `| async on-success tables | 0 | 0 | ${sum(rows, (row) => row.asyncEventTables)} |`,
+    `| support tables | ${sum(rows, (row) => support(row, false))} | ${sum(rows, (row) => support(row, true))} | ${sum(rows, (row) => support(row, false, true))} |`,
+    `| **all tables** | **${totalAfter}** | **${totalBefore}** | **${totalAsync}** |`,
+    `| largest app | ${Math.max(0, ...rows.map((row) => row.appTables + support(row, false)))} | ${Math.max(0, ...rows.map((row) => row.appTables + support(row, true)))} | ${Math.max(0, ...rows.map((row) => row.appTables + support(row, false, true)))} |`,
     '',
     `Apps whose sweeper checkpoints in \`C2CJobCheckpoint\`: ${sum(rows, (row) => row.jobCheckpoint)}.`,
     '',
@@ -133,11 +149,11 @@ export function renderTableBudgetDoc(rows: readonly AppTableBudget[]): string {
     'c2c tables. "checkpoint" marks the apps whose deploy creates `C2CJobCheckpoint`; it is',
     'counted in c2c/total already.',
     '',
-    '| app | app tables | c2c before | total before | c2c after | total after | checkpoint |',
-    '|---:|---:|---:|---:|---:|---:|---:|',
+    '| app | app tables | c2c before | total before | c2c after | total after | async tables | total with async | checkpoint |',
+    '|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
     ...rows.map(
       (row, i) =>
-        `| ${i + 1} | ${row.appTables} | ${support(row, true)} | ${row.appTables + support(row, true)} | ${support(row, false)} | ${row.appTables + support(row, false)} | ${row.jobCheckpoint} |`,
+        `| ${i + 1} | ${row.appTables} | ${support(row, true)} | ${row.appTables + support(row, true)} | ${support(row, false)} | ${row.appTables + support(row, false)} | ${row.asyncEventTables} | ${row.appTables + support(row, false, true)} | ${row.jobCheckpoint} |`,
     ),
     '',
   ].join('\n');

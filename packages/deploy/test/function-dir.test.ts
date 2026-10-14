@@ -606,6 +606,97 @@ test('the Advanced I/O entry serves the generated handlers: 401 without a user, 
   }
 });
 
+test('loading the entry imports no handler module: cold start is the router only', async () => {
+  // Entry dispatch is ~5 ms because index.js only reads its JSON configs at
+  // load; every aio/custom/reports handler arrives later through a dynamic
+  // import on first use. A static require here would reintroduce the up to
+  // ~274 ms import-everything cost measured on hotel-management.
+  const out = mkdtempSync(join(tmpdir(), 'c2c-fn-cold-'));
+  const counterKey = '__c2cHandlerEvaluations';
+  const globalAny = globalThis as typeof globalThis & Record<string, unknown>;
+  const previousCount = globalAny[counterKey];
+  try {
+    const app = await sampleApp();
+    writeDeployTree(out, deployFiles(app, guardFor(app), false, { mode: 'live' }).files);
+    const dir = join(out, 'functions/c2c_api');
+    const routes = JSON.parse(readFileSync(join(dir, 'routes.json'), 'utf8')) as Record<string, string>;
+    // Give every routed handler the same top-level sentinel. Unlike observing
+    // Module._load, this sees both CommonJS require and ESM dynamic import.
+    const specs = new Set(Object.values(routes));
+    for (const spec of specs) {
+      const handlerPath = join(dir, spec);
+      const source = readFileSync(handlerPath, 'utf8');
+      writeFileSync(handlerPath, `globalThis.${counterKey} = (globalThis.${counterKey} ?? 0) + 1;\n${source}`);
+    }
+    delete globalAny[counterKey];
+    const req = createRequire(import.meta.url);
+    req(join(dir, 'index.js'));
+    // Dynamic imports are asynchronous; let load-time import().catch(...) work
+    // finish so eager ESM loads are observable too.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(globalAny[counterKey] ?? 0, 0, 'loading index.js evaluated a routed handler module');
+  } finally {
+    if (previousCount === undefined) delete globalAny[counterKey];
+    else globalAny[counterKey] = previousCount;
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('a route resolves to its handler on first use and reuses the cached module', async () => {
+  // The entry's dynamic import is cached by the module loader, so the same
+  // module instance serves every request for the route. The counter below
+  // proves it: a fresh evaluation per request would answer 1 every time.
+  const out = mkdtempSync(join(tmpdir(), 'c2c-fn-cache-'));
+  const fake = join(root, 'tools/catalyst-harness/fake-zcatalyst-sdk-node.cjs');
+  const moduleAny = Module as unknown as { _resolveFilename: (request: string, ...rest: unknown[]) => string };
+  const original = moduleAny._resolveFilename;
+  moduleAny._resolveFilename = function resolveFake(this: unknown, request: string, ...rest: unknown[]) {
+    if (request === 'zcatalyst-sdk-node') return fake;
+    return original.call(this, request, ...rest);
+  };
+  try {
+    const app = await sampleApp();
+    writeDeployTree(out, deployFiles(app, guardFor(app), false, { mode: 'live' }).files);
+    const dir = join(out, 'functions/c2c_api');
+    writeFileSync(
+      join(dir, 'counted.mjs'),
+      'let calls = 0;\nexport default async function counted(call, res) {\n  calls += 1;\n  res.writeHead(200, { \'content-type\': \'application/json\' });\n  res.end(JSON.stringify({ calls }));\n}\n',
+    );
+    const routes = JSON.parse(readFileSync(join(dir, 'routes.json'), 'utf8')) as Record<string, string>;
+    routes['POST /counted'] = './counted.mjs';
+    writeFileSync(join(dir, 'routes.json'), JSON.stringify(routes));
+    const req = createRequire(import.meta.url);
+    const sdk = req(fake) as { setSession(token: string, user: unknown): void };
+    sdk.setSession('cache-t1', { user_id: '1', email_id: 'operator@example.test', role_details: { role_name: 'App Administrator' } });
+    const entry = req(join(dir, 'index.js')) as (req: IncomingMessage, res: ServerResponse) => Promise<void>;
+    const server = createServer((rq, rs) => void entry(rq, rs));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    try {
+      const post = async (path: string) => {
+        const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', cookie: 'c2c-harness-session=cache-t1' },
+          body: '{}',
+          signal: AbortSignal.timeout(10_000),
+        });
+        return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+      };
+      const first = await post('/server/c2c_api/counted');
+      assert.equal(first.status, 200);
+      assert.equal(first.body.calls, 1);
+      const second = await post('/server/c2c_api/counted');
+      assert.equal(second.status, 200);
+      assert.equal(second.body.calls, 2, 'the second request reused the cached handler module');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  } finally {
+    moduleAny._resolveFilename = original;
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
 test('a handler that throws after headers are sent still ends the response and logs', async () => {
   // send() used to return silently when res.headersSent, leaving the request
   // open until the gateway timed out. It must end the response and log. The

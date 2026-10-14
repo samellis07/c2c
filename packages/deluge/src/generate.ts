@@ -28,7 +28,8 @@ import { blueprintFieldSpec, isConsumedPhaseProperty, isOwnerBlockName, isOwnerK
 import { analyzeConnections, connectionsChecklist, declaredConnections } from './connections.js';
 import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, writeLiveSource } from './field-store.js';
 import { applyFillLock, reportLock, type FillLock, type StaleFill } from './fill-todos.js';
-import { JOB_LIVE_IMPORTS, jobLiveHelpers, planSchedules, schedulingConfig, sweeperModule, SWEEPER_MODULE, type SchedulePlan } from './schedules.js';
+import { afterCommitModule, ASYNC_ON_SUCCESS_WARNING, assertAsyncSuccessDeferrable, deadLetterModule, EVENT_FUNCTION_MODULE, eventSweeperModule, successSpecs, type AsyncCandidate } from './events.js';
+import { EVENT_SWEEPER_MODULE, JOB_LIVE_IMPORTS, jobLiveHelpers, planSchedules, schedulingConfig, sweeperModule, SWEEPER_MODULE, type SchedulePlan } from './schedules.js';
 import { emittedReadOnly, emittedThisappCalls, jsIdent, reportCriteria, translate, type AlertEventClass, type TodoItem, type TranslateOptions, type TranslateStats } from './translate.js';
 import { normType } from './types.js';
 
@@ -98,6 +99,14 @@ export interface GenerateOptions {
    * options). Each stub is one residual hole in migration-report.json.
    */
   uiTodos?: readonly UiStubTodo[];
+  /**
+   * Opt-in async on-success lane: emit the after-commit event-function module,
+   * the dead-letter store and its sweep Job, and defer the live post-write
+   * script run to the record trigger (docs/event-deadletter.md). Default off —
+   * without it no `functions/events/` file exists and the output is
+   * byte-identical.
+   */
+  asyncOnSuccess?: boolean;
 }
 
 /** One generated UI stub, as the UI builder reports it. */
@@ -184,6 +193,10 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
   const warnings: GenerateWarning[] = [];
   const clientCalls = clientCallFunctions(app);
   const calledFunctions = new Set<string>();
+  const emittedHandlers: { path: string; kind: string; candidate: AsyncCandidate }[] = [];
+  const recordHandler = (entry: { path: string; kind: string; candidate: AsyncCandidate }): void => {
+    emittedHandlers.push(entry);
+  };
   for (const w of app.workflows) {
     if (workflowKind(w) === 'payment') {
       put(`not-supported/payments-${slug(w.name || w.form || 'workflow')}.mjs`, paymentStub(w));
@@ -191,7 +204,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
     }
     if (workflowKind(w) === 'blueprint') {
       emitBlueprint(app, w, specOf.get(w), put, stats, todos, alertDiagnostics, options?.schema);
-      if (w.deluge || w.fieldRules?.length) emitFormHandler(app, w, put, stats, todos, alertDiagnostics, clientCalls.names, calledFunctions, options?.schema);
+      if (w.deluge || w.fieldRules?.length) emitFormHandler(app, w, put, stats, todos, alertDiagnostics, clientCalls.names, calledFunctions, options?.schema, !!options?.asyncOnSuccess, recordHandler);
     } else if (workflowKind(w) === 'approval') {
       const key = w.name || `approval:${w.form ?? ''}`;
       const group = approvalGroups.get(key)!;
@@ -200,7 +213,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
     else {
       const filesBefore = files.length;
       const todosBefore = todos.length;
-      emitFormHandler(app, w, put, stats, todos, alertDiagnostics, clientCalls.names, calledFunctions, options?.schema);
+      emitFormHandler(app, w, put, stats, todos, alertDiagnostics, clientCalls.names, calledFunctions, options?.schema, !!options?.asyncOnSuccess, recordHandler);
       // A form workflow with no script and no field rules writes nothing. Name it in the
       // migration report so the declaration is not absent from both the tree and the report.
       if (files.length === filesBefore && todos.length === todosBefore) {
@@ -212,7 +225,24 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
       }
     }
   }
-  emitScheduling(app, schedulePlans, put, options?.schema);
+  // Every Advanced I/O form handler imports the shared request helpers from
+  // one app-local module. Emit it only when this app has at least one AIO file.
+  if (files.some((file) => file.path.startsWith('functions/aio/'))) {
+    put('functions/aio/_lib.mjs', aioLibraryModule());
+  }
+  // Response-sensitive on-success work never defers: it stays synchronous by
+  // refusing the flag with a named error, before the lane is emitted.
+  if (options?.asyncOnSuccess) {
+    assertAsyncSuccessDeferrable(
+      emittedHandlers.filter((entry) => entry.kind === 'success').map((entry) => entry.candidate),
+    );
+  }
+  // The async on-success lane exists only when an add/edit on-success module
+  // does; the event function re-runs exactly those sibling modules. Deletes
+  // stay synchronous in the delete endpoint, so delete-only specs never open
+  // the lane.
+  const asyncSuccess = !!options?.asyncOnSuccess && successSpecs(files).some((spec) => spec.add.length + spec.edit.length > 0);
+  emitScheduling(app, schedulePlans, put, options?.schema, asyncSuccess);
   const publishers = apiPublishers(app);
   const admins = administratorProfiles(app);
   for (const fn of app.functions) emitFunction(app, fn, put, stats, todos, alertDiagnostics, thisappEntries, publishers.get(fn.name), admins, warnings, clientCalls.names, calledFunctions, options?.schema);
@@ -250,6 +280,15 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
       `functions/custom/${name}-call.mjs`,
       functionCallModule({ app, name: fn.name, signature: fn.signature, params: fnParams(fn.signature), reads: readForms, schema: options?.schema }),
     );
+  }
+  if (asyncSuccess) {
+    put('functions/c2c-deadletter.mjs', deadLetterModule());
+    put(
+      `functions/${EVENT_FUNCTION_MODULE}`,
+      afterCommitModule({ app, banner, specs: successSpecs(files), schema: options?.schema ?? schemaOf(app), runtimeOptions: schemaRuntimeOptions(app, options?.schema) }),
+    );
+    put(`functions/job/${EVENT_SWEEPER_MODULE}.mjs`, eventSweeperModule({ app, banner }));
+    warnings.push({ ...ASYNC_ON_SUCCESS_WARNING });
   }
   // Translation blocks are not migrated: each one is an explicit manual step.
   for (const t of app.translations) warnings.push(translationWarning(t));
@@ -375,6 +414,8 @@ function emitFormHandler(
   clientCallFunctions: ReadonlySet<string>,
   calledFunctions: Set<string>,
   schema?: SchemaPlan,
+  asyncOnSuccess = false,
+  recordHandler?: (entry: { path: string; kind: string; candidate: AsyncCandidate }) => void,
 ): void {
   const subform = subformEventField(w.event);
   const translated = w.deluge ? translateInApp(app, w.deluge.text, { ...workflowScriptOptions(app, w), clientCallFunctions: [...clientCallFunctions] }) : emptyTranslate();
@@ -388,6 +429,16 @@ function emitFormHandler(
   const base = `${slug(form)}/${slug(w.event || w.name || 'handler')}`;
   const systemWrite = systemWriteKind(w);
   if (guarded.server.trim()) {
+    recordHandler?.({
+      path: `functions/aio/${base}.mjs`,
+      kind,
+      candidate: {
+        name: w.name || `${form} ${w.event || 'handler'}`,
+        server: guarded.server,
+        client: guarded.client,
+        deluge: w.deluge?.text ?? '',
+      },
+    });
     put(
       `functions/aio/${base}.mjs`,
       aioModule({
@@ -403,6 +454,7 @@ function emitFormHandler(
         validateSpecs: systemWrite ? validateSiblingSpecs(app, form) : undefined,
         body: [systemStampSource(systemWrite), subformRowSource(subform, guarded.server), guarded.server].filter((part) => part.trim()).join('\n'),
         schema,
+        deferSuccess: asyncOnSuccess && kind === 'success',
       }),
     );
   }
@@ -467,8 +519,8 @@ function emitSchedule(
 }
 
 /** One sweeper Job when any form schedule is swept, and job-scheduling.json when the app has schedules. */
-function emitScheduling(app: App, plans: Map<Workflow, SchedulePlan>, put: (path: string, source: string) => void, schema?: SchemaPlan): void {
-  if (!plans.size) return;
+function emitScheduling(app: App, plans: Map<Workflow, SchedulePlan>, put: (path: string, source: string) => void, schema?: SchemaPlan, eventSweep = false): void {
+  if (!plans.size && !eventSweep) return;
   const entries: { module: string; spec: NonNullable<Extract<SchedulePlan, { kind: 'form' }>['sweep']> }[] = [];
   const ordered = app.workflows.filter(isScheduleBranch).map((w) => plans.get(w)!);
   for (const plan of ordered) if (plan.kind === 'form' && plan.sweep) entries.push({ module: plan.module, spec: plan.sweep });
@@ -478,7 +530,7 @@ function emitScheduling(app: App, plans: Map<Workflow, SchedulePlan>, put: (path
       sweeperModule({ app, banner, runtimeOptions: `${timeZoneFields(app) || ', settingsTimeZone: spec.timeZone'}${schemaRuntimeOptions(app, schema)}`, entries }),
     );
   }
-  put('job-scheduling.json', schedulingConfig(app, ordered));
+  put('job-scheduling.json', schedulingConfig(app, ordered, eventSweep));
 }
 
 /** The same branch order as generate(): blueprints and approvals win over the schedule container. */
@@ -1165,6 +1217,18 @@ function resolveApiMethod(publishers: readonly ApiPublish[]): { method: string }
   return { method: declared[0] ?? 'POST' };
 }
 
+/**
+ * The translated body can change state: a Data Store write, mail, an outbound
+ * call (invokeurl may POST, an integration task writes), an in-app function
+ * call (it may write), or an untranslated hole (unknown, so not safe).
+ */
+const STATE_CHANGING_SHIMS =
+  /\bshim\.(?:datastore\.(?:insert|insertRow|update|delete|flush|setField|writeRow)|mail\.send|http\.invokeurl|zoho\.task|thisapp\.call|todo)\(/;
+
+function changesState(body: string): boolean {
+  return STATE_CHANGING_SHIMS.test(body);
+}
+
 /** Profiles Creator would call Administrator: the administrator preset with no module list. */
 export function administratorProfiles(app: App): string[] {
   const seen = new Set<string>();
@@ -1257,7 +1321,19 @@ function emitFunction(
             note: `no Administrator-preset profile is declared in share_settings; the generated route denies every caller`,
           });
         }
-        httpApi = { publishers: api, admins, method: resolved.method };
+        let method = resolved.method;
+        if (method === 'GET' && changesState(server)) {
+          // A GET is a safe method: browsers send it cross-site with cookies
+          // and skip the CORS preflight, so a state change behind it is a CSRF
+          // hole. The route is written as POST and the report names the change.
+          method = 'POST';
+          warnings.push({
+            construct: 'custom-function-api-method',
+            name: fn.name,
+            note: `api ${api.map((p) => p.api).join(', ')} method GET is routed as POST: the function writes data, sends mail, or calls out, and a state change is never a GET`,
+          });
+        }
+        httpApi = { publishers: api, admins, method };
       }
     }
     const path = put(
@@ -2541,7 +2617,21 @@ export function writeRulesOption(app: App, schema?: SchemaPlan): string {
 
 /** Schema-derived createRuntime fields: decimals, app-unique columns, write rules, and split layouts. */
 function schemaRuntimeOptions(app: App, schema?: SchemaPlan): string {
-  return `${decimalColumnsOption(app)}${appUniqueOption(app, schema)}${writeRulesOption(app, schema)}${splitsOption(app, schema)}`;
+  return `${decimalColumnsOption(app)}${multiLookupsOption(app, schema)}${appUniqueOption(app, schema)}${writeRulesOption(app, schema)}${splitsOption(app, schema)}`;
+}
+
+function multiLookupsOption(app: App, schema?: SchemaPlan): string {
+  const map: Record<string, Record<string, { table: string; parentColumn: string; valueColumn: string; orderColumn: string }>> = {};
+  for (const table of (schema ?? schemaOf(app)).tables) {
+    if (table.role !== 'junction') continue;
+    const parent = table.columns.find((column) => column.name === 'parent_id');
+    const order = table.columns.find((column) => column.name === 'row_order');
+    const value = table.columns.find((column) => column.relation && column.name !== parent?.name);
+    if (!parent || !order || !value) continue;
+    const field = value.field ?? value.name;
+    (map[table.form] ??= {})[field] = { table: table.name, parentColumn: parent.name, valueColumn: value.name, orderColumn: order.name };
+  }
+  return Object.keys(map).length ? `, multiLookups: ${JSON.stringify(map)}` : '';
 }
 
 function timeZoneFields(app: App): string {
@@ -3492,6 +3582,8 @@ function aioModule(opts: {
   body: string;
   /** Sourced schema plan; the embedded write rules match the provisioned store. */
   schema?: SchemaPlan;
+  /** Async on-success lane: the live endpoint stores the row and replies; the record trigger runs this script after commit (docs/event-deadletter.md). */
+  deferSuccess?: boolean;
 }): string {
   const signals = signalsFor(opts.recordEvent);
   const schema = formWriteSchema(opts.app, opts.form);
@@ -3523,6 +3615,11 @@ function aioModule(opts: {
     lines.push(
       'Creator runs On Success after the record is submitted (https://help.zoho.com/portal/en/kb/creator/developer-guide/workflows/create-and-manage-on-success-action/articles/understand-on-success-action): "The actions that you define in the On success event will be executed when a new record is successfully submitted to the database or when an existing record is updated or deleted from the database." Whether Creator rolls that row back when On Success throws is unverified; this port leaves the row.',
     );
+    if (opts.deferSuccess) {
+      lines.push(
+        'Async on-success opt-in: in live mode this endpoint validates and stores the row, then replies without running the script. The after-commit event function (functions/events/after-commit.mjs) runs it when the record trigger fires; a failure dead-letters to C2CEventDeadLetter for the sweep Job (docs/event-deadletter.md). Dry run still executes the script inline.',
+      );
+    }
   }
   lines.push('The previous row is loaded on the server. Dry run uses dryRunOld and does not read a client previous row.');
   lines.push('Client tasks for this handler, if any, are in the matching client/handlers module.');
@@ -3588,7 +3685,7 @@ ${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' :
     }
     let result = null;
     try {
-      result = await handle(ctx);
+      result = ${opts.deferSuccess ? 'live ? { deferred: "after-commit event" } : await handle(ctx)' : 'await handle(ctx)'};
     } catch (err) {
       if (!ctx.persisted) throw err;
       // A store refusal from a post-write script call maps before the
@@ -3629,13 +3726,14 @@ ${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' :
       : '';
   const refusal = `${deleteRefusal}${submitRefusal}`;
   const shimNames = opts.systemWrite
-    ? ['authorizeRead', 'authorizeWrite', 'applyInitialValues', 'compileCriteria', 'createRuntime', 'jsonReplacer', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'principalFromRequest', 'projectFields', 'projectReadable', 'replyStoreError']
-    : ['authorizeRead', 'authorizeWrite', 'createRuntime', 'jsonReplacer', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'principalFromRequest'];
+    ? ['authorizeRead', 'authorizeWrite', 'applyInitialValues', 'compileCriteria', 'createRuntime', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'principalFromRequest', 'projectFields', 'projectReadable', 'replyStoreError']
+    : ['authorizeRead', 'authorizeWrite', 'createRuntime', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'principalFromRequest'];
   for (const name of fieldStoreImports(storeShape)) {
     if (!shimNames.includes(name)) shimNames.push(name);
   }
   const shimImports = shimNames.join(', ');
   return `${banner(lines)}${liveImport}import { ${shimImports} } from "creator-to-catalyst/shims";
+import { send, isHidden, requestRowId } from "../_lib.mjs";
 ${thisappImport}
 
 export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(opts.path)}, dryRun: true };
@@ -3644,29 +3742,13 @@ export const access = ${accessLiteral(opts.app)};
 export const formName = ${JSON.stringify(opts.form)};
 export const recordEvent = ${JSON.stringify(opts.recordEvent ?? null)};
 ${schemaExports}
-function send(res, status, body) {
-  res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(body, jsonReplacer));
-}
-
-function isHidden(name) {
-  return !!name && Array.isArray(access.hidden) && access.hidden.includes(name);
-}
-
-function requestRowId(req) {
-  const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : null;
-  if (!body) return "";
-  const id = body.ROWID != null ? body.ROWID : body.rowid;
-  if (id == null || typeof id === "object") return "";
-  return String(id).trim();
-}
 ${subformRowHelper}${liveHelpersBlock}export async function handle(ctx) {
   const shim = ctx.shim;
 ${indent(opts.body)}
 }
 
 export default async function handler(req, res) {
-${opts.systemWrite ? '  const deploy = deployConfig();\n  const live = deploy.mode === "live";\n' : ''}  if (isHidden(formName)) {
+${opts.systemWrite ? '  const deploy = deployConfig();\n  const live = deploy.mode === "live";\n' : ''}  if (isHidden(access, formName)) {
     send(res, 403, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: "hidden form" });
     return;
   }
@@ -3740,6 +3822,29 @@ ${successBody}
 ${refusal}${opts.systemWrite ? '    // The row write itself failed at the store. Map the refusal\n    // (409/422/400 naming the field) and log it; anything else stays a\n    // sanitized 500.\n    if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;\n' : ''}    const denied = err && err.code === "RECORD_ACCESS_DENIED";
     send(res, denied ? 403 : 500, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: denied ? err.message : "request failed", slots: null, ${opts.systemWrite ? '...debugTranscript' : 'transcript: runtime.transcript'} });
   }
+}
+`;
+}
+
+/** App-local helpers shared by every generated Advanced I/O handler. */
+export function aioLibraryModule(): string {
+  return `import { jsonReplacer } from "creator-to-catalyst/shims";
+
+export function send(res, status, body) {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(body, jsonReplacer));
+}
+
+export function isHidden(access, name) {
+  return !!name && Array.isArray(access.hidden) && access.hidden.includes(name);
+}
+
+export function requestRowId(req) {
+  const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : null;
+  if (!body) return "";
+  const id = body.ROWID != null ? body.ROWID : body.rowid;
+  if (id == null || typeof id === "object") return "";
+  return String(id).trim();
 }
 `;
 }

@@ -101,6 +101,41 @@ test('synthetic replay (no fixtures needed): CRM createRecord returns the detail
   }
 });
 
+test('creator.updateRecord returns the Deluge map: {code:3000, data} on success, the reply map (not a throw) on 3100/2892/1110/2894', async () => {
+  const failures = [
+    { id: '999', reply: { code: 3100, message: 'No Data Available' } },
+    { id: '998', reply: { code: 2892, message: 'Invalid record ID' } },
+    { id: '997', reply: { code: 1110, message: 'Invalid field' } },
+    { id: '996', reply: { code: 2894, message: 'Permission denied' } },
+  ];
+  const { origin, seen, server } = await fakeZoho([
+    { method: 'PATCH', path: '/creator/v2.1/data/o/a/report/R/42', reply: { code: 3000, data: { ID: '42' } } },
+    ...failures.map((f) => ({ method: 'PATCH', path: `/creator/v2.1/data/o/a/report/R/${f.id}`, reply: f.reply })),
+  ]);
+  try {
+    const { runtime, ctx } = live(liveConfig(origin));
+    const args = ['o', 'a', 'R', '42', { Status: 'done' }, {}, 'c2c_creator'];
+    const made = await runtime.shim.zoho.task(ctx, ['creator', 'updateRecord'], args);
+    assert.deepEqual(made, { code: 3000, data: { ID: '42' } });
+    assert.equal(JSON.parse(seen[0]!.body).data.Status, 'done');
+    // Deluge's task does not throw (errors.md#3100): the script reads the code.
+    for (const f of failures) {
+      const got = await runtime.shim.zoho.task(ctx, ['creator', 'updateRecord'], [...args.slice(0, 3), f.id, ...args.slice(4)]);
+      assert.deepEqual(got, f.reply);
+    }
+  } finally {
+    server.close();
+  }
+});
+
+test('creator.updateRecord: other_api_params never override the record data', () => {
+  const adapter = TASK_ADAPTERS['creator.updateRecord']!;
+  const req = adapter.request(['o', 'a', 'R', '42', { Status: 'done' }, { data: { Status: 'clobbered' }, skip_workflow: ['form_workflow'] }, 'c'], 'in');
+  const body = JSON.parse(req.body!);
+  assert.deepEqual(body.data, { Status: 'done' });
+  assert.deepEqual(body.skip_workflow, ['form_workflow']);
+});
+
 test('request() builds the DC-resolved REST call for in and com', () => {
   const crm = TASK_ADAPTERS['crm.createRecord']!;
   assert.equal(crm.request(['Leads', {}, {}, 'c'], 'in').url, 'https://www.zohoapis.in/crm/v7/Leads');
