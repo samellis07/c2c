@@ -34,7 +34,7 @@ const ALLOWED_ATTRS = {
   td: new Set(['colspan', 'rowspan', 'title']),
   th: new Set(['colspan', 'rowspan', 'title']),
   ol: new Set(['start', 'title']),
-  '*': new Set(['title', 'data-style-dropped']),
+  '*': new Set(['title', 'data-style-dropped', 'data-zml']),
 };
 
 function flatUrl(value) {

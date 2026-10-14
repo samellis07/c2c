@@ -5,16 +5,16 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
-import { deriveIr, parse, type App } from '../../core/src/index.js';
+import { deriveIr, parse, parseFile, type App } from '../../core/src/index.js';
 import { mockDatastore } from '../../shims/test/zcql-mock.js';
 import { buildUi, generateUi } from '../src/index.js';
-import { compileHtmlpage, islandReadOnly, renderAuditSource } from '../src/htmlpage.js';
+import { compileHtmlpage, convertZmlSnippetToHtml, islandReadOnly, renderAuditSource } from '../src/htmlpage.js';
 import { renderedDocumentViolation, renderedHtmlElements } from '../../shims/src/rendered-guard.js';
 import { c2cUrlFunctionSource } from '../src/url-policy.js';
 import { uiSnippetFiles } from '../src/model.js';
@@ -33,6 +33,14 @@ function pageWithSnippet(snippet: string): string {
   // A Deluge string keeps \n, \t, \r, and any raw character. The \f escape is
   // the letter f, and a \u escape is u plus the hex digits, so the page string
   // keeps the original character instead of those escapes.
+  const literal = JSON.stringify(zml)
+    .replace(/(?<!\\)\\f/g, '\f')
+    .replace(/(?<!\\)\\u([0-9a-fA-F]{4})/g, (_m, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+  return `\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tContent=${literal}\n\t\t}\n\t}`;
+}
+
+function pageWithZmlSnippet(snippet: string): string {
+  const zml = `<zml><layout><row><column width='100%'><dspZml id='zml1'><![CDATA[${snippet}]]></dspZml></column></row></layout></zml>`;
   const literal = JSON.stringify(zml)
     .replace(/(?<!\\)\\f/g, '\f')
     .replace(/(?<!\\)\\u([0-9a-fA-F]{4})/g, (_m, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
@@ -968,6 +976,249 @@ async function renderLive(
     live.restore();
   }
 }
+
+async function renderLiveZml(
+  snippet: string,
+  rows: Record<string, unknown>[],
+  input: Record<string, unknown>,
+  user: typeof USER = USER,
+  policy?: Record<string, Record<string, FieldGrant>>,
+) {
+  const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithZmlSnippet(`htmlpage zml1()\ncontent\n${snippet}`)}`));
+  const compiled = uiSnippetFiles(model);
+  assert.equal(compiled.length, 1, JSON.stringify(model.todos));
+  assert.equal(model.todos.filter((todo) => todo.reason === SNIPPET_TODO).length, 0);
+  if (policy) rewritePolicy(files, policy);
+  const source = String(files.find((file) => file.path === compiled[0]!.path)?.data ?? '');
+  const mod = await loadTree(files, compiled[0]!.path);
+  const live = await liveStore({ Orders: rows });
+  try {
+    const out = await invoke(mod.default as never, { ...user, body: { input } });
+    const stored = await live.datastore.query('Orders', 'true', 300);
+    return { out, source, stored };
+  } finally {
+    live.restore();
+  }
+}
+
+test('convertZmlSnippetToHtml converts panel, pr, pc, text, prefix, suffix into safe HTML and CSS', () => {
+  const zml = `<panel>
+\t<pr width="100%" height="50px;">
+\t\t<pc width="100%" paddingLeft="10px" hAlign="left">
+\t\t\t<text value="" style="">
+\t\t\t\t<prefix value="Welcome " size="4"></prefix>
+\t\t\t\t<suffix value="<%=userName%>" size="4" bold="true" color="#962FFF"></suffix>
+\t\t\t</text>
+\t\t</pc>
+\t</pr>
+</panel>`;
+  const html = convertZmlSnippetToHtml(zml);
+  assert.match(html, /<div data-zml="panel">/);
+  assert.match(html, /<div data-zml="pr" style="width:100%;height:50px">/);
+  assert.match(html, /<div data-zml="pc" style="width:100%;text-align:left;padding-left:10px">/);
+  assert.match(html, /<span style="font-size:18px">Welcome <\/span>/);
+  assert.match(html, /<span style="color:#962FFF;font-size:18px;font-weight:bold"><%=userName%><\/span>/);
+});
+
+test('Shape B: a ZML snippet with single-record query lookup and prefix/suffix interpolation compiles and renders', async () => {
+  const { out, source, stored } = await renderLiveZml(
+    `<%{
+rec = Orders[ID == input.id];
+userName = ifnull(rec.Name, "");
+%>
+<panel>
+\t<pr width="100%" height="50px;">
+\t\t<pc width="100%" paddingLeft="10px" hAlign="left">
+\t\t\t<text value="" style="">
+\t\t\t\t<prefix value="Welcome " size="4"></prefix>
+\t\t\t\t<suffix value="<%=userName%>" size="4" bold="true" color="#962FFF"></suffix>
+\t\t\t</text>
+\t\t</pc>
+\t</pr>
+</panel>
+<%
+}%>`,
+    [{ Name: 'Ada', Status: 'open', Amount: 1 }],
+    { id: FIRST_ID },
+  );
+  assert.match(source, /shim\.datastore\.field\(/);
+  assert.match(source, /"forms":\["Orders"\]/);
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.match(String(out.body.html), /<span style="font-size:18px">Welcome <\/span>/);
+  assert.match(String(out.body.html), /<span style="color:#962FFF;font-size:18px;font-weight:bold">Ada<\/span>/);
+  assert.equal(stored[0]?.Name, 'Ada');
+});
+
+test('Shape B: a ZML snippet with direct criteria field interpolation in text element compiles and renders', async () => {
+  const { out, source } = await renderLiveZml(
+    `<panel>
+  <pr height="fill" width="fill">
+    <pc width="100%" bgColor="#FFFFFF" padding="20px" hAlign="center" vAlign="middle">
+      <text type="Text" value="<%=Orders[ID == input.id].Name%>" size="5" color="#7268cd" bold="true" textAlign="center"> </text>
+    </pc>
+  </pr>
+</panel>`,
+    [{ Name: 'Ada', Status: 'open', Amount: 1 }],
+    { id: FIRST_ID },
+  );
+  assert.match(source, /shim\.datastore\.field\(/);
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.match(String(out.body.html), /<div data-zml="pc" style="width:100%;background-color:#FFFFFF;text-align:center;vertical-align:middle;padding:20px"/);
+  assert.match(String(out.body.html), /<div style="color:#7268cd;font-size:24px;font-weight:bold;text-align:center">Ada<\/div>/);
+});
+
+test('Shape B: an unauthorized caller to a ZML snippet endpoint is refused', async () => {
+  const { out } = await renderLiveZml(
+    `<panel><pr><pc><text value="<%=Orders[ID == input.id].Name%>"/></pc></pr></panel>`,
+    [{ Name: 'OnlyAda', Status: 'open', Amount: 1 }],
+    { id: FIRST_ID },
+    CLERK,
+    { Clerk: {} },
+  );
+  assert.equal(out.status, 403, JSON.stringify(out.body));
+  assert.equal(out.body.html, undefined);
+});
+
+test('Shape B: sales-management real page generation and DOM structure comparison against ZML source', async () => {
+  const fixtureDir = process.env.C2C_FIXTURES_DIR;
+  const salesMgmtPath = fixtureDir ? join(fixtureDir, 'gallery/sales-management/Sales_Management.ds') : '';
+  const fallbackApp = `form Add_Sales_Rep
+{
+\tName
+\t(
+\t\ttype = text
+\t)
+\tEmail
+\t(
+\t\ttype = email
+\t)
+}
+pages
+{
+\tpage Dashboard
+\t{
+\t\tdisplayname = "Dashboard"
+\t\tContent = "<zml>\\n\\t<layout>\\n\\t<row>\\n\\t<column width='100%'>\\n\\t<dspZml id='zml_snippet' elementName='ZML Snippet'>\\n\\t<![CDATA[htmlpage zml_snippet()\\ncontent\\n&lt;%{\\n\\tgetCurrentUser = Add_Sales_Rep[Email == zoho.loginuserid];\\n\\tuserName = ifnull(getCurrentUser.Name,&quot;&quot;);\\n\\t%&gt;\\n&lt;panel&gt; \\n\\t&lt;pr width=&quot;100%&quot; height=&quot;50px;&quot;&gt;\\n\\t\\t&lt;pc width=&quot;100%&quot; paddingLeft=&quot;10px&quot; hAlign=&quot;left&quot;&gt;\\n\\t\\t\\t&lt;text value=&quot;&quot; style=&quot;&quot;&gt; \\n\\t\\t\\t\\t&lt;prefix value=&quot;Welcome&quot; size=&quot;4&quot;&gt;&lt;/prefix&gt;\\n\\t\\t\\t\\t&lt;suffix value=&quot;&lt;%=userName%&gt;&quot; size=&quot;4&quot; bold=&quot;true&quot; color=&quot;#962FFF&quot;&gt;&lt;/suffix&gt;\\n\\t\\t\\t\\t\\n\\t\\t\\t&lt;/text&gt;\\n\\t\\t&lt;/pc&gt;\\n\\t&lt;/pr&gt;\\n&lt;/panel&gt;\\n&lt;%\\n\\n}%&gt;]]>\\n</dspZml>\\n</column>\\n</row>\\n</layout>\\n</zml>"
+\t}
+}`;
+
+  const isFixture = existsSync(salesMgmtPath);
+  const app = isFixture ? parseFile(salesMgmtPath).ir : appOf(fallbackApp);
+  const bundle = generateUi(app);
+
+  // 1. Generation assertions: zero snippet TODOs, Dashboard page model exists
+  assert.equal(bundle.model.todos.filter((t) => t.reason === SNIPPET_TODO).length, 0);
+  const page = bundle.model.pages.find((p) => p.name === 'Dashboard');
+  assert.ok(page, 'Dashboard page exists in generated model');
+
+  // 2. Client-runtime page render: assert produced DOM structure against ZML source
+  const runtime = (await import(pathToFileURL(join(process.cwd(), 'packages/ui/src/client-runtime.js')).href)) as {
+    renderPage(page: unknown, doc: unknown, appModel: unknown): string;
+    sanitizeSnippet(raw: string, doc: unknown): string;
+  };
+  interface TestElement {
+    style: Record<string, string>;
+    textContent: string | null;
+    innerHTML: string;
+    querySelector(selector: string): TestElement | null;
+    querySelectorAll(selector: string): TestElement[];
+  }
+  interface TestDoc {
+    body: TestElement;
+    querySelector(selector: string): TestElement | null;
+    querySelectorAll(selector: string): TestElement[];
+  }
+
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>') as unknown as {
+    window: { document: TestDoc };
+  };
+  const doc = dom.window.document;
+  const pageHtml = runtime.renderPage(page, doc, bundle.model);
+  doc.body.innerHTML = pageHtml;
+
+  // Root article & layout hierarchy
+  const article = dom.window.document.querySelector('article[data-page="Dashboard"]');
+  assert.ok(article, 'Dashboard article rendered');
+  const layout = article.querySelector('div[data-zml="layout"]');
+  assert.ok(layout, 'layout container rendered');
+  const firstRow = layout.querySelector('div[data-zml="row"]');
+  assert.ok(firstRow, 'first row rendered');
+  const firstCol = firstRow.querySelector('div[data-zml="column"][data-width="100%"]');
+  assert.ok(firstCol, 'first column with width 100% rendered');
+
+  // Snippet container and static shell mapping
+  const snippetHost = firstCol.querySelector('[data-snippet-src="/htmlpages/Dashboard/s0"]');
+  assert.ok(snippetHost, 'snippet host element rendered with endpoint src');
+  const staticPanel = snippetHost.querySelector('div[data-zml="panel"]');
+  assert.ok(staticPanel, 'panel mapped to div[data-zml="panel"]');
+  const staticPr = staticPanel.querySelector('div[data-zml="pr"]');
+  assert.ok(staticPr, 'pr mapped to div[data-zml="pr"]');
+  assert.equal(staticPr.style.width, '100%');
+  assert.equal(staticPr.style.height, '50px');
+  const staticPc = staticPr.querySelector('div[data-zml="pc"]');
+  assert.ok(staticPc, 'pc mapped to div[data-zml="pc"]');
+  assert.equal(staticPc.style.width, '100%');
+  assert.equal(staticPc.style.textAlign, 'left');
+  assert.equal(staticPc.style.paddingLeft, '10px');
+
+  // 3. Dynamic endpoint execution: assert live DOM structure and escaped values
+  const snippetFile = bundle.files.find((f) => f.path === 'functions/htmlpages/dashboard-s0.mjs');
+  assert.ok(snippetFile, 'functions/htmlpages/dashboard-s0.mjs is generated');
+  const mod = await loadTree(bundle.files, snippetFile.path);
+  const live = await liveStore({
+    Add_Sales_Rep: [
+      {
+        Name: '<script>alert("XSS")</script> & Ada Lovelace',
+        Email: 'ada@example.com',
+      },
+    ],
+  });
+  try {
+    const out = await invoke(mod.default as never, {
+      user: { profile: 'Administrator', loginUser: 'ada@example.com', userId: 'ada@example.com' },
+      body: { input: {} },
+    });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    const endpointHtml = String(out.body.html);
+
+    // Verify endpoint HTML escaping and element structure
+    assert.match(endpointHtml, /<div data-zml="panel">/);
+    assert.match(endpointHtml, /<div data-zml="pr" style="width:100%;height:50px">/);
+    assert.match(endpointHtml, /<div data-zml="pc" style="width:100%;text-align:left;padding-left:10px">/);
+    assert.match(endpointHtml, /<span style="font-size:18px">Welcome<\/span>/);
+    assert.match(
+      endpointHtml,
+      /<span style="color:#962FFF;font-size:18px;font-weight:bold">&lt;script&gt;alert\(&quot;XSS&quot;\)&lt;\/script&gt; &amp; Ada Lovelace<\/span>/,
+    );
+    assert.equal(renderedDocumentViolation(endpointHtml), '');
+
+    // Insert dynamic HTML into the rendered page DOM and assert DOM nodes
+    snippetHost.innerHTML = runtime.sanitizeSnippet(endpointHtml, doc);
+    const livePanel = snippetHost.querySelector('div[data-zml="panel"]');
+    assert.ok(livePanel, 'live panel exists in DOM');
+    const livePr = livePanel.querySelector('div[data-zml="pr"]');
+    assert.ok(livePr, 'live pr exists in DOM');
+    assert.equal(livePr.style.width, '100%');
+    assert.equal(livePr.style.height, '50px');
+
+    const livePc = livePr.querySelector('div[data-zml="pc"]');
+    assert.ok(livePc, 'live pc exists in DOM');
+    assert.equal(livePc.style.width, '100%');
+    assert.equal(livePc.style.textAlign, 'left');
+    assert.equal(livePc.style.paddingLeft, '10px');
+
+    const spans = livePc.querySelectorAll('span');
+    assert.equal(spans.length, 2, 'prefix and suffix spans present');
+    assert.equal(spans[0]?.textContent, 'Welcome');
+    assert.equal(spans[0]?.style.fontSize, '18px');
+    assert.equal(spans[1]?.textContent, '<script>alert("XSS")</script> & Ada Lovelace');
+    assert.equal(spans[1]?.style.fontSize, '18px');
+    assert.equal(spans[1]?.style.fontWeight, 'bold');
+    assert.equal(doc.querySelectorAll('script').length, 0, 'malicious script element not in DOM');
+  } finally {
+    live.restore();
+  }
+});
 
 test('a criteria field read compiles to an endpoint and returns that record', async () => {
   const { out, source, stored } = await renderLive(
