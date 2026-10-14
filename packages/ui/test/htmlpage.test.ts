@@ -1693,6 +1693,16 @@ test('comment island dropped', async () => {
         input: { val: 'omitted' },
         expected: '<b>shown</b><i>also shown</i>',
       },
+      {
+        template: '<p>before</p><!-- <%= input.secret %> --!><p>after</p>',
+        input: { secret: '--> <script>alert(1)</script>' },
+        expected: '<p>before</p><p>after</p>',
+      },
+      {
+        template: '<p>before</p><!-- <%= input.secret %>',
+        input: { secret: '--> <script>alert(1)</script>' },
+        expected: '<p>before</p>',
+      },
     ];
     for (const c of cases) {
       const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n${c.template}`)}`));
@@ -1703,11 +1713,70 @@ test('comment island dropped', async () => {
       assert.equal(out.status, 200, JSON.stringify(out.body));
       const html = String(out.body.html);
       assert.equal(html, c.expected);
-      assert.doesNotMatch(html, /alert|script|-->|omitted/);
+      for (const bad of ['alert', 'script', '-->', '--!>', 'omitted']) assert.ok(!html.includes(bad), `${bad} in ${html}`);
     }
   } finally {
     live.restore();
   }
+});
+
+test('a comment closed by --!> ends where the HTML parser ends it', async () => {
+  const live = await liveStore({});
+  try {
+    // The sanitizer's comment scan must stop at --!> exactly as DOMParser
+    // does: the text after it is markup again, not comment content.
+    const cases = [
+      {
+        template: '<p>a</p><!-- <%= input.drop %> --> <%= input.val %> <p>b</p>',
+        input: { drop: 'gone', val: 'shown' },
+        expected: '<p>a</p> shown <p>b</p>',
+      },
+      {
+        template: '<p>a</p><!-- <%= input.drop %> --!> <%= input.val %> <p>b</p>',
+        input: { drop: 'gone', val: 'shown' },
+        expected: '<p>a</p> shown <p>b</p>',
+      },
+      {
+        // A comment nested inside a comment is not a new comment: the first
+        // close ends it and the tail is markup again.
+        template: '<p>a</p><!-- one <!-- <%= input.val %> --> tail <p>b</p>',
+        input: { val: 'omitted' },
+        expected: '<p>a</p> tail <p>b</p>',
+      },
+      {
+        template: '<p>a</p><!-- never <%= input.val %> closed <p>b</p>',
+        input: { val: 'omitted' },
+        expected: '<p>a</p>',
+      },
+    ];
+    for (const c of cases) {
+      const { files, model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n${c.template}`)}`));
+      const compiled = uiSnippetFiles(model);
+      assert.equal(compiled.length, 1, c.template);
+      const mod = await loadTree(files, compiled[0].path);
+      const out = await invoke(mod.default as never, { ...USER, body: { input: c.input ?? {} } });
+      assert.equal(out.status, 200, JSON.stringify(out.body));
+      const html = String(out.body.html);
+      assert.equal(html, c.expected);
+      for (const bad of ['-->', '--!>', 'omitted']) assert.ok(!html.includes(bad), `${bad} in ${html}`);
+    }
+  } finally {
+    live.restore();
+  }
+});
+
+test('page names and snippet ids with long dash runs slugify in linear time', () => {
+  // ReDoS regression: the file-path slug used to be two regex passes whose
+  // alternation backtracked quadratically on uncontrolled separator runs.
+  const dashes = `x${'-'.repeat(100_000)}x`;
+  const t0 = performance.now();
+  const compiled = compileHtmlpage(appOf(ORDERS), dashes, 'hp1', 'htmlpage hp1()\ncontent\n<p><%= input.val %></p>', {
+    id: dashes,
+  });
+  const elapsed = performance.now() - t0;
+  assert.ok(compiled.ok, compiled.ok ? '' : compiled.reason);
+  assert.equal(compiled.file!.path, 'functions/htmlpages/x-x-x-x.mjs');
+  assert.ok(elapsed < 1000, `compile took ${elapsed} ms`);
 });
 
 test('a field value inside a loop is escaped in the rendered page', async () => {
