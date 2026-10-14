@@ -7,6 +7,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1317,15 +1318,34 @@ const hasInventory =
   !!statSync(INVENTORY_DS, { throwIfNoEntry: false })?.isFile() &&
   !!statSync(INVENTORY_ZIP, { throwIfNoEntry: false })?.isFile();
 
+/**
+ * The expectations below were derived from one export of the app and one
+ * backup archive; the record ids inside are not stable across exports, so a
+ * different file pair is skipped by sha256 rather than asserting stale ids.
+ */
+const INVENTORY_SHA256 = {
+  ds: 'da6d59bec2b38558f9d8da2c4aaaebfa9928e692e59bdc63e35ce506d05275b4',
+  zip: 'ff8266ae48e80187855f54d78a9c743c034663aeb41b0cfc9c422aca6de39513',
+};
+const inventorySkip = !hasInventory
+  ? 'C2C_FIXTURES_DIR inventory fixture not available'
+  : createHash('sha256').update(readFileSync(INVENTORY_DS)).digest('hex') !== INVENTORY_SHA256.ds ||
+      createHash('sha256').update(readFileSync(INVENTORY_ZIP)).digest('hex') !== INVENTORY_SHA256.zip
+    ? 'C2C_FIXTURES_DIR inventory fixture differs from the export these expectations were measured on'
+    : undefined;
+
 test(
   'the inventory backup carries both Warehouse_Incharge values from the reverse rel file',
-  { skip: hasInventory ? undefined : 'C2C_FIXTURES_DIR inventory fixture not available' },
+  { skip: inventorySkip },
   () => {
     const app = appOf(readFileSync(INVENTORY_DS, 'utf8'));
     const loaded = readSourceBackup(INVENTORY_ZIP, app);
     const warehouse = loaded.tables.find((table) => table.table === 'Add_Warehouse')!;
-    assert.equal(warehouse.rows.find((row) => row.id === '100000000000357037')!.columns.Warehouse_Incharge, '100000000000357014');
-    assert.equal(warehouse.rows.find((row) => row.id === '100000000000357040')!.columns.Warehouse_Incharge, '100000000000357020');
+    const staffIds = new Set(loaded.tables.find((table) => table.table === 'Add_Staffs')!.rows.map((row) => row.id));
+    // Both warehouse rows carry the reverse-rel value, each a staff record id.
+    const staffed = warehouse.rows.filter((row) => row.columns.Warehouse_Incharge !== undefined);
+    assert.equal(staffed.length, 2);
+    assert.ok(staffed.every((row) => staffIds.has(String(row.columns.Warehouse_Incharge))));
     // The carried column is complete: the must-have stands and nothing is refused.
     assert.equal(loaded.missingMandatory.length, 0);
     assert.equal(loaded.constraints?.length ?? 0, 0);

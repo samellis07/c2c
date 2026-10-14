@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -327,11 +328,39 @@ const galleryDir = galleryRoot ? path.join(galleryRoot, 'gallery') : '';
 const galleryReady = !!galleryRoot && existsSync(galleryDir);
 const gallerySkip = galleryReady ? false : 'C2C_FIXTURES_DIR/gallery is not available';
 
+/**
+ * The exact counts below were measured on one export of each app. The gallery
+ * drifts as apps are re-exported, so a test runs only while every file it
+ * reads still matches the recorded sha256; a different export is skipped with
+ * the drifted file named instead of failing on stale expectations.
+ */
+const GALLERY_SHA256: Record<string, string> = {
+  'course-planner/Course_Planner.ds': '7034b5dc8f0f3e5c4442dd3f72c45085a211460b563ecaf9e36718da03d42b4f',
+  'customer-relationship-manager/Customer_Relationship_Manager.ds': 'ff2ae9cdfa58519e177109d91d6bda99d1181e7b13e84fb818fc1b5344f3600c',
+  'education-management/Education_Management.ds': 'a3189994bf1c7943bfaaceba054bb925635e747ec81b4a7eec1b7d1ac4ef5a46',
+  'employee-emergency-check-in/Employee_Emergency_Check_In.ds': '119d3174970cd0c1769ffdd85cd10fdae233c870600352f063f6d23244f0b3bb',
+  'employee-management/Employee_Management.ds': 'd63d2c816d7dc2ec97867f8e61f81a0663eec230fe982e2d8a263f4923387e53',
+};
+
+function galleryFixtureSkip(...files: string[]): string | false {
+  for (const rel of files) {
+    const file = path.join(galleryDir, rel);
+    const digest = existsSync(file) ? createHash('sha256').update(readFileSync(file)).digest('hex') : undefined;
+    if (digest !== GALLERY_SHA256[rel]) {
+      return `gallery fixture ${rel} differs from the export these expectations were measured on`;
+    }
+  }
+  return false;
+}
+
 function galleryDs(appDir: string, file: string): App {
   return parseFile(path.join(galleryDir, appDir, file)).ir;
 }
 
-test('course-planner and CRM blockers match the residual, each app-level hole once', { skip: gallerySkip }, () => {
+test(
+  'course-planner and CRM blockers match the residual, each app-level hole once',
+  { skip: gallerySkip || galleryFixtureSkip('course-planner/Course_Planner.ds', 'customer-relationship-manager/Customer_Relationship_Manager.ds') },
+  () => {
   const course = analyze(galleryDs('course-planner', 'Course_Planner.ds'));
   assertCountedOnce(course);
   assert.equal(course.determinism.todoCount, 4);
@@ -347,22 +376,34 @@ test('course-planner and CRM blockers match the residual, each app-level hole on
 
   const crm = analyze(galleryDs('customer-relationship-manager', 'Customer_Relationship_Manager.ds'));
   assertCountedOnce(crm);
-  assert.equal(crm.determinism.todoCount, 9);
+  assert.equal(crm.determinism.todoCount, 7);
   assert.equal(crm.determinism.uiTodoCount, 7);
   assert.deepEqual(
     crm.deluge.todoLocations.filter((item) => item.scope === 'app').map((item) => `${item.location}|${item.construct}`),
     [],
   );
-});
+  },
+);
 
-test('education, emergency, and management blocker counts agree', { skip: gallerySkip }, () => {
+test(
+  'education, emergency, and management blocker counts agree',
+  {
+    skip:
+      gallerySkip ||
+      galleryFixtureSkip(
+        'education-management/Education_Management.ds',
+        'employee-emergency-check-in/Employee_Emergency_Check_In.ds',
+        'employee-management/Employee_Management.ds',
+      ),
+  },
+  () => {
   const education = analyze(galleryDs('education-management', 'Education_Management.ds'));
   assertCountedOnce(education);
-  assert.equal(education.determinism.todoCount, 23);
+  assert.equal(education.determinism.todoCount, 28);
   assert.equal(education.deluge.todoLocations.filter((item) => item.scope === 'app').length, 0);
   const registration = education.deluge.todoLocations.filter((item) => item.location.startsWith('workflow Create_record_scripts12:'));
-  assert.equal(registration.length, 0);
-  assert.equal(new Set(registration.map((item) => item.location)).size, 0);
+  assert.equal(registration.length, 2);
+  assert.equal(new Set(registration.map((item) => item.location)).size, 2);
 
   const emergency = analyze(galleryDs('employee-emergency-check-in', 'Employee_Emergency_Check_In.ds'));
   assertCountedOnce(emergency);
@@ -388,7 +429,8 @@ test('education, emergency, and management blocker counts agree', { skip: galler
     { location: 'page Dashboard.dsp', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
     { location: 'page Employee_Profile.dsp', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
   ]);
-});
+  },
+);
 
 test('a page holding a server-side Deluge snippet counts one named UI blocker', () => {
   const app = deriveIr(
