@@ -1125,6 +1125,10 @@ function accessibleName(el: Element, doc: Document): string {
     const own = el.textContent?.trim();
     if (own) return own;
   }
+  if (el.getAttribute('role') === 'radio' || el.getAttribute('role') === 'checkbox') {
+    const own = el.textContent?.trim();
+    if (own) return own;
+  }
   if (tag === 'INPUT' && /^(submit|reset|button)$/i.test(el.getAttribute('type') ?? '')) {
     const v = el.getAttribute('value');
     if (v && v.trim()) return v.trim();
@@ -1133,6 +1137,22 @@ function accessibleName(el: Element, doc: Document): string {
 }
 
 const CONTROL = 'input:not([type="hidden"]), select, textarea, [contenteditable="true"]';
+
+/** A semantic control must be exposed, named, and reachable by keyboard. */
+function eligibleControl(el: Element, doc: Document): boolean {
+  for (let node: Element | null = el; node; node = node.parentElement) {
+    if (node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true') return false;
+  }
+  if (!accessibleName(el, doc)) return false;
+  if (el.getAttribute('role') === 'radiogroup') return false;
+  if (el.hasAttribute('tabindex')) return Number(el.getAttribute('tabindex')) >= 0;
+  if (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true') return false;
+  if (el.tagName === 'A') return el.hasAttribute('href');
+  if (['BUTTON', 'SELECT', 'TEXTAREA'].includes(el.tagName)) return true;
+  if (el.tagName === 'INPUT') return (el.getAttribute('type') ?? 'text').toLowerCase() !== 'hidden';
+  if (el.getAttribute('contenteditable') === 'true') return true;
+  return false;
+}
 
 function fieldContainer(form: Element, name: string): Element | null {
   for (const el of Array.from(form.querySelectorAll('[data-field]'))) if (el.getAttribute('data-field') === name) return el;
@@ -1144,23 +1164,56 @@ function fieldContainer(form: Element, name: string): Element | null {
 }
 
 function controlSuits(kind: FieldKind, box: Element, rendered: (el: Element) => boolean = () => true): boolean {
-  const controls = Array.from(box.querySelectorAll(CONTROL)).concat(box.matches(CONTROL) ? [box] : []).filter(rendered);
+  const doc = box.ownerDocument;
+  const controls = Array.from(box.querySelectorAll(CONTROL)).concat(box.matches(CONTROL) ? [box] : []).filter((el) => rendered(el) && eligibleControl(el, doc));
   const types = controls.map((c) => (c.tagName === 'INPUT' ? (c.getAttribute('type') ?? 'text').toLowerCase() : c.tagName.toLowerCase()));
   const has = (pred: (t: string, el: Element) => boolean): boolean => controls.some((c, i) => pred(types[i]!, c));
-  const sees = (selector: string): boolean => Array.from(box.querySelectorAll(selector)).some(rendered);
+  const sees = (selector: string): boolean => Array.from(box.querySelectorAll(selector)).some((el) => rendered(el) && eligibleControl(el, doc));
+  // A rendered popup trigger opens the field's options: the Arc Select,
+  // MultiSelect, DatePicker and TimePicker triggers carry these semantics. A
+  // closed popup is not in the DOM — the real DatePicker renders no
+  // aria-controls and the MultiSelect and TimePicker listboxes exist only
+  // while open — so the trigger is credited on its own terms: a popup kind
+  // that fits the field, and a name the field's own labelling gives it inside
+  // the box.
+  const POPUP_KINDS: Partial<Record<FieldKind, string[]>> = {
+    text: ['dialog', 'listbox', 'grid'],
+    choice: ['listbox'],
+    multichoice: ['listbox'],
+  };
+  // The trigger is this field's control when the field's own labelling gives
+  // it its name: a label-for inside the box, an aria-labelledby pointing at
+  // a label element inside the box, or a label wrapped around it.
+  const namedByField = (el: Element): boolean => {
+    const labelledBy = (el.getAttribute('aria-labelledby') ?? '').split(/\s+/).filter(Boolean);
+    if (labelledBy.some((id) => { const target = doc.getElementById(id); return !!target && box.contains(target) && !el.contains(target); })) return true;
+    const id = el.getAttribute('id');
+    if (id && Array.from(box.querySelectorAll('label')).some((label) => label.getAttribute('for') === id)) return true;
+    const wrap = el.closest('label');
+    return !!wrap && box.contains(wrap);
+  };
+  const popupTrigger = (): boolean => Array.from(box.querySelectorAll('button[aria-haspopup][aria-expanded], [role="combobox"][aria-expanded]')).some((trigger) => {
+    if (!rendered(trigger) || !eligibleControl(trigger, doc)) return false;
+    // role=combobox's implicit popup is a listbox; aria-haspopup="true" means a menu.
+    const haspopup = (trigger.getAttribute('aria-haspopup') ?? (trigger.getAttribute('role') === 'combobox' ? 'listbox' : '')).toLowerCase();
+    if (!(POPUP_KINDS[kind] ?? []).includes(haspopup === 'true' ? 'menu' : haspopup)) return false;
+    return namedByField(trigger);
+  });
   switch (kind) {
     case 'text':
-      return has((t) => !['checkbox', 'radio', 'file', 'submit', 'button', 'reset'].includes(t));
+      return has((t) => !['checkbox', 'radio', 'file', 'submit', 'button', 'reset'].includes(t)) || popupTrigger();
     case 'longtext':
       return has((t, el) => t === 'textarea' || el.getAttribute('contenteditable') === 'true' || t === 'text');
     case 'choice':
-      return has((t) => t === 'select' || t === 'radio' || t === 'text' || t === 'search');
+      return has((t) => t === 'select' || t === 'radio' || t === 'text' || t === 'search') || popupTrigger() || sees('[role="radio"]');
     case 'multichoice':
-      return has((t, el) => (t === 'select' && el.hasAttribute('multiple')) || t === 'checkbox' || t === 'select');
+      return has((t, el) => (t === 'select' && el.hasAttribute('multiple')) || t === 'checkbox' || t === 'select') || popupTrigger();
     case 'decision':
-      return has((t) => t === 'checkbox');
+      // Radix renders a decision as a button with the checkbox role.
+      return has((t) => t === 'checkbox') || sees('[role="checkbox"]');
     case 'file':
-      return has((t) => t === 'file') || sees('canvas') || fileControlProxy(box, rendered);
+      // The dropzone button delegates to its mirror file input on click.
+      return has((t) => t === 'file') || sees('canvas') || fileControlProxy(box, rendered) || (sees('button') && box.querySelector('input[type="file"]') !== null);
     case 'composite':
       return controls.length >= 2;
     case 'subform':
@@ -1184,7 +1237,24 @@ function fileControlProxy(box: Element, rendered: (el: Element) => boolean): boo
 }
 
 function isRequiredMarked(box: Element): boolean {
-  return Array.from(box.querySelectorAll(CONTROL)).some((c) => c.hasAttribute('required') || c.getAttribute('aria-required') === 'true');
+  // Custom groups mark the field on their container: RadioCards on its
+  // radiogroup, the Radix decision on its checkbox button.
+  const doc = box.ownerDocument;
+  const eligible = (selector: string): Element[] => Array.from(box.querySelectorAll(selector)).filter((el) => eligibleControl(el, doc));
+  const nativeMarked = eligible(CONTROL).some((c) => c.hasAttribute('required') || c.getAttribute('aria-required') === 'true');
+  const checkboxMarked = eligible('[role="checkbox"][aria-required="true"]').length > 0;
+  // aria-required is supported on input-like roles only; on a role it does
+  // not fit — a plain menu button, say — it marks nothing.
+  const REQUIRED_ROLES = new Set(['checkbox', 'combobox', 'gridcell', 'listbox', 'radio', 'radiogroup', 'spinbutton', 'switch', 'textbox', 'tree']);
+  const accessibleMarked = eligible('[aria-required="true"]').some((el) => REQUIRED_ROLES.has(el.getAttribute('role') ?? ''));
+  const radioGroups = Array.from(box.querySelectorAll('[role="radiogroup"][aria-required="true"]')).filter((group) => {
+    for (let node: Element | null = group; node; node = node.parentElement) {
+      if (node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true') return false;
+    }
+    return true;
+  });
+  const hasAccessibleRadio = radioGroups.some((group) => Array.from(group.querySelectorAll('[role="radio"]')).some((radio) => eligibleControl(radio, doc)));
+  return nativeMarked || checkboxMarked || accessibleMarked || hasAccessibleRadio;
 }
 
 /** CSS.escape as browsers define it: the runtime calls it as a page global, which jsdom lacks. */
