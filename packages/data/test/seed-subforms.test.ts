@@ -367,6 +367,42 @@ test('an over-long nested junction name is a table-name-length-unverified blocke
   for (const item of seed.tables) assert.ok(known.has(item.form), item.form);
 });
 
+test('a 26-character child name passes the table-name gate in the schema and the seed', () => {
+  const child = 'Details__Asset_Information';
+  assert.equal(child.length, 26);
+  const app = appOf(
+    `\tform Tag
+\t{
+\t\tName
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tform Details
+\t{
+\t\tName
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tAsset_Information
+\t\t(
+\t\t\ttype = grid
+\t\t\tLine
+\t\t\t(
+\t\t\t\ttype = text
+\t\t\t)
+\t\t)
+\t}`,
+  );
+  const plan = generateSchema(app);
+  assert.ok(plan.tables.some((item) => item.name === child), `schema plans ${child}`);
+  assert.equal(plan.limitBlockers?.find((item) => item.table === child && item.limitId === 'table-name-length-unverified'), undefined);
+  const seed = generateSeed(app, { n: 1, seed: 'fits-name' });
+  const seedBlockers = (seed as { limitBlockers?: { table: string; limitId: string }[] }).limitBlockers ?? [];
+  assert.equal(seedBlockers.find((item) => item.table === child && item.limitId === 'table-name-length-unverified'), undefined);
+  assert.ok(seed.tables.some((item) => item.form === child), `seed writes ${child}`);
+});
+
 const GALLERY = process.env.C2C_FIXTURES_DIR ? join(process.env.C2C_FIXTURES_DIR, 'gallery') : '';
 
 function dsOf(slug: string): string {

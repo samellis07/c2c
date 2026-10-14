@@ -31,7 +31,7 @@ export const ORG_TABLE_LIMIT_RECOVERY =
  * Longest Data Store table name a create has kept.
  * No published table-name maximum is recorded, so this is not a cap to truncate to.
  */
-export const LONGEST_KEPT_TABLE_NAME = 'Add_Production_Batch__BOM';
+export const LONGEST_KEPT_TABLE_NAME = 'Rate_Your_Vendors__Product_Service';
 
 export const TABLE_NAME_LENGTH_UNVERIFIED = 'table-name-length-unverified';
 
