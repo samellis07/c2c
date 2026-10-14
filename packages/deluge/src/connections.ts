@@ -362,18 +362,36 @@ export function connectionsChecklist(appName: string, report: ConnectionsReport,
     out.push(`| \`${e.catalystName ?? '(choose a name)'}\` | ${e.serviceName ?? 'unknown (needs a human)'} | ${e.scopes.length ? e.scopes.map((s) => `\`${s}\``).join('<br>') : 'none derivable'} | ${e.link ? `\`${e.link}\`` : `(none: set \`${e.configKey}\`)`} | ${used} |`);
   }
   out.push('');
+  const isInvokeurl = (use: { task: string }) => use.task.startsWith('invokeurl ');
   const manualUses = report.entries.flatMap((entry) => entry.uses.filter((use) => !use.adapter).map((use) => ({ entry, use })));
+  // A connected invokeurl is marked adapter-backed by the analyzer, but no
+  // dedicated adapter is generated for an arbitrary request: it runs through
+  // the generic invokeurl runtime and needs the user's configured connection.
+  const adapterBackedUses = report.entries.flatMap((entry) => entry.uses.filter((use) => use.adapter && isInvokeurl(use)).map((use) => ({ entry, use })));
   const detected = report.entries.reduce((n, entry) => n + entry.uses.length, 0);
-  const generated = detected - manualUses.length;
+  const generated = detected - adapterBackedUses.length - manualUses.length;
+  // Setup work is counted per connection that carries a call the generator did
+  // not fully write: adapter-backed calls need the user's connection, manual
+  // calls need it plus a human to identify the service and scope. Connections
+  // used only by generated calls are still created from the table above but
+  // are not manual setup work.
+  const setupEntries = report.entries.filter((entry) => entry.uses.some((use) => !use.adapter || isInvokeurl(use)));
   out.push(
     '',
     `## Integration coverage (${detected} detected calls)`,
     '',
-    'Adapter-backed calls are generated. Calls without an adapter are counted below as manual work and remain dry-run only; the connection name and derivable scope are shown for each call.',
+    'Calls split three ways and the buckets add up to the detected total: generated calls have a generated task adapter; adapter-backed `invokeurl` calls run through the generic invokeurl runtime but need the user\'s configured connection; calls with no adapter are manual work and stay dry-run only. The connection name and derivable scope are shown for each call.',
     '',
-    `Generated calls: ${generated}. Manual integration calls: ${manualUses.length}. Manual connection setup steps: ${report.entries.length} (the owner must create and authorize each connection with their credentials).`,
+    `Generated calls: ${generated}. Adapter-backed calls: ${adapterBackedUses.length}. Manual integration calls: ${manualUses.length}. Manual connection setup steps: ${setupEntries.length} (connections carrying adapter-backed or manual calls; the owner must create and authorize each with their credentials).`,
     '',
   );
+  if (adapterBackedUses.length) {
+    out.push('### Adapter-backed calls (configure the connection)', '');
+    for (const { entry, use } of adapterBackedUses) {
+      out.push(`- [ ] \`${use.task}\` in ${use.where}: connection \`${entry.catalystName ?? entry.configKey}\`; service ${entry.serviceName ?? 'unknown (identify by hand)'}; scope ${use.scope ? `\`${use.scope}\`` : 'not derivable (identify and authorize by hand)'}.`);
+    }
+    out.push('');
+  }
   if (manualUses.length) {
     out.push('### Manual integration calls', '');
     for (const { entry, use } of manualUses) {
