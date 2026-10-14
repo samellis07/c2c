@@ -729,7 +729,7 @@ test('a stored file or signature view link fetches the file through a POST with 
   // The stored signature image fetches the same signed URL as the view link.
   // The img lands only after the POST resolves and React re-renders, which can
   // take longer than a single flush, so wait for the element itself.
-  await waitFor(() => rendered.box.querySelector('[data-field="Sig"] img') !== null, 'the signature image');
+  await waitFor(() => rendered.box.querySelector('[data-field="Sig"] img[src="https://example.com/signed"]') !== null, 'the signature image');
   const sigImg = rendered.box.querySelector('[data-field="Sig"] img') as HTMLImageElement | null;
   assert.ok(sigImg, 'stored signature renders as an image');
   assert.equal(sigImg.getAttribute('src'), 'https://example.com/signed');
