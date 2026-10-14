@@ -4,10 +4,10 @@ Gather these four things. The AI will ask for anything missing —
 you only need to point, click, and sign in where asked.
 
 The things only you do at the **end** of a run are a separate
-checklist, printed by the program
-([human checklist](../../docs/human-steps.md), and the screens in
-[chapter 4](04-your-five-steps.md)). Each item appears only when
-it applies:
+checklist of up to four items, printed by the program
+([human checklist](../../docs/human-steps.md); see also the screens
+and follow-up in-app verification in [chapter 4](04-your-five-steps.md)).
+Each item appears only when it applies:
 
 1. Start Slate once — only when the app has web screens and Slate
    has not already been started on this project.
@@ -33,16 +33,17 @@ project it cannot find.
   ([Projects per account](../../plugin/references/facts/limits.md#projects-per-account)
   [UNVERIFIED]).
 - When you have not already given the AI a project id, the AI
-  creates the project. The name is `c2c-` plus your app's name in
-  lower case, with spaces and other marks turned into hyphens. A
-  new project is created by importing a template, in Development.
+  creates the project. The name is `c2c-` plus your app's link name
+  in lower case, with spaces and other marks turned into hyphens
+  (leading and trailing hyphens are trimmed, and `c2c-` is not doubled).
+  A new project is created by importing a template, in Development.
   The AI then reads that project back and records its id
   ([Create a project only through the IaC import](../../plugin/references/facts/projects.md#create-a-project-only-through-the-iac-import),
   [Verify the project before depending on it](../../plugin/references/facts/projects.md#verify-the-project-before-depending-on-it)).
   A direct "create project" call is refused
   ([`400 PROJECT_CREATION_NOT_ALLOWED`](../../plugin/references/facts/errors.md#400-project_creation_not_allowed)).
-  When the name is already in use, the AI adds a suffix and tries
-  the import once more
+  When the name is already in use, the AI adds a suffix and retries
+  the import with up to 5 names (`-2`, `-3`, …)
   ([`409 DUPLICATE_ENTRY` on project import](../../plugin/references/facts/errors.md#409-duplicate_entry-on-project-import)).
   Those facts entries do not carry an evidence label.
 - When you already have a Development project that holds only this
@@ -86,9 +87,10 @@ the AI never types your passwords or tokens**
   versions already checked. A newer CLI still runs, and the doctor
   warns that it has not been checked.
 - Node.js on the machine where the AI runs: 20.20.0 or newer, and
-  older than 23. The doctor's install hint names Node 20 or 22.
-  20.20.1 is the version c2c is checked on. Another allowed version
-  warns, because byte-for-byte results are guaranteed on 20.20.1.
+  older than 23 (Node 20 or 22). The doctor's fix hint recommends
+  20.20.1. 20.20.1 is the version c2c is checked on. Another allowed
+  version warns, because byte-for-byte results are guaranteed on
+  20.20.1.
 
 If a sign-in opened the wrong account or data centre, the doctor
 (see below) catches it — the AI will ask you to sign out and sign
