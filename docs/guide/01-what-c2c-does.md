@@ -50,30 +50,39 @@ items:
 - The Zia AI builder.
 - On-prem Data Bridge.
 
-Three more are **not supported in 1.0**. Each one is named in the
-report when your app uses it:
+Several features are **not supported in this version (counted; on the roadmap)**.
+Each one is named in the report when your app uses it:
 
 - **Payments.** No payment gateway is generated. A payment
   workflow is counted, and saving a record does not take a payment.
-- **Single sign-on (Zoho One or SAML).** Catalyst has no built-in
-  Zoho One, SAML, or similar organisation sign-in for app users.
-  The report lists it as a manual item. People sign in with
-  Catalyst's own sign-in, and existing users are invited again
-  ([Third-party JWT is the SSO route](../../plugin/references/facts/auth.md#third-party-jwt-is-the-sso-route);
-  that facts entry has no evidence label).
 - **Offline mode.** The web app does not keep your records on the
   device. While you are offline it says that data is unavailable
   ([what the web app generates](../../docs/ui.md)).
+- **Form Email.** Inbound Form Email is not supported in this
+  version.
+- **Cliq integration-function bots.** Cliq bots relying on Integration
+  Functions are not generated in this version.
+- **C8 dialect.** Deluge scripts in the C8 dialect are not supported
+  yet (C5 and C6 are supported).
+
+**Single sign-on (Zoho One or SAML)** has no built-in Catalyst
+equivalent for app users. The report lists it as a manual item.
+People sign in with Catalyst's own sign-in, and existing users are
+invited again
+([Third-party JWT is the SSO route](../../plugin/references/facts/auth.md#third-party-jwt-is-the-sso-route);
+that facts entry has no evidence label).
 
 You get a web app. Creator's own iPhone and Android apps are not
-produced. Mail your app already sends is carried over, and the
-sender address is verified by you when the app sends mail (that
-checklist item appears only then).
+produced. Outgoing mail your app sends through Deluge `sendmail` is
+carried over (and the sender address is verified by you when the app
+sends mail; that checklist item appears only then), while inbound
+Form Email is not supported in this version.
 
 Anything else the converter cannot translate is counted. The
 analysis text prints `todo items` with that count. A count of zero
-is what makes the analysis say the result is deterministic. The
-published sample table writes the same counts per kind, for example
+(along with zero applied lock fills) is what makes the analysis say
+the result is deterministic. The published sample table writes the
+same counts per kind, for example
 `2 (2 sendmail-attachment:template)`: two places where a mail
 attachment is a record template, and a person still has to decide
 what to do with those attachments
