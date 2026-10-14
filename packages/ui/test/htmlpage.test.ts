@@ -219,13 +219,13 @@ test('empty server wrappers keep sanitized static markup without an endpoint', (
 });
 
 test('empty server wrappers keep dropped styles as a counted TODO', () => {
-  const unsafeSnippet = `htmlpage hp1()\ncontent\n<%{}%>\n<div style="background-image:url(javascript:alert(1))">x</div>`;
+  const unsafeSnippet = `htmlpage hp1()\ncontent\n<%{%}>\n<div style="background-image:url(javascript:alert(1))">x</div>`;
   const unsafe = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(unsafeSnippet)}`));
   assert.equal(unsafe.model.todos.filter((todo) => todo.reason === SNIPPET_TODO).length, 1);
   assert.deepEqual(uiSnippetFiles(unsafe.model), []);
   assert.deepEqual(htmlElements(unsafe.model)[0].children.map((child) => child.kind), ['todo']);
 
-  const safeSnippet = `htmlpage hp1()\ncontent\n<%{}%>\n<div style="color:red;background-color:#fff">x</div>`;
+  const safeSnippet = `htmlpage hp1()\ncontent\n<%{%}>\n<div style="color:red;background-color:#fff">x</div>`;
   const safe = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(safeSnippet)}`));
   assert.deepEqual(safe.model.todos, []);
   assert.deepEqual(uiSnippetFiles(safe.model), []);
