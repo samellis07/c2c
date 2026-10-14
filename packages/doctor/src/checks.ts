@@ -33,7 +33,7 @@ import { localRefreshAllowed } from '../../deploy/src/rest.js';
 import { importingAgeMs, importingAgeState, isStuckImporting, stuckImportGuidedStep, STUCK_IMPORT_MAX_AGE_HOURS, unknownImportAgeGuidedStep, type ListedProject } from '../../deploy/src/stuck-import.js';
 import { fallbackForTool } from '../../deploy/src/mcp-registry.js';
 import { readDeployConfig } from '../../deploy/src/dc.js';
-import { mailSenderTag, readMailSenderEvidence } from '../../deploy/src/mail.js';
+import { mailSenderTag, readMailSenderEvidence, type MailSenderEvidence } from '../../deploy/src/mail.js';
 import { generate as generateDeluge } from '../../deluge/src/generate.js';
 
 export interface DoctorContext {
@@ -470,9 +470,10 @@ function checkD1(ctx: DoctorContext): { result: CheckResult; ir?: App } {
  * attestation — D-M1 reports `verified` solely from the live Catalyst
  * read-back a confirmed deploy persisted (c2c-out/.c2c/mail-sender.json,
  * sender tags only). An attestation without that record is reported as
- * attested, not verified.
+ * attested, not verified. When the target project is known, a record observed
+ * against another project (or naming none) is ignored.
  */
-export function checkMailSender(app: App, workspace: string): CheckResult[] {
+export function checkMailSender(app: App, workspace: string, projectId?: string): CheckResult[] {
   const sendsMail = generateDeluge(app).files.some((file) => file.source.includes('shim.mail.send('));
   if (!sendsMail) return [];
   const path = join(workspace, 'c2c-deploy.json');
@@ -485,9 +486,16 @@ export function checkMailSender(app: App, workspace: string): CheckResult[] {
   if (!sender?.from) {
     return [fail('D-M1', 'the app sends mail and no Catalyst Mail sender is set', 'set mail.from in c2c-deploy.json, verify it in Catalyst Mail, then run c2c deploy --confirm so the live read-back is recorded')];
   }
-  const observed = readMailSenderEvidence(workspace)?.senders[mailSenderTag(sender.from)];
+  let evidence: MailSenderEvidence | undefined = readMailSenderEvidence(workspace);
+  if (evidence && projectId !== undefined && cliRenderedId(evidence.projectId ?? '') !== cliRenderedId(projectId)) evidence = undefined;
+  const observed = evidence?.senders[mailSenderTag(sender.from)];
   if (observed?.toUpperCase() === 'VERIFIED') {
-    return [{ ...pass('D-M1', 'the app sends mail and its sender is verified by the live Catalyst read-back'), screen: `mail sender ${maskEmail(sender.from)} is verified (live read-back)` }];
+    return [
+      {
+        ...pass('D-M1', 'the app sends mail and its sender is verified by the live Catalyst read-back'),
+        screen: `mail sender ${maskEmail(sender.from)} is verified (live read-back${evidence?.projectId ? ` for project ${evidence.projectId}` : ''} at ${evidence?.at})`,
+      },
+    ];
   }
   if (observed !== undefined) {
     return [
@@ -1213,7 +1221,7 @@ export async function runDoctorChecks(ctx: DoctorContext): Promise<DoctorRun> {
 
   const d1 = checkD1(ctx);
   checks.push(d1.result);
-  if (d1.ir) checks.push(...checkMailSender(d1.ir, ctx.workspace));
+  if (d1.ir) checks.push(...checkMailSender(d1.ir, ctx.workspace, ctx.scope.project));
   checks.push(ctx.local ? localSkip('D-D2') : checkD2(ctx));
   checks.push(ctx.local ? localSkip('D-D3') : checkD3(ctx));
 

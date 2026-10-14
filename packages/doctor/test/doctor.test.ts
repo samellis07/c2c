@@ -251,7 +251,7 @@ test('doctor reports the sender verified only from the recorded live read-back',
   // The recorded read-back decides: VERIFIED passes, anything else fails.
   evidence('VERIFIED');
   assert.equal(check().status, 'pass');
-  assert.equal(check().screen, 'mail sender s***@example.com is verified (live read-back)');
+  assert.match(check().screen ?? '', /^mail sender s\*\*\*@example\.com is verified \(live read-back at \d{4}-/);
   evidence('PENDING');
   assert.equal(check().status, 'fail');
   assert.equal(check().screen, 'mail sender s***@example.com read back as PENDING');
@@ -264,6 +264,26 @@ test('doctor reports the sender verified only from the recorded live read-back',
   writeFileSync(path, JSON.stringify({ mail: { testRecipients: [] } }));
   assert.equal(check().status, 'fail');
   assert.match(check().detail, /no Catalyst Mail sender is set/);
+});
+
+test('doctor ignores a recorded read-back observed against another project', () => {
+  const dir = tmp('c2c-doctor-mail-');
+  writeFileSync(join(dir, 'c2c-deploy.json'), JSON.stringify({ mail: { from: 'sender@example.com', verified: true } }));
+  const record = (projectId?: string) =>
+    writeMailSenderEvidence(dir, { version: 1, ...(projectId ? { projectId } : {}), at: '2026-01-02T03:04:05.000Z', senders: { [mailSenderTag('sender@example.com')]: 'VERIFIED' } });
+
+  record('1001');
+  const same = checkMailSender(MAIL_APP, dir, '1001')[0]!;
+  assert.equal(same.status, 'pass');
+  assert.equal(same.screen, 'mail sender s***@example.com is verified (live read-back for project 1001 at 2026-01-02T03:04:05.000Z)');
+
+  // Another project's record, or one naming no project, does not verify: the attestation alone is a warning.
+  for (const other of ['2002', undefined]) {
+    record(other);
+    const check = checkMailSender(MAIL_APP, dir, '1001')[0]!;
+    assert.equal(check.status, 'warn', `record for project ${other ?? '(none)'}`);
+    assert.equal(check.screen, 'mail sender s***@example.com is attested, not confirmed by a live read-back');
+  }
 });
 
 const dirs: string[] = [];

@@ -12,6 +12,7 @@ export {
   mailImportSpec,
   mailLogTableStep,
   mailModuleSource,
+  mailSenderEvidenceFor,
   mailSenderEvidenceVerified,
   mailSenderPrecheck,
   mailSenderStatusEntries,

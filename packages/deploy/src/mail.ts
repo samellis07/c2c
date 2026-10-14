@@ -199,6 +199,14 @@ export function writeMailSenderEvidence(workspace: string, evidence: MailSenderE
   writeFileSync(path, `${JSON.stringify(evidence, null, 2)}\n`);
 }
 
+/**
+ * The recorded read-back when it belongs to `projectId`; a record observed
+ * against another project, or one that names no project, is ignored.
+ */
+export function mailSenderEvidenceFor(evidence: MailSenderEvidence | undefined, projectId: string): MailSenderEvidence | undefined {
+  return evidence?.projectId === projectId ? evidence : undefined;
+}
+
 /** True when the recorded read-back lists `address` VERIFIED. */
 export function mailSenderEvidenceVerified(evidence: MailSenderEvidence | undefined, address: string): boolean {
   return evidence?.senders[mailSenderTag(address)]?.toUpperCase() === 'VERIFIED';
