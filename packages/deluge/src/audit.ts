@@ -30,3 +30,14 @@ export function withDecimalAudit<T>(fn: () => T): { result: T; audit: DecimalAud
     sink = prev;
   }
 }
+
+/** Run `fn` without recording into the active audit. Probe translations use this. */
+export function withoutDecimalAudit<T>(fn: () => T): T {
+  const prev = sink;
+  sink = null;
+  try {
+    return fn();
+  } finally {
+    sink = prev;
+  }
+}

@@ -1,4 +1,5 @@
 import type { FunctionDef } from '../../core/src/ir.js';
+import { compareEnUs } from '../../core/src/order.js';
 import type { TodoItem } from './translate.js';
 import { loadDocs } from './catalogue.js';
 import { parse } from './parser.js';
@@ -40,7 +41,9 @@ export function resolveAppCalls(source: string, functions: FunctionDef[], todos:
         if (matches.length === 1 && parameterCount(matches[0]!.signature) === call.args.length) edits.push(callee.span.start);
       }
     }
-    for (const [key, child] of Object.entries(node)) if (key !== 'span') visit(child);
+    for (const key of Object.keys(node).sort((a, b) => compareEnUs(a, b))) {
+      if (key !== 'span') visit(node[key]);
+    }
   };
   visit(parse(source));
   if (!edits.length) return source;
