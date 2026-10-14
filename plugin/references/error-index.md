@@ -15,7 +15,7 @@ the specific cause. Every code links back to this index.
 
 | Code | Error boundary |
 |---|---|
-| `C2C-CLI-001` | Core `c2c` argument, input, and command errors |
+| `C2C-CLI-001` | Core `c2c` errors and CLI utility script errors |
 | `C2C-DEPLOY-001` | Deploy, plan, edit, provision, and migration command errors |
 | `C2C-DOCTOR-001` | Doctor and vendor verification command errors |
 

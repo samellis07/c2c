@@ -27,6 +27,10 @@ function usage() {
   return 'usage: check-matrix-citations.mjs [source.json] [--repo dir] [--rev rev]';
 }
 
+function cliError(message) {
+  console.error(`${message.trimEnd()} [C2C-CLI-001]\nSee plugin/references/error-index.md#c2c-cli-001`);
+}
+
 export function extractCites(rows) {
   const out = [];
   for (const row of rows) {
@@ -92,15 +96,21 @@ if (isMain) {
     else if (args[i] === '--rev') rev = args[++i];
     else if (!args[i].startsWith('--') && source === null) source = args[i];
     else {
-      console.error(usage());
+      cliError(usage());
       process.exit(2);
     }
   }
   if (repo === undefined || rev === undefined || source === undefined || source === null) {
-    console.error(usage());
+    cliError(usage());
     process.exit(2);
   }
-  const doc = JSON.parse(readFileSync(source, 'utf8'));
+  let doc;
+  try {
+    doc = JSON.parse(readFileSync(source, 'utf8'));
+  } catch (error) {
+    cliError(`cannot read ${source}: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(2);
+  }
   // A c2c-matrix-citations/1 sidecar carries { cites: [{id, spec}] }; a full
   // matrix carries rows whose cites are extracted.
   const cites = Array.isArray(doc?.cites)
@@ -108,8 +118,8 @@ if (isMain) {
     : extractCites(Array.isArray(doc) ? doc : doc.rows ?? []);
   const failures = checkCites(cites, { repo, rev });
   if (failures.length > 0) {
-    for (const f of failures) console.error(`stale cite row ${f.id}: ${f.spec} — ${f.reason}`);
-    console.error(`${failures.length} stale cite(s) of ${cites.length} at ${rev}`);
+    for (const f of failures) cliError(`stale cite row ${f.id}: ${f.spec} — ${f.reason}`);
+    cliError(`${failures.length} stale cite(s) of ${cites.length} at ${rev}`);
     process.exit(1);
   }
   console.log(`ok: ${cites.length} cites resolve at ${rev}`);

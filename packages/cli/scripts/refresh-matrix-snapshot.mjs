@@ -10,24 +10,35 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkCites, extractCites } from './check-matrix-citations.mjs';
 
+function cliError(message) {
+  process.stderr.write(`${message.trimEnd()} [C2C-CLI-001]\nSee plugin/references/error-index.md#c2c-cli-001\n`);
+}
+
 const sourcePath = process.argv[2];
 if (!sourcePath) {
-  process.stderr.write('usage: node packages/cli/scripts/refresh-matrix-snapshot.mjs <source.json> [YYYY-MM-DD]\n');
+  cliError('usage: node packages/cli/scripts/refresh-matrix-snapshot.mjs <source.json> [YYYY-MM-DD]');
   process.exit(2);
 }
 const snapshotDate = process.argv[3] ?? new Date().toISOString().slice(0, 10);
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../data');
 const repo = path.resolve(dataDir, '..', '..', '..');
 
-const raw = readFileSync(sourcePath);
+let raw;
+let sourceRows;
+try {
+  raw = readFileSync(sourcePath);
+  sourceRows = JSON.parse(raw.toString('utf8'));
+} catch (error) {
+  cliError(`cannot read ${sourcePath}: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(2);
+}
 const sourceSha256 = createHash('sha256').update(raw).digest('hex');
-const sourceRows = JSON.parse(raw.toString('utf8'));
 
 const cites = extractCites(sourceRows);
 const stale = checkCites(cites, { repo, rev: 'HEAD' });
 if (stale.length > 0) {
-  for (const f of stale) process.stderr.write(`stale cite row ${f.id}: ${f.spec} — ${f.reason}\n`);
-  process.stderr.write(`refusing to refresh: ${stale.length} stale cite(s) of ${cites.length} at HEAD\n`);
+  for (const f of stale) cliError(`stale cite row ${f.id}: ${f.spec} — ${f.reason}`);
+  cliError(`refusing to refresh: ${stale.length} stale cite(s) of ${cites.length} at HEAD`);
   process.exit(1);
 }
 

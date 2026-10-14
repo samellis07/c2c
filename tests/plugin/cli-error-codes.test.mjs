@@ -1,5 +1,6 @@
 /** CLI error codes and the troubleshooting index stay in bidirectional parity. */
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -8,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const sources = [
   'packages/cli/src/c2c.ts',
+  'packages/cli/scripts/check-matrix-citations.mjs',
+  'packages/cli/scripts/refresh-matrix-snapshot.mjs',
   'packages/deploy/src/cli.ts',
   'packages/doctor/src/cli.ts',
 ];
@@ -41,4 +44,15 @@ test('negative controls detect a missing index row and an orphan index row', () 
   const orphan = read(index).replace('| Code | Error boundary |', '| Code | Error boundary |\n| `C2C-DOCTOR-999` | invented boundary |');
   assert.throws(() => assertParity(texts, orphan), /no source boundary/);
   assert.ok(indexed.has(code));
+});
+
+test('CLI utility script errors carry the indexed code and link', () => {
+  const check = spawnSync(process.execPath, [path.join(repo, sources[1]), '--unknown'], { encoding: 'utf8' });
+  assert.equal(check.status, 2);
+  assert.match(check.stderr, /\[C2C-CLI-001\]/);
+  assert.match(check.stderr, /plugin\/references\/error-index\.md#c2c-cli-001/);
+  const refresh = spawnSync(process.execPath, [path.join(repo, sources[2])], { encoding: 'utf8' });
+  assert.equal(refresh.status, 2);
+  assert.match(refresh.stderr, /\[C2C-CLI-001\]/);
+  assert.match(refresh.stderr, /plugin\/references\/error-index\.md#c2c-cli-001/);
 });
