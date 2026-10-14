@@ -73,6 +73,22 @@ function resolveKey(packages, name, from) {
   }
 }
 
+// W3C Subresource Integrity (SRI) / npm ssri & pacote: npm v5+ emits sha512-<base64>
+// and ssri accepts SHA-2 (sha256/sha384/sha512) digests encoded in standard RFC 4648 base64.
+// Legacy sha1 is collision-broken (SHAttered / NIST SP 800-131A) and is rejected.
+const SRI_SHA2_RE = /^sha(?:512|384|256)-[A-Za-z0-9+/]+=*$/;
+const ALLOWED_REGISTRY_RE = /^https:\/\/registry\.npmjs\.org\//;
+
+function isSafeRepoRelativeWorkspaceTarget(rootAbs, lockDir, resolved) {
+  if (typeof resolved !== 'string') return false;
+  const target = resolved.trim();
+  if (!target || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(target)) return false;
+  if (path.isAbsolute(target) || path.posix.isAbsolute(target)) return false;
+  const targetAbs = path.resolve(lockDir, target);
+  const relToRoot = path.relative(rootAbs, targetAbs);
+  return Boolean(relToRoot) && !relToRoot.startsWith('..') && !path.isAbsolute(relToRoot);
+}
+
 /**
  * Walk the production dependency closure of one package.json + package-lock
  * pair. Returns { packages, problems }: every reachable prod package with its
@@ -80,22 +96,52 @@ function resolveKey(packages, name, from) {
  * manifest's `dependencies`).
  */
 export function auditLockfile({ root = repoRoot, dir, label, deps } = {}) {
-  const manifestPath = path.join(root, dir ?? '', 'package.json');
-  const lockPath = path.join(root, dir ?? '', 'package-lock.json');
+  const rootAbs = path.resolve(root);
+  const lockDir = path.resolve(root, dir ?? '');
+  const manifestPath = path.join(lockDir, 'package.json');
+  const lockPath = path.join(lockDir, 'package-lock.json');
   const problems = [];
   if (!existsSync(manifestPath)) return { label, packages: [], problems: [`${label}: ${manifestPath} is missing`] };
   const manifest = readJson(manifestPath);
   const lock = existsSync(lockPath) ? readJson(lockPath) : undefined;
   const packages = lock?.packages ?? {};
   if (!existsSync(lockPath)) problems.push(`${label}: ${lockPath} is missing; licences cannot be verified deterministically`);
+  const workspaceTargets = new Set();
+  for (const [, entry] of Object.entries(packages)) {
+    if (entry?.link === true && isSafeRepoRelativeWorkspaceTarget(rootAbs, lockDir, entry.resolved)) {
+      workspaceTargets.add(path.posix.normalize(entry.resolved.trim()));
+    }
+  }
   for (const [key, entry] of Object.entries(packages)) {
-    if (!key || entry.link === true || entry.dev === true) continue;
+    // Root entry ("") is the project manifest itself; dev entries are not shipped.
+    if (key === '' || entry.dev === true) continue;
     const id = `${key} (${entry.version ?? 'unknown version'})`;
+    if (entry.link === true) {
+      // Local workspace symlink (`node_modules/<pkg>` -> repo-relative workspace directory).
+      // Only links resolving strictly inside the repository root are trusted.
+      if (!isSafeRepoRelativeWorkspaceTarget(rootAbs, lockDir, entry.resolved)) {
+        problems.push(`${label}: ${id} workspace link points outside the repository (${entry.resolved ?? 'missing resolved'})`);
+      }
+      continue;
+    }
+    if (!key.startsWith('node_modules/') && !key.includes('/node_modules/') && workspaceTargets.has(path.posix.normalize(key))) {
+      // Local workspace package definition entry paired with a verified `link: true` entry.
+      continue;
+    }
+    if (entry.inBundle === true) {
+      // npm omits `resolved` and `integrity` on `inBundle: true` entries (`bundleDependencies`)
+      // because bundled packages are extracted from their parent package's tarball and covered
+      // by the parent's registry URL and SHA-2 integrity digest. Their licence is still audited below.
+      continue;
+    }
     if (typeof entry.integrity !== 'string' || !entry.integrity.trim()) {
       problems.push(`${label}: ${id} has no integrity hash`);
+    } else if (!SRI_SHA2_RE.test(entry.integrity.trim())) {
+      problems.push(`${label}: ${id} has invalid or weak integrity hash ${entry.integrity}`);
     }
-    if (typeof entry.resolved === 'string' && /^(?:git(?:\+[^:]+)?:|https?:)/i.test(entry.resolved)
-      && !/^https:\/\/(?:registry\.npmjs\.org|registry\.yarnpkg\.com)\//i.test(entry.resolved)) {
+    if (typeof entry.resolved !== 'string' || !entry.resolved.trim()) {
+      problems.push(`${label}: ${id} has no resolved registry URL (non-registry tarball source)`);
+    } else if (!ALLOWED_REGISTRY_RE.test(entry.resolved)) {
       problems.push(`${label}: ${id} uses a non-registry tarball source ${entry.resolved}`);
     }
   }
@@ -112,7 +158,12 @@ export function auditLockfile({ root = repoRoot, dir, label, deps } = {}) {
       problems.push(`${label}: ${name} (required by ${from || 'manifest'}) has no locked entry`);
       return;
     }
-    const entry = packages[key];
+    const rawEntry = packages[key];
+    const linkedWorkspace =
+      rawEntry.link === true && typeof rawEntry.resolved === 'string'
+        ? packages[path.posix.normalize(rawEntry.resolved.trim())]
+        : undefined;
+    const entry = linkedWorkspace ? { ...linkedWorkspace, ...rawEntry } : rawEntry;
     if (entry.dev === true) return; // dev-only, not shipped
     const id = `${name}@${entry.version}`;
     if (seen.has(id)) return;
