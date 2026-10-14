@@ -12,7 +12,9 @@
  *     `POST /bucket` with `401 OAUTH_SCOPE_MISMATCH` (jobs-and-files.md,
  *     surface-decision-table.md).
  *   - `GET /baas/v1/project/<project-id>/bucket/<name>` with the CLI token
- *     returns the bucket row or 404 (stratus-bucket.ts).
+ *     returns the bucket row inside the Catalyst `data` envelope —
+ *     `{ data: [{ bucket_name, bucket_url, ... }] }` — or 404 when absent
+ *     (stratus-bucket.ts, packages/deploy/test/seed-bucket.test.ts).
  *   - There is no documented token delete: cleanup is
  *     `CatalystbyZoho_Delete_Bucket` by `query_params.bucket_name`
  *     (errors.md), instructed for the session and re-printed while a pending
@@ -99,11 +101,19 @@ export async function verifyProbe(rest: RestFn, target: ProbeTarget, name: strin
         return { ...base, status: 'unverifiable', detail: `the REST read-back returned malformed JSON; bucket ${name} could not be verified` };
       }
     }
-    if (typeof body !== 'object' || body === null || !('bucket_name' in body) || typeof body.bucket_name !== 'string') {
-      return { ...base, status: 'unverifiable', detail: `the REST read-back did not contain a bucket_name; bucket ${name} could not be verified` };
+    // The specific-bucket GET answers the row inside the Catalyst `data`
+    // envelope, the same array shape the seed bucket read-back uses
+    // (stratus-bucket.ts, packages/deploy/test/seed-bucket.test.ts).
+    const data = typeof body === 'object' && body !== null ? (body as { data?: unknown }).data : undefined;
+    if (!Array.isArray(data) || data.length !== 1 || typeof data[0] !== 'object' || data[0] === null) {
+      return { ...base, status: 'unverifiable', detail: `the REST read-back did not return a single bucket row; bucket ${name} could not be verified` };
     }
-    if (body.bucket_name !== name) {
-      return { ...base, status: 'unverifiable', detail: `the REST read-back returned bucket_name ${body.bucket_name}, not the expected probe bucket ${name}` };
+    const row = data[0] as { bucket_name?: unknown };
+    if (typeof row.bucket_name !== 'string') {
+      return { ...base, status: 'unverifiable', detail: `the REST read-back row did not contain a bucket_name; bucket ${name} could not be verified` };
+    }
+    if (row.bucket_name !== name) {
+      return { ...base, status: 'unverifiable', detail: `the REST read-back returned bucket_name ${row.bucket_name}, not the expected probe bucket ${name}` };
     }
     return { ...base, status: 'verified', detail: `probe bucket ${name} found in project ${target.project} over the Catalyst REST API` };
   }

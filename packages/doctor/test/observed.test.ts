@@ -204,7 +204,7 @@ test('mcp-observed: stdio is green when the probe write is read back in the sele
     ],
   });
   const seen: { path: string }[] = [];
-  const run = await observe(env, body, [], NO_HOOKS, fakeRest({ [probe]: { bucket_name: probe } }, seen));
+  const run = await observe(env, body, [], NO_HOOKS, fakeRest({ [probe]: { data: [{ bucket_name: probe }] } }, seen));
   assert.equal(run.code, 0, run.out + run.err);
   assert.match(run.out, /PASS D-B1 .*stdio.*bound by the probe write/);
   assert.match(run.out, /PASS D-B2 .*in .*project write probe/);
@@ -258,20 +258,44 @@ test('mcp-observed: a probe that landed under a different org/project is red', a
 
 test('mcp-observed: a 200 read-back must contain the exact probe bucket name', async () => {
   for (const [label, body] of [
-    ['different bucket', { bucket_name: 'some-other-bucket' }],
+    ['different bucket', { data: [{ bucket_name: 'some-other-bucket' }] }],
+    ['empty data', { data: [] }],
+    ['several buckets', (request: string) => ({ data: [{ bucket_name: `c2cprobe${request}` }, { bucket_name: 'some-other-bucket' }] })],
+    ['row without a name', { data: [{ bucket_url: 'https://x-development.zohostratus.in' }] }],
+    ['data not a list', { data: { bucket_name: 'x' } }],
+    ['top-level name only', { bucket_name: 'x' }],
     ['missing body', undefined],
     ['malformed JSON', '{not-json'],
   ] as const) {
     const { dir, env } = workspace();
     const { request } = await begin(env);
     const probe = `c2cprobe${request}`;
-    const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: body }));
+    const resolved = typeof body === 'function' ? body(request) : body;
+    const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: resolved }));
     assert.equal(run.code, 1, `${label}: ${run.out}${run.err}`);
     assert.match(run.out, /FAIL D-B2 .*probe write was not read back/);
     const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
     assert.notEqual(file.mcp?.binding?.status, 'verified');
     assert.ok(existsSync(join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json')), `${label}: cleanup remains tracked`);
   }
+});
+
+test('mcp-observed: the real Catalyst get-bucket envelope verifies — data array, one row, exact name', async () => {
+  const { dir, env } = workspace();
+  const { request } = await begin(env);
+  const probe = `c2cprobe${request}`;
+  // The exact body the specific-bucket REST read-back returns
+  // (packages/deploy/test/seed-bucket.test.ts): the row rides in `data`.
+  const run = await observe(
+    env,
+    observation(request, { host_of_url: undefined, transport: 'stdio' }),
+    [],
+    NO_HOOKS,
+    fakeRest({ [probe]: { data: [{ bucket_name: probe, bucket_url: `https://${probe}-development.zohostratus.in` }] } }),
+  );
+  assert.equal(run.code, 0, run.out + run.err);
+  const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
+  assert.equal(file.mcp?.binding?.status, 'verified');
 });
 
 test('mcp-observed: a fabricated org host or a matching CLI selection never stands in for the probe', async () => {
@@ -295,7 +319,7 @@ test('mcp-observed: cleanup is re-printed while the probe may still exist, and c
   const { dir, env } = workspace();
   const { request } = await begin(env);
   const probe = `c2cprobe${request}`;
-  const run = await observe(env, observation(request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: { bucket_name: probe } }));
+  const run = await observe(env, observation(request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: { data: [{ bucket_name: probe }] } }));
   assert.equal(run.code, 0, run.out + run.err);
   assert.match(run.out, /cleanup: remove the probe bucket/);
   assert.match(run.out, /Delete_Bucket/);
@@ -315,14 +339,14 @@ test('mcp-observed: a second probe never orphans the first — both are tracked,
   // First probe verified server-side, but the session never ran its delete.
   const first = await begin(env);
   const probe1 = `c2cprobe${first.request}`;
-  const run1 = await observe(env, observation(first.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { bucket_name: probe1 } }));
+  const run1 = await observe(env, observation(first.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { data: [{ bucket_name: probe1 }] } }));
   assert.equal(run1.code, 0, run1.out + run1.err);
   // The second begin still reminds about the first probe, and the second
   // verified probe is APPENDED — both buckets stay tracked.
   const second = await begin(env);
   const probe2 = `c2cprobe${second.request}`;
   assert.match(second.out, new RegExp(probe1));
-  const run2 = await observe(env, observation(second.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { bucket_name: probe1 }, [probe2]: { bucket_name: probe2 } }));
+  const run2 = await observe(env, observation(second.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { data: [{ bucket_name: probe1 }] }, [probe2]: { data: [{ bucket_name: probe2 }] } }));
   assert.equal(run2.code, 0, run2.out + run2.err);
   const tracked = JSON.parse(readFileSync(cleanupFile, 'utf8')) as { name: string }[];
   assert.deepEqual(tracked.map((p) => p.name).sort(), [probe1, probe2].sort());
@@ -341,14 +365,14 @@ test('mcp-observed: a partial cleanup keeps the remaining pending record', async
   const cleanupFile = join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json');
   const first = await begin(env);
   const probe1 = `c2cprobe${first.request}`;
-  assert.equal((await observe(env, observation(first.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { bucket_name: probe1 } }))).code, 0);
+  assert.equal((await observe(env, observation(first.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { data: [{ bucket_name: probe1 }] } }))).code, 0);
   const second = await begin(env);
   const probe2 = `c2cprobe${second.request}`;
-  assert.equal((await observe(env, observation(second.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { bucket_name: probe1 }, [probe2]: { bucket_name: probe2 } }))).code, 0);
+  assert.equal((await observe(env, observation(second.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { data: [{ bucket_name: probe1 }] }, [probe2]: { data: [{ bucket_name: probe2 }] } }))).code, 0);
   // The session deleted only the first bucket: its entry drops, the second stays.
   const third = await begin(env);
   const probe3 = `c2cprobe${third.request}`;
-  const run3 = await observe(env, observation(third.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe2]: { bucket_name: probe2 }, [probe3]: { bucket_name: probe3 } }));
+  const run3 = await observe(env, observation(third.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe2]: { data: [{ bucket_name: probe2 }] }, [probe3]: { data: [{ bucket_name: probe3 }] } }));
   assert.equal(run3.code, 0, run3.out + run3.err);
   const tracked = JSON.parse(readFileSync(cleanupFile, 'utf8')) as { name: string }[];
   assert.deepEqual(tracked.map((p) => p.name).sort(), [probe2, probe3].sort());
