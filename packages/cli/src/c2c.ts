@@ -175,7 +175,7 @@ import { defaultIo, deployCli, diffTemplate, editCli, formatDrift, hasReportJson
 import { cutoverCli } from './cutover.js';
 import { argvShapeProblems, seedArgsProblem } from './argv.js';
 import { GATE_EXIT, defaultDoctorIo, doctorCli, doctorGateForArgs, doctorStamp, gateRefusalMessage, verifyVendorCli, workspaceDir, type DoctorStamp } from '../../doctor/src/index.js';
-import { fillTodosMain } from '../../deluge/src/fill-todos.js';
+import { FillTodoError, fillTodosMain } from '../../deluge/src/fill-todos.js';
 import { analyze, analyzeAsJson, analyzeAsText } from './analyze.js';
 import { precheck, precheckAsJson, precheckAsText } from './precheck.js';
 
@@ -591,6 +591,14 @@ function main(argv: string[]): number {
     if (locked) return 2;
     if (!ir) return 1;
     const lockPath = flag('--lock');
+    if (rest.includes('--lock') && !lockPath) {
+      process.stderr.write('c2c: needs a value\n');
+      return 2;
+    }
+    if (lockPath !== undefined && !statSync(lockPath, { throwIfNoEntry: false })?.isFile()) {
+      process.stderr.write(`c2c: no such lock file: ${lockPath}\n`);
+      return 2;
+    }
     const report = analyze(ir, lockPath !== undefined ? { lock: readLock(lockPath) } : undefined);
     if (rest.includes('--quality')) {
       analyzeQuality(ir, report).then(
@@ -961,6 +969,9 @@ try {
   code = main(process.argv.slice(2));
 } catch (err) {
   if (err instanceof LockedExportError) {
+    process.stderr.write(`c2c: ${err.message}\n`);
+    code = 2;
+  } else if (err instanceof FillTodoError) {
     process.stderr.write(`c2c: ${err.message}\n`);
     code = 2;
   } else if (err instanceof DomUnavailableError || (err instanceof Error && err.name === 'DomUnavailableError')) {
