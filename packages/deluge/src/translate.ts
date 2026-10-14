@@ -4380,7 +4380,7 @@ function callExpr(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fals
       return mergeFx(`(${id} ? (Array.isArray(${id}) ? ${id}.length : 1) : 0)`, [q], { shim: true });
     }
     if (method === 'average' || method === 'median') {
-      return mergeFx(`shim.number.${method}(${q.code})`, [q], { shim: true });
+      return mergeFx(`shim.list.aggregate(${q.code}, ${JSON.stringify(aggregateFn(method))})`, [q], { shim: true });
     }
     // Rows or values already in memory (`input.Subform.sum(Amount)`,
     // `numbers.average()`). `min`/`max` with an argument are the two-number
@@ -4713,9 +4713,6 @@ function namedCall(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fal
       // (`sum("x")` is not `shim.list.aggregate`). A map member is not a list of rows:
       // `sum(m.k)` aggregates the member expression, same as `m.k.sum()`.
       if (!q.query && !q.todo && q.list) {
-        if (aggregateCall === 'average' || aggregateCall === 'median') {
-          return mergeFx(`shim.number.${aggregateCall}(${q.code})`, [q], { shim: true });
-        }
         const exact = !!fieldName && scope.decimalFields.has(fieldName);
         const extra = fieldName ? `, ${JSON.stringify(fieldName)}${exact ? ', true' : ''}` : '';
         return mergeFx(`shim.list.aggregate(${q.code}, ${JSON.stringify(fn)}${extra})`, [q], {
@@ -4876,7 +4873,7 @@ function directMethod(method: string, recv: Fx, args: Fx[]): Fx | null {
   if (method === 'cos') return call(`shim.number.cos(${recv.code})`, { decimal: true });
   if (method === 'tan') return call(`shim.number.tan(${recv.code})`, { decimal: true });
   if (method === 'asin') return call(`shim.number.asin(${recv.code})`, { decimal: true });
-  if (method === 'average' || method === 'median') return call(`shim.number.${method}(${recv.code})`);
+  if (method === 'average' || method === 'median') return call(`shim.list.aggregate(${recv.code}, ${JSON.stringify(aggregateFn(method))})`);
   if (method === 'nthLargest' || method === 'nthSmallest') return call(`shim.number.${method}(${recv.code}, ${args[0]?.code ?? 'null'})`);
   if (method === 'toHex') return call(`shim.number.toHex(${recv.code})`);
   if (method === 'toWords') return call(`shim.number.toWords(${recv.code}, ${args[0]?.code ?? 'null'})`);

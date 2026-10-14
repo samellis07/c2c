@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert';
-import { average, median, nthLargest, nthSmallest, round, sqrt, log, toHex, toWords } from '../src/number.js';
+import { nthLargest, nthSmallest, round, sqrt, log, toHex, toWords } from '../src/number.js';
 import { DelugeConversionError } from '../src/convert.js';
 
 test('round', () => {
@@ -29,17 +29,12 @@ test('log of negative', () => {
   assert.strictEqual(Number.isNaN(log(-1)), true);
 });
 
-test('Deluge number lists average, median and ranked values', () => {
-  assert.equal(average([1, 5, 2, 3]), 2.75);
-  assert.equal(median([1, 5, 2, 3]), 2.5);
+test('Deluge collection ranks are one-based, numerically sorted values', () => {
   // Numeric ordering matters here: a lexicographic sort would put 10 before 2.
-  assert.equal(median([10, 2, 3]), 3);
+  assert.equal(nthLargest([10, 2, 3], 2), 3);
   assert.equal(nthLargest([300, 455, 124, 926, 780], 5), 124);
   assert.equal(nthSmallest([300, 455, 124, 926, 780], 2), 300);
-  assert.equal(average([null, 2, 4]), 3);
-  assert.equal(median([]), null);
   assert.equal(nthLargest([], 1), null);
-  assert.throws(() => average([1, 'nope']), /non-numeric/);
   assert.throws(() => nthSmallest([1, {}], 1), /non-numeric/);
 });
 
