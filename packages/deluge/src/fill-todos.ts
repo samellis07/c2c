@@ -1512,7 +1512,12 @@ export function emitTodoFiles(app: App, dir: string): FillTask[] {
 
 export function readLock(path: string): FillLock {
   if (!statSync(path, { throwIfNoEntry: false })?.isFile()) return { version: 1, entries: {} };
-  const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<FillLock>;
+  let parsed: Partial<FillLock>;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<FillLock>;
+  } catch {
+    throw new FillTodoError('lock file is not valid JSON');
+  }
   if (parsed.version !== 1 || !parsed.entries || typeof parsed.entries !== 'object' || Array.isArray(parsed.entries)) {
     throw new FillTodoError('c2c.lock.json is not version 1');
   }
