@@ -439,7 +439,8 @@ fa5aa7e9f8adb46c2db8f47a1ffd29b5d7dfb49eb18af1662ab0277ef86d74bb  web/lib/c2c-ui
 3f716c3464707bbad24d07bc9d2ec34de1594bc897d5a2a422ab2b18781ae6c0  web/lib/c2c-ui/subform/rows.ts
 3f110b83535075d85835b1bc0fd9229c83f5e37a4ff47a10fd12ead279e6acf3  web/lib/c2c-ui/subform/subform.css
 9794f4426cb104c49b9ab8cca0b85318632e71cf2d664fd0880220d5d43bcb2d  web/lib/c2c-ui/types.ts
-d13ec44b318c6ff6196a1e365dd059ce5e079c51dbdeff415df5f50767c17641  web/lib/c2c-ui/vite/plugin.ts
+89db592b6211d95ad2ff83a9b8ad583fe1affd8224b5b46f8877c47c41998db9  web/lib/c2c-ui/vite/plugin.ts
+3e93155d769794b9122b83d3034f85b13b16298709747082e4ca7c056eeec93d  web/lib/c2c-ui/vite/route-chunk-budgets.json
 8f75f481d2dc6e9dae4d51d8a9f3e7a0e53913661616fd744840bf9d0240330f  web/lib/c2c-ui/workflow/ApprovalsInbox.tsx
 d0eb613b0771884197332c502fe766a6369059bbf594320250819a1921ec2935  web/lib/c2c-ui/workflow/DecisionDialog.tsx
 0337edd68663c06e7a95a3a877bea917ce91c50fe4aac59ad69714bf05669145  web/lib/c2c-ui/workflow/FlowStageBar.tsx
