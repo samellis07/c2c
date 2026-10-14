@@ -15,7 +15,6 @@ import {
   doctorGateForArgs,
   doctorJsonPath,
   doctorStamp,
-  DOCTOR_CHECK_IDS,
   evaluateGate,
   gateRefusalMessage,
   missingRequiredTools,
@@ -44,10 +43,78 @@ import { ALL_REQUIRED_MCP_TOOLS, MCP_TOOLS_GUIDANCE, NEVER_CALL_MCP_TOOLS, REQUI
 const ORG = '10000000000';
 const PROJECT = '10000000000013200';
 
-test('doctor check catalogue matches the documented specification', () => {
+test('doctor check catalogue matches the documented specification', async () => {
   const spec = readFileSync(join(repoRoot(), 'plugin/references/doctor-spec.md'), 'utf8');
-  const documented = [...spec.matchAll(/^\| (D-[A-Z]\d+) \|/gm)].map((match) => match[1]!);
-  assert.deepEqual([...new Set(documented)].sort(), [...DOCTOR_CHECK_IDS].sort());
+  const documented = new Set([...spec.matchAll(/^\| (D-[A-Z]\d+) \|/gm)].map((match) => match[1]!));
+
+  // The implemented set is what runDoctorChecks actually emits across an
+  // offline fixture matrix that exercises every branch — a documented id the
+  // code never emits, or an emitted id the spec does not document, both fail
+  // this test. (The bare 'D-B' aggregate skip for missing evidence is not a
+  // catalogue id and is filtered out.)
+  const { dir, env } = greenWorkspace();
+  const vanilla = resolveScope({ cwd: dir, flags: {}, hooks: NO_HOOKS });
+  const react = resolveScope({ cwd: dir, flags: { ui: 'react' }, hooks: NO_HOOKS });
+  const meta = parseEvidence(JSON.stringify(evidence()));
+  const emitted = new Set<string>();
+  const collect = async (ctx: DoctorContext) => {
+    for (const check of (await runDoctorChecks(ctx)).checks) {
+      if (/^D-[A-Z]\d+$/.test(check.id)) emitted.add(check.id);
+    }
+  };
+  // Remote React run with evidence, a below-floor plugin and a non-pinned
+  // Node: emits D-A*, D-B*, D-C*, D-D*, D-E*, D-F*, D-R* and D-V*.
+  writeFileSync(
+    join(env.C2C_CATALYST_SKILLS_DIR!, 'catalyst-by-zoho', 'SKILL.md'),
+    '---\nname: catalyst-by-zoho\nmetadata:\n  version: "0.0.1"\n---\n',
+  );
+  await collect({
+    io: hostIo(env, join(dir, 'npm-cache')).io,
+    workspace: dir,
+    scope: react,
+    local: false,
+    evidence: meta,
+    cliDc: () => 'in',
+    nodeVersion: '20.21.0',
+  });
+  // A --local vanilla run without evidence emits the --local skip ids.
+  await collect({ io: hostIo(env, join(dir, 'npm-cache')).io, workspace: dir, scope: vanilla, local: true });
+
+  assert.deepEqual([...emitted].sort(), [...documented].sort());
+});
+
+/** Spawns a green host: catalyst CLI answers, and node/npm satisfy the React build floors. */
+function hostIo(env: NodeJS.ProcessEnv, npmCache: string, npmVersion = '10.9.2') {
+  return fakeIo(env, (command, args) => {
+    const key = args.join(' ');
+    if (command === 'node' && key === '--version') return { code: 0, stdout: 'v20.20.1\n', stderr: '' };
+    if (command === 'npm' && key === '--version') return { code: 0, stdout: `${npmVersion}\n`, stderr: '' };
+    if (command === 'npm' && key === 'ping --fetch-timeout 10000') return { code: 0, stdout: '', stderr: '' };
+    if (command === 'npm' && key === 'config get cache') return { code: 0, stdout: `${npmCache}\n`, stderr: '' };
+    return greenCatalyst(command, args);
+  });
+}
+
+test('doctor react prerequisites: the npm floor gates the registry and cache probes', async () => {
+  const { dir, env } = greenWorkspace();
+  const react = resolveScope({ cwd: dir, flags: { ui: 'react' }, hooks: NO_HOOKS });
+  const npmCache = join(dir, 'npm-cache');
+  const run = (npmVersion?: string) =>
+    runDoctorChecks({ io: hostIo(env, npmCache, npmVersion).io, workspace: dir, scope: react, local: false });
+
+  const ok = await run();
+  assert.equal(ok.checks.find((check) => check.id === 'D-R1')?.status, 'pass');
+  assert.equal(ok.checks.find((check) => check.id === 'D-R2')?.status, 'pass');
+  assert.equal(ok.checks.find((check) => check.id === 'D-R3')?.status, 'pass');
+  assert.equal(ok.checks.find((check) => check.id === 'D-R4')?.status, 'pass');
+  // The D-R4 probe creates the cache directory when it is missing.
+  assert.ok(existsSync(npmCache));
+
+  // An npm below compat.json reactBuild.npmMin fails D-R2 and skips D-R3/D-R4.
+  const old = await run('9.9.9');
+  assert.equal(old.checks.find((check) => check.id === 'D-R2')?.status, 'fail');
+  assert.equal(old.checks.find((check) => check.id === 'D-R3')?.status, 'skip');
+  assert.equal(old.checks.find((check) => check.id === 'D-R4')?.status, 'skip');
 });
 
 test('doctor offline coverage: conditional and warning checks return their documented outcomes', async () => {
