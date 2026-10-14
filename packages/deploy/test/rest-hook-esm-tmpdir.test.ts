@@ -120,3 +120,80 @@ test('a token child that prints nothing reports its exit code and first stderr l
     return true;
   });
 });
+
+test('child stderr secrets (Zoho OAuth token, Bearer header, refresh_token JSON, hex/base64 runs, env dumps) never leak into REST or token errors', async () => {
+  const zohoToken = '1000.a1b2c3d4e5f60718293a4b5c6d7e8f90.9f8e7d6c5b4a39281706f5e4d3c2b1a0';
+  const zohoHeaderToken = '1000.zohoheadersecret9876543210abcdef';
+  const bearerToken = 'bearer-planted-secret-987654321';
+  const refreshToken = 'rt-planted-secret-654321';
+  const accessToken = 'at-planted-secret-111222';
+  const clientSecret = 'cs-planted-secret-333444';
+  const plantedToken = 'c2c-fake-token-PLANTED-123456';
+  const hexRun = 'deadbeef0123456789abcdef01234567';
+  const b64Run = 'YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=';
+
+  const stderrLines = [
+    `catalyst auth failed: Zoho-oauthtoken ${zohoHeaderToken} raw ${zohoToken} Authorization: Bearer ${bearerToken} {"refresh_token":"${refreshToken}","access_token":"${accessToken}","client_secret":"${clientSecret}"} ?access_token=${accessToken}&client_secret=${clientSecret} ${plantedToken} ${hexRun} ${b64Run}`,
+    `planted-only: ${plantedToken}`,
+  ];
+
+  for (const line of stderrLines) {
+    const env = fakeCatalyst(
+      `'use strict';\nrequire('fs').writeSync(2, ${JSON.stringify(line + '\n')});\nprocess.kill(process.pid, 'SIGKILL');\n`,
+      mkdtempSync(join(tmpdir(), 'c2c-redact-stderr-')),
+    );
+    for (const call of [
+      () => catalystRestCall(env, ORG, PROJECT, { method: 'GET', path: `/baas/v1/project/${PROJECT}` }),
+      () => readCliAccessToken(env, ORG, PROJECT),
+    ]) {
+      await assert.rejects(call, (err: Error) => {
+        for (const canary of [
+          zohoToken,
+          zohoHeaderToken,
+          bearerToken,
+          refreshToken,
+          accessToken,
+          clientSecret,
+          plantedToken,
+          'PLANTED',
+          hexRun,
+          b64Run,
+        ]) {
+          assert.ok(!err.message.includes(canary), `stderr secret leaked (${canary}): ${err.message}`);
+        }
+        return true;
+      });
+    }
+  }
+});
+
+test('env dumps in child stderr are skipped while a benign line is preserved and long excerpts are capped', async () => {
+  const envSecret = 'env-dump-canary-secret-999';
+  const env = fakeCatalyst(
+    `'use strict';\nrequire('fs').writeSync(2, 'C2C_FAKE_TOKEN=${envSecret}\\n{"PATH":"/usr/bin","C2C_SECRET":"${envSecret}"}\\ncatalyst gateway unreachable\\n');\nprocess.kill(process.pid, 'SIGKILL');\n`,
+    mkdtempSync(join(tmpdir(), 'c2c-env-dump-')),
+  );
+  for (const call of [
+    () => catalystRestCall(env, ORG, PROJECT, { method: 'GET', path: `/baas/v1/project/${PROJECT}` }),
+    () => readCliAccessToken(env, ORG, PROJECT),
+  ]) {
+    await assert.rejects(call, (err: Error) => {
+      assert.ok(!err.message.includes(envSecret), `env dump leaked: ${err.message}`);
+      assert.ok(!err.message.includes('C2C_FAKE_TOKEN'), `env key leaked: ${err.message}`);
+      assert.match(err.message, /catalyst gateway unreachable/);
+      return true;
+    });
+  }
+
+  const longBenign = `benign error prefix ${'x'.repeat(500)}`;
+  const longEnv = fakeCatalyst(
+    `'use strict';\nrequire('fs').writeSync(2, ${JSON.stringify(longBenign + '\n')});\nprocess.kill(process.pid, 'SIGKILL');\n`,
+    mkdtempSync(join(tmpdir(), 'c2c-long-stderr-')),
+  );
+  await assert.rejects(readCliAccessToken(longEnv, ORG, PROJECT), (err: Error) => {
+    assert.match(err.message, /benign error prefix/);
+    assert.ok(err.message.length <= 260, `stderr excerpt was not capped: length ${err.message.length}`);
+    return true;
+  });
+});
+

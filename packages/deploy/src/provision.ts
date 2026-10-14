@@ -27,7 +27,8 @@ import { assertLiveProject, flag, type Io } from './cli.js';
 import { resolveProvisionScope, type ProvisionScope } from './provision-config.js';
 import { CUSTOMER_STEPS } from './customer-steps.js';
 import { parseJsonExact } from './json-exact.js';
-import { catalystRestCall, listCatalystProjects, readCliAccessToken, renewCliAccessToken } from './rest.js';
+import { AUTH_RE, catalystRestCall, EMAIL_RE, HEX_B64_TOKEN_RE, JWT_RE, listCatalystProjects, PARAM_SECRET_RE, readCliAccessToken, redactString, renewCliAccessToken, SAFE_CODE_KEY_RE, URL_RE, ZOHO_TOKEN_RE } from './rest.js';
+export { redactString };
 import { catalystBaseFor, dcEndpoints } from './dc.js';
 import { catalystScopeArgs, scrubCatalystEnv } from './scope.js';
 import { isExactGrantList, isPerRowGrantMatch, PLAN_CLI_PATH, PLAN_EMITTED_CLI_PATHS, PLAN_STEP_TOOL, PLAN_STEP_TOOLS, STEP_KINDS, sha256, type ProvisionStep, type StepEndpoint } from './offline-plan.js';
@@ -448,27 +449,10 @@ function readProvisionInputs(out: string): ProvisionInputs {
 // the doctor evidence validator, applied as redaction so the stored proof
 // stays usable.
 
-const URL_RE = /\b[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s"'<>)\]}]+/g;
-const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-/** xxx.yyy.zzz with base64url segments — a JWT. */
-const JWT_RE = /\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g;
-const AUTH_RE = /\b(?:Basic|Bearer)\s+[^\s"'<>]+/gi;
-const ZOHO_TOKEN_RE = /\b[0-9]{3,}\.[0-9a-zA-Z]{8,}[0-9a-zA-Z._-]*/g;
-/**
- * A secret-named parameter value. The key may sit at the start of the text or
- * after whitespace, `?`, `&`, `#`, `;`, `,`, `:`, a quote, `=`, `+`, or a markup /
- * bracket delimiter (`<`, `>`, `)`, `]`, `}`). The separator between key and value
- * is `=` or `:` (a header or a raw JSON pair), and the value may be wrapped in
- * quotes: `client_secret="…"`, `"refresh_token=…"`.
- */
-const PARAM_SECRET_RE =
-  /((?:^|["'=+?&#\s;,:<>)\]}]))((?:[^=\s&"'<>)\]}:]*)(?:token|secret|key|sig|code|pass|pw|otp)(?:[^=\s&"'<>)\]}:]*))(["']?)(\s*[:=]\s*["']?)([^&\s"'<>)\]},]+)/gi;
-const SENSITIVE_VALUE_RE = new RegExp(`(?:${URL_RE.source}|${AUTH_RE.source}|${JWT_RE.source}|${EMAIL_RE.source}|${ZOHO_TOKEN_RE.source}|${PARAM_SECRET_RE.source})`, 'i');
+const SENSITIVE_VALUE_RE = new RegExp(`(?:${URL_RE.source}|${AUTH_RE.source}|${JWT_RE.source}|${EMAIL_RE.source}|${ZOHO_TOKEN_RE.source}|${PARAM_SECRET_RE.source}|${HEX_B64_TOKEN_RE.source})`, 'i');
 /** A secret-named key — and everything nested under it — is never evidence. `code` matches inside _-compounds (auth_code, code_verifier) and camelCase (authCode) too. */
 const SECRET_KEY_RE =
   /token|secret|passw|pw|authorization|api[-_]?key|private[-_]?key|access[-_]?key|signature|session|credential|cookie|bearer|jwt|otp|(?:^|[-_]|[a-z])code(?:$|[-_]|[A-Z])/i;
-/** Diagnostic codes a caller reads to act on a failure — not secrets. */
-const SAFE_CODE_KEY_RE = /^(?:error|status|exit|http|reason)[-_]?code$/i;
 
 /**
  * Person data is never evidence: a read-back row can carry who created or
@@ -497,27 +481,6 @@ function stripPersonFields(value: unknown): unknown {
     out[key] = stripPersonFields(child);
   }
   return out;
-}
-
-export function redactString(value: string): string {
-  // The URL pass runs first: it consumes userinfo (`u:p@host`), the query and
-  // the fragment whole. Emailing first would split a URL at the '@' and leave
-  // its query secrets behind. The escaped forms of a URL are decoded before it
-  // — backslash and unicode escapes from JSON text, and the percent-encoded
-  // delimiters of a URL-shaped string — so an encoded URL in a raw-text body
-  // still matches.
-  return value
-    .replace(/\\\//g, '/')
-    .replace(/\\u002f/gi, '/')
-    .replace(/%(?:2f|3a|3f|3d|26|23|40)/gi, (hex) => String.fromCharCode(parseInt(hex.slice(1), 16)))
-    .replace(URL_RE, '<url>')
-    .replace(PARAM_SECRET_RE, (full, sep: string, key: string, close: string, delim: string) =>
-      SAFE_CODE_KEY_RE.test(key) ? full : `${sep}${key}${close}${delim}<redacted>`,
-    )
-    .replace(AUTH_RE, '<auth>')
-    .replace(JWT_RE, '<token>')
-    .replace(EMAIL_RE, '<email>')
-    .replace(ZOHO_TOKEN_RE, '<token>');
 }
 
 /** Deep copy with every email, URL and token-shaped string masked; secret-named keys hold only a marker; person entries are dropped. */

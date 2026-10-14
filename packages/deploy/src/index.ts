@@ -86,7 +86,7 @@ export { matchReadBack, provisionArgsProblem, provisionCli, resolveTokens } from
 export type { ProvisionPlanFile, ProvisionState, StepRecord, StepStatus } from './provision.js';
 export { readDeployConfig, resolveProvisionScope } from './provision-config.js';
 export type { DeployConfig, ProvisionScope } from './provision-config.js';
-export { assertProjectPath, assertSlatePath, catalystRestCall, decodeRestPayload, listCatalystProjects, parseProjectList, readCliAccessToken } from './rest.js';
+export { assertProjectPath, assertSlatePath, catalystRestCall, decodeRestPayload, listCatalystProjects, parseProjectList, readCliAccessToken, redactStderrExcerpt, redactString } from './rest.js';
 export { assertProjectDetails, assertReportedScope, catalystScopeArgs, cliRenderedProjectId, scrubCatalystEnv } from './scope.js';
 export { assertSmokeCookie, assertSmokeUrl, describeSmokeAuth, executeSmoke, formatSmokePlan, planSmoke, smokeCookieName } from './smoke.js';
 export type { SmokeAuth, SmokeFetch, SmokeFieldPlan, SmokeInputs, SmokeKind, SmokeResult, SmokeRunOptions, SmokeStep } from './smoke.js';
