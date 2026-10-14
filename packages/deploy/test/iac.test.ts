@@ -351,6 +351,48 @@ test('drift: an undeclared table or custom role permission is extra (exit 2); de
   assert.deepEqual(report.missing, []);
 });
 
+test('drift: EventListeners items are reported, never silently ignored', () => {
+  // Synthetic export excerpt (no recorded export with EventListeners items
+  // exists — the observed export emits the key only). Shaped like a real
+  // export excerpt: top-level component arrays plus a component_keys list,
+  // no `components` envelope. c2c never declares
+  // EventListeners, so the project-created listener and a console-added rule
+  // are both extra — produce_url and ids are scrubbed before the report.
+  const exported = {
+    name: 'project-template',
+    version: '1.0.0',
+    component_keys: [...IAC_COMPONENT_ORDER],
+    ...(recordedExport().components as Record<string, unknown>),
+    EventListeners: [
+      { type: 'listeners', name: 'component-listener', properties: { id: '12345678901234567', listener_type: 'component' }, dependsOn: [] },
+      {
+        type: 'rules',
+        name: 'orders-insert-rule',
+        properties: {
+          id: '12345678901234567',
+          component: 'DataStore',
+          table: 'Orders',
+          actions: ['Insert'],
+          targets: ['evt_handler'],
+          produce_url: 'https://events.example.test/produce/rule-key',
+        },
+        dependsOn: ['EventListeners.listeners.component-listener'],
+      },
+      { type: 'listeners', name: 'custom-listener', properties: { produce_url: 'https://events.example.test/produce/x' }, dependsOn: [] },
+    ],
+  };
+  const report = diffTemplate(DOC_TEMPLATE, exported);
+  assert.equal(report.exitCode, 2);
+  assert.deepEqual(report.missing, []);
+  assert.deepEqual(report.changed, []);
+  assert.deepEqual(report.extra, [
+    'EventListeners.listeners.component-listener',
+    'EventListeners.listeners.custom-listener',
+    'EventListeners.rules.orders-insert-rule',
+  ]);
+  assert.doesNotMatch(formatDrift(report), /produce_url|12345678901234567|rule-key/);
+});
+
 test('drift: a generated template round-trips through an export-shaped copy with no drift', () => {
   const template = JSON.parse(projectTemplateJson(SALES)) as { components: Record<string, Record<string, unknown>[]> };
   let n = 0;

@@ -105,6 +105,14 @@ Recipe: [UNVERIFIED] a custom publisher plus event plus rule to a Function targe
 
 Rule: [UNVERIFIED] treat the digest URL as a secret in generated config; create publishers and rules in the console and point them at Job-type targets.
 
+### Event Listeners are deprecated — Signals is the exit, and drift still reports them
+
+Rule: never emit the `EventListeners` IaC component or call `/event-bus` — on a current project the API answers `EVENT_BUS_ERROR` ("Event listeners are now deprecated. Please use Signals") and `event:generate` redirects to `signals:generate`. Route row triggers (`row_inserted` / `row_updated` / `row_deleted`) to Signals rules, which are console-created only.
+
+- `c2c iac-drift` still watches the `EventListeners` component: an export that carries `listeners` or `rules` items c2c did not create is reported as drift, never silently ignored.
+- Event delivery is documented as a single attempt — no automatic retry, backoff, or DLQ; a failure lands in the rule's Processed Events tab (retention 3 months Prod, 1 month Dev) with optional email alerts. Plan a dead-letter write plus a sweep for any async work the user must not lose.
+- Ordering and latency are undocumented; keep ordered or response-affecting work synchronous in `c2c_api` and use events only for fire-and-forget actions (mail, notifications, outbound calls).
+
 ## Job pools, crons, and jobs
 
 ### Create one Function job pool per project outside the token path

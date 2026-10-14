@@ -12,7 +12,10 @@
  * No ids, timestamps or secrets: every env var value is written as "".
  *
  * Not emitted: NoSQL tables (no IaC key), Signals (no IaC key in a current export),
- * Circuits (not in IN), EventListeners (deprecated), legacy Cron (unstable shape).
+ * Circuits (not in IN), EventListeners (deprecated — Signals is the exit; never
+ * emitted, but diffTemplate still reports export items so a console-added
+ * listener or rule surfaces instead of passing silently), legacy Cron
+ * (unstable shape).
  */
 import type { SchemaPlan } from '../../schema/src/generator.js';
 import { API_FUNCTION, FUNCTION_STACK } from './function-dir.js';
@@ -415,6 +418,15 @@ const VOLATILE_KEYS = new Set(['id', 'created_time', 'modified_time', 'last_upda
 /** Catalyst creates these in every project; they are drift only when the template declares them. */
 const DEFAULT_ROLES = new Set(['App Administrator', 'App User']);
 
+/**
+ * Components the drift check watches even when the expected template declares
+ * none of their items. c2c never emits EventListeners (deprecated — the
+ * event-bus API already 404s on new projects and Signals is the replacement),
+ * so any item an export carries there is a listener or rule c2c did not create:
+ * reported as extra, never silently ignored.
+ */
+const WATCHED_COMPONENTS = new Set(['EventListeners']);
+
 export interface NormalizedItem {
   key: string;
   properties: Record<string, unknown>;
@@ -467,12 +479,14 @@ export function normalizeTemplate(doc: unknown): Map<string, NormalizedItem> {
  * properties the template declares are compared, because an export also carries
  * Catalyst-filled defaults (an int column's max_length, for example). Export
  * components the template does not use at all, and Catalyst's default role
- * scopes and permissions and the Default cache segment, are not extra.
+ * scopes and permissions and the Default cache segment, are not extra — except
+ * WATCHED_COMPONENTS, which c2c never emits yet still reports on.
  */
 export function diffTemplate(expectedDoc: unknown, actualDoc: unknown): DriftReport {
   const expected = normalizeTemplate(expectedDoc);
   const actual = normalizeTemplate(actualDoc);
   const declared = new Set([...expected.keys()].map((key) => key.split('.')[0]));
+  for (const component of WATCHED_COMPONENTS) declared.add(component);
   const missing: string[] = [];
   const changed: DriftChange[] = [];
   for (const [key, want] of expected) {
