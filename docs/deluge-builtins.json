@@ -3,10 +3,10 @@
   "docs": "packages/deluge/data/builtin-docs.json",
   "dispatch": "packages/deluge/src/dispatch.ts",
   "counts": {
-    "supported": 38,
-    "shimmed": 637,
-    "todo": 45,
-    "total": 720
+    "supported": 44,
+    "shimmed": 626,
+    "todo": 48,
+    "total": 718
   },
   "entries": [
     {
@@ -1525,22 +1525,9 @@
         "date-time"
       ],
       "arity": 1,
-      "docUrl": null,
-      "status": "shimmed",
-      "mapsTo": "shim.date.edate",
-      "snippet": "x = \"2020-01-01\".edate(1);"
-    },
-    {
-      "name": "edate",
-      "kind": "function",
-      "category": "date-time",
-      "receivers": [
-        "date-time"
-      ],
-      "arity": 1,
       "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/edate.html",
-      "status": "shimmed",
-      "mapsTo": "shim.date.edate",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = \"2020-01-01\".edate(\"x\");"
     },
     {
@@ -1552,8 +1539,8 @@
       ],
       "arity": 2,
       "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/edate.html",
-      "status": "shimmed",
-      "mapsTo": "shim.date.edate",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = edate(\"x\", \"x\");"
     },
     {
@@ -2253,22 +2240,9 @@
         "date-time"
       ],
       "arity": 1,
-      "docUrl": null,
-      "status": "shimmed",
-      "mapsTo": "shim.date.subBusinessDay",
-      "snippet": "x = \"2020-01-01\".subBusinessDay(1);"
-    },
-    {
-      "name": "subBusinessDay",
-      "kind": "function",
-      "category": "date-time",
-      "receivers": [
-        "date-time"
-      ],
-      "arity": 1,
       "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subbusinessday.html",
-      "status": "shimmed",
-      "mapsTo": "shim.date.subBusinessDay",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = \"2020-01-01\".subBusinessDay(\"x\");"
     },
     {
@@ -2280,8 +2254,8 @@
       ],
       "arity": 2,
       "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subbusinessday.html",
-      "status": "shimmed",
-      "mapsTo": "shim.date.subBusinessDay",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = subBusinessDay(\"x\", \"x\");"
     },
     {
@@ -5946,8 +5920,8 @@
       ],
       "arity": 2,
       "docUrl": "https://www.zoho.com/deluge/help/functions/map/put.html",
-      "status": "shimmed",
-      "mapsTo": "shim.set",
+      "status": "supported",
+      "mapsTo": "var x = ({ [\"k\"]: \"v\" }[\"x\"] = \"x\")",
       "snippet": "x = {\"k\": \"v\"}.put(\"x\", \"x\");"
     },
     {
@@ -5959,8 +5933,8 @@
       ],
       "arity": 2,
       "docUrl": "https://www.zoho.com/deluge/help/map-manipulations/put.html",
-      "status": "shimmed",
-      "mapsTo": "shim.set",
+      "status": "supported",
+      "mapsTo": "var x = ({ [\"k\"]: \"v\" }[\"x\"] = \"x\")",
       "snippet": "x = {\"k\": \"v\"}.put(\"x\", \"x\");"
     },
     {
@@ -6102,8 +6076,8 @@
       ],
       "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/miscellaneous/getfieldnames.html",
-      "status": "shimmed",
-      "mapsTo": "shim.record.getFieldNames",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = Collection().getFieldNames();"
     },
     {
@@ -6115,8 +6089,8 @@
       ],
       "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/miscellaneous/getfieldnames.html",
-      "status": "shimmed",
-      "mapsTo": "shim.record.getFieldNames",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = getFieldNames();"
     },
     {
@@ -6128,8 +6102,8 @@
       ],
       "arity": 1,
       "docUrl": "https://www.zoho.com/deluge/help/miscellaneous/getfieldvalue.html",
-      "status": "shimmed",
-      "mapsTo": "shim.record.getFieldValue",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = Collection().getFieldValue(\"x\");"
     },
     {
@@ -6141,8 +6115,8 @@
       ],
       "arity": 1,
       "docUrl": "https://www.zoho.com/deluge/help/miscellaneous/getfieldvalue.html",
-      "status": "shimmed",
-      "mapsTo": "shim.record.getFieldValue",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = getFieldValue(\"x\");"
     },
     {
@@ -8143,8 +8117,8 @@
       ],
       "arity": 4,
       "docUrl": "https://www.zoho.com/deluge/help/functions/string/replaceallignorecase.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
+      "status": "shimmed",
+      "mapsTo": "shim.string.replaceAllIgnoreCase",
       "snippet": "x = replaceAllIgnoreCase(\"x\", \"x\", \"x\", \"x\");"
     },
     {
@@ -8156,8 +8130,8 @@
       ],
       "arity": 3,
       "docUrl": "https://www.zoho.com/deluge/help/functions/string/replaceallignorecase.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
+      "status": "shimmed",
+      "mapsTo": "shim.string.replaceAllIgnoreCase",
       "snippet": "x = \"abc\".replaceAllIgnoreCase(\"x\", \"x\", \"x\");"
     },
     {
@@ -8208,8 +8182,8 @@
       ],
       "arity": 4,
       "docUrl": "https://www.zoho.com/deluge/help/functions/string/replacefirstignorecase.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
+      "status": "shimmed",
+      "mapsTo": "shim.string.replaceFirstIgnoreCase",
       "snippet": "x = replaceFirstIgnoreCase(\"x\", \"x\", \"x\", \"x\");"
     },
     {
@@ -8221,8 +8195,8 @@
       ],
       "arity": 3,
       "docUrl": "https://www.zoho.com/deluge/help/functions/string/replacefirstignorecase.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
+      "status": "shimmed",
+      "mapsTo": "shim.string.replaceFirstIgnoreCase",
       "snippet": "x = \"abc\".replaceFirstIgnoreCase(\"x\", \"x\", \"x\");"
     },
     {
@@ -8637,8 +8611,8 @@
       ],
       "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-text.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
+      "status": "supported",
+      "mapsTo": "var x = String(\"abc\")",
       "snippet": "x = \"abc\".toText();"
     },
     {
@@ -8663,8 +8637,8 @@
       ],
       "arity": 1,
       "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-text.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
+      "status": "supported",
+      "mapsTo": "var x = String(\"x\")",
       "snippet": "x = toText(\"x\");"
     },
     {
@@ -9287,8 +9261,8 @@
       ],
       "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-text.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
+      "status": "supported",
+      "mapsTo": "var x = String(\"abc\")",
       "snippet": "x = \"abc\".toText();"
     },
     {
@@ -9300,8 +9274,8 @@
       ],
       "arity": 1,
       "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-text.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
+      "status": "supported",
+      "mapsTo": "var x = String(\"x\")",
       "snippet": "x = toText(\"x\");"
     },
     {
@@ -9339,8 +9313,8 @@
       ],
       "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/xml-manipulation/executexpath.html",
-      "status": "shimmed",
-      "mapsTo": "shim.xml.executeXpath",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = executeXpath();"
     },
     {
@@ -9352,8 +9326,8 @@
       ],
       "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/functions/xml/toxml.html",
-      "status": "shimmed",
-      "mapsTo": "shim.xml.toXml",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = \"abc\".toXml();"
     },
     {
@@ -9365,8 +9339,8 @@
       ],
       "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/functions/xml/toxmllist.html",
-      "status": "shimmed",
-      "mapsTo": "shim.xml.toXmlList",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = \"abc\".toXmlList();"
     }
   ]

@@ -149,6 +149,24 @@ const ROUTED: { name: string; free: (v: string) => string; method: (v: string) =
     inputs: ['"aba"', 'null', '""'],
   },
   {
+    name: 'replaceAllIgnoreCase',
+    free: (v) => `v = ${v};\nreturn replaceAllIgnoreCase(v, "A", "x", false);`,
+    method: (v) => `v = ${v};\nreturn v.replaceAllIgnoreCase("A", "x", false);`,
+    inputs: ['"aBa"', 'null', '""'],
+  },
+  {
+    name: 'replaceFirstIgnoreCase',
+    free: (v) => `v = ${v};\nreturn replaceFirstIgnoreCase(v, "A", "x", false);`,
+    method: (v) => `v = ${v};\nreturn v.replaceFirstIgnoreCase("A", "x", false);`,
+    inputs: ['"aBa"', 'null', '""'],
+  },
+  {
+    name: 'toText',
+    free: (v) => `v = ${v};\nreturn toText(v);`,
+    method: (v) => `v = ${v};\nreturn v.toText();`,
+    inputs: ['"12"', '100', '""'],
+  },
+  {
     name: 'subString',
     free: (v) => `v = ${v};\nreturn subString(v, 0);`,
     method: (v) => `v = ${v};\nreturn v.subString(0);`,
@@ -189,8 +207,9 @@ test('a pair with no translation on either form stays a hole, and a different fu
   for (const src of [
     'return now();',
     'return today();',
-    'return toText("12");',
-    'return "12".toText();',
+    'return edate("2020-01-01", 1);',
+    'return "2020-01-01".edate(1);',
+    'return subBusinessDay("2020-01-01", 1);',
     'return toHex(255);',
     'return Average();',
   ]) {

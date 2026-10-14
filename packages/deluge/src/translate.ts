@@ -38,6 +38,7 @@ import {
   NATIVE_STRING_JS,
   NULL_FUNCTIONS,
   REPLACE_FIRST,
+  TO_TEXT,
   ROUND_FUNCTION,
   TEXT_FUNCTIONS,
   ZOHO_ENV,
@@ -4401,6 +4402,23 @@ function callExpr(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fals
     const argSrc = args.map((a) => a.code).join(', ');
     const code = `shim.date.${method}(${recv.code}${argSrc ? `, ${argSrc}` : ''}, ctx)`;
     return mergeFx(code, [recv, ...args], { shim: true, date: dateResult });
+  }
+  // `toText` and `toString` are one function (functions/common/to-text.html
+  // documents both spellings on one page). Without a format both are text.
+  // With a format only a known date-time is formatted (shim.date.toText).
+  // Any other receiver stays a hole: functions/number/text.html formats a
+  // number, or text such as "123123456" and "02/04/2020", with the format,
+  // while functions/common/to-text.html reads a number as epoch milliseconds
+  // and returns text it does not recognise unchanged. The pages disagree.
+  if (method === TO_TEXT) {
+    const recv = expr(e.callee.object, scope);
+    if (recv.todo) return untranslatedMethod(method, recv, args);
+    if (!args.length) {
+      if (recv.date) return mergeFx(`shim.date.text(${recv.code}, ctx)`, [recv], { shim: true });
+      return mergeFx(`String(${recv.code})`, [recv]);
+    }
+    if (!recv.date || args.length > 2) return untranslatedMethod(method, recv, args);
+    return mergeFx(`shim.date.toText(${[recv, ...args].map((a) => a.code).join(', ')}, ctx)`, [recv, ...args], { shim: true });
   }
   if (method === 'toString') {
     const recv = expr(e.callee.object, scope);
