@@ -190,6 +190,18 @@ interface HtmlNode {
 }
 
 /**
+ * Offset just past the first `-->` or `--!>` comment close at or after
+ * `from`, or -1 when the comment is unterminated.
+ */
+function commentClose(input: string, from: number): number {
+  for (let i = input.indexOf('--', from); i >= 0 && i + 2 < input.length; i = input.indexOf('--', i + 1)) {
+    if (input[i + 2] === '>') return i + 3;
+    if (input[i + 2] === '!' && input[i + 3] === '>') return i + 4;
+  }
+  return -1;
+}
+
+/**
  * A small tag soup parser: enough HTML to rebuild the allowlisted tree. Text
  * and attribute values are entity-decoded; anything the sanitizer refuses is
  * escaped or dropped at emit time, so a malformed input degrades to text.
@@ -208,8 +220,8 @@ function parseHtml(raw: string): HtmlNode {
     }
     if (lt > i) top().children.push({ text: decodeEntities(input.slice(i, lt)), children: [] });
     if (input.startsWith('<!--', lt)) {
-      const end = input.indexOf('-->', lt + 4);
-      i = end < 0 ? input.length : end + 3;
+      const end = commentClose(input, lt + 4);
+      i = end < 0 ? input.length : end;
       continue;
     }
     const close = /^<\/\s*([a-zA-Z][^\s/>]*)\s*>/.exec(input.slice(lt));

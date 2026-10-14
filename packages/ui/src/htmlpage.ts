@@ -76,10 +76,22 @@ function marker(i: number): string {
 }
 
 function localSlug(value: string): string {
-  const out = String(value ?? '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  // One linear pass: runs of non [a-z0-9] collapse to a single '-', with no
+  // leading or trailing dash. Equivalent to the previous two-step replace
+  // but with no backtracking on long runs of separators.
+  const lower = String(value ?? '').toLowerCase();
+  let out = '';
+  let dash = false;
+  for (let i = 0; i < lower.length; i++) {
+    const code = lower.charCodeAt(i);
+    if ((code >= 97 && code <= 122) || (code >= 48 && code <= 57)) {
+      if (dash && out) out += '-';
+      out += lower[i];
+      dash = false;
+    } else {
+      dash = true;
+    }
+  }
   return out || 'page';
 }
 
@@ -371,6 +383,9 @@ function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'comme
         if (c === '-' && prefix.startsWith('-->', i)) {
           mode = 'data';
           i += 2;
+        } else if (c === '-' && prefix.startsWith('--!>', i)) {
+          mode = 'data';
+          i += 3;
         }
         break;
       case 'markup':
@@ -1161,6 +1176,18 @@ function parseZmlAttributes(attrText: string): Record<string, string> {
   return attrs;
 }
 
+/**
+ * Offset just past the first `-->` or `--!>` comment close at or after
+ * `from`, or -1 when the comment is unterminated.
+ */
+function commentClose(input: string, from: number): number {
+  for (let i = input.indexOf('--', from); i >= 0 && i + 2 < input.length; i = input.indexOf('--', i + 1)) {
+    if (input[i + 2] === '>') return i + 3;
+    if (input[i + 2] === '!' && input[i + 3] === '>') return i + 4;
+  }
+  return -1;
+}
+
 export function convertZmlSnippetToHtml(template: string): string {
   if (!/<\/?(panel|pr|pc|prefix|suffix|text|row|column)\b/i.test(template)) {
     return template;
@@ -1183,8 +1210,8 @@ export function convertZmlSnippetToHtml(template: string): string {
 
     if (template[at] === '<') {
       if (template.startsWith('<!--', at)) {
-        const end = template.indexOf('-->', at + 4);
-        const stop = end < 0 ? template.length : end + 3;
+        const end = commentClose(template, at + 4);
+        const stop = end < 0 ? template.length : end;
         out += template.slice(at, stop);
         at = stop;
         continue;
