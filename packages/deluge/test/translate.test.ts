@@ -446,6 +446,20 @@ test('statement buckets: input+alert is shimmed, assignment is translated, unkno
   assert.match(stripComments(todo.server), /shim\.todo/);
 });
 
+test('zoho.checkout.create remains a payments TODO and is inert in a dry run', async () => {
+  const t = translate('r = zoho.checkout.create("page", {"amount": 1});');
+  assert.equal(t.stats.todo, 1);
+  assert.equal(t.todos[0]?.construct, 'payments');
+  assert.match(t.server, /await shim\.todo\(ctx, "payments"\)/);
+  assert.match(t.server, /\/\/ Deluge: r = zoho\.checkout\.create\("\*\*\*", \{"\*\*\*": 1\}\)/);
+
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  const ctx = runtime.context({});
+  await body(t.server)(runtime.shim, ctx);
+  assert.deepEqual(runtime.transcript, [{ op: 'todo', construct: 'payments', detail: null }]);
+  assert.equal(runtime.transcript.some((entry) => entry.op === 'http' || entry.op === 'outbound'), false);
+});
+
 test('direct control flow, collections, and string/math stay in generated JS', () => {
   const t = translate([
     'items = List();',
