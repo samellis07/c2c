@@ -63,6 +63,33 @@ test('batched and staged writes inside a prefetch module count as non-reads', ()
   assert.equal(r.byOp['shim.http.postUrl'], 1);
 });
 
+test('an input field write inside a prefetch module fails', () => {
+  const text = `${READS}  await shim.input.set(ctx, "status", "closed");\n`;
+  const r = checkPrefetchReads(tree([{ path: 'functions/aio/f/on-load-prefetch.mjs', text }]));
+  assert.equal(r.ok, false);
+  assert.equal(r.nonReads, 1);
+  assert.equal(r.byOp['shim.input.set'], 1);
+  assert.equal(r.findings[0]!.op, 'shim.input.set');
+});
+
+test('an input subform row insert inside a prefetch module fails', () => {
+  const text = `${READS}  await shim.input.insert(ctx, "line_items", { qty: 1 });\n`;
+  const r = checkPrefetchReads(tree([{ path: 'functions/aio/f/on-load-prefetch.mjs', text }]));
+  assert.equal(r.ok, false);
+  assert.equal(r.nonReads, 1);
+  assert.equal(r.byOp['shim.input.insert'], 1);
+  assert.equal(r.findings[0]!.op, 'shim.input.insert');
+});
+
+test('a record field write inside a prefetch module fails', () => {
+  const text = `${READS}  await shim.record.set(row, "status", "closed");\n`;
+  const r = checkPrefetchReads(tree([{ path: 'functions/aio/f/on-load-prefetch.mjs', text }]));
+  assert.equal(r.ok, false);
+  assert.equal(r.nonReads, 1);
+  assert.equal(r.byOp['shim.record.set'], 1);
+  assert.equal(r.findings[0]!.op, 'shim.record.set');
+});
+
 test('a non-read quoted in a comment line is not counted', () => {
   const text = `${READS}// Deluge: zoho.task("reminder")\n// await shim.datastore.insert(ctx, "Audit", { a: 1 });\n * await shim.thisapp.call(ctx, "f", []);\n`;
   const r = checkPrefetchReads(tree([{ path: 'functions/aio/f/on-load-prefetch.mjs', text }]));

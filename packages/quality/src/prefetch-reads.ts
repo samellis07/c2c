@@ -4,7 +4,8 @@
  * send, or a call that leaves the app in one of those modules would fire on
  * every form load. The sweep fails any app whose generated prefetch modules
  * perform a non-read, the same list the translator refuses to replay into a
- * prefetch: datastore writes, mail, http, zoho.task, and thisapp.call.
+ * prefetch: datastore writes, input and record field writes, mail, http,
+ * zoho.task, and thisapp.call.
  */
 import type { GeneratedTree } from './modules.js';
 import { sortedCounts } from './static.js';
@@ -12,11 +13,13 @@ import { sortedCounts } from './static.js';
 /**
  * A call a generated prefetch endpoint must never run: it writes, sends, or
  * leaves the datastore read surface (a thisapp function body may write).
- * Reads — rows, lookup, aggregate, column, field — and zoho.* environment
- * lookups are allowed.
+ * input.set / input.insert / record.set are field writes — a record.set only
+ * persists at datastore.flush, but a hoisted field write still skews the
+ * slots a render computed. Reads — rows, lookup, aggregate, column, field —
+ * and zoho.* environment lookups are allowed.
  */
 export const PREFETCH_NON_READ =
-  /\bshim\.(datastore\.(?:insert|insertRow|insertRows|update|updateRows|delete|deleteRows|writeRow|setField|flush)|mail\.\w+|http\.\w+|zoho\.task|thisapp\.call)\s*\(/g;
+  /\bshim\.(datastore\.(?:insert|insertRow|insertRows|update|updateRows|delete|deleteRows|writeRow|setField|flush)|input\.(?:set|insert)|record\.set|mail\.\w+|http\.\w+|zoho\.task|thisapp\.call)\s*\(/g;
 
 /** A generated module is a prefetch endpoint when its file name ends `-prefetch.mjs` / `-prefetch.js`. */
 export function isPrefetchModule(path: string): boolean {
