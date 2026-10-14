@@ -1,0 +1,1286 @@
+{
+  "version": 1,
+  "command": "plan",
+  "c2c": "0.2.0",
+  "app": "Kitchen_Sink_Studio",
+  "dc": "in",
+  "dcSource": "--dc",
+  "doctor": "not-run",
+  "counts": {
+    "tables": 8,
+    "dataStoreTables": 8,
+    "columns": 89,
+    "nosqlTables": 0,
+    "functions": 0,
+    "schedules": 1,
+    "reports": 7,
+    "pages": 1,
+    "roles": 4,
+    "customApis": 0
+  },
+  "tables": [
+    {
+      "name": "Room",
+      "form": "Room",
+      "role": "form",
+      "nosql": false,
+      "columns": 7,
+      "uniqueVarchar": 1,
+      "fks": 0
+    },
+    {
+      "name": "Gear",
+      "form": "Gear",
+      "role": "form",
+      "nosql": false,
+      "columns": 8,
+      "uniqueVarchar": 0,
+      "fks": 0
+    },
+    {
+      "name": "Session_Log",
+      "form": "Session_Log",
+      "role": "form",
+      "nosql": false,
+      "columns": 7,
+      "uniqueVarchar": 0,
+      "fks": 0
+    },
+    {
+      "name": "Booking__Lines",
+      "form": "Booking",
+      "role": "child",
+      "nosql": false,
+      "columns": 9,
+      "uniqueVarchar": 0,
+      "fks": 1
+    },
+    {
+      "name": "Booking",
+      "form": "Booking",
+      "role": "form",
+      "nosql": false,
+      "columns": 20,
+      "uniqueVarchar": 0,
+      "fks": 1
+    },
+    {
+      "name": "Guest",
+      "form": "Guest",
+      "role": "form",
+      "nosql": false,
+      "columns": 17,
+      "uniqueVarchar": 0,
+      "fks": 0
+    },
+    {
+      "name": "Media_Kit",
+      "form": "Media_Kit",
+      "role": "form",
+      "nosql": false,
+      "columns": 17,
+      "uniqueVarchar": 0,
+      "fks": 1
+    },
+    {
+      "name": "Booking__Gear_Refs",
+      "form": "Booking",
+      "role": "junction",
+      "nosql": false,
+      "columns": 4,
+      "uniqueVarchar": 0,
+      "fks": 2
+    }
+  ],
+  "budgets": [
+    {
+      "id": "columns",
+      "table": "Room",
+      "status": "pass",
+      "detail": "table Room: 7/250 columns"
+    },
+    {
+      "id": "unique-varchar",
+      "table": "Room",
+      "status": "pass",
+      "detail": "table Room: 1/2 unique varchar columns"
+    },
+    {
+      "id": "fk",
+      "table": "Room",
+      "status": "pass",
+      "detail": "table Room: 0/15 foreign keys"
+    },
+    {
+      "id": "columns",
+      "table": "Gear",
+      "status": "pass",
+      "detail": "table Gear: 8/250 columns"
+    },
+    {
+      "id": "unique-varchar",
+      "table": "Gear",
+      "status": "pass",
+      "detail": "table Gear: 0/2 unique varchar columns"
+    },
+    {
+      "id": "fk",
+      "table": "Gear",
+      "status": "pass",
+      "detail": "table Gear: 0/15 foreign keys"
+    },
+    {
+      "id": "columns",
+      "table": "Session_Log",
+      "status": "pass",
+      "detail": "table Session_Log: 7/250 columns"
+    },
+    {
+      "id": "unique-varchar",
+      "table": "Session_Log",
+      "status": "pass",
+      "detail": "table Session_Log: 0/2 unique varchar columns"
+    },
+    {
+      "id": "fk",
+      "table": "Session_Log",
+      "status": "pass",
+      "detail": "table Session_Log: 0/15 foreign keys"
+    },
+    {
+      "id": "columns",
+      "table": "Booking__Lines",
+      "status": "pass",
+      "detail": "table Booking__Lines: 9/250 columns"
+    },
+    {
+      "id": "unique-varchar",
+      "table": "Booking__Lines",
+      "status": "pass",
+      "detail": "table Booking__Lines: 0/2 unique varchar columns"
+    },
+    {
+      "id": "fk",
+      "table": "Booking__Lines",
+      "status": "pass",
+      "detail": "table Booking__Lines: 1/15 foreign keys"
+    },
+    {
+      "id": "columns",
+      "table": "Booking",
+      "status": "pass",
+      "detail": "table Booking: 20/250 columns"
+    },
+    {
+      "id": "unique-varchar",
+      "table": "Booking",
+      "status": "pass",
+      "detail": "table Booking: 0/2 unique varchar columns"
+    },
+    {
+      "id": "fk",
+      "table": "Booking",
+      "status": "pass",
+      "detail": "table Booking: 1/15 foreign keys"
+    },
+    {
+      "id": "columns",
+      "table": "Guest",
+      "status": "pass",
+      "detail": "table Guest: 17/250 columns"
+    },
+    {
+      "id": "unique-varchar",
+      "table": "Guest",
+      "status": "pass",
+      "detail": "table Guest: 0/2 unique varchar columns"
+    },
+    {
+      "id": "fk",
+      "table": "Guest",
+      "status": "pass",
+      "detail": "table Guest: 0/15 foreign keys"
+    },
+    {
+      "id": "columns",
+      "table": "Media_Kit",
+      "status": "pass",
+      "detail": "table Media_Kit: 17/250 columns"
+    },
+    {
+      "id": "unique-varchar",
+      "table": "Media_Kit",
+      "status": "pass",
+      "detail": "table Media_Kit: 0/2 unique varchar columns"
+    },
+    {
+      "id": "fk",
+      "table": "Media_Kit",
+      "status": "pass",
+      "detail": "table Media_Kit: 1/15 foreign keys"
+    },
+    {
+      "id": "columns",
+      "table": "Booking__Gear_Refs",
+      "status": "pass",
+      "detail": "table Booking__Gear_Refs: 4/250 columns"
+    },
+    {
+      "id": "unique-varchar",
+      "table": "Booking__Gear_Refs",
+      "status": "pass",
+      "detail": "table Booking__Gear_Refs: 0/2 unique varchar columns"
+    },
+    {
+      "id": "fk",
+      "table": "Booking__Gear_Refs",
+      "status": "pass",
+      "detail": "table Booking__Gear_Refs: 2/15 foreign keys"
+    },
+    {
+      "id": "select-width",
+      "table": "Booking",
+      "status": "pass",
+      "detail": "widest generated read of Booking selects 20 columns per statement (docs 20, unverified limit 30; confirm with P-WIDTH)"
+    },
+    {
+      "id": "joins",
+      "status": "pass",
+      "detail": "generated reads are single-table (0/4 joins); lookup display needs one fetch per lookup (confirm with P-JOIN)"
+    },
+    {
+      "id": "org-tables",
+      "status": "pass",
+      "detail": "this app creates 8 Data Store table(s); an org-wide limit on table creates refuses a create with 403 API_LIMIT_REACHED \"API Limit for table\" — on that refusal stop creates, keep created tables, and retry after 30/60/120 minutes; a project delete may not free capacity at once"
+    }
+  ],
+  "budgetsOk": true,
+  "steps": [
+    {
+      "id": "import",
+      "via": "cli",
+      "command": "c2c provision --confirm --run import",
+      "args": {
+        "name": "c2c-kitchen-sink-studio",
+        "environment": "Development",
+        "app": "Kitchen_Sink_Studio",
+        "dir": "provision/iac",
+        "note": "the bundle ships the dry-run c2c_api without bundled dependencies — run c2c deploy --confirm after provisioning to install the live function"
+      },
+      "readBack": {
+        "via": "cli",
+        "command": "c2c provision --record import",
+        "match": {
+          "project_name": "<import-name>",
+          "id": "<project>"
+        }
+      }
+    },
+    {
+      "id": "cloudscale-enable",
+      "via": "console",
+      "command": "Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)",
+      "args": {
+        "service": "Cloud Scale"
+      },
+      "readBack": {
+        "via": "cli",
+        "command": "c2c provision --record cloudscale-enable",
+        "args": {
+          "call": {
+            "method": "GET",
+            "path": "/baas/v1/project/<project>/table"
+          }
+        },
+        "match": {
+          "gate": "open"
+        }
+      }
+    },
+    {
+      "id": "tables",
+      "via": "cli",
+      "command": "c2c provision --confirm --run tables",
+      "args": {
+        "plan": "provision/tables.json",
+        "tables": [
+          "Room",
+          "Gear",
+          "Session_Log",
+          "Booking__Lines",
+          "Booking",
+          "Guest",
+          "Media_Kit",
+          "Booking__Gear_Refs"
+        ]
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_List_All_Tables",
+        "match": {
+          "table_name": [
+            "Room",
+            "Gear",
+            "Session_Log",
+            "Booking__Lines",
+            "Booking",
+            "Guest",
+            "Media_Kit",
+            "Booking__Gear_Refs"
+          ]
+        }
+      }
+    },
+    {
+      "id": "import-table-permissions",
+      "via": "mcp",
+      "tool": "CatalystbyZoho_Get_Table_Permissions",
+      "args": {
+        "path_variables": {
+          "projectId": "<project>"
+        },
+        "headers": {
+          "Catalyst-org": "<org>",
+          "Environment": "Development"
+        },
+        "calls": [
+          {
+            "path_variables": {
+              "id": "<id:Room>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Gear>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Session_Log>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Booking__Lines>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Booking>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Guest>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Media_Kit>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Booking__Gear_Refs>"
+            }
+          }
+        ],
+        "note": "the IaC import set these grants; this step only proves them — a mismatch means the import did not apply them"
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_Get_Table_Permissions",
+        "args": {
+          "path_variables": {
+            "projectId": "<project>"
+          },
+          "headers": {
+            "Catalyst-org": "<org>",
+            "Environment": "Development"
+          },
+          "calls": [
+            {
+              "path_variables": {
+                "id": "<id:Room>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Gear>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Session_Log>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Booking__Lines>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Booking>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Guest>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Media_Kit>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Booking__Gear_Refs>"
+              }
+            }
+          ]
+        },
+        "match": {
+          "<id:Room>": {
+            "App Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "App User": [
+              "SELECT"
+            ],
+            "Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "Desk_Staff": [
+              "SELECT"
+            ],
+            "Studio_Lead": [
+              "SELECT"
+            ],
+            "Studio_Crew": [
+              "SELECT"
+            ]
+          },
+          "<id:Gear>": {
+            "App Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "App User": [
+              "SELECT"
+            ],
+            "Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "Desk_Staff": [
+              "SELECT"
+            ],
+            "Studio_Lead": [
+              "SELECT"
+            ],
+            "Studio_Crew": [
+              "SELECT"
+            ]
+          },
+          "<id:Session_Log>": {
+            "App Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "App User": [
+              "SELECT"
+            ],
+            "Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "Desk_Staff": [
+              "SELECT"
+            ],
+            "Studio_Lead": [
+              "SELECT"
+            ],
+            "Studio_Crew": [
+              "SELECT"
+            ]
+          },
+          "<id:Booking__Lines>": {
+            "App Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "App User": [
+              "SELECT"
+            ],
+            "Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "Desk_Staff": [
+              "SELECT"
+            ],
+            "Studio_Lead": [
+              "SELECT"
+            ],
+            "Studio_Crew": [
+              "SELECT"
+            ]
+          },
+          "<id:Booking>": {
+            "App Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "App User": [
+              "SELECT"
+            ],
+            "Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "Desk_Staff": [
+              "SELECT",
+              "UPDATE"
+            ],
+            "Studio_Lead": [
+              "SELECT"
+            ],
+            "Studio_Crew": [
+              "SELECT"
+            ]
+          },
+          "<id:Guest>": {
+            "App Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "App User": [
+              "SELECT"
+            ],
+            "Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "Desk_Staff": [
+              "SELECT"
+            ],
+            "Studio_Lead": [
+              "SELECT"
+            ],
+            "Studio_Crew": [
+              "SELECT"
+            ]
+          },
+          "<id:Media_Kit>": {
+            "App Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "App User": [
+              "SELECT"
+            ],
+            "Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "Desk_Staff": [
+              "SELECT"
+            ],
+            "Studio_Lead": [
+              "SELECT"
+            ],
+            "Studio_Crew": [
+              "SELECT"
+            ]
+          },
+          "<id:Booking__Gear_Refs>": {
+            "App Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "App User": [
+              "SELECT"
+            ],
+            "Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "Desk_Staff": [
+              "SELECT"
+            ],
+            "Studio_Lead": [
+              "SELECT"
+            ],
+            "Studio_Crew": [
+              "SELECT"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "import-table-scopes",
+      "via": "mcp",
+      "tool": "CatalystbyZoho_Get_Table_Scopes",
+      "args": {
+        "path_variables": {
+          "projectId": "<project>"
+        },
+        "headers": {
+          "Catalyst-org": "<org>",
+          "Environment": "Development"
+        },
+        "calls": [
+          {
+            "path_variables": {
+              "id": "<id:Room>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Gear>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Session_Log>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Booking__Lines>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Booking>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Guest>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Media_Kit>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Booking__Gear_Refs>"
+            }
+          }
+        ],
+        "note": "the IaC import set these scopes; this step only proves them"
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_Get_Table_Scopes",
+        "args": {
+          "path_variables": {
+            "projectId": "<project>"
+          },
+          "headers": {
+            "Catalyst-org": "<org>",
+            "Environment": "Development"
+          },
+          "calls": [
+            {
+              "path_variables": {
+                "id": "<id:Room>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Gear>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Session_Log>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Booking__Lines>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Booking>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Guest>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Media_Kit>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Booking__Gear_Refs>"
+              }
+            }
+          ]
+        },
+        "match": {
+          "<id:Room>": {
+            "App Administrator": [
+              "GLOBAL"
+            ],
+            "App User": [
+              "GLOBAL"
+            ],
+            "Administrator": [
+              "GLOBAL"
+            ],
+            "Desk_Staff": [
+              "GLOBAL"
+            ],
+            "Studio_Lead": [
+              "GLOBAL"
+            ],
+            "Studio_Crew": [
+              "GLOBAL"
+            ]
+          },
+          "<id:Gear>": {
+            "App Administrator": [
+              "GLOBAL"
+            ],
+            "App User": [
+              "GLOBAL"
+            ],
+            "Administrator": [
+              "GLOBAL"
+            ],
+            "Desk_Staff": [
+              "GLOBAL"
+            ],
+            "Studio_Lead": [
+              "GLOBAL"
+            ],
+            "Studio_Crew": [
+              "GLOBAL"
+            ]
+          },
+          "<id:Session_Log>": {
+            "App Administrator": [
+              "GLOBAL"
+            ],
+            "App User": [
+              "GLOBAL"
+            ],
+            "Administrator": [
+              "GLOBAL"
+            ],
+            "Desk_Staff": [
+              "GLOBAL"
+            ],
+            "Studio_Lead": [
+              "GLOBAL"
+            ],
+            "Studio_Crew": [
+              "GLOBAL"
+            ]
+          },
+          "<id:Booking__Lines>": {
+            "App Administrator": [
+              "GLOBAL"
+            ],
+            "App User": [
+              "GLOBAL"
+            ],
+            "Administrator": [
+              "GLOBAL"
+            ],
+            "Desk_Staff": [
+              "GLOBAL"
+            ],
+            "Studio_Lead": [
+              "GLOBAL"
+            ],
+            "Studio_Crew": [
+              "GLOBAL"
+            ]
+          },
+          "<id:Booking>": {
+            "App Administrator": [
+              "GLOBAL"
+            ],
+            "App User": [
+              "GLOBAL"
+            ],
+            "Administrator": [
+              "GLOBAL"
+            ],
+            "Desk_Staff": [
+              "ORG"
+            ],
+            "Studio_Lead": [
+              "GLOBAL"
+            ],
+            "Studio_Crew": [
+              "GLOBAL"
+            ]
+          },
+          "<id:Guest>": {
+            "App Administrator": [
+              "GLOBAL"
+            ],
+            "App User": [
+              "GLOBAL"
+            ],
+            "Administrator": [
+              "GLOBAL"
+            ],
+            "Desk_Staff": [
+              "GLOBAL"
+            ],
+            "Studio_Lead": [
+              "GLOBAL"
+            ],
+            "Studio_Crew": [
+              "GLOBAL"
+            ]
+          },
+          "<id:Media_Kit>": {
+            "App Administrator": [
+              "GLOBAL"
+            ],
+            "App User": [
+              "GLOBAL"
+            ],
+            "Administrator": [
+              "GLOBAL"
+            ],
+            "Desk_Staff": [
+              "GLOBAL"
+            ],
+            "Studio_Lead": [
+              "GLOBAL"
+            ],
+            "Studio_Crew": [
+              "GLOBAL"
+            ]
+          },
+          "<id:Booking__Gear_Refs>": {
+            "App Administrator": [
+              "GLOBAL"
+            ],
+            "App User": [
+              "GLOBAL"
+            ],
+            "Administrator": [
+              "GLOBAL"
+            ],
+            "Desk_Staff": [
+              "GLOBAL"
+            ],
+            "Studio_Lead": [
+              "GLOBAL"
+            ],
+            "Studio_Crew": [
+              "GLOBAL"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "jobpool",
+      "via": "mcp",
+      "tool": "CatalystbyZoho_Create_Job_Pool",
+      "args": {
+        "path_variables": {
+          "projectId": "<project>"
+        },
+        "headers": {
+          "Catalyst-org": "<org>",
+          "Environment": "Development"
+        },
+        "body": {
+          "name": "KitchenSinkStudio",
+          "type": "Function",
+          "capacity": {
+            "memory": "256"
+          }
+        }
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_List_All_Jobpools",
+        "match": {
+          "name": "KitchenSinkStudio"
+        }
+      }
+    },
+    {
+      "id": "stratus-enable",
+      "via": "console",
+      "command": "Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket)",
+      "args": {
+        "service": "Stratus"
+      },
+      "readBack": {
+        "via": "cli",
+        "command": "c2c provision --record stratus-enable",
+        "args": {
+          "call": {
+            "method": "GET",
+            "path": "/baas/v1/project/<project>/bucket"
+          }
+        },
+        "match": {
+          "gate": "open"
+        }
+      }
+    },
+    {
+      "id": "bucket",
+      "via": "mcp",
+      "tool": "CatalystbyZoho_Create_Bucket",
+      "args": {
+        "path_variables": {
+          "projectId": "<project>"
+        },
+        "headers": {
+          "Catalyst-org": "<org>",
+          "Environment": "Development"
+        },
+        "body": {
+          "bucket_name": "c2c-kitchen-sink-studio-5d64898c",
+          "bucket_meta": {
+            "type": "protected"
+          }
+        }
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_Get_All_Buckets",
+        "match": {
+          "bucket_name": "c2c-kitchen-sink-studio-5d64898c"
+        }
+      }
+    },
+    {
+      "id": "auth-hosted",
+      "via": "cli",
+      "command": "c2c provision --confirm --run auth-hosted",
+      "args": {
+        "call": {
+          "method": "POST",
+          "path": "/baas/v1/project/<project>/authentication/enable?auth_type=hosted",
+          "body": {
+            "public_signup": false
+          }
+        }
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_Get_Authentication_Configurations",
+        "match": {
+          "hosted_auth": true
+        }
+      }
+    },
+    {
+      "id": "auth-embedded",
+      "via": "cli",
+      "command": "c2c provision --confirm --run auth-embedded",
+      "args": {
+        "call": {
+          "method": "POST",
+          "path": "/baas/v1/project/<project>/authentication/enable?auth_type=embedded",
+          "body": {
+            "public_signup": false
+          }
+        }
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_Get_Authentication_Configurations",
+        "match": {
+          "embedded_auth": true
+        }
+      }
+    },
+    {
+      "id": "import-roles",
+      "via": "mcp",
+      "tool": "CatalystbyZoho_List_All_Roles",
+      "args": {
+        "path_variables": {
+          "projectId": "<project>"
+        },
+        "headers": {
+          "Catalyst-org": "<org>",
+          "Environment": "Development"
+        },
+        "note": "the IaC import created these roles; this step only proves them — a mismatch means the import did not apply them"
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_List_All_Roles",
+        "match": {
+          "role_name": [
+            "Administrator",
+            "Desk_Staff",
+            "Studio_Lead",
+            "Studio_Crew"
+          ]
+        }
+      }
+    },
+    {
+      "id": "slate-enable",
+      "via": "console",
+      "command": "Catalyst console → the project → Slate → Start Exploring (<console>/baas/<org>/project/<project>/Development#/slate) — then c2c verifies it: c2c provision --record slate-enable (GET /slate/v1/project/<project>/app)",
+      "args": {
+        "service": "Slate"
+      },
+      "readBack": {
+        "via": "cli",
+        "command": "c2c provision --record slate-enable",
+        "args": {
+          "call": {
+            "method": "GET",
+            "path": "/slate/v1/project/<project>/app"
+          }
+        },
+        "match": {
+          "gate": "open"
+        }
+      }
+    },
+    {
+      "id": "authorized-domain",
+      "via": "cli",
+      "command": "c2c provision --confirm --run authorized-domain (after the Slate deploy, when the App URL host is known)",
+      "args": {
+        "call": {
+          "method": "POST",
+          "path": "/baas/v1/project/<project>/cors-domain",
+          "body": {
+            "domain": "<slate-app-url-host>",
+            "cors": true,
+            "iframe": true
+          }
+        }
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_List_All_CORS_Domains",
+        "match": {
+          "<slate-app-url-host>": {
+            "cors": true,
+            "iframe": true
+          }
+        }
+      }
+    },
+    {
+      "id": "sign-in-check",
+      "via": "console",
+      "command": "Open the Slate app URL — the sign-in box must show the Catalyst sign-in page, not the app itself or a blank box. A blank box means iFrame is off for the host: Authentication > Whitelisting > the Slate host > Edit > iFrame on, then reload.",
+      "args": {},
+      "readBack": {
+        "via": "console",
+        "command": "record the check: c2c provision --record sign-in-check --result <file> ({\"sign_in_page\": true} once the sign-in page shows)",
+        "match": {
+          "sign_in_page": true
+        }
+      }
+    },
+    {
+      "id": "import-security-rule",
+      "via": "mcp",
+      "tool": "CatalystbyZoho_List_All_Functions",
+      "args": {
+        "path_variables": {
+          "projectId": "<project>"
+        },
+        "headers": {
+          "Catalyst-org": "<org>",
+          "Environment": "Development"
+        },
+        "note": "the IaC SecurityRules item requires authentication for c2c_api; List_All_Functions exposes is_authenticated — this step only proves the import applied it"
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_List_All_Functions",
+        "match": {
+          "c2c_api": {
+            "is_authenticated": true
+          }
+        }
+      }
+    },
+    {
+      "id": "crons",
+      "via": "cli",
+      "command": "c2c provision --confirm --run crons (crons are created disabled; the user enables each in the console)",
+      "args": {
+        "plan": "provision/crons.json",
+        "schedules": 1,
+        "enabled": false
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_List_All_Crons",
+        "match": {
+          "cron_name": [
+            "daily_sweep"
+          ]
+        }
+      }
+    }
+  ],
+  "mcpTools": {
+    "base": [
+      "CatalystbyZoho_List_All_Organizations",
+      "CatalystbyZoho_List_All_Tables",
+      "CatalystbyZoho_List_All_Columns",
+      "CatalystbyZoho_Execute_Query",
+      "CatalystbyZoho_Get_Table_Permissions",
+      "CatalystbyZoho_Update_Table_Permissions",
+      "CatalystbyZoho_Get_Table_Scopes",
+      "CatalystbyZoho_Update_Table_Scopes",
+      "CatalystbyZoho_Get_Authentication_Configurations",
+      "CatalystbyZoho_List_All_Roles",
+      "CatalystbyZoho_List_All_CORS_Domains",
+      "CatalystbyZoho_List_All_Project_Users",
+      "CatalystbyZoho_List_All_Functions",
+      "CatalystbyZoho_List_All_Env_Variables",
+      "CatalystbyZoho_List_All_Slate_Apps",
+      "CatalystbyZoho_Get_Logs"
+    ],
+    "plan": [
+      "CatalystbyZoho_Create_Bucket",
+      "CatalystbyZoho_Create_Job_Pool",
+      "CatalystbyZoho_Create_Upload_Signature",
+      "CatalystbyZoho_Get_All_Buckets",
+      "CatalystbyZoho_Head_Bucket",
+      "CatalystbyZoho_List_All_Crons",
+      "CatalystbyZoho_List_All_Jobpools",
+      "CatalystbyZoho_Update_Authentication_Configuration"
+    ]
+  },
+  "probes": [
+    {
+      "id": "P-LIKE",
+      "measures": "LIKE '*x*' returns the row; '%x%' returns 0",
+      "needed": true,
+      "reason": "every migration verifies it"
+    },
+    {
+      "id": "P-OFFSET",
+      "measures": "LIMIT a,b offset base",
+      "needed": true,
+      "reason": "every migration verifies it"
+    },
+    {
+      "id": "P-UPD300",
+      "measures": "ZCQL UPDATE/DELETE statement cap",
+      "needed": true,
+      "reason": "every migration verifies it"
+    },
+    {
+      "id": "P-JOIN",
+      "measures": "max joins (Development and Production)",
+      "needed": true,
+      "reason": "every migration verifies it"
+    },
+    {
+      "id": "P-WIDTH",
+      "measures": "max select columns + exact error",
+      "needed": true,
+      "reason": "every migration verifies it"
+    },
+    {
+      "id": "P-COLS",
+      "measures": "columns per table by type (scratch table)",
+      "needed": true,
+      "reason": "every migration verifies it"
+    },
+    {
+      "id": "P-401",
+      "measures": "private route without auth returns 401",
+      "needed": true,
+      "reason": "every migration verifies it"
+    },
+    {
+      "id": "P-BULK",
+      "measures": "bulk write job path with a Stratus CSV",
+      "needed": true,
+      "reason": "run before the data load"
+    },
+    {
+      "id": "P-RATE",
+      "measures": "write rate before a large load",
+      "needed": true,
+      "reason": "run before the data load"
+    },
+    {
+      "id": "P-SVC",
+      "measures": "enabled services (console first-use on a fresh project)",
+      "needed": true,
+      "reason": "the plan uses Stratus"
+    },
+    {
+      "id": "P-MAIL",
+      "measures": "send from the verified sender (customer confirms receipt)",
+      "needed": false,
+      "reason": "the app sends no mail"
+    }
+  ],
+  "zcqlCaps": {
+    "rowsPerQuery": 300,
+    "offsetBase": 1,
+    "likeWildcard": "*",
+    "maxJoins": 4,
+    "selectWidthDoc": 20,
+    "selectWidthUnverified": 30
+  }
+}
