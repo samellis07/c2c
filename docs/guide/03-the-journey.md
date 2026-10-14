@@ -21,17 +21,20 @@ Still offline. The AI builds the whole migration plan — tables,
 limit budgets, functions, screens, sign-in, integrations, and the
 exact infrastructure steps — and walks you through it section by
 section. You approve the plan and answer the decisions it forces
-(for example which fields lose "no duplicates", since Catalyst
-allows only 2 unique text columns per table). Nothing runs until
-you approve.
+(for example which fields lose "no duplicates": Catalyst
+allows only 2 unique short-text columns per table
+([L-UNIQUE-VARCHAR](../../plugin/references/limits.md#l-unique-varchar-unique-varchar-columns-per-table),
+[TESTED]) — the rest are enforced in the app code instead).
+Nothing is created until you approve.
 
 ## Step 3 — Provision: build the empty house
 
 Needs a green doctor and your yes per phase. The AI creates the
 infrastructure item by item — tables, permissions, the job pool,
 the file bucket, sign-in config — reading each one back after
-creating it. Anything only a human can do in the console (creating
-the project itself, custom roles, some connections) becomes a
+creating it. Anything only a human can do in the console (custom
+roles, some connections, and similar — a brand-new project is
+created by the import, or by you in the console) becomes a
 precise instruction: exact page, exact click, then "tell me when
 done", and the AI verifies it afterwards.
 
@@ -41,14 +44,17 @@ With your yes, the AI deploys the translated functions and links
 and deploys your Slate web app, then records the app's web address
 (URL). One detail you may be asked for: secret values (API keys and
 similar) go into a file **you** fill in — the AI never reads or
-repeats them — because deploying replaces them otherwise.
+repeats them — because a deploy writes the full set at once and
+would otherwise wipe them
+([facts/functions.md](../../plugin/references/facts/functions.md)).
 
 ## Step 5 — Sign-in and access: lock the doors, invite yourself
 
 The AI enables hosted and embedded sign-in, registers your app's
 address as an authorised domain, sets table permissions per role,
-and invites **you** as the first administrator. Then come two of
-your five human steps (invite mail, one sign-in — see
+and invites **you** as the first administrator. Then come your
+human steps for this stage: the invite mail, plus the one sign-in
+when your app has web screens (see
 [chapter 4](04-your-five-steps.md)).
 
 ## Step 6 — Data load: move the records
@@ -61,12 +67,16 @@ step — it is never smoothed over.
 
 ## After that — verify, then go live (your call)
 
-- **Verify:** the AI runs limit probes (tiny scratch resources it
-  creates, measures and deletes), a smoke test with you in the
-  browser, and your 3–5 most important business rules stated as
+- **Verify:** the AI runs the checks the plan flags (small scratch
+  resources it creates, measures and deletes, with your OK), a
+  smoke test you run in your own browser (step 4 of your five
+  steps), and your 3–5 most important business rules stated as
   given/when/then and tried through the screens.
 - **Cutover (optional, you drive):** when you are satisfied, *you*
   click **Deploy to Production** in the console (a payment method is
-  required), freeze writes in Creator, and switch your links. The AI
-  checks each stage after you. Creator stays read-only — not
-  deleted — until you sign off, so you can always go back.
+  required on the account —
+  [facts/projects.md](../../plugin/references/facts/projects.md)),
+  freeze writes in Creator, and switch your links. The AI
+  re-verifies on Production reads after each stage you complete.
+  Creator stays read-only — not deleted — until you sign off, so
+  you can always go back.
