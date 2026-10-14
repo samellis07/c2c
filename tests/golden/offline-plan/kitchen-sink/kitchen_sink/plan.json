@@ -252,6 +252,30 @@
       "id": "org-tables",
       "status": "pass",
       "detail": "this app creates 8 Data Store table(s); an org-wide limit on table creates refuses a create with 403 API_LIMIT_REACHED \"API Limit for table\" — on that refusal stop creates, keep created tables, and retry after 30/60/120 minutes; a project delete may not free capacity at once"
+    },
+    {
+      "id": "dev-row-cap",
+      "status": "warn",
+      "detail": "the per-table row estimate needs source row counts; Development's per-table row cap is a hidden value (datastore.rows_per_table_dev, the value is not published) — a load refused with 403 API_LIMIT_REACHED \"API Limit for row\" is the signal",
+      "fix": "re-run c2c plan with --source-backup, --source-csv or --source-json so the budget lists the largest tables; rehearse a large load on a different environment before cutover"
+    },
+    {
+      "id": "varchar-length",
+      "status": "warn",
+      "detail": "source string values are unmeasured; a REST insert silently truncates past a varchar column's length (measured ceiling 255) — validate before write; counts are JavaScript code points — whether Catalyst counts emoji, multibyte characters or CRLF line endings the same way is unverified",
+      "fix": "re-run c2c plan with --source-backup, --source-csv or --source-json so the budget measures source string values against varchar column lengths"
+    },
+    {
+      "id": "dev-api-calls",
+      "status": "warn",
+      "detail": "the mover's API-call estimate needs source row counts; Development allows 200000 API calls per application (api.calls_dev, docs figure)",
+      "fix": "re-run c2c plan with --source-backup, --source-csv or --source-json so the estimate counts the mover reads and writes"
+    },
+    {
+      "id": "dev-write-rate",
+      "status": "pass",
+      "detail": "no source row counts — the dev-api-calls budget carries the missing-source warning; the stated Development write rate is ~100 writes/min/table (datastore.write_requests_per_minute, unverified)",
+      "fix": "re-run c2c plan with --source-backup, --source-csv or --source-json so both estimates count the mover calls; run c2c probe P-RATE before a large load"
     }
   ],
   "budgetsOk": true,
