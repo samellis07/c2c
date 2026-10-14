@@ -164,6 +164,8 @@ test('a Zoho REST reply (zoho.creator.*) keeps a bare 19-digit ID', async () => 
 
 test('the c2c_api entry reads a bare 19-digit id in a request body exactly', async () => {
   const out = mkdtempSync(join(tmpdir(), 'c2c-bigint-fn-'));
+  // Pin CommonJS so a TMPDIR under a {"type":"module"} package.json cannot change how these fixtures load.
+  writeFileSync(join(out, 'package.json'), '{"type":"commonjs"}');
   const moduleAny = Module as unknown as { _resolveFilename: (request: string, ...rest: unknown[]) => string };
   const original = moduleAny._resolveFilename;
   moduleAny._resolveFilename = function resolveFake(this: unknown, request: string, ...rest: unknown[]) {

@@ -265,7 +265,7 @@ async function restOnce(
   }
   const located = resolveCatalyst(env);
   const dir = mkdtempSync(join(tmpdir(), 'c2c-rest-'));
-  const hook = join(dir, 'cli-hook.js');
+  const hook = join(dir, 'cli-hook.cjs');
   writeFileSync(hook, HOOK, { mode: 0o600 });
   try {
     const childEnv: NodeJS.ProcessEnv = {
@@ -291,7 +291,8 @@ async function restOnce(
     const result = await run(process.execPath, ['-r', hook, located.bin, ...scopeArgs, 'project:list'], childEnv);
     const text = result.extra;
     const line = text.split('\n').find((item) => item.startsWith('C2C_RESULT ') || item === 'C2C_REFUSED');
-    if (!line || line === 'C2C_REFUSED') throw new Error('catalyst rest refused the path');
+    if (!line) throw new Error(`catalyst rest printed no result (${describeExit(result)})`);
+    if (line === 'C2C_REFUSED') throw new Error('catalyst rest refused the path');
     const parsed = JSON.parse(line.slice('C2C_RESULT '.length)) as { status?: number; raw?: unknown; body?: unknown; tokenTag?: unknown };
     const decoded = decodeRestPayload(parsed);
     if (result.code !== 0 && (parsed.status === undefined || parsed.status === 0)) {
@@ -399,7 +400,7 @@ export async function renewCliAccessToken(env: NodeJS.ProcessEnv, org?: string):
 async function cliToken(env: NodeJS.ProcessEnv, mode: TokenMode, org?: string, projectId?: string): Promise<string> {
   const located = resolveCatalyst(env);
   const dir = mkdtempSync(join(tmpdir(), 'c2c-token-'));
-  const hook = join(dir, 'token-hook.js');
+  const hook = join(dir, 'token-hook.cjs');
   writeFileSync(hook, TOKEN_HOOK, { mode: 0o600 });
   try {
     const childEnv: NodeJS.ProcessEnv = {
@@ -413,6 +414,7 @@ async function cliToken(env: NodeJS.ProcessEnv, mode: TokenMode, org?: string, p
         ? ['--version']
         : [...(org === undefined ? [] : projectId === undefined ? ['--org', org] : catalystScopeArgs(org, projectId)), 'project:list'];
     const result = await run(process.execPath, ['-r', hook, located.bin, ...command], childEnv);
+    if (!result.extra && (result.code !== 0 || result.signal)) throw new Error(`catalyst token hook printed nothing (${describeExit(result)})`);
     return result.extra.trim();
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -434,13 +436,30 @@ export function resolveCatalyst(env: NodeJS.ProcessEnv): { bin: string; lib: str
   throw new Error('catalyst CLI library was not found');
 }
 
-/** Spawn with an inherited pipe on fd 3; the hook writes secrets/results there, never to disk. */
-function run(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number; extra: string }> {
+type RunResult = { code: number; signal?: string; extra: string; stderr: string };
+
+const STDERR_KEEP = 4096;
+
+/** Exit code or signal plus the first stderr line, for a child that wrote no result. */
+function describeExit(result: RunResult): string {
+  const how = result.signal ? `killed by ${result.signal}` : `exit code ${result.code}`;
+  const first = result.stderr.split('\n').map((item) => item.trim()).find((item) => item !== '');
+  return first ? `${how}: ${first.slice(0, 300)}` : how;
+}
+
+/** Spawn with an inherited pipe on fd 3; the hook writes secrets/results there, never to disk. Only the head of stderr is kept, for error messages. */
+function run(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<RunResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { env, stdio: ['ignore', 'ignore', 'ignore', 'pipe'] });
+    const child = spawn(command, args, { env, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] });
     const chunks: Buffer[] = [];
+    let stderr = '';
     child.stdio[3]?.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (stderr.length < STDERR_KEEP) stderr += chunk.toString('utf8').slice(0, STDERR_KEEP - stderr.length);
+    });
     child.on('error', reject);
-    child.on('close', (code) => resolve({ code: code ?? 1, extra: Buffer.concat(chunks).toString('utf8') }));
+    child.on('close', (code, signal) =>
+      resolve({ code: code ?? 1, ...(signal ? { signal } : {}), extra: Buffer.concat(chunks).toString('utf8'), stderr }),
+    );
   });
 }
