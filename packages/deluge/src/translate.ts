@@ -4116,6 +4116,29 @@ function callExpr(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fals
         rowReads: aggregateRowRead(obj, fn, field, call, scope),
       });
     }
+    // `.count()` on a record-typed local (a function parameter holding one
+    // record or a record collection) is the record cardinality: a single
+    // record counts as 1, a collection counts its rows, null counts as 0
+    // (record count: https://www.zoho.com/deluge/help/data-access/aggregate-records/count.html).
+    if (
+      method === 'count' &&
+      !e.args.length &&
+      obj.kind === 'name' &&
+      scope.local.has(obj.name) &&
+      !scope.list.has(obj.name) &&
+      !scope.map.has(obj.name) &&
+      !scope.date.has(obj.name) &&
+      !scope.decimal.has(obj.name) &&
+      !q.query &&
+      !q.todo &&
+      !q.list &&
+      !q.map &&
+      !q.date &&
+      !q.decimal
+    ) {
+      const id = jsIdent(obj.name);
+      return mergeFx(`(${id} ? (Array.isArray(${id}) ? ${id}.length : 1) : 0)`, [q], { shim: true });
+    }
     // Rows or values already in memory (`input.Subform.sum(Amount)`,
     // `numbers.average()`). `min`/`max` with an argument are the two-number
     // functions and `distinct` is the list function, so they are not here.
