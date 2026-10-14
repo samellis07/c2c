@@ -10,24 +10,30 @@
  * table. The table exists only then: deploy creates it for an app that sends
  * mail and was deployed with --mail, and with mail off nothing is written to it.
  *
- * Sender verification cannot be read offline. The owner verifies the sender in
- * the Catalyst console (Mail > Email Configuration, or a DKIM/SPF domain) and
- * passes --mail-from <address> --mail-sender-verified. Precheck rule
- * `mail-sender-unverified` blocks a confirmed --mail deploy until then. Catalyst
- * documents both "throws" and "accepted but never delivered" for an unverified
- * sender, so c2c refuses before the call.
+ * Sender verification is observed live, never asserted: the owner verifies the
+ * sender in the Catalyst console (Mail > Email Configuration, or a DKIM/SPF
+ * domain) and a confirmed deploy reads the state back (GET /email, the same
+ * list List_All_Emails_Configuration answers), persisting it under
+ * c2c-out/.c2c/. --mail-sender-verified and c2c-deploy.json `mail.verified`
+ * record the owner's attestation only. Precheck rule `mail-sender-unverified`
+ * blocks a confirmed --mail deploy until the read-back reports VERIFIED.
+ * Catalyst documents both "throws" and "accepted but never delivered" for an
+ * unverified sender, so c2c refuses before the call.
  * https://docs.catalyst.zoho.com/en/cloud-scale/help/mail/introduction/
  */
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { App } from '../../core/src/ir.js';
 import { generate as generateDeluge } from '../../deluge/src/generate.js';
-import type { TableCreateStep } from './tables.js';
+import type { RestFn, TableCreateStep } from './tables.js';
 
 export interface MailConfig {
   enabled: boolean;
   allowlist: readonly string[];
   /** Catalyst Mail sender for zoho.adminuserid mail (C2C_MAIL_FROM). Null until the owner names one. */
   from: string | null;
-  /** Senders the owner attests are verified in the Catalyst console. */
+  /** Senders a live Catalyst read-back reported VERIFIED (attestations never enter this list). */
   verifiedSenders: readonly string[];
 }
 
@@ -38,14 +44,27 @@ export interface MailDecision {
 
 export interface MailSender {
   from?: string;
+  /** True only when the caller holds read-back evidence that the sender is VERIFIED — never the bare attestation. */
   verified?: boolean;
 }
 
 /** Precheck rule id for an app that sends mail without a verified Catalyst Mail sender. */
 export const MAIL_SENDER_RULE = 'mail-sender-unverified';
+
+/**
+ * A sender address as findings and logs may carry it: first letter and
+ * domain only (`s***@example.com`). Findings get pasted into chats and the
+ * delivery log is a Data Store table — the full address never prints.
+ */
+export function maskMailAddress(address: string): string {
+  const at = address.lastIndexOf('@');
+  if (at <= 0) return address ? '***' : '';
+  return `${address[0]}***${address.slice(at)}`;
+}
+
 /** Canonical failure detail shared by precheck and generated runtime. */
 export function mailSenderFailure(from: string | null | undefined): string {
-  return from ? `the app sends mail and sender ${from} is not marked verified` : 'the app sends mail and no Catalyst Mail sender is set';
+  return from ? `the app sends mail and sender ${maskMailAddress(from)} is not marked verified` : 'the app sends mail and no Catalyst Mail sender is set';
 }
 /** Delivery log: one row per sendmail the live function receives. */
 export const MAIL_LOG_TABLE = 'c2c_mail_log';
@@ -119,7 +138,7 @@ function appSendsMail(app: App): boolean {
 export function mailSenderPrecheck(app: App, config: MailConfig): MailFinding[] {
   if (!appSendsMail(app)) return [];
   const severity = config.enabled ? 'blocker' : 'warning';
-  const fix = 'Verify the sender in the Catalyst console (Mail), then deploy with --mail-from <address> --mail-sender-verified.';
+  const fix = 'Verify the sender in the Catalyst console (Mail → Email Configuration); a deploy --confirm reads the state back live — mail.verified only records the attestation.';
   if (!config.from) {
     return [{ check: MAIL_SENDER_RULE, severity, message: mailSenderFailure(config.from), fix, see: MAIL_DOC }];
   }
@@ -131,6 +150,107 @@ export function mailSenderPrecheck(app: App, config: MailConfig): MailFinding[] 
 
 export function formatMailFindings(findings: readonly MailFinding[]): string[] {
   return findings.map((finding) => `precheck: ${finding.severity} ${finding.check}: ${finding.message}. ${finding.fix} ${finding.see}`);
+}
+
+// ---------- live sender read-back and its persisted evidence ----------
+//
+// `mail.verified` in c2c-deploy.json (and --mail-sender-verified) is only the
+// operator's attestation. A sender counts as verified when the live Catalyst
+// read-back — GET /baas/v1/project/<id>/email, the same list
+// List_All_Emails_Configuration answers — reports it VERIFIED. A confirmed
+// deploy refreshes the record below; dry-runs and the doctor consume it.
+
+/** A one-way tag for a sender address: the address itself never lands in evidence. */
+export function mailSenderTag(address: string): string {
+  return `sha256:${createHash('sha256').update(address.trim().toLowerCase()).digest('hex').slice(0, 16)}`;
+}
+
+export const MAIL_SENDER_EVIDENCE = join('c2c-out', '.c2c', 'mail-sender.json');
+
+/** The recorded read-back: sender tag → the status Catalyst last reported. */
+export interface MailSenderEvidence {
+  version: 1;
+  /** The project the read-back ran against. */
+  projectId?: string;
+  /** When the read-back ran. */
+  at: string;
+  senders: Record<string, string>;
+}
+
+export function readMailSenderEvidence(workspace: string): MailSenderEvidence | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(join(workspace, MAIL_SENDER_EVIDENCE), 'utf8')) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const record = parsed as Record<string, unknown>;
+    if (record.version !== 1 || typeof record.at !== 'string' || !record.senders || typeof record.senders !== 'object' || Array.isArray(record.senders)) return undefined;
+    const senders: Record<string, string> = {};
+    for (const [tag, status] of Object.entries(record.senders as Record<string, unknown>)) {
+      if (typeof status === 'string') senders[tag] = status;
+    }
+    return { version: 1, ...(typeof record.projectId === 'string' ? { projectId: record.projectId } : {}), at: record.at, senders };
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeMailSenderEvidence(workspace: string, evidence: MailSenderEvidence): void {
+  const path = join(workspace, MAIL_SENDER_EVIDENCE);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(evidence, null, 2)}\n`);
+}
+
+/** True when the recorded read-back lists `address` VERIFIED. */
+export function mailSenderEvidenceVerified(evidence: MailSenderEvidence | undefined, address: string): boolean {
+  return evidence?.senders[mailSenderTag(address)]?.toUpperCase() === 'VERIFIED';
+}
+
+/**
+ * The address/status rows of a GET /baas/v1/project/<id>/email read-back (or
+ * the equivalent List_All_Emails_Configuration result): a bare list or the
+ * entries under a `data`-style field.
+ */
+export function mailSenderStatusEntries(body: unknown): { address: string; status: string }[] {
+  let list: unknown = body;
+  if (list && typeof list === 'object' && !Array.isArray(list)) {
+    const record = list as Record<string, unknown>;
+    for (const key of ['data', 'emails', 'email_configurations', 'result', 'items']) {
+      if (Array.isArray(record[key])) {
+        list = record[key];
+        break;
+      }
+    }
+  }
+  if (!Array.isArray(list)) return [];
+  const out: { address: string; status: string }[] = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const entry = item as Record<string, unknown>;
+    const rawAddress = entry.email_address ?? entry.email ?? entry.address ?? entry.from_email;
+    const rawStatus = entry.status ?? entry.verification_status;
+    if (typeof rawAddress !== 'string' || !rawAddress.trim() || typeof rawStatus !== 'string' || !rawStatus.trim()) continue;
+    out.push({ address: rawAddress.trim(), status: rawStatus.trim() });
+  }
+  return out;
+}
+
+/**
+ * Read the project's mail sender states live (one GET, nothing else) and
+ * persist the observed statuses keyed by sender tag. Returns the evidence
+ * record, or undefined when the read could not run or was refused.
+ */
+export async function observeMailSenders(rest: RestFn, projectId: string, workspace: string): Promise<MailSenderEvidence | undefined> {
+  let result;
+  try {
+    result = await rest({ method: 'GET', path: `/baas/v1/project/${projectId}/email` });
+  } catch {
+    return undefined;
+  }
+  if (result.status < 200 || result.status >= 300) return undefined;
+  const senders: Record<string, string> = {};
+  for (const entry of mailSenderStatusEntries(result.body)) senders[mailSenderTag(entry.address)] = entry.status.toUpperCase();
+  const evidence: MailSenderEvidence = { version: 1, projectId, at: new Date().toISOString(), senders };
+  writeMailSenderEvidence(workspace, evidence);
+  return evidence;
 }
 
 /** Data Store table for the delivery log. Planned only when the app sends mail and mail is on. */
@@ -230,6 +350,15 @@ function senderOf(message) {
   return message && message.from !== undefined && message.from !== null ? String(message.from).trim() : "";
 }
 
+// First letter and domain only: refusal reasons are returned to the caller
+// and rows are written to the delivery log table, so the full sender address
+// never prints or persists for a refused send.
+function maskSender(address) {
+  const text = String(address ?? "");
+  const at = text.lastIndexOf("@");
+  return at > 0 ? text[0] + "***" + text.slice(at) : text ? "***" : "";
+}
+
 // 'template: ... as inline' descriptors render into the body here and leave
 // the attachment list; 'template: ... as pdf' renders the same layout and is
 // converted to a PDF attachment below. Everything left over still refuses.
@@ -314,7 +443,7 @@ async function logDelivery(req, message, outcome, config) {
       sent_at: new Date().toISOString(),
       status: outcome.status,
       reason: clip(outcome.reason, 10000),
-      from_email: clip(senderOf(message), 255),
+      from_email: outcome.status === "refused" ? maskSender(senderOf(message)) : clip(senderOf(message), 255),
       to_email: clip(recipientsOf(message).join(", "), 10000),
       subject: clip(message && message.subject, 255),
     });
@@ -330,7 +459,7 @@ async function attempt(message, req, config) {
   const from = senderOf(message);
   const verified = config && Array.isArray(config.verifiedSenders) ? config.verifiedSenders : [];
   if (!from || !verified.includes(from)) {
-    const failure = from ? \`the app sends mail and sender \${from} is not marked verified\` : "the app sends mail and no Catalyst Mail sender is set";
+    const failure = from ? \`the app sends mail and sender \${maskSender(from)} is not marked verified\` : "the app sends mail and no Catalyst Mail sender is set";
     return { performed: false, status: "refused", code: MAIL_SENDER_RULE, reason: \`\${failure} (precheck \${MAIL_SENDER_RULE})\` };
   }
   const rendered = renderInlineAttachments(message);

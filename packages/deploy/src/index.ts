@@ -4,6 +4,7 @@ export { ALLOWED_ENV, ORG_HOW_TO_SET, PROJECT_HOW_TO_SET, GuardError, catalystPr
 export type { GuardCode, GuardInput, GuardOk } from './guards.js';
 export {
   MAIL_LOG_TABLE,
+  MAIL_SENDER_EVIDENCE,
   MAIL_SENDER_RULE,
   decideMail,
   formatMailFindings,
@@ -11,12 +12,19 @@ export {
   mailImportSpec,
   mailLogTableStep,
   mailModuleSource,
+  mailSenderEvidenceVerified,
   mailSenderPrecheck,
+  mailSenderStatusEntries,
+  mailSenderTag,
+  maskMailAddress,
+  observeMailSenders,
   patchMail,
+  readMailSenderEvidence,
   recipientsOf,
   sendsMail,
+  writeMailSenderEvidence,
 } from './mail.js';
-export type { MailConfig, MailDecision, MailFinding, MailSender } from './mail.js';
+export type { MailConfig, MailDecision, MailFinding, MailSender, MailSenderEvidence } from './mail.js';
 export { buildDeploy, deployCommands, deployFiles, deployTableSteps, formatAsyncLaneWarning, formatPlan, migrateCatalystJson, writeDeployTree } from './plan.js';
 export { DEAD_LETTER_TABLE, PROCESSED_TABLE, TRIGGERS_WIRED_FLAG, asyncLaneBlocker, deadLetterTableStep, processedTableStep } from './events.js';
 export type { DeployBundle, DeployCommand, DeployFile, DeployUi } from './plan.js';
