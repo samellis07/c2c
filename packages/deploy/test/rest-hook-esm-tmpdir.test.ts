@@ -167,6 +167,43 @@ test('child stderr secrets (Zoho OAuth token, Bearer header, refresh_token JSON,
   }
 });
 
+test('every credential-named key syntax and value length is redacted in REST and token errors', async () => {
+  const keys = [
+    'secret', 'token', 'password', 'passwd', 'pwd', 'credential', 'credentials',
+    'auth', 'authorization', 'api_key', 'api-key', 'apikey', 'session', 'cookie',
+    'private_key', 'private-key', 'signature',
+  ];
+  const forms = [
+    (key: string, value: string) => `${key}=${value}`,
+    (key: string, value: string) => `https://example.test/path?${key}=${value}`,
+    (key: string, value: string) => `${key}: ${value}`,
+    (key: string, value: string) => `{"${key}": "${value}"}`,
+    (key: string, value: string) => `${key}='${value}'`,
+  ];
+  for (const key of keys) {
+    for (const [formIndex, form] of forms.entries()) {
+      for (const long of [false, true]) {
+        const canary = `short-${key.replace(/\W/g, '')}-${formIndex}`;
+        const value = long ? `${canary}-${'L'.repeat(600)}` : canary;
+        const line = `credential diagnostic: ${form(key, value)}`;
+        const env = fakeCatalyst(
+          `'use strict';\nrequire('fs').writeSync(2, ${JSON.stringify(line + '\\n')});\nprocess.kill(process.pid, 'SIGKILL');\n`,
+          mkdtempSync(join(tmpdir(), 'c2c-key-redact-')),
+        );
+        for (const call of [
+          () => catalystRestCall(env, ORG, PROJECT, { method: 'GET', path: `/baas/v1/project/${PROJECT}` }),
+          () => readCliAccessToken(env, ORG, PROJECT),
+        ]) {
+          await assert.rejects(call, (err: Error) => {
+            assert.ok(!err.message.includes(canary), `${key} form ${formIndex} leaked ${long ? 'long' : 'short'} value: ${err.message}`);
+            return true;
+          });
+        }
+      }
+    }
+  }
+});
+
 test('env dumps in child stderr are skipped while a benign line is preserved and long excerpts are capped', async () => {
   const envSecret = 'env-dump-canary-secret-999';
   const env = fakeCatalyst(
