@@ -172,8 +172,8 @@ interface DelugeUnit {
 interface Ranged { start: number; end: number }
 
 /** A sorted interval index; queries visit only intervals that may overlap. */
-class IntervalIndex<T extends Ranged> {
-  private readonly entries: { value: T; start: number; end: number; prefixEnd: number }[];
+class IntervalIndex<T> {
+  private readonly entries: { value: T; order: number; start: number; end: number; prefixEnd: number }[];
 
   constructor(values: readonly T[], range: (value: T) => Ranged) {
     let prefixEnd = Number.NEGATIVE_INFINITY;
