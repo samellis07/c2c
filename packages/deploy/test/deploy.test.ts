@@ -519,6 +519,31 @@ test('deploy without --confirm writes the plan and does not spawn', async () => 
   rmSync(out, { recursive: true, force: true });
 });
 
+test('blocker 3: --async-on-success warns in plan mode and refuses --confirm without --triggers-wired', async () => {
+  // The default DS has a deferrable `on success (x = 1;)`, so the flag opens the lane.
+  const ds = writeDs();
+  const planCap = capture();
+  const planOut = mkdtempSync(join(tmpdir(), 'c2c-out-'));
+  const planCode = await deployCli([...baseArgs(ds), '--async-on-success', '--out', planOut], planCap.io);
+  assert.equal(planCode, 0);
+  assert.match(planCap.stdout(), /async on-success triggers \(opt-in lane\):/);
+  assert.match(planCap.stderr(), /warning event-async-triggers:/);
+  rmSync(planOut, { recursive: true, force: true });
+
+  const refusedCap = capture();
+  const refused = await deployCli([...baseArgs(ds), '--async-on-success', '--confirm', '--function-env', 'new'], refusedCap.io);
+  assert.equal(refused, 1);
+  assert.match(refusedCap.stderr(), /blocker event-async-triggers:.*--triggers-wired/);
+
+  const wiredCap = capture();
+  const wired = await deployCli(
+    [...baseArgs(ds), '--async-on-success', '--triggers-wired', '--confirm', '--function-env', 'new'],
+    wiredCap.io,
+  );
+  assert.equal(wired, 0);
+  assert.equal(wiredCap.stderr().includes('blocker event-async-triggers'), false);
+});
+
 test('deploy --confirm spawns the Development CLI and still hides the credential path', async () => {
   const ds = writeDs();
   const cap = capture({

@@ -23,6 +23,7 @@ import { applyAuthProvision, formatAuthProvision, hostOf, slateUrlFrom } from '.
 import { slateHost } from '../../auth/src/slate-host.js';
 import { API_FUNCTION, FUNCTION_DIR, envVariables } from './function-dir.js';
 import { buildDeploy, commandLine, deployFiles, migrateCatalystJson, writeDeployTree, type DeployCommand, type DeployFile, type DeployUi } from './plan.js';
+import { asyncLaneBlocker } from './events.js';
 import { humanChecklist } from './human-steps.js';
 import { CONSOLE_SERVICES, formatPostDeploySteps, postDeploySteps, servicesTouched, type ConsoleService, type PostDeployStep } from './post-deploy.js';
 import { appTimeZone, generateUi, slateConfigSource } from '../../ui/src/generate.js';
@@ -727,7 +728,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
   const { target, rest } = targetOf(args);
   if (!target) {
     io.stderr(
-      'usage: c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address> --mail-sender-verified]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>]\n' +
+      'usage: c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address> --mail-sender-verified]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>]\n' +
         '       c2c deploy <file|dir> --backfill-shadows [--confirm] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
         '       --source-* measures the Creator data so is_mandatory/is_unique are provisioned only where the records allow it\n' +
         '       org: --org, else c2c-deploy.json, else the project registry (--projects), else the Catalyst CLI login (active_org)\n' +
@@ -824,11 +825,22 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     }, {
       ...(slateDomain ? { slateDomain } : {}),
       ...(admin ? { admin } : {}),
-    }, deployMailRecipients(findDeployConfig(target, flag(rest, '--config'))), deploySource?.sourceData, ui);
+    }, deployMailRecipients(findDeployConfig(target, flag(rest, '--config'))), deploySource?.sourceData, ui, rest.includes('--async-on-success'));
     const mailBlockers = bundle.mailFindings.filter((finding) => finding.severity === 'blocker');
     if (confirm && mailBlockers.length) {
       for (const finding of mailBlockers) io.stderr(`blocker ${finding.check}: ${finding.message}. ${finding.fix} ${finding.see}\n`);
       return 1;
+    }
+    // Deploy-time trigger gate: the record trigger is project configuration
+    // the deploy does not create. The printed plan carries the warning; a
+    // confirmed deploy refuses without the explicit opt-in.
+    const triggerBlocker = asyncLaneBlocker(bundle.usesEvents, rest.includes('--triggers-wired'));
+    if (triggerBlocker) {
+      if (confirm) {
+        io.stderr(`blocker event-async-triggers: ${triggerBlocker}\n`);
+        return 1;
+      }
+      io.stderr(`warning event-async-triggers: ${triggerBlocker}\n`);
     }
     if (confirm && !out) out = mkdtempSync(join(tmpdir(), 'c2c-deploy-'));
     const digest = bundleDigest(bundle.files);

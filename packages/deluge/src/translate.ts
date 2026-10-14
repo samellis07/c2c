@@ -2537,9 +2537,13 @@ function rangeSlotFor(col: Fx, scope: Scope): { slot: string; from: string; to: 
     if (!clientBound(name, scope)) return null;
     const binding = scope.bindings.get(name);
     // A pure local an earlier client loop wrote is a number the client posts.
-    // An if/else tombstone (flow -1, side effect) and any non-read are not:
-    // the loop stays a counted todo instead of guessing an arm or replaying
-    // the call.
+    // An if/else tombstone (flow -1, side effect) is also a live client value
+    // when the client stream declared the name: the client posts whichever
+    // value the arms left, so no arm is guessed and nothing is replayed. The
+    // deferred read still refuses bounds that are not safe integers, so a name
+    // the client never actually set degrades to a blocked read, not bad rows.
+    // Any other non-read binding stays refused.
+    if (binding?.flow === -1 && (scope.declaredClient.has(name) || scope.prefetchBound.has(name))) continue;
     if (binding && (binding.sideEffect || binding.appFunction || binding.todo || binding.unboundReads.length > 0 || binding.flow < 0)) return null;
   }
   const serverReads: string[] = [];

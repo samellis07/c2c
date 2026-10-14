@@ -132,8 +132,8 @@ test('convertSyntheticSeed explodes multi-lookup arrays to Form__Field junction 
   );
   assert.deepEqual(converted.Job_Opening, [{ c2c_source_id: 'Job_Opening#1', Title: 'J1' }]);
   assert.deepEqual(converted.Job_Opening__Shortlisted, [
-    { c2c_source_id: 'Job_Opening__Shortlisted#1#1', parent_id: 'Job_Opening#1', Shortlisted: 'Candidate#1' },
-    { c2c_source_id: 'Job_Opening__Shortlisted#1#2', parent_id: 'Job_Opening#1', Shortlisted: 'Candidate#2' },
+    { c2c_source_id: 'Job_Opening__Shortlisted#1#1', parent_id: 'Job_Opening#1', row_order: '0', Shortlisted: 'Candidate#1' },
+    { c2c_source_id: 'Job_Opening__Shortlisted#1#2', parent_id: 'Job_Opening#1', row_order: '1', Shortlisted: 'Candidate#2' },
   ]);
 });
 

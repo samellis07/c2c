@@ -16,6 +16,7 @@ import {
   createRuntime,
   jobPoolName,
   needsExactRead,
+  readMultiLookupValues,
 } from '../src/runtime.js';
 import { translate } from '../../deluge/src/translate.js';
 import { mockDatastore } from './zcql-mock.js';
@@ -28,6 +29,51 @@ test('decimal division keeps 20 fractional digits and is not a JS float', () => 
   const third = decimal.div('1', '3').toString();
   assert.equal(third, `0.${'3'.repeat(20)}`);
   assert.notEqual(String(1 / 3), third);
+});
+
+test('multi lookup junction rows read back in row_order', async () => {
+  const calls: unknown[][] = [];
+  const values = await readMultiLookupValues(async (form, where, limit, offset, orderBy) => {
+    calls.push([form, where, limit, offset, orderBy]);
+    return offset ? [] : [{ Members: '700', row_order: '0' }, { Members: '500', row_order: '1' }, { Members: '600', row_order: '2' }];
+  }, { table: 'Team__Members', parentColumn: 'parent_id', valueColumn: 'Members', orderColumn: 'row_order' }, '900');
+  assert.deepEqual(values, ['700', '500', '600']);
+  assert.deepEqual(calls[0], ['Team__Members', "parent_id = '900'", 300, 0, 'ORDER BY row_order, ROWID']);
+});
+
+test('generated record reads hydrate multi lookups from ordered junction rows', async () => {
+  const runtime = createRuntime({
+    dryRun: false,
+    appTimeZone: 'UTC',
+    multiLookups: { Team: { Members: { table: 'Team__Members', parentColumn: 'parent_id', valueColumn: 'Members', orderColumn: 'row_order' } } },
+    datastore: { query: async (form, where, _limit, offset) => form === 'Team'
+      ? [{ ROWID: '900', Name: 'Core' }]
+      : !offset && where.includes("'900'") ? [{ Members: '700', row_order: '0' }, { Members: '500', row_order: '1' }] : [] },
+  });
+  const ctx = runtime.context({});
+  const rows = await runtime.shim.datastore.rows(ctx, runtime.shim.datastore.query(ctx, 'Team', { op: 'true' }));
+  assert.deepEqual(runtime.shim.record.get(rows[0]!, 'Members'), ['700', '500']);
+});
+
+test('dry-run record reads hydrate multi lookups from seeded junction rows without datastore calls', async () => {
+  let calls = 0;
+  const runtime = createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    multiLookups: { Team: { Members: { table: 'Team__Members', parentColumn: 'parent_id', valueColumn: 'Members', orderColumn: 'row_order' } } },
+    seed: {
+      Team: [{ ROWID: '900', Name: 'Core' }],
+      Team__Members: [
+        { ROWID: '2', parent_id: '900', Members: '500', row_order: '1' },
+        { ROWID: '1', parent_id: '900', Members: '700', row_order: '0' },
+      ],
+    },
+    datastore: { query: async () => { calls++; return []; } },
+  });
+  const ctx = runtime.context({});
+  const rows = await runtime.shim.datastore.rows(ctx, runtime.shim.datastore.query(ctx, 'Team', { op: 'true' }));
+  assert.deepEqual(runtime.shim.record.get(rows[0]!, 'Members'), ['700', '500']);
+  assert.equal(calls, 0);
 });
 
 test('app time zone: env, then IR setting; UTC is a labelled dry-run fallback only', () => {

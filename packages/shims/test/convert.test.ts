@@ -242,6 +242,22 @@ test('rangeSlotRequest requires integer bounds and clamps them to the ZCQL page 
   assert.equal(forged.to, 1 + LIMITS.zcqlRowsPerQuery);
   assert.equal(forged.empty, false);
 
+  // A `from` past LIMITS.zcqlMaxRows is refused: no deep offset reaches the store.
+  for (const from of [LIMITS.zcqlMaxRows + 1, 1_000_000_000_000]) {
+    const deep = rangeSlotRequest({ slot: 'c0', range: { from, to: from + LIMITS.zcqlRowsPerQuery } });
+    assert.ok(deep.error, `expected refusal for from ${from}`);
+    assert.equal(deep.slot, undefined);
+  }
+  // A deep page inside the bound is served; its end clamps to LIMITS.zcqlMaxRows.
+  const deepOk = rangeSlotRequest({ slot: 'c0', range: { from: LIMITS.zcqlMaxRows - 99, to: LIMITS.zcqlMaxRows + 200 } });
+  assert.deepEqual(deepOk, { slot: 'c0', from: LIMITS.zcqlMaxRows - 99, to: LIMITS.zcqlMaxRows, empty: false });
+  assert.deepEqual(rangeSlotRequest({ slot: 'c0', range: { from: LIMITS.zcqlMaxRows, to: LIMITS.zcqlMaxRows } }), {
+    slot: 'c0',
+    from: LIMITS.zcqlMaxRows,
+    to: LIMITS.zcqlMaxRows,
+    empty: false,
+  });
+
   // Non-integer, non-number, or missing bounds are refused.
   for (const range of [
     { from: 1.5, to: 11 },

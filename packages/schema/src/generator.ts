@@ -795,6 +795,16 @@ function junctionTable(
   };
   local.groups.set(left, ANCHOR_GROUP);
   columns.push(left);
+  columns.push({
+    name: allocColumn(used, 'row_order'),
+    creatorType: 'lookup multi',
+    matrixId: 'lookup-multi-order',
+    status: 'partial',
+    dataType: 'Int',
+    mandatory: false,
+    unique: false,
+    note: 'Lookup value position, 0-based. Reads order by it, then ROWID.',
+  });
   pushFk(local, field, rowOf('lookup-multi'), false);
   // pushFk names the column after the field. That is the related id.
   pushSourceId(columns, local.groups);
@@ -813,7 +823,7 @@ function junctionTable(
  * constraint on one is never relaxed by source data — there is no app-layer rule that
  * would take over (a child row without its parent link would just be orphaned).
  */
-const GENERATED_COLUMN_IDS = new Set(['subform', 'lookup-multi', 'c2c-source-id', 'c2c-system-field', 'c2c-flow-status', 'c2c-flow-history']);
+const GENERATED_COLUMN_IDS = new Set(['subform', 'lookup-multi', 'lookup-multi-order', 'c2c-source-id', 'c2c-system-field', 'c2c-flow-status', 'c2c-flow-history']);
 
 const emptyCell = (value: unknown): boolean =>
   value === undefined || value === null || (typeof value === 'string' && value.trim() === '') || (Array.isArray(value) && value.length === 0);

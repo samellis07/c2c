@@ -20,6 +20,7 @@ import { translate } from '../../deluge/src/translate.js';
 import { generateSchema } from '../../schema/src/generator.js';
 import { fieldTypeRow } from '../../schema/src/mapping.js';
 import { createRuntime } from '../../shims/src/runtime.js';
+import { loadGeneratedModule } from '../../core/test/support/generated-module.js';
 import { columnTypes } from '../src/function-dir.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from '../src/guards.js';
 import { deployFiles, writeDeployTree } from '../src/plan.js';
@@ -212,21 +213,11 @@ test('a number past 2^53 reads exactly and writes back the same digits', async (
   assert.equal(it.rows('Item')[0]!.Stock, big);
 });
 
-async function loadModule(source: string, t: { after(fn: () => void): void }): Promise<Record<string, unknown>> {
-  const dir = mkdtempSync(join(tmpdir(), 'c2c-live-types-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
-  mkdirSync(join(dir, 'node_modules'), { recursive: true });
-  symlinkSync(root, join(dir, 'node_modules/creator-to-catalyst'));
-  writeFileSync(join(dir, 'handler.mjs'), source);
-  return (await import(pathToFileURL(join(dir, 'handler.mjs')).href)) as Record<string, unknown>;
-}
-
 function workflow(partial: Partial<Workflow> & Pick<Workflow, 'name' | 'event'>): Workflow {
   return { deluge: null, properties: [], span: Z, ...partial };
 }
 
-test('gallery shape: an Order on-success workflow decrements the item stock and keeps a running total', async (t) => {
+test('gallery shape: an Order on-success workflow decrements the item stock and keeps a running total', async () => {
   const ir = app();
   ir.workflows.push(
     workflow({
@@ -246,9 +237,10 @@ test('gallery shape: an Order on-success workflow decrements the item stock and 
       },
     }),
   );
-  const file = generate(ir).files.find((f) => f.path.startsWith('functions/aio/order/') && f.source.includes('Item'));
+  const generated = generate(ir);
+  const file = generated.files.find((f) => f.path.startsWith('functions/aio/order/') && f.source.includes('Item'));
   assert.ok(file, 'generated Order handler');
-  const mod = (await loadModule(file.source, t)) as { handle: (ctx: unknown) => Promise<unknown> };
+  const mod = (await loadGeneratedModule(generated.files, file.path)) as { handle: (ctx: unknown) => Promise<unknown> };
   const it = await seeded();
   for (const name of ['ten', 'nine']) await mod.handle(it.runtime.context({ record: { Item_Name: name } }));
   const ten = it.rows('Item').find((row) => row.Name === 'ten')!;

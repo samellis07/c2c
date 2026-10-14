@@ -163,6 +163,7 @@ export function convertSyntheticSeed(value: unknown, opts?: SyntheticConvertOpti
               extraRow(table).push({
                 c2c_source_id: `${table}#${i + 1}#${k + 1}`,
                 parent_id: id,
+                row_order: String(k),
                 [field]: resolveRef(target.form, field, ref, targets),
               });
             });

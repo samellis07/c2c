@@ -474,6 +474,13 @@ export function readSourceBackup(source: string, app: App, allowEmpty = false): 
   const fidelity: string[] = [];
   const covered = new Map<string, Set<string>>();
   const junctions = new Map<string, Map<string, SeedRow>>();
+  const junctionOrder = new Map<string, number>();
+  const nextJunctionOrder = (table: string, parent: string): string => {
+    const key = `${table}\0${parent}`;
+    const order = junctionOrder.get(key) ?? 0;
+    junctionOrder.set(key, order + 1);
+    return String(order);
+  };
   // Tables the backup cannot vouch complete: a child row no rel file links to
   // a live parent is skipped, and a junction link naming a base or target
   // outside the backup builds no row. Either leaves the table short of the
@@ -718,7 +725,7 @@ export function readSourceBackup(source: string, app: App, allowEmpty = false): 
         fidelity.push(`${name}: ${ownerSpec.form}.${fieldName} is a multi lookup the schema does not store; ${pairs.length} relation row(s) not carried`);
         continue;
       }
-      const link = junction.columns.find((column) => column.name !== 'parent_id' && !column.shadowFor);
+      const link = junction.columns.find((column) => column.name !== 'parent_id' && column.name !== 'row_order' && !column.shadowFor);
       if (!link) throw new Error(`${name}: ${junction.table} has no link column`);
       const targetSpec = link.relation ? byTable.get(link.relation.table) : undefined;
       // A `bidirectional` list also fills the single-lookup back column on the
@@ -733,7 +740,7 @@ export function readSourceBackup(source: string, app: App, allowEmpty = false): 
       const backField = targetSpec && backName ? formOf(targetSpec.form)?.fields.find((candidate) => normKey(candidate.name) === normKey(backName)) : undefined;
       const backIsMulti = !!backField && isMultiField(backField) && !isSubformField(backField);
       const backJunction = !backColumn && targetSpec && backName && backIsMulti ? junctionFor(targetSpec.form, backName) : undefined;
-      const backJunctionLink = backJunction?.columns.find((column) => column.name !== 'parent_id' && !column.shadowFor);
+      const backJunctionLink = backJunction?.columns.find((column) => column.name !== 'parent_id' && column.name !== 'row_order' && !column.shadowFor);
       const backJunctionRows = backJunction ? (junctions.get(backJunction.table) ?? new Map<string, SeedRow>()) : undefined;
       if (backJunction && backJunctionRows) junctions.set(backJunction.table, backJunctionRows);
       const rows = junctions.get(junction.table) ?? new Map<string, SeedRow>();
@@ -753,7 +760,7 @@ export function readSourceBackup(source: string, app: App, allowEmpty = false): 
         if (rows.has(id)) {
           counters.junctionDedup += 1;
         } else {
-          rows.set(id, { id, columns: { parent_id: pair.base, [link.name]: pair.ref } });
+          rows.set(id, { id, columns: { parent_id: pair.base, row_order: nextJunctionOrder(junction.table, pair.base), [link.name]: pair.ref } });
           count(counters.relRows, `${junction.table}.${link.name}`);
         }
         if (backColumn && backRows) {
@@ -783,7 +790,7 @@ export function readSourceBackup(source: string, app: App, allowEmpty = false): 
           if (backJunctionRows.has(id)) {
             counters.junctionDedup += 1;
           } else {
-            backJunctionRows.set(id, { id, columns: { parent_id: pair.ref, [backJunctionLink.name]: pair.base } });
+            backJunctionRows.set(id, { id, columns: { parent_id: pair.ref, row_order: nextJunctionOrder(backJunction.table, pair.ref), [backJunctionLink.name]: pair.base } });
             count(counters.relRows, `${backJunction.table}.${backJunctionLink.name}`);
           }
         }
@@ -897,7 +904,7 @@ export function readSourceBackup(source: string, app: App, allowEmpty = false): 
       if (!backSpec || (!backColumn && !backJunction)) {
         fidelity.push(`${name}: ${ownerSpec.form}.${fieldName} is bidirectional but ${ownerField.lookup?.form ?? 'the target'} has no ${backName} column; the reverse value is not carried`);
       } else if (backJunction) {
-        const link = backJunction.columns.find((item) => item.name !== 'parent_id' && !item.shadowFor);
+        const link = backJunction.columns.find((item) => item.name !== 'parent_id' && item.name !== 'row_order' && !item.shadowFor);
         if (!link) throw new Error(`${name}: ${backJunction.table} has no link column`);
         const rows = junctions.get(backJunction.table) ?? new Map<string, SeedRow>();
         junctions.set(backJunction.table, rows);
@@ -915,7 +922,7 @@ export function readSourceBackup(source: string, app: App, allowEmpty = false): 
           if (rows.has(id)) {
             counters.junctionDedup += 1;
           } else {
-            rows.set(id, { id, columns: { parent_id: pair.ref, [link.name]: pair.base } });
+            rows.set(id, { id, columns: { parent_id: pair.ref, row_order: nextJunctionOrder(backJunction.table, pair.ref), [link.name]: pair.base } });
             count(counters.relRows, `${backJunction.table}.${link.name}`);
           }
         }

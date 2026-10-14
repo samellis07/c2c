@@ -17,7 +17,8 @@ export {
   sendsMail,
 } from './mail.js';
 export type { MailConfig, MailDecision, MailFinding, MailSender } from './mail.js';
-export { buildDeploy, deployCommands, deployFiles, deployTableSteps, formatPlan, migrateCatalystJson, writeDeployTree } from './plan.js';
+export { buildDeploy, deployCommands, deployFiles, deployTableSteps, formatAsyncLaneWarning, formatPlan, migrateCatalystJson, writeDeployTree } from './plan.js';
+export { DEAD_LETTER_TABLE, PROCESSED_TABLE, TRIGGERS_WIRED_FLAG, asyncLaneBlocker, deadLetterTableStep, processedTableStep } from './events.js';
 export type { DeployBundle, DeployCommand, DeployFile, DeployUi } from './plan.js';
 export { emptyRegistry } from './registry.js';
 export { DC_ENDPOINTS, dcEndpoints, catalystBaseFor, deployMailRecipients } from './dc.js';

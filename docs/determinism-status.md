@@ -25,7 +25,7 @@ TODO item per untranslated construct occurrence.
 |---|---:|
 | corpus apps | 67 |
 | deterministic apps | 8 (11.9%) |
-| residual TODO items | 655 |
+| residual TODO items | 639 |
 | distinct TODO kinds | 18 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
@@ -35,7 +35,7 @@ TODO item per untranslated construct occurrence.
 |---|---:|
 | `client-condition-uses-server` | 319 |
 | `Server-side Deluge snippet requires manual translation` | 186 |
-| `client-loop-uses-server` | 102 |
+| `client-loop-uses-server` | 86 |
 | `criteria-dynamic` | 10 |
 | `pushnotification` | 6 |
 | `task:(app identifier)` | 5 |
@@ -82,7 +82,7 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "client-loop-uses-server",
-      "count": 102
+      "count": 86
     },
     {
       "construct": "criteria-dynamic",
@@ -237,7 +237,7 @@ clears the app. The count is apps, not items.
         "client-loop-uses-server",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 200
+      "items": 184
     },
     {
       "constructs": [
@@ -573,7 +573,7 @@ clears the app. The count is apps, not items.
       "items": 6
     }
   ],
-  "todoTotal": 655,
+  "todoTotal": 639,
   "totalApps": 67
 }
 ```

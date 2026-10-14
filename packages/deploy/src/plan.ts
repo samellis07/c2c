@@ -28,6 +28,7 @@ import {
   type MailFinding,
   type MailSender,
 } from './mail.js';
+import { ASYNC_ON_SUCCESS_WARNING, TRIGGERS_WIRED_FLAG, deadLetterTableStep, processedTableStep } from './events.js';
 import { PROJECT_TEMPLATE_FILE, projectTemplateJson } from './iac.js';
 import { seedBucketName, seedFileColumns } from './seed.js';
 import { formatTableCreate, tableCreatePlan, type TableCreateStep } from './tables.js';
@@ -78,6 +79,8 @@ export interface DeployOptions {
   source?: readonly SourceTableData[];
   /** The UI target the Slate app serves. Default react, which writes web/ and builds web/dist; vanilla is the fallback. */
   ui?: DeployUi;
+  /** Opt-in async on-success lane: emit the event function, dead-letter store and sweep Job (docs/event-deadletter.md). */
+  asyncOnSuccess?: boolean;
 }
 
 export interface DeployBundle {
@@ -91,6 +94,8 @@ export interface DeployBundle {
   mailFindings: MailFinding[];
   /** True when a generated server function calls the mail shim — the app sends mail. */
   sendsMail: boolean;
+  /** True when the bundle emits async on-success event functions (the trigger gate applies). */
+  usesEvents: boolean;
   /** Store constraints the `--source-*` data disproved — the deploy report records them so a later audit can see why a column was provisioned app-level. */
   constraints?: readonly ConstraintDecision[];
 }
@@ -202,7 +207,7 @@ export function deployFiles(
   mailEnabled: boolean,
   opts: DeployOptions = {},
   sender: MailSender = {},
-): { files: DeployFile[]; mail: MailConfig; schema: ReturnType<typeof generateSchema>; sendsMail: boolean } {
+): { files: DeployFile[]; mail: MailConfig; schema: ReturnType<typeof generateSchema>; sendsMail: boolean; usesEvents: boolean } {
   // A live tree without the app time zone fails every live handler at request
   // time (TimeZoneRequired inside createRuntime). Report it here, at generate
   // time, with the fix named — not as a runtime 500 "request failed".
@@ -213,7 +218,7 @@ export function deployFiles(
   }
   const mail = mailConfig(mailEnabled, sender, opts.mailTestRecipients ?? []);
   const schema = generateSchema(app, opts.source ? { source: opts.source } : undefined);
-  const ui = buildUi(app, { dc: guard.dc, schema });
+  const ui = buildUi(app, { dc: guard.dc, schema, ...(opts.asyncOnSuccess ? { asyncOnSuccess: true } : {}) });
   const files: DeployFile[] = [];
   files.push({ path: 'catalyst.json', data: `${JSON.stringify(catalystJson(guard, mail), null, 2)}\n` });
   files.push({
@@ -278,7 +283,7 @@ export function deployFiles(
   if (widgetItems.length) {
     files.push({ path: 'manual/widgets.json', data: `${JSON.stringify({ widgets: widgetItems }, null, 2)}\n` });
   }
-  return { files, mail, schema, sendsMail: functionsSendMail(ui.files) };
+  return { files, mail, schema, sendsMail: functionsSendMail(ui.files), usesEvents: ui.files.some((file) => file.path.startsWith('functions/events/')) };
 }
 
 /**
@@ -287,8 +292,8 @@ export function deployFiles(
  * the app's functions send mail and the deploy turned mail on — so any other
  * deploy creates no log table.
  */
-export function deployTableSteps(schema: ReturnType<typeof generateSchema>, sendingApp: boolean, mailEnabled: boolean): TableCreateStep[] {
-  return [...tableCreatePlan(schema), ...(sendingApp && mailEnabled ? [mailLogTableStep()] : [])];
+export function deployTableSteps(schema: ReturnType<typeof generateSchema>, sendingApp: boolean, mailEnabled: boolean, usesEvents = false): TableCreateStep[] {
+  return [...tableCreatePlan(schema), ...(sendingApp && mailEnabled ? [mailLogTableStep()] : []), ...(usesEvents ? [deadLetterTableStep(), processedTableStep()] : [])];
 }
 
 export function buildDeploy(
@@ -303,16 +308,17 @@ export function buildDeploy(
   mailTestRecipients: readonly string[] = [],
   source?: readonly SourceTableData[],
   ui: DeployUi = 'react',
+  asyncOnSuccess = false,
 ): DeployBundle {
-  const { files, mail, schema, sendsMail: mails } = deployFiles(
+  const { files, mail, schema, sendsMail: mails, usesEvents } = deployFiles(
     app,
     guard,
     mailEnabled,
-    { mode: confirm ? 'live' : 'dry-run', apiBase, functionEnv, mailTestRecipients, ...(source ? { source } : {}), ui },
+    { mode: confirm ? 'live' : 'dry-run', apiBase, functionEnv, mailTestRecipients, ...(source ? { source } : {}), ui, ...(asyncOnSuccess ? { asyncOnSuccess } : {}) },
     sender,
   );
   const commands = deployCommands(guard.projectName, guard.org, guard.projectId, ui);
-  const tableSteps = deployTableSteps(schema, mails, mail.enabled);
+  const tableSteps = deployTableSteps(schema, mails, mail.enabled, usesEvents);
   const mailFindings = mailSenderPrecheck(app, mail);
   const widgetItems = widgetManualItems(app.widgets);
   const plan = formatPlan({
@@ -329,7 +335,7 @@ export function buildDeploy(
     ui,
     ...(widgetItems.length ? { widgets: widgetItems } : {}),
   });
-  return { files, plan, commands, projectName: guard.projectName, mail, tableSteps, mailFindings, sendsMail: mails, ...(schema.constraints?.length ? { constraints: schema.constraints } : {}) };
+  return { files, plan, commands, projectName: guard.projectName, mail, tableSteps, mailFindings, sendsMail: mails, usesEvents, ...(schema.constraints?.length ? { constraints: schema.constraints } : {}) };
 }
 
 export function writeDeployTree(dir: string, files: readonly DeployFile[]): void {
@@ -392,6 +398,23 @@ function tableBlock(table: SchemaTable): string {
   return [head, ...table.columns.map(columnLine)].join('\n');
 }
 
+/**
+ * Deploy-time trigger gate, printed part. The trigger/rule is project
+ * configuration the deploy does not create: when the bundle emits the
+ * after-commit event function, the plan must say so loudly, and a confirmed
+ * deploy refuses without the explicit opt-in (cli.ts). No event function, no
+ * lines — flag-off plans are byte-identical.
+ */
+export function formatAsyncLaneWarning(files: readonly { path: string }[]): string[] {
+  if (!files.some((file) => file.path.endsWith('/events/after-commit.mjs'))) return [];
+  return [
+    '',
+    'async on-success triggers (opt-in lane):',
+    `- ${ASYNC_ON_SUCCESS_WARNING.construct}: ${ASYNC_ON_SUCCESS_WARNING.note}`,
+    `- triggers: wire one record trigger per table per action to functions/events/after-commit.mjs; a confirmed deploy refuses without ${TRIGGERS_WIRED_FLAG}`,
+  ];
+}
+
 export function formatPlan(opts: {
   guard: GuardOk;
   mail: MailConfig;
@@ -426,6 +449,7 @@ export function formatPlan(opts: {
     ...formatMailFindings(opts.mailFindings ?? []),
     `confirm: ${opts.confirm ? 'yes' : 'no'}`,
     `ui: ${opts.ui ?? 'react'}`,
+    ...formatAsyncLaneWarning(opts.files),
     '',
     'tables:',
     ...(opts.tables.length ? opts.tables.map(tableBlock) : ['- none']),

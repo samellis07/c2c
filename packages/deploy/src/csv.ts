@@ -28,8 +28,9 @@
  * written as a parent cell. Dates are dd-MMM-yyyy
  * or already ISO. An ambiguous date is left as text so the writer can refuse it.
  * Decimals drop grouping commas and pad up to the column scale. Extra fractional
- * digits are kept so the writer can refuse them instead of rounding. Multi-select
- * becomes a JSON list. Files are the exported reference.
+ * digits are kept so the writer can refuse them instead of rounding. Choice
+ * multi-select becomes a JSON list; multi-lookup values become ordered junction
+ * rows. Files are the exported reference.
  *
  * Acyclic lookups are resolved to parent ROWIDs before insert. A self-lookup
  * or a cycle cannot be: those columns are omitted on insert, then set with a
@@ -134,6 +135,7 @@ interface PendingLink {
   raw: string;
   file: string;
   authoritative: boolean;
+  order: number;
 }
 
 /** Rows harvested from flattened subform columns, destined for a child table. */
@@ -1030,7 +1032,7 @@ function materialize(
         }
         if (hit.kind === 'junction') {
           const column = junctionColumn(hit.table, hit.column, specs);
-          for (const related of relatedValues(cell)) {
+          relatedValues(cell).forEach((related, order) => {
             rowPending.push({
               table: hit.table,
               parentId: '',
@@ -1040,8 +1042,9 @@ function materialize(
               raw: related.raw,
               file: plan.sheet.file,
               authoritative: related.authoritative,
+              order,
             });
-          }
+          });
           return;
         }
         if (hit.kind === 'composite') {
@@ -1865,6 +1868,7 @@ function resolveLookupCells(
   occupied: ReadonlySet<string>,
   authoritative: ReadonlySet<string>,
 ): void {
+  const orderColumns = new Map(specs.filter((spec) => spec.role === 'junction').map((spec) => [spec.table, spec.columns.find((column) => column.field === 'row_order' || column.column === 'row_order')?.column]));
   const bySpec = new Map(specs.map((spec) => [spec.table, spec]));
   const index = new Map<string, IndexedRow[]>();
   for (const table of tables) {
@@ -1891,7 +1895,8 @@ function resolveLookupCells(
     const id = `${link.parentId}__${link.column}__${target}`;
     const table = tables.find((item) => item.table === link.table);
     if (!table || table.rows.some((row) => row.id === id)) continue;
-    table.rows.push({ id, columns: { parent_id: link.parentId, [link.column]: target } });
+    const orderColumn = orderColumns.get(link.table);
+    table.rows.push({ id, columns: { parent_id: link.parentId, ...(orderColumn ? { [orderColumn]: String(link.order) } : {}), [link.column]: target } });
   }
 }
 

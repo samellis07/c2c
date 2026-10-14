@@ -648,6 +648,54 @@ test('a range bound that reads a client-accumulated scalar defers the read to a 
   assert.match(client, /for \(var d_rec of shim\.each\(ctx, slots\["c0"\]\)\)/);
 });
 
+test('a range bound that reads an if/else-tombstoned client scalar defers the read to a slot request', () => {
+  // `proplength` is assigned inside both arms, so its binding is an if/else
+  // tombstone the prefetch cannot replay. The client declared and still holds
+  // the name, so it posts whichever value the arms left; nothing is replayed
+  // and no arm is guessed.
+  const t = translate(
+    [
+      'proplength = 0;',
+      'if (input.Flag == "y") {',
+      '  proplength = 1;',
+      '} else {',
+      '  proplength = 2;',
+      '}',
+      'for each rr in Lines[ID != 0] sort by Added_Time desc range from 1 to 11 - proplength {',
+      '  info rr.Item;',
+      '  proplength = proplength + 1;',
+      '}',
+    ].join('\n'),
+  );
+  assert.equal(t.todos.some((item) => item.construct === 'client-loop-uses-server'), false);
+  const client = stripComments(t.client);
+  const prefetch = stripComments(t.prefetch);
+  assert.match(client, /await shim\.client\.rows\(ctx, "c0", 1, \(11 - proplength\)\)/);
+  assert.match(client, /for \(var rr of shim\.each\(ctx, range_c0\.rows\)\)/);
+  assert.match(prefetch, /ctx\.rangeSlot === "c0"/);
+  // The bound is evaluated on the client; the prefetch module does not replay
+  // a `proplength` binding.
+  assert.doesNotMatch(prefetch, /var proplength/);
+});
+
+test('a range bound that reads an app-function result keeps the counted todo', () => {
+  // `inde` is a thisapp call: the client never holds it, and a function body
+  // may have side effects so the prefetch must not replay it. The bound can
+  // be evaluated nowhere — the loop is not deferred.
+  const t = translate(
+    [
+      'inde = thisapp.indexCalculation(Lines[ID != 0].count());',
+      'rangeTo = inde.toLong();',
+      'for each rr in Lines[ID != 0] sort by Added_Time desc range from 1 to rangeTo {',
+      '  info rr.Item;',
+      '}',
+    ].join('\n'),
+  );
+  assert.equal(t.todos.some((item) => item.construct === 'client-loop-uses-server'), true);
+  assert.doesNotMatch(stripComments(t.prefetch), /ctx\.rangeSlot/);
+  assert.doesNotMatch(stripComments(t.client), /shim\.client\.rows/);
+});
+
 test('a client range read replays input-derived criteria leaves but keeps a dynamic leaf a todo', () => {
   // `proplength` was written inside an earlier client loop, so the bound does
   // not dominate the collection. The client sends it. `bed1` was bound from
@@ -1315,13 +1363,16 @@ test('a binding assigned inside a loop body is never replayed', () => {
 });
 
 test('a binding assigned in an if/else arm is never replayed at a later use', () => {
-  // The else-arm `n = 100` does not dominate the range end: when Flag runs the
-  // page is 1 row, and a 5-row snapshot would walk past it.
+  // Neither arm's `n` dominates the range end, so the prefetch replays no
+  // binding. The client declared `n`, though, and posts whichever value the
+  // arms left as a deferred read: when Flag runs the page is 1 row.
   const ranged = translate('if (input.Flag) { n = 1; } else { n = 100; }\nfor each r in Orders[ID != 0] sort by ID asc range from 1 to n { alert r.Name; }', {
     inputFields: ['Flag'],
   });
-  assert.equal(ranged.todos.filter((item) => item.construct === 'client-loop-uses-server').length, 1);
+  assert.equal(ranged.todos.filter((item) => item.construct === 'client-loop-uses-server').length, 0);
   assert.doesNotMatch(stripComments(ranged.prefetch), /var n =/);
+  assert.match(stripComments(ranged.prefetch), /ctx\.rangeSlot === "c0"/);
+  assert.match(stripComments(ranged.client), /await shim\.client\.rows\(ctx, "c0", 1, n\)/);
   // Neither arm's assignment dominates the condition after the if.
   const self = translate('n = 1;\nif (false) { n = 2; } else { n = n + 9; }\nc = Orders[ID != 0].count();\nif (c > n) { alert "x"; }');
   assert.equal(self.todos.filter((item) => item.construct === 'client-condition-uses-server').length, 1);

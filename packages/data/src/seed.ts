@@ -784,17 +784,20 @@ export function generateSeed(app: App, opts?: { n?: number; seed?: string }): Se
       if (!parentIds?.length) return;
       const plannedJunction = takeJunction(schemaPlan, parentTable, col.name, col.lookupForm, junctionUsed);
       const link = plannedJunction?.columns.find((column) => column.relation && column.name !== 'parent_id');
+      const orderColumn = plannedJunction?.columns.find((column) => column.name === 'row_order')?.name ?? 'row_order';
       const junctionName = plannedJunction?.name ?? linkedTableName(parentTable, col.name, 'link');
       const columnName = link?.name ?? schemaIdent(col.name, 'link');
       const junctionRows: { id: string; columns: Record<string, string> }[] = [];
       let junctionId = 1;
       for (let i = 0; i < ids.length; i++) {
         const requested = 1 + ((i + tag.n) % 3);
+        let position = 0;
         for (const pickedIndex of distinctTargetIndexes(i, requested, parentIds.length)) {
           junctionRows.push({
             id: `${junctionName}#${tag.text}#${junctionId++}`,
             columns: {
               parent_id: ids[i],
+              [orderColumn]: String(position++),
               [columnName]: parentIds[pickedIndex],
             },
           });

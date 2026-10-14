@@ -43,6 +43,12 @@ export const CHECKPOINT_TABLE = 'C2CJobCheckpoint';
 export const JOB_TARGET = 'c2c_jobs';
 export const SWEEPER_MODULE = 'c2c-form-sweeper';
 const SWEEPER_CRON = 'c2c_form_sweeper';
+/** The dead-letter sweep Job of an app that opts into async on-success (events.ts). */
+export const EVENT_SWEEPER_MODULE = 'c2c-event-sweeper';
+const EVENT_SWEEPER_CRON = 'c2c_event_sweeper';
+/** The dead-letter sweep period and the budget below it, so two sweeps never overlap. */
+export const EVENT_SWEEP_PERIOD_MINUTES = 15;
+export const EVENT_SWEEP_BUDGET_MINUTES = 14;
 
 export interface CronDefinition {
   cron_name: string;
@@ -206,6 +212,18 @@ export function sweeperCron(app: App): CronDefinition {
   };
 }
 
+/** The periodic cron that fires the dead-letter sweep Job. No retry: the marker rows are the retry state. */
+export function eventSweeperCron(app: App): CronDefinition {
+  return {
+    cron_name: EVENT_SWEEPER_CRON,
+    cron_status: true,
+    cron_type: 'Periodic',
+    cron_detail: { hour: 0, minute: EVENT_SWEEP_PERIOD_MINUTES, second: 0, repetition_type: 'every' },
+    job_meta: jobMeta(EVENT_SWEEPER_CRON, jobPool(app), EVENT_SWEEPER_MODULE, 0),
+    c2c: { timeZone: null, start: null, frequency: `every ${EVENT_SWEEP_PERIOD_MINUTES} minutes` },
+  };
+}
+
 /** Generated runtime-only helpers shared by job modules: the deploy switch and the store. */
 export function jobLiveHelpers(): string {
   return `function modeOverride() {
@@ -315,7 +333,7 @@ export default async function job(jobRequest, context) {
 }
 
 /** Generated job-scheduling.json: the pool, every cron, the sweeper and the known gaps. */
-export function schedulingConfig(app: App, plans: readonly SchedulePlan[]): string {
+export function schedulingConfig(app: App, plans: readonly SchedulePlan[], eventSweep = false): string {
   const crons: CronDefinition[] = [];
   const sweeps: string[] = [];
   for (const plan of plans) {
@@ -323,6 +341,7 @@ export function schedulingConfig(app: App, plans: readonly SchedulePlan[]): stri
     if (plan.kind === 'form' && plan.sweep) sweeps.push(plan.sweep.name);
   }
   if (sweeps.length) crons.push(sweeperCron(app));
+  if (eventSweep) crons.push(eventSweeperCron(app));
   crons.sort((a, b) => (a.cron_name < b.cron_name ? -1 : a.cron_name > b.cron_name ? 1 : 0));
   const config = {
     jobPool: { name: jobPool(app), type: 'Function' },
@@ -337,6 +356,34 @@ export function schedulingConfig(app: App, plans: readonly SchedulePlan[]): stri
           schedules: sweeps,
         }
       : null,
+    ...(eventSweep
+      ? {
+          eventSweeper: {
+            module: `job/${EVENT_SWEEPER_MODULE}.mjs`,
+            periodMinutes: EVENT_SWEEP_PERIOD_MINUTES,
+            budgetMinutes: EVENT_SWEEP_BUDGET_MINUTES,
+            // Mirrors DEAD_LETTER_COLUMNS in events.ts (that module imports this
+            // one, so the list cannot be imported back). Deploy owns the real
+            // create step; this block only documents it in the plan.
+            deadLetterTable: {
+              name: 'C2CEventDeadLetter',
+              columns: [
+                { name: 'Event_Key', type: 'varchar', length: 255 },
+                { name: 'Form', type: 'varchar', length: 255 },
+                { name: 'Action', type: 'varchar', length: 255 },
+                { name: 'Record_ID', type: 'varchar', length: 255 },
+                { name: 'Target', type: 'varchar', length: 255 },
+                { name: 'State', type: 'varchar', length: 255 },
+                { name: 'Attempts', type: 'int' },
+                { name: 'Error', type: 'text' },
+                { name: 'Envelope', type: 'text' },
+                { name: 'First_Failed', type: 'varchar', length: 255 },
+                { name: 'Last_Failed', type: 'varchar', length: 255 },
+              ],
+            },
+          },
+        }
+      : {}),
     knownGaps: KNOWN_GAPS,
   };
   return JSON.stringify(config, null, 2) + '\n';

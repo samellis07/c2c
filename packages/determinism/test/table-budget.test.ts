@@ -103,29 +103,39 @@ const SCHEDULE_DS = `application "Reminders"
 
 test('an app that sends mail needs c2c_mail_log only under --mail; a no-mail app never does', () => {
   const mailer = appTableBudget(deriveIr(parse(MAIL_DS)));
-  assert.deepEqual(mailer, { appTables: 2, flowHistory: 0, mailLogDefault: 0, mailLogWithMail: 1, jobCheckpoint: 0 });
+  assert.deepEqual(mailer, { appTables: 2, flowHistory: 0, mailLogDefault: 0, mailLogWithMail: 1, jobCheckpoint: 0, asyncEventTables: 2 });
   const quiet = appTableBudget(deriveIr(parse(PLAIN_DS)));
-  assert.deepEqual(quiet, { appTables: 2, flowHistory: 0, mailLogDefault: 0, mailLogWithMail: 0, jobCheckpoint: 0 });
+  assert.deepEqual(quiet, { appTables: 2, flowHistory: 0, mailLogDefault: 0, mailLogWithMail: 0, jobCheckpoint: 0, asyncEventTables: 0 });
 });
 
 test('a form schedule counts the sweeper checkpoint table', () => {
-  assert.deepEqual(appTableBudget(deriveIr(parse(SCHEDULE_DS))), { appTables: 1, flowHistory: 0, mailLogDefault: 0, mailLogWithMail: 0, jobCheckpoint: 1 });
+  assert.deepEqual(appTableBudget(deriveIr(parse(SCHEDULE_DS))), { appTables: 1, flowHistory: 0, mailLogDefault: 0, mailLogWithMail: 0, jobCheckpoint: 1, asyncEventTables: 0 });
 });
 
 test('the budget doc reports before and after per app, with counts only', () => {
   const rows = [
-    { appTables: 2, flowHistory: 0, mailLogDefault: 0, mailLogWithMail: 1, jobCheckpoint: 0 },
-    { appTables: 5, flowHistory: 1, mailLogDefault: 0, mailLogWithMail: 0, jobCheckpoint: 1 },
+    { appTables: 2, flowHistory: 0, mailLogDefault: 0, mailLogWithMail: 1, jobCheckpoint: 0, asyncEventTables: 2 },
+    { appTables: 5, flowHistory: 1, mailLogDefault: 0, mailLogWithMail: 0, jobCheckpoint: 1, asyncEventTables: 0 },
   ];
   const doc = renderTableBudgetDoc(rows);
-  assert.match(doc, /\| 1 \| 2 \| 1 \| 3 \| 0 \| 2 \| 0 \|/);
-  assert.match(doc, /\| 2 \| 5 \| 2 \| 7 \| 2 \| 7 \| 1 \|/);
+  assert.match(doc, /\| 1 \| 2 \| 1 \| 3 \| 0 \| 2 \| 2 \| 4 \| 0 \|/);
+  assert.match(doc, /\| 2 \| 5 \| 2 \| 7 \| 2 \| 7 \| 0 \| 7 \| 1 \|/);
   assert.match(doc, /\| \*\*all tables\*\* \| \*\*9\*\* \| \*\*10\*\* \|/);
   assert.match(doc, /sweeper checkpoints in `C2CJobCheckpoint`: 1\./);
+  assert.match(doc, /\| \*\*all tables\*\* \| \*\*9\*\* \| \*\*10\*\* \| \*\*11\*\* \|/);
+  assert.match(doc, /\| largest app \| 7 \| 7 \| 7 \|/);
   assert.match(doc, /\| `C2CJobCheckpoint` \| 1 \| 1 \|/);
   assert.match(doc, /\| `c2c_mail_log` \| 0 \| 1 \|/);
   assert.equal(/\d{4}-\d{2}-\d{2}|\/Users\//.test(doc), false);
   assert.equal(renderTableBudgetDoc(rows), doc);
+});
+
+test('an app with an add on-success module counts both async lane tables', () => {
+  const budget = appTableBudget(deriveIr(parse(MAIL_DS)));
+  assert.equal(budget.asyncEventTables, 2);
+  const withoutLane = budget.appTables + budget.flowHistory + budget.jobCheckpoint + budget.mailLogDefault;
+  const withLane = withoutLane + budget.asyncEventTables;
+  assert.equal(withLane - withoutLane, 2);
 });
 
 function galleryDir(): string | undefined {

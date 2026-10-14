@@ -10,7 +10,7 @@ import { deriveIr, emptyApp, headerWords, isGroup, parse, parseProject, sig, wal
 import { createRuntime, LIMITS } from '../../shims/src/runtime.js';
 import { RecordAccessError } from '../../shims/src/access.js';
 import { mockDatastore } from '../../shims/test/zcql-mock.js';
-import { conditionalFieldRules, emittedFieldRuleCondition, fieldRuleDenials, generate, measureActionCriteria, workflowKind, type AlertDiagnostic } from '../src/generate.js';
+import { aioLibraryModule, conditionalFieldRules, emittedFieldRuleCondition, fieldRuleDenials, generate, measureActionCriteria, workflowKind, type AlertDiagnostic } from '../src/generate.js';
 
 function stripComments(s: string) { return (s || '').replace(/^\s*\/\/ Deluge: .*\n?/gm, ''); }
 
@@ -72,6 +72,51 @@ test('handlers embed the IR time zone and still honour C2C_APP_TIMEZONE', () => 
   const sizedServer = sized.files.find((f) => f.path === 'functions/aio/orders/on-success.mjs');
   assert.ok(sizedServer);
   assert.match(stripComments(sizedServer.source), /shim\.list\.size\(shim\.list\.get\(rows, "contacts"\)\)/);
+});
+
+test('AIO handlers share one app library and import its common request helpers', () => {
+  const g = generate(app({
+    workflows: [
+      workflow({ name: 'Success A', form: 'Orders', event: 'on success', deluge: { text: 'x = 1;', span: Z } }),
+      workflow({ name: 'Success B', form: 'Invoices', event: 'on success', deluge: { text: 'x = 2;', span: Z } }),
+    ],
+  }));
+  const libs = g.files.filter((file) => file.path === 'functions/aio/_lib.mjs');
+  assert.equal(libs.length, 1);
+  assert.match(libs[0].source, /export function requestRowId/);
+  const handlers = g.files.filter((file) => file.path.startsWith('functions/aio/') && file.path.endsWith('/on-success.mjs'));
+  assert.equal(handlers.length, 2);
+  for (const handler of handlers) {
+    assert.match(handler.source, /from "\.\.\/_lib\.mjs"/);
+    assert.doesNotMatch(handler.source, /function requestRowId\(/);
+  }
+});
+
+test('generated handlers include schema-derived multi-lookup hydration metadata', () => {
+  const parsed = deriveIr(parse(`application "Multi Lookup"
+{
+form Author
+{
+Name
+(
+type = text
+)
+}
+form Team
+{
+Members
+(
+type = list
+values = Author.ID
+)
+}
+}`));
+  const generated = generate({
+    ...parsed,
+    workflows: [workflow({ name: 'On Success', form: 'Team', event: 'on success', deluge: { text: 'x = 1;', span: Z } })],
+  });
+  const sources = generated.files.map((file) => file.source).join('\n');
+  assert.match(sources, /multiLookups: \{"Team":\{"Members":\{"table":"Team__Members","parentColumn":"parent_id","valueColumn":"Members","orderColumn":"row_order"\}\}\}/);
 });
 
 test('form events become Advanced I/O handlers and client modules', () => {
@@ -736,6 +781,13 @@ test('a client-evaluated range bound is a deferred slot read the endpoint valida
   // A forged wide range is clamped by the endpoint, not refused outright.
   const wide = await invoke(mod.default, { ...caller, body: { record: {}, nonce: 'n1', slot: 'c0', range: { from: 1, to: 100000 } } });
   assert.equal(wide.status, 200);
+  // A forged deep start is refused before any read; a deep page inside the bound is served.
+  const deep = await invoke(mod.default, { ...caller, body: { record: {}, nonce: 'n1', slot: 'c0', range: { from: 1_000_000_000_000, to: 1_000_000_000_300 } } });
+  assert.equal(deep.status, 400);
+  assert.equal(deep.body.slots, null);
+  const deepOk = await invoke(mod.default, { ...caller, body: { record: {}, nonce: 'n1', slot: 'c0', range: { from: LIMITS.zcqlMaxRows - 99, to: LIMITS.zcqlMaxRows } } });
+  assert.equal(deepOk.status, 200);
+  assert.deepEqual(Object.keys(deepOk.body.slots as Record<string, unknown>), ['c0']);
 
   // The clamp is real: a seeded store yields at most the ZCQL page cap, and an
   // access record filter still narrows the deferred read.
@@ -1528,7 +1580,7 @@ test('approvals and blueprints are state machines, not Circuits, and do not doub
   assert.match(stripComments(machine.source), /script_transition_0_condition/);
   assert.match(stripComments(machine.source), /z = 3/);
   assert.match(stripComments(form.source), /y = 2/);
-  assert.equal(blueprint.files.filter((f) => f.path.startsWith('functions/aio/')).length, 1);
+  assert.equal(blueprint.files.filter((f) => f.path.startsWith('functions/aio/') && f.path !== 'functions/aio/_lib.mjs').length, 1);
   check(machine.source, 'blueprint.mjs');
   assert.doesNotMatch(stripComments(machine.source), /body\.record/);
   assert.doesNotMatch(stripComments(machine.source), /body\.old/);
@@ -2259,7 +2311,9 @@ async function loadModule(source: string, name: string, storeSource?: string): P
   symlinkSync(process.cwd(), join(dir, 'node_modules/creator-to-catalyst'));
   const file = join(dir, name);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, source);
+  const hasAioLibrary = source.includes('from "../_lib.mjs"');
+  writeFileSync(file, hasAioLibrary ? source.replaceAll('"../_lib.mjs"', '"./_lib.mjs"') : source);
+  if (hasAioLibrary) writeFileSync(join(dirname(file), '_lib.mjs'), aioLibraryModule());
   if (storeSource) writeFileSync(join(dir, 'c2c-store.mjs'), storeSource);
   try {
     return (await import(pathToFileURL(file).href)) as Record<string, (req: unknown, res: unknown) => unknown>;
@@ -2952,6 +3006,28 @@ test('an api block with no method keeps the POST endpoint', () => {
   const source = customEndpoint(fn.source);
   assert.match(source, /POST \/functions\/helpers-twice/);
   assert.match(source, /export const endpoint = \{ type: "advancedio", method: "POST", path: "\/functions\/helpers-twice"/);
+});
+
+test('a GET api whose function changes state is routed as POST with a report warning', () => {
+  const bodies = [
+    'insert into Note [ Title = "x" ];',
+    'delete from Note[ID == n];',
+    'sendmail [ from: zoho.adminuserid to: "ops@example.com" subject: "s" message: "m" ];',
+    'r = zoho.crm.createRecord("Leads", {"Last_Name": "x"});',
+  ];
+  for (const body of bodies) {
+    const writer = { ...twiceFn(), deluge: [{ text: `${body}\nreturn n * 2;`, span: Z }] };
+    const g = generate(app({
+      profiles: [ADMIN],
+      apis: [apiBlock('Get_Twice', 'r = thisapp.Helpers.twice(4)', [{ key: 'scope', value: '"Admin only"' }], 'GET')],
+      functions: [writer],
+    }));
+    const fn = g.files.find((file) => file.path === 'functions/custom/helpers-twice.mjs');
+    assert.ok(fn, body);
+    assert.match(stripComments(fn.source), /export const endpoint = \{ type: "advancedio", method: "POST", path: "\/functions\/helpers-twice"/, body);
+    const warnings = JSON.parse(g.files.find((file) => file.path === 'migration-report.json')!.source).warnings as { construct: string; note: string }[];
+    assert.ok(warnings.some((w) => w.construct === 'custom-function-api-method' && /method GET is routed as POST/.test(w.note)), body);
+  }
 });
 
 test('disagreeing or unsupported api methods do not invent a route', () => {
