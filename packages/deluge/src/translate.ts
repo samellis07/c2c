@@ -4379,6 +4379,9 @@ function callExpr(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fals
       const id = jsIdent(obj.name);
       return mergeFx(`(${id} ? (Array.isArray(${id}) ? ${id}.length : 1) : 0)`, [q], { shim: true });
     }
+    if (method === 'average' || method === 'median') {
+      return mergeFx(`shim.number.${method}(${q.code})`, [q], { shim: true });
+    }
     // Rows or values already in memory (`input.Subform.sum(Amount)`,
     // `numbers.average()`). `min`/`max` with an argument are the two-number
     // functions (functions/number/min.html, max.html) and `distinct` is the
@@ -4589,6 +4592,9 @@ function namedCall(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fal
     return mergeFx(`shim.map(${JSON.stringify(typeArg)})`, args, { shim: true, map: true });
   }
   if (name === 'abs') return mergeFx(`shim.math.abs(${args[0]?.code ?? 'undefined'})`, args, { shim: true });
+  if (name === 'toHex') return mergeFx(`shim.number.toHex(${args[0]?.code ?? 'null'})`, args, { shim: true });
+  if (name === 'toWords') return mergeFx(`shim.number.toWords(${args[0]?.code ?? 'null'}, ${args[1]?.code ?? 'null'})`, args, { shim: true });
+  if (name === 'nthLargest' || name === 'nthSmallest') return mergeFx(`shim.number.${name}(${args[0]?.code ?? 'null'}, ${args[1]?.code ?? 'null'})`, args, { shim: true });
   if (name === 'exp') return mergeFx(`shim.math.exp(${args[0]?.code ?? 'undefined'})`, args, { shim: true });
   if (name === 'frac') return mergeFx(`shim.math.frac(${args[0]?.code ?? 'undefined'})`, args, { shim: true });
   if (name === 'log') return mergeFx(`shim.math.log(${args[0]?.code ?? 'undefined'})`, args, { shim: true });
@@ -4699,6 +4705,9 @@ function namedCall(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fal
           list: fn === 'distinct',
           rowReads: aggregateRowRead(objAst, fn, fieldCode, call, scope),
         });
+      }
+      if ((aggregateCall === 'average' || aggregateCall === 'median') && !q.list) {
+        return mergeFx(`shim.number.${aggregateCall}(${q.code})`, [q], { shim: true });
       }
       // In-memory lists only. A string or other non-list stays an untranslated call
       // (`sum("x")` is not `shim.list.aggregate`). A map member is not a list of rows:
@@ -4864,6 +4873,10 @@ function directMethod(method: string, recv: Fx, args: Fx[]): Fx | null {
   if (method === 'cos') return call(`shim.number.cos(${recv.code})`, { decimal: true });
   if (method === 'tan') return call(`shim.number.tan(${recv.code})`, { decimal: true });
   if (method === 'asin') return call(`shim.number.asin(${recv.code})`, { decimal: true });
+  if (method === 'average' || method === 'median') return call(`shim.number.${method}(${recv.code})`);
+  if (method === 'nthLargest' || method === 'nthSmallest') return call(`shim.number.${method}(${recv.code}, ${args[0]?.code ?? 'null'})`);
+  if (method === 'toHex') return call(`shim.number.toHex(${recv.code})`);
+  if (method === 'toWords') return call(`shim.number.toWords(${recv.code}, ${args[0]?.code ?? 'null'})`);
   if (MATH_SHIM_METHODS.has(method)) return call(`shim.math.${method}(${recv.code})`);
   if (method === 'isFile') return call(`shim.isFile(${recv.code})`);
   if (method === 'isEven') return call(`shim.math.isEven(${recv.code})`);

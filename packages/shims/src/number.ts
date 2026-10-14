@@ -12,6 +12,7 @@
  */
 import { DelugeConversionError } from './convert.js';
 import { Decimal } from './decimal.js';
+import { DelugeRuntimeError } from './errors.js';
 
 export const NUMERIC = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
@@ -133,6 +134,114 @@ export function smallest(value: unknown): number | null {
   }
   const n = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+const SMALL_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+const TENS_WORDS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+const SCALES = ['', 'thousand', 'million', 'billion', 'trillion', 'quadrillion'];
+
+function underThousand(n: number, british: boolean): string {
+  const words: string[] = [];
+  const hundreds = Math.floor(n / 100);
+  const rest = n % 100;
+  if (hundreds) words.push(SMALL_WORDS[hundreds]!, 'hundred');
+  if (rest) {
+    if (hundreds && british) words.push('and');
+    if (rest < 20) words.push(SMALL_WORDS[rest]!);
+    else {
+      const tens = TENS_WORDS[Math.floor(rest / 10)]!;
+      words.push(rest % 10 ? `${tens}-${SMALL_WORDS[rest % 10]}` : tens);
+    }
+  }
+  return words.join(' ');
+}
+
+function integerWords(text: string, language: string): string {
+  let value = BigInt(text);
+  if (value === 0n) return 'zero';
+  const negative = value < 0n;
+  if (negative) value = -value;
+  const british = language === 'en-gb';
+  const groups: number[] = [];
+  if (language === 'en-in') {
+    groups.push(Number(value % 1000n)); value /= 1000n;
+    while (value > 0n) { groups.push(Number(value % 100n)); value /= 100n; }
+    const scales = ['', 'thousand', 'lakh', 'crore', 'arab', 'kharab'];
+    const words: string[] = [];
+    for (let i = groups.length - 1; i >= 0; i--) if (groups[i]) words.push(underThousand(groups[i]!, false), scales[i] ?? '');
+    return `${negative ? 'minus ' : ''}${words.join(' ').trim()}`;
+  }
+  while (value > 0n) { groups.push(Number(value % 1000n)); value /= 1000n; }
+  const words: string[] = [];
+  for (let i = groups.length - 1; i >= 0; i--) if (groups[i]) words.push(underThousand(groups[i]!, british), SCALES[i] ?? '');
+  return `${negative ? 'minus ' : ''}${words.join(' ').trim()}`;
+}
+
+/** Zoho's documented English number words (en-us, en-gb and en-in). */
+export function toWords(value: unknown, language: unknown): string {
+  const locale = String(language ?? '').toLowerCase();
+  if (!['en-us', 'en-gb', 'en-in'].includes(locale)) throw new DelugeRuntimeError(`toWords: unsupported language ${String(language)}`);
+  let text = value instanceof Decimal ? value.toString() : typeof value === 'bigint' ? value.toString() : String(value ?? '');
+  text = text.trim();
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text)) throw new DelugeRuntimeError('toWords: input must be a number');
+  const negative = text.startsWith('-');
+  text = text.replace(/^[+-]/, '');
+  const [whole = '0', fraction] = text.split('.');
+  const integer = integerWords(`${negative ? '-' : ''}${BigInt(whole || '0')}`, locale);
+  return fraction ? `${integer} point ${[...fraction].map((digit) => SMALL_WORDS[Number(digit)]).join(' ')}` : integer;
+}
+
+/** Converts an integer number to its base-16 text without locale dependence. */
+export function toHex(value: unknown): string {
+  let text = value instanceof Decimal ? value.toString() : typeof value === 'bigint' ? value.toString() : String(value ?? '');
+  text = text.trim();
+  if (!/^[+-]?\d+$/.test(text)) throw new DelugeRuntimeError('toHex: input must be an integer');
+  return BigInt(text).toString(16);
+}
+
+/** Numeric-list average follows the Deluge number-list contract. */
+export function average(value: unknown): unknown {
+  return numericListAggregate(value, 'avg');
+}
+
+export function median(value: unknown): unknown {
+  return numericListAggregate(value, 'median');
+}
+
+export function nthLargest(value: unknown, rank: unknown): unknown {
+  return numericListRank(value, rank, true);
+}
+
+export function nthSmallest(value: unknown, rank: unknown): unknown {
+  return numericListRank(value, rank, false);
+}
+
+function numericListAggregate(value: unknown, op: 'avg' | 'median'): unknown {
+  if (!Array.isArray(value)) throw new DelugeRuntimeError(`${op}: expected a number list`);
+  const values = value.filter((item) => item != null && !(typeof item === 'string' && item.trim() === ''));
+  if (!values.length) return null;
+  const nums = values.map((item) => {
+    const n = typeof item === 'number' ? item : Number(item instanceof Decimal ? item.toString() : item);
+    if (!Number.isFinite(n)) throw new DelugeRuntimeError(`${op}: list contains a non-numeric value`);
+    return n;
+  });
+  nums.sort((a, b) => a - b);
+  if (op === 'avg') return nums.reduce((sum, n) => sum + n, 0) / nums.length;
+  const mid = Math.floor(nums.length / 2);
+  return nums.length % 2 ? nums[mid] : (nums[mid - 1]! + nums[mid]!) / 2;
+}
+
+function numericListRank(value: unknown, rank: unknown, descending: boolean): unknown {
+  if (!Array.isArray(value)) throw new DelugeRuntimeError('nth: expected a number collection');
+  const values = value.filter((item) => item != null && !(typeof item === 'string' && item.trim() === '')).map((item) => {
+    const n = typeof item === 'number' ? item : Number(item instanceof Decimal ? item.toString() : item);
+    if (!Number.isFinite(n)) throw new DelugeRuntimeError('nth: collection contains a non-numeric value');
+    return n;
+  });
+  const index = Number(rank);
+  if (!Number.isInteger(index) || index < 1 || index > values.length) return null;
+  values.sort((a, b) => descending ? b - a : a - b);
+  return values[index - 1];
 }
 
 export function abs(value: unknown): number | bigint | Decimal | null {
