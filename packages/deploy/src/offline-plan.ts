@@ -19,7 +19,7 @@ import { widgetCommandStatus, widgetManualItems, type WidgetManualItem } from '.
 import { LockedExportError } from '../../core/src/source.js';
 import { appFacts, integrationNamespaces } from '../../core/src/features.js';
 import { authPlan } from '../../auth/src/plan.js';
-import { constraintDecisionNote, generateSchema, type ConstraintDecision, type SchemaTable, type SourceTableData } from '../../schema/src/generator.js';
+import { constraintDecisionNote, fieldGapsOf, generateSchema, type ConstraintDecision, type FieldGap, type SchemaTable, type SourceTableData } from '../../schema/src/generator.js';
 import { catalystLimit, limitValue, ORG_TABLE_LIMIT_RECOVERY } from '../../schema/src/limits.js';
 import { fieldTypeRow, UNIQUE_VARCHAR_MAX_PER_TABLE } from '../../schema/src/mapping.js';
 import { jobPoolName, LIMITS } from '../../shims/src/runtime.js';
@@ -194,6 +194,8 @@ export interface OfflinePlan {
     customApis: number;
   };
   tables: { name: string; form: string; role: string; nosql: boolean; columns: number; uniqueVarchar: number; fks: number; nosqlReason?: string }[];
+  /** Partial and unsupported field behavior; these are reported, never treated as generated shims. */
+  fieldGaps: FieldGap[];
   /** Store constraints the `--source-*` data disproved — the columns are provisioned without them. */
   constraints?: ConstraintDecision[];
   budgets: PlanBudget[];
@@ -1550,6 +1552,7 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
       fks: fkCount(table),
       ...(table.nosqlReason ? { nosqlReason: table.nosqlReason } : {}),
     })),
+    fieldGaps: fieldGapsOf(schema.fields),
     ...(schema.constraints?.length ? { constraints: schema.constraints } : {}),
     budgets,
     budgetsOk: ok,
@@ -1686,6 +1689,11 @@ function formatPlanMd(
       (budget) => `- [${budget.status.toUpperCase()}] (${budget.id}) ${budget.table ? `${budget.table}: ` : ''}${budget.detail}${budget.fix ? ` → ${budget.fix}` : ''}`,
     ),
   ];
+  lines.push('', '## Field behavior gaps (no silent shim)', '');
+  if (!plan.fieldGaps.length) lines.push('- none');
+  for (const gap of plan.fieldGaps) {
+    lines.push(`- ${gap.matrixId}: ${gap.count} field${gap.count === 1 ? '' : 's'} (${gap.fields.map((field) => `${field.form}.${field.field}`).join(', ')}) — ${gap.reason}`);
+  }
   if (plan.manual?.length) {
     lines.push('', '## Manual', '');
     for (const item of plan.manual) lines.push(`- ${item.detail}`);

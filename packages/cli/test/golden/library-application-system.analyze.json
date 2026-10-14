@@ -383,6 +383,109 @@
     ],
     "notObservable": 47
   },
+  "fieldGaps": [
+    {
+      "matrixId": "auto-number",
+      "count": 4,
+      "reason": "ROWID is not a substitute: it has no prefix, start, or reset. A bigint column plus a generated counter (start index from the .ds) is the plan. Concurrent inserts can collide until an atomic increment is proven, so this stays partial.",
+      "fields": [
+        {
+          "form": "Book",
+          "field": "Book_ID"
+        },
+        {
+          "form": "Member_Info",
+          "field": "Auto_Number"
+        },
+        {
+          "form": "Book_Transaction",
+          "field": "Trans"
+        },
+        {
+          "form": "Staff_Members",
+          "field": "Staff_ID"
+        }
+      ]
+    },
+    {
+      "matrixId": "checkbox-multi",
+      "count": 1,
+      "reason": "The .ds token checkboxes is a list, not a boolean. Stored as text holding a JSON list. values = Form.Field is a multi lookup (junction table).",
+      "fields": [
+        {
+          "form": "Book",
+          "field": "Mark_as_Featured"
+        }
+      ]
+    },
+    {
+      "matrixId": "currency",
+      "count": 1,
+      "reason": "Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
+      "fields": [
+        {
+          "form": "Book_Transaction",
+          "field": "Fine_Amount"
+        }
+      ]
+    },
+    {
+      "matrixId": "decimal",
+      "count": 1,
+      "reason": "Decimal is not a Data Store column type (Text, VarChar, Date, DateTime, Int, Double, Boolean, BigInt, Foreign Key, Encrypted). Stored as a canonical decimal string in varchar 64. Scale is the field decimal places (default 2). Extra fractional digits quantize half-away-from-zero. ZCQL orders the varchar as text.",
+      "fields": [
+        {
+          "form": "Member_Info",
+          "field": "Max_Books_Allowed"
+        }
+      ]
+    },
+    {
+      "matrixId": "email",
+      "count": 2,
+      "reason": "There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.",
+      "fields": [
+        {
+          "form": "Member_Info",
+          "field": "Email"
+        },
+        {
+          "form": "Staff_Members",
+          "field": "Staff_Email"
+        }
+      ]
+    },
+    {
+      "matrixId": "lookup-single",
+      "count": 2,
+      "reason": "Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
+      "fields": [
+        {
+          "form": "Book_Transaction",
+          "field": "Member"
+        },
+        {
+          "form": "Book_Transaction",
+          "field": "Book"
+        }
+      ]
+    },
+    {
+      "matrixId": "phone",
+      "count": 2,
+      "reason": "There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
+      "fields": [
+        {
+          "form": "Member_Info",
+          "field": "Phone_Number"
+        },
+        {
+          "form": "Staff_Members",
+          "field": "Phone_Number"
+        }
+      ]
+    }
+  ],
   "deluge": {
     "units": 14,
     "statements": 65,

@@ -535,6 +535,760 @@
     ],
     "notObservable": 47
   },
+  "fieldGaps": [
+    {
+      "matrixId": "auto-number",
+      "count": 1,
+      "reason": "ROWID is not a substitute: it has no prefix, start, or reset. A bigint column plus a generated counter (start index from the .ds) is the plan. Concurrent inserts can collide until an atomic increment is proven, so this stays partial.",
+      "fields": [
+        {
+          "form": "New_Deal",
+          "field": "Auto_Number"
+        }
+      ]
+    },
+    {
+      "matrixId": "currency",
+      "count": 32,
+      "reason": "Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
+      "fields": [
+        {
+          "form": "New_Account",
+          "field": "Annual_Revenue"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Amount"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Expected_Revenue"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Annual_Revenue"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "List_Price"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Amount"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Discount"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Tax"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Total"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Sub_Total"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Tax_Total"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Grand_Total"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Sales_Commission"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Excise_Duty"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "List_Price"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Amount"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Discount"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Tax"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Total"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Sub_Total"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Tax_Total"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Grand_Total"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Excise_Duty"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Sales_Commission"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "List_Price"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Amount"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Discount"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Tax"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Total"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Sub_Total"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Tax_Total"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Grand_Total"
+        }
+      ]
+    },
+    {
+      "matrixId": "decimal",
+      "count": 27,
+      "reason": "Decimal is not a Data Store column type (Text, VarChar, Date, DateTime, Int, Double, Boolean, BigInt, Foreign Key, Encrypted). Stored as a canonical decimal string in varchar 64. Scale is the field decimal places (default 2). Extra fractional digits quantize half-away-from-zero. ZCQL orders the varchar as text.",
+      "fields": [
+        {
+          "form": "New_Quotation",
+          "field": "Width_of_Cargo_cm"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Chargeable_Weight_KG"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Length_of_Cargo_cm"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Volume_CBM"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Height_of_Cargo_cm"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Gross_Weight_KG"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Quantity"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Length_of_Cargo_cm"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Volume_CBM"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Width_of_Cargo_cm"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Height_of_Cargo_cm"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Gross_Weight_KG"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Chargeable_Weight_KG"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Quantity"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Quantity"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FWD"
+        },
+        {
+          "form": "New_SOF",
+          "field": "AFT"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FWD2"
+        },
+        {
+          "form": "New_SOF",
+          "field": "AFT2"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FO"
+        },
+        {
+          "form": "New_SOF",
+          "field": "DO"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FW"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FO2"
+        },
+        {
+          "form": "New_SOF",
+          "field": "DO2"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FW2"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "G_Wt"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "NetWt"
+        }
+      ]
+    },
+    {
+      "matrixId": "email",
+      "count": 5,
+      "reason": "There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.",
+      "fields": [
+        {
+          "form": "New_Account",
+          "field": "Email"
+        },
+        {
+          "form": "New_User",
+          "field": "Email"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Email"
+        },
+        {
+          "form": "New_Vendor",
+          "field": "Email"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Email"
+        }
+      ]
+    },
+    {
+      "matrixId": "image",
+      "count": 7,
+      "reason": "Stratus object key (same upload, download, and byte-migration path as file upload). Thumbnail, crop, and annotation are not generated.",
+      "fields": [
+        {
+          "form": "New_Account",
+          "field": "Image"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Contact_Image"
+        },
+        {
+          "form": "New_Vendor",
+          "field": "Vendor_Image"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Deal_Image"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Photograph"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Photograph"
+        },
+        {
+          "form": "New_Product",
+          "field": "Product_Image"
+        }
+      ]
+    },
+    {
+      "matrixId": "lookup-single",
+      "count": 57,
+      "reason": "Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
+      "fields": [
+        {
+          "form": "New_Account",
+          "field": "Account_Owner"
+        },
+        {
+          "form": "New_Account",
+          "field": "Lead_ID"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Contact_Owner"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Vendor"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Lead_ID"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Account_Name"
+        },
+        {
+          "form": "New_Vendor",
+          "field": "Vendor_Owner"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Deal_Owner"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Gate_Way_Airport"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Destination_Airport"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Port_of_Loading"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Account_Name"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Port_of_Discharge"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Lead_ID"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Vessel_Name"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Lead_Owner"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Gate_Way_Airport"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Destination_Airport"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Port_of_Loading"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Account_ID"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Port_of_Discharge"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Vessel_Name"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Quote_Owner"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Deal_Name"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Account_Name"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Contact_Name"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Port_of_Loading"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Port_of_Discharge"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Gate_Way_Airport"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Destination_Airport"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "HS_Code"
+        },
+        {
+          "form": "New_Quotation",
+          "field": "Product_Name"
+        },
+        {
+          "form": "New_Product",
+          "field": "Product_Owner"
+        },
+        {
+          "form": "New_Product",
+          "field": "Vendor_Name"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Delivery_Order_Owner"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Deal_Name"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Quote_Number"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Contact_Name"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Account_Name"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Product_Name"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Invoice_Owner"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Delivery_Order"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Deal_Name"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Contact_Name"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Account_Name"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Product_Name"
+        },
+        {
+          "form": "New_SOF",
+          "field": "Vessel_Name"
+        },
+        {
+          "form": "New_SOF",
+          "field": "New_Port"
+        },
+        {
+          "form": "New_SOF",
+          "field": "Appointment"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Container_No"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Container_Seal_Number"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Container_Type"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Container_Size"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Port_of_Loading"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Port_of_Discharge"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Gate_Way_Airport"
+        },
+        {
+          "form": "New_Table_of_Container",
+          "field": "Destination_Airport"
+        }
+      ]
+    },
+    {
+      "matrixId": "multi-line",
+      "count": 12,
+      "reason": "Data Store text holds 10,000 characters. A generated length check rejects the rest. Multi-line formula output (up to 65,355) does not fit.",
+      "fields": [
+        {
+          "form": "New_Account",
+          "field": "Description"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Description"
+        },
+        {
+          "form": "New_Deal",
+          "field": "General_Description"
+        },
+        {
+          "form": "New_Deal",
+          "field": "Description"
+        },
+        {
+          "form": "New_Lead",
+          "field": "General_Description"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Description"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Terms_and_Conditions2"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Description"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Terms_and_Conditions2"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Description"
+        },
+        {
+          "form": "New_SOF",
+          "field": "Remarks1"
+        },
+        {
+          "form": "New_SOF",
+          "field": "Master_Remarks1"
+        }
+      ]
+    },
+    {
+      "matrixId": "multi-select",
+      "count": 4,
+      "reason": "No array column. Stored as text holding a JSON list. Criteria do not match list semantics. values = Form.Field on this type is a multi lookup (junction table), not this column.",
+      "fields": [
+        {
+          "form": "Map_Dependency_Mode",
+          "field": "Sub_Mode_of_Shipment"
+        },
+        {
+          "form": "Map_Submode",
+          "field": "Cargo_Type"
+        },
+        {
+          "form": "Map_Submode",
+          "field": "Shipment_Terms"
+        },
+        {
+          "form": "Map_Submode",
+          "field": "Container_Movement_Type"
+        }
+      ]
+    },
+    {
+      "matrixId": "phone",
+      "count": 7,
+      "reason": "There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
+      "fields": [
+        {
+          "form": "New_Account",
+          "field": "Phone_Number"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Mobile"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Assistant_Phone"
+        },
+        {
+          "form": "New_Contact",
+          "field": "Phone_Number"
+        },
+        {
+          "form": "New_Vendor",
+          "field": "Phone_Number"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Phone_Number"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Mobile"
+        }
+      ]
+    },
+    {
+      "matrixId": "subform",
+      "count": 8,
+      "reason": "The .ds token is grid. Every inline subform (nested fields, no values = Form.Field) becomes its own child table with a parent_id foreign key to the parent ROWID (ON-DELETE-CASCADE) and a row_order Int (0-based Creator row position). A form with several subforms gets one child table per subform; it is not a NoSQL collection. A nested subform inside a subform is not expanded. A grid whose values point at another form is a relation to that form’s table, not a second copy of it.",
+      "fields": [
+        {
+          "form": "New_Quotation",
+          "field": "Quoted_Items"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Table_of_Containers"
+        },
+        {
+          "form": "New_Delivery_Order",
+          "field": "Ordered_Items"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Table_of_Containers"
+        },
+        {
+          "form": "New_Invoice",
+          "field": "Invoiced_Items"
+        },
+        {
+          "form": "New_SOF",
+          "field": "DETAILS1"
+        },
+        {
+          "form": "New_SOF",
+          "field": "STOPPAGES"
+        },
+        {
+          "form": "New_SOF",
+          "field": "NO_CARGO_OPERATIONS"
+        }
+      ]
+    },
+    {
+      "matrixId": "time",
+      "count": 5,
+      "reason": "There is no time column. Stored as varchar HH:MM:SS. Range comparisons are generated code.",
+      "fields": [
+        {
+          "form": "New_SOF",
+          "field": "Time"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FROM"
+        },
+        {
+          "form": "New_SOF",
+          "field": "TO"
+        },
+        {
+          "form": "New_SOF",
+          "field": "FROM2"
+        },
+        {
+          "form": "New_SOF",
+          "field": "TO2"
+        }
+      ]
+    },
+    {
+      "matrixId": "url",
+      "count": 2,
+      "reason": "URLs routinely exceed varchar 255, which truncates silently. Default storage is text. maxchar of 255 or less stays varchar of that length. Creator also stores link title; a second column is not invented here.",
+      "fields": [
+        {
+          "form": "New_Account",
+          "field": "Website"
+        },
+        {
+          "form": "New_Lead",
+          "field": "Website"
+        }
+      ]
+    }
+  ],
   "deluge": {
     "units": 54,
     "statements": 553,
