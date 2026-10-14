@@ -256,6 +256,24 @@ test('mcp-observed: a probe that landed under a different org/project is red', a
   assert.match(run.out, /FAIL D-B1 .*not proved bound/);
 });
 
+test('mcp-observed: a 200 read-back must contain the exact probe bucket name', async () => {
+  for (const [label, body] of [
+    ['different bucket', { bucket_name: 'some-other-bucket' }],
+    ['missing body', undefined],
+    ['malformed JSON', '{not-json'],
+  ] as const) {
+    const { dir, env } = workspace();
+    const { request } = await begin(env);
+    const probe = `c2cprobe${request}`;
+    const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: body }));
+    assert.equal(run.code, 1, `${label}: ${run.out}${run.err}`);
+    assert.match(run.out, /FAIL D-B2 .*probe write was not read back/);
+    const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
+    assert.notEqual(file.mcp?.binding?.status, 'verified');
+    assert.ok(existsSync(join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json')), `${label}: cleanup remains tracked`);
+  }
+});
+
 test('mcp-observed: a fabricated org host or a matching CLI selection never stands in for the probe', async () => {
   const { env } = workspace();
   const { request } = await begin(env);
