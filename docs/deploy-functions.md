@@ -302,8 +302,12 @@ record your attestation only — the sender counts as verified when a confirmed
 deploy reads the state back live (`GET /email`, the same list the
 `List_All_Emails_Configuration` MCP tool answers) and Catalyst reports it
 `VERIFIED`. The read-back is recorded under `c2c-out/.c2c/mail-sender.json`
-(sender tags only, no addresses), and the doctor reports `verified` solely
-from that record — the bare attestation shows as `attested`.
+(sender tags only, no addresses, plus the project it was read from). A
+confirmed deploy never trusts that record: if the live read-back fails (a
+network error or a refused request), the sender is treated as unverified and
+the deploy is refused. Only a dry run and the doctor read the record, and only
+when it was observed against the same project. The doctor reports `verified`
+solely from that record — the bare attestation shows as `attested`.
 The human checklist names the verification-code step (Catalyst console →
 Mail → Email Configuration).
 

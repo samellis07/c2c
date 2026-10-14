@@ -25,7 +25,7 @@ import { slateHost } from '../../auth/src/slate-host.js';
 import { API_FUNCTION, FUNCTION_DIR, envVariables, secretEnvValues } from './function-dir.js';
 import { buildDeploy, commandLine, deployFiles, migrateCatalystJson, writeDeployTree, type DeployCommand, type DeployFile, type DeployUi } from './plan.js';
 import { asyncLaneBlocker } from './events.js';
-import { mailSenderEvidenceVerified, observeMailSenders, readMailSenderEvidence } from './mail.js';
+import { mailSenderEvidenceFor, mailSenderEvidenceVerified, observeMailSenders, readMailSenderEvidence } from './mail.js';
 import { humanChecklist } from './human-steps.js';
 import { applyFunctionEnvSecrets, readConnectionSecretKeys } from './function-env.js';
 import { CONSOLE_SERVICES, formatPostDeploySteps, postDeploySteps, servicesTouched, type ConsoleService, type PostDeployStep } from './post-deploy.js';
@@ -851,20 +851,25 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     const subsetShims = rest.includes('--subset-shims') || io.env.C2C_SUBSET_SHIMS === '1';
     const mailFrom = flag(rest, '--mail-from') ?? deployConfig?.mail?.from;
     // --mail-sender-verified / mail.verified records the owner's attestation
-    // only: a sender counts as verified when the live Catalyst read-back —
-    // refreshed by a confirmed deploy and persisted under c2c-out/.c2c/ —
-    // lists it VERIFIED. A read-back that cannot run leaves the attestation
-    // unverified; a confirmed deploy is then still refused by the blocker.
+    // only: a sender counts as verified when the live Catalyst read-back lists
+    // it VERIFIED. A confirmed deploy always reads back live and never falls
+    // back to the persisted record: a read-back that throws or is refused
+    // leaves the sender unverified, so the blocker refuses the deploy. Only a
+    // dry run reads the persisted record, and only when it was observed
+    // against the same project.
     let mailVerified = false;
     if (mailFrom && rest.includes('--mail')) {
-      const observed = confirm
-        ? await observeMailSenders(
-            io.rest ?? ((call: RestCall) => catalystRestCall(io.env, guard.org, guard.projectId, call, { log: (line) => io.stderr(`${line}\n`) })),
-            guard.projectId,
-            process.cwd(),
-          )
-        : undefined;
-      mailVerified = mailSenderEvidenceVerified(observed ?? readMailSenderEvidence(process.cwd()), mailFrom);
+      if (confirm) {
+        const observed = await observeMailSenders(
+          io.rest ?? ((call: RestCall) => catalystRestCall(io.env, guard.org, guard.projectId, call, { log: (line) => io.stderr(`${line}\n`) })),
+          guard.projectId,
+          process.cwd(),
+        );
+        if (!observed) io.stderr(`warning mail-sender-readback: the live Catalyst mail sender read-back for project ${guard.projectId} failed; the sender is treated as unverified\n`);
+        mailVerified = mailSenderEvidenceVerified(observed, mailFrom);
+      } else {
+        mailVerified = mailSenderEvidenceVerified(mailSenderEvidenceFor(readMailSenderEvidence(process.cwd()), guard.projectId), mailFrom);
+      }
     }
     const bundle = buildDeploy(app, guard, rest.includes('--mail'), confirm, apiBase, functionEnv, {
       from: mailFrom,

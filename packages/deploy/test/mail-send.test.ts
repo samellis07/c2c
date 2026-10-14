@@ -258,6 +258,62 @@ test('a VERIFIED read-back clears the sender blocker without the attestation fla
   }
 });
 
+for (const [name, rest] of [
+  ['throws', async () => { throw new Error('read-back refused in this test'); }],
+  ['returns 403', async () => ({ status: 403, body: { status: 'failure', data: { message: 'forbidden' } } })],
+  ['hits a network error', async () => { throw new TypeError('fetch failed'); }],
+] as const) {
+  test(`a confirmed deploy fails closed when the live read-back ${name}, even with a VERIFIED record on disk`, async () => {
+    const { ds, ws, cleanup } = liveMailSetup();
+    try {
+      const recorded = { version: 1 as const, projectId: '1001', at: new Date().toISOString(), senders: { [mailSenderTag(OWNER)]: 'VERIFIED' } };
+      writeMailSenderEvidence(ws, recorded);
+      const cap = io();
+      const calls: string[] = [];
+      cap.io.rest = async (call) => {
+        calls.push(`${call.method} ${call.path}`);
+        return rest();
+      };
+      const code = await inWorkspace(ws, () =>
+        deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--confirm', '--function-env', 'new', '--mail', '--mail-from', OWNER, '--mail-sender-verified'], cap.io),
+      );
+      assert.equal(code, 1);
+      assert.deepEqual(calls, ['GET /baas/v1/project/1001/email']);
+      assert.match(cap.err(), /warning mail-sender-readback: the live Catalyst mail sender read-back for project 1001 failed; the sender is treated as unverified/);
+      assert.match(cap.err(), new RegExp(`blocker ${MAIL_SENDER_RULE}`));
+      // The stale record is neither trusted nor overwritten.
+      assert.deepEqual(readMailSenderEvidence(ws), recorded);
+    } finally {
+      cleanup();
+    }
+  });
+}
+
+test('a dry run ignores a persisted read-back from another project or naming no project', async () => {
+  const { ds, ws, cleanup } = liveMailSetup();
+  try {
+    for (const projectId of ['2002', undefined]) {
+      writeMailSenderEvidence(ws, { version: 1, ...(projectId ? { projectId } : {}), at: new Date().toISOString(), senders: { [mailSenderTag(OWNER)]: 'VERIFIED' } });
+      const seen = io();
+      assert.equal(
+        await inWorkspace(ws, () => deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--mail', '--mail-from', OWNER], seen.io)),
+        0,
+      );
+      assert.match(seen.out(), new RegExp(`precheck: blocker ${MAIL_SENDER_RULE}`), `record for project ${projectId ?? '(none)'}`);
+    }
+    // A record for a different sender does not verify this one either.
+    writeMailSenderEvidence(ws, { version: 1, projectId: '1001', at: new Date().toISOString(), senders: { [mailSenderTag('other@example.com')]: 'VERIFIED' } });
+    const other = io();
+    assert.equal(
+      await inWorkspace(ws, () => deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--mail', '--mail-from', OWNER], other.io)),
+      0,
+    );
+    assert.match(other.out(), new RegExp(`precheck: blocker ${MAIL_SENDER_RULE}`));
+  } finally {
+    cleanup();
+  }
+});
+
 test('a dry run consumes the persisted read-back: evidence verifies, the bare attestation does not', async () => {
   const { ds, ws, cleanup } = liveMailSetup();
   try {
