@@ -617,6 +617,8 @@ export function schemaMappingMarkdown(): string {
   lines.push('');
   lines.push('One row per field type the schema generator maps. The reason is the contract, not a hint.');
   lines.push('');
+  lines.push('For a field stored as one column, Creator `must have` and `unique` are emitted as `mandatory` and `unique`, and `initial value` is emitted as `defaultValue` when Catalyst supports a default for that column type. Text, Foreign Key, and Encrypted columns keep their documented default behavior: no Catalyst default, with a generated-form prefill warning. Type-specific size, precision, lookup relation, and composite parts are described in the row reason. Source-measured constraint demotions and the per-table unique-varchar limit are described below.');
+  lines.push('');
   lines.push('## Decisions');
   lines.push('');
   for (const [key, text] of Object.entries(DECISIONS)) lines.push(`- **${key}.** ${text}`); // determinism-allow: const DECISIONS object; key order is the published contract in docs/schema-mapping.md, not a hash map
