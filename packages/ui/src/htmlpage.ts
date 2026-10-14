@@ -35,6 +35,8 @@ export interface HtmlpageFile {
 
 export interface HtmlpageCompiled {
   ok: boolean;
+  /** The template contains only an empty statement wrapper and static markup. */
+  staticOnly?: boolean;
   /** Sanitized static shell for the element (`el.html`). */
   html?: string;
   /** Endpoint path the client posts to. */
@@ -432,7 +434,9 @@ function splitChunks(template: string): Chunk[] | null {
       if (brace < 0 && plain < 0) return null;
       if (brace >= 0 && (plain < 0 || brace < plain)) {
         out.push({ kind: 'stmts', text: template.slice(open + 3, brace) });
-        at = brace + 2;
+        // Creator's paired empty wrapper closes with `%}>`; the final `>` is
+        // part of the delimiter, not visible static markup.
+        at = brace + (template.startsWith('%}>', brace) ? 3 : 2);
         continue;
       }
       out.push({ kind: 'stmts', text: template.slice(open + 2, plain) });
@@ -1289,7 +1293,34 @@ export function compileHtmlpage(
   const head = splitTemplate(decoded);
   head.template = convertZmlSnippetToHtml(head.template);
   const chunks = splitChunks(head.template);
-  if (!chunks || !chunks.some((c) => c.kind !== 'static')) return fail('no Deluge islands');
+  if (!chunks) return fail('malformed Deluge island');
+  const rawIslands = chunks.filter((c) => c.kind !== 'static');
+  if (!rawIslands.length) return fail('no Deluge islands');
+  // Legacy exports sometimes wrap entirely static markup in an empty
+  // statement block. Parse every statement island before accepting this path:
+  // comments and whitespace have no AST nodes, while any real statement keeps
+  // the existing server-side translation/TODO behavior.
+  if (
+    rawIslands.every((island) => island.kind === 'stmts') &&
+    rawIslands.every((island) => {
+      try {
+        return parse(island.text).body.length === 0;
+      } catch {
+        return false;
+      }
+    })
+  ) {
+    return {
+      ok: true,
+      staticOnly: true,
+      html: sanitizeSnippet(
+        chunks
+          .filter((c) => c.kind === 'static')
+          .map((c) => c.text)
+          .join(''),
+      ),
+    };
+  }
   if (MARK_CHECK.test(head.template) || /\bc2c_(out|parts|static|str|esc|link|notes|css)\b/i.test(head.template))
     return fail('marker collision');
 
