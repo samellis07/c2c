@@ -18,6 +18,7 @@ import { listDsFiles, parseFileWithSidecars, parseProject, type App } from '../.
 import { compareEnUs } from '../../core/src/order.js';
 import { readLock, type FillLock } from '../../deluge/src/index.js';
 import { analyze, type TodoKind } from './analyze.js';
+import type { FieldGap } from '../../schema/src/generator.js';
 import { MATRIX_SNAPSHOT, type MatrixSnapshot } from './feature-matrix.js';
 
 export interface MigrationAppEntry {
@@ -26,6 +27,7 @@ export interface MigrationAppEntry {
   todoCount: number;
   fillLockEntries: number;
   todoKinds: TodoKind[];
+  fieldGaps: FieldGap[];
   /** UI stubs still marked TODO. Each one is included in `todoCount`. */
   uiTodoCount: number;
   readiness: number;
@@ -53,6 +55,8 @@ export interface MigrationReport {
     todoTotal: number;
     distinctTodoKinds: number;
     todoKinds: TodoKind[];
+    fieldGaps: FieldGap[];
+    fieldGapTotal: number;
     /** Deterministic apps that still have UI TODO stubs. A stub is a residual hole, so this stays zero. */
     deterministicWithUiTodos: { apps: number; uiTodos: number };
   };
@@ -100,6 +104,7 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
       todoCount: report.determinism.todoCount,
       fillLockEntries: report.determinism.fillLockEntries,
       todoKinds: report.determinism.todoKinds,
+      fieldGaps: report.fieldGaps,
       uiTodoCount: report.determinism.uiTodoCount,
       readiness: report.score.readiness,
       band: report.score.band,
@@ -110,14 +115,23 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
   const deterministicApps = apps.filter((app) => app.deterministic).length;
   const withUi = apps.filter((app) => app.deterministic && app.uiTodoCount > 0);
   const kindCounts = new Map<string, number>();
+  const fieldGapCounts = new Map<string, FieldGap>();
   let todoTotal = 0;
   for (const app of apps) {
     todoTotal += app.todoCount;
     for (const kind of app.todoKinds) kindCounts.set(kind.construct, (kindCounts.get(kind.construct) ?? 0) + kind.count);
+    for (const gap of app.fieldGaps) {
+      const existing = fieldGapCounts.get(gap.matrixId);
+      if (existing) {
+        existing.count += gap.count;
+        existing.fields.push(...gap.fields);
+      } else fieldGapCounts.set(gap.matrixId, { ...gap, fields: [...gap.fields] });
+    }
   }
   const todoKinds: TodoKind[] = [...kindCounts.entries()]
     .map(([construct, count]) => ({ construct, count }))
     .sort(byKind);
+  const fieldGaps = [...fieldGapCounts.values()].sort((a, b) => compareEnUs(a.matrixId, b.matrixId));
   const target = (share: number): MigrationTarget => {
     const required = Math.ceil(share * apps.length);
     return { required, met: deterministicApps >= required };
@@ -135,6 +149,8 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
       todoTotal,
       distinctTodoKinds: todoKinds.length,
       todoKinds,
+      fieldGaps,
+      fieldGapTotal: fieldGaps.reduce((total, gap) => total + gap.count, 0),
       deterministicWithUiTodos: { apps: withUi.length, uiTodos: withUi.reduce((sum, app) => sum + app.uiTodoCount, 0) },
     },
   };
@@ -158,6 +174,8 @@ export function migrationReportAsText(report: MigrationReport): string {
     `migration report: ${report.label}  apps ${a.totalApps}  deterministic ${a.deterministicApps} (${a.deterministicShare}%)`,
     `targets (deterministic apps only): 95% needs ${a.targets.p95.required} — ${a.targets.p95.met ? 'met' : 'NOT met'}; 100% needs ${a.targets.p100.required} — ${a.targets.p100.met ? 'met' : 'NOT met'}`,
     `residual TODO items: ${a.todoTotal} across ${a.distinctTodoKinds} kinds`,
+    `field gaps: ${a.fieldGapTotal} across ${a.fieldGaps.length} kinds`,
+    ...a.fieldGaps.map((gap) => `  ${gap.matrixId}: ${gap.count} (${gap.fields.map((field) => `${field.form}.${field.field}`).join(', ')}) — ${gap.reason}`),
     `UI TODO stubs on deterministic apps: ${a.deterministicWithUiTodos.uiTodos} in ${a.deterministicWithUiTodos.apps} of the ${a.deterministicApps} deterministic apps`,
     ...a.todoKinds.slice(0, 20).map((kind) => `  ${kind.count} ${kind.construct}`),
   ].join('\n');
