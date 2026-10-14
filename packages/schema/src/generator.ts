@@ -236,7 +236,8 @@ function reservedNames(role: 'form' | 'child' | 'junction' | 'system'): Set<stri
 type ColumnGroups = WeakMap<SchemaColumn, string>;
 
 function pushSystemColumns(columns: SchemaColumn[], groups: ColumnGroups): void {
-  const present = new Set(columns.map((column) => column.name));
+  const present = new Set<string>();
+  for (const column of columns) present.add(column.name);
   for (const spec of SYSTEM_FIELD_COLUMNS) {
     if (present.has(spec.name)) continue;
     const column: SchemaColumn = {

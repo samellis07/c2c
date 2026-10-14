@@ -469,6 +469,7 @@ export const FIELD_TYPES: readonly FieldTypeRow[] = [
 
 const BY_TOKEN = new Map<string, FieldTypeRow>();
 const BY_ID = new Map<string, FieldTypeRow>();
+const NORMALIZED_TYPES = new Map<string, string>();
 for (const row of FIELD_TYPES) {
   BY_ID.set(row.id, row);
   for (const token of row.tokens) BY_TOKEN.set(token, row);
@@ -476,7 +477,13 @@ for (const row of FIELD_TYPES) {
 
 /** Lowercase, turn `_` and `-` into spaces, collapse whitespace. */
 export function normalizeType(raw?: string): string {
-  return (raw ?? '').trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  const value = raw ?? '';
+  const cached = NORMALIZED_TYPES.get(value);
+  if (cached !== undefined) return cached;
+  const normalized = value.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  if (NORMALIZED_TYPES.size >= 512) NORMALIZED_TYPES.delete(NORMALIZED_TYPES.keys().next().value!);
+  NORMALIZED_TYPES.set(value, normalized);
+  return normalized;
 }
 
 export function fieldTypeById(id: string): FieldTypeRow | undefined {
