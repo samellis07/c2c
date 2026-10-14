@@ -57,16 +57,20 @@ export const PAGE_ELEMENTS = [
   'article[data-page]',
   'article[data-page] [data-zml]',
   'article[data-page] [data-zml="panel"]',
-  'article[data-page] .zcard',
-  'article[data-page] .zcard [data-zml]',
+  'article[data-page] [data-zml="panel"] [data-zml]',
   'article[data-page] .embed',
   'article[data-page] .embed h3 a',
   'article[data-page] .kpi',
   'article[data-page] .gauge',
   'article[data-page] .snippet',
   'article[data-page] .zicon',
-  'article[data-page] svg.chart',
   'article[data-page] [data-report-search] input',
+  'section[data-report]',
+  '[data-board]',
+  '[data-board] [data-lane]',
+  '[data-board] [data-lane] h3',
+  '[data-board] li',
+  'h3[data-group]',
   '.report-tools',
   '.report-tools input[type="search"]',
   '.report-tools select[data-filter]',
@@ -284,8 +288,9 @@ export interface SnapshotOptions {
   scheme?: 'light' | 'dark';
   /**
    * Screens to capture: 'home', 'form', 'report', 'list' (the first
-   * list-view report) and 'page' (the first ZML page). Screens the app does
-   * not have are skipped. Default ['home', 'form', 'report'].
+   * list-view report), 'page' (the first ZML page), 'view:<kind>' (the
+   * first generated report of that view) and 'report:<name>'. Screens the
+   * app does not have are skipped. Default ['home', 'form', 'report'].
    */
   screens?: readonly string[];
   /** Elements to read; defaults to KEY_ELEMENTS. */
@@ -323,6 +328,7 @@ const EMPTY_BODY = { status: 'success', data: [], rows: [], total: 0 };
 type UiReportLike = {
   name: string;
   view?: string;
+  status?: string;
   queryEndpoint?: string;
   columns?: { field: string; label?: string; numeric?: boolean }[];
 };
@@ -342,8 +348,21 @@ export function screenHash(model: { forms: { name: string }[]; reports: UiReport
     }
     case 'page':
       return model.pages && model.pages[0] ? `#/page/${encodeURIComponent(model.pages[0].name)}` : undefined;
-    default:
+    default: {
+      // 'view:<kind>' is the first generated report of that view;
+      // 'report:<name>' is the report itself.
+      const view = /^view:(.+)$/.exec(screen);
+      if (view) {
+        const report = model.reports.find((item) => item.view === view[1] && item.status !== 'todo');
+        return report ? `#/report/${encodeURIComponent(report.name)}` : undefined;
+      }
+      const named = /^report:(.+)$/.exec(screen);
+      if (named) {
+        const report = model.reports.find((item) => item.name === named[1]);
+        return report ? `#/report/${encodeURIComponent(report.name)}` : undefined;
+      }
       return undefined;
+    }
   }
 }
 
