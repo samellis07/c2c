@@ -186,8 +186,14 @@ import { migrationReportAsJson, migrationReportAsText, migrationReportForDir } f
 import { readLock } from '../../deluge/src/index.js';
 import { bundleFromDir, bundleFromFiles, scoreFileOf, scoreUi, uiScoreAsText } from '../../ui-score/src/score.js';
 
+const CLI_ERROR_CODE = 'C2C-CLI-001';
+const ERROR_INDEX_HINT = 'See plugin/references/error-index.md';
+function writeCliError(message: string): void {
+  process.stderr.write(`[${CLI_ERROR_CODE}] ${message.trimEnd()}\n${ERROR_INDEX_HINT}#${CLI_ERROR_CODE.toLowerCase()}\n`);
+}
+
 function usage(): never {
-  process.stderr.write(
+  writeCliError(
     'usage: c2c parse <file|dir> [--json]\n       c2c corpus <dir> [--label name] [--out file] [--top n]\n' +
       '       c2c features <dir> [--unit dir|file] [--names] [--out file] [--apps file]\n' +
       '       c2c schema <file|dir> [--json|--iac|--report] [--out file] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--allow-empty]\n' +
@@ -254,7 +260,7 @@ function summarize(ir: App): string {
 function loadIr(target: string): App | undefined {
   const st = statSync(target, { throwIfNoEntry: false });
   if (!st) {
-    process.stderr.write(`c2c: no such file or directory: ${target}\n`);
+    writeCliError(`c2c: no such file or directory: ${target}\n`);
     return undefined;
   }
   return st.isDirectory() ? parseProject(target).ir : parseFileWithSidecars(target).ir;
@@ -270,7 +276,7 @@ function loadIrOrLocked(target: string): { ir: App | undefined; locked: boolean 
     return { ir: loadIr(target), locked: false };
   } catch (err) {
     if (err instanceof LockedExportError) {
-      process.stderr.write(`c2c: ${err.message}\n`);
+      writeCliError(`c2c: ${err.message}\n`);
       return { ir: undefined, locked: true };
     }
     throw err;
@@ -285,7 +291,7 @@ function writeOut(text: string, out: string | undefined): void {
 
 async function migrateCli(args: string[]): Promise<number> {
   if (!args.includes('--dry-run')) {
-    process.stderr.write('c2c: migrate-data refuses to write; pass --dry-run\n');
+    writeCliError('c2c: migrate-data refuses to write; pass --dry-run\n');
     return 2;
   }
   const flag = (name: string) => {
@@ -303,7 +309,7 @@ async function migrateCli(args: string[]): Promise<number> {
     if (args[i] !== '--report' || !args[i + 1]) continue;
     const [report, table] = args[i + 1].split(':');
     if (!report || !table) {
-      process.stderr.write('c2c: --report must be Report:Table\n');
+      writeCliError('c2c: --report must be Report:Table\n');
       return 2;
     }
     tables.push({ report, table });
@@ -313,7 +319,7 @@ async function migrateCli(args: string[]): Promise<number> {
   if (statSync(checkpointPath, { throwIfNoEntry: false })?.isFile()) {
     const parsed = JSON.parse(readFileSync(checkpointPath, 'utf8')) as Checkpoint;
     if (parsed.version !== 1 || !parsed.tables) {
-      process.stderr.write('c2c: checkpoint is not version 1\n');
+      writeCliError('c2c: checkpoint is not version 1\n');
       return 2;
     }
     checkpoint = parsed;
@@ -365,7 +371,7 @@ function doctorGateRefusal(args: readonly string[], opts: { createsProject?: boo
   if (!args.includes('--confirm')) return undefined;
   const { verdict, scope } = doctorGateForArgs(args, { cwd: workspaceDir(process.env), env: process.env, ...(opts.createsProject ? { createsProject: true } : {}) });
   if (verdict.ok) return undefined;
-  process.stderr.write(`${gateRefusalMessage(verdict, scope)}\n`);
+  writeCliError(`${gateRefusalMessage(verdict, scope)}\n`);
   return GATE_EXIT;
 }
 
@@ -375,7 +381,7 @@ function main(argv: string[]): number {
   // A flag the command does not know is refused, never silently ignored.
   const unknown = argvShapeProblems(cmd, restAll).filter((problem) => problem.startsWith('unknown flag '));
   if (unknown.length) {
-    process.stderr.write(`c2c ${cmd}: ${unknown.join('; ')}\n`);
+    writeCliError(`c2c ${cmd}: ${unknown.join('; ')}\n`);
     return 2;
   }
   if (cmd === '--verify-vendor') {
@@ -388,7 +394,7 @@ function main(argv: string[]): number {
       },
       (err: unknown) => {
         const message = err instanceof Error ? err.message : 'doctor failed';
-        process.stderr.write(`c2c: ${message}\n`);
+        writeCliError(`c2c: ${message}\n`);
         process.exitCode = 1;
       },
     );
@@ -403,7 +409,7 @@ function main(argv: string[]): number {
       },
       (err: unknown) => {
         const message = err instanceof Error ? err.message : 'deploy failed';
-        process.stderr.write(`c2c: ${message}\n`);
+        writeCliError(`c2c: ${message}\n`);
         process.exitCode = 1;
       },
     );
@@ -423,7 +429,7 @@ function main(argv: string[]): number {
       },
       (err: unknown) => {
         const message = err instanceof Error ? err.message : 'plan failed';
-        process.stderr.write(`c2c: ${message}\n`);
+        writeCliError(`c2c: ${message}\n`);
         process.exitCode = 1;
       },
     );
@@ -440,7 +446,7 @@ function main(argv: string[]): number {
       },
       (err: unknown) => {
         const message = err instanceof Error ? err.message : 'provision failed';
-        process.stderr.write(`c2c: ${message}\n`);
+        writeCliError(`c2c: ${message}\n`);
         process.exitCode = 1;
       },
     );
@@ -455,7 +461,7 @@ function main(argv: string[]): number {
       },
       (err: unknown) => {
         const message = err instanceof Error ? err.message : 'users failed';
-        process.stderr.write(`c2c: ${message}\n`);
+        writeCliError(`c2c: ${message}\n`);
         process.exitCode = 1;
       },
     );
@@ -470,7 +476,7 @@ function main(argv: string[]): number {
       },
       (err: unknown) => {
         const message = err instanceof Error ? err.message : 'smoke failed';
-        process.stderr.write(`c2c: ${message}\n`);
+        writeCliError(`c2c: ${message}\n`);
         process.exitCode = 1;
       },
     );
@@ -486,7 +492,7 @@ function main(argv: string[]): number {
       },
       (err: unknown) => {
         const message = err instanceof Error ? err.message : `${cmd} failed`;
-        process.stderr.write(`c2c: ${message}\n`);
+        writeCliError(`c2c: ${message}\n`);
         process.exitCode = 1;
       },
     );
@@ -507,18 +513,18 @@ function main(argv: string[]): number {
       },
       (err: unknown) => {
         const message = err instanceof Error ? err.message : 'status failed';
-        process.stderr.write(`c2c: ${message}\n`);
+        writeCliError(`c2c: ${message}\n`);
         process.exitCode = 1;
       },
     );
     return 0;
   }
   if (cmd === 'cutover-checklist' || cmd === 'proof') {
-    const io = { stdout: (text: string) => process.stdout.write(text), stderr: (text: string) => process.stderr.write(text) };
+    const io = { stdout: (text: string) => process.stdout.write(text), stderr: (text: string) => writeCliError(text) };
     try {
       return cutoverCli(restAll, io, cmd === 'proof' ? 'proof' : 'checklist');
     } catch (err) {
-      process.stderr.write(`c2c: ${err instanceof Error ? err.message : `${cmd} failed`}\n`);
+      writeCliError(`c2c: ${err instanceof Error ? err.message : `${cmd} failed`}\n`);
       return 1;
     }
   }
@@ -529,7 +535,7 @@ function main(argv: string[]): number {
       },
       (err: unknown) => {
         const message = err instanceof Error ? err.message : 'fill-todos failed';
-        process.stderr.write(`c2c: ${message}\n`);
+        writeCliError(`c2c: ${message}\n`);
         process.exitCode = 1;
       },
     );
@@ -545,7 +551,7 @@ function main(argv: string[]): number {
         },
         (err: unknown) => {
           const message = err instanceof Error ? err.message : 'migrate failed';
-          process.stderr.write(`c2c: ${message}\n`);
+          writeCliError(`c2c: ${message}\n`);
           process.exitCode = 1;
         },
       );
@@ -558,7 +564,7 @@ function main(argv: string[]): number {
         },
         (err: unknown) => {
           const message = err instanceof Error ? err.message : 'migrate failed';
-          process.stderr.write(`c2c: ${message}\n`);
+          writeCliError(`c2c: ${message}\n`);
           process.exitCode = 1;
         },
       );
@@ -571,7 +577,7 @@ function main(argv: string[]): number {
         },
         (err: unknown) => {
           const message = err instanceof Error ? err.message : 'migrate failed';
-          process.stderr.write(`c2c: ${message}\n`);
+          writeCliError(`c2c: ${message}\n`);
           process.exitCode = 1;
         },
       );
@@ -583,7 +589,7 @@ function main(argv: string[]): number {
       },
       (err: unknown) => {
         const message = err instanceof Error ? err.message : 'migrate failed';
-        process.stderr.write(`c2c: ${message}\n`);
+        writeCliError(`c2c: ${message}\n`);
         process.exitCode = 1;
       },
     );
@@ -601,11 +607,11 @@ function main(argv: string[]): number {
     if (!ir) return 1;
     const lockPath = flag('--lock');
     if (rest.includes('--lock') && !lockPath) {
-      process.stderr.write('c2c: needs a value\n');
+      writeCliError('c2c: needs a value\n');
       return 2;
     }
     if (lockPath !== undefined && !statSync(lockPath, { throwIfNoEntry: false })?.isFile()) {
-      process.stderr.write(`c2c: no such lock file: ${lockPath}\n`);
+      writeCliError(`c2c: no such lock file: ${lockPath}\n`);
       return 2;
     }
     const report = analyze(ir, lockPath !== undefined ? { lock: readLock(lockPath) } : undefined);
@@ -615,7 +621,7 @@ function main(argv: string[]): number {
           process.stdout.write(rest.includes('--json') ? stampedJson(analyzeAsJson(q)) : `${qualityAsText(q)}\n`);
         },
         (err: unknown) => {
-          process.stderr.write(`c2c: ${err instanceof Error ? err.message : 'quality gate failed'}\n`);
+          writeCliError(`c2c: ${err instanceof Error ? err.message : 'quality gate failed'}\n`);
           process.exitCode = 1;
         },
       );
@@ -628,11 +634,11 @@ function main(argv: string[]): number {
     if (rest.some((arg) => arg !== '--json')) usage();
     const st = statSync(target, { throwIfNoEntry: false });
     if (!st) {
-      process.stderr.write(`c2c: no such file or directory: ${target}\n`);
+      writeCliError(`c2c: no such file or directory: ${target}\n`);
       return PRECHECK_EXIT.missing;
     }
     if (!st.isFile()) {
-      process.stderr.write('c2c: precheck needs one .ds file\n');
+      writeCliError('c2c: precheck needs one .ds file\n');
       return 2;
     }
     let parsed: { source: string; file: ReturnType<typeof parseFile> };
@@ -640,21 +646,21 @@ function main(argv: string[]): number {
       parsed = { source: decode(readFileSync(target)).text, file: parseFile(target) };
     } catch (err) {
       if (err instanceof LockedExportError) {
-        process.stderr.write(`c2c: ${err.message}\n`);
+        writeCliError(`c2c: ${err.message}\n`);
         return 2;
       }
-      process.stderr.write(`c2c: cannot parse ${target}: ${err instanceof Error ? err.message : String(err)}\n`);
+      writeCliError(`c2c: cannot parse ${target}: ${err instanceof Error ? err.message : String(err)}\n`);
       return PRECHECK_EXIT.unparsable;
     }
     // A file with no `application "<name>" { ... }` block is not a Creator export; never certify it clean.
     if (!parsed.file.ir.name || parsed.file.ir.dialect === 'snippet') {
-      process.stderr.write(`c2c: ${target} is not a Creator .ds application export (no application block)\n`);
+      writeCliError(`c2c: ${target} is not a Creator .ds application export (no application block)\n`);
       return PRECHECK_EXIT.unparsable;
     }
     // A truncated or unbalanced .ds is a parse failure, not a clean app.
     if (parsed.file.cst.errors.length) {
       const first = parsed.file.cst.errors[0]!;
-      process.stderr.write(`c2c: cannot parse ${target}: ${first.message}${parsed.file.cst.errors.length > 1 ? ` (+${parsed.file.cst.errors.length - 1} more)` : ''}\n`);
+      writeCliError(`c2c: cannot parse ${target}: ${first.message}${parsed.file.cst.errors.length > 1 ? ` (+${parsed.file.cst.errors.length - 1} more)` : ''}\n`);
       return PRECHECK_EXIT.unparsable;
     }
     const { ir } = parsed.file;
@@ -666,7 +672,7 @@ function main(argv: string[]): number {
   if (cmd === 'migration-report') {
     const st = statSync(target, { throwIfNoEntry: false });
     if (!st?.isDirectory()) {
-      process.stderr.write('c2c: migration-report needs an apps directory\n');
+      writeCliError('c2c: migration-report needs an apps directory\n');
       return 2;
     }
     const report = migrationReportForDir(target, flag('--label') ?? 'corpus');
@@ -676,7 +682,7 @@ function main(argv: string[]): number {
   if (cmd === 'parse') {
     const st = statSync(target, { throwIfNoEntry: false });
     if (!st) {
-      process.stderr.write(`c2c: no such file or directory: ${target}\n`);
+      writeCliError(`c2c: no such file or directory: ${target}\n`);
       return 1;
     }
     let ir: App;
@@ -693,7 +699,7 @@ function main(argv: string[]): number {
       }
     } catch (err) {
       if (err instanceof LockedExportError) {
-        process.stderr.write(`c2c: ${err.message}\n`);
+        writeCliError(`c2c: ${err.message}\n`);
         return 2;
       }
       throw err;
@@ -741,7 +747,7 @@ function main(argv: string[]): number {
     const srcCsv = flag('--source-csv');
     const srcJson = flag('--source-json');
     if ([srcBackup, srcCsv, srcJson].filter((dir) => dir !== undefined).length > 1) {
-      process.stderr.write('c2c: pass at most one of --source-backup, --source-csv, or --source-json\n');
+      writeCliError('c2c: pass at most one of --source-backup, --source-csv, or --source-json\n');
       return 2;
     }
     const allowEmpty = rest.includes('--allow-empty');
@@ -765,7 +771,7 @@ function main(argv: string[]): number {
     try {
       report = diffTemplate(JSON.parse(readFileSync(target, 'utf8')), JSON.parse(readFileSync(exported, 'utf8')));
     } catch (err) {
-      process.stderr.write(`c2c iac-drift: ${err instanceof Error ? err.message : String(err)}\n`);
+      writeCliError(`c2c iac-drift: ${err instanceof Error ? err.message : String(err)}\n`);
       return 3;
     }
     process.stdout.write(formatDrift(report));
@@ -784,7 +790,7 @@ function main(argv: string[]): number {
     const parsedN = n === undefined ? undefined : Number(n);
     const problem = seedArgsProblem(rest);
     if (problem) {
-      process.stderr.write(`${problem}\n`);
+      writeCliError(`${problem}\n`);
       return 2;
     }
     const out = flag('--out') as string;
@@ -792,7 +798,7 @@ function main(argv: string[]): number {
       const rowsArg = flag('--rows') ?? n;
       const rows = rowsArg === undefined ? undefined : Number(rowsArg);
       if (rows !== undefined && (!Number.isInteger(rows) || rows < 0)) {
-        process.stderr.write('c2c seed: --rows must be a non-negative integer\n');
+        writeCliError('c2c seed: --rows must be a non-negative integer\n');
         return 2;
       }
       const result = generateCreatorImport(ir, { rows, seed: flag('--seed') });
@@ -813,7 +819,7 @@ function main(argv: string[]): number {
     for (const file of result.files) writeFileSync(join(out, file.fileName), file.csv);
     for (const file of result.fixtureFiles) {
       if (file.name !== basename(file.name) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(file.name)) {
-        process.stderr.write('c2c seed: fixture name is not a file name\n');
+        writeCliError('c2c seed: fixture name is not a file name\n');
         return 2;
       }
       writeFileSync(join(out, file.name), file.bytes);
@@ -880,7 +886,7 @@ function main(argv: string[]): number {
     if (!ir) return 1;
     const out = flag('--out');
     if (!out) {
-      process.stderr.write('c2c ui: --out directory is required\n');
+      writeCliError('c2c ui: --out directory is required\n');
       return 2;
     }
     const bundle = buildUi(ir);
@@ -904,7 +910,7 @@ function main(argv: string[]): number {
     try {
       bundle = uiDir ? bundleFromDir(uiDir) : bundleFromFiles(buildUi(ir).files);
     } catch (err) {
-      process.stderr.write(`c2c score-ui: ${err instanceof Error ? err.message : 'unreadable bundle'}\n`);
+      writeCliError(`c2c score-ui: ${err instanceof Error ? err.message : 'unreadable bundle'}\n`);
       return 2;
     }
     const write = flag('--write');
@@ -918,7 +924,7 @@ function main(argv: string[]): number {
         process.exitCode = result.pass ? 0 : 1;
       },
       (err: unknown) => {
-        process.stderr.write(`c2c score-ui: ${err instanceof Error ? err.message : 'scoring failed'}\n`);
+        writeCliError(`c2c score-ui: ${err instanceof Error ? err.message : 'scoring failed'}\n`);
         process.exitCode = 2;
       },
     );
@@ -930,7 +936,7 @@ function main(argv: string[]): number {
     if (!ir) return 1;
     const out = flag('--out');
     if (!out) {
-      process.stderr.write('c2c ui-react: --out directory is required\n');
+      writeCliError('c2c ui-react: --out directory is required\n');
       return 2;
     }
     const apiBase = flag('--api-base');
@@ -940,7 +946,7 @@ function main(argv: string[]): number {
       process.stdout.write(`ui-react files ${files.length} written ${result.written.length} kept ${result.kept.length} removed ${result.removed.length}\n`);
     } catch (err) {
       if (err instanceof HandEditedError) {
-        process.stderr.write(`c2c ui-react: ${err.message}\n`);
+        writeCliError(`c2c ui-react: ${err.message}\n`);
         return 1;
       }
       throw err;
@@ -978,13 +984,13 @@ try {
   code = main(process.argv.slice(2));
 } catch (err) {
   if (err instanceof LockedExportError) {
-    process.stderr.write(`c2c: ${err.message}\n`);
+    writeCliError(`c2c: ${err.message}\n`);
     code = 2;
   } else if (err instanceof FillTodoError) {
-    process.stderr.write(`c2c: ${err.message}\n`);
+    writeCliError(`c2c: ${err.message}\n`);
     code = 2;
   } else if (err instanceof DomUnavailableError || (err instanceof Error && err.name === 'DomUnavailableError')) {
-    process.stderr.write(`c2c: ${err.message}\n`);
+    writeCliError(`c2c: ${err.message}\n`);
     code = 1;
   } else {
     throw err;

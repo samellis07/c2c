@@ -7,6 +7,18 @@ Rows that name a doctor check point into [doctor-spec.md](doctor-spec.md); the
 few rows with neither keep their fix inline. "Stop" means the migration step
 must not continue until fixed.
 
+## c2c CLI error codes
+
+The CLI attaches one stable code to errors emitted by each command boundary. The
+code identifies where the error surfaced; preserve the accompanying message for
+the specific cause. Every code links back to this index.
+
+| Code | Error boundary |
+|---|---|
+| `C2C-CLI-001` | Core `c2c` argument, input, and command errors |
+| `C2C-DEPLOY-001` | Deploy, plan, edit, provision, and migration command errors |
+| `C2C-DOCTOR-001` | Doctor and vendor verification command errors |
+
 ## Agent host, MCP and the doctor
 
 | Error text | Entry / fix |

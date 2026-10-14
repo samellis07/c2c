@@ -400,7 +400,7 @@ export function catalystSpawn(command: string, args: string[], opts: { cwd: stri
 export function defaultIo(): Io {
   return {
     stdout: (text) => process.stdout.write(text),
-    stderr: (text) => process.stderr.write(text),
+    stderr: (text) => process.stderr.write(`[C2C-DEPLOY-001] ${text.trimEnd()}\nSee plugin/references/error-index.md#c2c-deploy-001\n`),
     env: process.env,
     spawn: catalystSpawn,
     fetch: (url, init) => globalThis.fetch(url, init) as ReturnType<Io['fetch']>,
