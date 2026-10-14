@@ -8,7 +8,7 @@ See also: https://docs.catalyst.zoho.com/en/cloud-scale/help/zcql/syntax-excepti
 
 ### Columns per table
 
-Rule: Plan for 250 columns per table [UNVERIFIED], the raised cap; the stated default is 100 columns per table [UNVERIFIED]. c2c plan warns when a table exceeds 100 columns because it relies on the raised cap (confirm with P-COLS). When a Creator form exceeds 250 columns, c2c plan splits overflow fields into 1:1 side tables keyed by the parent ROWID; it blocks a field group that cannot fit. c2c doctor D-F5 checks the generated table set against the same cap and default; it does not read live tables. Do not plan a wider physical table in Development or Production.
+Rule: Plan for 250 columns per table [UNVERIFIED], the raised cap; the stated default is 100 columns per table [DOC] (https://docs.catalyst.zoho.com/en/cloud-scale/help/data-store/columns/). c2c plan warns when a table exceeds 100 columns because it relies on the raised cap (confirm with P-COLS). When a Creator form exceeds 250 columns, c2c plan splits overflow fields into 1:1 side tables keyed by the parent ROWID; it blocks a field group that cannot fit. c2c doctor D-F5 checks the generated table set against the same cap and default; it does not read live tables. Do not plan a wider physical table in Development or Production.
 
 Recipe: GET /baas/v1/project/<project-id>/table/<table-id>/column with the token headers. Success is a column array whose length plus the planned additions is at most 250. On a refusal while adding a column, stop and split.
 
@@ -88,7 +88,7 @@ Recipe: POST /baas/v1/project/<project-id>/table/<table-id>/row with X-CATALYST-
 
 ### Row insert batch
 
-Rule: Send at most 200 rows per insert call [DOC]. c2c migrate-data checks the batch length and splits above 200.
+Rule: Send at most 200 rows per insert call [TESTED]. c2c migrate-data checks the batch length and splits above 200.
 
 Recipe: POST /baas/v1/project/<project-id>/table/<table-id>/row with a JSON array of at most 200 objects. Path ends in `/row`, never `/rows`. Success is HTTP 200 and a `data` array as long as the batch. Read-back: `SELECT COUNT(ROWID) FROM <table>`.
 
@@ -106,7 +106,7 @@ Recipe: Bound the insert pool to 10. Success is a run with no 429. On 429 or tha
 
 ### Bulk write job size
 
-Rule: Plan for 100000 rows per bulk-write job [UNVERIFIED]. c2c plan checks the CSV row count and splits a larger file. Use bulk write only after a small CSV job reaches status Completed and the row read-back matches. Unmatched fk_mapping keys are dropped with no error row.
+Rule: Plan for 100000 rows per bulk-write job [DOC] (https://docs.catalyst.zoho.com/en/sdk/nodejs/v2/cloud-scale/data-store/bulk-write/). c2c plan checks the CSV row count and splits a larger file. Use bulk write only after a small CSV job reaches status Completed and the row read-back matches. Unmatched fk_mapping keys are dropped with no error row.
 
 Recipe: PUT the CSV to `https://<bucket>-development.zohostratus.<dc>/<object-key>` with headers Authorization, CATALYST-ORG, X-CATALYST-Environment, compress, and Content-Type. Then POST /baas/v1/project/<project-id>/bulk/write with table_identifier, operation (`insert`, `update`, or `upsert`), object_details.bucket_name, object_details.object_key, optional find_by, and optional fk_mapping. Poll GET /baas/v1/project/<project-id>/bulk/write/<job-id> until Completed. Success is Completed plus COUNT(ROWID) and parent ROWIDs in the mapped column. A `.json` object returns `400` and `Invalid Operation! The object should be of .csv file format.`
 

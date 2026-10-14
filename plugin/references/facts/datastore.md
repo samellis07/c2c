@@ -45,22 +45,27 @@ Rule: [UNVERIFIED] always send the array form. A plain JSON object is rejected w
 
 ### 250-column hard cap and 100-column default
 
-Rule: the 250-column hard cap and 100-column default are [UNVERIFIED].
-`c2c plan` warns above 100. When a Creator form exceeds 250, plan splits
-overflow fields into 1:1 side tables keyed by the parent ROWID and blocks an
-unsplittable field group. `c2c doctor` D-F5 checks the generated table set
-against the same cap and default; it does not read live tables.
-Assume at most 130 text-type (varchar plus text) columns per table;
-`c2c plan` warns past that count and moves overflow text to Stratus
-before any write.
+Rule: [DOC] the documented default is 100 columns per table in
+Development
+(https://docs.catalyst.zoho.com/en/cloud-scale/help/data-store/columns/),
+raisable on request — assume the raised hard cap is 250 [UNVERIFIED]
+([L-COLUMNS](references/limits.md#l-columns-columns-per-table-development)).
+`c2c plan` warns above 100, which relies on the raised cap of 250
+[UNVERIFIED]. When a Creator form exceeds 250, plan splits overflow fields
+into 1:1 side tables keyed by the parent ROWID and blocks an unsplittable
+field group. `c2c doctor` D-F5 checks the generated table set against the
+same cap and default; it does not read live tables. Assume at most 130
+text-type (varchar plus text) columns per table [UNVERIFIED]; `c2c plan`
+warns past that count and moves overflow text to Stratus before any write.
 
 ### Assume varchar stores at most 255 characters and truncates silently
 
-Recipe: [UNVERIFIED] `POST /baas/v1/project/<project-id>/table/<table-id>/row`
+Recipe: [TESTED] `POST /baas/v1/project/<project-id>/table/<table-id>/row`
 returns HTTP 200 while storing only the leading characters of an
-over-length varchar value.
+over-length varchar value
+([L-VARCHAR-LENGTH](references/limits.md#l-varchar-length-varchar-length)).
 
-Rule: [UNVERIFIED] clamp every varchar value to its `max_length` (assume 255 when
+Rule: [TESTED] clamp every varchar value to its `max_length` (assume 255 when
 the column definition carries none) before any write, and read back
 byte-exact after the write. Never treat a 200 as "stored what was
 sent".
@@ -74,28 +79,32 @@ a mapped field exceeds the budget.
 
 ### At most 2 unique varchar columns per table; unique int and bigint are free
 
-Recipe: [UNVERIFIED] `POST .../table/<table-id>/column` with a unique varchar as the
+Recipe: [TESTED] `POST .../table/<table-id>/column` with a unique varchar as the
 third such column returns `403 INVALID_OPERATION` ("Reached max number
-of columns of Unique varchar type"). Unique `int` and unique `bigint`
+of columns of Unique varchar type")
+([L-UNIQUE-VARCHAR](references/limits.md#l-unique-varchar-unique-varchar-columns-per-table)).
+Unique `int` and unique `bigint`
 columns return 200. Unique `text` returns 400 ("Text column cannot be
 Unique"). `email` is not a column type, and `encrypted` is not a column
 type (the encrypted type is `encrypted text`); a column create with
 either name returns 400 `PATTERN_NOT_MATCHED` even with `is_unique`
 set. That code is an invalid-type error, not a uniqueness failure.
 
-Rule: [UNVERIFIED] model the migration idempotency key (numeric Creator ids fit in
+Rule: [TESTED] model the migration idempotency key (numeric Creator ids fit in
 int64) as a unique bigint. `c2c plan` fails closed when more than two
 unique text fields are required and enforces the rest at app level.
 
 ### Assume at most 15 foreign-key columns per table
 
-Recipe: [UNVERIFIED] `POST .../table/<table-id>/column` with body
+Recipe: [TESTED] `POST .../table/<table-id>/column` with body
 `[{"column_name": ..., "data_type": "foreign key", "parent_table":
 "<parent-table-id>", "constraint_type": "ON-DELETE-CASCADE"}]` returns
 200; `ON-DELETE-SET-NULL` is the nulling alternative. The spaced token
 is rejected: always send the hyphenated enum.
 
-Rule: [UNVERIFIED] assume a table holds at most 15 foreign-key columns. Map the
+Rule: [UNVERIFIED] assume a table holds at most 15 foreign-key columns
+([L-FOREIGN-KEYS](references/limits.md#l-foreign-keys-foreign-keys-per-table)).
+Map the
 first 15 lookups as real foreign keys with the parent table id and
 `ON-DELETE-CASCADE`; store any further lookups as plain bigint ROWID
 values without a constraint. `c2c plan` warns past the count. Declare
@@ -106,13 +115,14 @@ declared key.
 
 ### Insert rows in batches of at most 200 per call
 
-Recipe: [UNVERIFIED] `POST /baas/v1/project/<project-id>/table/<table-id>/row`
-accepts an array body; send at most 200 rows per call. A `/rows`
+Recipe: [TESTED] `POST /baas/v1/project/<project-id>/table/<table-id>/row`
+accepts an array body; send at most 200 rows per call
+([L-ROW-BATCH](references/limits.md#l-row-batch-row-insert-batch)). A `/rows`
 (plural) path answers `404 INVALID_URL_PATTERN`. Success is HTTP 200
 with a `data` list holding one created record per sent row; assert the
 count equals the sent count, and re-read when the shape is absent.
 
-- [UNVERIFIED] `updateRows` and `deleteRows` cap at 200 ids per call as well
+- [TESTED] `updateRows` and `deleteRows` cap at 200 ids per call as well
 (`403 INVALID_OPERATION` on update, `400 INVALID_INPUT` "Length of ids
 cannot be more than 200" on delete). A missing ROWID inside an update
 or delete batch is silently skipped — the call returns fewer affected
@@ -148,8 +158,10 @@ than one parent row — a display value is not a key.
 
 ### Validate every value client-side; the store coerces silently
 
-Recipe: [UNVERIFIED] the following inputs all return HTTP 200 with a mutated stored
-value: varchar longer than `max_length` (truncated); date
+Recipe: [TESTED] the following inputs all return HTTP 200 with a mutated stored
+value ([L-DATE-WRITE](references/limits.md#l-date-write-date-strictness),
+[L-DOUBLE-ROUNDING](references/limits.md#l-double-rounding-double-rounding)):
+varchar longer than `max_length` (truncated); date
 `"05-10-2026"` (stored as `0011-04-18`); `"2026-13-45"` (rolled to
 `2027-02-14`); `"2026-02-30"` (rolled to `2026-03-02`); double `0.105`
 (stored `0.1`); `-0.015` (stored `-0.01`); `0.125` (stored `0.12`).
@@ -163,7 +175,7 @@ display strings and epoch values answer `400 INVALID_INPUT`
 ("datetime value expected"). Values are stored and compared as naive
 wall-clock strings on both paths.
 
-Rule: [UNVERIFIED] normalise every date to `yyyy-MM-dd` with a real calendar check,
+Rule: [TESTED] normalise every date to `yyyy-MM-dd` with a real calendar check,
 round every double with HALF_UP to the column's decimal digits, bound
 doubles to `max_length`, and clamp every varchar before any write.
 Read back after the write.
@@ -249,12 +261,14 @@ promotion instead.
 
 ### Never rely on unique columns or read-modify-write under concurrency
 
-Recipe: [UNVERIFIED] parallel inserts of one unique value store duplicates with a
-mix of 200, 409, and 429 responses. `UPDATE ... SET cnt = cnt + 1`
+Recipe: [TESTED] parallel inserts of one unique value store duplicates with a
+mix of 200, 409, and 429 responses
+([L-UNIQUE-RACE](references/limits.md#l-unique-race-unique-under-concurrency)).
+`UPDATE ... SET cnt = cnt + 1`
 returns 200 while landing a fraction of the increments; 20 parallel
 read-modify-write cycles leave a counter at 1.
 
-Rule: [UNVERIFIED] never use a unique column for mutual exclusion or dedup under
+Rule: [TESTED] never use a unique column for mutual exclusion or dedup under
 load, and never sequence through a counter column. Allocate ids
 client-side (key shards, claimed ranges) or serialise through one
 writer. Treat unique columns as best-effort with a reconciler.
@@ -282,16 +296,19 @@ rows from the browser in bursts; go through a function or a batch.
 
 ### There is no quota read endpoint; surface limit codes raw
 
-Recipe: [UNVERIFIED] guessed quota paths (`/limits`, `/quota`, `/usage`,
+Recipe: [TESTED] guessed quota paths (`/limits`, `/quota`, `/usage`,
 per-table limits) all return `404 INVALID_URL_PATTERN`.
 
-Rule: [UNVERIFIED] budget projects, tables, columns, and calls manually; `c2c
+Rule: [TESTED] budget projects, tables, columns, and calls manually; `c2c
 doctor` reports the counts it can read. On `API_LIMIT_REACHED`,
 surface the raw code with the affected table; never assume quota ran
 out. Assume Development tables may refuse rows past an undisclosed
-count, and that an org-wide table-create limit with no published
-number or window can refuse a create at any visible count; rehearse
-full-volume loads outside Development.
+count [UNVERIFIED]
+([L-DEV-ROW-CAP](references/limits.md#l-dev-row-cap-dev-per-table-row-cap)),
+while an org-wide table-create limit with no published
+number or window can refuse a create at any visible count [TESTED]
+([L-TABLE-CREATES](references/limits.md#l-table-creates-table-creates-per-org));
+rehearse full-volume loads outside Development.
 
 ### NoSQL tables are console-only; prefer child tables
 

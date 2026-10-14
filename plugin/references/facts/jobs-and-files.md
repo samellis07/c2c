@@ -34,15 +34,18 @@ as proof of exactness.
 
 ### Resolve lookups with fk_mapping; load parents first
 
-Recipe: [UNVERIFIED] `fk_mapping` entries of `local_column` plus `reference_column`
-resolve local values to the referenced parent ROWIDs on insert. Keys
+Recipe: [TESTED] `fk_mapping` entries of `local_column` plus `reference_column`
+resolve local values to the referenced parent ROWIDs on insert; the
+`reference_column` must be a unique column. Keys
 with no parent match are dropped silently. `find_by` names the unique
 column for upsert matching.
 
-Rule: [UNVERIFIED] load parent tables before children, pre-validate every foreign
+Rule: [DOC] load parent tables before children, pre-validate every foreign
 key value against the parent set, and re-count children after the job.
-Assume about 100,000 rows per bulk-write call; split larger loads
-into several jobs.
+Assume about 100,000 rows per bulk-write call
+([L-BULK-WRITE](references/limits.md#l-bulk-write-bulk-write);
+https://docs.catalyst.zoho.com/en/sdk/nodejs/v2/cloud-scale/data-store/bulk-write/);
+split larger loads into several jobs.
 
 ### Send CSV only; JSON sources and URL objects are rejected
 
@@ -143,8 +146,11 @@ flat fields `source_type`, `job_name`, `jobpool_id`, `target_type`,
 and `target_id` returns 200 with status `PENDING`; poll the job from
 `PENDING` through to `SUCCESS`.
 
-Rule: [UNVERIFIED] chunk work past minutes with persisted checkpoints and
-self-resubmit; a Job function runs at most 15 minutes and returns no
+Rule: [DOC] chunk work past minutes with persisted checkpoints and
+self-resubmit; a Job function runs at most 15 minutes
+([L-JOB-TIME](references/limits.md#l-job-time-job-function);
+https://docs.catalyst.zoho.com/en/serverless/help/functions/job-functions/)
+and returns no
 HTTP response. Close every job with success or failure in a `finally`
 block, or it hangs `In Progress` to timeout. Dispatch queues under
 burst, so poll patiently and never promise near-real-time for
@@ -152,12 +158,14 @@ job-backed workflows.
 
 ### Route work past 25 seconds to a Job function, never to sync config
 
-Recipe: [UNVERIFIED] an Advanced I/O call sleeping 35 seconds dies with `408
+Recipe: [DOC][TESTED] an Advanced I/O call sleeping 35 seconds dies with `408
 EXECUTION_TIME_EXCEEDED` near the 32-second mark; timeout and memory
 configuration posts return 200 but change nothing. AppSail requests
-cut off the same way near 30 seconds.
+cut off the same way near 30 seconds
+([L-REQUEST-TIME](references/limits.md#l-request-time-advanced-io--appsail-request);
+https://docs.catalyst.zoho.com/en/serverless/help/functions/advanced-io/).
 
-Rule: [UNVERIFIED] send anything that can exceed about 25 seconds to a Job
+Rule: [DOC][TESTED] send anything that can exceed about 25 seconds to a Job
 function with submit-plus-poll. Never tune timeouts through the
 function configuration route.
 

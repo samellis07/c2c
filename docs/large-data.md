@@ -143,7 +143,7 @@ rounding during a load too.
 | Limit | Behaviour | What c2c does |
 |---|---|---|
 | **Org table limit** | Creating a table past it fails with `403 API_LIMIT_REACHED` "You have reached the max limit of your current API Limit for table". It is an org-wide limit on table creates; its value is not published [TESTED]. | `c2c plan` reports the app's Data Store table count (`counts.dataStoreTables` and the `org-tables` budget). Deploy stops at the first refused create. The error names the limit, the tables the app needs and the tables already created. On that refusal: stop creates, keep created tables, and retry later with growing waits (observed: the refusal cleared after 30 minutes to a few hours [TESTED]); a project delete may not free capacity at once. |
-| insertRows / updateRows / deleteRows | 200 rows per call [DOC] | chunked; update counts are checked |
+| insertRows / updateRows / deleteRows | 200 rows per call [TESTED] | chunked; update counts are checked |
 | ZCQL SELECT | 300 rows per query [DOC]; `IN` lists of up to 300 values [TESTED] | keyset paging; `IN` reads chunked |
 | ZCQL UPDATE / DELETE | 300 rows per statement, with no error for the rest [TESTED] | `updateAllWhere` / `deleteAllWhere` |
 | Request cut (Advanced I/O, AppSail) | about 30 s, not raisable (Advanced I/O [DOC]; AppSail [UNVERIFIED]) | `runOrDefer` → Job + 202 + poll |

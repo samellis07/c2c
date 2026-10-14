@@ -42,7 +42,7 @@ Every row below has a stable limit id (`L-…`). Skills cite the id of each limi
 
 ### L-COLUMNS: Columns per table (Development)
 
-Raised cap: 250 columns per table [UNVERIFIED]. Default: 100 columns [UNVERIFIED]. Behaviour: `c2c plan` warns above the default and splits Creator form overflow above 250 into 1:1 side tables (or blocks a field group that cannot fit); `c2c doctor` D-F5 checks the generated table set against the same cap and default (it does not read live tables). Probe: P-COLS.
+Value: 100 documented default (https://docs.catalyst.zoho.com/en/cloud-scale/help/data-store/columns/); raised cap 250; "no upper limit" in Production. Label: [DOC] for the 100 default; the 250 raised cap is [UNVERIFIED]. Behaviour: warn — `c2c plan` warns on a table over 100, which relies on the raised cap of 250 [UNVERIFIED]; split — it splits Creator form overflow above 250 into 1:1 side tables (or blocks a field group that cannot fit); `c2c doctor` D-F5 checks the generated table set against the same cap and default (it does not read live tables). Probe: P-COLS.
 
 ### L-UNIQUE-VARCHAR: Unique varchar columns per table
 

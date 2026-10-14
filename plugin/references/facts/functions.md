@@ -25,7 +25,9 @@ Rule: [UNVERIFIED] every env write replaces the whole set — merge before writi
 
 ### A ~30-second ceiling decides the function type
 
-Rule: [UNVERIFIED] a synchronous function must finish in ~25 s; anything longer is a Job function.
+Rule: [DOC][TESTED] a synchronous function must finish in ~25 s; anything longer is a Job function
+([L-REQUEST-TIME](references/limits.md#l-request-time-advanced-io--appsail-request);
+https://docs.catalyst.zoho.com/en/serverless/help/functions/advanced-io/).
 
 - Advanced I/O (`applogic`) executions are killed at ~30 s with `408 EXECUTION_TIME_EXCEEDED`; posting a `timeout` value in the function configuration is ignored and can silently wipe env vars — never post timeout configuration.
 - Enforcement lands between 31–38 s for Advanced I/O, Basic I/O and Development AppSail alike (`408 EXECUTION_TIME_EXCEEDED`); design to 30 s, not the tail.
@@ -34,7 +36,9 @@ Rule: [UNVERIFIED] a synchronous function must finish in ~25 s; anything longer 
 
 ### Job functions get 15 minutes and return nothing to the caller
 
-Rule: [UNVERIFIED] a `job` function runs up to 15 minutes, has no HTTP response, and must close its context.
+Rule: [DOC] a `job` function runs up to 15 minutes, has no HTTP response, and must close its context
+([L-JOB-TIME](references/limits.md#l-job-time-job-function);
+https://docs.catalyst.zoho.com/en/serverless/help/functions/job-functions/).
 
 - Wrap the handler body in `try/finally` calling `context.closeWithSuccess()` / `context.closeWithFailure()` — a Job or Basic I/O function that never closes sits `In Progress` indefinitely.
 - Job dispatch queues under burst load — treat submit as async; never promise near-real-time delivery from it.
