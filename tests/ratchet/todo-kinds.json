@@ -1,0 +1,9 @@
+{
+  "fixtures/dialects/d1-minimal.ds": {},
+  "fixtures/dialects/d2-minimal.ds": {},
+  "fixtures/redistributable/freight-forwarding": {
+    "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.": 1,
+    "client-condition-uses-server": 13
+  },
+  "fixtures/redistributable/library-application-system": {}
+}
