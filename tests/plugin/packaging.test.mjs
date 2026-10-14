@@ -370,7 +370,7 @@ test('a vendored CLI with no jsdom exits 1 with one clean DomUnavailableError li
     assert.equal(res.status, 1, `stdout=${res.stdout}\nstderr=${res.stderr}`);
     assert.equal(
       res.stderr,
-      'c2c: a DOM is required to sanitize notes/print-template HTML but jsdom could not be loaded; reinstall the plugin or run npm ci\n',
+      'c2c: a DOM is required to sanitize notes/print-template HTML but jsdom could not be loaded; reinstall the plugin or run npm ci [C2C-CLI-001]\nSee plugin/references/error-index.md#c2c-cli-001\n',
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
