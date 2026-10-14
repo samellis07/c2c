@@ -4713,6 +4713,9 @@ function namedCall(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fal
       // (`sum("x")` is not `shim.list.aggregate`). A map member is not a list of rows:
       // `sum(m.k)` aggregates the member expression, same as `m.k.sum()`.
       if (!q.query && !q.todo && q.list) {
+        if (aggregateCall === 'average' || aggregateCall === 'median') {
+          return mergeFx(`shim.number.${aggregateCall}(${q.code})`, [q], { shim: true });
+        }
         const exact = !!fieldName && scope.decimalFields.has(fieldName);
         const extra = fieldName ? `, ${JSON.stringify(fieldName)}${exact ? ', true' : ''}` : '';
         return mergeFx(`shim.list.aggregate(${q.code}, ${JSON.stringify(fn)}${extra})`, [q], {
