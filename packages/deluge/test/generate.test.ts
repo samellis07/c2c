@@ -2341,7 +2341,7 @@ async function loadTree(g: ReturnType<typeof generate>, entry: string): Promise<
 }
 
 /** Keep a generated functions tree alive while a callback runs lazy registry imports. */
-async function withTree<T>(g: ReturnType<typeof generate>, entry: string, run: (mod: Record<string, unknown>) => Promise<T> | T): Promise<T> {
+async function withTree<T>(g: ReturnType<typeof generate>, entry: string, run: (mod: Record<string, unknown>, dir: string) => Promise<T> | T): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-tree-'));
   writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
   mkdirSync(join(dir, 'node_modules'), { recursive: true });
@@ -2352,11 +2352,41 @@ async function withTree<T>(g: ReturnType<typeof generate>, entry: string, run: (
     writeFileSync(dest, file.source);
   }
   try {
-    return await run((await import(pathToFileURL(join(dir, entry)).href)) as Record<string, unknown>);
+    return await run((await import(pathToFileURL(join(dir, entry)).href)) as Record<string, unknown>, dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+test('a bare app-function call resolves by declaration and executes through the thisapp registry', async () => {
+  const g = generate(app({
+    functions: [
+      {
+        name: 'twice', kind: 'deluge', signature: 'int twice(int n)',
+        deluge: [{ text: 'return n * 2;', span: Z }], properties: [], span: Z,
+      },
+      {
+        name: 'twicePlus', kind: 'deluge', signature: 'int twicePlus(int n)',
+        deluge: [{ text: 'return twice(n) + 1;', span: Z }], properties: [], span: Z,
+      },
+    ],
+  }));
+  assert.equal(g.todos.some((todo) => todo.construct === 'call:twice'), false);
+  const caller = g.files.find((file) => file.path === 'functions/custom/twiceplus.mjs');
+  assert.ok(caller);
+  assert.match(stripComments(caller.source), /shim\.thisapp\.call\(ctx, \["twice"\], \[n\]\)/);
+
+  const value = await withTree(g, 'functions/thisapp.mjs', async (registryModule, dir) => {
+    const registry = registryModule.functions as NonNullable<Parameters<typeof createRuntime>[0]>['functions'];
+    const runtime = createRuntime({ dryRun: false, settingsTimeZone: 'Asia/Kolkata', functions: registry });
+    const ctx = runtime.context({ record: {}, old: {} });
+    const callerModule = await import(pathToFileURL(join(dir, 'functions/custom/twiceplus.mjs')).href) as {
+      twicePlus(ctx: ReturnType<ReturnType<typeof createRuntime>['context']>, n: number): Promise<number>;
+    };
+    return callerModule.twicePlus(ctx, 4);
+  });
+  assert.equal(value, 9);
+});
 
 test('custom functions get a deterministic thisapp registry and live dispatch stays in-process', async () => {
   const build = () =>
