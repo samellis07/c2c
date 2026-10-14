@@ -13,6 +13,15 @@ import { diffManifest, digestOf, loadApp, manifestFor, parseManifestFiles, rende
 const root = repoRoot();
 const FIXTURES = ['freight-forwarding', 'library-application-system'];
 
+// Four small, distinct app shapes extend the two committed redistributable
+// snapshots without turning the environment matrix into a gallery sweep.
+const ENV_FIXTURES = [
+  { name: 'ui-stub', text: `application "Ui_Stub"\n{\n forms { form Item { Title ( type = text ) } }\n reports { pivottable Totals { show all rows from Item ( Title ) } }\n}\n` },
+  { name: 'plain-mail', text: `application "Plain_Mail"\n{\n forms { form Item { Title ( type = text ) } }\n workflow { form { On_Add as "On add" { type = form form = Item on add { actions { on success ( sendmail [ from: zoho.adminuserid to: "owner@example.com" subject: "added" message: "hello" ]; ) } } } }\n}\n` },
+  { name: 'scheduled', text: `application "Scheduled"\n{\n time zone = "Asia/Kolkata"\n forms { form Item { Due_Date ( type = date ) } }\n}\n` },
+  { name: 'simple-list', text: `application "Simple_List"\n{\n forms { form Item { Title ( type = text ) } }\n reports { list All_Items { show all rows from Item ( Title ) } }\n}\n` },
+];
+
 test('node and typescript pins match the running toolchain', () => {
   const pin = toolchain();
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
@@ -142,6 +151,50 @@ test('gallery script is not part of the default test run and refuses a missing d
   });
   assert.equal(child.status, 2);
   assert.match(child.stderr, /C2C_GALLERY_DIR/);
+});
+
+test('four additional apps keep generated trees and offline plans byte-identical across environments', () => {
+  const variants = [
+    { name: 'UTC/C/022', env: { TZ: 'UTC', LANG: 'C', LC_ALL: 'C', HOME: tmpdir() }, mask: '022', cwd: root },
+    { name: 'Kolkata/en_US/077', env: { TZ: 'Asia/Kolkata', LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8', HOME: join(tmpdir(), 'c2c-home-matrix-a') }, mask: '077', cwd: tmpdir() },
+    { name: 'Los_Angeles/de_DE/022', env: { TZ: 'America/Los_Angeles', LANG: 'de_DE.UTF-8', LC_ALL: 'de_DE.UTF-8', HOME: join(tmpdir(), 'c2c-home-matrix-b') }, mask: '022', cwd: tmpdir() },
+  ];
+  const childScript = `
+    const { parse, deriveIr } = require(${JSON.stringify(join(root, 'dist/core/src/index.js'))});
+    const { treeFiles } = require(${JSON.stringify(join(root, 'dist/determinism/src/tree.js'))});
+    const { buildOfflinePlan } = require(${JSON.stringify(join(root, 'dist/deploy/src/offline-plan.js'))});
+    process.umask(parseInt(process.env.C2C_MATRIX_UMASK, 8));
+    const text = require('node:fs').readFileSync(0, 'utf8');
+    const app = deriveIr(parse(text));
+    const bytes = (value) => Buffer.isBuffer(value) ? value.toString('base64') : String(value);
+    const target = require('node:path').join(process.cwd(), 'matrix-fixture.ds');
+    require('node:fs').writeFileSync(target, text);
+    const tree = treeFiles(target).map((file) => [file.path, bytes(file.data)]);
+    const plan = buildOfflinePlan(app, { dc: 'in', dcSource: 'default', mail: false }).files.map((file) => [file.path, bytes(file.data)]);
+    process.stdout.write(JSON.stringify({ tree, plan }));
+  `;
+  const outputs = (text: string, env: Record<string, string>, mask: string, cwd: string) => {
+    const dir = mkdtempSync(join(cwd, 'c2c-determinism-env-'));
+    try {
+      const child = spawnSync(process.execPath, ['-e', childScript], {
+        cwd: dir,
+        encoding: 'utf8',
+        env: { ...process.env, ...env, C2C_MATRIX_UMASK: mask },
+        input: text,
+        maxBuffer: 64 * 1024 * 1024,
+      });
+      assert.equal(child.status, 0, child.stderr || child.stdout);
+      return JSON.parse(child.stdout) as unknown;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  for (const fixture of ENV_FIXTURES) {
+    const expected = outputs(fixture.text, variants[0]!.env, variants[0]!.mask, variants[0]!.cwd);
+    for (const variant of variants.slice(1)) {
+      assert.deepEqual(outputs(fixture.text, variant.env, variant.mask, variant.cwd), expected, `${fixture.name}: ${variant.name}`);
+    }
+  }
 });
 
 function runOnce(target: string): Manifest {
