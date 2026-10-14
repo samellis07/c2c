@@ -86,7 +86,7 @@ export { matchReadBack, provisionArgsProblem, provisionCli, resolveTokens } from
 export type { ProvisionPlanFile, ProvisionState, StepRecord, StepStatus } from './provision.js';
 export { readDeployConfig, resolveProvisionScope } from './provision-config.js';
 export type { DeployConfig, ProvisionScope } from './provision-config.js';
-export { assertProjectPath, assertSlatePath, catalystRestCall, decodeRestPayload, listCatalystProjects, parseProjectList, readCliAccessToken } from './rest.js';
+export { assertProjectPath, assertSlatePath, catalystRestCall, decodeRestPayload, listCatalystProjects, parseProjectList, readCliAccessToken, redactStderrExcerpt, redactString } from './rest.js';
 export { assertProjectDetails, assertReportedScope, catalystScopeArgs, cliRenderedProjectId, scrubCatalystEnv } from './scope.js';
 export { catalystCreatedMs, importingAgeMs, importingAgeState, isStuckImporting, projectDataRecord, stuckImportGuidedStep, unknownImportAgeGuidedStep, STUCK_IMPORT_MAX_AGE_HOURS, STUCK_IMPORT_MAX_AGE_MS } from './stuck-import.js';
 export type { ListedProject } from './stuck-import.js';

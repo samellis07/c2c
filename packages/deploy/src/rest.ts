@@ -445,12 +445,77 @@ export function resolveCatalyst(env: NodeJS.ProcessEnv): { bin: string; lib: str
 type RunResult = { code: number; signal?: string; extra: string; stderr: string };
 
 const STDERR_KEEP = 4096;
+const STDERR_EXCERPT_MAX = 200;
 
-/** Exit code or signal plus the first stderr line, for a child that wrote no result. */
+export const URL_RE = /\b[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s"'<>)\]}]+/g;
+export const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+/** xxx.yyy.zzz with base64url segments — a JWT. */
+export const JWT_RE = /\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g;
+export const AUTH_RE = /\b(?:Basic|Bearer|Zoho-oauthtoken)\s+[^\s"'<>)\]},;]+/gi;
+export const ZOHO_TOKEN_RE = /\b[0-9]{3,}\.[0-9a-zA-Z]{8,}[0-9a-zA-Z._-]*/g;
+/**
+ * A secret-named parameter value. The key may sit at the start of the text or
+ * after whitespace, `?`, `&`, `#`, `;`, `,`, `:`, a quote, `=`, `+`, or a markup /
+ * bracket delimiter (`<`, `>`, `)`, `]`, `}`). The separator between key and value
+ * is `=` or `:` (a header or a raw JSON pair), and the value may be wrapped in
+ * quotes: `client_secret="…"`, `"refresh_token=…"`.
+ */
+export const PARAM_SECRET_RE =
+  /((?:^|["'=+?&#\s;,:<>)\]}]))((?:[^=\s&"'<>)\]}:]*)(?:token|secret|key|sig|code|pass|pw|otp)(?:[^=\s&"'<>)\]}:]*))(["']?)(\s*[:=]\s*["']?)([^&\s"'<>)\]},]+)/gi;
+/** Long hex, base64, or token-shaped credential runs. */
+export const HEX_B64_TOKEN_RE =
+  /\b(?:[A-Za-z0-9+/]{16,}={1,2}|(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{16,}|(?=[A-Za-z0-9._-]*[0-9])(?=[A-Za-z0-9._-]*[A-Za-z])[A-Za-z0-9._-]{20,}|(?=[A-Za-z0-9._-]*[0-9])[A-Za-z0-9._-]*(?:token|secret|passwd|password|apikey|oauth)[A-Za-z0-9._-]*)/gi;
+/** Diagnostic codes a caller reads to act on a failure — not secrets. */
+export const SAFE_CODE_KEY_RE = /^(?:error|status|exit|http|reason)[-_]?code$/i;
+
+export function redactString(value: string): string {
+  // The URL pass runs first: it consumes userinfo (`u:p@host`), the query and
+  // the fragment whole. Emailing first would split a URL at the '@' and leave
+  // its query secrets behind. The escaped forms of a URL are decoded before it
+  // — backslash and unicode escapes from JSON text, and the percent-encoded
+  // delimiters of a URL-shaped string — so an encoded URL in a raw-text body
+  // still matches.
+  return value
+    .replace(/\\\//g, '/')
+    .replace(/\\u002f/gi, '/')
+    .replace(/%(?:2f|3a|3f|3d|26|23|40)/gi, (hex) => String.fromCharCode(parseInt(hex.slice(1), 16)))
+    .replace(URL_RE, '<url>')
+    .replace(AUTH_RE, '<auth>')
+    .replace(PARAM_SECRET_RE, (full, sep: string, key: string, close: string, delim: string) =>
+      SAFE_CODE_KEY_RE.test(key) ? full : `${sep}${key}${close}${delim}<redacted>`,
+    )
+    .replace(JWT_RE, '<token>')
+    .replace(EMAIL_RE, '<email>')
+    .replace(ZOHO_TOKEN_RE, '<token>')
+    .replace(HEX_B64_TOKEN_RE, '<token>');
+}
+
+/** True when a trimmed stderr line looks like an environment dump rather than an error message. */
+function isEnvDumpLine(line: string): boolean {
+  if (/^[{}[\],]+$/.test(line)) return true;
+  if (/^(?:export\s+|set\s+)?[A-Z_][A-Z0-9_]{2,}=/.test(line)) return true;
+  if (/^["']?[A-Z_][A-Z0-9_]{2,}["']?\s*:\s*["']/.test(line)) return true;
+  const assignments = line.match(/(?:^|[\s{,"'])[A-Z_][A-Z0-9_]{2,}["']?\s*[:=]/g);
+  return (assignments?.length ?? 0) >= 2;
+}
+
+/** First non-empty, non-env-dump stderr line, redacted and length-capped. */
+export function redactStderrExcerpt(stderr: string): string {
+  const first = stderr
+    .split('\n')
+    .map((item) => item.trim())
+    .find((item) => item !== '' && !isEnvDumpLine(item));
+  if (!first) return '';
+  return redactString(first)
+    .replace(/\b[A-Z_][A-Z0-9_]{2,}=[^\s"'<>)\]},;]+/g, '<redacted>')
+    .slice(0, STDERR_EXCERPT_MAX);
+}
+
+/** Exit code or signal plus the first redacted stderr line, for a child that wrote no result. */
 function describeExit(result: RunResult): string {
   const how = result.signal ? `killed by ${result.signal}` : `exit code ${result.code}`;
-  const first = result.stderr.split('\n').map((item) => item.trim()).find((item) => item !== '');
-  return first ? `${how}: ${first.slice(0, 300)}` : how;
+  const first = redactStderrExcerpt(result.stderr);
+  return first ? `${how}: ${first}` : how;
 }
 
 /** Spawn with an inherited pipe on fd 3; the hook writes secrets/results there, never to disk. Only the head of stderr is kept, for error messages. */
