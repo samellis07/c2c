@@ -476,7 +476,7 @@ export async function failingParityIds(caseList, vectors, pending) {
   return ids;
 }
 
-/** Admin email is never committed. Both the shim and a captured To reduce to this class. */
+/** Admin email is never committed. Both the shim and a captured From/To reduce to this class. */
 export const ADMIN_ADDRESS = '<admin>';
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const WRITE_OPS = new Set(['insert', 'update', 'delete', 'setField']);
@@ -537,7 +537,7 @@ export async function evaluateSubmit(id, shape) {
     return {
       $workflow: 'on success',
       $task: 'sendmail',
-      headers: { Subject: sent.subject, From: sent.from, To: addressClass(sent.to) },
+      headers: { Subject: sent.subject, From: addressClass(sent.from), To: addressClass(sent.to) },
       body: sent.message,
       formBanner: DEFAULT_SUCCESS_BANNER,
     };
@@ -553,7 +553,7 @@ export function submitCapturedView(captured, keys) {
   const out = {};
   for (const key of keys) {
     if (key === 'headers') {
-      out.headers = { Subject: captured.headers.Subject, From: captured.headers.From, To: addressClass(captured.headers.To) };
+      out.headers = { Subject: captured.headers.Subject, From: addressClass(captured.headers.From), To: addressClass(captured.headers.To) };
     } else {
       out[key] = captured[key];
     }
