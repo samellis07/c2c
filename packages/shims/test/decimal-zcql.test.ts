@@ -175,6 +175,34 @@ test('zcql-mock: WHERE is three-valued (NULL comparison is UNKNOWN, NOT UNKNOWN 
   assert.deepEqual(await ids('(N < 5 OR N IS NULL)'), ['1', null]);
 });
 
+test('zcql-mock comparisons follow declared integer, exact-decimal, and varchar types', async () => {
+  const store = mockDatastore({
+    T: { Count: 'int', Amount: 'decimal', Label: 'string' },
+  });
+  await store.datastore.insert('T', [
+    { Count: '2', Amount: '2.00', Label: '2' },
+    { Count: '4', Amount: '4.00', Label: '4' },
+    { Count: '100', Amount: '100.00', Label: '100' },
+    { Count: '101', Amount: '100.00000000000000001', Label: '100.00000000000000001' },
+  ]);
+  const values = async (where: string, column: string) =>
+    (await store.datastore.query('T', where, 300)).map((row) => row[column]);
+
+  assert.deepEqual(await values('Count > 100', 'Count'), ['101']);
+  assert.deepEqual(await values('Count < 100', 'Count'), ['2', '4']);
+  assert.deepEqual(await values('Count = 100', 'Count'), ['100']);
+
+  assert.deepEqual(await values('Amount > 100.00', 'Amount'), ['100.00000000000000001']);
+  assert.deepEqual(await values('Amount < 100.00', 'Amount'), ['2.00', '4.00']);
+  assert.deepEqual(await values('Amount = 100.00', 'Amount'), ['100.00']);
+
+  // VarChar deliberately retains lexicographic comparison: '2' is greater than
+  // '100', and a longer string with the same prefix is greater too.
+  assert.deepEqual(await values("Label > '100'", 'Label'), ['2', '4', '100.00000000000000001']);
+  assert.deepEqual(await values("Label < '100'", 'Label'), []);
+  assert.deepEqual(await values("Label = '100'", 'Label'), ['100']);
+});
+
 test('rows whose shadow is null (written before the shadow column existed) are still found', async () => {
   const { runtime, ctx } = await liveRates(['10.00', '3.00', '250.00', ''], ['10.00', '250.00']);
   const q = (c: Criteria, opts?: Parameters<typeof rateValues>[3]) => rateValues(runtime, ctx, c, opts);
