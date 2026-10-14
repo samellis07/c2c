@@ -42,7 +42,7 @@ Every builtin lands in one of three states, defined in
 
 ## Notes
 
-- The builtin catalogue lists 269 `todo` entries in
+- The builtin catalogue's `todo` entry count lives in
   `docs/deluge-builtins.json` (`counts.todo`); that is not the corpus residual — see
   [docs/determinism-status.md](../determinism-status.md).
 - Client-side builtins that read the server go through the prefetch

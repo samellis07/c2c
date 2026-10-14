@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { emptyApp, type App, type Workflow } from '../../core/src/ir.js';
 import { buildMigrationReport, type MigrationReport } from '../../cli/src/migration-report.js';
 import {
+  builtinTodoCount,
   canonicalStatusJson,
   computeDeterminismStatus,
   parseStatusDoc,
@@ -291,4 +293,52 @@ test('committed status doc equals a fresh gallery computation', { skip: !statusD
   const fresh = renderStatusDoc(computeDeterminismStatus(dir));
   assert.equal(readFileSync(docPath, 'utf8'), fresh, 'docs/determinism-status.md is stale: run npm run determinism:status');
   assertNoQuotedIdentifiers(parseStatusDoc(fresh));
+});
+
+test('status doc renders the builtin TODO count from the catalogue, not a hard-coded number', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-builtin-catalogue-'));
+  const fixturePath = join(dir, 'deluge-builtins.json');
+  try {
+    writeFileSync(
+      fixturePath,
+      JSON.stringify({ counts: { supported: 1, shimmed: 2, todo: 7, total: 10 }, entries: [] }),
+    );
+    assert.equal(builtinTodoCount(fixturePath), 7);
+    const status: DeterminismStatus = {
+      totalApps: 0,
+      deterministicApps: 0,
+      todoTotal: 0,
+      kinds: [],
+      perAppConstructSets: [],
+      deterministicWithUiTodos: { apps: 0, uiTodos: 0 },
+    };
+    const doc = renderStatusDoc(status, fixturePath);
+    assert.match(doc, /The builtin catalogue lists 7 TODO entries/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('no doc quotes a builtin TODO count that differs from docs/deluge-builtins.json counts.todo', () => {
+  const realTodo = builtinTodoCount();
+  const quote = /builtin catalogue lists (\d+) `?todo`? entries/gi;
+  const files: string[] = [join(root, 'README.md')];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith('.md')) files.push(full);
+    }
+  };
+  walk(join(root, 'docs'));
+  let quotes = 0;
+  for (const path of files) {
+    if (!existsSync(path)) continue;
+    for (const match of readFileSync(path, 'utf8').matchAll(quote)) {
+      quotes += 1;
+      assert.equal(Number(match[1]), realTodo, `${path} quotes a stale builtin TODO count`);
+    }
+  }
+  // determinism-status.md must keep quoting the count, or this guard checks nothing.
+  assert.ok(quotes >= 1, 'expected docs/determinism-status.md to quote counts.todo');
 });

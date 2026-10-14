@@ -77,6 +77,16 @@ function catalogueNames(): Set<string> {
   return catalogue;
 }
 
+/**
+ * `counts.todo` from the builtin catalogue (`docs/deluge-builtins.json` by
+ * default). Reads the committed file, not a live count — deterministic, no
+ * clock. `path` lets a test point at a fixture catalogue.
+ */
+export function builtinTodoCount(path: string = join(repoRoot(), 'docs/deluge-builtins.json')): number {
+  const doc = JSON.parse(readFileSync(path, 'utf8')) as { counts: { todo: number } };
+  return doc.counts.todo;
+}
+
 /** A quoted user-chosen name. The quotes are part of the name, not of the kind. */
 const QUOTED_NAME = /"[^"]*"/g;
 
@@ -154,8 +164,9 @@ export function computeDeterminismStatus(dir: string): DeterminismStatus {
   return statusFromReport(migrationReportForDir(dir, 'gallery'));
 }
 
-export function renderStatusDoc(status: DeterminismStatus): string {
+export function renderStatusDoc(status: DeterminismStatus, builtinCataloguePath?: string): string {
   const top = status.kinds.slice(0, 20);
+  const todoCount = builtinTodoCount(builtinCataloguePath);
   const share = status.totalApps ? Math.round((status.deterministicApps / status.totalApps) * 1000) / 10 : 100;
   return [
     '# Determinism status',
@@ -178,7 +189,7 @@ export function renderStatusDoc(status: DeterminismStatus): string {
     `${status.deterministicWithUiTodos.apps} of the ${status.deterministicApps} deterministic apps still have UI TODO stubs ` +
       `(${status.deterministicWithUiTodos.uiTodos} in total).`,
     '',
-    'The builtin catalogue lists 269 TODO entries',
+    `The builtin catalogue lists ${todoCount} TODO entries`,
     '(`docs/deluge-builtins.json` `counts.todo`). That is not the corpus residual counted here: one',
     'TODO item per untranslated construct occurrence.',
     '',

@@ -17,7 +17,7 @@ A residual TODO item is an untranslated Deluge hole or one generated UI stub
 so an app with a stub is not deterministic.
 0 of the 8 deterministic apps still have UI TODO stubs (0 in total).
 
-The builtin catalogue lists 269 TODO entries
+The builtin catalogue lists 56 TODO entries
 (`docs/deluge-builtins.json` `counts.todo`). That is not the corpus residual counted here: one
 TODO item per untranslated construct occurrence.
 
