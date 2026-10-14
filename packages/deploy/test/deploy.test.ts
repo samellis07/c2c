@@ -834,6 +834,8 @@ test('a lossy project:list still fails closed when REST ids differ by one digit'
 
 test('a fake catalyst binary records argv and env, and a mismatched report aborts', async () => {
   const bin = mkdtempSync(join(tmpdir(), 'c2c-fake-catalyst-'));
+  // Pin CommonJS so a TMPDIR under a {"type":"module"} package.json cannot change how these fixtures load.
+  writeFileSync(join(bin, 'package.json'), '{"type":"commonjs"}');
   const log = join(bin, 'calls.log');
   const script = join(bin, 'catalyst');
   writeFileSync(

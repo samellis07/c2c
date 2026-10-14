@@ -103,6 +103,8 @@ interface FakeCatalyst {
 /** A fake catalyst install: <root>/bin/catalyst + lib beside it. */
 function fakeCatalyst(binSource: string): FakeCatalyst {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-pipe-test-'));
+  // Pin CommonJS so a TMPDIR under a {"type":"module"} package.json cannot change how these fixtures load.
+  writeFileSync(join(dir, 'package.json'), '{"type":"commonjs"}');
   const binDir = join(dir, 'bin');
   const internal = join(binDir, 'internal');
   const auth = join(binDir, 'authentication');
@@ -175,14 +177,14 @@ test('catalystRestCall lists projects through the pipe under the exact-only guar
   assert.deepEqual(projects, [{ name: 'c2c-widget', id: '1001' }]);
 });
 
-test('a child that exits without writing keeps the same errors as today', async () => {
+test('a child that exits without writing reports how it died, not a refusal', async () => {
   const fake = fakeCatalyst(`'use strict';\nprocess.kill(process.pid, 'SIGKILL');\n`);
   delete fake.env.NODE_OPTIONS;
   delete fake.env.C2C_SPY_LOG;
-  await assert.rejects(readCliAccessToken(fake.env, ORG, PROJECT), /catalyst token was empty/);
+  await assert.rejects(readCliAccessToken(fake.env, ORG, PROJECT), /catalyst token hook printed nothing \(killed by SIGKILL\)/);
   await assert.rejects(
     catalystRestCall(fake.env, ORG, PROJECT, { method: 'GET', path: `/baas/v1/project/${PROJECT}` }),
-    /catalyst rest refused the path/,
+    /catalyst rest printed no result \(killed by SIGKILL\)/,
   );
 });
 

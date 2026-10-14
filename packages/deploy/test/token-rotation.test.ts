@@ -160,6 +160,8 @@ interface Rig {
  */
 function rig(opts: { onUnauthorized?: 'outside-refresh' | 'store-goes-stale'; storeExpiresAt?: number } = {}): Rig {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-rotation-test-'));
+  // Pin CommonJS so a TMPDIR under a {"type":"module"} package.json cannot change how these fixtures load.
+  writeFileSync(join(dir, 'package.json'), '{"type":"commonjs"}');
   const binDir = join(dir, 'bin');
   for (const sub of ['internal', 'authentication', 'util_modules']) mkdirSync(join(binDir, sub), { recursive: true });
   const bin = join(binDir, 'catalyst');
