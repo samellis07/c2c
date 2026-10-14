@@ -2,6 +2,8 @@
 
 One row per field type the schema generator maps. The reason is the contract, not a hint.
 
+For a field stored as one column, Creator `must have` and `unique` are emitted as `mandatory` and `unique`, and `initial value` is emitted as `defaultValue` when Catalyst supports a default for that column type. Text, Foreign Key, and Encrypted columns keep their documented default behavior: no Catalyst default, with a generated-form prefill warning. Type-specific size, precision, lookup relation, and composite parts are described in the row reason. Source-measured constraint demotions and the per-table unique-varchar limit are described below.
+
 ## Decisions
 
 - **currency.** Currency, decimal, and percent are an exact canonical decimal string in VarChar length 64, not Double and not bigint minor units. Decimal is not a Catalyst column type. Scale is the field decimal places (default 2). Extra fractional digits quantize half-away-from-zero. The currency ISO code is field metadata. Percent is the typed number, not divided by 100. ZCQL orders the varchar lexicographically; numeric order is the generated comparator.
