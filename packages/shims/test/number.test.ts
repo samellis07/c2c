@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert';
-import { round, sqrt, log } from '../src/number.js';
+import { average, median, nthLargest, nthSmallest, round, sqrt, log, toHex, toWords } from '../src/number.js';
 import { DelugeConversionError } from '../src/convert.js';
 
 test('round', () => {
@@ -27,4 +27,28 @@ test('log', () => {
 
 test('log of negative', () => {
   assert.strictEqual(Number.isNaN(log(-1)), true);
+});
+
+test('Deluge number lists average, median and ranked values', () => {
+  assert.equal(average([1, 5, 2, 3]), 2.75);
+  assert.equal(median([1, 5, 2, 3]), 2.5);
+  // Numeric ordering matters here: a lexicographic sort would put 10 before 2.
+  assert.equal(median([10, 2, 3]), 3);
+  assert.equal(nthLargest([300, 455, 124, 926, 780], 5), 124);
+  assert.equal(nthSmallest([300, 455, 124, 926, 780], 2), 300);
+  assert.equal(average([null, 2, 4]), 3);
+  assert.equal(median([]), null);
+  assert.equal(nthLargest([], 1), null);
+  assert.throws(() => average([1, 'nope']), /non-numeric/);
+  assert.throws(() => nthSmallest([1, {}], 1), /non-numeric/);
+});
+
+test('Deluge number text conversions are deterministic English / hexadecimal', () => {
+  assert.equal(toHex(100), '64');
+  assert.equal(toHex(-255n), '-ff');
+  assert.equal(toWords(1989, 'en-us'), 'one thousand nine hundred eighty-nine');
+  assert.equal(toWords('1989.13', 'en-us'), 'one thousand nine hundred eighty-nine point one three');
+  assert.equal(toWords(-12, 'en-gb'), 'minus twelve');
+  assert.equal(toWords(10000000, 'en-in'), 'one crore');
+  assert.throws(() => toWords(3, 'fr'), /unsupported language/);
 });

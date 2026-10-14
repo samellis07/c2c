@@ -59,6 +59,26 @@ test('list and conversion builtins: subList, toListString, toJSONList', async ()
   assert.equal(await run('out = "1,2,3".toListString().size();'), 3);
 });
 
+test('number-list and number-text builtins route through deterministic shims', async () => {
+  for (const src of [
+    'out = numbers.average();', 'out = average(numbers);',
+    'out = numbers.median();', 'out = median(numbers);',
+    'out = marks.nthLargest(2);', 'out = marks.nthSmallest(2);',
+    'out = toHex(100);', 'out = 100.toHex();',
+    'out = toWords(1989, "en-us");', 'out = 1989.toWords("en-us");',
+  ]) noTodo(src);
+  assert.equal(await run('numbers = {1, 5, 2, 3}; out = numbers.average();'), 2.75);
+  assert.equal(await run('numbers = {1, 5, 2, 3}; out = average(numbers);'), 2.75);
+  assert.equal(await run('numbers = {1, 5, 2, 3}; out = numbers.median();'), 2.5);
+  assert.equal(await run('marks = {300, 455, 124, 926, 780}; out = marks.nthLargest(5);'), 124);
+  assert.equal(await run('marks = {300, 455, 124, 926, 780}; out = marks.nthSmallest(2);'), 300);
+  assert.equal(await run('out = toHex(100);'), '64');
+  assert.equal(await run('out = toWords(1989, "en-us");'), 'one thousand nine hundred eighty-nine');
+  assert.equal(await run('out = toWords(1989.13, "en-us");'), 'one thousand nine hundred eighty-nine point one three');
+  // Guard against accidentally changing to string ordering in list shims.
+  assert.equal(await run('numbers = {10, 2, 3}; out = numbers.median();'), 3);
+});
+
 test('date builtins: eomonth, toStartOfMonth, between-counts, day and week of year', async () => {
   for (const src of [
     'out = eomonth(d, 0).getDay();',
