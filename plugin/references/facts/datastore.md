@@ -303,7 +303,7 @@ a NoSQL table in the console only when nothing else fits.
 
 ### Bulk-write `records_processed` counts attempted rows, not written rows [UNVERIFIED]
 
-Recipe: a Completed bulk-write job against a table with a unique int
+Recipe: [UNVERIFIED] a Completed bulk-write job against a table with a unique int
 column, fed a 5-row CSV where 2 rows duplicate unique values already in
 the same file, reports `records_processed` `"5"` while only 3 rows land
 (the first occurrence of each value is kept). The same job over a 5-row
@@ -313,7 +313,7 @@ error CSV lists each rejected row with its file row number and the
 per-row failure ("Duplicate value for <col>"; "Invalid input value for
 <col>. int value expected").
 
-Rule: never treat `records_processed` as a write count or diff it
+Rule: [UNVERIFIED] never treat `records_processed` as a write count or diff it
 against the CSV length as a health check — it counts every input row,
 failed ones included. Reconcile a bulk job by re-counting the table and
 downloading the error CSV; a `Completed` job with a non-empty error
