@@ -24,7 +24,7 @@ import { lex } from '../../deluge/src/lexer.js';
 import { parse } from '../../deluge/src/parser.js';
 import type { Expr, Stmt } from '../../deluge/src/ast.js';
 import { translateInApp } from '../../deluge/src/generate.js';
-import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, sanitizeSnippet } from './pages.js';
+import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, sanitizeSnippet } from './pages.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { c2cUrlFunctionSource } from './url-policy.js';
 
@@ -1310,15 +1310,15 @@ export function compileHtmlpage(
       }
     })
   ) {
+    const staticMarkup = chunks
+      .filter((c) => c.kind === 'static')
+      .map((c) => c.text)
+      .join('');
+    if (droppedStyles(staticMarkup, false).length) return fail('static markup contains a dropped style declaration');
     return {
       ok: true,
       staticOnly: true,
-      html: sanitizeSnippet(
-        chunks
-          .filter((c) => c.kind === 'static')
-          .map((c) => c.text)
-          .join(''),
-      ),
+      html: sanitizeSnippet(staticMarkup),
     };
   }
   if (MARK_CHECK.test(head.template) || /\bc2c_(out|parts|static|str|esc|link|notes|css)\b/i.test(head.template))
