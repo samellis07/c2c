@@ -327,6 +327,7 @@ export const LONGTAIL_METHODS = new Set([
   'getJson', 'equalsIgnoreCase', 'containsIgnoreCase',
   ...['removeFirstOccurence', 'removeLastOccurence', 'getAlpha', 'getAlphaNumeric', 'subText', 'matches', 'encodeUrl', 'left', 'right', 'mid', 'ltrim', 'rtrim', 'repeat', 'reverse'],
   'find', 'subList', 'containsValue', 'deleteKey', 'deleteKeys', 'getKey', 'getLastKey', 'frac',
+  'nthLargest', 'nthSmallest', 'toHex', 'toWords',
   'isEven', 'isOdd', 'isFile', 'containValue', 'notContains', 'deleteAll', 'sortKey', 'delete', 'duplicate',
   'getFieldNames', 'getFieldValue',
 
