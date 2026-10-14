@@ -1,8 +1,8 @@
 /**
  * rules-functions: plugin/references/facts/functions.md is a shipped rules
  * file — unique headings, every rule carries a `Rule:` line or an exact
- * recipe, no provenance/status/evidence wording, no dates, no hard-coded DC,
- * and no hygiene failures.
+ * recipe, every `Recipe:`/`Rule:` line carries an evidence label, no status
+ * fields, no dates, no hard-coded DC, and no hygiene failures.
  */
 import assert from 'node:assert/strict';
 import { lstatSync, readFileSync } from 'node:fs';
@@ -15,7 +15,6 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const factsDir = path.join(repo, 'plugin', 'references', 'facts');
 const file = path.join(factsDir, 'functions.md');
 
-const EVIDENCE_LABEL = /\[[A-Z][A-Z0-9 -]{1,14}\]/;
 const FIELD_LABEL = /^\s*[-*]?\s*\*{0,2}(status|evidence|verified|source|date)\s*\*{0,2}\s*:/im;
 const ISO_DATE = /\b20\d\d-\d\d-\d\d\b/;
 const HARDCODED_DC = /\b(api|console)\.catalyst\.(in|com|eu|au|jp|sa|ca)\b|\bonslate\.(in|com|eu|au|jp|sa|ca)\b/;
