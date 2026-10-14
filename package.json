@@ -32,6 +32,7 @@
     "migration-reports:update": "npm run build && node packages/cli/scripts/update-fixture-migration-reports.mjs",
     "determinism:update": "npm run build && node dist/determinism/src/manifests.js --update",
     "determinism:check": "npm run build && node dist/determinism/src/manifests.js --check",
+    "merge-driver:install": "bash tools/install-merge-driver.sh",
     "tables:budget": "npm run build && node dist/determinism/src/table-budget.js",
     "smoke:gallery": "npm run build && node dist/quality/src/gallery.js",
     "score-ui:gallery": "npm run build && node dist/ui-score/src/gallery.js",
