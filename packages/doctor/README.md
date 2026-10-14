@@ -42,12 +42,22 @@ The plugin never asks the user for an evidence file. `/c2c:doctor` runs:
 1. `c2c doctor --mcp-begin` — opens a one-time request in
    `c2c-out/.c2c/mcp-request.json` (a random request id and when it was
    issued; it expires after 15 minutes) and prints the calls to make.
-2. The agent calls `CatalystbyZoho_List_All_Organizations` in the session,
-   and the user approves the call at the host's normal prompt. No setting
+2. The agent makes the calls the request names in the session — first
+   `CatalystbyZoho_Create_Bucket`, a short-lived probe bucket named after the
+   request id (`c2cprobe<id>`), then `CatalystbyZoho_List_All_Organizations` —
+   and the user approves each call at the host's normal prompt. No setting
    changes. The agent never calls `CatalystbyZoho_List_All_Projects` or
    `CatalystbyZoho_Get_Project_By_Id`: they return project secrets
    (jwtSecret, clientSecret) into the transcript, and an observation quoting
    either is refused. Projects come from the Catalyst CLI (`project:list`).
+   The probe write is the security check: a submitted JSON can echo the
+   request id, so the doctor instead reads the probe bucket back over the
+   Catalyst REST API with the user's own CLI credential
+   (`GET /baas/v1/project/<id>/bucket/c2cprobe<id>`). A match proves the MCP
+   connector is bound to the same org/DC/project as the CLI — the only
+   evidence a stdio/local connector can offer. Afterwards the agent removes
+   the probe with `CatalystbyZoho_Delete_Bucket` (the delete call is printed
+   on every run while the probe may still exist).
 3. The agent pipes one observation into `c2c doctor --mcp-observed -` (with
    the usual scope flags):
 
@@ -61,9 +71,18 @@ The plugin never asks the user for an evidence file. `/c2c:doctor` runs:
   "transport": "http",
   "shape": "meta",
   "tools": ["CatalystbyZoho_List_All_Organizations", "..."],
-  "calls": [{ "tool": "CatalystbyZoho_List_All_Organizations", "result": "<the call result, verbatim>" }]
+  "calls": [
+    { "tool": "CatalystbyZoho_Create_Bucket", "result": "<the call result, verbatim>" },
+    { "tool": "CatalystbyZoho_List_All_Organizations", "result": "<the call result, verbatim>" }
+  ]
 }
 ```
+
+For a local/stdio connector, set `transport` to `stdio` (or `local`) and omit
+`host_of_url`. Its DC is proven by the probe read-back alone: the observed
+org hosts and the CLI's own selection are caller-side facts, so D-B2 passes
+only when the probe bucket was found in the selected project. Do not guess
+or type a host/DC into the observation.
 
 The doctor derives the record from that observation:
 
@@ -84,9 +103,10 @@ The doctor derives the record from that observation:
 It refuses (exit 1, nothing written) an observation that is not
 `c2c-mcp-observation` schema 1 (a legacy evidence file included), is larger
 than 4 MiB, carries a call result over 1 MiB, sets its own `orgs`, `projects`,
-`at` or `workspace`, answers a request this workspace did not issue or already
-used, arrives after the request expired, has no `List_All_Organizations`
-result, carries a `calls[]` entry with fields other than `tool` and `result`,
+`at`, `workspace` or `binding`, answers a request this workspace did not issue or already
+used, arrives after the request expired, has no `List_All_Organizations` or
+`Create_Bucket` result, carries a `calls[]` entry with fields other than
+`tool` and `result`,
 or quotes a call that returned an error — an `isError` flag anywhere in the
 result (the top envelope, a later text block, a bare-array entry, or a
 data-style list), as boolean `true` or the string `"true"`. A result that

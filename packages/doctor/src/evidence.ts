@@ -11,6 +11,7 @@
  * cannot name a decimal id is stale or partial — re-record, don't keep it.
  */
 import { createHash } from 'node:crypto';
+import { normalizeDc, type Dc } from './scope.js';
 import requiredTools from '../data/required-mcp-tools.json' with { type: 'json' };
 import { REQUIRED_MCP_TOOLS } from './required-tools.js';
 
@@ -49,6 +50,8 @@ export interface McpEvidence {
   tools?: string[];
   schemas?: Record<string, { path_variables?: string[]; body?: string[] }>;
   orgs?: string[];
+  /** DCs derived only from observed organization console/API hosts, keyed by org id. */
+  orgDcs?: Record<string, Dc>;
   /** Legacy operator field: parsed (ids only) but never compared — projects come from the Catalyst CLI list (D-C4). */
   projects?: string[];
   catalyst_skills_visible?: string[];
@@ -62,6 +65,13 @@ export interface McpEvidence {
   projectTables?: Record<string, string[]>;
   /** Optional: org-wide table count (D-F4). */
   orgTableCount?: number;
+  /**
+   * Doctor-derived only (never parsed from a file): the server-side probe
+   * result. `verified` means the nonce-named write the request asked for was
+   * read back over the Catalyst REST API in the selected project — the MCP
+   * connector is bound to the CLI's org/DC/project.
+   */
+  binding?: { kind: 'bucket'; name: string; status: 'verified' | 'absent' | 'unverifiable' | 'unresolved'; detail: string };
 }
 
 /** Strip a host prefix `mcp__<server>__` (or `mcp__<a>__<b>__`) from a tool name. A non-string name is '', never a throw. */
@@ -249,8 +259,8 @@ export function parseEvidence(text: string): McpEvidence {
     throw new EvidenceRejected('evidence.host_of_url must be a host name only');
   }
   out.transport = str('transport');
-  if (out.transport !== undefined && !['http', 'streamable-http', 'sse'].includes(out.transport)) {
-    throw new EvidenceRejected('evidence.transport is not http');
+  if (out.transport !== undefined && !['http', 'streamable-http', 'sse', 'stdio', 'local'].includes(out.transport)) {
+    throw new EvidenceRejected('evidence.transport must be http, stdio, or local');
   }
   out.shape = str('shape');
   if (out.shape !== undefined && out.shape !== 'meta' && out.shape !== 'direct') {
@@ -288,6 +298,16 @@ export function parseEvidence(text: string): McpEvidence {
     out.schemas = clean;
   }
   out.orgs = idArray(record.orgs, 'evidence.orgs');
+  if (record.orgDcs !== undefined) {
+    if (!record.orgDcs || typeof record.orgDcs !== 'object' || Array.isArray(record.orgDcs)) throw new EvidenceRejected('evidence.orgDcs must be an object');
+    const orgDcs: Record<string, Dc> = {};
+    for (const [org, value] of Object.entries(record.orgDcs as Record<string, unknown>)) {
+      const dc = typeof value === 'string' ? normalizeDc(value) : undefined;
+      if (!/^[0-9]+$/.test(org) || !dc) throw new EvidenceRejected('evidence.orgDcs must map decimal org ids to known DCs');
+      orgDcs[org] = dc;
+    }
+    out.orgDcs = orgDcs;
+  }
   out.projects = idArray(record.projects, 'evidence.projects');
   out.catalyst_skills_visible = stringArray(record.catalyst_skills_visible, 'evidence.catalyst_skills_visible');
   const tableLists = tableList(record.tables, 'evidence.tables');
@@ -366,6 +386,7 @@ export function mcpRecord(
     ...(evidence.shape ? { shape: evidence.shape } : {}),
     ...(evidence.host_of_url ? { host: evidence.host_of_url } : {}),
     ...(evidence.transport ? { transport: evidence.transport } : {}),
+    ...(evidence.orgDcs ? { orgDcs: evidence.orgDcs } : {}),
     ...(evidence.tools ? { tools: [...evidence.tools].map(bareToolName).sort() } : {}),
     ...(Object.keys(digest).length ? { schemaDigest: digest } : {}),
     ...(scope && (scope.dc || scope.org || scope.project)
@@ -373,6 +394,7 @@ export function mcpRecord(
       : {}),
     ...(evidence.at ? { at: evidence.at } : {}),
     ...(origin ? { source: origin.source } : {}),
+    ...(evidence.binding ? { binding: evidence.binding } : {}),
     ...(origin?.source === 'observed' ? { observed: origin.observed } : {}),
   };
 }

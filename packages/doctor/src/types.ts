@@ -30,6 +30,8 @@ export interface DoctorIo {
   spawn: SpawnFn;
   /** Standard input, for `--mcp-observed -`. */
   stdin?: () => string;
+  /** One Catalyst REST call with the user's CLI credential (the probe read-back); defaults to the CLI-token hook. */
+  rest?: (call: { method: 'GET' | 'POST'; path: string; body?: unknown }) => Promise<{ status: number; body: unknown; retryAfterMs?: number }>;
   /** A one-way tag of the token in the Catalyst CLI credential store, read without a refresh; undefined when none is fresh. */
   tokenTag?: () => Promise<string | undefined>;
   /** Forces one Catalyst CLI token refresh (nothing is kept). Used only with C2C_ALLOW_LOCAL_REFRESH=1. */
@@ -50,6 +52,8 @@ export interface DoctorFile {
     shape?: string;
     host?: string;
     transport?: string;
+    /** Per-org DCs derived from an observed organization console/API host. */
+    orgDcs?: Record<string, string>;
     tools?: string[];
     schemaDigest?: Record<string, string>;
     /** The dc/org/project this record was validated for; the gate binds to it. */
@@ -58,6 +62,8 @@ export interface DoctorFile {
     at?: string;
     /** `observed`: derived from MCP calls made in the user's session; `operator`: a supplied file. */
     source?: 'observed' | 'operator';
+    /** The server-side probe read-back result (observed flow only). */
+    binding?: { kind: string; name: string; status: string; detail?: string };
     /** The observed calls this record was derived from: the request id, the org/project ids and each result's digest. */
     observed?: { request: string; orgs: string[]; projects?: string[]; calls: { tool: string; digest: string }[] };
   };
