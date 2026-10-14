@@ -26,8 +26,17 @@ function fixtureTree(t, { deps, lockEntries, exceptions = [] }) {
   return dir;
 }
 
+const VALID_SHA512 = 'sha512-f4OxZX/x/FO5LcGBSKHWXfwtSx+j1ncoSt3SABJtkGk=';
+const registryUrl = (name, version = '1.0.0') => `https://registry.npmjs.org/${name}/-/${name}-${version}.tgz`;
+
 const lockEntry = (name, license, dependencies) => ({
-  [`node_modules/${name}`]: { version: '1.0.0', integrity: 'sha512-fixture', ...(license === undefined ? {} : { license }), ...(dependencies ? { dependencies } : {}) },
+  [`node_modules/${name}`]: {
+    version: '1.0.0',
+    integrity: VALID_SHA512,
+    resolved: registryUrl(name),
+    ...(license === undefined ? {} : { license }),
+    ...(dependencies ? { dependencies } : {}),
+  },
 });
 
 test('allowlist contains the project list and nothing else', () => {
@@ -59,10 +68,16 @@ test('lockfile integrity hashes are required and non-registry tarballs are rejec
   const dir = fixtureTree(t, {
     deps: { unhashed: '1.0.0', remote: '2.0.0' },
     lockEntries: {
-      ...lockEntry('unhashed', 'MIT'),
+      'node_modules/unhashed': {
+        version: '1.0.0',
+        resolved: registryUrl('unhashed'),
+        license: 'MIT',
+      },
       'node_modules/remote': {
-        version: '2.0.0', integrity: 'sha512-valid-looking-hash',
-        resolved: 'https://example.invalid/remote.tgz', license: 'MIT',
+        version: '2.0.0',
+        integrity: VALID_SHA512,
+        resolved: 'https://example.invalid/remote.tgz',
+        license: 'MIT',
       },
     },
   });
@@ -71,13 +86,144 @@ test('lockfile integrity hashes are required and non-registry tarballs are rejec
   assert.ok(problems.some((p) => /node_modules\/remote.*non-registry tarball source/.test(p)), problems.join('\n'));
 });
 
+test('every non-registry resolved form (file:, github:, ssh:, workspace:, http:, missing resolved) is rejected', (t) => {
+  const refusedCases = [
+    ['from-file', { resolved: 'file:../evil.tgz' }, /from-file.*non-registry tarball source/],
+    ['from-github', { resolved: 'github:evil/x' }, /from-github.*non-registry tarball source/],
+    ['from-ssh', { resolved: 'ssh://example.invalid/evil/x.git' }, /from-ssh.*non-registry tarball source/],
+    ['from-git-https', { resolved: 'git+https://github.com/evil/x.git' }, /from-git-https.*non-registry tarball source/],
+    ['from-workspace-proto', { resolved: 'workspace:*' }, /from-workspace-proto.*non-registry tarball source/],
+    ['from-http', { resolved: 'http://registry.npmjs.org/from-http/-/from-http-1.0.0.tgz' }, /from-http.*non-registry tarball source/],
+    ['from-spoof-host', { resolved: 'https://registry.npmjs.org.evil.example/from-spoof-host.tgz' }, /from-spoof-host.*non-registry tarball source/],
+    ['missing-resolved', {}, /missing-resolved.*no resolved registry URL \(non-registry tarball source\)/],
+  ];
+  for (const [name, extra, pattern] of refusedCases) {
+    const dir = fixtureTree(t, {
+      deps: { [name]: '1.0.0' },
+      lockEntries: {
+        [`node_modules/${name}`]: {
+          version: '1.0.0',
+          integrity: VALID_SHA512,
+          license: 'MIT',
+          ...extra,
+        },
+      },
+    });
+    const { problems } = auditLockfile({ root: dir, dir: '.', label: 'fixture' });
+    assert.ok(problems.some((p) => pattern.test(p)), `expected ${name} to fail ${pattern}, got: ${problems.join('\n')}`);
+  }
+});
+
+test('weak sha1 and malformed integrity hashes are rejected while SHA-2 base64 digests pass', (t) => {
+  const badIntegrityCases = [
+    ['weak-sha1', 'sha1-f4OxZX/x/FO5LcGBSKHWXfwtSx8='],
+    ['weak-md5', 'md5-f4OxZX/x/FO5LcGBSKHWXw=='],
+    ['garbage-token', 'x'],
+    ['non-base64-sha512', 'sha512-not_valid_base64!@#'],
+    ['empty-sha512', 'sha512-'],
+  ];
+  for (const [name, integrity] of badIntegrityCases) {
+    const dir = fixtureTree(t, {
+      deps: { [name]: '1.0.0' },
+      lockEntries: {
+        [`node_modules/${name}`]: {
+          version: '1.0.0',
+          integrity,
+          resolved: registryUrl(name),
+          license: 'MIT',
+        },
+      },
+    });
+    const { problems } = auditLockfile({ root: dir, dir: '.', label: 'fixture' });
+    assert.ok(
+      problems.some((p) => new RegExp(`${name}.*invalid or weak integrity hash`).test(p)),
+      `expected ${name} (${integrity}) to fail integrity format check, got: ${problems.join('\n')}`,
+    );
+  }
+
+  const validSha2Dir = fixtureTree(t, {
+    deps: { s512: '1.0.0', s384: '1.0.0', s256: '1.0.0' },
+    lockEntries: {
+      'node_modules/s512': { version: '1.0.0', integrity: VALID_SHA512, resolved: registryUrl('s512'), license: 'MIT' },
+      'node_modules/s384': { version: '1.0.0', integrity: 'sha384-f4OxZX/x/FO5LcGBSKHWXfwtSx+j1ncoSt3SABJtkGk=', resolved: registryUrl('s384'), license: 'MIT' },
+      'node_modules/s256': { version: '1.0.0', integrity: 'sha256-f4OxZX/x/FO5LcGBSKHWXfwtSx+j1ncoSt3SABJtkGk=', resolved: registryUrl('s256'), license: 'MIT' },
+    },
+  });
+  assert.deepEqual(auditLockfile({ root: validSha2Dir, dir: '.', label: 'fixture' }).problems, []);
+});
+
+test('local workspace links inside the repo pass; workspace links escaping the repo fail', (t) => {
+  const validWs = fixtureTree(t, {
+    deps: { 'local-ws': '1.0.0' },
+    lockEntries: {
+      'packages/local-ws': { version: '1.0.0', license: 'MIT' },
+      'node_modules/local-ws': { link: true, resolved: 'packages/local-ws' },
+    },
+  });
+  const ok = auditLockfile({ root: validWs, dir: '.', label: 'fixture' });
+  assert.deepEqual(ok.problems, []);
+  assert.equal(ok.packages[0].name, 'local-ws');
+
+  for (const [name, resolved] of [
+    ['escape-rel', '../../outside'],
+    ['escape-abs', '/tmp/outside'],
+    ['escape-proto', 'workspace:*'],
+    ['escape-missing', undefined],
+  ]) {
+    const badWs = fixtureTree(t, {
+      deps: {},
+      lockEntries: {
+        [`node_modules/${name}`]: { link: true, ...(resolved === undefined ? {} : { resolved }) },
+      },
+    });
+    const { problems } = auditLockfile({ root: badWs, dir: '.', label: 'fixture' });
+    assert.ok(
+      problems.some((p) => new RegExp(`${name}.*workspace link points outside the repository`).test(p)),
+      `expected ${name} to fail workspace link check, got: ${problems.join('\n')}`,
+    );
+  }
+});
+
+test('inBundle entries pass without own integrity/resolved when parent is verified, and still undergo licence checks', (t) => {
+  const allowedBundle = fixtureTree(t, {
+    deps: { parent: '1.0.0' },
+    lockEntries: {
+      ...lockEntry('parent', 'MIT', { bundled: '1.0.0' }),
+      'node_modules/parent/node_modules/bundled': {
+        version: '1.0.0',
+        inBundle: true,
+        license: 'Apache-2.0',
+      },
+    },
+  });
+  const ok = auditLockfile({ root: allowedBundle, dir: '.', label: 'fixture' });
+  assert.deepEqual(ok.problems, []);
+  assert.deepEqual(ok.packages.map((p) => p.name), ['bundled', 'parent']);
+
+  const copyleftBundle = fixtureTree(t, {
+    deps: { parent: '1.0.0' },
+    lockEntries: {
+      ...lockEntry('parent', 'MIT', { 'bundled-gpl': '1.0.0' }),
+      'node_modules/parent/node_modules/bundled-gpl': {
+        version: '1.0.0',
+        inBundle: true,
+        license: 'GPL-3.0-only',
+      },
+    },
+  });
+  const bad = auditLockfile({ root: copyleftBundle, dir: '.', label: 'fixture' });
+  assert.ok(bad.problems.some((p) => /bundled-gpl@1\.0\.0.*GPL-3\.0-only.*not on the project allowlist/.test(p)), bad.problems.join('\n'));
+});
+
 test('registry tarballs with integrity hashes pass lockfile source checks', (t) => {
   const dir = fixtureTree(t, {
     deps: { regular: '1.0.0' },
     lockEntries: {
       'node_modules/regular': {
-        version: '1.0.0', integrity: 'sha512-valid-looking-hash',
-        resolved: 'https://registry.npmjs.org/regular/-/regular-1.0.0.tgz', license: 'MIT',
+        version: '1.0.0',
+        integrity: VALID_SHA512,
+        resolved: 'https://registry.npmjs.org/regular/-/regular-1.0.0.tgz',
+        license: 'MIT',
       },
     },
   });
@@ -106,7 +252,14 @@ test('planted SSPL dependency fails the lockfile audit', (t) => {
 test('a dependency with no licence fails', (t) => {
   const dir = fixtureTree(t, {
     deps: { silent: '1.0.0' },
-    lockEntries: { 'node_modules/silent': { version: '1.0.0', integrity: 'sha512-fixture', license: undefined } },
+    lockEntries: {
+      'node_modules/silent': {
+        version: '1.0.0',
+        integrity: VALID_SHA512,
+        resolved: registryUrl('silent'),
+        license: undefined,
+      },
+    },
   });
   const { problems } = auditLockfile({ root: dir, dir: '.', label: 'fixture' });
   assert.ok(problems.some((p) => /silent@1\.0\.0 declares no licence/.test(p)), problems.join('\n'));
@@ -136,7 +289,12 @@ test('transitive deps and nested lockfile paths are walked; dev entries are not'
     deps: { top: '1.0.0', devtool: '1.0.0' },
     lockEntries: {
       ...lockEntry('top', 'MIT', { mid: '1.0.0' }),
-      'node_modules/top/node_modules/mid': { version: '1.0.0', integrity: 'sha512-fixture', license: '(MIT OR GPL-3.0-only)' },
+      'node_modules/top/node_modules/mid': {
+        version: '1.0.0',
+        integrity: VALID_SHA512,
+        resolved: registryUrl('mid'),
+        license: '(MIT OR GPL-3.0-only)',
+      },
       'node_modules/devtool': { version: '1.0.0', dev: true, license: 'GPL-3.0-only' },
     },
   });
