@@ -183,6 +183,7 @@ type Row = Record<string, unknown>;
 interface Mounted {
   container: HTMLElement;
   calls: Record<string, unknown>[];
+  posted: { endpoint: string; body: Record<string, unknown> }[];
   /** Display text of one column's cells, top to bottom. */
   textOf(key: string): string[];
   /** aria-sort of one column header. */
@@ -191,6 +192,7 @@ interface Mounted {
   headerButton(key: string): Element | null;
   /** Dispatch a click and flush the effects and the fake endpoint round-trip. */
   click(el: Element | null): Promise<void>;
+  byRole(role: 'link' | 'button', name: string): Element | null;
 }
 
 /** Mount <ReportView> against a fake endpoint that applies the posted sort like the report endpoint. */
@@ -241,9 +243,12 @@ async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: 
     return [...list].sort((a, b) => cell(a[spec.field], b[spec.field]) * sign || idOrder(a, b));
   };
   const calls: Record<string, unknown>[] = [];
+  const posted: { endpoint: string; body: Record<string, unknown> }[] = [];
   const api = {
-    post: async (_endpoint: string, body: Record<string, unknown>) => {
+    post: async (endpoint: string, body: Record<string, unknown>) => {
       calls.push(body);
+      posted.push({ endpoint, body });
+      if (endpoint.includes('/actions/')) return { ok: true, status: 200, body: { dryRun: true } };
       const ordered = order(rows, (body.sort ?? []) as { field: string; order?: string }[]);
       const page = typeof body.page === 'number' ? body.page : 0;
       const pageSize = typeof body.pageSize === 'number' && body.pageSize > 0 ? body.pageSize : ordered.length || 1;
@@ -264,6 +269,7 @@ async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: 
   return {
     container,
     calls,
+    posted,
     textOf: (key) => [...container.querySelectorAll(`tbody td[data-th="${key}"]`)].map((cell) => (cell.textContent ?? '').trim()),
     ariaSort: (key) => container.querySelector(`th[data-key="${key}"]`)?.getAttribute('aria-sort') ?? null,
     headerButton: (key) => container.querySelector(`th[data-key="${key}"] button`),
@@ -273,6 +279,20 @@ async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: 
         el?.dispatchEvent(new Mouse('click', { bubbles: true }));
       });
       await flush();
+    },
+    byRole: (role, name) => {
+      const selector = role === 'link' ? 'a[href], [role="link"]' : role === 'button' ? 'button, [role="button"]' : role;
+      return (
+        [...container.querySelectorAll(selector)].find((el) => {
+          const ariaLabel = el.getAttribute('aria-label');
+          const accessibleName = ariaLabel !== null && ariaLabel !== '' ? ariaLabel : (el.textContent ?? '').trim();
+          if (name === undefined) return true;
+          if (typeof name === 'string') {
+            return accessibleName === name || ariaLabel === name || (el.textContent ?? '').trim() === name;
+          }
+          return (name as RegExp).test(accessibleName);
+        }) ?? null
+      );
     },
   };
 }
@@ -353,6 +373,16 @@ test('an action column header offers no sort and posts no ORDER BY', { skip: SKI
   await view.click(view.container.querySelector('th[data-key="Approve"]'));
   assert.equal(view.calls.length, 1, 'clicking the action header sends no new query');
   assert.equal((view.calls[0]!.sort as { field: string }[]).at(-1)!.field, 'Total');
+  const actionBtn = view.byRole('button', 'Approve');
+  assert.ok(actionBtn, 'the column action button is accessible by role and visible text');
+
+  const customActionSpec = {
+    ...spec.reports.Orders!,
+    customActions: [{ name: 'Sign Off', endpoint: '/reports/Orders/actions/approve' }],
+  };
+  const customView = await mount(out, customActionSpec, ROWS, new Set(['Total']));
+  const customBtn = customView.container.querySelector('td button[data-action="/reports/Orders/actions/approve"]');
+  assert.equal(customBtn?.getAttribute('aria-label'), 'Approve: Sign Off', 'differing action name preserves visible text in accessible name');
 });
 
 test('a todo-marked report and its field-only filters are visible, not silent', { skip: SKIP }, async (t) => {
@@ -366,4 +396,49 @@ test('a todo-marked report and its field-only filters are visible, not silent', 
   const orders = await mount(out, spec.reports.Orders!, ROWS, new Set(['Total']));
   const dropped = [...orders.container.querySelectorAll('p.todo')].map((p) => p.textContent ?? '').join(' ');
   assert.match(dropped, /Status/, `the field-only filter is named: ${dropped}`);
+});
+
+test('record controls have a real destination and custom row actions post the ROWID', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'record-actions');
+  const spec = reactAppSpec(appOf());
+  const report = spec.reports.Orders!;
+  const readOnly = { ...report, rowActions: { ...report.rowActions, edit: false } };
+  const view = await mount(out, {
+    ...readOnly,
+    detail: true,
+    customActions: [{ name: 'Print Invoice', endpoint: '/reports/Orders/actions/print-invoice' }],
+  }, ROWS, new Set(['Total']));
+
+  const opener = view.byRole('link', 'Open record 1') as HTMLAnchorElement | null;
+  assert.equal(opener?.getAttribute('href'), '#/report/Orders/row/1');
+  const action = view.byRole('button', 'Print Invoice');
+  assert.ok(action, 'the authored row action is rendered as a button');
+  await view.click(action);
+  assert.deepEqual(view.posted.at(-1), {
+    endpoint: '/reports/Orders/actions/print-invoice',
+    body: { ROWID: '1' },
+  }, 'the action POST reaches its endpoint with this row ID');
+
+  const editable = await mount(out, { ...report, rowActions: { ...report.rowActions, edit: true } }, ROWS, new Set(['Total']));
+  const edit = editable.byRole('link', 'Edit record 1') as HTMLAnchorElement | null;
+  assert.equal(edit?.getAttribute('href'), '#/form/Order/edit/1');
+
+  const noDetail = await mount(out, { ...readOnly, detail: false }, ROWS, new Set(['Total']));
+  assert.equal(noDetail.byRole('link', 'Open record 1'), null, 'a read-only report without a detail layout has no fake opener');
+  assert.equal(noDetail.container.querySelector('a.c2c-row-open'), null);
+
+  const blankId = await mount(out, { ...readOnly, detail: true }, [{ Title: 'No ID', Total: '1' }], new Set(['Total']));
+  assert.equal(blankId.byRole('link', 'Open record'), null, 'a row without ROWID has no control pointing to a create form');
+  assert.equal(blankId.byRole('link', 'Open record 1'), null);
+  assert.equal(blankId.byRole('link', 'Edit record'), null);
+  assert.equal(blankId.container.querySelector('a.c2c-row-open'), null);
+});
+
+test('non-list reports keep their visible pending-view stub', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'view-stub');
+  const spec = reactAppSpec(appOf());
+  const board = await mount(out, { ...spec.reports.Orders!, view: 'kanban', todo: 'Kanban view is pending.' }, ROWS, new Set(['Total']));
+  assert.ok(board.container.querySelector('[data-view-stub="kanban"]'));
+  assert.match(board.container.textContent ?? '', /view, which this app does not draw yet/);
+  assert.equal(board.container.querySelector('table'), null, 'pending views are not silently rendered as lists');
 });

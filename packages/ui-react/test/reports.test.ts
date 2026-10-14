@@ -44,6 +44,9 @@ function source(): string {
 \t\t\t(
 \t\t\t\tcolumn header = "Approve"
 \t\t\t)
+\t\t\tcustom action "Print Invoice"
+\t\t\t(
+\t\t\t)
 \t\t)
 \t\tfilters
 \t\t(
@@ -130,6 +133,8 @@ test('the report spec carries the view options: sort, filters, grouping, detail,
   assert.equal(approve.action, '/reports/Orders/actions/approve');
   const toolbar = report.customActions.filter((a) => a.header);
   assert.deepEqual(toolbar.map((a) => [a.name, a.endpoint]), [['Export', '/reports/Orders/actions/export']]);
+  const recordActions = report.customActions.filter((a) => !a.header && !report.columns.some((c) => c.action === a.endpoint));
+  assert.deepEqual(recordActions.map((a) => [a.name, a.endpoint]), [['Print Invoice', '/reports/Orders/actions/print-invoice']]);
   const plain = spec.reports.Board!;
   assert.equal(plain.view, 'kanban');
   assert.equal(plain.groupField, 'Status');
@@ -177,3 +182,4 @@ test('the report criteria matcher paints conditional formats and names unmigrate
   assert.match(matcher, /matchCriteria/);
   assert.match(matcher, /criteriaTodo/);
 });
+
