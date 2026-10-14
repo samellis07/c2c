@@ -8,7 +8,8 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { deployCli, seedMigrateCli, smokeCli, sourceCsvCli, type Io } from '../src/cli.js';
+import { deployCli, loadApp, seedMigrateCli, smokeCli, sourceCsvCli, type Io } from '../src/cli.js';
+import { buildOfflinePlan, PLAN_BUDGET_IDS } from '../src/offline-plan.js';
 
 const DECOY_ORG = '10000000001';
 const DECOY_PROJECT = '10000000000000002';
@@ -34,6 +35,27 @@ show all rows from Item
 }
 }
 `;
+
+test('offline plan budget row IDs match the reference in both directions', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-plan-budget-ids-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const ds = join(dir, 'widget.ds');
+  writeFileSync(ds, DS);
+  const { files, plan } = buildOfflinePlan(loadApp(ds), {
+    dc: 'in',
+    dcSource: '--dc',
+    mail: false,
+    newProject: true,
+  });
+  const emittedIds = [...new Set(plan.budgets.map((budget) => budget.id))].sort();
+  const planIds = [...PLAN_BUDGET_IDS].sort();
+  const reference = readFileSync('plugin/references/plan-budget-ids.md', 'utf8');
+  const documentedIds = [...reference.matchAll(/^\| `([^`]+)` \|/gm)].map((match) => match[1]!).sort();
+  assert.deepEqual(emittedIds, planIds, 'every declared budget ID is emitted');
+  assert.deepEqual(emittedIds, documentedIds, 'every emitted budget ID is documented, with no undocumented IDs');
+  const markdown = files.find((file) => file.path === 'plan.md')?.data ?? '';
+  for (const id of emittedIds) assert.match(markdown, new RegExp(`\\(${id}\\)`));
+});
 
 function workspace(): { dir: string; ds: string; seed: string; csv: string } {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-offline-plan-'));

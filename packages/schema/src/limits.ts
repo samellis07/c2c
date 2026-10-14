@@ -139,7 +139,17 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
     unit: 'requests/minute',
     verified: false,
     action: 'report',
-    whenExceeded: 'Reported only, unless a generated batch is already more requests than this.',
+    whenExceeded:
+      'Reported only. The plan warns with the mover write-call estimate: one insert call per batch of 200 source rows per Data Store table, before fill-back updates, file uploads and retries. The mover does not pace writes; probe P-RATE measures the real rate.',
+  },
+  {
+    id: 'datastore.rows_per_table_dev',
+    value: null,
+    unit: 'rows',
+    verified: false,
+    action: 'report',
+    whenExceeded:
+      'Reported only. Development enforces a per-table row cap whose value is not published: a load refused with 403 API_LIMIT_REACHED "API Limit for row" is the signal, not a number. The plan warns with the largest measured per-table row counts from --source-* data. A large load is rehearsed on a different environment; generation does not block on it.',
   },
   {
     id: 'datastore.concurrency_dev',
@@ -181,6 +191,15 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
     verified: false,
     action: 'report',
     whenExceeded: 'Reported only. No runtime change.',
+  },
+  {
+    id: 'api.calls_dev',
+    value: 200000,
+    unit: 'API calls',
+    verified: false,
+    action: 'report',
+    whenExceeded:
+      'Reported only. The plan warns with the mover call estimate: per batch of 200 source rows per Data Store table one reconcile read, one insert and one write-recount read, plus verification, remap and count reads per 300 ids, fixed per-table verification passes and deferred-lookup updates, before retries, file uploads and runtime calls. No generation change.',
   },
   {
     id: 'bulk.rows_per_call',
