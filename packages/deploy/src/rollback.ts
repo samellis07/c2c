@@ -18,6 +18,7 @@
  * The import/ folder reads back with `--source-csv`, so a re-plan against the
  * last checkpoint shows no changes when the store and checkpoint agree.
  */
+import { createHash } from 'node:crypto';
 import type { App, Field } from '../../core/src/ir.js';
 import { generateSchema, type SchemaColumn, type SchemaTable } from '../../schema/src/generator.js';
 import { SOURCE_ID_COLUMN, SYSTEM_FIELD_COLUMNS } from '../../schema/src/mapping.js';
@@ -41,11 +42,16 @@ export interface RollbackFile {
 
 export interface RollbackExport {
   files: RollbackFile[];
+  /** The manifest `c2c cutover-checklist` verifies: schema c2c-rollback-export/1. */
+  manifest: RollbackFile;
   /** Per form: rows exported. */
   counts: { form: string; table: string; rows: number }[];
   order: string[];
   warnings: string[];
 }
+
+export const ROLLBACK_MANIFEST_FILE = 'c2c-rollback-manifest.json';
+export const ROLLBACK_MANIFEST_VERSION = 'c2c-rollback-export/1';
 
 interface Header {
   header: string;
@@ -270,7 +276,19 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
   files.push({ path: 'IMPORT_ORDER.txt', body: `${order.map((form, index) => `${index + 1}. import/${form}.csv`).join('\n')}\n` });
   files.push({ path: 'README.md', body: rollbackReadme(app, order, counts, warnings) });
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return { files, counts, order, warnings };
+
+  const tableFiles: Record<string, string> = {};
+  for (const table of formTables) tableFiles[table.name] = `import/${table.form}.csv`;
+  for (const table of schema.tables.filter((item) => (item.role === 'child' || item.role === 'junction') && !item.nosql)) {
+    tableFiles[table.name] = `manual/${table.name}.csv`;
+  }
+  const fileChecksums: Record<string, string> = {};
+  for (const file of files) fileChecksums[file.path] = createHash('sha256').update(file.body).digest('hex');
+  const manifest: RollbackFile = {
+    path: ROLLBACK_MANIFEST_FILE,
+    body: `${JSON.stringify({ version: ROLLBACK_MANIFEST_VERSION, app: app.name ?? '', tables: tableFiles, files: fileChecksums }, null, 2)}\n`,
+  };
+  return { files, manifest, counts, order, warnings };
 }
 
 function rollbackReadme(app: App, order: readonly string[], counts: RollbackExport['counts'], warnings: readonly string[]): string {
