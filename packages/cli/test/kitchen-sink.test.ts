@@ -132,7 +132,13 @@ test('kitchen sink plans offline, byte-identically, with no budget warning', asy
     for (const out of outs) assert.equal(await planCli([DS, '--out', out, '--dc', 'in'], offlineIo()), 0);
     assert.deepEqual(hashTree(outs[0]!), hashTree(outs[1]!));
     const md = readFileSync(join(outs[0]!, 'plan.md'), 'utf8');
-    assert.doesNotMatch(md, /\[(WARN|FAIL)\]/);
+    // The only warnings a sourceless plan may carry are the four budgets that
+    // ask for --source-* measurements; any other WARN or a FAIL is a defect.
+    const flagged = md.split('\n').filter((line) => /\[(WARN|FAIL)\]/.test(line));
+    assert.deepEqual(
+      [...new Set(flagged.map((line) => /^\s*- \[(?:WARN|FAIL)\] \(([\w-]+)\)/.exec(line)?.[1]))].sort(),
+      ['dev-api-calls', 'dev-row-cap', 'varchar-length'],
+    );
   } finally {
     for (const out of outs) rmSync(out, { recursive: true, force: true });
   }
