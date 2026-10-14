@@ -20,13 +20,14 @@ import { LockedExportError } from '../../core/src/source.js';
 import { appFacts, integrationNamespaces } from '../../core/src/features.js';
 import { authPlan } from '../../auth/src/plan.js';
 import { constraintDecisionNote, generateSchema, type ConstraintDecision, type SchemaTable, type SourceTableData } from '../../schema/src/generator.js';
-import { limitValue, ORG_TABLE_LIMIT_RECOVERY } from '../../schema/src/limits.js';
+import { catalystLimit, limitValue, ORG_TABLE_LIMIT_RECOVERY } from '../../schema/src/limits.js';
 import { fieldTypeRow, UNIQUE_VARCHAR_MAX_PER_TABLE } from '../../schema/src/mapping.js';
 import { jobPoolName, LIMITS } from '../../shims/src/runtime.js';
 import { buildUi } from '../../ui/src/generate.js';
 import { principalRoleMap } from '../../auth/src/apply.js';
 import { flag, hasReportJson, loadApp, type Io } from './cli.js';
-import { tableCreatePlan } from './tables.js';
+import { ZCQL_IN_LIMIT } from '../../data/src/migrate.js';
+import { cyclicForeignKeys, foreignKeyId, tableCreatePlan } from './tables.js';
 import { readSourceCsv, readSourceJson } from './csv.js';
 import { readSourceBackup } from './backup.js';
 import { API_FUNCTION, FUNCTION_DIR, columnTypes, functionDir } from './function-dir.js';
@@ -138,6 +139,20 @@ export interface PlanBudget {
   detail: string;
   fix?: string;
 }
+
+/** Stable identifiers for every budget row emitted by the offline plan. */
+export const PLAN_BUDGET_IDS = [
+  'columns',
+  'unique-varchar',
+  'fk',
+  'select-width',
+  'joins',
+  'org-tables',
+  'dev-row-cap',
+  'varchar-length',
+  'dev-api-calls',
+  'dev-write-rate',
+] as const;
 
 export interface StepEndpoint {
   via: 'cli' | 'mcp' | 'console';
@@ -307,13 +322,259 @@ const MAX_FK = 15;
 const MAX_JOINS = 4;
 const SELECT_WIDTH_DOC = 20;
 const SELECT_WIDTH_UNVERIFIED = limitValue('zcql.select_columns');
+/** Stated Development ceiling of API calls per application (docs figure, unverified). */
+const DEV_API_CALLS = limitValue('api.calls_dev');
+/** Stated Dev write rate per table (docs/self-reported figure, unverified). */
+const DEV_WRITE_RATE = limitValue('datastore.write_requests_per_minute');
+/** Rows per mover write batch; one reconcile read plus one insert call per batch. */
+const MOVER_BATCH = LIMITS.insertRowsPerCall;
+/** Ids per ZCQL IN-slice; verification, remap and count reads chunk here. */
+const MOVER_ID_CHUNK = ZCQL_IN_LIMIT;
+/** Conservative fixed-call allowance per non-empty table; a measured empty table is free. */
+const MOVER_TABLE_FIXED_CALLS = 2;
 
-function buildBudgets(tables: SchemaTable[]): { budgets: PlanBudget[]; ok: boolean } {
+/**
+ * Dev write-rate budget: warn with the mover's per-table write-call estimate.
+ * The mover sends one insert call per MOVER_BATCH rows of every Data Store
+ * table it loads and does not pace them; extension tables load the base
+ * form's rows, system tables are created empty. Fill-back updates, file
+ * uploads and retries add calls on top, so the estimate is a floor, not a
+ * bound. A table at or over the stated rate sustains a minute or more of
+ * writes at that cap on its own (100 calls at 100/min is exactly a minute),
+ * so the row warns. Missing source row counts are warned about once, by the
+ * dev-api-calls budget; this row refers to it instead of warning twice for
+ * the same missing input.
+ */
+function writeRateBudget(tables: SchemaTable[], source?: readonly SourceTableData[]): PlanBudget {
+  const { rowsOf } = moverSourceModel(tables, source);
+  const cap = `~${DEV_WRITE_RATE}`;
+  if (!source) {
+    return {
+      id: 'dev-write-rate',
+      status: 'pass',
+      detail:
+        `no source row counts — the dev-api-calls budget carries the missing-source warning; ` +
+        `the stated Development write rate is ${cap} writes/min/table (datastore.write_requests_per_minute, unverified)`,
+      fix: 're-run c2c plan with --source-backup, --source-csv or --source-json so both estimates count the mover calls; run c2c probe P-RATE before a large load',
+    };
+  }
+  const calls = new Map<string, number>();
+  const unmeasured: string[] = [];
+  for (const table of tables) {
+    if (table.nosql || table.role === 'system') continue;
+    const rows = rowsOf(table);
+    if (rows === undefined) unmeasured.push(table.name);
+    else calls.set(table.name, Math.ceil(rows / MOVER_BATCH));
+  }
+  const atRate = [...calls.entries()].filter(([, count]) => count >= DEV_WRITE_RATE);
+  const describe = (name: string, count: number) => `${name} ${count} insert call${count === 1 ? '' : 's'}`;
+  if (atRate.length > 0) {
+    const listed = atRate.map(([name, count]) => describe(name, count)).join(', ');
+    const missingNote =
+      unmeasured.length > 0 ? ` (no source rows for ${unmeasured.join(', ')} — counted in the dev-api-calls warning)` : '';
+    return {
+      id: 'dev-write-rate',
+      status: 'warn',
+      detail:
+        `the mover sends ${listed} back-to-back — at the stated Development write rate of ${cap} writes/min/table ` +
+        `(datastore.write_requests_per_minute, unverified) that is a minute or more at the cap per table${missingNote}; ` +
+        `the mover does not pace writes and a refused batch stops the load`,
+      fix: 'run c2c probe P-RATE before the load and re-run the mover on a refusal — it checkpoints, so a re-run resumes; pace or stage the load if 429s fire',
+    };
+  }
+  const estimate = [...calls.entries()].map(([name, count]) => describe(name, count)).join(', ') || 'no measured tables';
+  if (unmeasured.length > 0) {
+    return {
+      id: 'dev-write-rate',
+      status: 'pass',
+      detail: `${estimate}; no source rows for ${unmeasured.join(', ')} — counted in the dev-api-calls warning (the stated Development write rate is ${cap} writes/min/table, datastore.write_requests_per_minute, unverified)`,
+      fix: 'export the missing tables under --source-* so the estimate counts them; run c2c probe P-RATE before a large load',
+    };
+  }
+  return {
+    id: 'dev-write-rate',
+    status: 'pass',
+    detail: `the mover sends ${estimate} (one insert per ${MOVER_BATCH} rows; fill-back updates, file uploads and retries are extra); the stated Development write rate is ${cap} writes/min/table (datastore.write_requests_per_minute, unverified)`,
+  };
+}
+
+/**
+ * Dev per-table row-cap budget: warn with the largest measured row counts.
+ * Development's per-table row cap has no published value — a load refused
+ * with 403 API_LIMIT_REACHED "API Limit for row" is the signal, not a number
+ * — so a count cannot clear it and the row warns whenever there are rows to
+ * load. The budget lists the largest measured Data Store tables (one insert
+ * batch per MOVER_BATCH rows; extension tables load the base form's rows,
+ * system tables are created empty). With no --source-* data the counts are
+ * unknown and the row warns so the plan says so.
+ */
+function devRowCapBudget(tables: SchemaTable[], source?: readonly SourceTableData[]): PlanBudget {
+  const limit = catalystLimit('datastore.rows_per_table_dev');
+  const cap = `${limit.id}, the value is not published`;
+  if (!source) {
+    return {
+      id: 'dev-row-cap',
+      status: 'warn',
+      detail: `the per-table row estimate needs source row counts; Development's per-table row cap is a hidden value (${cap}) — a load refused with 403 API_LIMIT_REACHED "API Limit for row" is the signal`,
+      fix: 're-run c2c plan with --source-backup, --source-csv or --source-json so the budget lists the largest tables; rehearse a large load on a different environment before cutover',
+    };
+  }
+  const rowsByTable = new Map(source.map((item) => [item.table, item.rows.length]));
+  const rowsOf = (table: SchemaTable): number | undefined =>
+    rowsByTable.get(table.name) ?? (table.extensionOf ? rowsByTable.get(table.extensionOf) : undefined);
+  const measured: { name: string; rows: number }[] = [];
+  const unmeasured: string[] = [];
+  for (const table of tables) {
+    if (table.nosql || table.role === 'system') continue;
+    const rows = rowsOf(table);
+    if (rows === undefined) unmeasured.push(table.name);
+    else {
+      const entry = rowsByTable.has(table.name)
+        ? source.find((item) => item.table === table.name)
+        : source.find((item) => item.table === table.extensionOf);
+      if (entry?.complete !== true) unmeasured.push(table.name);
+      if (rows > 0) measured.push({ name: table.name, rows });
+    }
+  }
+  if (measured.length === 0 && unmeasured.length === 0) {
+    return {
+      id: 'dev-row-cap',
+      status: 'pass',
+      detail: `no source rows to load; Development's per-table row cap is a hidden value (${cap}) — a load refused with 403 API_LIMIT_REACHED "API Limit for row" is the signal`,
+    };
+  }
+  const largest = measured
+    .sort((a, b) => b.rows - a.rows)
+    .slice(0, 3)
+    .map((item) => {
+      const batches = Math.ceil(item.rows / MOVER_BATCH);
+      return `${item.name} ${item.rows} rows (${batches} insert batch${batches === 1 ? '' : 'es'} of up to ${MOVER_BATCH})`;
+    })
+    .join(', ');
+  return {
+    id: 'dev-row-cap',
+    status: 'warn',
+    detail:
+      `${measured.length ? `largest measured table(s): ${largest}` : 'source row counts are unknown'}; Development's per-table row cap is a hidden value (${cap}), so a count cannot clear it — ` +
+      `the refusal is 403 API_LIMIT_REACHED "API Limit for row"${unmeasured.length ? `; row counts are unknown for ${unmeasured.join(', ')}` : ''}`,
+    fix: 'rehearse the load on a different environment before cutover; a refused insert stops that table and the mover checkpoints, so a re-run resumes',
+  };
+}
+
+/** Measured varchar ceiling: a REST insert silently truncates past it. */
+const VARCHAR_MEASURED = LIMITS.varcharMaxLength;
+/**
+ * Counts are JavaScript code points (`[...s].length`), not UTF-16 code units:
+ * an emoji is one here, two there. Whether Catalyst's "characters" counts
+ * emoji, other multibyte characters, or CRLF the same way is unverified, so
+ * the warnings say so instead of implying the numbers predict acceptance.
+ */
+const codePoints = (value: string): number => [...value].length;
+const CHAR_SEMANTICS =
+  'counts are JavaScript code points — whether Catalyst counts emoji, multibyte characters or CRLF line endings the same way is unverified';
+
+/**
+ * Varchar-length budget: measure --source-* string values against the
+ * generated VarChar column lengths. Field definitions over the measured 255
+ * are already promoted to text by the mapper, so what remains is data: a
+ * source value longer than its column is silently truncated by a REST
+ * insert, and the mover only logs such values (VARCHAR_255). Warn-only: a
+ * value longer than the column warns by name; values the source cannot prove
+ * it holds every record of (`complete` unset) warn as not fully measured,
+ * and unmeasured values warn as unknown. Never fails the plan.
+ */
+function varcharLengthBudget(tables: SchemaTable[], source?: readonly SourceTableData[]): PlanBudget {
+  const hint =
+    're-run c2c plan with --source-backup, --source-csv or --source-json so the budget measures source string values against varchar column lengths';
+  if (!source) {
+    return {
+      id: 'varchar-length',
+      status: 'warn',
+      detail: `source string values are unmeasured; a REST insert silently truncates past a varchar column's length (measured ceiling ${VARCHAR_MEASURED}) — validate before write; ${CHAR_SEMANTICS}`,
+      fix: hint,
+    };
+  }
+  const byTable = new Map(source.map((item) => [item.table, item]));
+  const offenders: { table: string; column: string; longest: number; cap: number; count: number }[] = [];
+  const unmeasured: string[] = [];
+  const partial: string[] = [];
+  let rowsSeen = 0;
+  for (const table of tables) {
+    if (table.nosql || table.role === 'system') continue;
+    const entry = byTable.get(table.name) ?? (table.extensionOf ? byTable.get(table.extensionOf) : undefined);
+    if (entry === undefined) {
+      unmeasured.push(table.name);
+      continue;
+    }
+    if (entry.complete !== true) partial.push(table.name);
+    rowsSeen += entry.rows.length;
+    if (!Array.isArray(entry.rows)) {
+      if (!partial.includes(table.name)) partial.push(table.name);
+      continue;
+    }
+    for (const column of table.columns) {
+      if (column.dataType !== 'VarChar') continue;
+      const cap = column.length ?? VARCHAR_MEASURED;
+      let longest = 0;
+      let count = 0;
+      for (const row of entry.rows) {
+        const value = row.columns[column.name];
+        if (typeof value !== 'string' || codePoints(value) <= cap) continue;
+        count += 1;
+        longest = Math.max(longest, codePoints(value));
+      }
+      if (count > 0) offenders.push({ table: table.name, column: column.name, longest, cap, count });
+    }
+  }
+  const gaps =
+    (unmeasured.length ? `; no source rows for ${unmeasured.join(', ')}` : '') +
+    (partial.length ? `; source rows for ${partial.join(', ')} are not fully measured (the source cannot prove it holds every record)` : '');
+  if (offenders.length > 0) {
+    const worst = offenders
+      .sort((a, b) => b.longest - a.longest)
+      .slice(0, 3)
+      .map((item) => `${item.table}.${item.column}: ${item.count} value(s) longest ${item.longest}/${item.cap}`)
+      .join('; ');
+    return {
+      id: 'varchar-length',
+      status: 'warn',
+      detail:
+        `source values over a varchar column's length: ${worst}; a REST insert silently truncates past the length (measured ceiling ${VARCHAR_MEASURED})` +
+        (gaps ? `${gaps}, so the real figures are higher` : '') +
+        `; ${CHAR_SEMANTICS}`,
+      fix: 'shorten the source values to fit the varchar column, or confirm the column stores text; the mover only logs over-length values and Catalyst truncates silently',
+    };
+  }
+  if (rowsSeen === 0 && !unmeasured.length && !partial.length) {
+    return {
+      id: 'varchar-length',
+      status: 'pass',
+      detail: `no source rows to load; a REST insert silently truncates past a varchar column's length (measured ceiling ${VARCHAR_MEASURED}); ${CHAR_SEMANTICS}`,
+    };
+  }
+  if (unmeasured.length > 0 || partial.length > 0) {
+    return {
+      id: 'varchar-length',
+      status: 'warn',
+      detail:
+        `measured source values fit their varchar columns${gaps}, so longer values may still truncate silently` +
+        `; ${CHAR_SEMANTICS}`,
+      fix: hint,
+    };
+  }
+  return {
+    id: 'varchar-length',
+    status: 'pass',
+    detail: `measured source string values fit their varchar columns (measured ceiling ${VARCHAR_MEASURED}); ${CHAR_SEMANTICS}`,
+  };
+}
+
+function buildBudgets(tables: SchemaTable[], source?: readonly SourceTableData[]): { budgets: PlanBudget[]; ok: boolean } {
   const budgets: PlanBudget[] = [];
   for (const table of tables) {
     const unique = uniqueVarchar(table);
     budgets.push({
-      id: 'columns',
+      id: PLAN_BUDGET_IDS[0],
       table: table.name,
       status: table.columns.length > MAX_COLUMNS ? 'fail' : table.columns.length > COLUMNS_DEFAULT ? 'warn' : 'pass',
       detail:
@@ -326,7 +587,7 @@ function buildBudgets(tables: SchemaTable[]): { budgets: PlanBudget[]; ok: boole
         : {}),
     });
     budgets.push({
-      id: 'unique-varchar',
+      id: PLAN_BUDGET_IDS[1],
       table: table.name,
       status:
         unique.store.length > MAX_UNIQUE_VARCHAR ? 'fail' : unique.names.length > MAX_UNIQUE_VARCHAR ? 'warn' : 'pass',
@@ -346,7 +607,7 @@ function buildBudgets(tables: SchemaTable[]): { budgets: PlanBudget[]; ok: boole
     });
     const fks = fkCount(table);
     budgets.push({
-      id: 'fk',
+      id: PLAN_BUDGET_IDS[2],
       table: table.name,
       status: fks > MAX_FK ? 'fail' : 'pass',
       detail: `table ${table.name}: ${fks}/${MAX_FK} foreign keys`,
@@ -365,7 +626,7 @@ function buildBudgets(tables: SchemaTable[]): { budgets: PlanBudget[]; ok: boole
   const emittedWidth = Math.min(width, SELECT_WIDTH_UNVERIFIED);
   const overDoc = emittedWidth > SELECT_WIDTH_DOC;
   budgets.push({
-    id: 'select-width',
+    id: PLAN_BUDGET_IDS[3],
     ...(widest ? { table: widest.name } : {}),
     status: overDoc ? 'warn' : 'pass',
     detail: widest
@@ -375,20 +636,127 @@ function buildBudgets(tables: SchemaTable[]): { budgets: PlanBudget[]; ok: boole
     ...(overDoc ? { fix: 'run c2c probe P-WIDTH before a wider single SELECT' } : {}),
   });
   budgets.push({
-    id: 'joins',
+    id: PLAN_BUDGET_IDS[4],
     status: 'pass',
     detail: `generated reads are single-table (0/${MAX_JOINS} joins); lookup display needs one fetch per lookup (confirm with P-JOIN)`,
   });
   const store = tables.filter((table) => !table.nosql).length;
   const nosql = tables.length - store;
   budgets.push({
-    id: 'org-tables',
+    id: PLAN_BUDGET_IDS[5],
     status: 'pass',
     detail:
       `this app creates ${store} Data Store table(s)${nosql ? ` (and ${nosql} NoSQL)` : ''}; an org-wide limit on table creates ` +
       `refuses a create with 403 API_LIMIT_REACHED "API Limit for table" — on that refusal ${ORG_TABLE_LIMIT_RECOVERY}`,
   });
+  budgets.push({ ...devRowCapBudget(tables, source), id: PLAN_BUDGET_IDS[6] });
+  budgets.push({ ...varcharLengthBudget(tables, source), id: PLAN_BUDGET_IDS[7] });
+  budgets.push({ ...devApiCallsBudget(tables, source), id: PLAN_BUDGET_IDS[8] });
+  budgets.push({ ...writeRateBudget(tables, source), id: PLAN_BUDGET_IDS[9] });
   return { budgets, ok: budgets.every((budget) => budget.status !== 'fail') };
+}
+
+/**
+ * Dev API-call budget: warn with the mover's call estimate.
+ * Per measured Data Store table with N rows (B 200-row batches, C 300-id
+ * slices; extension tables load the base form's rows, system tables are
+ * created empty) the live mover spends, in the normal path:
+ * - 2 calls per batch: the reconcile read (`queryExistingSourceIds`) and the
+ *   insert (`writeBatch`), packages/data/src/migrate.ts;
+ * - 1 write-recount read per batch (`queryStoredRows` inside `writeBatch`,
+ *   packages/data/src/migrate.ts);
+ * - 1 end-of-table fidelity read-back per id slice (`queryStoredRows`,
+ *   packages/data/src/migrate.ts);
+ * - 1 source-id remap read per id slice (`loadRowIds`,
+ *   packages/deploy/src/remap.ts, called once per loaded table by
+ *   packages/deploy/src/csv.ts and packages/deploy/src/seed.ts);
+ * - 1 row-count check per id slice (`loadCount` over `sourceIdCountQueries`,
+ *   packages/deploy/src/csv.ts);
+ * - MOVER_TABLE_FIXED_CALLS as a conservative allowance per non-empty table;
+ *   measured empty tables have no batches or id slices, and the loader paths
+ *   return before making any of these calls;
+ * - 1 deferred-update write per batch for tables carrying a deferred
+ *   (self/cyclic, via `cyclicForeignKeys`) lookup (`updateDeferredForeignKeys`,
+ *   packages/deploy/src/remap.ts), worst case every row needs the update.
+ * File uploads, fill-back updates, retries and the deployed app's runtime
+ * calls are on top, so the estimate is a floor, not a bound. With no
+ * --source-* data the estimate is unknown and the row warns so the plan
+ * says so.
+ */
+function devApiCallsBudget(tables: SchemaTable[], source?: readonly SourceTableData[]): PlanBudget {
+  const { rowsOf, deferredTables } = moverSourceModel(tables, source);
+  let calls = 0;
+  const unmeasured: string[] = [];
+  for (const table of tables) {
+    if (table.nosql || table.role === 'system') continue;
+    const rows = rowsOf(table);
+    if (rows === undefined) unmeasured.push(table.name);
+    else {
+      const batches = Math.ceil(rows / MOVER_BATCH);
+      const slices = Math.ceil(rows / MOVER_ID_CHUNK);
+      // Empty measured tables take no loader calls; the fixed allowance is
+      // deliberately conservative for non-empty tables only.
+      calls += 3 * batches + 3 * slices + (rows > 0 ? MOVER_TABLE_FIXED_CALLS : 0);
+      if (deferredTables.has(table.name)) calls += batches;
+    }
+  }
+  const cap = `${DEV_API_CALLS}`;
+  if (!source) {
+    return {
+      id: 'dev-api-calls',
+      status: 'warn',
+      detail: `the mover's API-call estimate needs source row counts; Development allows ${cap} API calls per application (api.calls_dev, docs figure)`,
+      fix: 're-run c2c plan with --source-backup, --source-csv or --source-json so the estimate counts the mover reads and writes',
+    };
+  }
+  const deferredNote = deferredTables.size > 0 ? `; deferred-lookup updates on ${[...deferredTables].join(', ')}` : '';
+  const unmeasuredNote = unmeasured.length > 0
+    ? `; row counts are unknown for ${unmeasured.join(', ')} (Development allows ${cap} per application, api.calls_dev, docs figure)`
+    : '';
+  const estimate = `the mover makes about ${calls} API calls loading the measured rows (per ${MOVER_BATCH}-row batch: reconcile read plus insert plus write-recount; per ${MOVER_ID_CHUNK} ids: verification plus remap plus count reads; ${MOVER_TABLE_FIXED_CALLS} conservative fixed-call allowance per non-empty table${deferredNote}; file uploads, fill-back updates, retries and runtime calls are extra)`;
+  if (calls >= DEV_API_CALLS) {
+    return {
+      id: 'dev-api-calls',
+      status: 'warn',
+      detail: `${estimate}${unmeasuredNote} — at or over the Development allowance of ${cap} per application (api.calls_dev, docs figure)`,
+      fix: 'load the data in stages and watch API usage in the console; the figure is a docs ceiling, not a guarantee',
+    };
+  }
+  if (unmeasured.length > 0) {
+    return {
+      id: 'dev-api-calls',
+      status: 'warn',
+      detail: `${estimate}${unmeasuredNote}`,
+      fix: 'export the missing tables under --source-* so the estimate counts them',
+    };
+  }
+  return {
+    id: 'dev-api-calls',
+    status: 'pass',
+    detail: `${estimate} (Development allows ${cap} per application, api.calls_dev, docs figure)`,
+  };
+}
+
+/**
+ * Shared source-row model for the mover-call budgets: row counts by table
+ * with the extension-table fallback to the base form's rows, plus the tables
+ * carrying a deferred (self/cyclic) lookup under the loaders' own deferral
+ * rule (`cyclicForeignKeys`, packages/deploy/src/tables.ts).
+ */
+function moverSourceModel(
+  tables: SchemaTable[],
+  source: readonly SourceTableData[] | undefined,
+): { rowsOf: (table: SchemaTable) => number | undefined; deferredTables: ReadonlySet<string> } {
+  const rowsByTable = new Map((source ?? []).map((item) => [item.table, item.rows.length]));
+  const rowsOf = (table: SchemaTable): number | undefined =>
+    rowsByTable.get(table.name) ?? (table.extensionOf ? rowsByTable.get(table.extensionOf) : undefined);
+  const names = tables.filter((table) => !table.nosql && table.role !== 'system').map((table) => table.name);
+  const keys = tables.flatMap((table) =>
+    table.columns.flatMap((column) => (column.relation ? [{ table: table.name, column: column.name, parent: column.relation.table }] : [])),
+  );
+  const deferred = cyclicForeignKeys(names, keys);
+  const deferredTables = new Set(keys.filter((key) => deferred.has(foreignKeyId(key))).map((key) => key.table));
+  return { rowsOf, deferredTables };
 }
 
 export interface PlanSignals {
@@ -1120,7 +1488,7 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
   const signals = planSignals(app);
   const manual = widgetManualItems(app.widgets);
   const mailStep = opts.mail || signals.sendmail;
-  const { budgets, ok } = buildBudgets(schema.tables);
+  const { budgets, ok } = buildBudgets(schema.tables, opts.source);
   const schedules = app.workflows
     .filter((workflow) => (workflow.container ?? '').toLowerCase() === 'schedule')
     .map((workflow) => ({ name: workflow.name ?? 'schedule', properties: workflow.properties.map((p) => ({ key: p.key, value: p.value })) }));
@@ -1301,7 +1669,7 @@ function formatPlanMd(
     '## Budgets (D-F5)',
     '',
     ...plan.budgets.map(
-      (budget) => `- [${budget.status.toUpperCase()}] ${budget.table ? `${budget.table}: ` : ''}${budget.detail}${budget.fix ? ` → ${budget.fix}` : ''}`,
+      (budget) => `- [${budget.status.toUpperCase()}] (${budget.id}) ${budget.table ? `${budget.table}: ` : ''}${budget.detail}${budget.fix ? ` → ${budget.fix}` : ''}`,
     ),
   ];
   if (plan.manual?.length) {
