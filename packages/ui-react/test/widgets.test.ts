@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import { test, after } from 'node:test';
 import { JSDOM } from 'jsdom';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -20,6 +20,7 @@ import { readRecord } from '../template/lib/c2c-ui/form/record.js';
 import type { FieldSpec, FormSpec } from '../template/lib/c2c-ui/types.js';
 
 interface Bundle {
+  css: string;
   react: Record<string, any>;
   client: Record<string, any>;
   dom: Record<string, any>;
@@ -109,7 +110,9 @@ function bundle(): Promise<Bundle> {
       return (mod.default ?? mod) as Record<string, any>;
     };
     const [react, client, dom, fields, formview, env, extend] = await Promise.all([load('react'), load('client'), load('dom'), load('fields'), load('formview'), load('env'), load('extend')]);
-    return { react, client, dom, fields, formview, env, extend };
+    const assets = join(out, 'assets');
+    const css = existsSync(assets) ? readdirSync(assets).filter((name) => name.endsWith('.css')).map((name) => readFileSync(join(assets, name), 'utf8')).join('\n') : '';
+    return { css, react, client, dom, fields, formview, env, extend };
   })();
   return bundled;
 }
@@ -289,6 +292,57 @@ test('a stored zero still posts as zero', async () => {
   const fields = [field('Qty', 'number'), field('Ratio', 'decimal', { decimalPlaces: 2 })];
   const rendered = await render({ Qty: '0', Ratio: '0' }, fields);
   assert.deepEqual(readRecord(rendered.formEl, spec(fields)), { Qty: '0', Ratio: '0.00' });
+});
+
+test('signature and richtext controls have accessible names, required state, keyboard support, and focusable surfaces', async () => {
+  const fields = [
+    field('Sig', 'signature', { required: true }),
+    field('Body', 'richtext', { required: true }),
+  ];
+  const rendered = await render({}, fields);
+  const signature = rendered.box.querySelector('[data-field="Sig"] svg[role="application"]') as SVGSVGElement | null;
+  assert.ok(signature, 'signature field exposes its actual SVG drawing surface');
+  assert.equal(signature?.getAttribute('aria-labelledby'), 'Sig-label');
+  assert.equal(signature?.getAttribute('aria-required'), 'true');
+  assert.equal(signature?.getAttribute('tabindex'), '0');
+  assert.equal(rendered.box.querySelector('[data-field="Sig"] canvas'), null, 'signature has no parallel canvas');
+  signature?.dispatchEvent(new rendered.win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await rendered.flush();
+  assert.ok(rendered.box.querySelector('[data-field="Sig"] svg path[data-color]:not([d=""])'), 'Enter adds a keyboard signature mark');
+  const editable = rendered.box.querySelector('[data-field="Body"] [contenteditable="true"]');
+  assert.ok(editable, 'richtext field exposes an editable control');
+  assert.equal(editable?.getAttribute('aria-labelledby'), 'Body-label');
+  assert.equal(editable.getAttribute('aria-required'), 'true', 'a required richtext marks the editable required');
+});
+
+test('the signature pad keyboard focus ring is drawn inside the pad clip', async () => {
+  const rendered = await render({}, [field('Sig', 'signature')]);
+  const kit = await bundle();
+  const style = rendered.box.createElement('style');
+  style.textContent = kit.css;
+  rendered.box.head.appendChild(style);
+  const rules = Array.from(style.sheet?.cssRules ?? []).filter(
+    (rule): rule is CSSStyleRule => 'selectorText' in rule,
+  );
+  const ruleFor = (cls: string, pseudo = '') =>
+    rules.find((rule) => rule.selectorText.split(',').some((sel) => sel.trim() === `.${cls}${pseudo}`));
+  const surface = rendered.box.querySelector('[data-field="Sig"] svg[role="application"]');
+  const pad = surface?.parentElement;
+  assert.ok(surface && pad, 'the drawing surface sits inside the pad');
+  const firstClass = (el: Element) => (el.getAttribute('class') ?? '').split(' ')[0] ?? '';
+  // The pad keeps clipping the ink at its rounded edge — drawing behaviour unchanged —
+  const padRule = ruleFor(firstClass(pad));
+  assert.equal(padRule?.style.getPropertyValue('overflow'), 'hidden', 'the pad still clips the ink');
+  // so the focus ring has to be inset: a negative offset keeps it inside the clip.
+  const focusRule = ruleFor(firstClass(surface), ':focus-visible');
+  assert.ok(focusRule, 'the drawing surface keeps a keyboard focus ring');
+  const ring = focusRule.style.getPropertyValue('outline');
+  assert.ok(ring && !ring.startsWith('none'), 'the ring is a real outline');
+  const offset = focusRule.style.getPropertyValue('--focus-outline-offset') || focusRule.style.getPropertyValue('outline-offset');
+  assert.ok(
+    /^-\d/.test(offset.trim()),
+    `the ring is inset (offset "${offset}") instead of clipped by the pad's overflow: hidden`,
+  );
 });
 
 test('an unchanged load→save round trip posts identical values for every widget kind', async () => {

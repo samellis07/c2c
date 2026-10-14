@@ -245,6 +245,10 @@ export interface SignaturePadProps {
   fileName?: string;
   /** Accessible name of the drawing surface. */
   label?: string;
+  /** Whether the signature is required. */
+  required?: boolean;
+  /** ID of the visible form label naming the drawing surface. */
+  labelledBy?: string;
   className?: string;
 }
 
@@ -259,7 +263,7 @@ function useReducedFlag() {
   return !!useReducedMotion() && hydrated;
 }
 
-export function SignaturePad({ signer, hint = "Sign here", defaultColor = "black", defaultWidth = "medium", onChange, fileName = "signature", label = "Signature pad", className }: SignaturePadProps) {
+export function SignaturePad({ signer, hint = "Sign here", defaultColor = "black", defaultWidth = "medium", onChange, fileName = "signature", label = "Signature pad", required, labelledBy, className }: SignaturePadProps) {
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
   const reduced = useReducedFlag();
   const [history, setHistory] = useState<History>({ past: [], present: [], future: [], fresh: null });
@@ -302,7 +306,7 @@ export function SignaturePad({ signer, hint = "Sign here", defaultColor = "black
     return { x: (event.clientX - box.left) / box.width * PAD_WIDTH, y: (event.clientY - box.top) / box.height * PAD_HEIGHT };
   }
 
-  function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+  function onPointerDown(event: ReactPointerEvent<SVGSVGElement>) {
     if (live.current || (event.pointerType === "mouse" && event.button !== 0)) return;
     event.preventDefault();
     settleWipe();
@@ -317,7 +321,7 @@ export function SignaturePad({ signer, hint = "Sign here", defaultColor = "black
     setDrawing(true);
     paintLive();
   }
-  function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+  function onPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
     const current = live.current;
     if (!current || current.id !== event.pointerId) return;
     const samples = typeof event.nativeEvent.getCoalescedEvents === "function" ? event.nativeEvent.getCoalescedEvents() : [];
@@ -329,7 +333,7 @@ export function SignaturePad({ signer, hint = "Sign here", defaultColor = "black
     }
     paintLive();
   }
-  function onPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+  function onPointerUp(event: ReactPointerEvent<SVGSVGElement>) {
     const current = live.current;
     if (!current || current.id !== event.pointerId) return;
     live.current = null;
@@ -419,11 +423,20 @@ export function SignaturePad({ signer, hint = "Sign here", defaultColor = "black
     savedTimer.current = window.setTimeout(() => setSaved(null), 1800);
   }
 
-  function onKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+  function onKeyDown(event: ReactKeyboardEvent<SVGSVGElement>) {
     const mod = event.metaKey || event.ctrlKey;
     const key = event.key.toLowerCase();
     if (mod && key === "z") { event.preventDefault(); if (event.shiftKey) redo(); else undo(); }
     else if (mod && key === "y") { event.preventDefault(); redo(); }
+    else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      const x = event.key === " " ? PAD_WIDTH * .55 : PAD_WIDTH * .45;
+      const y = PAD_HEIGHT * .72;
+      counter.current += 1;
+      const now = event.nativeEvent.timeStamp;
+      commit([...strokes, { id: `${uid}-${counter.current}`, color, width, at: now, points: [{ x, y, p: -1, t: 0 }] }]);
+      setStatus(`Stroke added. ${strokes.length + 1} ${strokes.length === 0 ? "stroke" : "strokes"} in the signature.`);
+    }
     else if (!mod && (event.key === "Delete" || event.key === "Backspace") && event.currentTarget === event.target) { event.preventDefault(); clear(); }
     else if (event.key === "Escape" && replaying) { stopReplay(); }
   }
@@ -447,22 +460,25 @@ export function SignaturePad({ signer, hint = "Sign here", defaultColor = "black
   const t: Transition = reduced ? { duration: duration.instant } : spring.snappy;
 
   return <div className={[styles.root, className].filter(Boolean).join(" ")} data-ink={color}>
-    <div ref={padRef} className={styles.pad} tabIndex={0} role="img" aria-roledescription="signature pad"
+    <div className={styles.pad}>
+      <svg ref={padRef} className={styles.surface} viewBox={`0 0 ${PAD_WIDTH} ${PAD_HEIGHT}`} preserveAspectRatio="none"
+      tabIndex={0} role="application" aria-roledescription="signature pad"
       aria-label={`${label}. ${empty ? "Empty." : `${strokes.length} ${strokes.length === 1 ? "stroke" : "strokes"}.`} Draw with a pointer, pen, or finger.`}
+      aria-labelledby={labelledBy}
+      aria-required={required || undefined}
       aria-describedby={`${uid}-keys`} data-drawing={drawing ? "" : undefined}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onKeyDown={onKeyDown}>
-      <div className={styles.guide} aria-hidden="true">
+      <g aria-hidden="true" className={styles.guide}>
         <X className={styles.mark} size={14} strokeWidth={1.75} />
-        <span className={styles.baseline} />
-        {signer && <span className={styles.signer}>{signer}</span>}
+        <line className={styles.baseline} x1={PAD_WIDTH * .07} x2={PAD_WIDTH * .93} y1={PAD_HEIGHT * .72} y2={PAD_HEIGHT * .72} />
+        {signer && <text className={styles.signer} x={PAD_WIDTH * .07} y={PAD_HEIGHT * .86}>{signer}</text>}
         <AnimatePresence initial={false}>
-          {showHint && <motion.span key="hint" className={styles.hint} initial={hintHidden} animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+          {showHint && <motion.text key="hint" className={styles.hint} x="50%" y={PAD_HEIGHT * .62} textAnchor="middle" initial={hintHidden} animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
             exit={{ ...hintHidden, transition: { duration: duration.fast, ease: [...ease.standard] } }}
-            transition={reduced ? { duration: duration.instant } : { duration: duration.standard, ease: [...ease.enter] }}>{hint}</motion.span>}
+            transition={reduced ? { duration: duration.instant } : { duration: duration.standard, ease: [...ease.enter] }}>{hint}</motion.text>}
         </AnimatePresence>
-      </div>
-      <div ref={inkRef} className={styles.ink}>
-        <svg viewBox={`0 0 ${PAD_WIDTH} ${PAD_HEIGHT}`} preserveAspectRatio="none" aria-hidden="true">
+      </g>
+      <g ref={inkRef} className={styles.ink}>
           <AnimatePresence initial={false}>
             {visible.map(({ stroke, d }) => <motion.path key={stroke.id} className={styles.stroke} data-color={stroke.color}
               d={d ?? strokePath(stroke)} initial={history.fresh === stroke.id ? false : { opacity: 0 }} animate={{ opacity: 1 }}
@@ -471,8 +487,8 @@ export function SignaturePad({ signer, hint = "Sign here", defaultColor = "black
           </AnimatePresence>
           <path ref={liveRef} className={styles.stroke} data-color={color} />
           {nib && <circle className={styles.nib} data-color={nibColor} cx={nib.x} cy={nib.y} r={WIDTHS[width].size * .9} />}
-        </svg>
-      </div>
+      </g>
+      </svg>
       {wiping && <motion.span className={styles.sweep} aria-hidden="true" initial={{ x: "0%", opacity: 0 }} animate={{ x: "100%", opacity: [0, 1, 1, 0] }}
         transition={{ duration: .56, ease: [...ease.inOut], opacity: { duration: .56, times: [0, .12, .85, 1] } }} />}
     </div>
