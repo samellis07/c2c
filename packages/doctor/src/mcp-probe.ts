@@ -91,6 +91,20 @@ export async function verifyProbe(rest: RestFn, target: ProbeTarget, name: strin
     return { ...base, status: 'unverifiable', detail: `the REST read-back failed: ${err instanceof Error ? err.message : String(err)}` };
   }
   if (res.status >= 200 && res.status < 300) {
+    let body: unknown = res.body;
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body) as unknown;
+      } catch {
+        return { ...base, status: 'unverifiable', detail: `the REST read-back returned malformed JSON; bucket ${name} could not be verified` };
+      }
+    }
+    if (typeof body !== 'object' || body === null || !('bucket_name' in body) || typeof body.bucket_name !== 'string') {
+      return { ...base, status: 'unverifiable', detail: `the REST read-back did not contain a bucket_name; bucket ${name} could not be verified` };
+    }
+    if (body.bucket_name !== name) {
+      return { ...base, status: 'unverifiable', detail: `the REST read-back returned bucket_name ${body.bucket_name}, not the expected probe bucket ${name}` };
+    }
     return { ...base, status: 'verified', detail: `probe bucket ${name} found in project ${target.project} over the Catalyst REST API` };
   }
   if (res.status === 404) {
