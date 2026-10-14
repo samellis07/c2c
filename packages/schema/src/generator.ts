@@ -124,6 +124,30 @@ export interface FieldOutcome {
   reason: string;
 }
 
+/** A field type with known migration behavior that is incomplete or unsupported. */
+export interface FieldGap {
+  matrixId: string;
+  count: number;
+  reason: string;
+  fields: { form: string; field: string }[];
+}
+
+/** Group partial and unsupported field outcomes without implying a generated shim. */
+export function fieldGapsOf(fields: readonly FieldOutcome[]): FieldGap[] {
+  const gaps = new Map<string, FieldGap>();
+  for (const outcome of fields) {
+    if (outcome.status === 'supported') continue;
+    let gap = gaps.get(outcome.matrixId);
+    if (!gap) {
+      gap = { matrixId: outcome.matrixId, count: 0, reason: outcome.reason, fields: [] };
+      gaps.set(outcome.matrixId, gap);
+    }
+    gap.count++;
+    gap.fields.push({ form: outcome.form, field: outcome.field });
+  }
+  return [...gaps.values()].sort((a, b) => (a.matrixId < b.matrixId ? -1 : a.matrixId > b.matrixId ? 1 : 0));
+}
+
 export interface SchemaSummary {
   tables: number;
   nosqlCollections: number;
@@ -1237,7 +1261,7 @@ export function schemaAsIac(plan: SchemaPlan): string {
 function listOutcomes(plan: SchemaPlan, status: Support): string {
   const rows = plan.fields.filter((f) => f.status === status);
   if (!rows.length) return '- none';
-  return rows.map((f) => `- ${f.form}.${f.field} (${f.creatorType} → ${f.matrixId})`).join('\n');
+  return rows.map((f) => `- ${f.form}.${f.field} (${f.creatorType} → ${f.matrixId})${status === 'supported' ? '' : ` — ${f.reason}`}`).join('\n');
 }
 
 export function schemaAsReport(plan: SchemaPlan): string {
