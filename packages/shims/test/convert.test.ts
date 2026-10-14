@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DelugeConversionError, toDecimal, toJSONCollection, toJSONList, toList, toLong, toMap, toNumber } from '../src/convert.js';
-import { DelugeDate, TimeZoneRequired } from '../src/date.js';
+import { DelugeDate, TimeZoneRequired, epochMillis, partsInZone } from '../src/date.js';
+import { normalizeDate } from '../src/write-rules.js';
 import { createRuntime, rangeSlotRequest, LIMITS } from '../src/runtime.js';
 
 test('toLong truncates decimals, rejects empty or non-numeric text, and rejects null', () => {
@@ -78,6 +79,24 @@ test('toLong across a DST boundary uses the app time zone instant', () => {
   assert.throws(() => toLong(new DelugeDate(2024, 3, 10, 2, 30, 0), zone), /does not exist/);
   // 2024-11-03 01:30 happens twice. The earlier instant (PDT, UTC-7) is kept.
   assert.equal(toLong(new DelugeDate(2024, 11, 3, 1, 30, 0), zone), Date.parse('2024-11-03T08:30:00Z'));
+});
+
+test('date-only values and app-local datetimes are stable across host timezone settings', () => {
+  const previous = process.env.TZ;
+  const zones = ['UTC', 'Asia/Kolkata', 'America/New_York', 'Pacific/Kiritimati'];
+  try {
+    for (const hostZone of zones) {
+      process.env.TZ = hostZone;
+      assert.deepEqual(normalizeDate('05-Oct-2026'), { ok: true, value: '2026-10-05' });
+      const instant = Date.parse('2024-03-10T07:00:00Z');
+      const wall = partsInZone(new Date(instant), 'America/New_York');
+      assert.deepEqual([wall.y, wall.m, wall.d, wall.hh, wall.mm, wall.ss], [2024, 3, 10, 3, 0, 0]);
+      assert.equal(epochMillis(new DelugeDate(2024, 3, 10, 3), 'America/New_York'), instant);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
 });
 
 test('toMap rejects invalid JSON and text over 5 MB', () => {

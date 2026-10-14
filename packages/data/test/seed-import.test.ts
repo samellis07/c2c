@@ -137,6 +137,16 @@ test('creator import conventions: dd-MMM-yyyy, comma multi-lookup, no file colum
   }
 });
 
+test('creator import date-times retain seconds with a fixed seed', () => {
+  const app = appOf(`\tform Visit\n\t{\n\t\tWhen\n\t\t(\n\t\t\ttype = datetime\n\t\t)\n\t}`);
+  const first = generateCreatorImport(app, { rows: 8, seed: 'seconds' });
+  const second = generateCreatorImport(app, { rows: 8, seed: 'seconds' });
+  const values = parseCsv(first.files[0]!.csv).slice(1).map((row) => row[0]);
+  assert.deepEqual(first.files[0]!.csv, second.files[0]!.csv);
+  assert.ok(values.every((value) => /^\d{2}-[A-Z][a-z]{2}-\d{4} \d{2}:\d{2}:\d{2}$/.test(value)));
+  assert.match(first.readme, /date-times `dd-MMM-yyyy HH:mm:ss`/);
+});
+
 test('name composite becomes dotted columns and emails/phones are fictional', () => {
   const app = appOf(
     `\tform Person
