@@ -7,7 +7,7 @@ import { deriveIr, parse, parseFile } from '../../core/src/index.js';
 import { canonicalSeedJson, generateSeed } from '../../data/src/seed.js';
 import { emptyCheckpoint, type FetchLike, type MigrateResponse } from '../../data/src/migrate.js';
 import { seedMigrateCli, type Io } from '../src/index.js';
-import { foreignKeysForApp } from '../src/remap.js';
+import { assertSeedReferences, foreignKeysForApp } from '../src/remap.js';
 import { migrateSeed, parseSeed, parseSeedBlocked, type SeedTable } from '../src/seed.js';
 
 const SCOPE = { org: '10000000000', projectId: '1001', token: 'test-cli-token' };
@@ -154,6 +154,71 @@ test('a parent/child seed remaps the child lookup to the parent ROWID', async ()
   assert.equal(result.ok, true);
   const parentRowid = stored.get('Author')!.get('a1')!.rowid;
   assert.equal(stored.get('Book')!.get('b1')!.columns.Author, parentRowid);
+});
+
+test('subform rows keep their lookups on read-back and a broken reference names its row id', async () => {
+  const tables = parseSeed(JSON.stringify({
+    app_name: 'orders',
+    forms: {
+      Product: [{ SKU: 'a' }, { SKU: 'b' }],
+      Order: [
+        { Lines: [{ $ref: 'Product', key: 'SKU', index: 0 }, { $ref: 'Product', key: 'SKU', index: 1 }] },
+        { Lines: [{ $ref: 'Product', key: 'SKU', index: 1 }] },
+      ],
+    },
+  }), { today: '2026-01-15' });
+  assert.deepEqual(
+    tables.find((table) => table.table === 'Order__Lines')?.rows.map((row) => row.id),
+    ['Order__Lines#1#1', 'Order__Lines#1#2', 'Order__Lines#2#1'],
+  );
+  const keys = [
+    { table: 'Order__Lines', column: 'Lines', parent: 'Product' },
+    { table: 'Order__Lines', column: 'parent_id', parent: 'Order' },
+  ];
+  const calls: string[] = [];
+  const { fetch, stored } = storeFetch(calls);
+  const result = await migrateSeed({
+    tables,
+    foreignKeys: keys,
+    dc: 'in',
+    catalystBase: 'https://api.catalyst.zoho.in',
+    dryRun: false,
+    fetch,
+    checkpoint: emptyCheckpoint(),
+    scope: SCOPE,
+  });
+  assert.equal(result.ok, true);
+  const line = stored.get('Order__Lines')!.get('Order__Lines#1#2')!;
+  assert.equal(line.columns.parent_id, stored.get('Order')!.get('Order#1')!.rowid);
+  assert.equal(line.columns.Lines, stored.get('Product')!.get('Product#2')!.rowid);
+  assert.equal(line.columns.row_order, '1');
+  const broken = tables.map((table) => table.table === 'Order__Lines'
+    ? {
+      ...table,
+      rows: table.rows.map((row) => row.id === 'Order__Lines#2#1'
+        ? { ...row, columns: { ...row.columns, Lines: 'Product#9' } }
+        : row),
+    }
+    : table);
+  assert.throws(
+    () => assertSeedReferences(broken, keys),
+    /lookup Order__Lines\.Lines row Order__Lines#2#1 source id Product#9 is not in Product/,
+  );
+  const written = calls.length;
+  await assert.rejects(
+    () => migrateSeed({
+      tables: broken,
+      foreignKeys: keys,
+      dc: 'in',
+      catalystBase: 'https://api.catalyst.zoho.in',
+      dryRun: false,
+      fetch,
+      checkpoint: emptyCheckpoint(),
+      scope: SCOPE,
+    }),
+    /lookup Order__Lines\.Lines row Order__Lines#2#1 source id Product#9 is not in Product/,
+  );
+  assert.equal(calls.length, written, 'a broken reference is refused before any write');
 });
 
 test('a self-lookup is deferred and set with a row update once both sides have ROWIDs', async () => {

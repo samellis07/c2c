@@ -151,22 +151,22 @@ export function convertSyntheticSeed(value: unknown, opts?: SyntheticConvertOpti
   const extras: CanonicalSeedFile = {};
   const extraRow = (table: string): Record<string, unknown>[] => extras[table] ?? (extras[table] = []);
   const inputTables = new Set(Object.keys(forms as Record<string, unknown>));
-  const claimedTables = new Set<string>();
-  const claimedPaths = new Map<string, string>();
-  const claimTable = (table: string, parentRowId: string, field: string): void => {
-    if (claimedTables.has(table) || inputTables.has(table)) {
+  // One generated name belongs to one source (`Order.Lines`, or a nested path).
+  // Every parent row of that source may fill it. A second source, or an input
+  // form that already uses the name, is a collision — a name like Order__Lines
+  // is valid when only Order.Lines produces it.
+  const claimedSources = new Map<string, string>();
+  const claimGeneratedTable = (table: string, parentRowId: string, field: string, source: string): void => {
+    if (inputTables.has(table)) {
       throw new Error(`synthetic seed table ${table} for ${parentRowId}.${field} collides with another table`);
     }
-    claimedTables.add(table);
-  };
-  const claimGeneratedTable = (table: string, parentRowId: string, field: string, logicalPath: string): void => {
-    if (inputTables.has(table)) throw new Error(`synthetic seed table ${table} for ${parentRowId}.${field} collides with another table`);
-    if (claimedTables.has(table)) {
-      if (claimedPaths.get(table) === logicalPath) return;
-      throw new Error(`synthetic seed table ${table} for ${parentRowId}.${field} collides with another table`);
+    const prior = claimedSources.get(table);
+    if (prior === undefined) {
+      claimedSources.set(table, source);
+      return;
     }
-    claimedTables.add(table);
-    claimedPaths.set(table, logicalPath);
+    if (prior === source) return;
+    throw new Error(`synthetic seed table ${table} for ${parentRowId}.${field} collides with another table`);
   };
   const flattenGrid = (
     parentTable: string,
@@ -178,7 +178,7 @@ export function convertSyntheticSeed(value: unknown, opts?: SyntheticConvertOpti
     pathIndexes: number[] = [],
   ): void => {
     const table = `${parentTable}__${field}`;
-    claimGeneratedTable(table, parentRowId, path, path);
+    claimGeneratedTable(table, parentRowId, field, path);
     values.forEach((item, k) => {
       if (!item || typeof item !== 'object' || Array.isArray(item) || isRef(item)) {
         throw new Error(`synthetic seed subform ${path} row ${parentRowId}#${k + 1} is not an object`);
@@ -194,7 +194,7 @@ export function convertSyntheticSeed(value: unknown, opts?: SyntheticConvertOpti
           }
           if (subCell.length > 0 && subCell.every(isRef)) {
             const junction = `${table}__${subField}`;
-            claimGeneratedTable(junction, childId, `${path}.${subField}`, `${path}.${subField}`);
+            claimGeneratedTable(junction, childId, subField, `${path}.${subField}`);
             subCell.forEach((ref, order) => extraRow(junction).push({
               c2c_source_id: `${junction}#${rootRowNumber}${[...pathIndexes, k + 1, order + 1].map((index) => `#${index}`).join('')}`,
               parent_id: childId,
@@ -225,7 +225,7 @@ export function convertSyntheticSeed(value: unknown, opts?: SyntheticConvertOpti
           if (cell.length === 0) continue;
           if (cell.length > 0 && cell.every(isRef)) {
             const table = `${target.form}__${field}`;
-            claimTable(table, id, field);
+            claimGeneratedTable(table, id, field, `${target.form}.${field}`);
             cell.forEach((ref, k) => {
               extraRow(table).push({
                 c2c_source_id: `${table}#${i + 1}#${k + 1}`,

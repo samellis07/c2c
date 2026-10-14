@@ -81,8 +81,8 @@ export function assertSeedReferences(tables: readonly RemapTable[], keys: readon
       if (!value) continue;
       for (const source of sourceIds(value)) {
         if (parents?.has(source)) continue;
-        if (!parents) throw new Error(`lookup ${key.table}.${key.column} references ${key.parent}, which is not in the seed`);
-        throw new Error(`lookup ${key.table}.${key.column} source id ${source} is not in ${key.parent}`);
+        if (!parents) throw new Error(`lookup ${key.table}.${key.column} row ${row.id} references ${key.parent}, which is not in the seed`);
+        throw new Error(`lookup ${key.table}.${key.column} row ${row.id} source id ${source} is not in ${key.parent}`);
       }
     }
   }
@@ -158,7 +158,7 @@ export function resolveForeignKeys(table: RemapTable, keys: readonly SeedForeign
         if (!source) continue;
         const mapped = sourceIds(source).map((id) => {
           const rowid = rowIds.get(key.parent)?.get(id);
-          if (!rowid) throw new Error(`lookup ${key.column} source id ${id} is not in ${key.parent}`);
+          if (!rowid) throw new Error(`lookup ${key.column} row ${row.id} source id ${id} is not in ${key.parent}`);
           return rowid;
         });
         columns[key.column] = source.startsWith('[') ? JSON.stringify(mapped) : mapped[0]!;
@@ -295,7 +295,7 @@ export async function updateDeferredForeignKeys(
       if (!source) continue;
       const mapped = sourceIds(source).map((id) => {
         const parentId = rowIds.get(key.parent)?.get(id);
-        if (!parentId) throw new Error(`lookup ${key.column} source id ${id} is not in ${key.parent}`);
+        if (!parentId) throw new Error(`lookup ${key.column} row ${row.id} source id ${id} is not in ${key.parent}`);
         return parentId;
       });
       const parentId = source.startsWith('[') ? JSON.stringify(mapped) : mapped[0]!;

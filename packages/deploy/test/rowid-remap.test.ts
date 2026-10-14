@@ -207,10 +207,10 @@ test('a multi lookup stored as a JSON id list remaps every element', () => {
   const bad = [{ table: 'Add_User', rows: [{ id: 'u1', columns: { Owned_Vehicles: '["v1","v9"]' } }] }];
   assert.throws(
     () => assertSeedReferences([seed[0]!, ...bad], keys),
-    /lookup Add_User\.Owned_Vehicles source id v9 is not in Add_Vehicle/,
+    /lookup Add_User\.Owned_Vehicles row u1 source id v9 is not in Add_Vehicle/,
   );
   assert.throws(
     () => resolveForeignKeys(bad[0]!, keys, rowIds),
-    /lookup Owned_Vehicles source id v9 is not in Add_Vehicle/,
+    /lookup Owned_Vehicles row u1 source id v9 is not in Add_Vehicle/,
   );
 });

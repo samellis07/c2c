@@ -385,7 +385,7 @@ export async function applyDelta(
             pendingCyclic.push({ table: item.table, sourceId: row.id, column, parent: key.parent, parentSource: value });
             continue;
           }
-          if (!parentRowId) throw new Error(`lookup ${item.table}.${column} source id ${value} is not in ${key.parent}`);
+          if (!parentRowId) throw new Error(`lookup ${item.table}.${column} row ${row.id} source id ${value} is not in ${key.parent}`);
           cells[column] = parentRowId;
         }
         const prepared = prepareColumns(columns, cells);
@@ -433,7 +433,7 @@ export async function applyDelta(
       await rememberRowIds(opts, pending.table, [sourceId], rowIds);
       const parentRowId = rowIds.get(pending.parent)?.get(parentSource);
       const rowid = rowIds.get(pending.table)?.get(sourceId);
-      if (!parentRowId) throw new Error(`lookup ${pending.table}.${pending.column} source id ${parentSource} is not in ${pending.parent}`);
+      if (!parentRowId) throw new Error(`lookup ${pending.table}.${pending.column} row ${sourceId} source id ${parentSource} is not in ${pending.parent}`);
       if (!rowid) throw new Error(`lookup ${pending.table}.${pending.column} row ${sourceId} has no ROWID`);
       const list = cyclicUpdates.get(pending.table) ?? [];
       list.push({ ROWID: rowid, [pending.column]: parentRowId });

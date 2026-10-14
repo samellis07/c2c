@@ -69,8 +69,15 @@ Synthetic seed conversion (`packages/data/src/seed-synthetic.ts`):
   plus `N` hours. Tests pin `{ today, now }`; the CLI resolves against the current UTC clock.
 - `"$user:login"` → `--login-user <email>`; refused without it.
 - Arrays of row objects → `<Form>__<field>` child rows; arrays of `$ref` → `<Form>__<field>`
-  junction rows (`parent_id` plus the field). Other arrays (multi-select choices) become one
-  JSON-list cell, as in the CSV loader. An empty array contributes nothing. Anything else fails closed.
+  junction rows (`parent_id`, `row_order`, and the field). Nested grids flatten the same way
+  (`<Form>__<field>__<subfield>`), and a lookup on a nested row resolves to that target's
+  source id. Other arrays (multi-select choices) become one JSON-list cell, as in the CSV
+  loader. An empty array contributes nothing. Anything else fails closed.
+- A generated name such as `Order__Lines` is one table for every parent row of that source.
+  Reordering the array rewrites `row_order`; a row left out of a later file is absent.
+  The name is refused only when two sources would write it, or an input form already uses
+  it. A broken `$ref` names the source row id (for example `Order__Lines#1#1`) and is
+  never dropped.
 
 Loading (`c2c migrate-data --seed <file> --app <link> --project <id> --org <org>`):
 
