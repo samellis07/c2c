@@ -32,6 +32,7 @@ import { afterCommitModule, ASYNC_ON_SUCCESS_WARNING, assertAsyncSuccessDeferrab
 import { EVENT_SWEEPER_MODULE, JOB_LIVE_IMPORTS, jobLiveHelpers, planSchedules, schedulingConfig, sweeperModule, SWEEPER_MODULE, type SchedulePlan } from './schedules.js';
 import { emittedReadOnly, emittedThisappCalls, jsIdent, reportCriteria, translate, type AlertEventClass, type TodoItem, type TranslateOptions, type TranslateStats } from './translate.js';
 import { normType } from './types.js';
+import { withoutDecimalAudit } from './audit.js';
 import { resolveAppCalls } from './resolve-app-calls.js';
 
 export interface GeneratedFile {
@@ -1769,7 +1770,8 @@ export function appTranslateOptions(app: App): Pick<TranslateOptions, 'formNames
 export function translateInApp(app: App, src: string, options: TranslateOptions = {}) {
   const shared = appTranslateOptions(app);
   const translateOptions = { ...shared, ...options, decimalFields: shared.decimalFields, schema: schemaOf(app), connections: declaredConnections(app), functions: app.functions.map(fn => fn.name) };
-  const baseline = translate(src, translateOptions);
+  // Probe only for unresolved call todos. Sites are counted on the pass below.
+  const baseline = withoutDecimalAudit(() => translate(src, translateOptions));
   return translate(resolveAppCalls(src, app.functions, baseline.todos), translateOptions);
 }
 
