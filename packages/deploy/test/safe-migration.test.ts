@@ -427,6 +427,19 @@ test('sync-delta plan prints counts per table and writes nothing', async () => {
   assert.equal(existsSync(join(ws.state, STATE_FILE)), false);
 });
 
+test('sync-delta confirm reports planned writes and the applied upsert count', async () => {
+  const ws = workspace();
+  const store = fakeStore();
+  const run = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, exportDir(VENDORS, ORDERS), '--confirm'), run.io), 0, run.err());
+  assert.match(run.out(), /^writes: yes \(4 planned upserts\)$/m);
+  assert.doesNotMatch(run.out(), /writes: no/);
+  assert.match(run.out(), /^applied: 4 upsert\(s\)$/m);
+  assert.equal(store.tables.get('Vendor')?.length, 2);
+  assert.equal(store.tables.get('Purchase_Order')?.length, 2);
+  assert.ok(run.fetched() > 0);
+});
+
 test('an export folder that already holds the loader report still reads as a source', async () => {
   const ws = workspace();
   const dir = exportDir(VENDORS, ORDERS);
