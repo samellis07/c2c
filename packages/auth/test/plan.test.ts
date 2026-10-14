@@ -339,3 +339,36 @@ test('edit without delete is refused and delete without edit stays inside the re
   assert.match(seen[0]!, /Owner = 'ada@example.test'/);
   assert.deepEqual(deleted, [['1']]);
 });
+
+test('case-only profile and hierarchy role names remain visible with a collision warning', () => {
+  const app = appOf(`\tshare_settings
+\t{
+\t\t"Librarian"
+\t\t{
+\t\t\tname = "Librarian"
+\t\t\ttype = Users_Permissions
+\t\t}
+\t\troles
+\t\t{
+\t\t\tCEO
+\t\t\t{
+\t\t\t\t"librarian"
+\t\t\t\t{
+\t\t\t\t\tdescription = "Hierarchy role"
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  const plan = authPlan(app);
+  assert.deepEqual(plan.roles.map(({ role_name, source }) => ({ role_name, source })), [
+    { role_name: 'Librarian', source: 'profile' },
+    { role_name: 'CEO', source: 'hierarchy' },
+    { role_name: 'librarian', source: 'hierarchy' },
+  ]);
+  const collision = plan.notes.filter((note) => note.includes('Potential Catalyst role-name collision'));
+  assert.deepEqual(collision, [
+    'Potential Catalyst role-name collision: profile "Librarian" and hierarchy role "librarian" differ only by case. Catalyst case sensitivity is undocumented; verify before creating both roles.',
+  ]);
+  assert.equal(authAsReport(plan).includes(collision[0]), true);
+  assert.equal(authAsReport(plan), authAsReport(authPlan(app)));
+});

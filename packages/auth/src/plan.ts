@@ -91,6 +91,7 @@ const CRUD: { verbs: string[]; crud: Crud }[] = [
 export function authPlan(app: App): AuthPlan {
   const formNames = new Set(app.forms.map((form) => form.name));
   const roles: PlannedRole[] = [];
+  const notes: string[] = [];
   const portalUsers: PortalUserPlan[] = [];
   const tablePermissions: TablePermission[] = [];
   const pageAccess: { page: string; role: string }[] = [];
@@ -101,6 +102,23 @@ export function authPlan(app: App): AuthPlan {
   const claimed = new Set<string>();
   for (const profile of app.profiles) claimed.add(foldRoleName(profile.name));
   walkRoles(app.roles, undefined, (role) => claimed.add(foldRoleName(role.name)));
+
+  // Catalyst role-name case sensitivity is not established in the facts ledger.
+  // Preserve source spelling and warn when profile/hierarchy names differ only
+  // by case, so the plan never asserts undocumented platform behavior.
+  const profileByLowerName = new Map<string, string>();
+  for (const profile of app.profiles) profileByLowerName.set(profile.name.toLowerCase(), profile.name);
+  const warnedCollisions = new Set<string>();
+  walkRoles(app.roles, undefined, (role) => {
+    const profile = profileByLowerName.get(role.name.toLowerCase());
+    if (profile && profile !== role.name) {
+      const pair = `${profile}\u0000${role.name}`;
+      if (!warnedCollisions.has(pair)) {
+        warnedCollisions.add(pair);
+        notes.push(`Potential Catalyst role-name collision: profile \"${profile}\" and hierarchy role \"${role.name}\" differ only by case. Catalyst case sensitivity is undocumented; verify before creating both roles.`);
+      }
+    }
+  });
 
   /**
    * The Catalyst role a name becomes. A name that spells a built-in role gets
@@ -176,7 +194,7 @@ export function authPlan(app: App): AuthPlan {
     });
   });
 
-  const notes = [
+  notes.push(
     'Dry run. This plan does not call Catalyst and does not create roles, users, or table permissions.',
     'Every Catalyst role is cloned. Apply-time resolves clone_role "App User" or "App Administrator" to that project\'s role id. The id is not invented here.',
     'A Creator profile becomes a Catalyst role of the same name — unless the name spells a built-in Catalyst role under case/space/punctuation folding, in which case the role is "Creator <profile>"; an app user is never invited onto a built-in role by a profile name. Table permissions hang off that role. The shim access policy is keyed by the profile name, so the signed-in principal.profile must be that name.',
@@ -186,7 +204,7 @@ export function authPlan(app: App): AuthPlan {
     'Record sharing by owner on portal profiles and on forms listed in role Hierarchy (no View All: own rows only; no Modify All: edit and delete own rows only), hidden and read-only fields, and add-only grants are enforced by c2c_api. Catalyst table permissions carry no field or row rule, so they do not express these; the generated client reads and writes only through c2c_api. migration-report.json security lists what is not enforced.',
     'Hosted and embedded login are both planned on. Public signup stays off until the owner turns it on. No authorized domain is invented.',
     'A profile with no ModulePermissions is not an empty allow. Creator predefined sets are written out as grants: Administrator (app owner and admins) can view, add, edit, and delete every form (GLOBAL). Write can view, add, and edit every form (ORG). Read can view every form (ORG). The Customer portal default ("only add and view") can view and add every form (ORG). The shim has one write bit, so add also allows update there. Delete is a separate bit and is not implied by write: only Administrator, among these presets, has it. Any other profile with no modules, including Developer, gets no grant. App User and App Administrator are the Catalyst clone targets for these profiles, not extra profile names.',
-  ];
+  );
 
   return {
     dryRun: true,
