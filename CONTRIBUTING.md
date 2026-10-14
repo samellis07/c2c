@@ -45,6 +45,37 @@ Commit as yourself. No tool, assistant or automation trailers
 
 Run `npm test` before you push.
 
+## Generated files and merges
+
+Some tracked files are regenerated from other sources. Never resolve a
+conflict in one by hand and never pick a side (`--ours`/`--theirs`) — a side
+pick silently reverts the other branch's source changes inside the same
+derived file. Regenerate instead.
+
+| File | Regenerate with |
+|---|---|
+| `packages/determinism/test/manifests/*.sha256` | `npm run determinism:update` (offline) |
+| `docs/determinism-status.md` | `C2C_FIXTURES_DIR=<fixtures> npm run determinism:status` |
+| `docs/decimal-audit.md` | `node dist/determinism/src/decimal-audit.js <fixtures>/gallery > docs/decimal-audit.md` |
+| `docs/quality-gate.md` | `C2C_FIXTURES_DIR=<fixtures> npm run smoke:gallery -- --markdown`, paste the block between the markers |
+| `docs/coverage-gate.md` | `C2C_FIXTURES_DIR=<fixtures> npm run coverage:95` |
+
+A merge driver automates this. Run once per clone (`git config` cannot be
+committed):
+
+```sh
+npm run merge-driver:install
+```
+
+`.gitattributes` then routes these paths through `tools/merge-generated.sh`,
+which regenerates offline manifests from in-repo inputs and union-merges gallery
+docs by default. Gallery regeneration can run only in the train's explicit
+regen gate, with `C2C_MERGE_REGENERATE=1` set for that merge command and the
+gallery inputs available. Ordinary merge and rebase commands must leave that
+variable unset, even when fixtures are present. A union-merged generated file
+is not canonical, so `npm test` fails stale until you run the regen command
+above — that failure, not a hand-merge, is the resolution path.
+
 ## Tests
 
 Tests are colocated under `packages/<name>/test/`, named after behaviour, and
