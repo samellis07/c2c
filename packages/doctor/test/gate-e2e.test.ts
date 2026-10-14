@@ -73,7 +73,9 @@ function runC2c(args: string[], cwd: string): { code: number; stdout: string; st
   try {
     const stdout = execFileSync(process.execPath, [c2cBin, ...args], {
       cwd,
-      env: { PATH: nodeOnlyBin(cwd), HOME: join(cwd, 'home'), C2C_WORKSPACE: cwd },
+      // A shared V8 compile cache so each e2e spawn does not recompile the CLI
+      // (ignored on runtimes without it).
+      env: { PATH: nodeOnlyBin(cwd), HOME: join(cwd, 'home'), C2C_WORKSPACE: cwd, NODE_COMPILE_CACHE: join(tmpdir(), 'c2c-node-compile-cache') },
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });

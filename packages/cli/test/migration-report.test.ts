@@ -17,6 +17,9 @@ import {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const fixtures = join(root, 'fixtures/redistributable');
+// The `node c2c.js` children below share a V8 compile cache so each e2e spawn
+// does not recompile the whole CLI (ignored on runtimes without it).
+process.env.NODE_COMPILE_CACHE ??= join(tmpdir(), 'c2c-node-compile-cache');
 
 const Z = { start: 0, end: 0 };
 

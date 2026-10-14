@@ -82,13 +82,13 @@ test('the client runtime evaluates and boots with the page model and document de
     assert.fail(`the client runtime did not evaluate: ${(err as Error).message}`);
   }
   await runtime.boot(model, win.document);
-  for (let i = 0; i < 10; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  for (let i = 0; i < 10; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const doc = win.document;
   assert.ok(doc.querySelector('section[data-report]'), 'boot renders the report section');
   const button = doc.querySelector('[data-print-record]');
   assert.ok(button, 'the record view offers a Print button');
   (button as HTMLElement).dispatchEvent(new (win as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent('click', { bubbles: true }));
-  for (let i = 0; i < 10; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  for (let i = 0; i < 10; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const sheet = doc.querySelector('[data-print-sheet]');
   assert.ok(sheet, 'the print sheet opens from the record view');
   assert.match(sheet?.textContent ?? '', /Ada Lovelace/);

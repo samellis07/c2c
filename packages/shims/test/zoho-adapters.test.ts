@@ -69,6 +69,9 @@ function liveConfig(origin: string, extra: Partial<ZohoConnectionsConfig> = {}):
     connections: { c2c_crm: 'c2c_crm', c2c_books: 'c2c_books', c2c_desk: 'c2c_desk', c2c_cliq: 'c2c_cliq', c2c_creator: 'c2c_creator' },
     credentials: async (name) => `fake-token-for-${name}`,
     originOverrides: { 'https://www.zohoapis.in': origin, 'https://desk.zoho.in': origin, 'https://cliq.zoho.in': origin },
+    // Instant backoff: retry behaviour is asserted, not the wall clock — real
+    // setTimeout sleeps stalled this file for seconds on each retryable 5xx.
+    sleep: async () => {},
     ...extra,
   };
 }

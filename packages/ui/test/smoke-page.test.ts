@@ -248,7 +248,7 @@ async function bootSmoke(model: UiModel, runtime: Record<string, unknown>, fetch
   for (let i = 0; i < 200; i++) {
     const state = view.document.querySelector('[data-smoke-state]')?.getAttribute('data-smoke-state');
     if (state && state !== 'pending' && state !== 'running') return { dom: dom as unknown as SmokeDom, state };
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
   return { dom: dom as unknown as SmokeDom, state: 'timeout' };
 }

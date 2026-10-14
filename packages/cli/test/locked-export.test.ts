@@ -27,6 +27,9 @@ import {
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const cli = path.join(repo, 'dist/cli/src/c2c.js');
+// The many `node c2c.js` children below share a V8 compile cache so each e2e
+// spawn does not recompile the whole CLI (ignored on runtimes without it).
+process.env.NODE_COMPILE_CACHE ??= path.join(tmpdir(), 'c2c-node-compile-cache');
 const lockedHtml = path.join(repo, 'tests/fixtures/locked-export.html');
 const cleanDs = path.join(repo, 'fixtures/redistributable/library-application-system/library_application.ds');
 

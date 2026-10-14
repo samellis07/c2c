@@ -237,7 +237,7 @@ test('each decoration runs and the page shows a form and a report', async () => 
     runScripts: 'outside-only',
   }).window as unknown as PageWin;
   await runtime.boot(model, formWin.document);
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const formEl = formWin.document.querySelector('form[data-form="Purchase_Order"]');
   assert.ok(formEl);
   assert.equal(formEl.querySelector('[data-field="PO_Title"]')?.getAttribute('data-column'), '1');
@@ -256,7 +256,9 @@ test('each decoration runs and the page shows a form and a report', async () => 
     json: async () => ({ rows }),
   })) as unknown as typeof fetch;
   await runtime.boot(model, reportWin.document);
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // The decoration pass runs on a timer scheduled after the rows' fetch
+  // resolves: a few timer turns, not a wall-clock wait.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const section = reportWin.document.querySelector('section[data-report="All_Purchase_Orders"]');
   assert.ok(section);
   assert.deepEqual(
@@ -274,7 +276,7 @@ test('each decoration runs and the page shows a form and a report', async () => 
   ]);
 
   reportWin.location.hash = '#/report/All_Purchase_Orders/row/1';
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(reportWin.document.querySelector('[data-block]')?.getAttribute('data-block'), 'Overview');
   assert.match(runtime.renderForm(form), /data-layout="two"/);
 });

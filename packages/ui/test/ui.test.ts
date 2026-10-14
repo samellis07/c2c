@@ -2343,7 +2343,7 @@ test('an on-edit load handler does not run on the add screen, an on-add one does
       url: 'http://localhost/slate/index.html#/form/Item',
     });
     await (runtime.boot as (model: UiModel, doc: unknown) => Promise<void>)(makeModel(recordEvent), dom.window.document);
-    for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+    for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
     const block = dom.window.document.querySelector('[data-field="Secret"]');
     assert.equal(block ? (block as unknown as { hidden: boolean }).hidden : null, hidden, recordEvent);
   }
@@ -2426,17 +2426,17 @@ test('browser form runs load, input, validate, then success in order on submit',
     return okResponse({ dryRun: true });
   }) as unknown as typeof fetch;
   await runtime.boot(model, dom.window.document);
-  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const win = dom.window as unknown as JsWin;
   const input = win.document.querySelector('input[name="Title"]') as unknown as { value: string; dispatchEvent(e: unknown): boolean } | null;
   assert.ok(input);
   input.value = 'Hello';
   input.dispatchEvent(new win.Event('change', { bubbles: true }));
-  for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const form = win.document.querySelector('form');
   assert.ok(form);
   form.dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
-  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual((globalThis as { __c2cOrder?: string[] }).__c2cOrder, ['load', 'input', 'validate', 'success']);
   assert.equal(posts.length, 1);
   assert.equal(posts[0].endpoint, '/forms/Item/submit');
@@ -2459,10 +2459,10 @@ test('browser form: a cancel-submit validate stops the write', async () => {
     return okResponse({ dryRun: true });
   }) as unknown as typeof fetch;
   await runtime.boot(model, dom.window.document);
-  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const cancelWin = dom.window as unknown as JsWin;
   cancelWin.document.querySelector('form')?.dispatchEvent(new cancelWin.Event('submit', { bubbles: true, cancelable: true }));
-  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual((globalThis as { __c2cOrder?: string[] }).__c2cOrder, ['validate']);
   assert.equal(posts.length, 0);
 });
@@ -2487,13 +2487,13 @@ test('browser form edit route prefills the row, runs on-edit handlers and posts 
     return okResponse({ dryRun: false, wrote: true });
   }) as unknown as typeof fetch;
   await runtime.boot(model, dom.window.document);
-  for (let i = 0; i < 40; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let i = 0; i < 40; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const editWin = dom.window as unknown as JsWin;
   const input = editWin.document.querySelector('input[name="Title"]') as unknown as { value: string } | null;
   assert.equal(input?.value, 'stored');
   assert.equal(editWin.document.querySelector('button[type="submit"]')?.textContent, 'Update');
   editWin.document.querySelector('form')?.dispatchEvent(new editWin.Event('submit', { bubbles: true, cancelable: true }));
-  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual((globalThis as { __c2cOrder?: string[] }).__c2cOrder, ['load-edit', 'validate-edit', 'success-edit']);
   const submit = posts.find((post) => post.endpoint === '/forms/Item/submit');
   assert.ok(submit);
@@ -2532,16 +2532,16 @@ test('browser subform row add and delete fire addrow/deleterow handlers with the
   });
   (dom.window as unknown as { fetch: typeof fetch }).fetch = (async () => okResponse({ dryRun: true })) as unknown as typeof fetch;
   await runtime.boot(model, dom.window.document);
-  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const win = dom.window as unknown as JsWin;
   const add = win.document.querySelector('[data-add-row]');
   assert.ok(add);
   add.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
-  for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const remove = win.document.querySelector('[data-remove-row]');
   assert.ok(remove, 'a subform row renders a remove button');
   remove.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
-  for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual((globalThis as { __c2cOrder?: string[] }).__c2cOrder, ['addrow', 'deleterow']);
   assert.equal(win.document.querySelectorAll('.subform tbody tr').length, 0);
 });

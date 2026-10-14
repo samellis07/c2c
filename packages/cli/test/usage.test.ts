@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -62,6 +62,9 @@ test('analyze without --lock keeps the implicit default behavior', () => {
   assert.equal(result.stderr, '');
   assert.match(result.stdout, /deterministic/);
 });
+// The `node c2c.js` children below share a V8 compile cache so each e2e spawn
+// does not recompile the whole CLI (ignored on runtimes without it).
+process.env.NODE_COMPILE_CACHE ??= join(tmpdir(), 'c2c-node-compile-cache');
 
 test('cli without arguments prints usage and exits 2', () => {
   const result = spawnSync(process.execPath, [cli], { encoding: 'utf8' });
