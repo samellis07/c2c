@@ -647,7 +647,10 @@ export function SignaturePadField({ form, field, error, value, rowId }: FieldPro
   const stored = text(value);
   return (
     <Box field={field}>
-      <span className={`${inputStyles.label} c2c-label field-title`}>{field.label}</span>
+      <label id={`${field.name}-label`} className={`${inputStyles.label} c2c-label field-title`}>
+        {field.label}
+        {field.required ? <span aria-hidden="true"> *</span> : null}
+      </label>
       {stored && !cleared ? (
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           <StoredSignature form={form} field={field} rowId={rowId} />
@@ -656,7 +659,7 @@ export function SignaturePadField({ form, field, error, value, rowId }: FieldPro
       ) : (
         <>
           <Suspense fallback={<FieldLoading field={field} bare />}>
-            <SignaturePad label={field.label} onChange={(next) => { setStrokes(next); notify(); }} />
+            <SignaturePad label={field.label} required={field.required} labelledBy={`${field.name}-label`} onChange={(next) => { setStrokes(next); notify(); }} />
           </Suspense>
           <input type="hidden" name={field.name} value={strokes.length ? JSON.stringify(strokes) : ''} />
         </>
@@ -672,12 +675,17 @@ export function RichTextField({ field, error, value }: FieldProps) {
   const notify = useNotify(field.name);
   return (
     <Box field={field}>
-      <span className={`${inputStyles.label} c2c-label field-title`}>{field.label}</span>
+      <label id={`${field.name}-label`} className={`${inputStyles.label} c2c-label field-title`}>
+        {field.label}
+        {field.required ? <span aria-hidden="true"> *</span> : null}
+      </label>
       <Suspense fallback={<FieldLoading field={field} bare />}>
         <RichTextEditor
           defaultValue={current}
           onChange={(next: RichTextValue) => { setCurrent(next.html); notify(); }}
           aria-label={field.label}
+          aria-labelledby={`${field.name}-label`}
+          aria-required={field.required || undefined}
         />
       </Suspense>
       <input type="hidden" name={field.name} value={current} />

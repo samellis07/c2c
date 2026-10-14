@@ -581,6 +581,8 @@ export interface RichTextEditorProps {
   readOnly?: boolean;
   autoFocus?: boolean;
   "aria-label"?: string;
+  "aria-labelledby"?: string;
+  "aria-required"?: boolean;
   className?: string;
   style?: CSSProperties;
 }
@@ -647,7 +649,7 @@ function ToolButton({ label, pressed, shortcut, onPress, children }: { label: st
  */
 export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorProps>(function RichTextEditor({
   value, defaultValue, defaultMarkdown, onChange, onHistoryChange, placeholder = "Start writing", blockHint = "Type / for blocks",
-  readOnly = false, autoFocus = false, "aria-label": ariaLabel = "Editor", className, style,
+  readOnly = false, autoFocus = false, "aria-label": ariaLabel = "Editor", "aria-labelledby": ariaLabelledBy, "aria-required": ariaRequired, className, style,
 }, ref) {
   const reduced = !!useReducedMotion();
   const uid = useId();
@@ -1467,6 +1469,8 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       role="textbox"
       aria-multiline="true"
       aria-label={ariaLabel}
+      aria-labelledby={ariaLabelledBy}
+      aria-required={ariaRequired || undefined}
       aria-readonly={readOnly || undefined}
       aria-controls={slashOpen ? `${uid}-slash` : undefined}
       aria-activedescendant={slashOpen ? optionId(slashIndex) : undefined}

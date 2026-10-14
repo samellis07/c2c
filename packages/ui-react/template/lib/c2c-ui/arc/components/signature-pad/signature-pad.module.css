@@ -12,19 +12,20 @@
   background: var(--surface); cursor: crosshair; touch-action: none; user-select: none; -webkit-user-select: none; isolation: isolate;
   transition: border-color var(--duration-fast) var(--ease-standard);
 }
+.surface { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; touch-action: none; outline: none; cursor: crosshair; }
+/* The pad clips the ink, so the keyboard ring draws inside the edge: a negative offset keeps it inside the clip. */
+.surface:focus-visible { outline: var(--focus-outline-width, 2px) solid var(--focus-outline, color-mix(in oklab, var(--accent-strong) 72%, transparent)); outline-offset: -2px; --focus-outline-offset: -2px; }
 .pad[data-drawing] { border-color: var(--border-strong); }
 
-.guide { position: absolute; inset: 0; pointer-events: none; }
-.baseline { position: absolute; left: 7%; right: 7%; top: 72%; border-top: 1.5px dashed var(--border-strong); }
+.guide { pointer-events: none; }
+.baseline { stroke: var(--border-strong); stroke-width: 1.5; stroke-dasharray: 4 4; }
 .mark { position: absolute; left: 7%; top: 72%; color: var(--text-muted); translate: 0 calc(-100% - 6px); }
-.signer { position: absolute; left: 7%; top: calc(72% + 8px); color: var(--text-muted); font-size: var(--text-xs); line-height: var(--leading-body); }
+.signer { fill: var(--text-muted); font-size: 11px; }
 .hint {
-  position: absolute; left: 50%; top: 72%; translate: -50% calc(-100% - 8px); color: var(--text-muted);
-  font-size: var(--text-lg); line-height: var(--leading-body); white-space: nowrap;
+  fill: var(--text-muted); font-size: 18px; dominant-baseline: auto;
 }
 
-.ink { position: absolute; inset: 0; pointer-events: none; }
-.ink svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.ink { pointer-events: none; }
 .stroke { fill: var(--ink-black); }
 .stroke[data-color="blue"], .nib[data-color="blue"] { fill: var(--ink-blue); }
 .stroke[data-color="violet"], .nib[data-color="violet"] { fill: var(--ink-violet); }
