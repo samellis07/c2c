@@ -68,6 +68,20 @@ test('decimal audit counts criteria and sort sites on exact-decimal columns and 
 test('docs/decimal-audit.md matches the gallery when C2C_FIXTURES_DIR is set', () => {
   const doc = readFileSync(join(process.cwd(), 'docs/decimal-audit.md'), 'utf8');
   assert.match(doc, /^# Exact-decimal audit\n/);
+  const rows = [...doc.matchAll(/^\| ([^|]+) \| (\d+) \|$/gm)].map(([, label, value]) => [label, Number(value)] as const);
+  assert.deepEqual(rows.map(([label]) => label), [
+    'corpus apps',
+    'apps with exact-decimal columns',
+    '`Form[criteria]` sites emitted',
+    '…criteria on an exact-decimal field',
+    '…sort by an exact-decimal field',
+    'report criteria/filters on an exact-decimal field',
+    'report sort by an exact-decimal field',
+    'sites not routed through the shadow path',
+    'raw JS arithmetic ops on a decimal operand',
+  ], 'fixture-less decimal audit must have exactly one complete table');
+  assert.ok(rows.every(([, value]) => Number.isSafeInteger(value) && value >= 0));
+  assert.equal((doc.match(/^# Exact-decimal audit$/gm) ?? []).length, 1);
   assert.match(doc, /\| sites not routed through the shadow path \| 0 \|/);
   assert.match(doc, /\| raw JS arithmetic ops on a decimal operand \| 0 \|/);
   const fixtures = process.env.C2C_FIXTURES_DIR;

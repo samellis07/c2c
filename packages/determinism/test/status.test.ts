@@ -603,3 +603,14 @@ test('no doc quotes a builtin TODO count that differs from docs/deluge-builtins.
   // determinism-status.md must keep quoting the count, or this guard checks nothing.
   assert.ok(quotes >= 1, 'expected docs/determinism-status.md to quote counts.todo');
 });
+
+test('committed status doc is structurally canonical without gallery fixtures', () => {
+  const doc = readFileSync(docPath, 'utf8');
+  const status = parseStatusDoc(doc);
+  assert.equal(doc, renderStatusDoc(status), 'status doc has duplicated, missing, or inconsistent generated rows');
+  assert.equal(status.totalApps, status.deterministicApps + status.perAppConstructSets.length);
+  assert.equal(status.todoTotal, status.perAppConstructSets.reduce((sum, row) => sum + row.items, 0));
+  assert.equal(status.todoTotal, status.kinds.reduce((sum, kind) => sum + kind.count, 0));
+  assert.equal(status.deterministicApps >= status.deterministicWithUiTodos.apps, true);
+  assertNoQuotedIdentifiers(status);
+});
