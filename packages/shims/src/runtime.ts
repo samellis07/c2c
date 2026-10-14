@@ -27,7 +27,7 @@ import { bigintsToDigits, jsonReplacer } from './ids.js';
 import { DelugeRuntimeError, DeleteRefused, StaleWriteError, SubmitRefused, UncapturedDelugeError, UniqueRefused } from './errors.js';
 import * as lists from './list.js';
 import { actualname, getFileName } from './file-values.js';
-import { abs, acos, acosh, asin, asinh, atan, atan2, atanh, average, cos, cosh, exp, frac, isEven, isNumber, isOdd, largest, log, log10, median, nthLargest, nthSmallest, round, sin, sinh, smallest, sqrt, tan, tanh, toHex, toWords, NUMERIC } from './number.js';
+import { abs, acos, acosh, asin, asinh, atan, atan2, atanh, cos, cosh, exp, frac, isEven, isNumber, isOdd, largest, log, log10, nthLargest, nthSmallest, round, sin, sinh, smallest, sqrt, tan, tanh, toHex, toWords, NUMERIC } from './number.js';
 import {
   containsIgnoreCase,
   encodeUrl,
@@ -880,8 +880,6 @@ export interface Shim {
   number: {
     largest(value: unknown): number | null;
     smallest(value: unknown): number | null;
-    average(value: unknown): unknown;
-    median(value: unknown): unknown;
     nthLargest(value: unknown, rank: unknown): unknown;
     nthSmallest(value: unknown, rank: unknown): unknown;
     toHex(value: unknown): string;
@@ -3663,7 +3661,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     },
     isEmpty: lists.isEmpty,
     isNumber,
-    number: { largest, smallest, average, median, nthLargest, nthSmallest, toHex, toWords, sin, cos, tan, asin },
+    number: { largest, smallest, nthLargest, nthSmallest, toHex, toWords, sin, cos, tan, asin },
     ifnull,
     log: {
       info(_ctx, value) {

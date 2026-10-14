@@ -199,36 +199,12 @@ export function toHex(value: unknown): string {
   return BigInt(text).toString(16);
 }
 
-/** Numeric-list average follows the Deluge number-list contract. */
-export function average(value: unknown): unknown {
-  return numericListAggregate(value, 'avg');
-}
-
-export function median(value: unknown): unknown {
-  return numericListAggregate(value, 'median');
-}
-
 export function nthLargest(value: unknown, rank: unknown): unknown {
   return numericListRank(value, rank, true);
 }
 
 export function nthSmallest(value: unknown, rank: unknown): unknown {
   return numericListRank(value, rank, false);
-}
-
-function numericListAggregate(value: unknown, op: 'avg' | 'median'): unknown {
-  if (!Array.isArray(value)) throw new DelugeRuntimeError(`${op}: expected a number list`);
-  const values = value.filter((item) => item != null && !(typeof item === 'string' && item.trim() === ''));
-  if (!values.length) return null;
-  const nums = values.map((item) => {
-    const n = typeof item === 'number' ? item : Number(item instanceof Decimal ? item.toString() : item);
-    if (!Number.isFinite(n)) throw new DelugeRuntimeError(`${op}: list contains a non-numeric value`);
-    return n;
-  });
-  nums.sort((a, b) => a - b);
-  if (op === 'avg') return nums.reduce((sum, n) => sum + n, 0) / nums.length;
-  const mid = Math.floor(nums.length / 2);
-  return nums.length % 2 ? nums[mid] : (nums[mid - 1]! + nums[mid]!) / 2;
 }
 
 function numericListRank(value: unknown, rank: unknown, descending: boolean): unknown {

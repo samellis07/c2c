@@ -236,6 +236,7 @@ test('a shimmed or supported builtin does not emit a todo hole', () => {
     assert.equal(/shim\.todo\(/.test(bodyText), false, `${entry.status} ${entry.name} :: ${entry.snippet}`);
     assert.equal(got.todos.length, 0, entry.snippet);
   }
+  assert.equal(shape('return toHex(255);').todo, false);
 });
 
 test('the cross-form arity table is the help-page pair list', () => {
