@@ -117,6 +117,19 @@ test('kanban lanes follow the options display field over group by', () => {
   assert.equal(r.Ghost.groupField, 'Product');
 });
 
+test('kanban with nothing to group is a counted manual TODO without an invented column', async () => {
+  const model = buildUi(
+    appOf(`\tform Ungrouped\n\t{\n${field('Title', 'text')}\n${field('Note', 'text')}\n\t}\n\tkanban Bare\n\t{\n\t\tshow all rows from Ungrouped\n\t\t(\n\t\t\tTitle\n\t\t\tNote\n\t\t)\n\t\toptions\n\t\t(\n\t\t)\n\t}`),
+  ).model;
+  const bare = model.reports.find((item) => item.name === 'Bare');
+  assert.ok(bare);
+  assert.equal(bare.status, 'todo');
+  assert.match(bare.todo ?? '', /needs a group-by field or a dropdown column/);
+  assert.equal(bare.groupField, undefined);
+  const { runtime } = await bootReport(model, 'Bare', [{ Title: 'A', Note: 'B' }]);
+  assert.doesNotThrow(() => runtime.renderReport(bare));
+});
+
 interface Runtime {
   boot(model: UiModel, doc: Document): Promise<void>;
   renderReport(report: UiModel['reports'][number]): string;
