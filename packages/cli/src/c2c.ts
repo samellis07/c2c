@@ -993,7 +993,8 @@ try {
     writeCliError(`c2c: ${err.message}\n`);
     code = 1;
   } else {
-    throw err;
+    writeCliError(`c2c: ${err instanceof Error ? err.message : String(err)}\n`);
+    code = 1;
   }
 }
 process.exitCode = code;
