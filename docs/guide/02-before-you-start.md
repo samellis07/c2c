@@ -36,7 +36,7 @@ the AI never types your passwords or tokens**
   organisation.
 - **The Catalyst CLI** (version 1.27.2 or newer), signed in to the
   same organisation and data centre.
-- Node.js 20 on the machine where the AI runs (20.20.1 recommended).
+- Node.js 20 or 22 on the machine where the AI runs (20.20.1 recommended).
 
 If a sign-in opened the wrong account or data centre, the doctor
 (see below) catches it — the AI will ask you to sign out and sign

@@ -12,11 +12,30 @@ c2c converts a Zoho Creator app (`.ds` export plus its records) into a Zoho Cata
 
 ## Install
 
-- **Claude Code:** `/plugin marketplace add samellis07/c2c` then `/plugin install c2c@creator-to-catalyst`. Then run `/c2c:doctor`.
-- **OpenAI Codex:** unpack the plugin, run `<plugin>/bin/c2c install-host "codex"`, start OpenAI Codex in your workspace, run `/prompts:c2c-doctor`.
-- **Cursor:** unpack the plugin, run `<plugin>/bin/c2c install-host cursor --project .`, run `/c2c-doctor`.
+The converter ships as a local build (`plugin/vendor/c2c`), so install from a checkout, not from the marketplace shorthand. From the repo root:
 
-`install-host` copies skills/commands into the host's folders. It never edits your MCP configuration; paste the snippet it prints (see `templates/mcp-snippets.md`) yourself.
+```sh
+npm ci
+npm run build
+node scripts/vendor-plugin.mjs
+```
+
+- **Claude Code:** `claude plugin marketplace add "$PWD/plugin"` then `claude plugin install c2c@creator-to-catalyst` (or the same two steps as `/plugin` commands inside Claude Code). Then run `/c2c:doctor`.
+- **OpenAI Codex:** unpack the plugin once (clone the repo and build it as above, or copy the `plugin/` folder somewhere stable), then copy its skills and commands into the host's folders:
+  ```sh
+  mkdir -p ~/.codex/skills ~/.codex/prompts
+  cp -R <plugin>/skills/* ~/.codex/skills/
+  for c in <plugin>/commands/*.md; do cp "$c" ~/.codex/prompts/c2c-$(basename "$c"); done
+  ```
+  Start OpenAI Codex in your workspace, run `/prompts:c2c-doctor`.
+- **Cursor:** unpack the plugin once (as above) and point the project at it with the rule template:
+  ```sh
+  mkdir -p .cursor/rules
+  sed "s|<c2c-plugin>|<path-to-plugin>|g" <plugin>/templates/cursor-rule.mdc > .cursor/rules/c2c.mdc
+  ```
+  (Replace `<path-to-plugin>` with the unpacked `plugin/` folder path.) Then ask the agent to run the c2c doctor.
+
+Installing never edits your MCP configuration; paste the snippet for your host yourself (see `templates/mcp-snippets.md`).
 
 ## Flow
 
