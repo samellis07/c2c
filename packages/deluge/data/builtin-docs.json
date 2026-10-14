@@ -4941,7 +4941,8 @@
       ],
       "arity": 1,
       "form": "free",
-      "docUrl": "https://www.zoho.com/deluge/help/functions/number/average.html"
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/average.html",
+      "snippet": "x = average({1, 5, 2, 3});"
     },
     {
       "name": "ceil",
@@ -5205,7 +5206,8 @@
       ],
       "arity": 1,
       "form": "free",
-      "docUrl": "https://www.zoho.com/deluge/help/functions/number/median.html"
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/median.html",
+      "snippet": "x = median({1, 5, 2, 3});"
     },
     {
       "name": "min",
