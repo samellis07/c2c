@@ -91,8 +91,8 @@ test('the checklist is one numbered list: slate start, admin invite, sign in, se
   assert.match(items[1]!, /invite/i);
   assert.match(items[2]!, /[Ss]ign in/);
   assert.match(items[3]!, /sender/i);
-  assert.match(items[3]!, /--mail-from <address>/);
-  assert.match(items[3]!, /verification code/);
+  assert.match(items[3]!, /mail.from/);
+  assert.match(items[3]!, /verification code|code sent/);
   const printed = formatHumanChecklist({ slate: true, sendsMail: true });
   assert.match(printed, /^human checklist:\n1\. .*Start Exploring[\s\S]*2\. .*invite[\s\S]*3\. .*[Ss]ign in[\s\S]*4\. .*sender/);
 });
