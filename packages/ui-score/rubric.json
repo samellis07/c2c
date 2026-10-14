@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "scale": 10,
+  "passBar": 8,
+  "viewports": {
+    "desktop": { "width": 1440, "height": 900 },
+    "phone": { "width": 390, "height": 844 }
+  },
+  "criteria": [
+    {
+      "id": "layout",
+      "title": "Layout parity",
+      "weights": { "desktop": 1.5, "phone": 1.5 },
+      "checks": [
+        "the app title is the Creator application name",
+        "each form shows its fields in the Creator field order",
+        "each titled Creator section field is a heading in its form",
+        "each form, report and page route renders without a not-generated placeholder",
+        "phone: a multi-column form layout collapses to one column"
+      ]
+    },
+    {
+      "id": "navigation",
+      "title": "Navigation (desktop menu; phone tab bar and More)",
+      "weights": { "desktop": 1.5, "phone": 2 },
+      "checks": [
+        "desktop: every visible Creator section is a menu group with its label",
+        "desktop: every form, report and page of a visible section is a menu link with its Creator label",
+        "desktop: the link of the open route is marked current",
+        "phone: the tab bar has between one and five entries, each with a name",
+        "phone: when the menu has more destinations than tabs, a More control opens a sheet and Escape closes it",
+        "phone: every menu destination is a tab or a More sheet link"
+      ]
+    },
+    {
+      "id": "forms",
+      "title": "Forms and fields",
+      "weights": { "desktop": 1.5, "phone": 1.5 },
+      "checks": [
+        "each form route renders a form headed with the Creator form label",
+        "each input field of the Creator form is present",
+        "each field's control suits its Creator type (choice, date, file, composite, subform, ...)",
+        "each field's label is its Creator label",
+        "each mandatory Creator field is marked required"
+      ]
+    },
+    {
+      "id": "reports",
+      "title": "Reports and columns",
+      "weights": { "desktop": 1.5, "phone": 1.5 },
+      "checks": [
+        "each report route renders a report headed with the Creator report label",
+        "desktop: each Creator column label is shown",
+        "phone: the phone quick view columns (or the first four) are shown on the record card",
+        "a chart or pivot report renders a chart area"
+      ]
+    },
+    {
+      "id": "actions",
+      "title": "Actions",
+      "weights": { "desktop": 1, "phone": 1 },
+      "checks": [
+        "each form has a submit button",
+        "each Creator form button label is a button",
+        "each Creator report custom action is a button",
+        "each record of a form-backed report can be opened or edited"
+      ]
+    },
+    {
+      "id": "states",
+      "title": "Empty and error states",
+      "weights": { "desktop": 1, "phone": 0.75 },
+      "checks": [
+        "a report with no records shows an empty state",
+        "a report whose data call fails shows an error with a retry",
+        "submitting a form with an empty mandatory field shows a field error",
+        "a slow report shows a busy loading state (measured, not yet scored)",
+        "a destructive action asks for confirmation first (measured, not yet scored)",
+        "a second submit while busy posts once (measured, not yet scored)",
+        "a 403 shows a denied screen with a way home, no dead retry (measured, not yet scored)",
+        "an unknown route shows a not-found screen with a way home and focus (measured, not yet scored)",
+        "a write result shows a toast that dismisses or closes (measured, not yet scored)",
+        "a route change focuses the screen heading and retitles the document (measured, not yet scored)"
+      ]
+    },
+    {
+      "id": "accessibility",
+      "title": "Accessibility basics",
+      "weights": { "desktop": 1, "phone": 0.75 },
+      "checks": [
+        "the document has a language and a title",
+        "a skip link leads to the main landmark",
+        "every navigation landmark has a name",
+        "every form control and button on every route has an accessible name",
+        "no route repeats an element id",
+        "phone: the More control states its popup and expanded state; the sheet is a dialog"
+      ]
+    },
+    {
+      "id": "responsive",
+      "title": "Responsiveness",
+      "weights": { "desktop": 1, "phone": 1 },
+      "checks": [
+        "the page declares a device-width viewport",
+        "desktop: the menu is shown and the tab bar is hidden",
+        "phone: the menu is hidden and the tab bar is shown",
+        "phone: the More sheet is a fixed overlay",
+        "phone: report rows become cards or the table scrolls sideways"
+      ]
+    }
+  ]
+}

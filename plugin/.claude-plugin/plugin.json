@@ -1,0 +1,19 @@
+{
+  "name": "c2c",
+  "version": "0.2.0",
+  "description": "Creator to Catalyst (c2c): migrate a Zoho Creator app (.ds export plus data) to its own Zoho Catalyst project. Gated by a read-only doctor that requires the official Catalyst plugin (skills, MCP connector) and the Catalyst CLI. Dry run by default, resumable, stores no customer data.",
+  "author": { "name": "Sam Ellis" },
+  "homepage": "https://github.com/samellis07/c2c",
+  "repository": "https://github.com/samellis07/c2c.git",
+  "license": "MIT",
+  "keywords": ["zoho", "creator", "catalyst", "migration", "deluge", "low-code", "c2c"],
+  "dependencies": ["catalyst-by-zoho@catalyst-by-zoho"],
+  "metadata": {
+    "requires": {
+      "catalystPlugin": ">=0.0.2",
+      "catalystCli": ">=1.27.2",
+      "node": "20.x (pinned 20.20.1)"
+    },
+    "note": "dependencies is resolved by Claude Code only. Cross-marketplace resolution is [UNVERIFIED]. c2c doctor checks the prerequisite on every host regardless."
+  }
+}

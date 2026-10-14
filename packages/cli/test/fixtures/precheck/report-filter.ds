@@ -1,0 +1,40 @@
+/*
+ * Author       : synthetic
+ * Generated on : 01-Jan-2025 12:00:00
+ * Version      : 1.0
+ */
+application "Precheck_Filter"
+{
+	forms
+	{
+		form Item
+		{
+			Title
+			(
+				type = text
+				displayname = "Title"
+			)
+			Tags
+			(
+				type = list
+				displayname = "Tags"
+				values = {"a","b"}
+			)
+		}
+	}
+	reports
+	{
+		list All_Items
+		{
+			displayName = "All Items"
+			show all rows from Item
+			(
+				Title as "Title"
+			)
+			filters
+			(
+				"Has a" : Tags == "a"
+			)
+		}
+	}
+}

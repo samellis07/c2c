@@ -1,0 +1,74 @@
+#!/bin/sh
+# c2c launcher. Runs the vendored creator-to-catalyst CLI with integrity and Node checks.
+# - Never writes inside the plugin directory.
+# - Never reads credential files; X_ZC_CREDENTIAL_PATH and CATALYST_TOKEN are passed through untouched.
+# Exit 6 = environment/integrity problem (see references/doctor-spec.md D-E1, D-E3).
+set -eu
+
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(dirname -- "$HERE")
+VENDOR="$ROOT/vendor/c2c"
+ENTRY="$VENDOR/dist/cli/src/c2c.js"
+PINNED_NODE="20.20.1"
+# Source of truth for supported Node: the repo package.json engines.node and
+# packages/doctor/data/compat.json node.range (currently ">=20.20 <23",
+# i.e. Node 20 or 22). This launcher mirrors that range as majors 20/22 with
+# the 20.20 floor; anything else (including Node 21) is refused.
+NODE_RANGE=">=20.20 <23"
+
+node_supported() {
+  _v=$1
+  case "$_v" in
+    ''|*[!0-9.]*|*.*.*.*) return 1 ;;
+  esac
+  _major=${_v%%.*}
+  _rest=${_v#*.}
+  case "$_rest" in
+    "$_v") return 1 ;;
+  esac
+  _minor=${_rest%%.*}
+  case "$_minor" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  if [ "$_major" = "20" ]; then
+    [ "$_minor" -ge 20 ]
+  elif [ "$_major" = "22" ]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "c2c: Node.js is not installed. Install Node 20 or 22 (pinned $PINNED_NODE, e.g. 'nvm install $PINNED_NODE')." >&2
+  exit 6
+fi
+
+NODE_V=$(node -p 'process.versions.node')
+if ! node_supported "$NODE_V"; then
+  echo "c2c: Node $NODE_V is not supported; c2c needs Node 20 or 22 ($NODE_RANGE; pinned $PINNED_NODE). Fix: nvm install $PINNED_NODE && nvm use $PINNED_NODE" >&2
+  exit 6
+fi
+if [ "$NODE_V" != "$PINNED_NODE" ] && [ -z "${C2C_QUIET_NODE_WARN:-}" ]; then
+  echo "c2c: warning: Node $NODE_V is not the pinned $PINNED_NODE; byte-identical manifests are only guaranteed on $PINNED_NODE." >&2
+fi
+
+if [ ! -f "$ENTRY" ]; then
+  echo "c2c: the vendored converter is missing ($ENTRY). Reinstall the c2c plugin." >&2
+  exit 6
+fi
+
+# Integrity: verify vendor/c2c against MANIFEST.sha256 once per version per workspace.
+# The marker lives in the caller's workspace (.c2c/), never in the plugin directory.
+VERSION=$(cat "$VENDOR/VERSION" 2>/dev/null || echo unknown)
+MARK_DIR="${C2C_WORKSPACE:-$PWD}/c2c-out/.c2c"
+MARK="$MARK_DIR/vendor-ok-$VERSION"
+if [ ! -f "$MARK" ]; then
+  if ! node "$VENDOR/dist/cli/src/c2c.js" --verify-vendor "$VENDOR" >/dev/null 2>&1; then
+    echo "c2c: the c2c plugin files were modified or are incomplete (vendor manifest mismatch). Reinstall the plugin." >&2
+    exit 6
+  fi
+  mkdir -p "$MARK_DIR" 2>/dev/null && : > "$MARK" 2>/dev/null || true
+fi
+
+exec node "$ENTRY" "$@"

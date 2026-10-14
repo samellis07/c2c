@@ -1,0 +1,45 @@
+/*
+ * Charts, metric cards and Creator page layout. Built on the Arc foundation
+ * tokens and the --c2c-* theme layer (styles/tokens.css).
+ * Phone layout: below 768px every page column takes the full width.
+ */
+.c2c-page-body { display: flex; flex-direction: column; gap: var(--space-4); }
+.c2c-page-todos { margin: 0 0 var(--space-4); }
+.c2c-page-todos summary { cursor: pointer; font-weight: 600; }
+.c2c-page-todos ul { margin: var(--space-2) 0 0; padding-left: var(--space-5); }
+
+.c2c-zml-box { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.c2c-zml-row { display: flex; flex-wrap: wrap; align-items: stretch; gap: var(--space-4); min-width: 0; }
+.c2c-zml-col { display: flex; flex-direction: column; gap: var(--space-3); flex: 1 1 0; min-width: 0; }
+.c2c-zml-panel { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); }
+.c2c-zml-link { display: block; color: inherit; text-decoration: none; border-radius: var(--radius-panel); }
+.c2c-zml-link:focus-visible { outline: 2px solid var(--c2c-accent); outline-offset: 2px; }
+.c2c-zml-text { margin: 0; }
+.c2c-zml-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--c2c-accent); }
+
+.c2c-snippet { min-width: 0; overflow-wrap: anywhere; }
+.c2c-snippet img { max-width: 100%; height: auto; }
+.c2c-page-link, .c2c-page-button { display: inline-flex; align-items: center; align-self: flex-start; gap: var(--space-2); min-height: 2.5rem; padding: var(--space-2) var(--space-4); border-radius: var(--radius-control); font-weight: 600; text-decoration: none; }
+.c2c-page-link { border: 1px solid var(--border); color: var(--c2c-accent); background: var(--surface); }
+.c2c-page-button { background: var(--c2c-accent); color: var(--c2c-accent-ink); }
+.c2c-page-link:focus-visible, .c2c-page-button:focus-visible { outline: 2px solid var(--c2c-accent); outline-offset: 2px; }
+.c2c-embed > .c2c-card { max-width: none; margin: 0; box-shadow: none; }
+
+.c2c-chart-panel { min-width: 0; }
+.c2c-chart-panel h2 { margin: 0 0 var(--space-3); font-size: var(--text-base); font-weight: 600; }
+.c2c-chart { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.c2c-chart-note { margin: 0; color: var(--text-secondary); font-size: var(--text-xs); }
+
+[data-zml="metrics"] { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: var(--space-3); }
+.c2c-metric { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.c2c-metric > .c2c-zml-icon { align-self: flex-start; }
+.c2c-metric-extra { margin: 0; color: var(--text-secondary); font-size: var(--text-sm); }
+
+@media (max-width: 767px) {
+  .c2c-zml-col { flex-basis: 100% !important; max-width: 100% !important; }
+  .c2c-zml-panel { padding: var(--space-3); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .c2c-chart *, .c2c-metric * { transition-duration: 0s !important; animation-duration: 0s !important; }
+}

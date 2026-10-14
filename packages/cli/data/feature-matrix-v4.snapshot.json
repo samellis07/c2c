@@ -1,0 +1,1175 @@
+{
+  "schema": "c2c-feature-matrix-snapshot/1",
+  "matrix": "feature-matrix-v4",
+  "source": "feature-matrix-v4",
+  "sourceSha256": "1f256aed8a4e4826ce02181864bb3a6b0e60acab97465538fe695e9f178cb26e",
+  "snapshotDate": "2026-10-06",
+  "provisional": false,
+  "note": "Statuses are conservative: verified/migrated need a migration run plus e2e, of which none exists, so 0 rows are verified.",
+  "rows": [
+    {
+      "id": 1,
+      "area": "Field type",
+      "feature": "Single line",
+      "status": "adapter-written"
+    },
+    {
+      "id": 2,
+      "area": "Field type",
+      "feature": "Multi line",
+      "status": "adapter-written"
+    },
+    {
+      "id": 3,
+      "area": "Field type",
+      "feature": "Email",
+      "status": "adapter-written"
+    },
+    {
+      "id": 4,
+      "area": "Field type",
+      "feature": "Phone",
+      "status": "adapter-written"
+    },
+    {
+      "id": 5,
+      "area": "Field type",
+      "feature": "Number",
+      "status": "adapter-written"
+    },
+    {
+      "id": 6,
+      "area": "Field type",
+      "feature": "Decimal",
+      "status": "adapter-written"
+    },
+    {
+      "id": 7,
+      "area": "Field type",
+      "feature": "Percent",
+      "status": "adapter-written"
+    },
+    {
+      "id": 8,
+      "area": "Field type",
+      "feature": "Currency",
+      "status": "adapter-written"
+    },
+    {
+      "id": 9,
+      "area": "Field type",
+      "feature": "Date",
+      "status": "adapter-written"
+    },
+    {
+      "id": 10,
+      "area": "Field type",
+      "feature": "Date-time",
+      "status": "adapter-written"
+    },
+    {
+      "id": 11,
+      "area": "Field type",
+      "feature": "Time",
+      "status": "adapter-written"
+    },
+    {
+      "id": 12,
+      "area": "Field type",
+      "feature": "Decision box",
+      "status": "adapter-written"
+    },
+    {
+      "id": 13,
+      "area": "Field type",
+      "feature": "Dropdown",
+      "status": "adapter-written"
+    },
+    {
+      "id": 14,
+      "area": "Field type",
+      "feature": "Radio",
+      "status": "adapter-written"
+    },
+    {
+      "id": 15,
+      "area": "Field type",
+      "feature": "Multi select",
+      "status": "adapter-written"
+    },
+    {
+      "id": 16,
+      "area": "Field type",
+      "feature": "Checkbox (multi)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 17,
+      "area": "Field type",
+      "feature": "Lookup single",
+      "status": "adapter-written"
+    },
+    {
+      "id": 18,
+      "area": "Field type",
+      "feature": "Lookup multi",
+      "status": "adapter-written"
+    },
+    {
+      "id": 19,
+      "area": "Field type",
+      "feature": "Subform",
+      "status": "adapter-written"
+    },
+    {
+      "id": 20,
+      "area": "Field type",
+      "feature": "Users",
+      "status": "adapter-written"
+    },
+    {
+      "id": 21,
+      "area": "Field type",
+      "feature": "File upload",
+      "status": "adapter-written"
+    },
+    {
+      "id": 22,
+      "area": "Field type",
+      "feature": "Image",
+      "status": "adapter-written"
+    },
+    {
+      "id": 23,
+      "area": "Field type",
+      "feature": "Audio",
+      "status": "adapter-written"
+    },
+    {
+      "id": 24,
+      "area": "Field type",
+      "feature": "Video",
+      "status": "adapter-written"
+    },
+    {
+      "id": 25,
+      "area": "Field type",
+      "feature": "Signature",
+      "status": "adapter-written"
+    },
+    {
+      "id": 26,
+      "area": "Field type",
+      "feature": "URL",
+      "status": "adapter-written"
+    },
+    {
+      "id": 27,
+      "area": "Field type",
+      "feature": "Rich text",
+      "status": "adapter-written"
+    },
+    {
+      "id": 28,
+      "area": "Field type",
+      "feature": "Formula",
+      "status": "adapter-written"
+    },
+    {
+      "id": 29,
+      "area": "Field type",
+      "feature": "Auto number",
+      "status": "adapter-written"
+    },
+    {
+      "id": 30,
+      "area": "Field type",
+      "feature": "Name (composite)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 31,
+      "area": "Field type",
+      "feature": "Address (composite)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 32,
+      "area": "Field type",
+      "feature": "Section",
+      "status": "adapter-written"
+    },
+    {
+      "id": 33,
+      "area": "Field type",
+      "feature": "Add notes",
+      "status": "adapter-written"
+    },
+    {
+      "id": 34,
+      "area": "Field type",
+      "feature": "Integration field",
+      "status": "adapter-written"
+    },
+    {
+      "id": 35,
+      "area": "Field type",
+      "feature": "Prediction (Zia field)",
+      "status": "not-started"
+    },
+    {
+      "id": 36,
+      "area": "Field type",
+      "feature": "Keyword extraction",
+      "status": "adapter-written"
+    },
+    {
+      "id": 37,
+      "area": "Field type",
+      "feature": "Sentiment analysis",
+      "status": "adapter-written"
+    },
+    {
+      "id": 38,
+      "area": "Field type",
+      "feature": "OCR (text analysis)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 39,
+      "area": "Field type",
+      "feature": "Object detection",
+      "status": "adapter-written"
+    },
+    {
+      "id": 40,
+      "area": "Field type",
+      "feature": "QR / Barcode field (generated code image)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 41,
+      "area": "Field type",
+      "feature": "Geolocation (Address geo capture / Added Location)",
+      "status": "not a Creator feature"
+    },
+    {
+      "id": 42,
+      "area": "Field type",
+      "feature": "Legacy Zoho CRM field",
+      "status": "adapter-written"
+    },
+    {
+      "id": 43,
+      "area": "Field type",
+      "feature": "Legacy Zoho CRM link",
+      "status": "adapter-written"
+    },
+    {
+      "id": 44,
+      "area": "Field property",
+      "feature": "Mandatory",
+      "status": "adapter-written"
+    },
+    {
+      "id": 45,
+      "area": "Field property",
+      "feature": "Unique / no duplicates",
+      "status": "adapter-written"
+    },
+    {
+      "id": 46,
+      "area": "Field property",
+      "feature": "Default value",
+      "status": "adapter-written"
+    },
+    {
+      "id": 47,
+      "area": "Field property",
+      "feature": "Max length",
+      "status": "adapter-written"
+    },
+    {
+      "id": 48,
+      "area": "Field property",
+      "feature": "Decimal places",
+      "status": "adapter-written"
+    },
+    {
+      "id": 49,
+      "area": "Field property",
+      "feature": "Field validation (format rules)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 50,
+      "area": "Field property",
+      "feature": "Hide / show field (field rules)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 51,
+      "area": "Field property",
+      "feature": "Enable / disable field",
+      "status": "adapter-written"
+    },
+    {
+      "id": 52,
+      "area": "Field property",
+      "feature": "Personal data / encrypt",
+      "status": "adapter-written"
+    },
+    {
+      "id": 53,
+      "area": "Field property",
+      "feature": "Field-level permissions",
+      "status": "adapter-written"
+    },
+    {
+      "id": 54,
+      "area": "Field property",
+      "feature": "Search index on a column",
+      "status": "not-started"
+    },
+    {
+      "id": 55,
+      "area": "Field property",
+      "feature": "System Added / Modified Time",
+      "status": "adapter-written"
+    },
+    {
+      "id": 56,
+      "area": "Field property",
+      "feature": "System record id",
+      "status": "adapter-written"
+    },
+    {
+      "id": 57,
+      "area": "Field property",
+      "feature": "Added user",
+      "status": "adapter-written"
+    },
+    {
+      "id": 58,
+      "area": "Report",
+      "feature": "List report",
+      "status": "adapter-written"
+    },
+    {
+      "id": 59,
+      "area": "Report",
+      "feature": "List report, card quick view",
+      "status": "not-started"
+    },
+    {
+      "id": 60,
+      "area": "Report",
+      "feature": "List report, custom quick view",
+      "status": "not-started"
+    },
+    {
+      "id": 61,
+      "area": "Report",
+      "feature": "Detail view",
+      "status": "not-started"
+    },
+    {
+      "id": 62,
+      "area": "Report",
+      "feature": "Calendar",
+      "status": "not-started"
+    },
+    {
+      "id": 63,
+      "area": "Report",
+      "feature": "Timeline",
+      "status": "not-started"
+    },
+    {
+      "id": 64,
+      "area": "Report",
+      "feature": "Kanban",
+      "status": "not-started"
+    },
+    {
+      "id": 65,
+      "area": "Report",
+      "feature": "Map",
+      "status": "not-started"
+    },
+    {
+      "id": 66,
+      "area": "Report",
+      "feature": "Spreadsheet",
+      "status": "built-in-Creator"
+    },
+    {
+      "id": 67,
+      "area": "Report",
+      "feature": "Pivot table",
+      "status": "not-started"
+    },
+    {
+      "id": 68,
+      "area": "Report",
+      "feature": "Pivot chart",
+      "status": "not-started"
+    },
+    {
+      "id": 69,
+      "area": "Report",
+      "feature": "Gantt",
+      "status": "not a Creator feature"
+    },
+    {
+      "id": 70,
+      "area": "Report",
+      "feature": "Switch view",
+      "status": "not-started"
+    },
+    {
+      "id": 71,
+      "area": "Report",
+      "feature": "Predefined filters",
+      "status": "adapter-written"
+    },
+    {
+      "id": 72,
+      "area": "Report",
+      "feature": "Custom filter criteria",
+      "status": "adapter-written"
+    },
+    {
+      "id": 73,
+      "area": "Report",
+      "feature": "Grouping",
+      "status": "not-started"
+    },
+    {
+      "id": 74,
+      "area": "Report",
+      "feature": "Sorting",
+      "status": "adapter-written"
+    },
+    {
+      "id": 75,
+      "area": "Report",
+      "feature": "Search in a report",
+      "status": "adapter-written"
+    },
+    {
+      "id": 76,
+      "area": "Report",
+      "feature": "Conditional formatting",
+      "status": "not-started"
+    },
+    {
+      "id": 77,
+      "area": "Report",
+      "feature": "Record-level custom action",
+      "status": "adapter-written"
+    },
+    {
+      "id": 78,
+      "area": "Report",
+      "feature": "Bulk edit",
+      "status": "not-started"
+    },
+    {
+      "id": 79,
+      "area": "Report",
+      "feature": "Export (report)",
+      "status": "not-started"
+    },
+    {
+      "id": 80,
+      "area": "Report",
+      "feature": "Print (report or record)",
+      "status": "not-started"
+    },
+    {
+      "id": 81,
+      "area": "Report",
+      "feature": "Import into a report",
+      "status": "adapter-written"
+    },
+    {
+      "id": 82,
+      "area": "Report",
+      "feature": "Record comments",
+      "status": "not-started"
+    },
+    {
+      "id": 83,
+      "area": "Workflow",
+      "feature": "Field rules",
+      "status": "adapter-written"
+    },
+    {
+      "id": 84,
+      "area": "Workflow",
+      "feature": "Load of form",
+      "status": "adapter-written"
+    },
+    {
+      "id": 85,
+      "area": "Workflow",
+      "feature": "User input of a field",
+      "status": "adapter-written"
+    },
+    {
+      "id": 86,
+      "area": "Workflow",
+      "feature": "Addition of a subform row",
+      "status": "adapter-written"
+    },
+    {
+      "id": 87,
+      "area": "Workflow",
+      "feature": "Deletion of a subform row",
+      "status": "not-started"
+    },
+    {
+      "id": 88,
+      "area": "Workflow",
+      "feature": "Validation on form submission",
+      "status": "adapter-written"
+    },
+    {
+      "id": 89,
+      "area": "Workflow",
+      "feature": "Successful form submission",
+      "status": "adapter-written"
+    },
+    {
+      "id": 90,
+      "area": "Workflow",
+      "feature": "Update of a field",
+      "status": "adapter-written"
+    },
+    {
+      "id": 91,
+      "area": "Workflow",
+      "feature": "Validation on record deletion",
+      "status": "not-started"
+    },
+    {
+      "id": 92,
+      "area": "Workflow",
+      "feature": "Successful record deletion",
+      "status": "not-started"
+    },
+    {
+      "id": 93,
+      "area": "Workflow",
+      "feature": "Stateless form: button click",
+      "status": "not-started"
+    },
+    {
+      "id": 94,
+      "area": "Workflow",
+      "feature": "Schedule on a date field",
+      "status": "not-started"
+    },
+    {
+      "id": 95,
+      "area": "Workflow",
+      "feature": "Schedule on a fixed date and time",
+      "status": "adapter-written"
+    },
+    {
+      "id": 96,
+      "area": "Workflow",
+      "feature": "Custom schedule quota",
+      "status": "not-started"
+    },
+    {
+      "id": 97,
+      "area": "Workflow",
+      "feature": "Approval (multi-level)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 98,
+      "area": "Workflow",
+      "feature": "Payment workflow",
+      "status": "adapter-written"
+    },
+    {
+      "id": 99,
+      "area": "Workflow",
+      "feature": "Payment gateway names",
+      "status": "adapter-written"
+    },
+    {
+      "id": 100,
+      "area": "Workflow",
+      "feature": "Batch workflow on import",
+      "status": "built-in-Creator"
+    },
+    {
+      "id": 101,
+      "area": "Workflow",
+      "feature": "Batch workflow on a schedule",
+      "status": "built-in-Creator"
+    },
+    {
+      "id": 102,
+      "area": "Workflow",
+      "feature": "Blueprint stages",
+      "status": "adapter-written"
+    },
+    {
+      "id": 103,
+      "area": "Workflow",
+      "feature": "Blueprint transitions (before / during / after)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 104,
+      "area": "Workflow",
+      "feature": "Blueprint SLA / due date",
+      "status": "not a Creator feature"
+    },
+    {
+      "id": 105,
+      "area": "Workflow",
+      "feature": "Blueprint analytics",
+      "status": "not-started"
+    },
+    {
+      "id": 106,
+      "area": "Deluge",
+      "feature": "if / else",
+      "status": "adapter-written"
+    },
+    {
+      "id": 107,
+      "area": "Deluge",
+      "feature": "for each over a list",
+      "status": "adapter-written"
+    },
+    {
+      "id": 108,
+      "area": "Deluge",
+      "feature": "try / catch",
+      "status": "adapter-written"
+    },
+    {
+      "id": 109,
+      "area": "Deluge",
+      "feature": "List",
+      "status": "adapter-written"
+    },
+    {
+      "id": 110,
+      "area": "Deluge",
+      "feature": "Map",
+      "status": "adapter-written"
+    },
+    {
+      "id": 111,
+      "area": "Deluge",
+      "feature": "Date-time and app timezone",
+      "status": "adapter-written"
+    },
+    {
+      "id": 112,
+      "area": "Deluge",
+      "feature": "Decimal precision",
+      "status": "adapter-written"
+    },
+    {
+      "id": 113,
+      "area": "Deluge",
+      "feature": "insert record",
+      "status": "adapter-written"
+    },
+    {
+      "id": 114,
+      "area": "Deluge",
+      "feature": "fetch by criteria",
+      "status": "adapter-written"
+    },
+    {
+      "id": 115,
+      "area": "Deluge",
+      "feature": "update record",
+      "status": "adapter-written"
+    },
+    {
+      "id": 116,
+      "area": "Deluge",
+      "feature": "delete record",
+      "status": "adapter-written"
+    },
+    {
+      "id": 117,
+      "area": "Deluge",
+      "feature": "Aggregate (sum, count, min, max, distinct)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 118,
+      "area": "Deluge",
+      "feature": "for each over fetched records",
+      "status": "adapter-written"
+    },
+    {
+      "id": 119,
+      "area": "Deluge",
+      "feature": "sendmail",
+      "status": "adapter-written"
+    },
+    {
+      "id": 120,
+      "area": "Deluge",
+      "feature": "SMS (sendsms / twilio.sms.send etc.)",
+      "status": "not-started"
+    },
+    {
+      "id": 121,
+      "area": "Deluge",
+      "feature": "Push / in-app notification",
+      "status": "built-in-Creator"
+    },
+    {
+      "id": 122,
+      "area": "Deluge",
+      "feature": "invokeurl",
+      "status": "adapter-written"
+    },
+    {
+      "id": 123,
+      "area": "Deluge",
+      "feature": "zoho.crm.*",
+      "status": "adapter-written"
+    },
+    {
+      "id": 124,
+      "area": "Deluge",
+      "feature": "zoho.books.*",
+      "status": "adapter-written"
+    },
+    {
+      "id": 125,
+      "area": "Deluge",
+      "feature": "thisapp.*",
+      "status": "adapter-written"
+    },
+    {
+      "id": 126,
+      "area": "Deluge",
+      "feature": "openUrl",
+      "status": "adapter-written"
+    },
+    {
+      "id": 127,
+      "area": "Deluge",
+      "feature": "alert",
+      "status": "adapter-written"
+    },
+    {
+      "id": 128,
+      "area": "Deluge",
+      "feature": "cancel submit",
+      "status": "adapter-written"
+    },
+    {
+      "id": 129,
+      "area": "Deluge",
+      "feature": "Portal user tasks",
+      "status": "adapter-written"
+    },
+    {
+      "id": 130,
+      "area": "Deluge",
+      "feature": "PDF / print task",
+      "status": "not-started"
+    },
+    {
+      "id": 131,
+      "area": "Deluge",
+      "feature": "File tasks",
+      "status": "built-in-Creator"
+    },
+    {
+      "id": 132,
+      "area": "Deluge",
+      "feature": "Statement limit",
+      "status": "not-started"
+    },
+    {
+      "id": 133,
+      "area": "Deluge",
+      "feature": "Script timeout",
+      "status": "not-started"
+    },
+    {
+      "id": 134,
+      "area": "Deluge",
+      "feature": "Subform row loop (input.Subform)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 135,
+      "area": "Deluge",
+      "feature": "Global Deluge function",
+      "status": "adapter-written"
+    },
+    {
+      "id": 136,
+      "area": "Deluge",
+      "feature": "Creator custom API (function as HTTP)",
+      "status": "built-in-Creator"
+    },
+    {
+      "id": 137,
+      "area": "Pages and UI",
+      "feature": "Page / dashboard",
+      "status": "adapter-written"
+    },
+    {
+      "id": 138,
+      "area": "Pages and UI",
+      "feature": "Panel, chart, gauge, search, button on a page",
+      "status": "adapter-written"
+    },
+    {
+      "id": 139,
+      "area": "Pages and UI",
+      "feature": "HTML / ZML snippet",
+      "status": "adapter-written"
+    },
+    {
+      "id": 140,
+      "area": "Pages and UI",
+      "feature": "Widget (embedded JS app)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 141,
+      "area": "Pages and UI",
+      "feature": "Embed a form or report in a page",
+      "status": "not-started"
+    },
+    {
+      "id": 142,
+      "area": "Pages and UI",
+      "feature": "Drag-and-drop form builder",
+      "status": "not a Creator feature"
+    },
+    {
+      "id": 143,
+      "area": "Security and portal",
+      "feature": "Roles (data hierarchy)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 144,
+      "area": "Security and portal",
+      "feature": "Profiles (feature permissions)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 145,
+      "area": "Security and portal",
+      "feature": "Sharing / share with stakeholders",
+      "status": "not-started"
+    },
+    {
+      "id": 146,
+      "area": "Security and portal",
+      "feature": "Customer portal",
+      "status": "adapter-written"
+    },
+    {
+      "id": 147,
+      "area": "Security and portal",
+      "feature": "Portal permission sets",
+      "status": "adapter-written"
+    },
+    {
+      "id": 148,
+      "area": "Security and portal",
+      "feature": "Accept payments from portal users",
+      "status": "not-started"
+    },
+    {
+      "id": 149,
+      "area": "Security and portal",
+      "feature": "Public signup",
+      "status": "adapter-written"
+    },
+    {
+      "id": 150,
+      "area": "Security and portal",
+      "feature": "Social login",
+      "status": "not-started"
+    },
+    {
+      "id": 151,
+      "area": "Security and portal",
+      "feature": "Hosted login page",
+      "status": "adapter-written"
+    },
+    {
+      "id": 152,
+      "area": "Mobile and locale",
+      "feature": "Auto-generated iOS and Android apps",
+      "status": "adapter-written"
+    },
+    {
+      "id": 153,
+      "area": "Mobile and locale",
+      "feature": "Mobile app customization / code-sign / MDM",
+      "status": "not-started"
+    },
+    {
+      "id": 154,
+      "area": "Mobile and locale",
+      "feature": "Offline forms and reports",
+      "status": "adapter-written"
+    },
+    {
+      "id": 155,
+      "area": "Mobile and locale",
+      "feature": "Barcode / QR scan on mobile",
+      "status": "not-started"
+    },
+    {
+      "id": 156,
+      "area": "Mobile and locale",
+      "feature": "Localization / multi-language",
+      "status": "not-started"
+    },
+    {
+      "id": 157,
+      "area": "Platform",
+      "feature": "Environments: Development, Stage, Production",
+      "status": "adapter-written"
+    },
+    {
+      "id": 158,
+      "area": "Platform",
+      "feature": "Publish version history",
+      "status": "not-started"
+    },
+    {
+      "id": 159,
+      "area": "Platform",
+      "feature": "Audit trail: record edits and deletes",
+      "status": "not-started"
+    },
+    {
+      "id": 160,
+      "area": "Platform",
+      "feature": "Audit trail: report export and print",
+      "status": "not-started"
+    },
+    {
+      "id": 161,
+      "area": "Platform",
+      "feature": "Application backup (manual)",
+      "status": "not-started"
+    },
+    {
+      "id": 162,
+      "area": "Platform",
+      "feature": "Scheduled backup",
+      "status": "not-started"
+    },
+    {
+      "id": 163,
+      "area": "Platform",
+      "feature": "Import data (CSV, XLS, JSON)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 164,
+      "area": "Platform",
+      "feature": "Record template / HTML print layout",
+      "status": "not-started"
+    },
+    {
+      "id": 165,
+      "area": "Platform",
+      "feature": "Connections (OAuth to Zoho or third parties)",
+      "status": "adapter-written"
+    },
+    {
+      "id": 166,
+      "area": "Platform",
+      "feature": "Data sources",
+      "status": "not-started"
+    },
+    {
+      "id": 167,
+      "area": "Platform",
+      "feature": "Custom connectors",
+      "status": "not-started"
+    },
+    {
+      "id": 168,
+      "area": "Platform",
+      "feature": "Email domain authentication (SPF/DKIM)",
+      "status": "not-started"
+    },
+    {
+      "id": 169,
+      "area": "Platform",
+      "feature": "Developer / execution logs",
+      "status": "not-started"
+    },
+    {
+      "id": 170,
+      "area": "Platform",
+      "feature": "APM",
+      "status": "not-started"
+    },
+    {
+      "id": 171,
+      "area": "Platform",
+      "feature": "Application alerts",
+      "status": "not-started"
+    },
+    {
+      "id": 172,
+      "area": "Platform",
+      "feature": "Metrics",
+      "status": "not-started"
+    },
+    {
+      "id": 173,
+      "area": "Platform",
+      "feature": "Automation testing",
+      "status": "adapter-written"
+    },
+    {
+      "id": 174,
+      "area": "Platform",
+      "feature": "Pipelines (CI)",
+      "status": "not-started"
+    },
+    {
+      "id": 175,
+      "area": "Platform",
+      "feature": "Node.js runtime",
+      "status": "adapter-written"
+    },
+    {
+      "id": 176,
+      "area": "Platform",
+      "feature": "Hosting a web client",
+      "status": "adapter-written"
+    },
+    {
+      "id": 177,
+      "area": "Platform",
+      "feature": "AppSail (long-running Node)",
+      "status": "not-started"
+    },
+    {
+      "id": 178,
+      "area": "Platform",
+      "feature": "Cache",
+      "status": "not-started"
+    },
+    {
+      "id": 179,
+      "area": "Platform",
+      "feature": "NoSQL document store",
+      "status": "not-started"
+    },
+    {
+      "id": 180,
+      "area": "Platform",
+      "feature": "IaC project template",
+      "status": "adapter-written"
+    },
+    {
+      "id": 181,
+      "area": "Platform",
+      "feature": "Multi-DC (IN versus US)",
+      "status": "not-started"
+    },
+    {
+      "id": 182,
+      "area": "Security and portal",
+      "feature": "SAML 2.0 / IdP Single Sign-On (SSO)",
+      "status": "not-started"
+    },
+    {
+      "id": 183,
+      "area": "Platform",
+      "feature": "Solutions Workspace: Integration Flows & RPA",
+      "status": "not-started"
+    },
+    {
+      "id": 184,
+      "area": "Platform",
+      "feature": "Org-Level Microservices",
+      "status": "built-in-Creator"
+    },
+    {
+      "id": 185,
+      "area": "Security and portal",
+      "feature": "User Management & Provisioning",
+      "status": "adapter-written"
+    },
+    {
+      "id": 186,
+      "area": "Agents",
+      "feature": "AI agents (AI Modeler)",
+      "status": "not-started"
+    },
+    {
+      "id": 187,
+      "area": "Creating applications",
+      "feature": "Create application by importing a .ds export",
+      "status": "built-in-Creator"
+    },
+    {
+      "id": 188,
+      "area": "Billing",
+      "feature": "Billing and subscriptions",
+      "status": "not-started"
+    },
+    {
+      "id": 189,
+      "area": "Governance",
+      "feature": "Governance: password policy, multi-factor authentication, Active Directory",
+      "status": "not-started"
+    },
+    {
+      "id": 190,
+      "area": "Organization",
+      "feature": "Organization settings and org-level administration",
+      "status": "not-started"
+    },
+    {
+      "id": 191,
+      "area": "Mobile SDK",
+      "feature": "Mobile SDK (native app development)",
+      "status": "not-started"
+    },
+    {
+      "id": 192,
+      "area": "Limitations",
+      "feature": "Creator product limitations (documentation section)",
+      "status": "not a Creator feature"
+    },
+    {
+      "id": 193,
+      "area": "Getting started",
+      "feature": "Getting started (documentation section)",
+      "status": "not a Creator feature"
+    },
+    {
+      "id": 194,
+      "area": "Post-creation applications setup",
+      "feature": "Post-creation application setup",
+      "status": "not-started"
+    }
+  ]
+}

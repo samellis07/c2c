@@ -1,0 +1,33 @@
+{
+  "c2c": "0.2.0",
+  "catalystPlugin": { "name": "catalyst-by-zoho", "min": "0.0.2", "tested": ["0.0.1", "0.0.2"] },
+  "catalystSkills": ["catalyst-by-zoho", "catalyst-zoho-mcp", "catalyst-basics", "catalyst-datastore", "catalyst-functions", "catalyst-slate", "catalyst-authentication", "catalyst-stratus"],
+  "catalystCli": { "package": "zcatalyst-cli", "min": "1.27.2", "tested": ["1.27.2", "1.28.0"] },
+  "node": { "range": ">=20.20 <23", "pinned": "20.20.1" },
+  "reactBuild": { "npmMin": 10, "pinned": "20.20.1" },
+  "generated": { "functionRuntime": "node20", "functionType": "advancedio", "zcatalystSdkNode": "3.4.0" },
+  "mcpEndpoints": {
+    "verified": { "in": "https://catalystbyzoho.zohomcp.in/mcp/message" },
+    "documented_catalystbyzoho": {
+      "us": "https://catalystbyzoho.zohomcp.com/mcp/message",
+      "eu": "https://catalystbyzoho.zohomcp.eu/mcp/message",
+      "in": "https://catalystbyzoho.zohomcp.in/mcp/message",
+      "au": "https://catalystbyzoho.zohomcp.com.au/mcp/message",
+      "ca": "https://catalystbyzoho.zohomcp.ca/mcp/message",
+      "sa": "https://catalystbyzoho.zohomcp.sa/mcp/message",
+      "jp": "https://catalystbyzoho.zohomcp.jp/mcp/message"
+    },
+    "documented_global_0_0_2": {
+      "us": "https://catalyst.zohomcp.com/mcp/message",
+      "eu": "https://catalyst.zohomcp.eu/mcp/message",
+      "in": "https://catalyst.zohomcp.in/mcp/message",
+      "au": "https://catalyst.zohomcp.com.au/mcp/message",
+      "ca": "https://catalyst.zohomcp.ca/mcp/message",
+      "sa": "https://catalyst.zohomcp.sa/mcp/message",
+      "jp": "https://catalyst.zohomcp.jp/mcp/message",
+      "uae": "https://catalyst.zohomcp.ae/mcp/message"
+    },
+    "note": "Only the IN endpoint has been tested; other entries come from documentation. Confirm them with doctor D-B4/D-B5."
+  },
+  "dcTld": { "us": "com", "eu": "eu", "in": "in", "au": "com.au", "ca": "ca", "sa": "sa", "jp": "jp", "uae": "ae" }
+}

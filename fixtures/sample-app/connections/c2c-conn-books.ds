@@ -1,0 +1,216 @@
+application "c2c-conn-books"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Calcutta"
+	time format = "24-hr"
+
+	forms
+	{
+		form New_Contact
+		{
+			displayname = "New Contact"
+			Name
+			(
+				type = text
+			)
+		}
+		form Conn_Books_Contact
+		{
+			displayname = "Conn Books Contact"
+			must have Books_Contact_Name
+			(
+				type = text
+				displayname = "Contact name"
+				row = 1
+				column = 1
+				width = medium
+			)
+			Books_Company
+			(
+				type = text
+				displayname = "Company"
+				row = 2
+				column = 1
+				width = medium
+			)
+			Books_Response
+			(
+				type = textarea
+				displayname = "Books create response"
+				row = 3
+				column = 1
+				width = medium
+			)
+			Books_Lookup
+			(
+				type = textarea
+				displayname = "Books lookup response"
+				row = 4
+				column = 1
+				width = medium
+			)
+			actions
+			{
+				on add
+				{
+					submit
+					(
+						type = submit
+						displayname = "Submit"
+					)
+					reset
+					(
+						type = reset
+						displayname = "Reset"
+					)
+				}
+				on edit
+				{
+					update
+					(
+						type = submit
+						displayname = "Update"
+					)
+					cancel
+					(
+						type = cancel
+						displayname = "Cancel"
+					)
+				}
+			}
+		}
+	}
+
+	reports
+	{
+		custom All_Contacts
+		{
+			displayName = "All Contacts"
+			show all rows from New_Contact
+			(
+				Name
+			)
+		}
+		list All_Conn_Books_Contacts
+		{
+			displayName = "All Conn Books Contacts"
+			show all rows from Conn_Books_Contact
+			(
+				Books_Contact_Name as "Contact name"
+				Books_Company as "Company"
+				Books_Response as "Books create response"
+				Books_Lookup as "Books lookup response"
+			)
+		}
+	}
+
+	workflow
+	{
+		form
+		{
+			Conn_Books_Contact_Check as "Conn Books Contact Check"
+			{
+				type = form
+				form = Conn_Books_Contact
+				record event = on add or edit
+				on validate
+				{
+					actions
+					{
+						custom deluge script
+						(
+							if(thisapp.c2c_books_org_id() == "FILL_BOOKS_ORG_ID")
+							{
+								alert "Set c2c_books_org_id to the Zoho Books organization ID first.";
+								cancel submit;
+							}
+						)
+					}
+				}
+			}
+			Conn_Books_Contact_Create as "Conn Books Contact Create"
+			{
+				type = form
+				form = Conn_Books_Contact
+				record event = on add or edit
+				on success
+				{
+					actions
+					{
+						custom deluge script
+						(
+							orgId = thisapp.c2c_books_org_id();
+							contact = Map();
+							contact.put("contact_name", input.Books_Contact_Name);
+							contact.put("company_name", input.Books_Company);
+							created = zoho.books.createRecord("Contacts", orgId, contact, "c2c_books");
+							input.Books_Response = created.toString();
+							listed = zoho.books.getRecords("Contacts", orgId, "contact_name=" + input.Books_Contact_Name, "c2c_books");
+							input.Books_Lookup = listed.toString();
+							success message "c2c-books-contact-sent";
+						)
+					}
+				}
+			}
+		}
+	}
+
+	functions
+	{
+		Deluge
+		{
+			string c2c_books_org_id()
+			{
+				return "FILL_BOOKS_ORG_ID";
+			}
+		}
+	}
+
+	share_settings
+	{
+		role Hierarchy = {New_Contact,Conn_Books_Contact}
+	}
+
+	web
+	{
+		forms
+		{
+			form New_Contact
+			{
+				label placement = left
+			}
+			form Conn_Books_Contact
+			{
+				label placement = left
+			}
+		}
+		menu
+		{
+			space Space
+			{
+				displayname = "Space"
+				section Contacts
+				{
+					displayname = "Contacts"
+					form New_Contact
+					{
+					}
+					report All_Contacts
+					{
+					}
+				}
+				section Conn_Section_Books_Contact
+				{
+					displayname = "c2c-conn-books"
+					icon = "design-todo"
+					form Conn_Books_Contact
+					{
+					}
+					report All_Conn_Books_Contacts
+					{
+					}
+				}
+			}
+		}
+	}
+}

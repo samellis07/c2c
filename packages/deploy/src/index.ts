@@ -1,0 +1,115 @@
+export { DEPLOY_REPORT, LOADER_REPORT, STATE_FILE, confirmedLoadExit, deployCli, hasReportJson, planGuard, seedMigrateArgsProblem, seedMigrateCli, sourceBackupCli, sourceCsvCli, smokeArgsProblems, smokeCli, sourceCsvArgsProblem, readFunctionEnv, usersCli, flag, loadApp, loadSource, loadRegistry, catalystSpawn, defaultIo } from './cli.js';
+export type { Io, SpawnFn, SpawnResult } from './cli.js';
+export { ALLOWED_ENV, ORG_HOW_TO_SET, PROJECT_HOW_TO_SET, GuardError, catalystProjectName, checkGuards, planScopeLines } from './guards.js';
+export type { GuardCode, GuardInput, GuardOk } from './guards.js';
+export {
+  MAIL_LOG_TABLE,
+  MAIL_SENDER_RULE,
+  decideMail,
+  formatMailFindings,
+  mailConfig,
+  mailImportSpec,
+  mailLogTableStep,
+  mailModuleSource,
+  mailSenderPrecheck,
+  patchMail,
+  recipientsOf,
+  sendsMail,
+} from './mail.js';
+export type { MailConfig, MailDecision, MailFinding, MailSender } from './mail.js';
+export { buildDeploy, deployCommands, deployFiles, deployTableSteps, formatPlan, migrateCatalystJson, writeDeployTree } from './plan.js';
+export type { DeployBundle, DeployCommand, DeployFile, DeployUi } from './plan.js';
+export { emptyRegistry } from './registry.js';
+export { DC_ENDPOINTS, dcEndpoints, catalystBaseFor, deployMailRecipients } from './dc.js';
+export {
+  bucketName,
+  buildOfflinePlan,
+  c2cVersion,
+  DC_TABLE,
+  PLAN_CLI_PATHS,
+  PLAN_EMITTED_CLI_PATHS,
+  PLAN_MCP_BASE,
+  PLAN_MCP_BY_FEATURE,
+  PLAN_STEP_TOOLS,
+  STEP_KINDS,
+  planCli,
+  planSignals,
+  projectKey,
+  resolveDc,
+  sha256,
+  writePlanTree,
+} from './offline-plan.js';
+export type { DcResolution, DcSource, OfflinePlan, PlanBudget, PlanFile, PlanProbe, PlanSignals, ProvisionStep, StepEndpoint, StepKind } from './offline-plan.js';
+export type { ProjectRegistry } from './registry.js';
+export { formatMigratePlan, formatSkipped, migrateSeed, parseSeed, parseSeedBlocked } from './seed.js';
+export type { ParseSeedOptions, SeedBlocked, SeedForeignKey, SeedRow, SeedTable } from './seed.js';
+export { assertSeedReferences, assertSeedColumns, assertSeedTables, foreignKeysForApp, orderTables, resolveForeignKeys } from './remap.js';
+export type { RemapTable } from './remap.js';
+export { formatCsvPlan, migrateCsv, migrateLoaded, parseCsv, readSourceCsv, readSourceJson, sourceIdCountQueries } from './csv.js';
+export type { CsvLoad, CsvMigrateResult } from './csv.js';
+export { readBackupUserLists, readSourceBackup } from './backup.js';
+export {
+  formatInviteResult,
+  inviteUsers,
+  parseSocialList,
+  readBackupUsers,
+  readUsersState,
+  newUsersSalt,
+  SOCIAL_PROVIDERS,
+  userRefId,
+  usersInvitesCsv,
+  usersPlan,
+  usersPlanJson,
+  usersPlanMarkdown,
+  writeUsersState,
+  USERS_INVITES_CSV,
+  USERS_PLAN_JSON,
+  USERS_PLAN_MD,
+  USERS_STATE_FILE,
+} from './users.js';
+export type { BackupUser, InviteTarget, PlanUser, RoleMapRow, SocialPlan, SocialProvider, UsersInviteResult, UsersPlan, UsersState } from './users.js';
+export { readZip } from './zipfile.js';
+export type { ZipEntry, ZipLimits } from './zipfile.js';
+export { applyTablePlan, columnBody, cyclicForeignKeyComponents, cyclicForeignKeys, foreignKeyId, formatMandatoryRelaxed, mandatoryRelaxedColumns, formatTableCreate, formatTableDiff, mandatoryRelaxedLine, nonDeferrableKeys, provisionedConstraints, tableCreatePlan } from './tables.js';
+export type { RestFn, TableCreateStep, TableDiff } from './tables.js';
+export { API_TEMPLATE_FUNCTION, IAC_COMPONENT_ORDER, PROJECT_TEMPLATE_FILE, bucketItem, diffTemplate, formatDrift, importTemplate, importTemplateJson, normalizeTemplate, projectTemplate, projectTemplateJson } from './iac.js';
+export { bucketCreateBody, ensureSeedBucket } from './stratus-bucket.js';
+export type { SeedBucketEnsure } from './stratus-bucket.js';
+export type { DriftChange, DriftReport, ImportTemplateInput, ProjectTemplate, TemplateFunction, TemplateGrant, TemplateItem, TemplateRole } from './iac.js';
+export { assertDeployRedirectUrl, IAC_DEPLOY_REDIRECT_URL, iacImportBundle, importMultipart, runProjectImport, StuckImportError, zipStore } from './iac-import.js';
+export type { ImportAttempt, ImportFetch, ImportResult } from './iac-import.js';
+export { exactId, parseJsonExact } from './json-exact.js';
+export { fakeStatusRest, formatStatus, readStatus, statusArgsProblem, statusAsJson, statusCli, statusFunctionOf, statusLogErrorsOf, statusTableNamesOf } from './status.js';
+export type { StatusFunction, StatusLogError, StatusReport, StatusSlateApp } from './status.js';
+export { matchReadBack, provisionArgsProblem, provisionCli, resolveTokens } from './provision.js';
+export type { ProvisionPlanFile, ProvisionState, StepRecord, StepStatus } from './provision.js';
+export { readDeployConfig, resolveProvisionScope } from './provision-config.js';
+export type { DeployConfig, ProvisionScope } from './provision-config.js';
+export { assertProjectPath, assertSlatePath, catalystRestCall, decodeRestPayload, listCatalystProjects, parseProjectList, readCliAccessToken } from './rest.js';
+export { assertProjectDetails, assertReportedScope, catalystScopeArgs, cliRenderedProjectId, scrubCatalystEnv } from './scope.js';
+export { assertSmokeCookie, assertSmokeUrl, describeSmokeAuth, executeSmoke, formatSmokePlan, planSmoke, smokeCookieName } from './smoke.js';
+export type { SmokeAuth, SmokeFetch, SmokeFieldPlan, SmokeInputs, SmokeKind, SmokeResult, SmokeRunOptions, SmokeStep } from './smoke.js';
+export { cdpBrowser, openOnOrigin, pageFetch, runBrowserSmoke } from './browser.js';
+export type { BrowserSmokeResult, SmokeBrowser, SmokePage } from './browser.js';
+export { CONSOLE_SERVICES, formatPostDeploySteps, postDeploySteps, servicesTouched } from './post-deploy.js';
+export { formatHumanChecklist, humanChecklist } from './human-steps.js';
+export type { HumanChecklistInput } from './human-steps.js';
+export type { ConsoleService, PostDeployStep } from './post-deploy.js';
+export { applyAuthProvision, authProvisionPlan, errorCode, formatAuthProvision, hostOf, projectUsers, slateUrlFrom } from './auth.js';
+export type { AuthOpId, AuthOpResult, AuthOpStatus, AuthProvisionInput, AuthProvisionResult } from './auth.js';
+export { restWithRetry, retryableStatus, retryDelayMs, spawnWithRetry, transientCatalystOutput } from './retry.js';
+export type { ReRead, RestRetry, RetryOptions, SpawnedResult } from './retry.js';
+export { readSlateAppUrl, slateApps, slateConfigToml, slateDeploymentDomain, slateUrlOf } from './slate.js';
+export type { SlateAppRef, SlateRead } from './slate.js';
+
+export { appShadowColumns, backfillCommand, backfillPageQuery, backfillShadows, formatBackfill, shadowColumns, staleShadowCountQuery, type BackfillResult, type ShadowColumn } from './shadows.js';
+export { EDIT_OPS, EditError, applyEdit, applyEdits, editsJson, editsPathFor, fieldUsages, normaliseOp, readEdits, withEdits, writeEdits } from './edit.js';
+export type { EditOp, EditOpName, EditResult, EditsFile, FieldRename, FieldUsage } from './edit.js';
+export { DeltaRefused, applySchemaDelta, deltaFiles, formatDelta, modelPlan, planDelta, writeDeltaTree } from './delta.js';
+export type { ColumnChange, FileChange, ModelPlan, PlanDelta, StoreDriver, TableChange } from './delta.js';
+export { editCli, opFromArgs } from './edit-cli.js';
+export { applyDelta, computeDelta, deletionRefusals, deltaTotals, formatDeltaPlan, MAX_DELETE_PERCENT, parseDeltaCheckpoint, rowFingerprint, tableChecksum, withDeletionsApplied } from './row-delta.js';
+export type { DeltaApplyResult, DeltaCheckpoint, DeltaPlan, DeltaTable, DeletionRefusal } from './row-delta.js';
+export { DELTA_SOURCES, deltaSource, readDeltaCheckpoint, readStateFile, rollbackExportCli, stateFilePath, syncDeltaCli } from './delta-cli.js';
+export { parseStoreRows, readStoreRows, rollbackExport } from './rollback.js';
+export type { RollbackExport, RollbackFile } from './rollback.js';

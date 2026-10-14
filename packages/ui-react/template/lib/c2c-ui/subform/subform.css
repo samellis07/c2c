@@ -1,0 +1,14 @@
+/* Subform grid: row numbers, required marks, compact cells. Tokens only; new rows fade in unless reduced motion is asked for. */
+.c2c-subform td { vertical-align: top; min-width: 9rem; }
+.c2c-subform .c2c-subform-num { width: 2.5rem; min-width: 0; color: var(--text-muted); font-weight: 400; font-variant-numeric: tabular-nums; text-align: right; }
+.c2c-subform td:last-child { min-width: 0; width: 2.5rem; }
+.c2c-required-mark { color: var(--danger); }
+.c2c-cell-check { width: 1.25rem; height: 1.25rem; margin: var(--space-2) 0; accent-color: var(--accent); }
+.c2c-cell-parts { display: grid; gap: var(--space-1); min-width: 12rem; }
+.c2c-cell-textarea { resize: vertical; }
+.c2c-cell-multi { min-height: 4.5rem; }
+.c2c-subform td[aria-invalid="true"] input:not([type="hidden"]), .c2c-subform td[aria-invalid="true"] select, .c2c-subform td[aria-invalid="true"] textarea { border-color: var(--danger); }
+@media (prefers-reduced-motion: no-preference) {
+  .c2c-subform-row { animation: c2c-row-in var(--duration-fast, .16s) var(--ease-enter, ease-out); }
+}
+@keyframes c2c-row-in { from { opacity: 0; } to { opacity: 1; } }

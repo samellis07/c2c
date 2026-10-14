@@ -1,0 +1,446 @@
+/**
+ * One admin REST call through the Catalyst CLI's own authenticated client.
+ * The credential directory is never opened or printed. The hook refuses any
+ * path outside /baas/v1/project/<id> or /baas/v1/project/<id>/.
+ * The token and REST results travel over an inherited pipe (fd 3) into
+ * memory: no secret or response body ever touches the filesystem, so a
+ * SIGKILL between write and cleanup cannot leave a live token on disk.
+ * (mkdtempSync dirs are already owner-only; the hook file itself, which
+ * carries no secrets, is written mode 0600.)
+ */
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { parseJsonExact } from './json-exact.js';
+import { invalidTokenAnswer, readWithNewerToken } from './retry.js';
+import { catalystScopeArgs, scrubCatalystEnv } from './scope.js';
+import type { RestCall, RestResult } from './tables.js';
+
+const HOOK = `const fs = require('fs');
+const path = require('path');
+const realExit = process.exit.bind(process);
+let pending = null;
+function run() {
+  if (!pending) pending = run0();
+  return pending;
+}
+async function run0() {
+  const spec = JSON.parse(process.env.C2C_REQ);
+  const allowed = process.env.C2C_ALLOWED_PREFIX || '';
+  const exact = allowed.endsWith('/') ? allowed.slice(0, -1) : allowed;
+  const write = (line) => fs.writeSync(3, line + '\\n');
+  // Numeric Retry-After header (seconds) → ms. An HTTP-date hint is ignored.
+  function retryAfterMs(res, err) {
+    const headers =
+      (res && res.response && res.response.headers) ||
+      (res && res.headers) ||
+      (err && err.context && err.context.response && err.context.response.headers) ||
+      {};
+    const raw = headers['retry-after'];
+    const secs = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
+    return Number.isFinite(secs) && secs >= 0 ? Math.round(secs * 1000) : undefined;
+  }
+  const exactOnly = process.env.C2C_EXACT_ONLY === '1';
+  const method = String(spec.method || 'GET').toUpperCase();
+  if (exactOnly) {
+    if (method !== 'GET' || !spec.path || spec.path.includes('..') || spec.path !== exact) {
+      write('C2C_REFUSED');
+      return;
+    }
+  } else if (!allowed || !spec.path || spec.path.includes('..') || (spec.path !== exact && !spec.path.startsWith(allowed)) || ((spec.path.startsWith('/slate/') || spec.path.startsWith('/browser360/')) && method !== 'GET')) {
+    write('C2C_REFUSED');
+    return;
+  }
+  // A one-way tag of the token this call carries (never the token itself):
+  // the caller retries a 401 INVALID_TOKEN only when the store holds another.
+  let tokenTag;
+  try {
+    const lib = process.env.C2C_CLI_LIB;
+    const API = require(path.join(lib, 'internal', 'api')).default;
+    const api = new API({ resolveOnError: true, printError: false, env: 'Development', envId: process.env.C2C_ORG });
+    try {
+      const credential = require(path.join(lib, 'authentication', 'credential.js')).default;
+      const used = await credential.getAccessToken();
+      if (used) tokenTag = require('crypto').createHash('sha256').update(String(used)).digest('hex').slice(0, 16);
+    } catch (e) {}
+    const method = String(spec.method || 'GET').toLowerCase();
+    // api.js JSON.parse rounds ids past MAX_SAFE_INTEGER. Record the raw
+    // text (the parse result itself is left alone) and keep that text.
+    const realParse = JSON.parse;
+    let rawBody = null;
+    let seq = 0;
+    JSON.parse = function (text, reviver) {
+      if (typeof text === 'string') {
+        const trimmed = text.trim();
+        if (trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') {
+          rawBody = text;
+          seq += 1;
+        }
+      }
+      return reviver === undefined ? realParse(text) : realParse(text, reviver);
+    };
+    const seqBefore = seq;
+    const callOpts = {};
+    if (spec.body !== undefined) callOpts.body = spec.body;
+    if (spec.origin === 'zgraphql') {
+      // The Slate deployment read lives on the zgraphql origin, not admin.
+      try { callOpts.origin = require(path.join(lib, 'util_modules', 'constants')).ORIGIN.zgraphql; } catch (e) {}
+    }
+    let res;
+    try {
+      res = await api[method](spec.path, callOpts);
+    } finally {
+      JSON.parse = realParse;
+    }
+    const status = res.statusCode || res.status || 200;
+    const captured = seq > seqBefore ? rawBody : null;
+    const payload = captured !== null ? { status: status, raw: captured } : { status: status, body: res.body };
+    const wait = retryAfterMs(res, null);
+    if (wait !== undefined) payload.retryAfterMs = wait;
+    if (tokenTag) payload.tokenTag = tokenTag;
+    write('C2C_RESULT ' + JSON.stringify(payload));
+  } catch (err) {
+    const status = err.status || (err.context && err.context.status) || 0;
+    const body = (err.context && err.context.body) || (err.original && err.original.body) || { message: err.message };
+    const payload = { status, body };
+    const wait = retryAfterMs(null, err);
+    if (wait !== undefined) payload.retryAfterMs = wait;
+    if (tokenTag) payload.tokenTag = tokenTag;
+    write('C2C_RESULT ' + JSON.stringify(payload));
+  }
+}
+process.exit = (code) => { run().finally(() => realExit(code)); };
+process.on('beforeExit', () => { run().finally(() => realExit(0)); });
+`;
+
+export function projectResourcePath(projectId: string): string {
+  return `/baas/v1/project/${projectId}`;
+}
+
+export function projectPrefix(projectId: string): string {
+  return `${projectResourcePath(projectId)}/`;
+}
+
+/** Envelope from the CLI hook. `raw` is the response text; integer literals stay strings. */
+export function decodeRestPayload(payload: { status?: number; raw?: unknown; body?: unknown; retryAfterMs?: unknown }): {
+  status: number;
+  body: unknown;
+  retryAfterMs?: number;
+} {
+  const base =
+    typeof payload.raw === 'string'
+      ? { status: payload.status ?? 0, body: parseJsonExact(payload.raw) }
+      : { status: payload.status ?? 0, body: payload.body };
+  const wait = typeof payload.retryAfterMs === 'number' && payload.retryAfterMs >= 0 ? Math.round(payload.retryAfterMs) : undefined;
+  return wait === undefined ? base : { ...base, retryAfterMs: wait };
+}
+
+export function assertProjectPath(projectId: string, path: string): void {
+  if (!/^[0-9]+$/.test(projectId)) throw new Error('refusing a path outside the project');
+  const exact = projectResourcePath(projectId);
+  const prefix = `${exact}/`;
+  if (path.includes('..') || (path !== exact && !path.startsWith(prefix))) {
+    throw new Error('refusing a path outside the project');
+  }
+}
+
+/**
+ * GET-only Slate reads: /slate/v1/project/<id>/app and …/deployment/<id>.
+ * The deployment read sits on the zgraphql origin; the app list on admin.
+ */
+export function assertSlatePath(projectId: string, path: string, method: string): void {
+  if (!/^[0-9]+$/.test(projectId)) throw new Error('refusing a path outside the project');
+  if (method !== 'GET') throw new Error('refusing a non-GET slate call');
+  const prefix = `/slate/v1/project/${projectId}/`;
+  if (path.includes('..') || !path.startsWith(prefix)) {
+    throw new Error('refusing a path outside the project');
+  }
+}
+
+function slatePrefix(projectId: string): string {
+  return `/slate/v1/project/${projectId}/`;
+}
+
+/** GET-only SmartBrowz reads under /browser360/v1/project/<id>/ (the first-use gate probe). */
+export function assertBrowserPath(projectId: string, path: string, method: string): void {
+  if (!/^[0-9]+$/.test(projectId)) throw new Error('refusing a path outside the project');
+  if (method !== 'GET') throw new Error('refusing a non-GET SmartBrowz call');
+  if (path.includes('..') || !path.startsWith(browserPrefix(projectId))) throw new Error('refusing a path outside the project');
+}
+
+function browserPrefix(projectId: string): string {
+  return `/browser360/v1/project/${projectId}/`;
+}
+
+/** Rows of GET /baas/v1/project. A non-decimal id (a rounded double) is dropped, not coerced. */
+export function parseProjectList(body: unknown): { name: string; id: string }[] {
+  if (!body || typeof body !== 'object') throw new Error('catalyst project list did not return projects');
+  const record = body as Record<string, unknown>;
+  const data = Array.isArray(record.data) ? record.data : Array.isArray(body) ? (body as unknown[]) : undefined;
+  if (!data) throw new Error('catalyst project list did not return projects');
+  const out: { name: string; id: string }[] = [];
+  for (const item of data) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    const id = decimalString(row.id ?? row.project_id);
+    const nameValue = row.project_name ?? row.name;
+    const name = typeof nameValue === 'string' ? nameValue.trim() : '';
+    if (!id || !name) continue;
+    out.push({ id, name });
+  }
+  return out;
+}
+
+function decimalString(value: unknown): string | undefined {
+  if (typeof value === 'string' && /^[0-9]+$/.test(value)) return value;
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return String(value);
+  return undefined;
+}
+
+/**
+ * List projects in one org. One GET /baas/v1/project, nothing else: the hook
+ * refuses every other method and path. Ids stay the digit strings from the body.
+ */
+export async function listCatalystProjects(env: NodeJS.ProcessEnv, org: string, opts: { log?: (line: string) => void } = {}): Promise<{ name: string; id: string }[]> {
+  if (!/^[0-9]+$/.test(org)) throw new Error('refusing to list projects without a decimal org id');
+  const decoded = await catalystRestCall(env, org, org, { method: 'GET', path: '/baas/v1/project' }, { exact: true, ...opts });
+  if (decoded.status < 200 || decoded.status >= 300) throw new Error('catalyst project list failed');
+  return parseProjectList(decoded.body);
+}
+
+/**
+ * One admin REST call. A GET that answers 401 INVALID_TOKEN (the access token
+ * lapsed as the call landed) is sent once more only when a newer token is at
+ * hand: by default the CLI credential store is re-read without a refresh, and
+ * the call is retried only when the stored token differs from the one that
+ * failed. With C2C_ALLOW_LOCAL_REFRESH=1 the retry forces one CLI refresh
+ * instead. A write is never re-sent. The outcome line goes to `opts.log`
+ * (stderr by default).
+ */
+export async function catalystRestCall(
+  env: NodeJS.ProcessEnv,
+  org: string,
+  projectId: string,
+  call: RestCall,
+  opts: { exact?: boolean; log?: (line: string) => void } = {},
+): Promise<RestResult> {
+  let failedTag: string | undefined;
+  return readWithNewerToken({
+    readOnly: call.method === 'GET',
+    attempt: async () => {
+      const { result, tokenTag } = await restOnce(env, org, projectId, call, opts);
+      failedTag = tokenTag;
+      return result;
+    },
+    expired: (res) => invalidTokenAnswer(res.status, res.body),
+    renew: async () => {
+      if (localRefreshAllowed(env)) {
+        await refreshCliAccessToken(env, org, opts.exact ? undefined : projectId);
+        return true;
+      }
+      const stored = await peekCliTokenTag(env);
+      return stored !== undefined && failedTag !== undefined && stored !== failedTag;
+    },
+    describe: `${call.method} ${call.path}`,
+    log: opts.log ?? ((line) => process.stderr.write(`${line}\n`)),
+  });
+}
+
+async function restOnce(
+  env: NodeJS.ProcessEnv,
+  org: string,
+  projectId: string,
+  call: RestCall,
+  opts: { exact?: boolean },
+): Promise<{ result: RestResult; tokenTag?: string }> {
+  if (opts.exact) {
+    if (call.method !== 'GET' || call.path !== '/baas/v1/project') throw new Error('refusing a path outside the project list');
+  } else if (call.path.startsWith('/slate/')) {
+    assertSlatePath(projectId, call.path, call.method);
+  } else if (call.path.startsWith('/browser360/')) {
+    assertBrowserPath(projectId, call.path, call.method);
+  } else {
+    assertProjectPath(projectId, call.path);
+  }
+  const located = resolveCatalyst(env);
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-rest-'));
+  const hook = join(dir, 'cli-hook.js');
+  writeFileSync(hook, HOOK, { mode: 0o600 });
+  try {
+    const childEnv: NodeJS.ProcessEnv = {
+      ...scrubCatalystEnv(env),
+      C2C_REQ: JSON.stringify({
+        method: call.method,
+        path: call.path,
+        ...(call.body !== undefined ? { body: call.body } : {}),
+        ...(call.origin ? { origin: call.origin } : {}),
+      }),
+      C2C_ALLOWED_PREFIX: opts.exact
+        ? '/baas/v1/project'
+        : call.path.startsWith('/slate/')
+          ? slatePrefix(projectId)
+          : call.path.startsWith('/browser360/')
+            ? browserPrefix(projectId)
+            : projectPrefix(projectId),
+      ...(opts.exact ? { C2C_EXACT_ONLY: '1' } : {}),
+      C2C_CLI_LIB: located.lib,
+      C2C_ORG: org,
+    };
+    const scopeArgs = opts.exact ? ['--org', org] : catalystScopeArgs(org, projectId);
+    const result = await run(process.execPath, ['-r', hook, located.bin, ...scopeArgs, 'project:list'], childEnv);
+    const text = result.extra;
+    const line = text.split('\n').find((item) => item.startsWith('C2C_RESULT ') || item === 'C2C_REFUSED');
+    if (!line || line === 'C2C_REFUSED') throw new Error('catalyst rest refused the path');
+    const parsed = JSON.parse(line.slice('C2C_RESULT '.length)) as { status?: number; raw?: unknown; body?: unknown; tokenTag?: unknown };
+    const decoded = decodeRestPayload(parsed);
+    if (result.code !== 0 && (parsed.status === undefined || parsed.status === 0)) {
+      throw new Error('catalyst rest failed');
+    }
+    return {
+      result: { status: parsed.status ?? result.code, body: decoded.body, ...(decoded.retryAfterMs !== undefined ? { retryAfterMs: decoded.retryAfterMs } : {}) },
+      ...(typeof parsed.tokenTag === 'string' ? { tokenTag: parsed.tokenTag } : {}),
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * C2C_TOKEN_MODE picks what the hook writes on fd 3:
+ * - read:    getAccessToken() — the cached token, refreshed by the CLI when it
+ *            is close to expiry (the first token of a run).
+ * - refresh: getAccessToken(true) — a forced refresh (C2C_ALLOW_LOCAL_REFRESH=1 only).
+ * - peek:    the pure accessToken getter on the stored credential: the stored
+ *            token when it is still fresh, else nothing. It never POSTs.
+ * - tag:     peek, written as a one-way tag instead of the token.
+ * peek and tag run on `catalyst --version`, a command that makes no API call,
+ * so the CLI's own lazy refresh never runs in that process either.
+ */
+const TOKEN_HOOK = `const fs = require('fs');
+const path = require('path');
+const realExit = process.exit.bind(process);
+let pending = null;
+function run() {
+  if (!pending) pending = run0();
+  return pending;
+}
+async function stored(lib, Credential) {
+  const store = require(path.join(lib, 'util_modules', 'config-store.js')).default;
+  const dc = require(path.join(lib, 'util_modules', 'dc.js'));
+  const raw = store.get(dc.getActiveDC() + '.credential', null);
+  if (typeof raw !== 'string') return null;
+  return Credential.init(raw, false).accessToken;
+}
+async function run0() {
+  try {
+    const lib = process.env.C2C_CLI_LIB;
+    const mode = process.env.C2C_TOKEN_MODE || 'read';
+    const Credential = require(path.join(lib, 'authentication', 'credential.js')).default;
+    let token;
+    if (mode === 'peek' || mode === 'tag') token = await stored(lib, Credential);
+    else token = await Credential.getAccessToken(mode === 'refresh');
+    if (token && mode === 'tag') token = require('crypto').createHash('sha256').update(String(token)).digest('hex').slice(0, 16);
+    fs.writeSync(3, token ? String(token) : '');
+  } catch (err) {
+    fs.writeSync(3, '');
+  }
+}
+process.exit = (code) => { run().finally(() => realExit(code)); };
+process.on('beforeExit', () => { run().finally(() => realExit(0)); });
+`;
+
+type TokenMode = 'read' | 'refresh' | 'peek' | 'tag';
+
+/** C2C_ALLOW_LOCAL_REFRESH=1: the user owns the only copy of this CLI credential, so a retry may force a refresh. */
+export function localRefreshAllowed(env: NodeJS.ProcessEnv): boolean {
+  return env.C2C_ALLOW_LOCAL_REFRESH === '1';
+}
+
+/** Read the CLI access token through the Catalyst process. The token is not printed and the credential directory is not opened here. */
+export async function readCliAccessToken(env: NodeJS.ProcessEnv, org: string, projectId: string): Promise<string> {
+  const token = await cliToken(env, 'read', org, projectId);
+  if (!token) throw new Error('catalyst token was empty');
+  return token;
+}
+
+/**
+ * Force a CLI token refresh now and return the new token. The CLI POSTs its
+ * refresh token and stores the answer; when the service rotates the refresh
+ * token, every other holder of the old one (another run on the same
+ * credential, an outside refresher) fails its next refresh. Used only with
+ * C2C_ALLOW_LOCAL_REFRESH=1. Without a project id the CLI runs org-scoped.
+ */
+export async function refreshCliAccessToken(env: NodeJS.ProcessEnv, org?: string, projectId?: string): Promise<string> {
+  const token = await cliToken(env, 'refresh', org, projectId);
+  if (!token) throw new Error('catalyst token was empty');
+  return token;
+}
+
+/** The token in the CLI credential store when it is still fresh, read without any refresh POST; undefined otherwise. */
+export async function peekCliAccessToken(env: NodeJS.ProcessEnv): Promise<string | undefined> {
+  return (await cliToken(env, 'peek')) || undefined;
+}
+
+/** peekCliAccessToken as a one-way tag: compares tokens without the token leaving the CLI process. */
+export async function peekCliTokenTag(env: NodeJS.ProcessEnv): Promise<string | undefined> {
+  return (await cliToken(env, 'tag')) || undefined;
+}
+
+/**
+ * A newer access token for a read that met 401 INVALID_TOKEN. By default
+ * the stored token, re-read without a refresh (the caller compares it with
+ * the one that failed); with C2C_ALLOW_LOCAL_REFRESH=1, a forced refresh.
+ */
+export async function renewCliAccessToken(env: NodeJS.ProcessEnv, org?: string): Promise<string | undefined> {
+  return localRefreshAllowed(env) ? refreshCliAccessToken(env, org) : peekCliAccessToken(env);
+}
+
+async function cliToken(env: NodeJS.ProcessEnv, mode: TokenMode, org?: string, projectId?: string): Promise<string> {
+  const located = resolveCatalyst(env);
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-token-'));
+  const hook = join(dir, 'token-hook.js');
+  writeFileSync(hook, TOKEN_HOOK, { mode: 0o600 });
+  try {
+    const childEnv: NodeJS.ProcessEnv = {
+      ...scrubCatalystEnv(env),
+      C2C_CLI_LIB: located.lib,
+      C2C_TOKEN_MODE: mode,
+      ...(org !== undefined ? { C2C_ORG: org } : {}),
+    };
+    const command =
+      mode === 'peek' || mode === 'tag'
+        ? ['--version']
+        : [...(org === undefined ? [] : projectId === undefined ? ['--org', org] : catalystScopeArgs(org, projectId)), 'project:list'];
+    const result = await run(process.execPath, ['-r', hook, located.bin, ...command], childEnv);
+    return result.extra.trim();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+export function resolveCatalyst(env: NodeJS.ProcessEnv): { bin: string; lib: string } {
+  const which = spawnSync('/usr/bin/which', ['catalyst'], { env, encoding: 'utf8' });
+  const found = which.status === 0 ? which.stdout.trim() : '';
+  if (!found) throw new Error('catalyst CLI was not found on PATH');
+  const bin = realpathSync(found);
+  let dir = dirname(bin);
+  for (let i = 0; i < 8; i++) {
+    if (existsSync(join(dir, 'internal'))) return { bin, lib: dir };
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error('catalyst CLI library was not found');
+}
+
+/** Spawn with an inherited pipe on fd 3; the hook writes secrets/results there, never to disk. */
+function run(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number; extra: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { env, stdio: ['ignore', 'ignore', 'ignore', 'pipe'] });
+    const chunks: Buffer[] = [];
+    child.stdio[3]?.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ code: code ?? 1, extra: Buffer.concat(chunks).toString('utf8') }));
+  });
+}

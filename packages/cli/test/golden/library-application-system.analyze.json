@@ -1,0 +1,399 @@
+{
+  "schema": "c2c-analyze/1",
+  "app": {
+    "name": "Library_System_Application",
+    "shape": "B",
+    "dialect": "D2"
+  },
+  "matrix": {
+    "matrix": "feature-matrix-v4",
+    "source": "feature-matrix-v4",
+    "sourceSha256": "1f256aed8a4e4826ce02181864bb3a6b0e60acab97465538fe695e9f178cb26e",
+    "snapshotDate": "2026-10-06",
+    "provisional": false
+  },
+  "features": {
+    "used": [
+      {
+        "id": 1,
+        "area": "Field type",
+        "feature": "Single line",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 3,
+        "area": "Field type",
+        "feature": "Email",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 4,
+        "area": "Field type",
+        "feature": "Phone",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 5,
+        "area": "Field type",
+        "feature": "Number",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 6,
+        "area": "Field type",
+        "feature": "Decimal",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 8,
+        "area": "Field type",
+        "feature": "Currency",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 9,
+        "area": "Field type",
+        "feature": "Date",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 13,
+        "area": "Field type",
+        "feature": "Dropdown",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 16,
+        "area": "Field type",
+        "feature": "Checkbox (multi)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 17,
+        "area": "Field type",
+        "feature": "Lookup single",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 29,
+        "area": "Field type",
+        "feature": "Auto number",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 30,
+        "area": "Field type",
+        "feature": "Name (composite)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 32,
+        "area": "Field type",
+        "feature": "Section",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 44,
+        "area": "Field property",
+        "feature": "Mandatory",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 45,
+        "area": "Field property",
+        "feature": "Unique / no duplicates",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 46,
+        "area": "Field property",
+        "feature": "Default value",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 47,
+        "area": "Field property",
+        "feature": "Max length",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 8
+      },
+      {
+        "id": 52,
+        "area": "Field property",
+        "feature": "Personal data / encrypt",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 56,
+        "area": "Field property",
+        "feature": "System record id",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 58,
+        "area": "Report",
+        "feature": "List report",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 77,
+        "area": "Report",
+        "feature": "Record-level custom action",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 6
+      },
+      {
+        "id": 81,
+        "area": "Report",
+        "feature": "Import into a report",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 85,
+        "area": "Workflow",
+        "feature": "User input of a field",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 88,
+        "area": "Workflow",
+        "feature": "Validation on form submission",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 89,
+        "area": "Workflow",
+        "feature": "Successful form submission",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 6
+      },
+      {
+        "id": 106,
+        "area": "Deluge",
+        "feature": "if / else",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 12
+      },
+      {
+        "id": 111,
+        "area": "Deluge",
+        "feature": "Date-time and app timezone",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 8
+      },
+      {
+        "id": 114,
+        "area": "Deluge",
+        "feature": "fetch by criteria",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 115,
+        "area": "Deluge",
+        "feature": "update record",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 116,
+        "area": "Deluge",
+        "feature": "delete record",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 119,
+        "area": "Deluge",
+        "feature": "sendmail",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 127,
+        "area": "Deluge",
+        "feature": "alert",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 128,
+        "area": "Deluge",
+        "feature": "cancel submit",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 137,
+        "area": "Pages and UI",
+        "feature": "Page / dashboard",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 138,
+        "area": "Pages and UI",
+        "feature": "Panel, chart, gauge, search, button on a page",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 14
+      },
+      {
+        "id": 143,
+        "area": "Security and portal",
+        "feature": "Roles (data hierarchy)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 144,
+        "area": "Security and portal",
+        "feature": "Profiles (feature permissions)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 6
+      },
+      {
+        "id": 146,
+        "area": "Security and portal",
+        "feature": "Customer portal",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 163,
+        "area": "Platform",
+        "feature": "Import data (CSV, XLS, JSON)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      }
+    ],
+    "counts": {
+      "supported": 0,
+      "adapter": 39,
+      "needs-assessment": 0,
+      "gap": 0,
+      "blocker": 0
+    },
+    "needsAssessment": [],
+    "excluded": 9,
+    "unmapped": [
+      {
+        "area": "Workflow",
+        "feature": "Function on records (not a matrix row)",
+        "uses": 7
+      }
+    ],
+    "notObservable": 47
+  },
+  "deluge": {
+    "units": 14,
+    "statements": 65,
+    "translated": 5,
+    "shimmed": 60,
+    "todo": 0,
+    "todoLocations": []
+  },
+  "blockers": [],
+  "determinism": {
+    "deterministic": true,
+    "todoCount": 0,
+    "fillLockEntries": 0,
+    "todoKinds": [],
+    "uiTodoCount": 0
+  },
+  "score": {
+    "readiness": 78,
+    "band": "needs-work",
+    "features": 75,
+    "deluge": 82
+  },
+  "effort": {
+    "estimate": true,
+    "hours": 86,
+    "weights": {
+      "hoursPerFeature": {
+        "supported": 0,
+        "adapter": 2,
+        "needs-assessment": 4,
+        "gap": 8,
+        "blocker": 16
+      },
+      "hoursPerShimmedStatement": 0.1,
+      "hoursPerTodoStatement": 1,
+      "hoursPerSchemaTable": 0.5,
+      "hoursPerTodoForm": 4,
+      "hoursPerTodoReport": 4,
+      "hoursPerTodoPage": 8,
+      "hoursPerCronJob": 1
+    }
+  },
+  "catalyst": {
+    "tables": 4,
+    "nosqlCollections": 0,
+    "delugeUnits": 14,
+    "functions": 1,
+    "cronJobs": 0,
+    "slatePages": 10,
+    "cost": "not estimated"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "$comment": "Tool names from the Catalyst MCP tool listing (180 tools). Never executed by c2c; doctor D-B5/D-B6 checks presence and records schemas. Names are compared without any host prefix. byFeature holds only tools a provisioning step or a shipped plugin skill actually calls; a listed tool with no call site is dropped, never demanded.",
+  "prefix": "CatalystbyZoho_",
+  "neverCall": {
+    "List_All_Projects": "returns project secrets (jwtSecret, clientSecret) into the transcript; c2c lists projects through the Catalyst CLI (name and id only)",
+    "Get_Project_By_Id": "returns project secrets (jwtSecret, clientSecret) into the transcript; c2c reads the project through the Catalyst CLI (name and id only)"
+  },
+  "metaTools": ["ZohoMCP_getFeatures", "ZohoMCP_listTools", "ZohoMCP_getSchema", "ZohoMCP_executeTool"],
+  "base": [
+    "List_All_Organizations",
+    "List_All_Tables",
+    "List_All_Columns",
+    "Execute_Query",
+    "Get_Table_Permissions",
+    "Update_Table_Permissions",
+    "Get_Table_Scopes",
+    "Update_Table_Scopes",
+    "Get_Authentication_Configurations",
+    "List_All_Roles",
+    "List_All_CORS_Domains",
+    "List_All_Project_Users",
+    "List_All_Functions",
+    "List_All_Env_Variables",
+    "List_All_Slate_Apps",
+    "Get_Logs"
+  ],
+  "byFeature": {
+    "schedules_or_long_work": ["Create_Job_Pool", "List_All_Jobpools", "List_All_Crons"],
+    "files_or_bulk_load": ["Create_Bucket", "Get_All_Buckets", "Head_Bucket", "Create_Upload_Signature"],
+    "custom_apis": ["Configure_API_Gateway_Route", "List_All_API_route", "Get_API_route"],
+    "sendmail": ["Create_Email_Configuration", "List_All_Emails_Configuration"],
+    "auth_config_update": ["Update_Authentication_Configuration"],
+    "user_invites": ["Add_User"]
+  },
+  "probeFirst": {
+    "List_All_Emails_Configuration": "the plan's sender read-back tool; present in the recorded schemas (plugin/references/mcp-schemas/)",
+    "Create_Upload_Signature": "object upload route not exercised by c2c"
+  }
+}

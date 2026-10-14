@@ -1,0 +1,102 @@
+# Offline CI: no network beyond `npm ci` and no secrets. Fixture-dependent
+# tests skip because C2C_FIXTURES_DIR / C2C_GALLERY_DIR are unset here.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        node-version: ['20.20.1', '22']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          # tests/matrix/matrix-check.test.mjs resolves origin/main and origin/main^.
+          fetch-depth: 0
+
+      - name: Set up Node ${{ matrix.node-version }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            packages/ui-react/template/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # The report-view render tests mount the template's own components; its
+      # runtime deps must be installed or those tests fail in this run. The
+      # template pins the generated app's Node version, so the Node-22 leg
+      # installs it with engine-strict off.
+      - name: Install the report-view template runtime
+        run: npm ci --prefix packages/ui-react/template --engine-strict=false
+
+      - name: Check (build, typecheck, tests, hygiene, determinism gate)
+        run: npm run check
+
+      - name: Determinism manifests check
+        run: npm run determinism:check
+
+      - name: Vendor plugin twice (manifests must match) and check versions
+        run: |
+          node scripts/vendor-plugin.mjs
+          cp plugin/vendor/c2c/MANIFEST.sha256 "$RUNNER_TEMP/c2c-manifest-a.sha256"
+          node scripts/vendor-plugin.mjs
+          cmp "$RUNNER_TEMP/c2c-manifest-a.sha256" plugin/vendor/c2c/MANIFEST.sha256
+          node scripts/vendor-plugin.mjs --check-versions --require-vendor
+
+      - name: Plugin hygiene scan
+        run: node scripts/vendor-plugin.mjs --check-hygiene --require-vendor
+
+      - name: Licence gate (shipped trees use allowlisted licences only)
+        run: node tools/licence-gate.mjs
+
+      - name: Validate plugin and marketplace manifests
+        run: |
+          if command -v claude >/dev/null 2>&1; then
+            claude plugin validate plugin/.claude-plugin/plugin.json
+            claude plugin validate plugin/.claude-plugin/marketplace.json
+          else
+            echo "TODO: claude CLI is not on PATH; JSON-schema check stands in for claude plugin validate."
+            node scripts/vendor-plugin.mjs --schema
+          fi
+
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20.20.1'
+
+      - name: Install
+        run: |
+          npm ci
+          npm ci --prefix packages/ui-react/template
+
+      - name: Dependency audit (high and above; waivers in tools/audit-allowlist.txt)
+        run: node tools/audit-gate.mjs

@@ -1,0 +1,57 @@
+/*
+ * Author       : synthetic
+ * Generated on : 01-Jan-2025 12:00:00
+ * Version      : 1.0
+ */
+application "Precheck_Sendmail"
+{
+	forms
+	{
+		form Item
+		{
+			Title
+			(
+				type = text
+				displayname = "Title"
+			)
+		}
+	}
+	reports
+	{
+		list All_Items
+		{
+			displayName = "All Items"
+			show all rows from Item
+			(
+				Title as "Title"
+			)
+		}
+	}
+	workflow
+	{
+		form
+		{
+			On_Add as "On add"
+			{
+				type = form
+				form = Item
+				on add
+				{
+					actions
+					{
+						on success
+						(
+							sendmail
+							[
+								from: "noreply@example.com"
+								to: "a@b.c"
+								subject: "s"
+								message: "m"
+							];
+						)
+					}
+				}
+			}
+		}
+	}
+}

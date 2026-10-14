@@ -1,0 +1,211 @@
+app: restaurants
+route: #/report/All_Restaurants
+state: list
+viewport: desktop 1280
+---
+div class="c2c-app"
+  header class="c2c-topbar"
+    span
+      "Restaurants"
+  nav aria-label="Main menu"
+    div class="c2c-nav-section"
+      h2 class="c2c-nav-heading"
+        "App"
+      ul
+        li
+          a href="#/form/Restaurant"
+            svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+              path
+              path
+              path
+              path
+              path
+            span
+              "Restaurant"
+        li
+          a href="#/form/Visit"
+            svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+              path
+              path
+              path
+              path
+              path
+            span
+              "Visit"
+        li
+          a aria-current="page" href="#/report/All_Restaurants"
+            svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+              path
+              rect
+              path
+              path
+            span
+              "All Restaurants"
+        li
+          a href="#/page/Guide"
+            svg aria-hidden="true" class="lucide lucide-layout-dashboard c2c-icon"
+              rect
+              rect
+              rect
+              rect
+            span
+              "Dining Guide"
+  main tabindex="-1"
+    section class="c2c-card" data-report="All_Restaurants" data-view="list"
+      h1
+        "All Restaurants"
+      div class="c2c-report-tools"
+        form class="c2c-search-form" role="search"
+          label class="c2c-search"
+            svg aria-hidden="true" class="lucide lucide-search"
+              path
+              circle
+            input aria-label="Search All Restaurants" placeholder="Search" type="search" value=""
+          button class="button secondary sm" tabindex="0" type="submit"
+            span class="labelSlot"
+              span class="labelContent"
+                span class="labelPhase"
+                  "Search"
+      div class="table-wrap"
+        div class="wrapper"
+          div class="scroller"
+            table class="table" role="table"
+              caption
+                "All Restaurants"
+              colgroup
+                col
+                col
+                col
+                col
+                col
+              thead role="rowgroup"
+                tr role="row"
+                  th aria-sort="none" data-key="Name" role="columnheader" scope="col"
+                    button aria-label="Sort by Name" class="sortButton" type="button"
+                      span class="sortInner"
+                        span
+                          "Name"
+                        span aria-hidden="true" class="sortIcon"
+                          svg aria-hidden="true" class="lucide lucide-arrow-up sortHint"
+                            path
+                            path
+                          span class="sortArrow"
+                            svg aria-hidden="true" class="lucide lucide-arrow-up"
+                              path
+                              path
+                  th aria-sort="none" data-key="Cuisine" role="columnheader" scope="col"
+                    button aria-label="Sort by Cuisine" class="sortButton" type="button"
+                      span class="sortInner"
+                        span
+                          "Cuisine"
+                        span aria-hidden="true" class="sortIcon"
+                          svg aria-hidden="true" class="lucide lucide-arrow-up sortHint"
+                            path
+                            path
+                          span class="sortArrow"
+                            svg aria-hidden="true" class="lucide lucide-arrow-up"
+                              path
+                              path
+                  th aria-sort="none" data-key="Rating" role="columnheader" scope="col"
+                    button aria-label="Sort by Rating" class="sortButton" type="button"
+                      span class="sortInner"
+                        span
+                          "Rating"
+                        span aria-hidden="true" class="sortIcon"
+                          svg aria-hidden="true" class="lucide lucide-arrow-up sortHint"
+                            path
+                            path
+                          span class="sortArrow"
+                            svg aria-hidden="true" class="lucide lucide-arrow-up"
+                              path
+                              path
+                  th aria-sort="none" data-key="Website" role="columnheader" scope="col"
+                    button aria-label="Sort by Website" class="sortButton" type="button"
+                      span class="sortInner"
+                        span
+                          "Website"
+                        span aria-hidden="true" class="sortIcon"
+                          svg aria-hidden="true" class="lucide lucide-arrow-up sortHint"
+                            path
+                            path
+                          span class="sortArrow"
+                            svg aria-hidden="true" class="lucide lucide-arrow-up"
+                              path
+                              path
+                  th data-key="__actions" role="columnheader" scope="col"
+                    "Actions"
+              tbody role="rowgroup"
+                tr role="row"
+                  td data-phone="true" data-th="Name" role="cell"
+                    a href="#/report/All_Restaurants/row/1"
+                      "Osteria Verde"
+                  td data-phone="true" data-th="Cuisine" role="cell"
+                    "Italian"
+                  td data-phone="true" data-th="Rating" role="cell"
+                    "4.5"
+                  td data-phone="true" data-th="Website" role="cell"
+                    "https://osteria.example.com"
+                  td data-phone="true" data-th="Actions" role="cell"
+                    span class="c2c-row-actions"
+                      a aria-label="Edit record 1" class="c2c-row-open" href="#/form/Restaurant/edit/1"
+                        "Edit"
+                      button class="button secondary sm" tabindex="0" type="button"
+                        span class="labelSlot"
+                          span class="labelContent"
+                            span class="labelPhase"
+                              "Delete"
+                tr role="row"
+                  td data-phone="true" data-th="Name" role="cell"
+                    a href="#/report/All_Restaurants/row/2"
+                      "Sushi Hana"
+                  td data-phone="true" data-th="Cuisine" role="cell"
+                    "Japanese"
+                  td data-phone="true" data-th="Rating" role="cell"
+                    "4.8"
+                  td data-phone="true" data-th="Website" role="cell"
+                    "https://hana.example.com"
+                  td data-phone="true" data-th="Actions" role="cell"
+                    span class="c2c-row-actions"
+                      a aria-label="Edit record 2" class="c2c-row-open" href="#/form/Restaurant/edit/2"
+                        "Edit"
+                      button class="button secondary sm" tabindex="0" type="button"
+                        span class="labelSlot"
+                          span class="labelContent"
+                            span class="labelPhase"
+                              "Delete"
+          p class="srOnly" role="status"
+  nav aria-label="Tabs"
+    a href="#/form/Restaurant"
+      svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+        path
+        path
+        path
+        path
+        path
+      span
+        "Restaurant"
+    a href="#/form/Visit"
+      svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+        path
+        path
+        path
+        path
+        path
+      span
+        "Visit"
+    a aria-current="page" href="#/report/All_Restaurants"
+      svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+        path
+        rect
+        path
+        path
+      span
+        "All Restaurants"
+    a href="#/page/Guide"
+      svg aria-hidden="true" class="lucide lucide-layout-dashboard c2c-icon"
+        rect
+        rect
+        rect
+        rect
+      span
+        "Dining Guide"

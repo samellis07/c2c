@@ -1,0 +1,91 @@
+app: call-logs
+route: #/report/Recent_Calls/row/1
+state: detail
+viewport: phone 390
+---
+div class="c2c-app"
+  header class="c2c-topbar"
+    span
+      "Call Logs"
+  nav aria-label="Main menu"
+    div class="c2c-nav-section"
+      h2 class="c2c-nav-heading"
+        "App"
+      ul
+        li
+          a href="#/form/Log_Call"
+            svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+              path
+              path
+              path
+              path
+              path
+            span
+              "Log a Call"
+        li
+          a aria-current="page" href="#/report/Recent_Calls"
+            svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+              path
+              rect
+              path
+              path
+            span
+              "Recent Calls"
+  main tabindex="-1"
+    section class="c2c-card" data-report="Recent_Calls" data-row="1" data-view="list"
+      h1
+        "Recent Calls"
+      p class="c2c-back"
+        a href="#/report/Recent_Calls"
+          "Back to"
+          "Recent Calls"
+      article aria-label="Onboarding walkthrough" class="c2c-record"
+        h2
+          "Onboarding walkthrough"
+        dl
+          div
+            dt
+              "Subject"
+            dd
+              "Onboarding walkthrough"
+          div
+            dt
+              "Direction"
+            dd
+              "Outbound"
+          div
+            dt
+              "Caller"
+            dd
+              "555-0100"
+          div
+            dt
+              "Started At"
+            dd
+              "2024-03-04 12:30"
+          div
+            dt
+              "Duration (min)"
+            dd
+              "25"
+        p
+          a aria-label="Edit record 1" class="c2c-row-open" href="#/form/Log_Call/edit/1"
+            "Edit"
+  nav aria-label="Tabs"
+    a href="#/form/Log_Call"
+      svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+        path
+        path
+        path
+        path
+        path
+      span
+        "Log a Call"
+    a aria-current="page" href="#/report/Recent_Calls"
+      svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+        path
+        rect
+        path
+        path
+      span
+        "Recent Calls"

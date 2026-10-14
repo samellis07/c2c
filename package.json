@@ -1,0 +1,50 @@
+{
+  "name": "creator-to-catalyst",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Convert Zoho Creator apps (.ds exports) to Zoho Catalyst projects",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20.20 <23"
+  },
+  "bin": {
+    "c2c": "dist/cli/src/c2c.js"
+  },
+  "exports": {
+    ".": "./dist/core/src/index.js",
+    "./deluge": "./dist/deluge/src/index.js",
+    "./shims": "./dist/shims/src/index.js",
+    "./ui": "./dist/ui/src/index.js",
+    "./auth": "./dist/auth/src/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node scripts/ensure-ui-react-template.mjs && node scripts/run-tests.mjs dist/core/test dist/schema/test dist/data/test dist/deluge/test dist/shims/test dist/ui/test dist/ui-react/test dist/auth/test dist/deploy/test dist/determinism/test dist/cli/test dist/quality/test dist/ui-score/test dist/doctor/test tests/matrix/matrix-check.test.mjs tests/plugin/hygiene.test.mjs tests/plugin/test-concurrency.test.mjs tests/plugin/links.test.mjs tests/plugin/packaging.test.mjs tests/plugin/packaged-hygiene.test.mjs tests/plugin/router-evals.test.mjs tests/plugin/rules-limits.test.mjs tests/plugin/rules-errors.test.mjs tests/plugin/rules-surface.test.mjs tests/plugin/rules-datastore.test.mjs tests/plugin/rules-zcql.test.mjs tests/plugin/rules-jobs-and-files.test.mjs tests/plugin/rules-auth.test.mjs tests/plugin/rules-functions.test.mjs tests/plugin/rules-projects.test.mjs tests/licence-gate/licence-gate.test.mjs tools/security-gate/test tests/plugin/launcher-node-gate.test.mjs tools/ui-snapshot/test tests/plugin/rules-status.test.mjs && npm run check:hygiene",
+    "check": "npm test && bash tools/determinism-gate.sh",
+    "check:hygiene": "node scripts/check-hygiene.mjs",
+    "tokens:css": "npm run build && node scripts/write-tokens-css.mjs",
+    "matrix:check": "node tools/matrix-check.mjs",
+    "synthetic:report": "npm run build && node tools/synthetic-report.mjs",
+    "matrix:fetch-help": "node tools/fetch-help-sitemap.mjs",
+    "determinism:gallery": "npm run build && node dist/determinism/src/gallery.js",
+    "determinism:status": "npm run build && node dist/determinism/src/status.js",
+    "determinism:update": "npm run build && node dist/determinism/src/manifests.js --update",
+    "determinism:check": "npm run build && node dist/determinism/src/manifests.js --check",
+    "tables:budget": "npm run build && node dist/determinism/src/table-budget.js",
+    "smoke:gallery": "npm run build && node dist/quality/src/gallery.js",
+    "score-ui:gallery": "npm run build && node dist/ui-score/src/gallery.js",
+    "ui-react:check": "npm run build && node tools/ui-react-check.mjs",
+    "golden:baseline": "npm run build && node tests/golden/baseline.mjs",
+    "c2c": "node dist/cli/src/c2c.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "fast-check": "4.10.2",
+    "jsdom": "^24.1.3",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "lossless-json": "4.3.1"
+  }
+}

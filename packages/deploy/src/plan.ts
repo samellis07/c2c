@@ -1,0 +1,467 @@
+/**
+ * Dry-run Catalyst app directory: catalyst.json, functions, Slate client, Data Store schema.
+ * Printing the plan does not call the network. --confirm is the only path that spawns the CLI.
+ */
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import type { App } from '../../core/src/ir.js';
+import { widgetManualItems, type WidgetManualItem } from '../../core/src/parse.js';
+import { integrityColumns } from '../../data/src/integrity.js';
+import { columnRenamesOf, constraintDecisionNote, generateSchema, schemaAsJson, type ConstraintDecision, type SchemaColumn, type SchemaTable, type SourceTableData } from '../../schema/src/generator.js';
+import { appTimeZone, buildUi, slateConfigSource } from '../../ui/src/generate.js';
+import { mailTemplateCatalog } from '../../ui/src/decorations/print-templates.js';
+import { generateReactApp } from '../../ui-react/src/generate.js';
+import { API_FUNCTION, columnTypes, FUNCTION_DIR, functionDir, routeTable } from './function-dir.js';
+import { planSmoke } from './smoke.js';
+import { confirmGuardLines, planScopeLines, type GuardOk } from './guards.js';
+import { catalystRc, catalystScopeArgs } from './scope.js';
+import {
+  formatMailFindings,
+  mailConfig,
+  mailImportSpec,
+  mailLogTableStep,
+  mailModuleSource,
+  mailSenderPrecheck,
+  patchMail,
+  sendsMail,
+  type MailConfig,
+  type MailFinding,
+  type MailSender,
+} from './mail.js';
+import { PROJECT_TEMPLATE_FILE, projectTemplateJson } from './iac.js';
+import { seedBucketName, seedFileColumns } from './seed.js';
+import { formatTableCreate, tableCreatePlan, type TableCreateStep } from './tables.js';
+import { formatPostDeploySteps, postDeploySteps, servicesTouched } from './post-deploy.js';
+import { authProvisionPlan } from './auth.js';
+import { authPlan } from '../../auth/src/plan.js';
+import { principalRoleMap } from '../../auth/src/apply.js';
+
+/** ROWID plus every schema column, including decimal shadows, without a repeated name. */
+function projectionNames(columnNames: readonly string[]): string[] {
+  const names = ['ROWID'];
+  for (const name of columnNames) if (!names.includes(name)) names.push(name);
+  return names;
+}
+
+export interface DeployFile {
+  path: string;
+  data: string | Buffer;
+}
+
+/** Which UI the Slate app serves: the vanilla slate/ tree, or the React app built from web/ to web/dist. */
+export type DeployUi = 'vanilla' | 'react';
+
+export interface DeployCommand {
+  /** Step id recorded in the resume state. */
+  id: 'install' | 'functions' | 'ui-deps' | 'ui-build' | 'slate-link' | 'slate';
+  /** Program to spawn. Defaults to catalyst. */
+  command?: 'catalyst' | 'npm';
+  argv: string[];
+  /** Working directory relative to the deploy dir. Defaults to the deploy dir. */
+  cwd?: string;
+}
+
+export interface DeployOptions {
+  /** live for a confirmed deploy; dry-run otherwise. */
+  mode?: 'live' | 'dry-run';
+  /** Base URL of the c2c_api function as the Slate client calls it. */
+  apiBase?: string;
+  /** The c2c_api function's current console environment, carried into catalyst-config.json env_variables. */
+  functionEnv?: Readonly<Record<string, string>>;
+  /** c2c-deploy.json `mail.testRecipients`. Omitted means nobody: no test sends. */
+  mailTestRecipients?: readonly string[];
+  /**
+   * Source rows the store constraints are measured against (`--source-*`): a
+   * mandatory/unique column the data disproves is provisioned without it and
+   * stays enforced in the generated app instead.
+   */
+  source?: readonly SourceTableData[];
+  /** The UI target the Slate app serves. Default react, which writes web/ and builds web/dist; vanilla is the fallback. */
+  ui?: DeployUi;
+}
+
+export interface DeployBundle {
+  files: DeployFile[];
+  plan: string;
+  commands: DeployCommand[];
+  projectName: string;
+  mail: MailConfig;
+  tableSteps: TableCreateStep[];
+  /** Mail sender precheck. A blocker stops a confirmed deploy. */
+  mailFindings: MailFinding[];
+  /** True when a generated server function calls the mail shim — the app sends mail. */
+  sendsMail: boolean;
+  /** Store constraints the `--source-*` data disproved — the deploy report records them so a later audit can see why a column was provisioned app-level. */
+  constraints?: readonly ConstraintDecision[];
+}
+
+/**
+ * Order: install the function's pinned dependencies, deploy the function (its URL
+ * gives the API base the client needs), then link and deploy the Slate client.
+ */
+export function deployCommands(projectName: string, org: string, projectId: string, ui: DeployUi = 'react'): DeployCommand[] {
+  const scope = catalystScopeArgs(org, projectId);
+  return [
+    { id: 'install', command: 'npm', argv: ['install', '--omit=dev', '--no-audit', '--no-fund'], cwd: FUNCTION_DIR },
+    { id: 'functions', argv: [...scope, 'deploy', '--only', `functions:${API_FUNCTION}`, '-ni'] },
+    // The React target deploys the built dist/, not its source: the app's
+    // pinned dependencies are installed and `npm run build` writes web/dist
+    // inside the deploy dir before the Slate steps.
+    ...(ui === 'react'
+      ? [
+          { id: 'ui-deps' as const, command: 'npm' as const, argv: ['ci', '--prefer-offline'], cwd: 'web' },
+          { id: 'ui-build' as const, command: 'npm' as const, argv: ['run', 'build'], cwd: 'web' },
+        ]
+      : []),
+    { id: 'slate-link', argv: [...scope, 'slate:link', '--name', projectName, '--framework', 'static', '--source', ui === 'react' ? './web/dist' : './slate', '-ni'] },
+    { id: 'slate', argv: [...scope, 'deploy', 'slate', projectName, '-ni'] },
+  ];
+}
+
+export function commandLine(command: DeployCommand): string {
+  const where = command.cwd ? ` (in ${command.cwd})` : '';
+  return `${command.command ?? 'catalyst'} ${command.argv.join(' ')}${where}`;
+}
+
+/** True when a generated server function calls the mail shim. */
+function functionsSendMail(files: readonly { path: string; data: string | Buffer }[]): boolean {
+  return sendsMail(files.map((file) => (file.path.startsWith('functions/') && typeof file.data === 'string' ? file.data : '')));
+}
+
+/**
+ * The c2c_api function sources the app's handlers need before functionDir
+ * expands the runtime assets: mail module, mail/projections/schema json, and
+ * every functions/* file buildUi generated (mail import patched in).
+ */
+export function functionSources(
+  schema: ReturnType<typeof generateSchema>,
+  ui: { files: { path: string; data: string | Buffer }[] },
+  mail: MailConfig,
+  app?: App,
+): DeployFile[] {
+  // The mail module and its config ship only with an app whose handlers send
+  // mail: a function of any other app never loads it or names its log table.
+  const mails = functionsSendMail(ui.files);
+  // sendmail `template:` attachments render against the app's print layouts;
+  // the catalog ships beside c2c-mail.mjs only when there are layouts to name.
+  const templates = app && mails ? mailTemplateCatalog(app) : {};
+  const hasTemplates = Object.keys(templates).length > 0;
+  const generated: DeployFile[] = [
+    ...(mails
+      ? [
+          { path: 'functions/c2c-mail.mjs', data: mailModuleSource(mail.allowlist) },
+          { path: 'functions/c2c-mail.json', data: `${JSON.stringify(mail, null, 2)}\n` },
+          ...(hasTemplates
+            ? [{ path: 'functions/c2c-print-templates.json', data: `${JSON.stringify(templates, null, 2)}\n` }]
+            : []),
+        ]
+      : []),
+    // c2c-columns.json stays the type map written by functionDir. The projection
+    // is ROWID plus every schema column, including decimal shadows. The function
+    // checks that list against c2c-schema.json at load.
+    {
+      path: 'functions/c2c-projections.json',
+      data: `${JSON.stringify(Object.fromEntries(schema.tables.map((table) => [table.name, projectionNames(table.columns.map((column) => column.name))])), null, 2)}\n`,
+    },
+    {
+      path: 'functions/c2c-schema.json',
+      data: `${JSON.stringify(Object.fromEntries(schema.tables.map((table) => [table.name, table.columns.map((column) => column.name)])), null, 2)}\n`,
+    },
+    // Write-rule columns keyed like the generated runtime options (form link
+    // name, child/junction table name): index.js hands them to the datastore
+    // adapter so a direct adapter write is checked the same as a runtime write.
+    {
+      path: 'functions/c2c-rules.json',
+      data: `${JSON.stringify(
+        Object.fromEntries(
+          schema.tables
+            .filter((table) => !table.nosql && table.role !== 'junction')
+            .map((table) => [table.role === 'form' ? table.form : table.name, integrityColumns(table)]),
+        ),
+        null,
+        2,
+      )}\n`,
+    },
+  ];
+  // Reserved column names stored under another column: the adapter translates
+  // the handlers' field names to these columns.
+  const renames = columnRenamesOf(schema);
+  if (Object.keys(renames).length) generated.push({ path: 'functions/c2c-renames.json', data: `${JSON.stringify(renames, null, 2)}\n` });
+  for (const file of ui.files) {
+    if (file.path === 'functions/c2c-mail.mjs' || !file.path.startsWith('functions/')) continue;
+    const data = mails && typeof file.data === 'string' && file.path.endsWith('.mjs') ? patchMail(file.data, mailImportSpec(file.path)) : file.data;
+    generated.push({ path: file.path, data });
+  }
+  return generated;
+}
+
+/** Files deploy would write. Table ordering is separate and may still throw on a foreign-key cycle. */
+export function deployFiles(
+  app: App,
+  guard: GuardOk,
+  mailEnabled: boolean,
+  opts: DeployOptions = {},
+  sender: MailSender = {},
+): { files: DeployFile[]; mail: MailConfig; schema: ReturnType<typeof generateSchema>; sendsMail: boolean } {
+  // A live tree without the app time zone fails every live handler at request
+  // time (TimeZoneRequired inside createRuntime). Report it here, at generate
+  // time, with the fix named — not as a runtime 500 "request failed".
+  if (opts.mode === 'live' && !appTimeZone(app)) {
+    throw new Error(
+      `live deploy of "${app.name || 'app'}" needs the Creator "time zone" application setting: without it every live handler fails at request time. Add \`time zone = "<IANA zone>"\` to the .ds application settings, or set C2C_APP_TIMEZONE on the deployed function environment.`,
+    );
+  }
+  const mail = mailConfig(mailEnabled, sender, opts.mailTestRecipients ?? []);
+  const schema = generateSchema(app, opts.source ? { source: opts.source } : undefined);
+  const ui = buildUi(app, { dc: guard.dc, schema });
+  const files: DeployFile[] = [];
+  files.push({ path: 'catalyst.json', data: `${JSON.stringify(catalystJson(guard, mail), null, 2)}\n` });
+  files.push({
+    path: '.catalystrc',
+    data: `${JSON.stringify(catalystRc(guard), null, 2)}\n`,
+  });
+  files.push({ path: 'c2c-mail.json', data: `${JSON.stringify(mail, null, 2)}\n` });
+  // The drift template names the seed file-column bucket the import creates,
+  // so an export that dropped it reads as drift. Apps without file fields
+  // emit no Stratus items.
+  const fileBucket = Object.keys(seedFileColumns(schema)).length ? seedBucketName((app.name ?? '').trim() || 'app') : undefined;
+  files.push({ path: `iac/${PROJECT_TEMPLATE_FILE}`, data: projectTemplateJson(schema, undefined, fileBucket ? { bucket: fileBucket } : {}) });
+  const json = schemaAsJson(schema);
+  files.push({ path: 'schema/datastore.json', data: json.endsWith('\n') ? json : `${json}\n` });
+  const generated = functionSources(schema, ui, mail, app);
+  if (opts.ui === 'react') {
+    // The React target: web/ holds the app source; the deploy commands build it
+    // to web/dist, which the Slate steps link and deploy in place of slate/.
+    // The runtime config is written with the same values the vanilla client
+    // carries — API base, Web SDK sign-in, app time zone, and the smoke plan the
+    // hidden #/admin/smoke page runs. Route keys come from the generated
+    // functions exactly as routes.json assembles them.
+    const smoke = planSmoke(app, { routes: routeTable(generated.filter((f) => f.path.startsWith('functions/'))), model: ui.model, schema });
+    // The runtime config is the deploy's own: generated with the placeholder
+    // base (its manifest hash stays stable), then replaced here with the real
+    // api base, auth, smoke plan and project — the same values slate/c2c-config.js
+    // carries for the vanilla target.
+    for (const file of generateReactApp(app, { auth: true })) {
+      files.push({
+        path: `web/${file.path}`,
+        data:
+          file.path === 'public/c2c-config.js'
+            ? slateConfigSource({ apiBase: opts.apiBase, auth: true, appTimeZone: appTimeZone(app), smokePlan: smoke, smokeProject: guard.projectId })
+            : file.data,
+      });
+    }
+  } else {
+    for (const file of ui.files) {
+      if (file.path === 'functions/c2c-mail.mjs' || file.path.startsWith('functions/')) continue;
+      if (file.path === 'slate/c2c-config.js') {
+        // The smoke plan the hidden #/admin/smoke page runs — the same calls
+        // `c2c smoke --confirm` plans. Route keys come from the generated
+        // functions exactly as routes.json assembles them.
+        const smoke = planSmoke(app, { routes: routeTable(generated.filter((f) => f.path.startsWith('functions/'))), model: ui.model, schema });
+        files.push({ path: file.path, data: slateConfigSource({ apiBase: opts.apiBase, auth: true, appTimeZone: appTimeZone(app), smokePlan: smoke, smokeProject: guard.projectId }) });
+        continue;
+      }
+      files.push({ path: file.path, data: file.data });
+    }
+  }
+  const verifiedFrom = mail.from && mail.verifiedSenders.includes(mail.from) ? mail.from : undefined;
+  files.push(
+    ...functionDir(generated, {
+      mode: opts.mode ?? 'dry-run',
+      columns: columnTypes(schema.tables),
+      env: opts.functionEnv,
+      roleMap: principalRoleMap(authPlan(app)),
+      ...(verifiedFrom ? { mailFrom: verifiedFrom } : {}),
+    }),
+  );
+  const widgetItems = widgetManualItems(app.widgets);
+  if (widgetItems.length) {
+    files.push({ path: 'manual/widgets.json', data: `${JSON.stringify({ widgets: widgetItems }, null, 2)}\n` });
+  }
+  return { files, mail, schema, sendsMail: functionsSendMail(ui.files) };
+}
+
+/**
+ * Every table step a deploy runs: the app's schema tables, then the support
+ * tables it needs. The delivery log is written only when a send can happen —
+ * the app's functions send mail and the deploy turned mail on — so any other
+ * deploy creates no log table.
+ */
+export function deployTableSteps(schema: ReturnType<typeof generateSchema>, sendingApp: boolean, mailEnabled: boolean): TableCreateStep[] {
+  return [...tableCreatePlan(schema), ...(sendingApp && mailEnabled ? [mailLogTableStep()] : [])];
+}
+
+export function buildDeploy(
+  app: App,
+  guard: GuardOk,
+  mailEnabled: boolean,
+  confirm = false,
+  apiBase?: string,
+  functionEnv?: Readonly<Record<string, string>>,
+  sender: MailSender = {},
+  auth?: { slateDomain?: string; admin?: { email: string; name?: string; roleId?: string } },
+  mailTestRecipients: readonly string[] = [],
+  source?: readonly SourceTableData[],
+  ui: DeployUi = 'react',
+): DeployBundle {
+  const { files, mail, schema, sendsMail: mails } = deployFiles(
+    app,
+    guard,
+    mailEnabled,
+    { mode: confirm ? 'live' : 'dry-run', apiBase, functionEnv, mailTestRecipients, ...(source ? { source } : {}), ui },
+    sender,
+  );
+  const commands = deployCommands(guard.projectName, guard.org, guard.projectId, ui);
+  const tableSteps = deployTableSteps(schema, mails, mail.enabled);
+  const mailFindings = mailSenderPrecheck(app, mail);
+  const widgetItems = widgetManualItems(app.widgets);
+  const plan = formatPlan({
+    guard,
+    mail,
+    tables: schema.tables,
+    files,
+    commands,
+    confirm,
+    tableSteps,
+    mailFindings,
+    auth,
+    constraints: schema.constraints,
+    ui,
+    ...(widgetItems.length ? { widgets: widgetItems } : {}),
+  });
+  return { files, plan, commands, projectName: guard.projectName, mail, tableSteps, mailFindings, sendsMail: mails, ...(schema.constraints?.length ? { constraints: schema.constraints } : {}) };
+}
+
+export function writeDeployTree(dir: string, files: readonly DeployFile[]): void {
+  for (const file of files) {
+    const dest = join(dir, ...file.path.split('/'));
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, file.data);
+  }
+}
+
+function catalystJson(guard: GuardOk, mail: MailConfig) {
+  // slate is an empty array until `slate:link` registers the app: zcatalyst-cli
+  // 1.27.2 addExistingSlate calls existingSlates.findIndex, so an object here
+  // crashes every link behind "contact Catalyst support".
+  return {
+    name: guard.projectName,
+    project_id: guard.projectId,
+    org_id: guard.org,
+    environment: guard.environment,
+    functions: { targets: [API_FUNCTION], ignore: [], source: 'functions' },
+    slate: [],
+    mail: { enabled: mail.enabled, allowlist: mail.allowlist },
+  };
+}
+
+/**
+ * Migrate an object-shaped `slate` field in an existing catalyst.json to the
+ * array the CLI expects. Older c2c wrote an object; the CLI never linked it,
+ * so nothing registered is lost by resetting to []. Returns true when the
+ * file was rewritten. A file that is already an array (in particular one the
+ * CLI itself extended on link) is left untouched.
+ */
+export function migrateCatalystJson(dir: string): boolean {
+  const path = join(dir, 'catalyst.json');
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Array.isArray(parsed.slate)) return false;
+  parsed.slate = [];
+  writeFileSync(path, `${JSON.stringify(parsed, null, 2)}\n`);
+  return true;
+}
+
+function columnLine(column: SchemaColumn): string {
+  const bits: string[] = [column.dataType];
+  if (column.length !== undefined) bits.push(`length=${column.length}`);
+  if (column.mandatory) bits.push('mandatory');
+  if (column.unique) bits.push('unique');
+  if (column.appMandatory) bits.push('app-mandatory (checked by the handler)');
+  if (column.appUnique) bits.push('app-unique (checked by the handler)');
+  if (column.relation) bits.push(`references=${column.relation.table}.${column.relation.column} on_delete=${column.relation.onDelete}`);
+  return `  - ${column.name} ${bits.join(' ')}`;
+}
+
+function tableBlock(table: SchemaTable): string {
+  const head = `- ${table.name} form=${table.form} role=${table.role}${table.nosql ? ' nosql' : ''}`;
+  return [head, ...table.columns.map(columnLine)].join('\n');
+}
+
+export function formatPlan(opts: {
+  guard: GuardOk;
+  mail: MailConfig;
+  tables: readonly SchemaTable[];
+  files: readonly DeployFile[];
+  commands: readonly DeployCommand[];
+  tableSteps: readonly TableCreateStep[];
+  confirm?: boolean;
+  mailFindings?: readonly MailFinding[];
+  auth?: { slateDomain?: string; admin?: { email: string; name?: string; roleId?: string } };
+  /** Constraints the source data moved to the app layer (deploy --source-*). */
+  constraints?: readonly ConstraintDecision[];
+  ui?: DeployUi;
+  /** Widget packages the deploy does not generate. */
+  widgets?: readonly WidgetManualItem[];
+}): string {
+  const functions = opts.files.map((file) => file.path).filter((path) => path.startsWith('functions/')).sort();
+  const slate = opts.files.map((file) => file.path).filter((path) => path.startsWith('slate/')).sort();
+  const web = opts.files.map((file) => file.path).filter((path) => path.startsWith('web/')).sort();
+  // The app-specific React files are listed; the platform tree is byte-identical
+  // for every app (build config and lib/c2c-ui/**) and is summarized.
+  const webListed = web.filter((path) => path.startsWith('web/src/generated/') || path.startsWith('web/public/') || path.startsWith('web/src/custom/') || path === 'web/index.html');
+  const webPlatform = web.length - webListed.length;
+  const lines = [
+    'c2c deploy plan v1',
+    ...planScopeLines(opts.guard),
+    opts.confirm ? 'credential: set' : 'credential: not checked',
+    ...(opts.confirm ? [] : confirmGuardLines()),
+    `mail: ${opts.mail.enabled ? 'enabled' : 'disabled'}`,
+    `allowlist: ${opts.mail.allowlist.join(', ')}`,
+    ...(opts.mail.from ? [`mail from: ${opts.mail.from} (${opts.mail.verifiedSenders.includes(opts.mail.from) ? 'verified' : 'not verified'})`] : []),
+    ...formatMailFindings(opts.mailFindings ?? []),
+    `confirm: ${opts.confirm ? 'yes' : 'no'}`,
+    `ui: ${opts.ui ?? 'react'}`,
+    '',
+    'tables:',
+    ...(opts.tables.length ? opts.tables.map(tableBlock) : ['- none']),
+    ...(opts.constraints?.length ? ['', 'store constraints decided from source:', ...opts.constraints.map(constraintDecisionNote).map((line) => `- ${line}`)] : []),
+    '',
+    'functions:',
+    ...(functions.length ? functions.map((path) => `- ${path}`) : ['- none']),
+    '',
+    'slate:',
+    ...(slate.length ? slate.map((path) => `- ${path}`) : ['- none']),
+    ...(web.length ? ['', 'web:', ...webListed.map((path) => `- ${path}`), `- plus ${webPlatform} platform files (build config and lib/c2c-ui/** — byte-identical for every app)`] : []),
+    ...(opts.widgets?.length ? ['', 'widgets:', ...opts.widgets.map((item) => `- ${item.detail}`)] : []),
+    '',
+    'schema:',
+    '- schema/datastore.json',
+    '',
+    'iac:',
+    `- iac/${PROJECT_TEMPLATE_FILE}`,
+    '',
+    ...formatTableCreate(opts.guard.projectId, opts.tableSteps, opts.confirm === true),
+    '',
+    opts.confirm ? 'commands (Development only):' : 'commands (Development only; not run):',
+    ...opts.commands.map((command) => `- ${commandLine(command)}`),
+    '',
+    opts.confirm ? 'auth provisioning (API):' : 'auth provisioning (API; not run):',
+    ...authProvisionPlan({
+      projectId: opts.guard.projectId,
+      ...(opts.auth?.slateDomain ? { slateDomain: opts.auth.slateDomain } : {}),
+      ...(opts.auth?.admin ? { admin: opts.auth.admin } : {}),
+    }).map((op) => `- ${op.call.method} ${op.call.path} — ${op.note}`),
+    '',
+    // Planned: every table step may create a table. After the run the report uses the actual diff.
+    formatPostDeploySteps(
+      postDeploySteps(opts.guard.projectId, servicesTouched({ createdTables: opts.tableSteps.map((step) => step.table), commands: opts.commands, auth: true })),
+      false,
+    ),
+  ];
+  return `${lines.join('\n')}\n`;
+}

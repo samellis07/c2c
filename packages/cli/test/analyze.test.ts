@@ -1,0 +1,417 @@
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
+import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { deriveIr, parse, parseFile, parseProject, type App } from '../../core/src/index.js';
+import { generate } from '../../deluge/src/index.js';
+import { analyze, analyzeAsJson, analyzeAsText, type AnalyzeReport } from '../src/analyze.js';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const fixtures = path.join(root, 'fixtures/redistributable');
+const goldenDir = path.join(root, 'packages/cli/test/golden');
+
+function load(target: string): App {
+  return statSync(target).isDirectory() ? parseProject(target).ir : parseFile(target).ir;
+}
+
+const cases = [
+  { name: 'freight-forwarding', target: path.join(fixtures, 'freight-forwarding') },
+  { name: 'library-application-system', target: path.join(fixtures, 'library-application-system/library_application.ds') },
+];
+
+for (const c of cases) {
+  test(`analyze ${c.name} matches golden JSON`, () => {
+    const golden = readFileSync(path.join(goldenDir, `${c.name}.analyze.json`), 'utf8');
+    assert.equal(analyzeAsJson(analyze(load(c.target))), golden);
+  });
+
+  test(`analyze ${c.name} is byte-stable across runs`, () => {
+    const app = load(c.target);
+    assert.equal(analyzeAsJson(analyze(app)), analyzeAsJson(analyze(app)));
+    assert.equal(analyzeAsText(analyze(app)), analyzeAsText(analyze(app)));
+  });
+
+  test(`analyze ${c.name} Deluge totals equal whole-app generate`, () => {
+    const app = load(c.target);
+    const r = analyze(app);
+    const whole = generate(app).stats;
+    assert.deepEqual(
+      { statements: r.deluge.statements, translated: r.deluge.translated, shimmed: r.deluge.shimmed },
+      { statements: whole.statements, translated: whole.translated, shimmed: whole.shimmed },
+    );
+    assert.equal(r.deluge.todoLocations.length, r.deluge.todo);
+    assert.equal(r.deluge.todo, r.determinism.todoCount);
+    assert.equal(r.blockers.filter((blocker) => blocker.kind !== 'feature').length, r.determinism.todoCount);
+  });
+
+  test(`analyze ${c.name} score stays in range and matches band rule`, () => {
+    const r = analyze(load(c.target));
+    assert.ok(r.score.readiness >= 0 && r.score.readiness <= 100);
+    const expected = r.score.readiness >= 85 && r.blockers.length === 0 ? 'ready' : r.score.readiness >= 60 ? 'needs-work' : 'blocked';
+    assert.equal(r.score.band, expected);
+    assert.equal(r.catalyst.cost, 'not estimated');
+  });
+}
+
+const TWO_DELUGE_UNITS = `application "TwoUnits"
+{
+	functions
+	{
+		void alpha()
+		{
+			info "alpha";
+		}
+		void beta()
+		{
+			info "beta";
+		}
+	}
+}
+`;
+
+const NO_DELUGE_UNITS = `application "NoUnits"
+{
+	section S
+	{
+		form Item
+		{
+			Name
+			(
+				type = text
+			)
+		}
+	}
+}
+`;
+
+test('analyze text shows Deluge units and the Catalyst function as separate counts', () => {
+  const counts = [TWO_DELUGE_UNITS, NO_DELUGE_UNITS].map((source) => {
+    const report = analyze(deriveIr(parse(source)));
+    const parsed = JSON.parse(analyzeAsJson(report)) as {
+      deluge: { units: number };
+      catalyst: { delugeUnits?: number; functions: number };
+    };
+    const line = analyzeAsText(report)
+      .split('\n')
+      .find((entry) => entry.startsWith('catalyst (estimate):'));
+    assert.ok(line);
+    assert.equal(parsed.catalyst.functions, 1);
+    assert.equal(parsed.catalyst.delugeUnits, parsed.deluge.units);
+    assert.match(line, new RegExp(`deluge units ${parsed.deluge.units}  functions 1`));
+    return parsed.deluge.units;
+  });
+  assert.deepEqual(counts, [2, 0]);
+});
+
+/**
+ * One report criteria and one named filter that do not translate, plus two
+ * functions and one form workflow. The report holes belong to the application.
+ * The workflow's toDecimal call is shimmed, so it adds no hole.
+ */
+const SCOPED = `application "Blocker_Scope"
+{
+	forms
+	{
+		form Item
+		{
+			Title
+			(
+				type = text
+				displayname = "Title"
+			)
+			Qty
+			(
+				type = number
+				displayname = "Qty"
+			)
+		}
+	}
+	reports
+	{
+		list Gappy
+		{
+			show all rows from Item [Lookup.Field]
+			(
+				Title
+			)
+		}
+		list Filtered
+		{
+			show all rows from Item [Title == "Open"]
+			(
+				Title
+			)
+			filters
+			{
+				"Broken" : Lookup.Field
+			}
+		}
+	}
+	workflow
+	{
+		form
+		{
+			On_Add as "On add"
+			{
+				type = form
+				form = Item
+				on add
+				{
+					actions
+					{
+						on success
+						(
+							info "saved";
+							n = toDecimal(input.Qty);
+						)
+					}
+				}
+			}
+		}
+	}
+	functions
+	{
+		Deluge
+		{
+			void do_one(int id)
+			{
+				info id;
+			}
+			void do_two(int id)
+			{
+				info id;
+			}
+		}
+	}
+}
+`;
+
+function residualBlockers(report: AnalyzeReport) {
+  return report.blockers.filter((blocker) => blocker.kind !== 'feature');
+}
+
+function assertCountedOnce(report: AnalyzeReport): void {
+  const blockers = residualBlockers(report);
+  const listed = blockers.map((blocker) => `${blocker.scope ?? ''}|${blocker.label}|${blocker.detail}`);
+  assert.equal(new Set(listed).size, listed.length);
+  assert.equal(report.deluge.todo, report.determinism.todoCount);
+  assert.equal(report.deluge.todoLocations.length, report.deluge.todo);
+  assert.equal(blockers.length, report.determinism.todoCount);
+  for (const blocker of blockers) {
+    const location = report.deluge.todoLocations.find((item) => item.location === blocker.label && item.construct === blocker.detail);
+    assert.equal(blocker.scope, location?.scope);
+  }
+}
+
+/**
+ * A blueprint whose stage and `start` settings blocks carry nested `chart
+ * data` blocks and an unsupported property, and whose transition has a phase
+ * with an unsupported property (`from port`). Those are source-UI layout
+ * metadata: the generator lists each one as a residual hole, so analyze must
+ * list each as a blocker too — never a counted TODO with no blocker entry.
+ */
+const BLUEPRINT_BLOCKS = `application "Blueprint_Blocks"
+{
+	forms
+	{
+		form Item
+		{
+			Title
+			(
+				type = text
+				displayname = "Title"
+			)
+		}
+	}
+	workflow
+	{
+		form
+		{
+			Flow as "Flow"
+			{
+				type = blueprint
+				form = Item
+				start
+				{
+					start stage = Draft
+					theme = dark
+					chart data
+					{
+						x = 1
+					}
+				}
+				stages
+				{
+					Draft
+					{
+						displayname = "Draft"
+						chart data
+						{
+							y = 2
+						}
+					}
+					Review
+					{
+						displayname = "Review"
+					}
+				}
+				transitions
+				{
+					Send
+					{
+						from stage = Draft
+						to stage = Review
+						during
+						{
+							from port = left
+						}
+					}
+				}
+			}
+		}
+	}
+}
+`;
+
+test('blueprint stage, start and transition-phase residual holes counted in todoKinds are blockers', () => {
+  const report = analyze(deriveIr(parse(BLUEPRINT_BLOCKS)));
+  assertCountedOnce(report);
+  const blockerDetails = residualBlockers(report).map((blocker) => blocker.detail);
+  for (const kind of report.determinism.todoKinds) {
+    assert.ok(
+      blockerDetails.filter((detail) => detail === kind.construct).length >= kind.count,
+      `todoKinds lists ${kind.count} × ${kind.construct} but blockers do not`,
+    );
+  }
+  const constructs = report.determinism.todoKinds.map((kind) => kind.construct);
+  assert.ok(constructs.includes('blueprint-stage-block-chart data'));
+  assert.ok(constructs.includes('blueprint-start-block-chart data'));
+  assert.ok(constructs.includes('blueprint-start-property-theme'));
+  const phaseConstruct = 'blueprint-phase-property-from port';
+  assert.equal(report.determinism.todoKinds.find((kind) => kind.construct === phaseConstruct)?.count, 1);
+  assert.equal(report.deluge.todoLocations.filter((item) => item.construct === phaseConstruct).length, 1);
+  assert.equal(residualBlockers(report).filter((blocker) => blocker.detail === phaseConstruct).length, 1);
+  for (const construct of constructs) {
+    assert.ok(blockerDetails.includes(construct), `blockers is missing ${construct}`);
+  }
+});
+
+test('app-level report criteria are listed once with scope app', () => {
+  const report = analyze(deriveIr(parse(SCOPED)));
+  assertCountedOnce(report);
+  assert.deepEqual(
+    report.deluge.todoLocations,
+    [
+      { location: 'report Filtered filter Broken', construct: 'report-criteria', scope: 'app' },
+      { location: 'report Gappy', construct: 'report-criteria', scope: 'app' },
+      {
+        location: 'report Gappy',
+        construct: 'Filter not migrated: the report criteria could not be translated; the report returns no rows.',
+        scope: 'ui',
+      },
+      {
+        location: 'report Filtered',
+        construct: 'Named filter "Broken" is not migrated; selecting it returns no rows.',
+        scope: 'ui',
+      },
+    ],
+  );
+  assert.equal(report.determinism.todoKinds.find((kind) => kind.construct === 'report-criteria')?.count, 2);
+  assert.equal(report.determinism.uiTodoCount, 2);
+  assert.equal(report.deluge.todo, 4);
+});
+
+const galleryRoot = process.env.C2C_FIXTURES_DIR;
+const galleryDir = galleryRoot ? path.join(galleryRoot, 'gallery') : '';
+const galleryReady = !!galleryRoot && existsSync(galleryDir);
+const gallerySkip = galleryReady ? false : 'C2C_FIXTURES_DIR/gallery is not available';
+
+function galleryDs(appDir: string, file: string): App {
+  return parseFile(path.join(galleryDir, appDir, file)).ir;
+}
+
+test('course-planner and CRM blockers match the residual, each app-level hole once', { skip: gallerySkip }, () => {
+  const course = analyze(galleryDs('course-planner', 'Course_Planner.ds'));
+  assertCountedOnce(course);
+  assert.equal(course.determinism.todoCount, 4);
+  assert.equal(course.determinism.uiTodoCount, 2);
+  assert.deepEqual(
+    course.deluge.todoLocations.filter((item) => item.scope === 'app').map((item) => `${item.location}|${item.construct}`),
+    ['report Ongoing_Courses_Student|report-criteria'],
+  );
+  assert.deepEqual(
+    course.deluge.todoLocations.filter((item) => item.scope === 'unit' && item.construct === 'criteria-dynamic'),
+    [{ location: 'workflow Run_Scripts_On_Click_of_Y:14', construct: 'criteria-dynamic', scope: 'unit' }],
+  );
+
+  const crm = analyze(galleryDs('customer-relationship-manager', 'Customer_Relationship_Manager.ds'));
+  assertCountedOnce(crm);
+  assert.equal(crm.determinism.todoCount, 9);
+  assert.equal(crm.determinism.uiTodoCount, 7);
+  assert.deepEqual(
+    crm.deluge.todoLocations.filter((item) => item.scope === 'app').map((item) => `${item.location}|${item.construct}`),
+    [],
+  );
+});
+
+test('education, emergency, and management blocker counts agree', { skip: gallerySkip }, () => {
+  const education = analyze(galleryDs('education-management', 'Education_Management.ds'));
+  assertCountedOnce(education);
+  assert.equal(education.determinism.todoCount, 23);
+  assert.equal(education.deluge.todoLocations.filter((item) => item.scope === 'app').length, 0);
+  const registration = education.deluge.todoLocations.filter((item) => item.location.startsWith('workflow Create_record_scripts12:'));
+  assert.equal(registration.length, 0);
+  assert.equal(new Set(registration.map((item) => item.location)).size, 0);
+
+  const emergency = analyze(galleryDs('employee-emergency-check-in', 'Employee_Emergency_Check_In.ds'));
+  assertCountedOnce(emergency);
+  assert.deepEqual(emergency.deluge.todoLocations, [
+    { location: 'report Open_Crisis_In_Our_Branch', construct: 'report-criteria', scope: 'app' },
+    {
+      location: 'report Open_Crisis_In_Our_Branch',
+      construct: 'Filter not migrated: the report criteria could not be translated; the report returns no rows.',
+      scope: 'ui',
+    },
+    { location: 'page Crisis_View_Page.dspZml', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
+    { location: 'page Crisis_Details.dspZml #1', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
+    { location: 'page Crisis_Details.dspZml #2', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
+    { location: 'page Crisis_Details.dspZml #3', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
+    { location: 'page Crisis_Details.dspZml #4', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
+    { location: 'page Crisis_Details.dspZml #5', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
+  ]);
+
+  const management = analyze(galleryDs('employee-management', 'Employee_Management.ds'));
+  assertCountedOnce(management);
+  assert.deepEqual(management.deluge.todoLocations, [
+    { location: 'page Dashboard.dspZml', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
+    { location: 'page Dashboard.dsp', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
+    { location: 'page Employee_Profile.dsp', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
+  ]);
+});
+
+test('a page holding a server-side Deluge snippet counts one named UI blocker', () => {
+  const app = deriveIr(
+    parse(`application "Demo"
+{
+\tpage Home
+\t{
+\t\tContent="<zml><layout><panel><dspZml name=\\"Snippet\\" value=\\"<% info = 1; %>\\"/></panel></layout></zml>"
+\t}
+}
+`),
+  );
+  const r = analyze(app);
+  assert.equal(r.determinism.uiTodoCount, 1);
+  assert.equal(
+    r.blockers.filter((b) => (b.kind as string) === 'ui').length,
+    1,
+    'Each UI stub must be counted EXACTLY once (fails if the dropped loop comes back)',
+  );
+  assert.ok(
+    r.blockers.some(
+      (b) => (b.kind as string) === 'ui' && b.label === 'page Home.dspZml' && /manual translation/.test(b.detail),
+    ),
+    JSON.stringify(r.blockers),
+  );
+});

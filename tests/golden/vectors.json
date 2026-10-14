@@ -1,0 +1,546 @@
+{
+  "version": 1,
+  "source": "creator-capture",
+  "zone": "Asia/Calcutta",
+  "clock": "2026-10-06T08:30:00.000Z",
+  "note": "238 synthetic Creator captures (223 plus 15 data-query cases over three seed rows). The 42 bool ids under invalid are a capture-encoder artifact (not compared). No customer data.",
+  "invalid": {
+    "isEmpty.list-empty": "capture-artifact",
+    "isEmpty.list-nonempty": "capture-artifact",
+    "isEmpty.map-empty": "capture-artifact",
+    "isEmpty.map-nonempty": "capture-artifact",
+    "isEmpty.string-empty": "capture-artifact",
+    "isEmpty.string-nonempty": "capture-artifact",
+    "isEmpty.string-space": "capture-artifact",
+    "isEmpty.fn-empty-string": "capture-artifact",
+    "isNumber.int": "capture-artifact",
+    "isNumber.negative": "capture-artifact",
+    "isNumber.decimal-string": "capture-artifact",
+    "isNumber.decimal-value": "capture-artifact",
+    "isNumber.text": "capture-artifact",
+    "isNumber.empty": "capture-artifact",
+    "isNumber.space": "capture-artifact",
+    "isNumber.scientific": "capture-artifact",
+    "contains.string-hit": "capture-artifact",
+    "contains.string-case": "capture-artifact",
+    "contains.string-empty": "capture-artifact",
+    "contains.list-hit": "capture-artifact",
+    "contains.list-miss": "capture-artifact",
+    "startsWith.hit": "capture-artifact",
+    "startsWith.miss": "capture-artifact",
+    "startsWith.empty": "capture-artifact",
+    "endsWith.hit": "capture-artifact",
+    "endsWith.miss": "capture-artifact",
+    "containKey.hit": "capture-artifact",
+    "containKey.miss": "capture-artifact",
+    "containKey.null-value": "capture-artifact",
+    "date.cmp.gt": "capture-artifact",
+    "date.cmp.eq": "capture-artifact",
+    "date.cmp.lt-null": "capture-artifact",
+    "date.cmp.gt-null": "capture-artifact",
+    "date.cmp.lte-null": "capture-artifact",
+    "date.cmp.gte-null": "capture-artifact",
+    "isNull.null": "capture-artifact",
+    "isNull.empty-string": "capture-artifact",
+    "isNull.zero": "capture-artifact",
+    "isBlank.empty": "capture-artifact",
+    "isBlank.null": "capture-artifact",
+    "isBlank.space": "capture-artifact",
+    "isBlank.zero": "capture-artifact"
+  },
+  "cases": {
+    "get.list-first": "a",
+    "get.list-last": "c",
+    "get.list-out-of-range": {
+      "$error": "Error at line : 62, Given index 5 is greater than the list size"
+    },
+    "get.list-negative": {
+      "$error": "Error at line : 89, Given index -1 is greater than the list size"
+    },
+    "get.list-empty": {
+      "$error": "Error at line : 116, Given index 0 is greater than the list size"
+    },
+    "get.map-hit": "x",
+    "get.map-miss": null,
+    "get.map-null-value": null,
+    "get.string-first": null,
+    "get.string-last": null,
+    "get.string-out-of-range": null,
+    "get.string-negative": null,
+    "get.string-empty": null,
+    "distinct.numbers-dupes": [
+      1,
+      2,
+      3
+    ],
+    "distinct.strings": [
+      "b",
+      "a"
+    ],
+    "distinct.empty": [],
+    "distinct.already-unique": [
+      3,
+      1,
+      2
+    ],
+    "distinct.all-same": [
+      "a"
+    ],
+    "distinct.case-sensitive": [
+      "A",
+      "a"
+    ],
+    "removeAllAlpha.mixed": "12!",
+    "removeAllAlpha.empty": null,
+    "removeAllAlpha.letters-only": null,
+    "removeAllAlpha.no-letters": "123 !",
+    "removeAllAlpha.spaces": " ",
+    "removeAllAlpha.accent": "é1",
+    "add.append-order": [
+      "b",
+      "a",
+      "c"
+    ],
+    "add.null-element": [
+      "a",
+      null
+    ],
+    "add.empty-list": [
+      "a"
+    ],
+    "add.duplicate": [
+      "a",
+      "a"
+    ],
+    "remove.list-index-0": [
+      "b",
+      "c"
+    ],
+    "remove.list-last": [
+      "a",
+      "b"
+    ],
+    "remove.list-return": "a",
+    "remove.list-negative": {
+      "$error": "Error at line : 392, Given index -1 is greater than the list size"
+    },
+    "remove.list-empty": {
+      "$error": "Error at line : 438, emptyList"
+    },
+    "remove.string-first": "aba",
+    "removeelement.present-order": [
+      "b",
+      "a"
+    ],
+    "removeelement.absent": [
+      "a",
+      "b"
+    ],
+    "removeelement.null": [
+      "a",
+      "b"
+    ],
+    "removeelement.empty": [],
+    "removeelement.spelling": [
+      "b",
+      "a"
+    ],
+    "days360.same-day": 0,
+    "days360.jan-1-to-31": 30,
+    "days360.jan-1-to-feb-1": 31,
+    "days360.leap-feb": 29,
+    "days360.jan-31-to-mar-1": 30,
+    "days360.reversed": -60,
+    "days360.year-boundary": 31,
+    "days360.with-time": 30,
+    "removeall.list-subset": [
+      "b",
+      "c"
+    ],
+    "removeall.list-absent": [
+      "a",
+      "b"
+    ],
+    "sort.numbers-asc": [
+      1,
+      1,
+      2,
+      3
+    ],
+    "sort.numbers-desc": [
+      3,
+      2,
+      1
+    ],
+    "sort.negatives": [
+      -3,
+      -1,
+      0,
+      2
+    ],
+    "sort.strings": [
+      "a",
+      "a",
+      "b",
+      "c"
+    ],
+    "sort.empty": [],
+    "sort.no-arg": [
+      1,
+      2
+    ],
+    "round.half-up-positive": 2,
+    "round.half-up-2-5": 3,
+    "round.half-negative": -2,
+    "round.places-2": 1.26,
+    "round.places-1-negative": -1.3,
+    "round.integer": 4,
+    "round.already-places": 1,
+    "getDayOfWeek.tuesday": 3,
+    "getDayOfWeek.sunday": 1,
+    "getDayOfWeek.monday": 2,
+    "getDayOfWeek.saturday": 7,
+    "getDayOfWeek.with-time": 3,
+    "indexOf.found": 1,
+    "indexOf.from": 4,
+    "indexOf.missing": -1,
+    "indexOf.empty-needle": 0,
+    "indexOf.empty-haystack": 0,
+    "indexOf.case": 1,
+    "indexOf.case-miss": -1,
+    "indexOf.at-start": 0,
+    "indexOf.list": 1,
+    "leftpad.one-arg": "  7",
+    "leftpad.fn-width": "  7",
+    "leftpad.fn-empty": "   ",
+    "leftpad.fn-longer": "7000",
+    "toStartOfWeek.tuesday": {
+      "$date": "2026-10-04T00:00:00"
+    },
+    "toStartOfWeek.sunday": {
+      "$date": "2026-10-04T00:00:00"
+    },
+    "toStartOfWeek.monday": {
+      "$date": "2026-10-04T00:00:00"
+    },
+    "toStartOfWeek.saturday": {
+      "$date": "2026-10-04T00:00:00"
+    },
+    "toStartOfWeek.with-time": {
+      "$date": "2026-10-04T00:00:00"
+    },
+    "intersect.overlap": [
+      2,
+      3
+    ],
+    "intersect.none": [],
+    "intersect.empty-left": [],
+    "intersect.dupes": [
+      1
+    ],
+    "intersect.order": [
+      1,
+      2
+    ],
+    "intersect.strings": [
+      "a"
+    ],
+    "isNumber.null": null,
+    "isNumber.bool": null,
+    "toLowerCase.mixed": "abc",
+    "toLowerCase.empty": null,
+    "toUpperCase.mixed": "ABC",
+    "toUpperCase.empty": null,
+    "trim.spaces": "a",
+    "trim.empty": null,
+    "trim.inner": "a b",
+    "subString.mid": "bc",
+    "subString.zero": null,
+    "subString.to-end": "cd",
+    "subString.negative": {
+      "$error": "Error at line : 276, One or more specified index values were invalid. Index value must range between 0 and the length of the text"
+    },
+    "subString.empty": {
+      "$error": "Error at line : 302, One or more specified index values were invalid. Index value must range between 0 and the length of the text"
+    },
+    "subString.reversed": {
+      "$error": "Error at line : 328, Start index cannot be greater than the end index"
+    },
+    "replaceAll.literal": "XbX",
+    "replaceAll.dot": "-----",
+    "replaceAll.empty": null,
+    "replaceFirst.one": "Xba",
+    "replaceFirst.missing": "bbb",
+    "lastIndexOf.found": 4,
+    "lastIndexOf.missing": -1,
+    "lastIndexOf.empty": 3,
+    "length.string": 2,
+    "length.empty": 0,
+    "length.list": null,
+    "getPrefix.sep": "ab",
+    "getPrefix.missing-sep": null,
+    "getPrefix.empty-source": null,
+    "getSuffix.sep": "cd",
+    "getSuffix.missing-sep": null,
+    "getSuffix.empty-source": null,
+    "concat.two": "abcd",
+    "concat.empty": "a",
+    "toList.sep": [
+      "a",
+      "b",
+      "c"
+    ],
+    "toList.no-sep": [
+      "abc"
+    ],
+    "toList.consecutive": [
+      "a",
+      null,
+      "b"
+    ],
+    "toList.empty-source": [
+      null
+    ],
+    "toList.missing-sep": [
+      "abc"
+    ],
+    "put.then-get": "x",
+    "put.replace": "y",
+    "put.null": null,
+    "size.list": 2,
+    "size.empty-list": 0,
+    "size.map": 2,
+    "size.empty-map": 0,
+    "addAll.order": [
+      "a",
+      "b",
+      "c"
+    ],
+    "addAll.empty": [
+      "a"
+    ],
+    "getYear.literal": 2026,
+    "getMonth.literal": 10,
+    "getDay.literal": 6,
+    "getHour.date-only": 0,
+    "getHour.time": 18,
+    "getMinutes.time": 30,
+    "getSeconds.time": 45,
+    "addDay.month-end": {
+      "$date": "2020-02-01T00:00:00"
+    },
+    "addDay.negative-leap": {
+      "$date": "2020-02-29T00:00:00"
+    },
+    "addDay.keeps-time": {
+      "$date": "2026-10-07T18:30:00"
+    },
+    "addMonth.clamp-leap": {
+      "$date": "2020-02-29T00:00:00"
+    },
+    "addMonth.clamp-nonleap": {
+      "$date": "2021-02-28T00:00:00"
+    },
+    "addMonth.negative": {
+      "$date": "2020-02-29T00:00:00"
+    },
+    "addYear.leap-day": {
+      "$date": "2021-02-28T00:00:00"
+    },
+    "addYear.plain": {
+      "$date": "2025-10-06T00:00:00"
+    },
+    "addWeek.one": {
+      "$date": "2026-10-13T00:00:00"
+    },
+    "addWeek.negative": {
+      "$date": "2026-09-29T00:00:00"
+    },
+    "addHour.midnight": {
+      "$date": "2026-10-07T03:00:00"
+    },
+    "addHour.negative": {
+      "$date": "2026-10-05T23:00:00"
+    },
+    "addMinutes.carry": {
+      "$date": "2026-10-06T19:10:00"
+    },
+    "addSeconds.carry": {
+      "$date": "2026-10-06T19:00:05"
+    },
+    "addBusinessDay.tuesday": {
+      "$date": "2026-10-07T00:00:00"
+    },
+    "addBusinessDay.friday": {
+      "$date": "2026-10-12T00:00:00"
+    },
+    "addBusinessDay.saturday": {
+      "$date": "2026-10-12T00:00:00"
+    },
+    "addBusinessDay.zero": {
+      "$date": "2026-10-06T00:00:00"
+    },
+    "addBusinessDay.negative": {
+      "$date": "2026-10-05T00:00:00"
+    },
+    "toDate.drops-time": {
+      "$date": "2026-10-06T00:00:00"
+    },
+    "toTime.keeps": {
+      "$date": "2026-10-06T18:30:45"
+    },
+    "toString.pattern": "06-Oct-2026",
+    "toString.time-pattern": "2026-10-06 18:30:45",
+    "diffDays.five": 432000000,
+    "diffDays.negative": -432000000,
+    "diffDays.same": 0,
+    "date.cmp.lt-null-null": {
+      "$error": "Error at line : 336, UnParsable date"
+    },
+    "date.cmp.gt-null-null": {
+      "$error": "Error at line : 365, UnParsable date"
+    },
+    "date.cmp.lte-null-null": {
+      "$error": "Error at line : 7, UnParsable date"
+    },
+    "date.cmp.gte-null-null": {
+      "$error": "Error at line : 36, UnParsable date"
+    },
+    "date.rel.bad-eq": {
+      "$error": "Error at line : 65, UnParsable date"
+    },
+    "abs.negative": 3,
+    "abs.zero": 0,
+    "abs.positive": 3,
+    "sqrt.square": 3,
+    "sqrt.zero": 0,
+    "sqrt.negative": null,
+    "floor.whole-decimal": 3,
+    "floor.decimal": 1,
+    "floor.negative": -2,
+    "ceil.whole-decimal": 3,
+    "ceil.decimal": 2,
+    "ceil.negative": -1,
+    "min.two": -1,
+    "min.two-negative": -5,
+    "max.two": 3,
+    "max.two-negative": -2,
+    "power.cube": 8,
+    "power.zero": 1,
+    "power.negative-exp": 0.5,
+    "toLong.decimal-text": 12,
+    "toLong.negative-text": -12,
+    "toLong.integer-text": 12,
+    "toLong.empty": {
+      "$error": "Error at line : 237, Unable to cast the '' value into a 'Long' value because the input is in an invalid format"
+    },
+    "toLong.text": {
+      "$error": "Error at line : 260, Unable to cast the '12a' value into a 'Long' value because the input is in an invalid format"
+    },
+    "toLong.null": {
+      "$error": "Error at line : 284, Value is empty and 'toLong' function cannot be applied"
+    },
+    "toLong.date-midnight": 1791225000000,
+    "toLong.date-evening": -48600000,
+    "toNumber.alias": 12,
+    "toNumber.null": {
+      "$error": "Error at line : 31, Value is empty and 'toNumber' function cannot be applied"
+    },
+    "toDecimal.text": {
+      "$decimal": "10.50"
+    },
+    "toDecimal.integer": {
+      "$decimal": "10"
+    },
+    "toDecimal.empty": {
+      "$error": "Error at line : 106, Unable to convert the input text to decimal"
+    },
+    "toDecimal.text-bad": {
+      "$error": "Error at line : 132, Unable to convert the input text to decimal"
+    },
+    "toMap.json-get": "x",
+    "toMap.deluge-text": "x",
+    "toMap.empty": {
+      "$error": "Error at line : 212, Invalid JSON Format String"
+    },
+    "ifnull.null": "x",
+    "ifnull.present": "y",
+    "ifnull.empty": null,
+    "decimal.add": {
+      "$decimal": "10.75"
+    },
+    "decimal.sub": {
+      "$decimal": "0.7"
+    },
+    "decimal.mul": {
+      "$decimal": "5.00"
+    },
+    "decimal.div": {
+      "$decimal": "0.25"
+    },
+    "foreach.null": 0,
+    "foreach.empty": 0,
+    "getall.names-qty-positive": [
+      "Ada",
+      "Ada"
+    ],
+    "getall.names-qty-negative": [
+      "Cy"
+    ],
+    "getall.names-qty-missing": [],
+    "getall.ada-qty": [
+      2,
+      5
+    ],
+    "distinct.status-open": [
+      "Open"
+    ],
+    "distinct.all-names": [
+      "Ada",
+      "Bea",
+      "Cy"
+    ],
+    "distinct.all-status": [
+      "Open",
+      "Hold"
+    ],
+    "getall.names-open": [
+      "Ada",
+      "Bea",
+      "Cy"
+    ],
+    "getall.names-open-spelling": [
+      "Ada",
+      "Bea",
+      "Cy"
+    ],
+    "getall.status-all": [
+      "Open",
+      "Open",
+      "Hold",
+      "Open"
+    ],
+    "removeelement.fetch-present": [
+      "Bea",
+      "Cy"
+    ],
+    "removeelement.fetch-absent": [
+      "Ada",
+      "Bea",
+      "Cy"
+    ],
+    "removeelement.fetch-spelling": [
+      "Ada",
+      "Ada",
+      "Cy"
+    ],
+    "removeall.fetch-subset": [
+      "Bea",
+      "Cy"
+    ],
+    "removeall.fetch-spelling": [
+      "Bea",
+      "Cy"
+    ]
+  }
+}

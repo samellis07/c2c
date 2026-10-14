@@ -1,0 +1,204 @@
+application "c2c-conn-creator-read"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Calcutta"
+	time format = "24-hr"
+
+	forms
+	{
+		form New_Contact
+		{
+			displayname = "New Contact"
+			Name
+			(
+				type = text
+			)
+		}
+		form Conn_Read_Query
+		{
+			displayname = "Conn Read Query"
+			Read_Code
+			(
+				type = text
+				displayname = "Code (blank = all)"
+				row = 1
+				column = 1
+				width = medium
+			)
+			Read_Response
+			(
+				type = textarea
+				displayname = "Creator response"
+				row = 2
+				column = 1
+				width = medium
+			)
+			actions
+			{
+				on add
+				{
+					submit
+					(
+						type = submit
+						displayname = "Submit"
+					)
+					reset
+					(
+						type = reset
+						displayname = "Reset"
+					)
+				}
+				on edit
+				{
+					update
+					(
+						type = submit
+						displayname = "Update"
+					)
+					cancel
+					(
+						type = cancel
+						displayname = "Cancel"
+					)
+				}
+			}
+		}
+	}
+
+	reports
+	{
+		custom All_Contacts
+		{
+			displayName = "All Contacts"
+			show all rows from New_Contact
+			(
+				Name
+			)
+		}
+		list All_Conn_Read_Queries
+		{
+			displayName = "All Conn Read Queries"
+			show all rows from Conn_Read_Query
+			(
+				Read_Code as "Code (blank = all)"
+				Read_Response as "Creator response"
+			)
+		}
+	}
+
+	workflow
+	{
+		form
+		{
+			Conn_Read_Query_Check as "Conn Read Query Check"
+			{
+				type = form
+				form = Conn_Read_Query
+				record event = on add or edit
+				on validate
+				{
+					actions
+					{
+						custom deluge script
+						(
+							if(thisapp.c2c_creator_owner() == "FILL_CREATOR_OWNER_NAME")
+							{
+								alert "Set c2c_creator_owner to the Creator owner name first.";
+								cancel submit;
+							}
+						)
+					}
+				}
+			}
+			Conn_Read_Query_Fetch as "Conn Read Query Fetch"
+			{
+				type = form
+				form = Conn_Read_Query
+				record event = on add or edit
+				on success
+				{
+					actions
+					{
+						custom deluge script
+						(
+							readCriteria = "";
+							if(input.Read_Code != null)
+							{
+								if(input.Read_Code != "")
+								{
+									readCriteria = "Src_Code == \"" + input.Read_Code + "\"";
+								}
+							}
+							got = zoho.creator.getRecords(thisapp.c2c_creator_owner(), thisapp.c2c_creator_src_app(), "All_Conn_Src_Items", readCriteria, 1, 200, "c2c_creator");
+							input.Read_Response = got.toString();
+							success message "c2c-creator-read";
+						)
+					}
+				}
+			}
+		}
+	}
+
+	functions
+	{
+		Deluge
+		{
+			string c2c_creator_owner()
+			{
+				return "FILL_CREATOR_OWNER_NAME";
+			}
+			string c2c_creator_src_app()
+			{
+				return "c2c-conn-creator-src";
+			}
+		}
+	}
+
+	share_settings
+	{
+		role Hierarchy = {New_Contact,Conn_Read_Query}
+	}
+
+	web
+	{
+		forms
+		{
+			form New_Contact
+			{
+				label placement = left
+			}
+			form Conn_Read_Query
+			{
+				label placement = left
+			}
+		}
+		menu
+		{
+			space Space
+			{
+				displayname = "Space"
+				section Contacts
+				{
+					displayname = "Contacts"
+					form New_Contact
+					{
+					}
+					report All_Contacts
+					{
+					}
+				}
+				section Conn_Section_Read_Query
+				{
+					displayname = "c2c-conn-creator-read"
+					icon = "design-todo"
+					form Conn_Read_Query
+					{
+					}
+					report All_Conn_Read_Queries
+					{
+					}
+				}
+			}
+		}
+	}
+}

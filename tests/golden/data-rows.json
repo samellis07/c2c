@@ -1,0 +1,10 @@
+{
+  "form": "GoldenRow",
+  "note": "Synthetic rows for the dry-run golden datastore. Same four rows and order as criteria-data.json GoldenRow. Names are Ada, Bea, and Cy. No personal data.",
+  "rows": [
+    { "Name": "Ada", "Qty": 2, "Status": "Open" },
+    { "Name": "Bea", "Qty": 0, "Status": "Open" },
+    { "Name": "Ada", "Qty": 5, "Status": "Hold" },
+    { "Name": "Cy", "Qty": -1, "Status": "Open" }
+  ]
+}

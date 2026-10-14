@@ -1,0 +1,7 @@
+// Parity baseline: case ids whose Creator vector does not match the shim.
+// A listed id that still fails is a known gap (the harness reports it as todo, not a failure).
+// A listed id that passes fails the suite with "remove <id> from parity-baseline.json".
+// The list only shrinks. An unlisted id that fails is a real failure.
+// Regenerate with `npm run golden:baseline`. Adding ids requires --allow-add.
+// Generated. Ids are sorted. Do not add ids by hand.
+[]

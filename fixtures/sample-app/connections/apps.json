@@ -1,0 +1,111 @@
+{
+  "apps": [
+    {
+      "name": "c2c-conn-crm",
+      "connections": [
+        "c2c_crm"
+      ],
+      "tasks": [
+        "zoho.crm.createRecord",
+        "zoho.crm.searchRecords",
+        "zoho.crm.updateRecord"
+      ]
+    },
+    {
+      "name": "c2c-conn-books",
+      "connections": [
+        "c2c_books"
+      ],
+      "tasks": [
+        "zoho.books.createRecord",
+        "zoho.books.getRecords"
+      ]
+    },
+    {
+      "name": "c2c-conn-desk",
+      "connections": [
+        "c2c_desk"
+      ],
+      "tasks": [
+        "zoho.desk.create"
+      ]
+    },
+    {
+      "name": "c2c-conn-cliq",
+      "connections": [
+        "c2c_cliq"
+      ],
+      "tasks": [
+        "zoho.cliq.postToChannel"
+      ]
+    },
+    {
+      "name": "c2c-conn-rest-getpost",
+      "connections": [
+        "c2c_crm"
+      ],
+      "tasks": [
+        "invokeurl"
+      ]
+    },
+    {
+      "name": "c2c-conn-rest-putdel",
+      "connections": [
+        "c2c_crm"
+      ],
+      "tasks": [
+        "invokeurl"
+      ]
+    },
+    {
+      "name": "c2c-conn-creator-src",
+      "connections": [],
+      "tasks": []
+    },
+    {
+      "name": "c2c-conn-creator-read",
+      "connections": [
+        "c2c_creator"
+      ],
+      "tasks": [
+        "zoho.creator.getRecords"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "link": "c2c_crm",
+      "scopes": [
+        "ZohoCRM.modules.leads.READ",
+        "ZohoCRM.modules.leads.CREATE",
+        "ZohoCRM.modules.leads.UPDATE",
+        "ZohoCRM.modules.leads.DELETE"
+      ]
+    },
+    {
+      "link": "c2c_books",
+      "scopes": [
+        "ZohoBooks.contacts.CREATE",
+        "ZohoBooks.contacts.READ"
+      ]
+    },
+    {
+      "link": "c2c_desk",
+      "scopes": [
+        "Desk.tickets.CREATE"
+      ]
+    },
+    {
+      "link": "c2c_cliq",
+      "scopes": [
+        "ZohoCliq.Webhooks.CREATE"
+      ]
+    },
+    {
+      "link": "c2c_creator",
+      "scopes": [
+        "ZohoCreator.report.READ"
+      ]
+    }
+  ]
+}

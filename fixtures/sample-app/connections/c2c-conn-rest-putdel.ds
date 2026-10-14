@@ -1,0 +1,211 @@
+application "c2c-conn-rest-putdel"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Calcutta"
+	time format = "24-hr"
+
+	forms
+	{
+		form New_Contact
+		{
+			displayname = "New Contact"
+			Name
+			(
+				type = text
+			)
+		}
+		form Conn_Rest_Put_Delete
+		{
+			displayname = "Conn Rest Put Delete"
+			must have Rest_Verb
+			(
+				type = picklist
+				displayname = "Verb"
+				values = {"PUT","DELETE"}
+				row = 1
+				column = 1
+				width = medium
+			)
+			must have Rest_Record_Id
+			(
+				type = text
+				displayname = "CRM record id"
+				row = 2
+				column = 1
+				width = medium
+			)
+			Rest_Last_Name
+			(
+				type = text
+				displayname = "Last name"
+				row = 3
+				column = 1
+				width = medium
+			)
+			Rest_Response
+			(
+				type = textarea
+				displayname = "REST response"
+				row = 4
+				column = 1
+				width = medium
+			)
+			actions
+			{
+				on add
+				{
+					submit
+					(
+						type = submit
+						displayname = "Submit"
+					)
+					reset
+					(
+						type = reset
+						displayname = "Reset"
+					)
+				}
+				on edit
+				{
+					update
+					(
+						type = submit
+						displayname = "Update"
+					)
+					cancel
+					(
+						type = cancel
+						displayname = "Cancel"
+					)
+				}
+			}
+		}
+	}
+
+	reports
+	{
+		custom All_Contacts
+		{
+			displayName = "All Contacts"
+			show all rows from New_Contact
+			(
+				Name
+			)
+		}
+		list All_Conn_Rest_Put_Deletes
+		{
+			displayName = "All Conn Rest Put Deletes"
+			show all rows from Conn_Rest_Put_Delete
+			(
+				Rest_Verb as "Verb"
+				Rest_Record_Id as "CRM record id"
+				Rest_Last_Name as "Last name"
+				Rest_Response as "REST response"
+			)
+		}
+	}
+
+	workflow
+	{
+		form
+		{
+			Conn_Rest_Put_Delete_Call as "Conn Rest Put Delete Call"
+			{
+				type = form
+				form = Conn_Rest_Put_Delete
+				record event = on add or edit
+				on success
+				{
+					actions
+					{
+						custom deluge script
+						(
+							if(input.Rest_Verb == "PUT")
+							{
+								apiUrl = "https://www.zohoapis.in/crm/v7/Leads/" + input.Rest_Record_Id;
+								rec = Map();
+								rec.put("Last_Name", input.Rest_Last_Name);
+								rec.put("Company", "c2c synthetic");
+								rows = List();
+								rows.add(rec);
+								payload = Map();
+								payload.put("data", rows);
+								hdr = Map();
+								hdr.put("Content-Type", "application/json");
+								putResp = invokeurl
+								[
+									url :apiUrl
+									type :PUT
+									body:payload.toString()
+									headers:hdr
+									connection:"c2c_crm"
+								];
+								input.Rest_Response = putResp.toString();
+							}
+							if(input.Rest_Verb == "DELETE")
+							{
+								apiUrl = "https://www.zohoapis.in/crm/v7/Leads?ids=" + input.Rest_Record_Id;
+								deleted = invokeurl
+								[
+									url :apiUrl
+									type :DELETE
+									connection:"c2c_crm"
+								];
+								input.Rest_Response = deleted.toString();
+							}
+							success message "c2c-rest-called";
+						)
+					}
+				}
+			}
+		}
+	}
+
+	share_settings
+	{
+		role Hierarchy = {New_Contact,Conn_Rest_Put_Delete}
+	}
+
+	web
+	{
+		forms
+		{
+			form New_Contact
+			{
+				label placement = left
+			}
+			form Conn_Rest_Put_Delete
+			{
+				label placement = left
+			}
+		}
+		menu
+		{
+			space Space
+			{
+				displayname = "Space"
+				section Contacts
+				{
+					displayname = "Contacts"
+					form New_Contact
+					{
+					}
+					report All_Contacts
+					{
+					}
+				}
+				section Conn_Section_Rest_Put_Delete
+				{
+					displayname = "c2c-conn-rest-putdel"
+					icon = "design-todo"
+					form Conn_Rest_Put_Delete
+					{
+					}
+					report All_Conn_Rest_Put_Deletes
+					{
+					}
+				}
+			}
+		}
+	}
+}

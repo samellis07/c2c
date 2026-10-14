@@ -1,0 +1,32 @@
+/*
+ * c2c design tokens: the one layer an app theme sets. Arc's foundation tokens
+ * (arc/foundation.css) stay the component vocabulary; these --c2c-* variables
+ * feed them. src/generated/theme.css sets them from the Creator theme;
+ * src/custom/theme.css, loaded last, may override any of them (or any Arc
+ * token). A design system replaces the defaults below, not the names.
+ */
+:root {
+  --c2c-accent: #0f3d4c;
+  --c2c-accent-ink: #ffffff;
+  --c2c-topbar-bg: #0f3d4c;
+  --c2c-topbar-ink: #ffffff;
+  --c2c-menu-bg: #ffffff;
+  --c2c-menu-ink: #0f3d4c;
+  --c2c-menu-active-bg: #e9f0f2;
+  --c2c-menu-active-ink: #0f3d4c;
+  --c2c-page-bg: #f4f7f8;
+  --c2c-font: var(--font-body);
+  --c2c-menu-width: 16rem;
+  --c2c-tabbar-height: 4rem;
+  --c2c-content-width: 72rem;
+
+  --accent: var(--c2c-accent);
+  --accent-strong: color-mix(in oklab, var(--c2c-accent) 80%, black);
+  --accent-subtle: color-mix(in oklab, var(--c2c-accent) 12%, transparent);
+  --accent-foreground: var(--c2c-accent-ink);
+  --control-on: var(--c2c-accent);
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: var(--font-body);
+  --radius-control: .625rem;
+  --radius-panel: .875rem;
+}

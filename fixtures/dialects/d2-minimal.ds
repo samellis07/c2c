@@ -1,0 +1,38 @@
+/*
+ * Author       : synthetic
+ * Generated on : 01-Jan-2025 12:00:00
+ * Version      : 1.0
+ */
+application "Synthetic_Dialect_App"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Kolkata"
+	section Main_Section
+	{
+		displayname = "Main"
+		form Contact
+		{
+			success message = "Contact Added Successfully"
+			field alignment = left
+			Name
+			(
+				type = text
+				displayname = "Name"
+			)
+			Email
+			(
+				type = text
+				displayname = "Email"
+			)
+		}
+		default list All_Contacts
+		{
+			displayName = "All Contacts"
+			show all rows from Contact
+			(
+				Name as "Name"
+				Email as "Email"
+			)
+		}
+	}
+}

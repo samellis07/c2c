@@ -1,0 +1,953 @@
+{
+  "schema": "c2c-matrix-citations/1",
+  "matrix": "feature-matrix-v4",
+  "source": "feature-matrix-v4",
+  "sourceSha256": "1f256aed8a4e4826ce02181864bb3a6b0e60acab97465538fe695e9f178cb26e",
+  "snapshotDate": "2026-10-06",
+  "cites": [
+    {
+      "id": 1,
+      "spec": "packages/schema/src/mapping.ts:56"
+    },
+    {
+      "id": 1,
+      "spec": "packages/schema/src/mapping.ts:56"
+    },
+    {
+      "id": 2,
+      "spec": "packages/schema/src/mapping.ts:66"
+    },
+    {
+      "id": 2,
+      "spec": "packages/schema/src/mapping.ts:66"
+    },
+    {
+      "id": 3,
+      "spec": "packages/schema/src/mapping.ts:76"
+    },
+    {
+      "id": 3,
+      "spec": "packages/schema/src/mapping.ts:76"
+    },
+    {
+      "id": 4,
+      "spec": "packages/schema/src/mapping.ts:86"
+    },
+    {
+      "id": 4,
+      "spec": "packages/schema/src/mapping.ts:86"
+    },
+    {
+      "id": 5,
+      "spec": "packages/schema/src/mapping.ts:95"
+    },
+    {
+      "id": 5,
+      "spec": "packages/schema/src/mapping.ts:95"
+    },
+    {
+      "id": 6,
+      "spec": "packages/schema/src/mapping.ts:105"
+    },
+    {
+      "id": 6,
+      "spec": "packages/schema/src/mapping.ts:105"
+    },
+    {
+      "id": 7,
+      "spec": "packages/schema/src/mapping.ts:115"
+    },
+    {
+      "id": 7,
+      "spec": "packages/schema/src/mapping.ts:115"
+    },
+    {
+      "id": 8,
+      "spec": "packages/schema/src/mapping.ts:125"
+    },
+    {
+      "id": 8,
+      "spec": "packages/schema/src/mapping.ts:125"
+    },
+    {
+      "id": 9,
+      "spec": "packages/schema/src/mapping.ts:135"
+    },
+    {
+      "id": 9,
+      "spec": "packages/schema/src/mapping.ts:135"
+    },
+    {
+      "id": 10,
+      "spec": "packages/schema/src/mapping.ts:144"
+    },
+    {
+      "id": 10,
+      "spec": "packages/schema/src/mapping.ts:144"
+    },
+    {
+      "id": 11,
+      "spec": "packages/schema/src/mapping.ts:153"
+    },
+    {
+      "id": 11,
+      "spec": "packages/schema/src/mapping.ts:153"
+    },
+    {
+      "id": 12,
+      "spec": "packages/schema/src/mapping.ts:162"
+    },
+    {
+      "id": 12,
+      "spec": "packages/schema/src/mapping.ts:162"
+    },
+    {
+      "id": 13,
+      "spec": "packages/schema/src/mapping.ts:172"
+    },
+    {
+      "id": 13,
+      "spec": "packages/schema/src/mapping.ts:172"
+    },
+    {
+      "id": 14,
+      "spec": "packages/schema/src/mapping.ts:182"
+    },
+    {
+      "id": 14,
+      "spec": "packages/schema/src/mapping.ts:182"
+    },
+    {
+      "id": 15,
+      "spec": "packages/schema/src/mapping.ts:191"
+    },
+    {
+      "id": 15,
+      "spec": "packages/schema/src/mapping.ts:191"
+    },
+    {
+      "id": 16,
+      "spec": "packages/schema/src/mapping.ts:201"
+    },
+    {
+      "id": 16,
+      "spec": "packages/schema/src/mapping.ts:201"
+    },
+    {
+      "id": 17,
+      "spec": "packages/schema/src/mapping.ts:211"
+    },
+    {
+      "id": 17,
+      "spec": "packages/schema/src/mapping.ts:211"
+    },
+    {
+      "id": 18,
+      "spec": "packages/schema/src/mapping.ts:221"
+    },
+    {
+      "id": 18,
+      "spec": "packages/schema/src/mapping.ts:221"
+    },
+    {
+      "id": 19,
+      "spec": "packages/schema/src/mapping.ts:231"
+    },
+    {
+      "id": 19,
+      "spec": "packages/schema/src/mapping.ts:231"
+    },
+    {
+      "id": 20,
+      "spec": "packages/schema/src/mapping.ts:240"
+    },
+    {
+      "id": 20,
+      "spec": "packages/schema/src/mapping.ts:240"
+    },
+    {
+      "id": 21,
+      "spec": "packages/schema/src/mapping.ts:250"
+    },
+    {
+      "id": 21,
+      "spec": "packages/schema/src/mapping.ts:250"
+    },
+    {
+      "id": 22,
+      "spec": "packages/schema/src/mapping.ts:259"
+    },
+    {
+      "id": 22,
+      "spec": "packages/schema/src/mapping.ts:259"
+    },
+    {
+      "id": 23,
+      "spec": "packages/schema/src/mapping.ts:268"
+    },
+    {
+      "id": 23,
+      "spec": "packages/schema/src/mapping.ts:268"
+    },
+    {
+      "id": 24,
+      "spec": "packages/schema/src/mapping.ts:277"
+    },
+    {
+      "id": 24,
+      "spec": "packages/schema/src/mapping.ts:277"
+    },
+    {
+      "id": 25,
+      "spec": "packages/schema/src/mapping.ts:286"
+    },
+    {
+      "id": 25,
+      "spec": "packages/schema/src/mapping.ts:286"
+    },
+    {
+      "id": 26,
+      "spec": "packages/schema/src/mapping.ts:295"
+    },
+    {
+      "id": 26,
+      "spec": "packages/schema/src/mapping.ts:295"
+    },
+    {
+      "id": 27,
+      "spec": "packages/schema/src/mapping.ts:305"
+    },
+    {
+      "id": 27,
+      "spec": "packages/schema/src/mapping.ts:305"
+    },
+    {
+      "id": 28,
+      "spec": "packages/schema/src/mapping.ts:314"
+    },
+    {
+      "id": 28,
+      "spec": "packages/schema/src/mapping.ts:314"
+    },
+    {
+      "id": 29,
+      "spec": "packages/schema/src/mapping.ts:324"
+    },
+    {
+      "id": 29,
+      "spec": "packages/schema/src/mapping.ts:324"
+    },
+    {
+      "id": 30,
+      "spec": "packages/schema/src/mapping.ts:334"
+    },
+    {
+      "id": 30,
+      "spec": "packages/schema/src/mapping.ts:334"
+    },
+    {
+      "id": 31,
+      "spec": "packages/schema/src/mapping.ts:343"
+    },
+    {
+      "id": 31,
+      "spec": "packages/schema/src/mapping.ts:343"
+    },
+    {
+      "id": 32,
+      "spec": "packages/schema/src/mapping.ts:353"
+    },
+    {
+      "id": 32,
+      "spec": "packages/schema/src/mapping.ts:353"
+    },
+    {
+      "id": 33,
+      "spec": "packages/schema/src/mapping.ts:361"
+    },
+    {
+      "id": 33,
+      "spec": "packages/schema/src/mapping.ts:361"
+    },
+    {
+      "id": 34,
+      "spec": "packages/schema/src/mapping.ts:369"
+    },
+    {
+      "id": 34,
+      "spec": "packages/schema/src/mapping.ts:369"
+    },
+    {
+      "id": 36,
+      "spec": "packages/schema/src/mapping.ts:387"
+    },
+    {
+      "id": 36,
+      "spec": "packages/schema/src/mapping.ts:387"
+    },
+    {
+      "id": 37,
+      "spec": "packages/schema/src/mapping.ts:396"
+    },
+    {
+      "id": 37,
+      "spec": "packages/schema/src/mapping.ts:396"
+    },
+    {
+      "id": 38,
+      "spec": "packages/schema/src/mapping.ts:405"
+    },
+    {
+      "id": 38,
+      "spec": "packages/schema/src/mapping.ts:405"
+    },
+    {
+      "id": 39,
+      "spec": "packages/schema/src/mapping.ts:414"
+    },
+    {
+      "id": 39,
+      "spec": "packages/schema/src/mapping.ts:414"
+    },
+    {
+      "id": 40,
+      "spec": "packages/schema/src/mapping.ts:423"
+    },
+    {
+      "id": 40,
+      "spec": "packages/schema/src/mapping.ts:423"
+    },
+    {
+      "id": 42,
+      "spec": "packages/schema/src/mapping.ts:442"
+    },
+    {
+      "id": 42,
+      "spec": "packages/schema/src/mapping.ts:442"
+    },
+    {
+      "id": 43,
+      "spec": "packages/schema/src/mapping.ts:451"
+    },
+    {
+      "id": 43,
+      "spec": "packages/schema/src/mapping.ts:451"
+    },
+    {
+      "id": 44,
+      "spec": "packages/ui/src/client-runtime.js:270"
+    },
+    {
+      "id": 44,
+      "spec": "packages/ui/src/client-runtime.js:270"
+    },
+    {
+      "id": 45,
+      "spec": "packages/schema/src/generator.ts:270"
+    },
+    {
+      "id": 45,
+      "spec": "packages/schema/src/generator.ts:270"
+    },
+    {
+      "id": 46,
+      "spec": "packages/schema/src/generator.ts:291"
+    },
+    {
+      "id": 46,
+      "spec": "packages/schema/src/generator.ts:291"
+    },
+    {
+      "id": 47,
+      "spec": "packages/schema/src/mapping.ts:63"
+    },
+    {
+      "id": 47,
+      "spec": "packages/schema/src/mapping.ts:63"
+    },
+    {
+      "id": 48,
+      "spec": "packages/shims/src/decimal.ts:15"
+    },
+    {
+      "id": 48,
+      "spec": "packages/shims/src/decimal.ts:15"
+    },
+    {
+      "id": 49,
+      "spec": "packages/ui/src/client-runtime.js:124"
+    },
+    {
+      "id": 49,
+      "spec": "packages/ui/src/client-runtime.js:124"
+    },
+    {
+      "id": 50,
+      "spec": "packages/ui/src/client-runtime.js:424"
+    },
+    {
+      "id": 50,
+      "spec": "packages/ui/src/client-runtime.js:424"
+    },
+    {
+      "id": 51,
+      "spec": "packages/ui/src/client-runtime.js:424"
+    },
+    {
+      "id": 51,
+      "spec": "packages/ui/src/client-runtime.js:424"
+    },
+    {
+      "id": 52,
+      "spec": "packages/schema/src/mapping.ts:460"
+    },
+    {
+      "id": 52,
+      "spec": "packages/schema/src/mapping.ts:460"
+    },
+    {
+      "id": 53,
+      "spec": "packages/shims/src/access.ts:159"
+    },
+    {
+      "id": 53,
+      "spec": "packages/shims/src/access.ts:159"
+    },
+    {
+      "id": 55,
+      "spec": "packages/schema/src/mapping.ts:521"
+    },
+    {
+      "id": 55,
+      "spec": "packages/schema/src/mapping.ts:521"
+    },
+    {
+      "id": 56,
+      "spec": "packages/data/src/migrate.ts:304"
+    },
+    {
+      "id": 56,
+      "spec": "packages/data/src/migrate.ts:304"
+    },
+    {
+      "id": 57,
+      "spec": "packages/schema/src/mapping.ts:521"
+    },
+    {
+      "id": 57,
+      "spec": "packages/schema/src/mapping.ts:521"
+    },
+    {
+      "id": 58,
+      "spec": "packages/ui/src/client-runtime.js:305"
+    },
+    {
+      "id": 58,
+      "spec": "packages/ui/src/client-runtime.js:305"
+    },
+    {
+      "id": 71,
+      "spec": "packages/shims/src/criteria.ts:79"
+    },
+    {
+      "id": 71,
+      "spec": "packages/shims/src/criteria.ts:79"
+    },
+    {
+      "id": 72,
+      "spec": "packages/shims/src/criteria.ts:79"
+    },
+    {
+      "id": 72,
+      "spec": "packages/shims/src/criteria.ts:79"
+    },
+    {
+      "id": 74,
+      "spec": "packages/shims/src/runtime.ts:276"
+    },
+    {
+      "id": 74,
+      "spec": "packages/shims/src/runtime.ts:276"
+    },
+    {
+      "id": 75,
+      "spec": "packages/ui/src/generate.ts:428"
+    },
+    {
+      "id": 75,
+      "spec": "packages/ui/src/generate.ts:428"
+    },
+    {
+      "id": 77,
+      "spec": "packages/ui/src/generate.ts:76"
+    },
+    {
+      "id": 77,
+      "spec": "packages/ui/src/generate.ts:76"
+    },
+    {
+      "id": 81,
+      "spec": "packages/data/src/seed-import.ts:743"
+    },
+    {
+      "id": 81,
+      "spec": "packages/data/src/seed-import.ts:743"
+    },
+    {
+      "id": 83,
+      "spec": "packages/ui/src/client-runtime.js:424"
+    },
+    {
+      "id": 83,
+      "spec": "packages/ui/src/client-runtime.js:424"
+    },
+    {
+      "id": 84,
+      "spec": "packages/ui/src/client-runtime.js:1264"
+    },
+    {
+      "id": 84,
+      "spec": "packages/ui/src/client-runtime.js:1264"
+    },
+    {
+      "id": 85,
+      "spec": "packages/ui/src/client-runtime.js:1267"
+    },
+    {
+      "id": 85,
+      "spec": "packages/ui/src/client-runtime.js:1267"
+    },
+    {
+      "id": 86,
+      "spec": "packages/ui/src/client-runtime.js:243"
+    },
+    {
+      "id": 86,
+      "spec": "packages/ui/src/client-runtime.js:243"
+    },
+    {
+      "id": 88,
+      "spec": "packages/ui/src/client-runtime.js:188"
+    },
+    {
+      "id": 88,
+      "spec": "packages/ui/src/client-runtime.js:188"
+    },
+    {
+      "id": 89,
+      "spec": "packages/ui/src/client-runtime.js:283"
+    },
+    {
+      "id": 89,
+      "spec": "packages/ui/src/client-runtime.js:283"
+    },
+    {
+      "id": 90,
+      "spec": "packages/deluge/src/translate.ts:448"
+    },
+    {
+      "id": 90,
+      "spec": "packages/deluge/src/translate.ts:448"
+    },
+    {
+      "id": 95,
+      "spec": "packages/deluge/src/generate.ts:275"
+    },
+    {
+      "id": 95,
+      "spec": "packages/deluge/src/generate.ts:275"
+    },
+    {
+      "id": 97,
+      "spec": "packages/deluge/src/generate.ts:300"
+    },
+    {
+      "id": 97,
+      "spec": "packages/deluge/src/generate.ts:300"
+    },
+    {
+      "id": 98,
+      "spec": "packages/deluge/src/translate.ts:1436"
+    },
+    {
+      "id": 98,
+      "spec": "packages/deluge/src/translate.ts:1436"
+    },
+    {
+      "id": 99,
+      "spec": "packages/deluge/src/translate.ts:37"
+    },
+    {
+      "id": 99,
+      "spec": "packages/deluge/src/translate.ts:37"
+    },
+    {
+      "id": 102,
+      "spec": "packages/deluge/src/generate.ts:104"
+    },
+    {
+      "id": 102,
+      "spec": "packages/deluge/src/generate.ts:104"
+    },
+    {
+      "id": 103,
+      "spec": "packages/deluge/src/generate.ts:106"
+    },
+    {
+      "id": 103,
+      "spec": "packages/deluge/src/generate.ts:106"
+    },
+    {
+      "id": 106,
+      "spec": "packages/deluge/src/translate.ts:392"
+    },
+    {
+      "id": 106,
+      "spec": "packages/deluge/src/translate.ts:392"
+    },
+    {
+      "id": 107,
+      "spec": "packages/deluge/src/translate.ts:394"
+    },
+    {
+      "id": 107,
+      "spec": "packages/deluge/src/translate.ts:394"
+    },
+    {
+      "id": 108,
+      "spec": "packages/deluge/src/translate.ts:398"
+    },
+    {
+      "id": 108,
+      "spec": "packages/deluge/src/translate.ts:398"
+    },
+    {
+      "id": 109,
+      "spec": "packages/shims/src/list.ts:26"
+    },
+    {
+      "id": 109,
+      "spec": "packages/shims/src/list.ts:26"
+    },
+    {
+      "id": 110,
+      "spec": "packages/shims/src/runtime.ts:26"
+    },
+    {
+      "id": 110,
+      "spec": "packages/shims/src/runtime.ts:26"
+    },
+    {
+      "id": 111,
+      "spec": "packages/shims/src/date.ts:27"
+    },
+    {
+      "id": 111,
+      "spec": "packages/shims/src/date.ts:27"
+    },
+    {
+      "id": 112,
+      "spec": "packages/shims/src/decimal.ts:11"
+    },
+    {
+      "id": 112,
+      "spec": "packages/shims/src/decimal.ts:11"
+    },
+    {
+      "id": 113,
+      "spec": "packages/shims/src/runtime.ts:281"
+    },
+    {
+      "id": 113,
+      "spec": "packages/shims/src/runtime.ts:281"
+    },
+    {
+      "id": 114,
+      "spec": "packages/shims/src/criteria.ts:79"
+    },
+    {
+      "id": 114,
+      "spec": "packages/shims/src/criteria.ts:79"
+    },
+    {
+      "id": 115,
+      "spec": "packages/shims/src/runtime.ts:282"
+    },
+    {
+      "id": 115,
+      "spec": "packages/shims/src/runtime.ts:282"
+    },
+    {
+      "id": 116,
+      "spec": "packages/shims/src/runtime.ts:283"
+    },
+    {
+      "id": 116,
+      "spec": "packages/shims/src/runtime.ts:283"
+    },
+    {
+      "id": 117,
+      "spec": "packages/shims/src/runtime.ts:278"
+    },
+    {
+      "id": 117,
+      "spec": "packages/shims/src/runtime.ts:278"
+    },
+    {
+      "id": 118,
+      "spec": "packages/deluge/src/translate.ts:531"
+    },
+    {
+      "id": 118,
+      "spec": "packages/deluge/src/translate.ts:531"
+    },
+    {
+      "id": 119,
+      "spec": "packages/deluge/src/translate.ts:1058"
+    },
+    {
+      "id": 119,
+      "spec": "packages/deluge/src/translate.ts:1058"
+    },
+    {
+      "id": 122,
+      "spec": "packages/deluge/src/translate.ts:1062"
+    },
+    {
+      "id": 122,
+      "spec": "packages/deluge/src/translate.ts:1062"
+    },
+    {
+      "id": 123,
+      "spec": "packages/shims/src/zoho-adapters.ts:276"
+    },
+    {
+      "id": 123,
+      "spec": "packages/shims/src/zoho-adapters.ts:276"
+    },
+    {
+      "id": 124,
+      "spec": "packages/shims/src/zoho-adapters.ts:328"
+    },
+    {
+      "id": 124,
+      "spec": "packages/shims/src/zoho-adapters.ts:328"
+    },
+    {
+      "id": 125,
+      "spec": "packages/deluge/src/translate.ts:881"
+    },
+    {
+      "id": 125,
+      "spec": "packages/deluge/src/translate.ts:881"
+    },
+    {
+      "id": 126,
+      "spec": "packages/deluge/src/translate.ts:432"
+    },
+    {
+      "id": 126,
+      "spec": "packages/deluge/src/translate.ts:432"
+    },
+    {
+      "id": 127,
+      "spec": "packages/deluge/src/translate.ts:408"
+    },
+    {
+      "id": 127,
+      "spec": "packages/deluge/src/translate.ts:408"
+    },
+    {
+      "id": 128,
+      "spec": "packages/deluge/src/translate.ts:423"
+    },
+    {
+      "id": 128,
+      "spec": "packages/deluge/src/translate.ts:423"
+    },
+    {
+      "id": 129,
+      "spec": "packages/auth/src/plan.ts:85"
+    },
+    {
+      "id": 129,
+      "spec": "packages/auth/src/plan.ts:85"
+    },
+    {
+      "id": 134,
+      "spec": "packages/deluge/src/translate.ts:538"
+    },
+    {
+      "id": 134,
+      "spec": "packages/deluge/src/translate.ts:538"
+    },
+    {
+      "id": 135,
+      "spec": "packages/deluge/src/translate.ts:775"
+    },
+    {
+      "id": 135,
+      "spec": "packages/deluge/src/translate.ts:775"
+    },
+    {
+      "id": 137,
+      "spec": "packages/ui/src/pages.ts:17"
+    },
+    {
+      "id": 137,
+      "spec": "packages/ui/src/pages.ts:17"
+    },
+    {
+      "id": 138,
+      "spec": "packages/ui/src/pages.ts:17"
+    },
+    {
+      "id": 138,
+      "spec": "packages/ui/src/pages.ts:17"
+    },
+    {
+      "id": 139,
+      "spec": "packages/ui/src/pages.ts:17"
+    },
+    {
+      "id": 139,
+      "spec": "packages/ui/src/pages.ts:17"
+    },
+    {
+      "id": 140,
+      "spec": "packages/ui/src/pages.ts:17"
+    },
+    {
+      "id": 140,
+      "spec": "packages/ui/src/pages.ts:17"
+    },
+    {
+      "id": 143,
+      "spec": "packages/auth/src/plan.ts:77"
+    },
+    {
+      "id": 143,
+      "spec": "packages/auth/src/plan.ts:77"
+    },
+    {
+      "id": 144,
+      "spec": "packages/auth/src/plan.ts:73"
+    },
+    {
+      "id": 144,
+      "spec": "packages/auth/src/plan.ts:73"
+    },
+    {
+      "id": 146,
+      "spec": "packages/auth/src/plan.ts:84"
+    },
+    {
+      "id": 146,
+      "spec": "packages/auth/src/plan.ts:84"
+    },
+    {
+      "id": 147,
+      "spec": "packages/auth/src/plan.ts:106"
+    },
+    {
+      "id": 147,
+      "spec": "packages/auth/src/plan.ts:106"
+    },
+    {
+      "id": 149,
+      "spec": "packages/auth/src/plan.ts:141"
+    },
+    {
+      "id": 149,
+      "spec": "packages/auth/src/plan.ts:141"
+    },
+    {
+      "id": 151,
+      "spec": "packages/auth/src/plan.ts:139"
+    },
+    {
+      "id": 151,
+      "spec": "packages/auth/src/plan.ts:139"
+    },
+    {
+      "id": 152,
+      "spec": "packages/ui/src/build.ts:21"
+    },
+    {
+      "id": 152,
+      "spec": "packages/ui/src/build.ts:21"
+    },
+    {
+      "id": 154,
+      "spec": "packages/ui/src/client-runtime.js:1203"
+    },
+    {
+      "id": 154,
+      "spec": "packages/ui/src/client-runtime.js:1203"
+    },
+    {
+      "id": 157,
+      "spec": "packages/deploy/src/scope.ts:159"
+    },
+    {
+      "id": 157,
+      "spec": "packages/deploy/src/scope.ts:159"
+    },
+    {
+      "id": 163,
+      "spec": "packages/data/src/seed-import.ts:743"
+    },
+    {
+      "id": 163,
+      "spec": "packages/data/src/seed-import.ts:743"
+    },
+    {
+      "id": 165,
+      "spec": "packages/shims/src/runtime.ts:120"
+    },
+    {
+      "id": 165,
+      "spec": "packages/shims/src/runtime.ts:120"
+    },
+    {
+      "id": 173,
+      "spec": "packages/determinism/src/e2e.ts"
+    },
+    {
+      "id": 173,
+      "spec": "packages/determinism/src/e2e.ts"
+    },
+    {
+      "id": 175,
+      "spec": "packages/deluge/src/translate.ts:775"
+    },
+    {
+      "id": 175,
+      "spec": "packages/deluge/src/translate.ts:775"
+    },
+    {
+      "id": 176,
+      "spec": "packages/ui/src/build.ts:21"
+    },
+    {
+      "id": 176,
+      "spec": "packages/ui/src/build.ts:21"
+    },
+    {
+      "id": 180,
+      "spec": "packages/deploy/src/plan.ts:84"
+    },
+    {
+      "id": 180,
+      "spec": "packages/deploy/src/plan.ts:84"
+    },
+    {
+      "id": 185,
+      "spec": "packages/auth/src/plan.ts:112"
+    },
+    {
+      "id": 185,
+      "spec": "packages/auth/src/plan.ts:112"
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "task.cancel.delete": {
+    "$workflow": "on validate",
+    "$event": "delete",
+    "$task": "cancel delete",
+    "paste": "cancel delete;",
+    "target": { "Name": "Bea", "Qty": 0, "Status": "Open" },
+    "rowRemains": true,
+    "message": null,
+    "otherRowsUnchanged": true
+  },
+  "task.success.literal": {
+    "$workflow": "on success",
+    "$task": "success message",
+    "parts": 1,
+    "paste": "success message \"c2c-golden\";",
+    "message": "c2c-golden",
+    "submitted": { "Name": "Zed", "Qty": 1, "Status": "Open" },
+    "deletedAfter": true,
+    "seedRows": 4
+  },
+  "task.success.literal-expr": {
+    "$workflow": "on success",
+    "$task": "success message",
+    "parts": 2,
+    "paste": "success message \"c2c \" + input.Name;",
+    "message": "c2c Zed",
+    "submitted": { "Name": "Zed", "Qty": 1, "Status": "Open" },
+    "deletedAfter": true,
+    "seedRows": 4
+  },
+  "task.success.expr-literal": {
+    "$workflow": "on success",
+    "$task": "success message",
+    "parts": 2,
+    "paste": "success message input.Name + \" saved\";",
+    "message": "Zed saved",
+    "submitted": { "Name": "Zed", "Qty": 1, "Status": "Open" },
+    "deletedAfter": true,
+    "seedRows": 4
+  },
+  "task.success.three-part": {
+    "$workflow": "on success",
+    "$task": "success message",
+    "parts": 3,
+    "paste": "success message \"c2c \" + input.Name + \" saved\";",
+    "message": "c2c Zed saved",
+    "submitted": { "Name": "Zed", "Qty": 1, "Status": "Open" },
+    "deletedAfter": true,
+    "seedRows": 4
+  },
+  "task.success.five-part": {
+    "$workflow": "on success",
+    "$task": "success message",
+    "parts": 5,
+    "paste": "success message \"c2c \" + input.Name + \" qty \" + input.Qty + \" ok\";",
+    "message": "c2c Zed qty 1 ok",
+    "submitted": { "Name": "Zed", "Qty": 1, "Status": "Open" },
+    "deletedAfter": true,
+    "seedRows": 4
+  },
+  "task.sendmail.submit": {
+    "$workflow": "on success",
+    "$task": "sendmail",
+    "paste": "sendmail [ from: zoho.adminuserid to: zoho.adminuserid subject: \"c2c-golden-submit\" message: \"c2c submit sendmail test\" ];",
+    "from": "zoho.adminuserid",
+    "to": "zoho.adminuserid",
+    "subject": "c2c-golden-submit",
+    "message": "c2c submit sendmail test",
+    "submitted": { "Name": "Zed", "Qty": 1, "Status": "Open" },
+    "mailReceived": true,
+    "headers": { "subject": "c2c-golden-submit" },
+    "body": "c2c submit sendmail test",
+    "deletedAfter": true,
+    "seedRows": 4
+  }
+}

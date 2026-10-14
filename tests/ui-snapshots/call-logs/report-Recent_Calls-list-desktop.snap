@@ -1,0 +1,193 @@
+app: call-logs
+route: #/report/Recent_Calls
+state: list
+viewport: desktop 1280
+---
+div class="c2c-app"
+  header class="c2c-topbar"
+    span
+      "Call Logs"
+  nav aria-label="Main menu"
+    div class="c2c-nav-section"
+      h2 class="c2c-nav-heading"
+        "App"
+      ul
+        li
+          a href="#/form/Log_Call"
+            svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+              path
+              path
+              path
+              path
+              path
+            span
+              "Log a Call"
+        li
+          a aria-current="page" href="#/report/Recent_Calls"
+            svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+              path
+              rect
+              path
+              path
+            span
+              "Recent Calls"
+  main tabindex="-1"
+    section class="c2c-card" data-report="Recent_Calls" data-view="list"
+      h1
+        "Recent Calls"
+      div class="c2c-report-tools"
+        form class="c2c-search-form" role="search"
+          label class="c2c-search"
+            svg aria-hidden="true" class="lucide lucide-search"
+              path
+              circle
+            input aria-label="Search Recent Calls" placeholder="Search" type="search" value=""
+          button class="button secondary sm" tabindex="0" type="submit"
+            span class="labelSlot"
+              span class="labelContent"
+                span class="labelPhase"
+                  "Search"
+      div class="table-wrap"
+        div class="wrapper"
+          div class="scroller"
+            table class="table" role="table"
+              caption
+                "Recent Calls"
+              colgroup
+                col
+                col
+                col
+                col
+                col
+                col
+              thead role="rowgroup"
+                tr role="row"
+                  th aria-sort="none" data-key="Subject" role="columnheader" scope="col"
+                    button aria-label="Sort by Subject" class="sortButton" type="button"
+                      span class="sortInner"
+                        span
+                          "Subject"
+                        span aria-hidden="true" class="sortIcon"
+                          svg aria-hidden="true" class="lucide lucide-arrow-up sortHint"
+                            path
+                            path
+                          span class="sortArrow"
+                            svg aria-hidden="true" class="lucide lucide-arrow-up"
+                              path
+                              path
+                  th aria-sort="none" data-key="Direction" role="columnheader" scope="col"
+                    button aria-label="Sort by Direction" class="sortButton" type="button"
+                      span class="sortInner"
+                        span
+                          "Direction"
+                        span aria-hidden="true" class="sortIcon"
+                          svg aria-hidden="true" class="lucide lucide-arrow-up sortHint"
+                            path
+                            path
+                          span class="sortArrow"
+                            svg aria-hidden="true" class="lucide lucide-arrow-up"
+                              path
+                              path
+                  th aria-sort="none" data-key="Caller" role="columnheader" scope="col"
+                    button aria-label="Sort by Caller" class="sortButton" type="button"
+                      span class="sortInner"
+                        span
+                          "Caller"
+                        span aria-hidden="true" class="sortIcon"
+                          svg aria-hidden="true" class="lucide lucide-arrow-up sortHint"
+                            path
+                            path
+                          span class="sortArrow"
+                            svg aria-hidden="true" class="lucide lucide-arrow-up"
+                              path
+                              path
+                  th aria-sort="none" data-key="Started_At" role="columnheader" scope="col"
+                    button aria-label="Sort by Started At" class="sortButton" type="button"
+                      span class="sortInner"
+                        span
+                          "Started At"
+                        span aria-hidden="true" class="sortIcon"
+                          svg aria-hidden="true" class="lucide lucide-arrow-up sortHint"
+                            path
+                            path
+                          span class="sortArrow"
+                            svg aria-hidden="true" class="lucide lucide-arrow-up"
+                              path
+                              path
+                  th aria-sort="none" data-key="Duration_Min" role="columnheader" scope="col"
+                    button aria-label="Sort by Duration (min)" class="sortButton" type="button"
+                      span class="sortInner"
+                        span
+                          "Duration (min)"
+                        span aria-hidden="true" class="sortIcon"
+                          svg aria-hidden="true" class="lucide lucide-arrow-up sortHint"
+                            path
+                            path
+                          span class="sortArrow"
+                            svg aria-hidden="true" class="lucide lucide-arrow-up"
+                              path
+                              path
+                  th data-key="__actions" role="columnheader" scope="col"
+                    "Actions"
+              tbody role="rowgroup"
+                tr role="row"
+                  td data-phone="true" data-th="Subject" role="cell"
+                    a href="#/report/Recent_Calls/row/1"
+                      "Onboarding walkthrough"
+                  td data-phone="true" data-th="Direction" role="cell"
+                    "Outbound"
+                  td data-phone="true" data-th="Caller" role="cell"
+                    "555-0100"
+                  td data-phone="true" data-th="Started At" role="cell"
+                    "2024-03-04 12:30"
+                  td data-th="Duration (min)" role="cell"
+                    "25"
+                  td data-phone="true" data-th="Actions" role="cell"
+                    span class="c2c-row-actions"
+                      a aria-label="Edit record 1" class="c2c-row-open" href="#/form/Log_Call/edit/1"
+                        "Edit"
+                      button class="button secondary sm" tabindex="0" type="button"
+                        span class="labelSlot"
+                          span class="labelContent"
+                            span class="labelPhase"
+                              "Delete"
+                tr role="row"
+                  td data-phone="true" data-th="Subject" role="cell"
+                    a href="#/report/Recent_Calls/row/2"
+                      "Support follow-up"
+                  td data-phone="true" data-th="Direction" role="cell"
+                    "Inbound"
+                  td data-phone="true" data-th="Caller" role="cell"
+                    "555-0101"
+                  td data-phone="true" data-th="Started At" role="cell"
+                    "2024-03-05 09:15"
+                  td data-th="Duration (min)" role="cell"
+                    "10"
+                  td data-phone="true" data-th="Actions" role="cell"
+                    span class="c2c-row-actions"
+                      a aria-label="Edit record 2" class="c2c-row-open" href="#/form/Log_Call/edit/2"
+                        "Edit"
+                      button class="button secondary sm" tabindex="0" type="button"
+                        span class="labelSlot"
+                          span class="labelContent"
+                            span class="labelPhase"
+                              "Delete"
+          p class="srOnly" role="status"
+  nav aria-label="Tabs"
+    a href="#/form/Log_Call"
+      svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+        path
+        path
+        path
+        path
+        path
+      span
+        "Log a Call"
+    a aria-current="page" href="#/report/Recent_Calls"
+      svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+        path
+        rect
+        path
+        path
+      span
+        "Recent Calls"

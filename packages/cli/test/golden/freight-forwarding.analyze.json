@@ -1,0 +1,716 @@
+{
+  "schema": "c2c-analyze/1",
+  "app": {
+    "name": "Freight Forwarding and Feeder Solution",
+    "shape": "B",
+    "dialect": "D2"
+  },
+  "matrix": {
+    "matrix": "feature-matrix-v4",
+    "source": "feature-matrix-v4",
+    "sourceSha256": "1f256aed8a4e4826ce02181864bb3a6b0e60acab97465538fe695e9f178cb26e",
+    "snapshotDate": "2026-10-06",
+    "provisional": false
+  },
+  "features": {
+    "used": [
+      {
+        "id": 1,
+        "area": "Field type",
+        "feature": "Single line",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 160
+      },
+      {
+        "id": 2,
+        "area": "Field type",
+        "feature": "Multi line",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 12
+      },
+      {
+        "id": 3,
+        "area": "Field type",
+        "feature": "Email",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 5
+      },
+      {
+        "id": 4,
+        "area": "Field type",
+        "feature": "Phone",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 7
+      },
+      {
+        "id": 5,
+        "area": "Field type",
+        "feature": "Number",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 24
+      },
+      {
+        "id": 6,
+        "area": "Field type",
+        "feature": "Decimal",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 27
+      },
+      {
+        "id": 8,
+        "area": "Field type",
+        "feature": "Currency",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 32
+      },
+      {
+        "id": 9,
+        "area": "Field type",
+        "feature": "Date",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 23
+      },
+      {
+        "id": 11,
+        "area": "Field type",
+        "feature": "Time",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 5
+      },
+      {
+        "id": 12,
+        "area": "Field type",
+        "feature": "Decision box",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 5
+      },
+      {
+        "id": 13,
+        "area": "Field type",
+        "feature": "Dropdown",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 122
+      },
+      {
+        "id": 15,
+        "area": "Field type",
+        "feature": "Multi select",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 17,
+        "area": "Field type",
+        "feature": "Lookup single",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 57
+      },
+      {
+        "id": 19,
+        "area": "Field type",
+        "feature": "Subform",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 8
+      },
+      {
+        "id": 22,
+        "area": "Field type",
+        "feature": "Image",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 7
+      },
+      {
+        "id": 26,
+        "area": "Field type",
+        "feature": "URL",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 29,
+        "area": "Field type",
+        "feature": "Auto number",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 30,
+        "area": "Field type",
+        "feature": "Name (composite)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 32,
+        "area": "Field type",
+        "feature": "Section",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 65
+      },
+      {
+        "id": 44,
+        "area": "Field property",
+        "feature": "Mandatory",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 46
+      },
+      {
+        "id": 45,
+        "area": "Field property",
+        "feature": "Unique / no duplicates",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 17
+      },
+      {
+        "id": 46,
+        "area": "Field property",
+        "feature": "Default value",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 24
+      },
+      {
+        "id": 47,
+        "area": "Field property",
+        "feature": "Max length",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 128
+      },
+      {
+        "id": 49,
+        "area": "Field property",
+        "feature": "Field validation (format rules)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 32
+      },
+      {
+        "id": 50,
+        "area": "Field property",
+        "feature": "Hide / show field (field rules)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 14
+      },
+      {
+        "id": 51,
+        "area": "Field property",
+        "feature": "Enable / disable field",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 12
+      },
+      {
+        "id": 52,
+        "area": "Field property",
+        "feature": "Personal data / encrypt",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 14
+      },
+      {
+        "id": 56,
+        "area": "Field property",
+        "feature": "System record id",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 33
+      },
+      {
+        "id": 57,
+        "area": "Field property",
+        "feature": "Added user",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 58,
+        "area": "Report",
+        "feature": "List report",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 21
+      },
+      {
+        "id": 72,
+        "area": "Report",
+        "feature": "Custom filter criteria",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 77,
+        "area": "Report",
+        "feature": "Record-level custom action",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 83,
+        "area": "Workflow",
+        "feature": "Field rules",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 84,
+        "area": "Workflow",
+        "feature": "Load of form",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 7
+      },
+      {
+        "id": 85,
+        "area": "Workflow",
+        "feature": "User input of a field",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 27
+      },
+      {
+        "id": 88,
+        "area": "Workflow",
+        "feature": "Validation on form submission",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 6
+      },
+      {
+        "id": 89,
+        "area": "Workflow",
+        "feature": "Successful form submission",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 11
+      },
+      {
+        "id": 106,
+        "area": "Deluge",
+        "feature": "if / else",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 100
+      },
+      {
+        "id": 107,
+        "area": "Deluge",
+        "feature": "for each over a list",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 22
+      },
+      {
+        "id": 108,
+        "area": "Deluge",
+        "feature": "try / catch",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 109,
+        "area": "Deluge",
+        "feature": "List",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 110,
+        "area": "Deluge",
+        "feature": "Map",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 5
+      },
+      {
+        "id": 111,
+        "area": "Deluge",
+        "feature": "Date-time and app timezone",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 11
+      },
+      {
+        "id": 112,
+        "area": "Deluge",
+        "feature": "Decimal precision",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 113,
+        "area": "Deluge",
+        "feature": "insert record",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 114,
+        "area": "Deluge",
+        "feature": "fetch by criteria",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 43
+      },
+      {
+        "id": 115,
+        "area": "Deluge",
+        "feature": "update record",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 119,
+        "area": "Deluge",
+        "feature": "sendmail",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 124,
+        "area": "Deluge",
+        "feature": "zoho.books.*",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 14
+      },
+      {
+        "id": 125,
+        "area": "Deluge",
+        "feature": "thisapp.*",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 2
+      },
+      {
+        "id": 127,
+        "area": "Deluge",
+        "feature": "alert",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 18
+      },
+      {
+        "id": 128,
+        "area": "Deluge",
+        "feature": "cancel submit",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 12
+      },
+      {
+        "id": 134,
+        "area": "Deluge",
+        "feature": "Subform row loop (input.Subform)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 4
+      },
+      {
+        "id": 135,
+        "area": "Deluge",
+        "feature": "Global Deluge function",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 143,
+        "area": "Security and portal",
+        "feature": "Roles (data hierarchy)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 144,
+        "area": "Security and portal",
+        "feature": "Profiles (feature permissions)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 3
+      },
+      {
+        "id": 146,
+        "area": "Security and portal",
+        "feature": "Customer portal",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      },
+      {
+        "id": 165,
+        "area": "Platform",
+        "feature": "Connections (OAuth to Zoho or third parties)",
+        "status": "adapter-written",
+        "verdict": "adapter",
+        "uses": 1
+      }
+    ],
+    "counts": {
+      "supported": 0,
+      "adapter": 58,
+      "needs-assessment": 0,
+      "gap": 0,
+      "blocker": 0
+    },
+    "needsAssessment": [],
+    "excluded": 4,
+    "unmapped": [
+      {
+        "area": "Workflow",
+        "feature": "Function on records (not a matrix row)",
+        "uses": 1
+      }
+    ],
+    "notObservable": 47
+  },
+  "deluge": {
+    "units": 54,
+    "statements": 553,
+    "translated": 65,
+    "shimmed": 475,
+    "todo": 14,
+    "todoLocations": [
+      {
+        "location": "function Zoho_Books_Cus_Updt2:6",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "function Zoho_Books_Cus_Updt2:9",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow Zoho_Book_Customer_Update:13",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow Zoho_Book_Customer_Update:4",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow Zoho_Book_Customer_Update:7",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow zoho_book_item_updt:4",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow zoho_book_item_updt:7",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow Zoho_Books_Invoice_Updt:14",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow Zoho_Books_Invoice_Updt:20",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow Zoho_Books_Project_Update:22",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow Zoho_Books_Project_Update:3",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow Zoho_Books_Quote_Updt:15",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow Zoho_Books_Quote_Updt:20",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "report Container_Movement_Tracking",
+        "construct": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
+        "scope": "ui"
+      }
+    ]
+  },
+  "blockers": [
+    {
+      "kind": "deluge",
+      "label": "function Zoho_Books_Cus_Updt2:6",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "function Zoho_Books_Cus_Updt2:9",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow Zoho_Book_Customer_Update:13",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow Zoho_Book_Customer_Update:4",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow Zoho_Book_Customer_Update:7",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow zoho_book_item_updt:4",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow zoho_book_item_updt:7",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow Zoho_Books_Invoice_Updt:14",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow Zoho_Books_Invoice_Updt:20",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow Zoho_Books_Project_Update:22",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow Zoho_Books_Project_Update:3",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow Zoho_Books_Quote_Updt:15",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow Zoho_Books_Quote_Updt:20",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "ui",
+      "label": "report Container_Movement_Tracking",
+      "detail": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
+      "scope": "ui"
+    }
+  ],
+  "determinism": {
+    "deterministic": false,
+    "todoCount": 14,
+    "fillLockEntries": 0,
+    "todoKinds": [
+      {
+        "construct": "client-condition-uses-server",
+        "count": 13
+      },
+      {
+        "construct": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
+        "count": 1
+      }
+    ],
+    "uiTodoCount": 1
+  },
+  "score": {
+    "readiness": 78,
+    "band": "needs-work",
+    "features": 75,
+    "deluge": 80
+  },
+  "effort": {
+    "estimate": true,
+    "hours": 189.5,
+    "weights": {
+      "hoursPerFeature": {
+        "supported": 0,
+        "adapter": 2,
+        "needs-assessment": 4,
+        "gap": 8,
+        "blocker": 16
+      },
+      "hoursPerShimmedStatement": 0.1,
+      "hoursPerTodoStatement": 1,
+      "hoursPerSchemaTable": 0.5,
+      "hoursPerTodoForm": 4,
+      "hoursPerTodoReport": 4,
+      "hoursPerTodoPage": 8,
+      "hoursPerCronJob": 1
+    }
+  },
+  "catalyst": {
+    "tables": 26,
+    "nosqlCollections": 0,
+    "delugeUnits": 54,
+    "functions": 1,
+    "cronJobs": 0,
+    "slatePages": 42,
+    "cost": "not estimated"
+  }
+}

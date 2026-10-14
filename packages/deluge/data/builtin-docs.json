@@ -1,0 +1,7315 @@
+{
+  "source": "https://www.zoho.com/deluge/help/",
+  "note": "Hand-maintained after a Zoho help scrape. Edit names, receivers, arity, docUrl, and snippet. Status is NOT stored here — packages/deluge/scripts/builtins-catalogue.ts derives it from the translator.",
+  "entries": [
+    {
+      "name": "add",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/add-append.html",
+      "snippet": "input.Name:ui.add(\"x\");"
+    },
+    {
+      "name": "alert",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/alert.html",
+      "snippet": "alert \"x\";"
+    },
+    {
+      "name": "alert",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/alert.html"
+    },
+    {
+      "name": "alert",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/alert.html"
+    },
+    {
+      "name": "append",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/add-append.html",
+      "snippet": "input.Name:ui.append(\"x\");"
+    },
+    {
+      "name": "cancel submit",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/misc-statements/cancel-submit.html",
+      "snippet": "cancel submit;"
+    },
+    {
+      "name": "clear",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/clear.html",
+      "snippet": "clear input.Name;"
+    },
+    {
+      "name": "clear",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/clear.html"
+    },
+    {
+      "name": "deselect",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/select-deselect.html"
+    },
+    {
+      "name": "deselectAll",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/selectall-deselectall.html"
+    },
+    {
+      "name": "disable",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/enable-disable.html",
+      "snippet": "disable input.Name;"
+    },
+    {
+      "name": "disable",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/enable-disable.html"
+    },
+    {
+      "name": "enable",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/enable-disable.html",
+      "snippet": "enable input.Name;"
+    },
+    {
+      "name": "enable",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/enable-disable.html"
+    },
+    {
+      "name": "Focus",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/focus.html"
+    },
+    {
+      "name": "hide",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/hide-show.html",
+      "snippet": "hide input.Name;"
+    },
+    {
+      "name": "hide",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/hide-show.html"
+    },
+    {
+      "name": "openUrl",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/openurl.html",
+      "snippet": "openUrl(\"https://example.test\", \"same window\");"
+    },
+    {
+      "name": "openUrl",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/openurl.html"
+    },
+    {
+      "name": "reload",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/reload.html",
+      "snippet": "reload;"
+    },
+    {
+      "name": "reload",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/reload.html"
+    },
+    {
+      "name": "select",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/select-deselect.html"
+    },
+    {
+      "name": "selectAll",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/selectall-deselectall.html"
+    },
+    {
+      "name": "show",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/hide-show.html",
+      "snippet": "show input.Name;"
+    },
+    {
+      "name": "show",
+      "kind": "task",
+      "category": "client",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/client-functions/hide-show.html"
+    },
+    {
+      "name": "clear",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/clear.html"
+    },
+    {
+      "name": "containsKey",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/containskey.html"
+    },
+    {
+      "name": "containsValue",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/containsvalue.html"
+    },
+    {
+      "name": "delete",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/delete.html"
+    },
+    {
+      "name": "deleteAll",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/deleteall.html"
+    },
+    {
+      "name": "deleteKey",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/deletekey.html"
+    },
+    {
+      "name": "deleteKeys",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/deletekeys.html"
+    },
+    {
+      "name": "distinct",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/distinct.html"
+    },
+    {
+      "name": "duplicate",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/duplicate.html"
+    },
+    {
+      "name": "get",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/get.html"
+    },
+    {
+      "name": "getKey",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/getkey.html"
+    },
+    {
+      "name": "getLastKey",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/getlastkey.html"
+    },
+    {
+      "name": "insert",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/insert.html"
+    },
+    {
+      "name": "insertAll",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/insertall.html"
+    },
+    {
+      "name": "intersect",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/intersect.html"
+    },
+    {
+      "name": "keys",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/keys.html"
+    },
+    {
+      "name": "size",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/size.html"
+    },
+    {
+      "name": "sort",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/sort.html"
+    },
+    {
+      "name": "sortKey",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/sortkey.html"
+    },
+    {
+      "name": "update",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 2,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/update.html"
+    },
+    {
+      "name": "values",
+      "kind": "function",
+      "category": "collection",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/collection/values.html"
+    },
+    {
+      "name": "getJson",
+      "kind": "function",
+      "category": "common",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/getjson.html"
+    },
+    {
+      "name": "isBlank",
+      "kind": "function",
+      "category": "common",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/isblank.html"
+    },
+    {
+      "name": "isBlank",
+      "kind": "function",
+      "category": "common",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/isblank.html"
+    },
+    {
+      "name": "isEven",
+      "kind": "function",
+      "category": "common",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/is-even.html"
+    },
+    {
+      "name": "isEven",
+      "kind": "function",
+      "category": "common",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/is-even.html"
+    },
+    {
+      "name": "isFile",
+      "kind": "function",
+      "category": "common",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/is-file.html"
+    },
+    {
+      "name": "isFile",
+      "kind": "function",
+      "category": "common",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/is-file.html"
+    },
+    {
+      "name": "isNull",
+      "kind": "function",
+      "category": "common",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/isnull.html"
+    },
+    {
+      "name": "isNull",
+      "kind": "function",
+      "category": "common",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/isnull.html"
+    },
+    {
+      "name": "isOdd",
+      "kind": "function",
+      "category": "common",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/is-odd.html"
+    },
+    {
+      "name": "isOdd",
+      "kind": "function",
+      "category": "common",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/is-odd.html"
+    },
+    {
+      "name": "isText",
+      "kind": "function",
+      "category": "common",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/istext.html"
+    },
+    {
+      "name": "average",
+      "kind": "function",
+      "category": "data-access",
+      "receivers": [
+        "form"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/aggregate-records/average.html",
+      "snippet": "x = Orders.average(Amount);"
+    },
+    {
+      "name": "Average",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/aggregate-records/average.html",
+      "snippet": "x = Average(Orders[ID > 0].Amount);"
+    },
+    {
+      "name": "clear",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/miscellaneous/clear-subform-rows.html"
+    },
+    {
+      "name": "count",
+      "kind": "function",
+      "category": "data-access",
+      "receivers": [
+        "form"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/aggregate-records/count.html",
+      "snippet": "x = Orders.count();"
+    },
+    {
+      "name": "Count",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/aggregate-records/count.html",
+      "snippet": "x = Count(Orders[ID > 0]);"
+    },
+    {
+      "name": "delete",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "form"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/delete-records.html",
+      "snippet": "delete from Orders[ID == 1];"
+    },
+    {
+      "name": "distinct",
+      "kind": "function",
+      "category": "data-access",
+      "receivers": [
+        "form"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/aggregate-records/distinct.html",
+      "snippet": "x = Orders.distinct(Name);"
+    },
+    {
+      "name": "Distinct",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/aggregate-records/distinct.html",
+      "snippet": "x = Distinct(Orders[ID > 0]);"
+    },
+    {
+      "name": "for each record",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "form"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/for-each-record.html",
+      "snippet": "for each rec in Orders[Status == \"Open\"] { x = 1; }"
+    },
+    {
+      "name": "input",
+      "kind": "variable",
+      "category": "data-access",
+      "receivers": [
+        "form"
+      ],
+      "arity": 0,
+      "form": "variable",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/accessing-form-fields.html",
+      "snippet": "x = input.Name;"
+    },
+    {
+      "name": "insert",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "form"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/add-record.html",
+      "snippet": "row = insert into Orders[Name = \"A\"];"
+    },
+    {
+      "name": "insert",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/miscellaneous/insert-subform-row.html"
+    },
+    {
+      "name": "insert",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/miscellaneous/insert-subform-row.html"
+    },
+    {
+      "name": "max",
+      "kind": "function",
+      "category": "data-access",
+      "receivers": [
+        "form"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/aggregate-records/maximum.html",
+      "snippet": "x = Orders.max(Amount);"
+    },
+    {
+      "name": "Maximum",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/aggregate-records/maximum.html",
+      "snippet": "x = Maximum(Orders[ID > 0].Amount);"
+    },
+    {
+      "name": "median",
+      "kind": "function",
+      "category": "data-access",
+      "receivers": [
+        "form"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/aggregate-records/median.html",
+      "snippet": "x = Orders.median(Amount);"
+    },
+    {
+      "name": "Median",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/aggregate-records/median.html",
+      "snippet": "x = Median(Orders[ID > 0].Amount);"
+    },
+    {
+      "name": "min",
+      "kind": "function",
+      "category": "data-access",
+      "receivers": [
+        "form"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/aggregate-records/minimum.html",
+      "snippet": "x = Orders.min(Amount);"
+    },
+    {
+      "name": "Minimum",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/aggregate-records/minimum.html",
+      "snippet": "x = Minimum(Orders[ID > 0].Amount);"
+    },
+    {
+      "name": "old",
+      "kind": "variable",
+      "category": "data-access",
+      "receivers": [
+        "form"
+      ],
+      "arity": 0,
+      "form": "variable",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/old.html",
+      "snippet": "x = old.Name;"
+    },
+    {
+      "name": "sum",
+      "kind": "function",
+      "category": "data-access",
+      "receivers": [
+        "form"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/aggregate-records/sum.html",
+      "snippet": "x = Orders.sum(Amount);"
+    },
+    {
+      "name": "Sum",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/aggregate-records/sum.html",
+      "snippet": "x = Sum(Orders[ID > 0].Amount);"
+    },
+    {
+      "name": "update",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "none"
+      ],
+      "arity": 6,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/update-multiple-fields.html"
+    },
+    {
+      "name": "update",
+      "kind": "task",
+      "category": "data-access",
+      "receivers": [
+        "form"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/data-access/update-records.html",
+      "snippet": "update Orders[ID == 1][Status = \"Done\"];"
+    },
+    {
+      "name": "addBusinessDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addbusinessday.html"
+    },
+    {
+      "name": "addBusinessDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addbusinessday.html"
+    },
+    {
+      "name": "addDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addday.html"
+    },
+    {
+      "name": "addDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addday.html"
+    },
+    {
+      "name": "addMonth",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addmonth.html"
+    },
+    {
+      "name": "addMonth",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addmonth.html"
+    },
+    {
+      "name": "addWeek",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addweek.html"
+    },
+    {
+      "name": "addWeek",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addweek.html"
+    },
+    {
+      "name": "addYear",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addyear.html"
+    },
+    {
+      "name": "addYear",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addyear.html"
+    },
+    {
+      "name": "day",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/day.html"
+    },
+    {
+      "name": "day",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/day.html"
+    },
+    {
+      "name": "day",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getday.html"
+    },
+    {
+      "name": "day",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getday.html"
+    },
+    {
+      "name": "days360",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/days360.html"
+    },
+    {
+      "name": "days360",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/days360.html"
+    },
+    {
+      "name": "daysBetween",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/daysbetween.html"
+    },
+    {
+      "name": "daysBetween",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/daysbetween.html"
+    },
+    {
+      "name": "edate",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/edate.html"
+    },
+    {
+      "name": "edate",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/edate.html"
+    },
+    {
+      "name": "eomonth",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/eomonth.html"
+    },
+    {
+      "name": "eomonth",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/eomonth.html"
+    },
+    {
+      "name": "getDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/day.html"
+    },
+    {
+      "name": "getDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/day.html"
+    },
+    {
+      "name": "getDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getday.html"
+    },
+    {
+      "name": "getDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getday.html"
+    },
+    {
+      "name": "getDayOfWeek",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/weekday.html"
+    },
+    {
+      "name": "getDayOfWeek",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/weekday.html"
+    },
+    {
+      "name": "getDayOfYear",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getdayofyear.html"
+    },
+    {
+      "name": "getHour",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/hour.html"
+    },
+    {
+      "name": "getHour",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/hour.html"
+    },
+    {
+      "name": "getHour",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/hour.html"
+    },
+    {
+      "name": "getMinutes",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/minute.html"
+    },
+    {
+      "name": "getMinutes",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/minute.html"
+    },
+    {
+      "name": "getMinutes",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/minute.html"
+    },
+    {
+      "name": "getMonth",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getmonth.html"
+    },
+    {
+      "name": "getMonth",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getmonth.html"
+    },
+    {
+      "name": "getMonth",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/month.html"
+    },
+    {
+      "name": "getMonth",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/month.html"
+    },
+    {
+      "name": "getSeconds",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/second.html"
+    },
+    {
+      "name": "getSeconds",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/second.html"
+    },
+    {
+      "name": "getSeconds",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/second.html"
+    },
+    {
+      "name": "getWeekOfYear",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getweekofyear.html"
+    },
+    {
+      "name": "getWeekOfYear",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getweekofyear.html"
+    },
+    {
+      "name": "getYear",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getyear.html"
+    },
+    {
+      "name": "getYear",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getyear.html"
+    },
+    {
+      "name": "hour",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/hour.html"
+    },
+    {
+      "name": "hour",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/hour.html"
+    },
+    {
+      "name": "hour",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/hour.html"
+    },
+    {
+      "name": "hoursBetween",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/hoursbetween.html"
+    },
+    {
+      "name": "hoursBetween",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/hoursbetween.html"
+    },
+    {
+      "name": "isDate",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/isdate.html"
+    },
+    {
+      "name": "isDate",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/isdate.html"
+    },
+    {
+      "name": "minute",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/minute.html"
+    },
+    {
+      "name": "minute",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/minute.html"
+    },
+    {
+      "name": "minute",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/minute.html"
+    },
+    {
+      "name": "month",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getmonth.html"
+    },
+    {
+      "name": "month",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getmonth.html"
+    },
+    {
+      "name": "month",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/month.html"
+    },
+    {
+      "name": "month",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/month.html"
+    },
+    {
+      "name": "monthsBetween",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/monthsbetween.html"
+    },
+    {
+      "name": "monthsBetween",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/monthsbetween.html"
+    },
+    {
+      "name": "nextWeekDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/nextweekday.html"
+    },
+    {
+      "name": "nextWeekDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/nextweekday.html"
+    },
+    {
+      "name": "now",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/now.html"
+    },
+    {
+      "name": "previousWeekDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/previousweekday.html"
+    },
+    {
+      "name": "previousWeekDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/previousweekday.html"
+    },
+    {
+      "name": "second",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/second.html"
+    },
+    {
+      "name": "second",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/second.html"
+    },
+    {
+      "name": "second",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/second.html"
+    },
+    {
+      "name": "subBusinessDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subbusinessday.html"
+    },
+    {
+      "name": "subBusinessDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subbusinessday.html"
+    },
+    {
+      "name": "subDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subday.html"
+    },
+    {
+      "name": "subDay",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subday.html"
+    },
+    {
+      "name": "subMonth",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/submonth.html"
+    },
+    {
+      "name": "subMonth",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/submonth.html"
+    },
+    {
+      "name": "subWeek",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subweek.html"
+    },
+    {
+      "name": "subWeek",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subweek.html"
+    },
+    {
+      "name": "subYear",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subyear.html"
+    },
+    {
+      "name": "subYear",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subyear.html"
+    },
+    {
+      "name": "toDate",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/todate.html"
+    },
+    {
+      "name": "toDate",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/todate.html"
+    },
+    {
+      "name": "today",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/today.html"
+    },
+    {
+      "name": "toStartOfMonth",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/tostartofmonth.html"
+    },
+    {
+      "name": "toStartOfMonth",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/tostartofmonth.html"
+    },
+    {
+      "name": "toStartOfWeek",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/tostartofweek.html"
+    },
+    {
+      "name": "toStartOfWeek",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/tostartofweek.html"
+    },
+    {
+      "name": "totalMonths",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/totalmonth.html"
+    },
+    {
+      "name": "totalMonths",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/totalmonth.html"
+    },
+    {
+      "name": "totalYears",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/totalyear.html"
+    },
+    {
+      "name": "totalYears",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/totalyear.html"
+    },
+    {
+      "name": "toTime",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/totime.html"
+    },
+    {
+      "name": "unixEpoch",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/unix-epoch.html"
+    },
+    {
+      "name": "weekday",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/weekday.html"
+    },
+    {
+      "name": "weekday",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/weekday.html"
+    },
+    {
+      "name": "workday",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/workday.html"
+    },
+    {
+      "name": "workday",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/workday.html"
+    },
+    {
+      "name": "year",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getyear.html"
+    },
+    {
+      "name": "year",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getyear.html"
+    },
+    {
+      "name": "yearsBetween",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/yearsbetween.html"
+    },
+    {
+      "name": "yearsBetween",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/yearsbetween.html"
+    },
+    {
+      "name": "info",
+      "kind": "task",
+      "category": "debug",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/debug/info.html",
+      "snippet": "info \"x\";"
+    },
+    {
+      "name": "encodeUrl",
+      "kind": "function",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/encodeurl.html"
+    },
+    {
+      "name": "htmlDecode",
+      "kind": "function",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/string/html-decode.html"
+    },
+    {
+      "name": "htmlDecode",
+      "kind": "function",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/string/html-decode.html"
+    },
+    {
+      "name": "htmlEncode",
+      "kind": "function",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/string/html-encode.html"
+    },
+    {
+      "name": "htmlEncode",
+      "kind": "function",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/string/html-encode.html"
+    },
+    {
+      "name": "zoho.encryption.aesDecode",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/encryption/aesdecode.html"
+    },
+    {
+      "name": "zoho.encryption.aesDecode128",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/encryption/aesdecode128.html"
+    },
+    {
+      "name": "zoho.encryption.aesEncode",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/encryption/aesencode.html"
+    },
+    {
+      "name": "zoho.encryption.aesEncode128",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/encryption/aesencode128.html"
+    },
+    {
+      "name": "zoho.encryption.base32Decode",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/encryption-tasks/base-32-decode.html"
+    },
+    {
+      "name": "zoho.encryption.base32Encode",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/encryption-tasks/base-32-encode.html"
+    },
+    {
+      "name": "zoho.encryption.base64Decode",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/encryption-tasks/base-64-decode.html"
+    },
+    {
+      "name": "zoho.encryption.base64DecodeToFile",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/encryption-tasks/base-64-decode-to-file.html"
+    },
+    {
+      "name": "zoho.encryption.base64Encode",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/encryption-tasks/base-64-encode.html"
+    },
+    {
+      "name": "zoho.encryption.hmacsha1",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/encryption/hmac-sha1.html"
+    },
+    {
+      "name": "zoho.encryption.hmacsha256",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/encryption/hmac-sha256.html"
+    },
+    {
+      "name": "zoho.encryption.hmacsha512",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/encryption/hmac-sha512.html"
+    },
+    {
+      "name": "zoho.encryption.md5",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/encryption/md5.html"
+    },
+    {
+      "name": "zoho.encryption.sha1",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/encryption/sha1.html"
+    },
+    {
+      "name": "zoho.encryption.sha256",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/encryption/sha256.html"
+    },
+    {
+      "name": "zoho.encryption.sha512",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/encryption/sha512.html"
+    },
+    {
+      "name": "zoho.encryption.urlDecode",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/encryption/urldecode.html"
+    },
+    {
+      "name": "zoho.encryption.urlEncode",
+      "kind": "integration",
+      "category": "encryption",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/encryption/urlencode.html"
+    },
+    {
+      "name": "actualname",
+      "kind": "task",
+      "category": "file",
+      "receivers": [
+        "file"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/file-attributes/actualname.html"
+    },
+    {
+      "name": "content",
+      "kind": "task",
+      "category": "file",
+      "receivers": [
+        "file"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/file-attributes/content.html"
+    },
+    {
+      "name": "getFileContent",
+      "kind": "function",
+      "category": "file",
+      "receivers": [
+        "file"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/file/get-file-content.html"
+    },
+    {
+      "name": "getFileName",
+      "kind": "function",
+      "category": "file",
+      "receivers": [
+        "file"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/file/get-file-name.html"
+    },
+    {
+      "name": "getFileSize",
+      "kind": "function",
+      "category": "file",
+      "receivers": [
+        "file"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/file/get-file-size.html"
+    },
+    {
+      "name": "getFileType",
+      "kind": "function",
+      "category": "file",
+      "receivers": [
+        "file"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/file/get-file-type.html"
+    },
+    {
+      "name": "setCharSet",
+      "kind": "function",
+      "category": "file",
+      "receivers": [
+        "file"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/file/set-charset.html"
+    },
+    {
+      "name": "setFileName",
+      "kind": "function",
+      "category": "file",
+      "receivers": [
+        "file"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/file/set-file-name.html"
+    },
+    {
+      "name": "setFilePassword",
+      "kind": "function",
+      "category": "file",
+      "receivers": [
+        "file"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/file/set-file-password.html"
+    },
+    {
+      "name": "setFileType",
+      "kind": "function",
+      "category": "file",
+      "receivers": [
+        "file"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/file/set-file-type.html"
+    },
+    {
+      "name": "break",
+      "kind": "task",
+      "category": "flow",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/misc-statements/break.html",
+      "snippet": "for each item in {\"a\"} { break; }"
+    },
+    {
+      "name": "continue",
+      "kind": "task",
+      "category": "flow",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/misc-statements/continue.html",
+      "snippet": "for each item in {\"a\"} { continue; }"
+    },
+    {
+      "name": "else",
+      "kind": "task",
+      "category": "flow",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/conditional-statements/condition.html",
+      "snippet": "if (1 == 0) { x = 0; } else { x = 1; }"
+    },
+    {
+      "name": "else if",
+      "kind": "task",
+      "category": "flow",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/conditional-statements/condition.html",
+      "snippet": "if (1 == 0) { x = 0; } else if (1 == 1) { x = 1; }"
+    },
+    {
+      "name": "for each",
+      "kind": "task",
+      "category": "flow",
+      "receivers": [
+        "list"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/list-manipulations/for-each-element.html",
+      "snippet": "for each item in {\"a\", \"b\"} { x = 1; }"
+    },
+    {
+      "name": "for each index",
+      "kind": "task",
+      "category": "flow",
+      "receivers": [
+        "list"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/list-manipulations/for-each-index.html",
+      "snippet": "for each index i item in {\"a\", \"b\"} { x = i; }"
+    },
+    {
+      "name": "if",
+      "kind": "task",
+      "category": "flow",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/conditional-statements/condition.html",
+      "snippet": "if (1 == 1) { x = 1; }"
+    },
+    {
+      "name": "if",
+      "kind": "function",
+      "category": "flow",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/conditional-statements/condition.html",
+      "snippet": "x = if(1 == 1, \"a\", \"b\");"
+    },
+    {
+      "name": "ifNull",
+      "kind": "function",
+      "category": "flow",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/conditional-statements/condition.html",
+      "snippet": "x = ifNull(\"a\", \"b\");"
+    },
+    {
+      "name": "ifNull",
+      "kind": "task",
+      "category": "flow",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/conditional-statements/condition.html"
+    },
+    {
+      "name": "return",
+      "kind": "task",
+      "category": "flow",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/misc-statements/return-statement.html",
+      "snippet": "return \"ok\";"
+    },
+    {
+      "name": "try",
+      "kind": "task",
+      "category": "flow",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/misc-statements/try-catch.html",
+      "snippet": "try { x = 1; } catch (err) { x = 0; }"
+    },
+    {
+      "name": "while",
+      "kind": "task",
+      "category": "flow",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": null,
+      "snippet": "while (1 == 0) { x = 1; }"
+    },
+    {
+      "name": "zoho.bookings.createAppointment",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 7,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/bookings/create-appointment.html"
+    },
+    {
+      "name": "zoho.bookings.getAvailableSlots",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/bookings/get-available-slots.html"
+    },
+    {
+      "name": "zoho.bookings.getRecordById",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/bookings/get-record-by-id.html"
+    },
+    {
+      "name": "zoho.bookings.getRelatedRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/bookings/get-related-records.html"
+    },
+    {
+      "name": "zoho.bookings.getWorkspaces",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/bookings/get-workspaces.html"
+    },
+    {
+      "name": "zoho.bookings.updateRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/bookings/update-record.html"
+    },
+    {
+      "name": "zoho.books.createRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/books/create-record.html"
+    },
+    {
+      "name": "zoho.books.getOrganizations",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/books/get-organizations.html"
+    },
+    {
+      "name": "zoho.books.getRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/books/fetch-records.html"
+    },
+    {
+      "name": "zoho.books.getRecordsByID",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/books/fetch-record-by-id.html"
+    },
+    {
+      "name": "zoho.books.getTemplates",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/books/get-templates.html"
+    },
+    {
+      "name": "zoho.books.markStatus",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/books/mark-status.html"
+    },
+    {
+      "name": "zoho.books.updateRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/books/update-record.html"
+    },
+    {
+      "name": "zoho.calendar.createEvent",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/calendar/create-event.html"
+    },
+    {
+      "name": "zoho.cliq.createRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/cliq/create-record.html"
+    },
+    {
+      "name": "zoho.cliq.deleteRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/cliq/delete-record.html"
+    },
+    {
+      "name": "zoho.cliq.deleteRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/cliq/delete-records.html"
+    },
+    {
+      "name": "zoho.cliq.getRecordById",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/cliq/get-record-by-id.html"
+    },
+    {
+      "name": "zoho.cliq.getRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/cliq/get-records.html"
+    },
+    {
+      "name": "zoho.cliq.postToBot",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/cliq/post-to-bot.html"
+    },
+    {
+      "name": "zoho.cliq.postToChannel",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/cliq/post-to-channel.html"
+    },
+    {
+      "name": "zoho.cliq.postToChat",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/cliq/post-to-chat.html"
+    },
+    {
+      "name": "zoho.cliq.postToUser",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/cliq/post-to-user.html"
+    },
+    {
+      "name": "zoho.cliq.updateRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/cliq/update-record.html"
+    },
+    {
+      "name": "zoho.connect.addComment",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/connect/add-comment.html"
+    },
+    {
+      "name": "zoho.connect.addPost",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/connect/add-post.html"
+    },
+    {
+      "name": "zoho.connect.addUsersToGroup",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/connect/add-users-to-group.html"
+    },
+    {
+      "name": "zoho.connect.deletePost",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/connect/delete-post.html"
+    },
+    {
+      "name": "zoho.connect.getPost",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/connect/get-post.html"
+    },
+    {
+      "name": "zoho.connect.getPostByTpId",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/connect/get-post-tpid.html"
+    },
+    {
+      "name": "zoho.connect.myGroups",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/connect/fetch-my-groups.html"
+    },
+    {
+      "name": "zoho.connect.myNetworks",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/connect/fetch-my-networks.html"
+    },
+    {
+      "name": "zoho.connect.sendMePrivateMessage",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/connect/send-private-message.html"
+    },
+    {
+      "name": "zoho.connect.updatePost",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/connect/update-post.html"
+    },
+    {
+      "name": "zoho.creator.createRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 6,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/creator/create-record.html"
+    },
+    {
+      "name": "zoho.creator.getRecordById",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/creator/get-record-by-id.html"
+    },
+    {
+      "name": "zoho.creator.getRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 7,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/creator/get-records.html"
+    },
+    {
+      "name": "zoho.creator.updateRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 7,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/creator/update-record.html"
+    },
+    {
+      "name": "zoho.creator.updateRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 7,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/creator/update-records.html"
+    },
+    {
+      "name": "zoho.crm.attachFile",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/crm/attach-file.html"
+    },
+    {
+      "name": "zoho.crm.bulkCreate",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/crm/bulk-create-records.html"
+    },
+    {
+      "name": "zoho.crm.bulkUpdate",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/crm/bulk-update-records.html"
+    },
+    {
+      "name": "zoho.crm.convertLead",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/crm/convert-lead.html"
+    },
+    {
+      "name": "zoho.crm.createRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/crm/create-record.html"
+    },
+    {
+      "name": "zoho.crm.getRecordById",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/crm/get-record-by-id.html"
+    },
+    {
+      "name": "zoho.crm.getRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/crm/get-records.html"
+    },
+    {
+      "name": "zoho.crm.getRelatedRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 7,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/crm/get-related-records.html"
+    },
+    {
+      "name": "zoho.crm.searchRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 6,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/crm/search-records.html"
+    },
+    {
+      "name": "zoho.crm.updateRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/crm/update-record.html"
+    },
+    {
+      "name": "zoho.crm.updateRelatedRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/crm/update-related-record.html"
+    },
+    {
+      "name": "zoho.crm.upsert",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/crm/upsert-record.html"
+    },
+    {
+      "name": "zoho.desk.create",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/desk/create-record.html"
+    },
+    {
+      "name": "zoho.desk.createRelatedRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/desk/create-related-record.html"
+    },
+    {
+      "name": "zoho.desk.getRecordById",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/desk/fetch-record-by-id.html"
+    },
+    {
+      "name": "zoho.desk.getRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/desk/get-records.html"
+    },
+    {
+      "name": "zoho.desk.getRelatedRecordById",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/desk/fetch-related-record-by-id.html"
+    },
+    {
+      "name": "zoho.desk.getRelatedRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/desk/fetch-related-records.html"
+    },
+    {
+      "name": "zoho.desk.searchRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/desk/search-records.html"
+    },
+    {
+      "name": "zoho.desk.ticket.merge",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/desk/merge-tickets.html"
+    },
+    {
+      "name": "zoho.desk.ticket.move",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/desk/move-ticket.html"
+    },
+    {
+      "name": "zoho.desk.ticket.split",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/desk/split-ticket.html"
+    },
+    {
+      "name": "zoho.desk.update",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/desk/update-record.html"
+    },
+    {
+      "name": "zoho.desk.updateRelatedRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 6,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/desk/update-related-record.html"
+    },
+    {
+      "name": "zoho.device.type",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/zoho-variables.html"
+    },
+    {
+      "name": "zoho.inventory.createRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/inventory/create-record.html"
+    },
+    {
+      "name": "zoho.inventory.getOrganizations",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/inventory/get-organization.html"
+    },
+    {
+      "name": "zoho.inventory.getRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/inventory/get-records.html"
+    },
+    {
+      "name": "zoho.inventory.getRecordsByID",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/inventory/get-records-by-id.html"
+    },
+    {
+      "name": "zoho.inventory.markStatus",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/inventory/mark-status.html"
+    },
+    {
+      "name": "zoho.inventory.updateRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/inventory/update-record.html"
+    },
+    {
+      "name": "zoho.invoice.create",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/invoice/create-record.html"
+    },
+    {
+      "name": "zoho.invoice.getRecordById",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/invoice/fetch-record-by-id.html"
+    },
+    {
+      "name": "zoho.invoice.getRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/invoice/fetch-records.html"
+    },
+    {
+      "name": "zoho.invoice.update",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/invoice/update-record.html"
+    },
+    {
+      "name": "zoho.mail.createFolder",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/mail/create-folder.html"
+    },
+    {
+      "name": "zoho.mail.createTag",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/mail/create-tag.html"
+    },
+    {
+      "name": "zoho.mail.getFolders",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/mail/get-folders.html"
+    },
+    {
+      "name": "zoho.mail.getLabels",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/mail/get-labels.html"
+    },
+    {
+      "name": "zoho.mail.getMessage",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/mail/get-message.html"
+    },
+    {
+      "name": "zoho.mail.markAsRead",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/mail/mark-as-read.html"
+    },
+    {
+      "name": "zoho.mail.markAsUnread",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/mail/mark-as-unread.html"
+    },
+    {
+      "name": "zoho.mail.moveToFolder",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/mail/move-to-folder.html"
+    },
+    {
+      "name": "zoho.mail.removeFlag",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/mail/remove-flag.html"
+    },
+    {
+      "name": "zoho.mail.setFlag",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/mail/set-flag.html"
+    },
+    {
+      "name": "zoho.mail.setTag",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/mail/set-tag.html"
+    },
+    {
+      "name": "zoho.map.distanceBetween",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/map-tasks/distance-between.html"
+    },
+    {
+      "name": "zoho.map.geoCode",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/map-tasks/geocode.html"
+    },
+    {
+      "name": "zoho.map.rGeoCode",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/map-tasks/rgeocode.html"
+    },
+    {
+      "name": "zoho.notebook.createNotecard",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/notebook/create-notecard.html"
+    },
+    {
+      "name": "zoho.people.create",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/people/create-record.html"
+    },
+    {
+      "name": "zoho.people.getRecordById",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/people/fetch-record-by-id.html"
+    },
+    {
+      "name": "zoho.people.getRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/people/fetch-records.html"
+    },
+    {
+      "name": "zoho.people.update",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/people/update-record.html"
+    },
+    {
+      "name": "zoho.projects.associateLogs",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/projects/associate-logs.html"
+    },
+    {
+      "name": "zoho.projects.create",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/projects/create.html"
+    },
+    {
+      "name": "zoho.projects.createProject",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/projects/create-project.html"
+    },
+    {
+      "name": "zoho.projects.getPortals",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/projects/get-portals.html"
+    },
+    {
+      "name": "zoho.projects.getProjectDetails",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/projects/get-project-details.html"
+    },
+    {
+      "name": "zoho.projects.getRecordById",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/projects/get-record-by-id.html"
+    },
+    {
+      "name": "zoho.projects.getRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 6,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/projects/get-records.html"
+    },
+    {
+      "name": "zoho.projects.update",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/projects/update.html"
+    },
+    {
+      "name": "zoho.projects.updateAssociateLogs",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 7,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/projects/update-associated-logs.html"
+    },
+    {
+      "name": "zoho.recruit.addRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/recruit/create-record.html"
+    },
+    {
+      "name": "zoho.recruit.getRecordbyId",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/recruit/fetch-record-by-id.html"
+    },
+    {
+      "name": "zoho.recruit.getRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/recruit/fetch-records.html"
+    },
+    {
+      "name": "zoho.recruit.searchRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 6,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/recruit/search-records.html"
+    },
+    {
+      "name": "zoho.recruit.updateRecord",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/recruit/update-record.html"
+    },
+    {
+      "name": "zoho.recruit.uploadFile",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/recruit/upload-files.html"
+    },
+    {
+      "name": "zoho.reports.createRow",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/analytics/add-row.html"
+    },
+    {
+      "name": "zoho.reports.deleteRow",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/analytics/delete-row.html"
+    },
+    {
+      "name": "zoho.reports.updateData",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/analytics/update-row.html"
+    },
+    {
+      "name": "zoho.salesiq.visitorsession.get",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/salesiq/visitorsession-get.html"
+    },
+    {
+      "name": "zoho.salesiq.visitorsession.set",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/salesiq/visitorsession-set.html"
+    },
+    {
+      "name": "zoho.sdp.associate",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/sdp/associate.html"
+    },
+    {
+      "name": "zoho.sdp.create",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/sdp/create-record.html"
+    },
+    {
+      "name": "zoho.sdp.getRecordById",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/sdp/get-record-by-id.html"
+    },
+    {
+      "name": "zoho.sdp.getRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 6,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/sdp/get-records.html"
+    },
+    {
+      "name": "zoho.sdp.invokeUrl",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/sdp/sdp-invokeurl.html"
+    },
+    {
+      "name": "zoho.sdp.update",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/sdp/update-record.html"
+    },
+    {
+      "name": "zoho.sheet.createRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/sheet/create-records.html"
+    },
+    {
+      "name": "zoho.sheet.find",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 6,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/sheet/find.html"
+    },
+    {
+      "name": "zoho.sheet.getRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/sheet/get-records.html"
+    },
+    {
+      "name": "zoho.sheet.getSheets",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/sheet/get-sheets.html"
+    },
+    {
+      "name": "zoho.sheet.insertCSV",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 6,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/sheet/insert-csv.html"
+    },
+    {
+      "name": "zoho.sheet.replace",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 7,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/sheet/replace.html"
+    },
+    {
+      "name": "zoho.sheet.updateRecords",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 6,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/sheet/update-records.html"
+    },
+    {
+      "name": "zoho.sign.downloadDocument",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/sign/download-document.html"
+    },
+    {
+      "name": "zoho.workdrive.createFolder",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/workdrive/create-folder.html"
+    },
+    {
+      "name": "zoho.workdrive.createTeamFolder",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/workdrive/create-team-folder.html"
+    },
+    {
+      "name": "zoho.workdrive.uploadFile",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/workdrive/upload-file.html"
+    },
+    {
+      "name": "zoho.writer.documents.favorite",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/mark-unmark-favorite-document.html"
+    },
+    {
+      "name": "zoho.writer.documents.lock",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/lock-unlock-documents.html"
+    },
+    {
+      "name": "zoho.writer.documents.MarkAsFinal",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/mark-revert-final-documents.html"
+    },
+    {
+      "name": "zoho.writer.documents.markAsReady",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/mark-document-ready.html"
+    },
+    {
+      "name": "zoho.writer.documents.setDescription",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/add-update-description.html"
+    },
+    {
+      "name": "zoho.writer.documents.setName",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/rename-document.html"
+    },
+    {
+      "name": "zoho.writer.documents.trackchanges",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/enable-disable-track-changes.html"
+    },
+    {
+      "name": "zoho.writer.generateFillableLink",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/GenerateFillableLink.html"
+    },
+    {
+      "name": "zoho.writer.getAllFields",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/get-all-fields.html"
+    },
+    {
+      "name": "zoho.writer.getDocuments",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/get-documents.html"
+    },
+    {
+      "name": "zoho.writer.getFillableTemplates",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/get-fillable-template.html"
+    },
+    {
+      "name": "zoho.writer.getMergeFields",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/get-merge-fields.html"
+    },
+    {
+      "name": "zoho.writer.getMergeTemplates",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/get-merge-templates.html"
+    },
+    {
+      "name": "zoho.writer.getSignTemplates",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/get-sign-templates.html"
+    },
+    {
+      "name": "zoho.writer.mergeAndInvoke",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/merge-and-invoke.html"
+    },
+    {
+      "name": "zoho.writer.mergeAndSend",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/merge-and-send.html"
+    },
+    {
+      "name": "zoho.writer.mergeAndSign",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 6,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/merge-and-sign.html"
+    },
+    {
+      "name": "zoho.writer.shareDocument",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/share-document.html"
+    },
+    {
+      "name": "zoho.writer.signDocument",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 6,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/sign-documents.html"
+    },
+    {
+      "name": "zoho.writer.uploadDocument",
+      "kind": "integration",
+      "category": "integration",
+      "receivers": [
+        "none"
+      ],
+      "arity": 5,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/writer/upload-document.html"
+    },
+    {
+      "name": "add",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/add.html"
+    },
+    {
+      "name": "add",
+      "kind": "task",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/list-manipulations/add.html"
+    },
+    {
+      "name": "addall",
+      "kind": "task",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/list-manipulations/addall-removeall.html"
+    },
+    {
+      "name": "addAll",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/addall.html"
+    },
+    {
+      "name": "clear",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/clear.html"
+    },
+    {
+      "name": "clear",
+      "kind": "task",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/list-manipulations/clear.html"
+    },
+    {
+      "name": "contains",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/contains.html"
+    },
+    {
+      "name": "distinct",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/distinct.html"
+    },
+    {
+      "name": "get",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/get.html"
+    },
+    {
+      "name": "indexOf",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/indexof.html"
+    },
+    {
+      "name": "intersect",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/intersect.html"
+    },
+    {
+      "name": "lastIndexOf",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/lastindexof.html"
+    },
+    {
+      "name": "remove",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/remove.html"
+    },
+    {
+      "name": "remove",
+      "kind": "task",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/list-manipulations/remove-index.html"
+    },
+    {
+      "name": "removeall",
+      "kind": "task",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/list-manipulations/addall-removeall.html"
+    },
+    {
+      "name": "removeAll",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/removeall.html"
+    },
+    {
+      "name": "removeElement",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/removeelement.html"
+    },
+    {
+      "name": "removeElement",
+      "kind": "task",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/list-manipulations/remove-element.html"
+    },
+    {
+      "name": "size",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/size.html"
+    },
+    {
+      "name": "sort",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/sort.html"
+    },
+    {
+      "name": "sort",
+      "kind": "task",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/list-manipulations/sort.html"
+    },
+    {
+      "name": "subList",
+      "kind": "function",
+      "category": "list",
+      "receivers": [
+        "list"
+      ],
+      "arity": 2,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/sublist.html"
+    },
+    {
+      "name": "clear",
+      "kind": "function",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/map/clear.html"
+    },
+    {
+      "name": "clear",
+      "kind": "task",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/map-manipulations/clear-map.html"
+    },
+    {
+      "name": "containKey",
+      "kind": "function",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/map/containkey.html"
+    },
+    {
+      "name": "containValue",
+      "kind": "function",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/map/containvalue.html"
+    },
+    {
+      "name": "get",
+      "kind": "function",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/map/get.html"
+    },
+    {
+      "name": "isEmpty",
+      "kind": "function",
+      "category": "map",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/text/is-empty.html"
+    },
+    {
+      "name": "keys",
+      "kind": "function",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/map/keys.html"
+    },
+    {
+      "name": "notContains",
+      "kind": "function",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/notcontains.html"
+    },
+    {
+      "name": "put",
+      "kind": "function",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 2,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/map/put.html"
+    },
+    {
+      "name": "put",
+      "kind": "task",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 2,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/map-manipulations/put.html"
+    },
+    {
+      "name": "putAll",
+      "kind": "function",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/map/putall.html"
+    },
+    {
+      "name": "putAll",
+      "kind": "task",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/map-manipulations/put-all-keys.html"
+    },
+    {
+      "name": "remove",
+      "kind": "function",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/map/remove.html"
+    },
+    {
+      "name": "remove",
+      "kind": "task",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/map-manipulations/remove-key.html"
+    },
+    {
+      "name": "size",
+      "kind": "function",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/map/size.html"
+    },
+    {
+      "name": "toJSONList",
+      "kind": "function",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/tojsonlist.html"
+    },
+    {
+      "name": "toMap",
+      "kind": "function",
+      "category": "map",
+      "receivers": [
+        "map"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/tomap.html"
+    },
+    {
+      "name": "break",
+      "kind": "task",
+      "category": "miscellaneous",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/misc-statements/break.html"
+    },
+    {
+      "name": "continue",
+      "kind": "task",
+      "category": "miscellaneous",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/misc-statements/continue.html"
+    },
+    {
+      "name": "getFieldNames",
+      "kind": "task",
+      "category": "miscellaneous",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/miscellaneous/getfieldnames.html"
+    },
+    {
+      "name": "getFieldNames",
+      "kind": "task",
+      "category": "miscellaneous",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/miscellaneous/getfieldnames.html"
+    },
+    {
+      "name": "getFieldValue",
+      "kind": "task",
+      "category": "miscellaneous",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/miscellaneous/getfieldvalue.html"
+    },
+    {
+      "name": "getFieldValue",
+      "kind": "task",
+      "category": "miscellaneous",
+      "receivers": [
+        "collection"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/miscellaneous/getfieldvalue.html"
+    },
+    {
+      "name": "invokeurl",
+      "kind": "task",
+      "category": "notifications",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/webhook/invokeurl-api-task.html",
+      "snippet": "resp = invokeurl[url: \"https://example.test\" type: GET];"
+    },
+    {
+      "name": "sendmail",
+      "kind": "task",
+      "category": "notifications",
+      "receivers": [
+        "none"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/misc-statements/send-mail.html",
+      "snippet": "sendmail[from: \"a@b.c\" to: \"c@d.e\" subject: \"s\" message: \"m\"];"
+    },
+    {
+      "name": "sendmail",
+      "kind": "task",
+      "category": "notifications",
+      "receivers": [
+        "none"
+      ],
+      "arity": 9,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/misc-statements/send-mail.html"
+    },
+    {
+      "name": "abs",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/abs.html"
+    },
+    {
+      "name": "abs",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/abs.html"
+    },
+    {
+      "name": "acos",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/acos.html"
+    },
+    {
+      "name": "acos",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/acos.html"
+    },
+    {
+      "name": "acosh",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/acosh.html"
+    },
+    {
+      "name": "acosh",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/acosh.html"
+    },
+    {
+      "name": "asin",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/asin.html"
+    },
+    {
+      "name": "asin",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/asin.html"
+    },
+    {
+      "name": "asinh",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/asinh.html"
+    },
+    {
+      "name": "asinh",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/asinh.html"
+    },
+    {
+      "name": "atan",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/atan.html"
+    },
+    {
+      "name": "atan",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/atan.html"
+    },
+    {
+      "name": "atan2",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/atan2.html"
+    },
+    {
+      "name": "atanh",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/atanh.html"
+    },
+    {
+      "name": "atanh",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/atanh.html"
+    },
+    {
+      "name": "average",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/average.html"
+    },
+    {
+      "name": "average",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/average.html"
+    },
+    {
+      "name": "ceil",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/ceil.html"
+    },
+    {
+      "name": "ceil",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/ceil.html"
+    },
+    {
+      "name": "cos",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/cos.html"
+    },
+    {
+      "name": "cos",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/cos.html"
+    },
+    {
+      "name": "cosh",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/cosh.html"
+    },
+    {
+      "name": "cosh",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/cosh.html"
+    },
+    {
+      "name": "exp",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/exp.html"
+    },
+    {
+      "name": "exp",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/exp.html"
+    },
+    {
+      "name": "floor",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/floor.html"
+    },
+    {
+      "name": "floor",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/floor.html"
+    },
+    {
+      "name": "frac",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/frac.html"
+    },
+    {
+      "name": "frac",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/frac.html"
+    },
+    {
+      "name": "isNumber",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/isnumber.html"
+    },
+    {
+      "name": "isNumber",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/isnumber.html"
+    },
+    {
+      "name": "largest",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/largest.html"
+    },
+    {
+      "name": "largest",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/largest.html"
+    },
+    {
+      "name": "log",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/log.html"
+    },
+    {
+      "name": "log",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/log.html"
+    },
+    {
+      "name": "log10",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/log10.html"
+    },
+    {
+      "name": "log10",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/log10.html"
+    },
+    {
+      "name": "max",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/max.html"
+    },
+    {
+      "name": "max",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/max.html"
+    },
+    {
+      "name": "median",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/median.html"
+    },
+    {
+      "name": "median",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/median.html"
+    },
+    {
+      "name": "min",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/min.html"
+    },
+    {
+      "name": "min",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/min.html"
+    },
+    {
+      "name": "nthLargest",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/nth-largest.html"
+    },
+    {
+      "name": "nthSmallest",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/nth-smallest.html"
+    },
+    {
+      "name": "power",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/power.html"
+    },
+    {
+      "name": "power",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/power.html"
+    },
+    {
+      "name": "randomNumber",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/randomnumber.html"
+    },
+    {
+      "name": "round",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/round.html"
+    },
+    {
+      "name": "sin",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/sin.html"
+    },
+    {
+      "name": "sin",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/sin.html"
+    },
+    {
+      "name": "sinh",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/sinh.html"
+    },
+    {
+      "name": "sinh",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/sinh.html"
+    },
+    {
+      "name": "smallest",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/smallest.html"
+    },
+    {
+      "name": "smallest",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/smallest.html"
+    },
+    {
+      "name": "sqrt",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/sqrt.html"
+    },
+    {
+      "name": "sqrt",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/sqrt.html"
+    },
+    {
+      "name": "tan",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/tan.html"
+    },
+    {
+      "name": "tan",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/tan.html"
+    },
+    {
+      "name": "tanh",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/tanh.html"
+    },
+    {
+      "name": "tanh",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/tanh.html"
+    },
+    {
+      "name": "toDecimal",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/todecimal.html"
+    },
+    {
+      "name": "toDecimal",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/todecimal.html"
+    },
+    {
+      "name": "toHex",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/tohex.html"
+    },
+    {
+      "name": "toHex",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/tohex.html"
+    },
+    {
+      "name": "toLong",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/tolong.html"
+    },
+    {
+      "name": "toLong",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/tolong.html"
+    },
+    {
+      "name": "toNumber",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/tolong.html"
+    },
+    {
+      "name": "toNumber",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/tolong.html"
+    },
+    {
+      "name": "toWords",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "number"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/towords.html"
+    },
+    {
+      "name": "toWords",
+      "kind": "function",
+      "category": "number",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/towords.html"
+    },
+    {
+      "name": "concat",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/concat.html"
+    },
+    {
+      "name": "concat",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/concat.html"
+    },
+    {
+      "name": "contains",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/contains.html"
+    },
+    {
+      "name": "contains",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/contains.html"
+    },
+    {
+      "name": "containsIgnoreCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/containsignorecase.html"
+    },
+    {
+      "name": "containsIgnoreCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/containsignorecase.html"
+    },
+    {
+      "name": "endsWith",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/endswith.html"
+    },
+    {
+      "name": "endsWith",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/endswith.html"
+    },
+    {
+      "name": "endsWithIgnoreCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/endswithignorecase.html"
+    },
+    {
+      "name": "endsWithIgnoreCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/endswithignorecase.html"
+    },
+    {
+      "name": "equalsIgnoreCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/equalsignorecase.html"
+    },
+    {
+      "name": "equalsIgnoreCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/equalsignorecase.html"
+    },
+    {
+      "name": "find",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/find.html"
+    },
+    {
+      "name": "find",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/find.html"
+    },
+    {
+      "name": "find",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/indexof.html"
+    },
+    {
+      "name": "find",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/indexof.html"
+    },
+    {
+      "name": "getAlpha",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/getalpha.html"
+    },
+    {
+      "name": "getAlpha",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/getalpha.html"
+    },
+    {
+      "name": "getAlphaNumeric",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/getalphanumeric.html"
+    },
+    {
+      "name": "getAlphaNumeric",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/getalphanumeric.html"
+    },
+    {
+      "name": "getOccurenceCount",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/getoccurencecount.html"
+    },
+    {
+      "name": "getOccurenceCount",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/getoccurencecount.html"
+    },
+    {
+      "name": "getPrefix",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/getprefix.html"
+    },
+    {
+      "name": "getPrefix",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/getprefix.html"
+    },
+    {
+      "name": "getPrefixIgnoreCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/getprefixignorecase.html"
+    },
+    {
+      "name": "getPrefixIgnoreCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/getprefixignorecase.html"
+    },
+    {
+      "name": "getSuffix",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/getsuffix.html"
+    },
+    {
+      "name": "getSuffix",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/getsuffix.html"
+    },
+    {
+      "name": "hexToText",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/hextotext.html"
+    },
+    {
+      "name": "hexToText",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/hextotext.html"
+    },
+    {
+      "name": "indexOf",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/find.html"
+    },
+    {
+      "name": "indexOf",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/find.html"
+    },
+    {
+      "name": "indexOf",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/indexof.html"
+    },
+    {
+      "name": "indexOf",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/indexof.html"
+    },
+    {
+      "name": "isAscii",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/isascii.html"
+    },
+    {
+      "name": "isAscii",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/isascii.html"
+    },
+    {
+      "name": "isEmpty",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/text/is-empty.html"
+    },
+    {
+      "name": "lastIndexOf",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/lastindexof.html"
+    },
+    {
+      "name": "lastIndexOf",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/lastindexof.html"
+    },
+    {
+      "name": "left",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/left.html"
+    },
+    {
+      "name": "leftpad",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/leftpad.html"
+    },
+    {
+      "name": "leftpad",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/leftpad.html"
+    },
+    {
+      "name": "len",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/len.html"
+    },
+    {
+      "name": "len",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/len.html"
+    },
+    {
+      "name": "len",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/length.html"
+    },
+    {
+      "name": "len",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/length.html"
+    },
+    {
+      "name": "length",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/len.html"
+    },
+    {
+      "name": "length",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/len.html"
+    },
+    {
+      "name": "length",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/length.html"
+    },
+    {
+      "name": "length",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/length.html"
+    },
+    {
+      "name": "lower",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/tolowerCase.html"
+    },
+    {
+      "name": "lower",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/tolowerCase.html"
+    },
+    {
+      "name": "ltrim",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/ltrim.html"
+    },
+    {
+      "name": "ltrim",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/ltrim.html"
+    },
+    {
+      "name": "matches",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/matches.html"
+    },
+    {
+      "name": "matches",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/matches.html"
+    },
+    {
+      "name": "mid",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/mid.html"
+    },
+    {
+      "name": "mid",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/mid.html"
+    },
+    {
+      "name": "proper",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/proper.html"
+    },
+    {
+      "name": "remove",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/remove.html"
+    },
+    {
+      "name": "remove",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/remove.html"
+    },
+    {
+      "name": "removeAllAlpha",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/removeallalpha.html"
+    },
+    {
+      "name": "removeAllAlpha",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/removeallalpha.html"
+    },
+    {
+      "name": "removeAllAlphaNumeric",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/removeallalphanumeric.html"
+    },
+    {
+      "name": "removeAllAlphaNumeric",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/removeallalphanumeric.html"
+    },
+    {
+      "name": "removeFirstOccurence",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/removefirstoccurence.html"
+    },
+    {
+      "name": "removeFirstOccurence",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/removefirstoccurence.html"
+    },
+    {
+      "name": "removeLastOccurence",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/removelastoccurence.html"
+    },
+    {
+      "name": "removeLastOccurence",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/removelastoccurence.html"
+    },
+    {
+      "name": "repeat",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/repeat.html"
+    },
+    {
+      "name": "repeat",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/repeat.html"
+    },
+    {
+      "name": "replaceAll",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 3,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/replaceall.html"
+    },
+    {
+      "name": "replaceAll",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/replaceall.html"
+    },
+    {
+      "name": "replaceAllIgnoreCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 3,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/replaceallignorecase.html"
+    },
+    {
+      "name": "replaceAllIgnoreCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/replaceallignorecase.html"
+    },
+    {
+      "name": "replaceFirst",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 3,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/replacefirst.html"
+    },
+    {
+      "name": "replaceFirst",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/replacefirst.html"
+    },
+    {
+      "name": "replaceFirstIgnoreCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 3,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/replacefirstignorecase.html"
+    },
+    {
+      "name": "replaceFirstIgnoreCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 4,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/replacefirstignorecase.html"
+    },
+    {
+      "name": "reverse",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/reverse.html"
+    },
+    {
+      "name": "reverse",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/reverse.html"
+    },
+    {
+      "name": "right",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/right.html"
+    },
+    {
+      "name": "rightpad",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/rightpad.html"
+    },
+    {
+      "name": "rightpad",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/rightpad.html"
+    },
+    {
+      "name": "rtrim",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/rtrim.html"
+    },
+    {
+      "name": "rtrim",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/rtrim.html"
+    },
+    {
+      "name": "startsWith",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/startswith.html"
+    },
+    {
+      "name": "startsWith",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/startswith.html"
+    },
+    {
+      "name": "startsWithIgnoreCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/startswithignorecase.html"
+    },
+    {
+      "name": "startsWithIgnoreCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/startswithignorecase.html"
+    },
+    {
+      "name": "subString",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/substring.html"
+    },
+    {
+      "name": "subString",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/substring.html"
+    },
+    {
+      "name": "subText",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/subtext.html"
+    },
+    {
+      "name": "subText",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/subtext.html"
+    },
+    {
+      "name": "textToHex",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/texttohex.html"
+    },
+    {
+      "name": "textToHex",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/texttohex.html"
+    },
+    {
+      "name": "toList",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/tolist.html"
+    },
+    {
+      "name": "toListString",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/list/to-list-string.html"
+    },
+    {
+      "name": "toLong",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-number.html"
+    },
+    {
+      "name": "toLong",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-number.html"
+    },
+    {
+      "name": "toLowerCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/tolowerCase.html"
+    },
+    {
+      "name": "toLowerCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/tolowerCase.html"
+    },
+    {
+      "name": "toNumber",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-number.html"
+    },
+    {
+      "name": "toNumber",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-number.html"
+    },
+    {
+      "name": "toString",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/tostring.html"
+    },
+    {
+      "name": "toString",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/tostring.html"
+    },
+    {
+      "name": "toText",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-text.html"
+    },
+    {
+      "name": "toText",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-text.html"
+    },
+    {
+      "name": "toText",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "common"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/text.html"
+    },
+    {
+      "name": "toUpperCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/touppercase.html"
+    },
+    {
+      "name": "toUpperCase",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/touppercase.html"
+    },
+    {
+      "name": "trim",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/trim.html"
+    },
+    {
+      "name": "trim",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/trim.html"
+    },
+    {
+      "name": "upper",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/touppercase.html"
+    },
+    {
+      "name": "upper",
+      "kind": "function",
+      "category": "text",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/string/touppercase.html"
+    },
+    {
+      "name": "addHour",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addhour.html"
+    },
+    {
+      "name": "addHour",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addhour.html"
+    },
+    {
+      "name": "addHour",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addhour.html"
+    },
+    {
+      "name": "addMinutes",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addminutes.html"
+    },
+    {
+      "name": "addMinutes",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addminutes.html"
+    },
+    {
+      "name": "addMinutes",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addminutes.html"
+    },
+    {
+      "name": "addSeconds",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addseconds.html"
+    },
+    {
+      "name": "addSeconds",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addseconds.html"
+    },
+    {
+      "name": "addSeconds",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/addseconds.html"
+    },
+    {
+      "name": "getHour",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/gethour.html"
+    },
+    {
+      "name": "getHour",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/gethour.html"
+    },
+    {
+      "name": "getHour",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/gethour.html"
+    },
+    {
+      "name": "getMinutes",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getminutes.html"
+    },
+    {
+      "name": "getMinutes",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getminutes.html"
+    },
+    {
+      "name": "getMinutes",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getminutes.html"
+    },
+    {
+      "name": "getSeconds",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getseconds.html"
+    },
+    {
+      "name": "getSeconds",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getseconds.html"
+    },
+    {
+      "name": "getSeconds",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getseconds.html"
+    },
+    {
+      "name": "hour",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/gethour.html"
+    },
+    {
+      "name": "hour",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/gethour.html"
+    },
+    {
+      "name": "hour",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/gethour.html"
+    },
+    {
+      "name": "minute",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getminutes.html"
+    },
+    {
+      "name": "minute",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getminutes.html"
+    },
+    {
+      "name": "minute",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getminutes.html"
+    },
+    {
+      "name": "second",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getseconds.html"
+    },
+    {
+      "name": "second",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getseconds.html"
+    },
+    {
+      "name": "second",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/getseconds.html"
+    },
+    {
+      "name": "subHour",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subhour.html"
+    },
+    {
+      "name": "subHour",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subhour.html"
+    },
+    {
+      "name": "subHour",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subhour.html"
+    },
+    {
+      "name": "subMinutes",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subminutes.html"
+    },
+    {
+      "name": "subMinutes",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subminutes.html"
+    },
+    {
+      "name": "subMinutes",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subminutes.html"
+    },
+    {
+      "name": "subSeconds",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subseconds.html"
+    },
+    {
+      "name": "subSeconds",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "time"
+      ],
+      "arity": 1,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subseconds.html"
+    },
+    {
+      "name": "subSeconds",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 2,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/subseconds.html"
+    },
+    {
+      "name": "toString",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/tostring.html"
+    },
+    {
+      "name": "toString",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/tostring.html"
+    },
+    {
+      "name": "toString",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "date-time"
+      ],
+      "arity": 2,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/tostring.html",
+      "snippet": "x = \"2020-01-01\".toString(\"dd-MMM-yyyy\", \"Europe/Moscow\");"
+    },
+    {
+      "name": "toDateTimeString",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "number"
+      ],
+      "arity": 2,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/todatetimestring.html",
+      "snippet": "x = (1693905560373).toDateTimeString(\"MMM dd, yy\", \"IST\");"
+    },
+    {
+      "name": "toDateTimeString",
+      "kind": "function",
+      "category": "date-time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 3,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/datetime/todatetimestring.html",
+      "snippet": "x = toDateTimeString(1693905560373, \"MMM dd, yy\", \"IST\");"
+    },
+    {
+      "name": "toText",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "common"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-text.html"
+    },
+    {
+      "name": "toText",
+      "kind": "function",
+      "category": "time",
+      "receivers": [
+        "none"
+      ],
+      "arity": 1,
+      "form": "free",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-text.html"
+    },
+    {
+      "name": "executeXpath",
+      "kind": "task",
+      "category": "xml",
+      "receivers": [
+        "xml"
+      ],
+      "arity": 0,
+      "form": "task",
+      "docUrl": "https://www.zoho.com/deluge/help/xml-manipulation/executexpath.html"
+    },
+    {
+      "name": "toXml",
+      "kind": "function",
+      "category": "xml",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/xml/toxml.html"
+    },
+    {
+      "name": "toXmlList",
+      "kind": "function",
+      "category": "xml",
+      "receivers": [
+        "text"
+      ],
+      "arity": 0,
+      "form": "method",
+      "docUrl": "https://www.zoho.com/deluge/help/functions/xml/toxmllist.html"
+    }
+  ]
+}

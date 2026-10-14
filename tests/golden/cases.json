@@ -1,0 +1,4564 @@
+{
+  "version": 1,
+  "zone": "Asia/Calcutta",
+  "clock": "2026-10-06T08:30:00.000Z",
+  "note": "Synthetic inputs. A Creator vector is pending until tests/golden/vectors.json or $C2C_FIXTURES_DIR/golden/vectors.json has that case id. expect.$compileError cases are not in the import. sendmail is not executed.",
+  "cases": [
+    {
+      "id": "get.list-first",
+      "builtin": "get",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "index",
+        "list"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\", \"c\"};\ngolden = items.get(0);",
+      "kind": "text"
+    },
+    {
+      "id": "get.list-last",
+      "builtin": "get",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "index",
+        "list"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\", \"c\"};\ngolden = items.get(2);",
+      "kind": "text"
+    },
+    {
+      "id": "get.list-out-of-range",
+      "builtin": "get",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "index",
+        "empty-result"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\"};\ngolden = items.get(5);",
+      "kind": "text"
+    },
+    {
+      "id": "get.list-negative",
+      "builtin": "get",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "index",
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\", \"c\"};\ngolden = items.get(-1);",
+      "kind": "text"
+    },
+    {
+      "id": "get.list-empty",
+      "builtin": "get",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = List();\ngolden = items.get(0);",
+      "kind": "text"
+    },
+    {
+      "id": "get.map-hit",
+      "builtin": "get",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "map"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = {\"a\": \"x\", \"b\": \"y\"};\ngolden = bag.get(\"a\");",
+      "kind": "text"
+    },
+    {
+      "id": "get.map-miss",
+      "builtin": "get",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "map",
+        "empty-result"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = {\"a\": \"x\"};\ngolden = bag.get(\"missing\");",
+      "kind": "text"
+    },
+    {
+      "id": "get.map-null-value",
+      "builtin": "get",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "map",
+        "null"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = Map();\nbag.put(\"a\", null);\ngolden = bag.get(\"a\");",
+      "kind": "text"
+    },
+    {
+      "id": "get.string-first",
+      "builtin": "get",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string-index"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".get(0);",
+      "kind": "text"
+    },
+    {
+      "id": "get.string-last",
+      "builtin": "get",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string-index"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".get(3);",
+      "kind": "text"
+    },
+    {
+      "id": "get.string-out-of-range",
+      "builtin": "get",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string-index"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".get(4);",
+      "kind": "text"
+    },
+    {
+      "id": "get.string-negative",
+      "builtin": "get",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string-index",
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".get(-1);",
+      "kind": "text"
+    },
+    {
+      "id": "get.string-empty",
+      "builtin": "get",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string-index",
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".get(0);",
+      "kind": "text"
+    },
+    {
+      "id": "distinct.numbers-dupes",
+      "builtin": "distinct",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "list",
+        "dupes"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {1, 2, 2, 1, 3};\ngolden = items.distinct();",
+      "kind": "list"
+    },
+    {
+      "id": "distinct.strings",
+      "builtin": "distinct",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "list",
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"b\", \"a\", \"b\"};\ngolden = items.distinct();",
+      "kind": "list"
+    },
+    {
+      "id": "distinct.empty",
+      "builtin": "distinct",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = List();\ngolden = items.distinct();",
+      "kind": "list"
+    },
+    {
+      "id": "distinct.already-unique",
+      "builtin": "distinct",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "list"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {3, 1, 2};\ngolden = items.distinct();",
+      "kind": "list"
+    },
+    {
+      "id": "distinct.all-same",
+      "builtin": "distinct",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "dupes"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"a\", \"a\"};\ngolden = items.distinct();",
+      "kind": "list"
+    },
+    {
+      "id": "distinct.case-sensitive",
+      "builtin": "distinct",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"A\", \"a\", \"A\"};\ngolden = items.distinct();",
+      "kind": "list"
+    },
+    {
+      "id": "getall.list-method",
+      "builtin": "getall",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "list"
+      ],
+      "needsForm": false,
+      "notes": "In-memory collection method. Form-field getAll is a separate needsForm case.",
+      "script": "items = {\"a\", \"b\"};\ngolden = items.getAll();",
+      "kind": "list",
+      "expect": {
+        "$compileError": "Not able to find 'getAll' function"
+      }
+    },
+    {
+      "id": "getall.list-spelling",
+      "builtin": "getall",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "spelling"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\"};\ngolden = items.getall();",
+      "kind": "list",
+      "expect": {
+        "$compileError": "Not able to find 'getall' function"
+      }
+    },
+    {
+      "id": "getall.empty-list",
+      "builtin": "getall",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = List();\ngolden = items.getAll();",
+      "kind": "list",
+      "expect": {
+        "$compileError": "Not able to find 'getAll' function"
+      }
+    },
+    {
+      "id": "removeAllAlpha.mixed",
+      "builtin": "removeAllAlpha",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "mixed"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"Ab12!c\".removeAllAlpha();",
+      "kind": "text"
+    },
+    {
+      "id": "removeAllAlpha.empty",
+      "builtin": "removeAllAlpha",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".removeAllAlpha();",
+      "kind": "text"
+    },
+    {
+      "id": "removeAllAlpha.letters-only",
+      "builtin": "removeAllAlpha",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "letters"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"ABCxyz\".removeAllAlpha();",
+      "kind": "text"
+    },
+    {
+      "id": "removeAllAlpha.no-letters",
+      "builtin": "removeAllAlpha",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "digits"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"123 !\".removeAllAlpha();",
+      "kind": "text"
+    },
+    {
+      "id": "removeAllAlpha.spaces",
+      "builtin": "removeAllAlpha",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "space"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"a b\".removeAllAlpha();",
+      "kind": "text"
+    },
+    {
+      "id": "removeAllAlpha.accent",
+      "builtin": "removeAllAlpha",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "unicode"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"café1\".removeAllAlpha();",
+      "kind": "text"
+    },
+    {
+      "id": "isEmpty.list-empty",
+      "builtin": "isEmpty",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "list",
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = List();\ngolden = items.isEmpty();",
+      "kind": "bool"
+    },
+    {
+      "id": "isEmpty.list-nonempty",
+      "builtin": "isEmpty",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "list"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\"};\ngolden = items.isEmpty();",
+      "kind": "bool"
+    },
+    {
+      "id": "isEmpty.map-empty",
+      "builtin": "isEmpty",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "map",
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = Map();\ngolden = bag.isEmpty();",
+      "kind": "bool"
+    },
+    {
+      "id": "isEmpty.map-nonempty",
+      "builtin": "isEmpty",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "map"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = {\"a\": \"x\"};\ngolden = bag.isEmpty();",
+      "kind": "bool"
+    },
+    {
+      "id": "isEmpty.string-empty",
+      "builtin": "isEmpty",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "string",
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".isEmpty();",
+      "kind": "bool"
+    },
+    {
+      "id": "isEmpty.string-nonempty",
+      "builtin": "isEmpty",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"a\".isEmpty();",
+      "kind": "bool"
+    },
+    {
+      "id": "isEmpty.string-space",
+      "builtin": "isEmpty",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "string",
+        "space"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \" \".isEmpty();",
+      "kind": "bool"
+    },
+    {
+      "id": "isEmpty.fn-null",
+      "builtin": "isEmpty",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "null",
+        "function"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isEmpty(null);",
+      "kind": "bool",
+      "expect": {
+        "$compileError": "Data type of argument at index '1' of the function 'isEmpty' did not match the required data type of '[TEXT]'."
+      }
+    },
+    {
+      "id": "isEmpty.fn-empty-string",
+      "builtin": "isEmpty",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "empty",
+        "function"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isEmpty(\"\");",
+      "kind": "bool"
+    },
+    {
+      "id": "isEmpty.fn-zero",
+      "builtin": "isEmpty",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "number",
+        "function"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isEmpty(0);",
+      "kind": "bool",
+      "expect": {
+        "$compileError": "Data type of argument at index '1' of the function 'isEmpty' did not match the required data type of '[TEXT]'."
+      }
+    },
+    {
+      "id": "add.append-return",
+      "builtin": "add",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "mutation",
+        "return"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"b\", \"a\"};\ngolden = items.add(\"c\");",
+      "kind": "bool",
+      "expect": {
+        "$compileError": "Not able to find 'add' function"
+      }
+    },
+    {
+      "id": "add.append-order",
+      "builtin": "add",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "mutation",
+        "list"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"b\", \"a\"};\nitems.add(\"c\");\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "add.insert-at-0",
+      "builtin": "add",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "mutation",
+        "index"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"b\", \"a\"};\nitems.add(0, \"z\");\ngolden = items;",
+      "kind": "list",
+      "expect": {
+        "$compileError": "The number of arguments for 'add' function does not match the number of mandatory params '1'."
+      }
+    },
+    {
+      "id": "add.insert-at-end",
+      "builtin": "add",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "mutation",
+        "index"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"b\", \"a\"};\nitems.add(2, \"z\");\ngolden = items;",
+      "kind": "list",
+      "expect": {
+        "$compileError": "The number of arguments for 'add' function does not match the number of mandatory params '1'."
+      }
+    },
+    {
+      "id": "add.null-element",
+      "builtin": "add",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "null",
+        "mutation"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\"};\nitems.add(null);\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "add.empty-list",
+      "builtin": "add",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "empty",
+        "mutation"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = List();\nitems.add(\"a\");\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "add.duplicate",
+      "builtin": "add",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "dupes",
+        "mutation"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\"};\nitems.add(\"a\");\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "remove.list-index-0",
+      "builtin": "remove",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "list",
+        "index",
+        "mutation"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\", \"c\"};\nitems.remove(0);\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "remove.list-last",
+      "builtin": "remove",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "list",
+        "index",
+        "mutation"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\", \"c\"};\nitems.remove(2);\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "remove.list-return",
+      "builtin": "remove",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "list",
+        "return"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\", \"c\"};\ngolden = items.remove(0);",
+      "kind": "text"
+    },
+    {
+      "id": "remove.list-negative",
+      "builtin": "remove",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "list",
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\", \"c\"};\nitems.remove(-1);\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "remove.list-empty",
+      "builtin": "remove",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = List();\nitems.remove(0);\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "remove.string-first",
+      "builtin": "remove",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"a-b-a\".remove(\"-\");",
+      "kind": "text"
+    },
+    {
+      "id": "remove.string-range",
+      "builtin": "remove",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string",
+        "index"
+      ],
+      "needsForm": false,
+      "notes": "Two-argument string remove: Creator may treat the pair as indexes or as start+count.",
+      "script": "golden = \"abcdef\".remove(1, 3);",
+      "kind": "text",
+      "expect": {
+        "$compileError": "The number of arguments for 'remove' function does not match the number of mandatory params '1'."
+      }
+    },
+    {
+      "id": "removeelement.present-order",
+      "builtin": "removeelement",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "mutation",
+        "dupes"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\", \"a\"};\nitems.removeElement(\"a\");\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "removeelement.return",
+      "builtin": "removeelement",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "return"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\", \"a\"};\ngolden = items.removeElement(\"a\");",
+      "kind": "bool",
+      "expect": {
+        "$compileError": "Not able to find 'removeElement' function"
+      }
+    },
+    {
+      "id": "removeelement.absent",
+      "builtin": "removeelement",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "absent"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\"};\nitems.removeElement(\"z\");\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "removeelement.null",
+      "builtin": "removeelement",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "null"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", null, \"b\"};\nitems.removeElement(null);\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "removeelement.empty",
+      "builtin": "removeelement",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = List();\nitems.removeElement(\"a\");\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "removeelement.spelling",
+      "builtin": "removeelement",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "spelling"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\", \"a\"};\nitems.removeelement(\"a\");\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "days360.same-day",
+      "builtin": "days360",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "zero"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = days360('01-Jan-2020', '01-Jan-2020');",
+      "kind": "number"
+    },
+    {
+      "id": "days360.jan-1-to-31",
+      "builtin": "days360",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "month-end"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = days360('01-Jan-2020', '31-Jan-2020');",
+      "kind": "number"
+    },
+    {
+      "id": "days360.jan-1-to-feb-1",
+      "builtin": "days360",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "month"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = days360('01-Jan-2020', '01-Feb-2020');",
+      "kind": "number"
+    },
+    {
+      "id": "days360.leap-feb",
+      "builtin": "days360",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "leap"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = days360('01-Feb-2020', '01-Mar-2020');",
+      "kind": "number"
+    },
+    {
+      "id": "days360.jan-31-to-mar-1",
+      "builtin": "days360",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "month-end"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = days360('31-Jan-2020', '01-Mar-2020');",
+      "kind": "number"
+    },
+    {
+      "id": "days360.reversed",
+      "builtin": "days360",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = days360('01-Mar-2020', '01-Jan-2020');",
+      "kind": "number"
+    },
+    {
+      "id": "days360.year-boundary",
+      "builtin": "days360",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "year"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = days360('31-Dec-2020', '31-Jan-2021');",
+      "kind": "number"
+    },
+    {
+      "id": "days360.with-time",
+      "builtin": "days360",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "time"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = days360('01-Jan-2020 18:30:00', '31-Jan-2020 01:00:00');",
+      "kind": "number"
+    },
+    {
+      "id": "days360.method-true",
+      "builtin": "days360",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "method"
+      ],
+      "needsForm": false,
+      "notes": "Optional third argument if Creator accepts a NASD/European flag. An error is a valid vector.",
+      "script": "golden = days360('31-Jan-2020', '01-Mar-2020', true);",
+      "kind": "number",
+      "expect": {
+        "$compileError": "The number of arguments for 'days360' function does not match the number of mandatory params '2'."
+      }
+    },
+    {
+      "id": "days360.method-false",
+      "builtin": "days360",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "method"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = days360('31-Jan-2020', '01-Mar-2020', false);",
+      "kind": "number",
+      "expect": {
+        "$compileError": "The number of arguments for 'days360' function does not match the number of mandatory params '2'."
+      }
+    },
+    {
+      "id": "removeall.string-char",
+      "builtin": "removeall",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"a-b-a\".removeAll(\"-\");",
+      "kind": "text",
+      "expect": {
+        "$compileError": "Not able to find 'removeAll' function"
+      }
+    },
+    {
+      "id": "removeall.string-all",
+      "builtin": "removeall",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"aaa\".removeAll(\"a\");",
+      "kind": "text",
+      "expect": {
+        "$compileError": "Not able to find 'removeAll' function"
+      }
+    },
+    {
+      "id": "removeall.string-empty-search",
+      "builtin": "removeall",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abc\".removeAll(\"\");",
+      "kind": "text",
+      "expect": {
+        "$compileError": "Not able to find 'removeAll' function"
+      }
+    },
+    {
+      "id": "removeall.string-absent",
+      "builtin": "removeall",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "absent"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abc\".removeAll(\"z\");",
+      "kind": "text",
+      "expect": {
+        "$compileError": "Not able to find 'removeAll' function"
+      }
+    },
+    {
+      "id": "removeall.string-empty-source",
+      "builtin": "removeall",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".removeAll(\"a\");",
+      "kind": "text",
+      "expect": {
+        "$compileError": "Not able to find 'removeAll' function"
+      }
+    },
+    {
+      "id": "removeall.list-subset",
+      "builtin": "removeall",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "list",
+        "mutation"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\", \"a\", \"c\"};\ndrop = {\"a\"};\nitems.removeAll(drop);\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "removeall.list-absent",
+      "builtin": "removeall",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "list",
+        "absent"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\"};\ndrop = {\"z\"};\nitems.removeAll(drop);\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "removeall.spelling",
+      "builtin": "removeall",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "spelling"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"a-b-a\".removeall(\"-\");",
+      "kind": "text",
+      "expect": {
+        "$compileError": "Not able to find 'removeall' function"
+      }
+    },
+    {
+      "id": "select.no-args",
+      "builtin": "select",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "exploratory"
+      ],
+      "needsForm": false,
+      "notes": "Residual name. No documented list select. The Creator error or return value is the vector.",
+      "script": "items = {\"red\", \"green\", \"red\"};\ngolden = items.select();",
+      "kind": "list",
+      "expect": {
+        "$compileError": "Not able to find 'select' function"
+      }
+    },
+    {
+      "id": "select.one-arg",
+      "builtin": "select",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "exploratory"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"ab\", \"b\"};\ngolden = items.select(\"a\");",
+      "kind": "list",
+      "expect": {
+        "$compileError": "Not able to find 'select' function"
+      }
+    },
+    {
+      "id": "sort.numbers-asc",
+      "builtin": "sort",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "number",
+        "asc"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {3, 1, 2, 1};\ngolden = items.sort(true);",
+      "kind": "list"
+    },
+    {
+      "id": "sort.numbers-desc",
+      "builtin": "sort",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "number",
+        "desc"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {3, 1, 2};\ngolden = items.sort(false);",
+      "kind": "list"
+    },
+    {
+      "id": "sort.negatives",
+      "builtin": "sort",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {-1, -3, 2, 0};\ngolden = items.sort(true);",
+      "kind": "list"
+    },
+    {
+      "id": "sort.strings",
+      "builtin": "sort",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"b\", \"a\", \"a\", \"c\"};\ngolden = items.sort(true);",
+      "kind": "list"
+    },
+    {
+      "id": "sort.empty",
+      "builtin": "sort",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = List();\ngolden = items.sort(true);",
+      "kind": "list"
+    },
+    {
+      "id": "sort.no-arg",
+      "builtin": "sort",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "default"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {2, 1};\ngolden = items.sort();",
+      "kind": "list"
+    },
+    {
+      "id": "round.half-up-positive",
+      "builtin": "round",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "decimal",
+        "half"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = round(1.5, 0);",
+      "kind": "number"
+    },
+    {
+      "id": "round.half-up-2-5",
+      "builtin": "round",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "decimal",
+        "half"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = round(2.5, 0);",
+      "kind": "number"
+    },
+    {
+      "id": "round.half-negative",
+      "builtin": "round",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "negative",
+        "half"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = round(-1.5, 0);",
+      "kind": "number"
+    },
+    {
+      "id": "round.places-2",
+      "builtin": "round",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = round(1.26, 2);",
+      "kind": "number"
+    },
+    {
+      "id": "round.places-1-negative",
+      "builtin": "round",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "negative",
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = round(-1.26, 1);",
+      "kind": "number"
+    },
+    {
+      "id": "round.integer",
+      "builtin": "round",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "integer"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = round(4, 0);",
+      "kind": "number"
+    },
+    {
+      "id": "round.already-places",
+      "builtin": "round",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = round(1.2, 0);",
+      "kind": "number"
+    },
+    {
+      "id": "getDayOfWeek.tuesday",
+      "builtin": "getDayOfWeek",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026'.getDayOfWeek();",
+      "kind": "number"
+    },
+    {
+      "id": "getDayOfWeek.sunday",
+      "builtin": "getDayOfWeek",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '04-Oct-2026'.getDayOfWeek();",
+      "kind": "number"
+    },
+    {
+      "id": "getDayOfWeek.monday",
+      "builtin": "getDayOfWeek",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '05-Oct-2026'.getDayOfWeek();",
+      "kind": "number"
+    },
+    {
+      "id": "getDayOfWeek.saturday",
+      "builtin": "getDayOfWeek",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '10-Oct-2026'.getDayOfWeek();",
+      "kind": "number"
+    },
+    {
+      "id": "getDayOfWeek.with-time",
+      "builtin": "getDayOfWeek",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "time"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026 18:30:00'.getDayOfWeek();",
+      "kind": "number"
+    },
+    {
+      "id": "indexOf.found",
+      "builtin": "indexOf",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "found"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcabc\".indexOf(\"b\");",
+      "kind": "number"
+    },
+    {
+      "id": "indexOf.from",
+      "builtin": "indexOf",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "from"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcabc\".indexOf(\"b\", 2);",
+      "kind": "number"
+    },
+    {
+      "id": "indexOf.missing",
+      "builtin": "indexOf",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "missing"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abc\".indexOf(\"z\");",
+      "kind": "number"
+    },
+    {
+      "id": "indexOf.empty-needle",
+      "builtin": "indexOf",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abc\".indexOf(\"\");",
+      "kind": "number"
+    },
+    {
+      "id": "indexOf.empty-haystack",
+      "builtin": "indexOf",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".indexOf(\"\");",
+      "kind": "number"
+    },
+    {
+      "id": "indexOf.case",
+      "builtin": "indexOf",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "case"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"Abc\".indexOf(\"b\");",
+      "kind": "number"
+    },
+    {
+      "id": "indexOf.case-miss",
+      "builtin": "indexOf",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "case"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abc\".indexOf(\"B\");",
+      "kind": "number"
+    },
+    {
+      "id": "indexOf.at-start",
+      "builtin": "indexOf",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "found"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abc\".indexOf(\"a\");",
+      "kind": "number"
+    },
+    {
+      "id": "indexOf.list",
+      "builtin": "indexOf",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "list"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\", \"a\"};\ngolden = items.indexOf(\"b\");",
+      "kind": "number"
+    },
+    {
+      "id": "leftpad.zero",
+      "builtin": "leftpad",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "pad"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"7\".leftPad(3, \"0\");",
+      "kind": "text",
+      "expect": {
+        "$compileError": "The number of arguments for 'leftPad' function does not match the number of mandatory params '1'."
+      }
+    },
+    {
+      "id": "leftpad.exact",
+      "builtin": "leftpad",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "exact"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"70\".leftPad(2, \"0\");",
+      "kind": "text",
+      "expect": {
+        "$compileError": "The number of arguments for 'leftPad' function does not match the number of mandatory params '1'."
+      }
+    },
+    {
+      "id": "leftpad.already-longer",
+      "builtin": "leftpad",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "longer"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"7000\".leftPad(3, \"0\");",
+      "kind": "text",
+      "expect": {
+        "$compileError": "The number of arguments for 'leftPad' function does not match the number of mandatory params '1'."
+      }
+    },
+    {
+      "id": "leftpad.empty",
+      "builtin": "leftpad",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".leftPad(3, \"0\");",
+      "kind": "text",
+      "expect": {
+        "$compileError": "The number of arguments for 'leftPad' function does not match the number of mandatory params '1'."
+      }
+    },
+    {
+      "id": "leftpad.space",
+      "builtin": "leftpad",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "space"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"7\".leftPad(4, \" \");",
+      "kind": "text",
+      "expect": {
+        "$compileError": "The number of arguments for 'leftPad' function does not match the number of mandatory params '1'."
+      }
+    },
+    {
+      "id": "leftpad.one-arg",
+      "builtin": "leftpad",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "default"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"7\".leftPad(3);",
+      "kind": "text"
+    },
+    {
+      "id": "leftpad.fn-width",
+      "builtin": "leftpad",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "pad"
+      ],
+      "needsForm": false,
+      "notes": "Sample apps call the free function leftpad(text, width). The two-argument method does not compile.",
+      "script": "golden = leftpad(\"7\", 3);",
+      "kind": "text"
+    },
+    {
+      "id": "leftpad.fn-empty",
+      "builtin": "leftpad",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = leftpad(\"\", 3);",
+      "kind": "text"
+    },
+    {
+      "id": "leftpad.fn-longer",
+      "builtin": "leftpad",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "longer"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = leftpad(\"7000\", 3);",
+      "kind": "text"
+    },
+    {
+      "id": "leftpad.zero-width",
+      "builtin": "leftpad",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "zero"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"7\".leftPad(0, \"0\");",
+      "kind": "text",
+      "expect": {
+        "$compileError": "The number of arguments for 'leftPad' function does not match the number of mandatory params '1'."
+      }
+    },
+    {
+      "id": "leftpad.negative-width",
+      "builtin": "leftpad",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"7\".leftPad(-1, \"0\");",
+      "kind": "text",
+      "expect": {
+        "$compileError": "The number of arguments for 'leftPad' function does not match the number of mandatory params '1'."
+      }
+    },
+    {
+      "id": "leftpad.spelling",
+      "builtin": "leftpad",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "spelling"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"7\".leftpad(3, \"0\");",
+      "kind": "text",
+      "expect": {
+        "$compileError": "The number of arguments for 'leftpad' function does not match the number of mandatory params '1'."
+      }
+    },
+    {
+      "id": "toStartOfWeek.tuesday",
+      "builtin": "toStartOfWeek",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026'.toStartOfWeek();",
+      "kind": "date"
+    },
+    {
+      "id": "toStartOfWeek.sunday",
+      "builtin": "toStartOfWeek",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '04-Oct-2026'.toStartOfWeek();",
+      "kind": "date"
+    },
+    {
+      "id": "toStartOfWeek.monday",
+      "builtin": "toStartOfWeek",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '05-Oct-2026'.toStartOfWeek();",
+      "kind": "date"
+    },
+    {
+      "id": "toStartOfWeek.saturday",
+      "builtin": "toStartOfWeek",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '10-Oct-2026'.toStartOfWeek();",
+      "kind": "date"
+    },
+    {
+      "id": "toStartOfWeek.with-time",
+      "builtin": "toStartOfWeek",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "time"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026 18:30:00'.toStartOfWeek();",
+      "kind": "date"
+    },
+    {
+      "id": "intersect.overlap",
+      "builtin": "intersect",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "overlap"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "left = {1, 2, 2, 3};\nright = {2, 3, 4};\ngolden = left.intersect(right);",
+      "kind": "list"
+    },
+    {
+      "id": "intersect.none",
+      "builtin": "intersect",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "none"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "left = {1};\nright = {2};\ngolden = left.intersect(right);",
+      "kind": "list"
+    },
+    {
+      "id": "intersect.empty-left",
+      "builtin": "intersect",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "left = List();\nright = {1};\ngolden = left.intersect(right);",
+      "kind": "list"
+    },
+    {
+      "id": "intersect.dupes",
+      "builtin": "intersect",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "dupes"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "left = {1, 1};\nright = {1, 1};\ngolden = left.intersect(right);",
+      "kind": "list"
+    },
+    {
+      "id": "intersect.order",
+      "builtin": "intersect",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "order"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "left = {3, 1, 2};\nright = {2, 1};\ngolden = left.intersect(right);",
+      "kind": "list"
+    },
+    {
+      "id": "intersect.strings",
+      "builtin": "intersect",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "left = {\"b\", \"a\"};\nright = {\"a\", \"c\"};\ngolden = left.intersect(right);",
+      "kind": "list"
+    },
+    {
+      "id": "isNumber.int",
+      "builtin": "isNumber",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "integer"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isNumber(12);",
+      "kind": "bool"
+    },
+    {
+      "id": "isNumber.negative",
+      "builtin": "isNumber",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isNumber(-3);",
+      "kind": "bool"
+    },
+    {
+      "id": "isNumber.decimal-string",
+      "builtin": "isNumber",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "decimal",
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isNumber(\"12.5\");",
+      "kind": "bool"
+    },
+    {
+      "id": "isNumber.decimal-value",
+      "builtin": "isNumber",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isNumber(-3.5);",
+      "kind": "bool"
+    },
+    {
+      "id": "isNumber.text",
+      "builtin": "isNumber",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "text"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isNumber(\"12a\");",
+      "kind": "bool"
+    },
+    {
+      "id": "isNumber.empty",
+      "builtin": "isNumber",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isNumber(\"\");",
+      "kind": "bool"
+    },
+    {
+      "id": "isNumber.space",
+      "builtin": "isNumber",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "space"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isNumber(\" 12\");",
+      "kind": "bool"
+    },
+    {
+      "id": "isNumber.null",
+      "builtin": "isNumber",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "null"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isNumber(null);",
+      "kind": "bool"
+    },
+    {
+      "id": "isNumber.bool",
+      "builtin": "isNumber",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "bool"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isNumber(true);",
+      "kind": "bool"
+    },
+    {
+      "id": "isNumber.scientific",
+      "builtin": "isNumber",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isNumber(\"1e2\");",
+      "kind": "bool"
+    },
+    {
+      "id": "toLowerCase.mixed",
+      "builtin": "toLowerCase",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "case"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"AbC\".toLowerCase();",
+      "kind": "text"
+    },
+    {
+      "id": "toLowerCase.empty",
+      "builtin": "toLowerCase",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".toLowerCase();",
+      "kind": "text"
+    },
+    {
+      "id": "toUpperCase.mixed",
+      "builtin": "toUpperCase",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "case"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"AbC\".toUpperCase();",
+      "kind": "text"
+    },
+    {
+      "id": "toUpperCase.empty",
+      "builtin": "toUpperCase",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".toUpperCase();",
+      "kind": "text"
+    },
+    {
+      "id": "trim.spaces",
+      "builtin": "trim",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "space"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"  a  \".trim();",
+      "kind": "text"
+    },
+    {
+      "id": "trim.empty",
+      "builtin": "trim",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".trim();",
+      "kind": "text"
+    },
+    {
+      "id": "trim.inner",
+      "builtin": "trim",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "space"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"a b\".trim();",
+      "kind": "text"
+    },
+    {
+      "id": "contains.string-hit",
+      "builtin": "contains",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"Abc\".contains(\"b\");",
+      "kind": "bool"
+    },
+    {
+      "id": "contains.string-case",
+      "builtin": "contains",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "string",
+        "case"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"Abc\".contains(\"B\");",
+      "kind": "bool"
+    },
+    {
+      "id": "contains.string-empty",
+      "builtin": "contains",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "string",
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".contains(\"\");",
+      "kind": "bool"
+    },
+    {
+      "id": "contains.list-hit",
+      "builtin": "contains",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "list"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\"};\ngolden = items.contains(\"b\");",
+      "kind": "bool"
+    },
+    {
+      "id": "contains.list-miss",
+      "builtin": "contains",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "list"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\"};\ngolden = items.contains(\"z\");",
+      "kind": "bool"
+    },
+    {
+      "id": "startsWith.hit",
+      "builtin": "startsWith",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".startsWith(\"ab\");",
+      "kind": "bool"
+    },
+    {
+      "id": "startsWith.miss",
+      "builtin": "startsWith",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".startsWith(\"b\");",
+      "kind": "bool"
+    },
+    {
+      "id": "startsWith.empty",
+      "builtin": "startsWith",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".startsWith(\"\");",
+      "kind": "bool"
+    },
+    {
+      "id": "endsWith.hit",
+      "builtin": "endsWith",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".endsWith(\"cd\");",
+      "kind": "bool"
+    },
+    {
+      "id": "endsWith.miss",
+      "builtin": "endsWith",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".endsWith(\"c\");",
+      "kind": "bool"
+    },
+    {
+      "id": "subString.mid",
+      "builtin": "subString",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string-index"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".subString(1, 3);",
+      "kind": "text"
+    },
+    {
+      "id": "subString.zero",
+      "builtin": "subString",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string-index"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".subString(0, 0);",
+      "kind": "text"
+    },
+    {
+      "id": "subString.to-end",
+      "builtin": "subString",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string-index"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".subString(2);",
+      "kind": "text"
+    },
+    {
+      "id": "subString.negative",
+      "builtin": "subString",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".subString(-2, 4);",
+      "kind": "text"
+    },
+    {
+      "id": "subString.empty",
+      "builtin": "subString",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".subString(0, 1);",
+      "kind": "text"
+    },
+    {
+      "id": "subString.reversed",
+      "builtin": "subString",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string-index"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".subString(3, 1);",
+      "kind": "text"
+    },
+    {
+      "id": "replaceAll.literal",
+      "builtin": "replaceAll",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"aba\".replaceAll(\"a\", \"X\");",
+      "kind": "text"
+    },
+    {
+      "id": "replaceAll.dot",
+      "builtin": "replaceAll",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "regex"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"a.b.a\".replaceAll(\".\", \"-\");",
+      "kind": "text"
+    },
+    {
+      "id": "replaceAll.empty",
+      "builtin": "replaceAll",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".replaceAll(\"a\", \"X\");",
+      "kind": "text"
+    },
+    {
+      "id": "replaceFirst.one",
+      "builtin": "replaceFirst",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"aba\".replaceFirst(\"a\", \"X\");",
+      "kind": "text"
+    },
+    {
+      "id": "replaceFirst.missing",
+      "builtin": "replaceFirst",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "missing"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"bbb\".replaceFirst(\"a\", \"X\");",
+      "kind": "text"
+    },
+    {
+      "id": "lastIndexOf.found",
+      "builtin": "lastIndexOf",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "found"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcabc\".lastIndexOf(\"b\");",
+      "kind": "number"
+    },
+    {
+      "id": "lastIndexOf.from",
+      "builtin": "lastIndexOf",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "from"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcabc\".lastIndexOf(\"b\", 2);",
+      "kind": "number",
+      "expect": {
+        "$compileError": "The number of arguments for 'lastIndexOf' function does not match the number of mandatory params '1'."
+      }
+    },
+    {
+      "id": "lastIndexOf.missing",
+      "builtin": "lastIndexOf",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "missing"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abc\".lastIndexOf(\"z\");",
+      "kind": "number"
+    },
+    {
+      "id": "lastIndexOf.empty",
+      "builtin": "lastIndexOf",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abc\".lastIndexOf(\"\");",
+      "kind": "number"
+    },
+    {
+      "id": "length.string",
+      "builtin": "length",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"ab\".length();",
+      "kind": "number"
+    },
+    {
+      "id": "length.empty",
+      "builtin": "length",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".length();",
+      "kind": "number"
+    },
+    {
+      "id": "length.list",
+      "builtin": "length",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "list"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\", \"c\"};\ngolden = items.length();",
+      "kind": "number"
+    },
+    {
+      "id": "getPrefix.short",
+      "builtin": "getPrefix",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcdef\".getPrefix(2);",
+      "kind": "text",
+      "expect": {
+        "$compileError": "Data type of argument at index '1' of the function 'getPrefix' did not match the required data type of '[TEXT]'."
+      }
+    },
+    {
+      "id": "getPrefix.past-end",
+      "builtin": "getPrefix",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"ab\".getPrefix(5);",
+      "kind": "text",
+      "expect": {
+        "$compileError": "Data type of argument at index '1' of the function 'getPrefix' did not match the required data type of '[TEXT]'."
+      }
+    },
+    {
+      "id": "getPrefix.zero",
+      "builtin": "getPrefix",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "zero"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"ab\".getPrefix(0);",
+      "kind": "text",
+      "expect": {
+        "$compileError": "Data type of argument at index '1' of the function 'getPrefix' did not match the required data type of '[TEXT]'."
+      }
+    },
+    {
+      "id": "getPrefix.sep",
+      "builtin": "getPrefix",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "Sample apps pass a text separator (getPrefix(\"-\")), not a count.",
+      "script": "golden = \"ab:cd\".getPrefix(\":\");",
+      "kind": "text"
+    },
+    {
+      "id": "getPrefix.missing-sep",
+      "builtin": "getPrefix",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "absent"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".getPrefix(\":\");",
+      "kind": "text"
+    },
+    {
+      "id": "getPrefix.empty-source",
+      "builtin": "getPrefix",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".getPrefix(\":\");",
+      "kind": "text"
+    },
+    {
+      "id": "getSuffix.short",
+      "builtin": "getSuffix",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcdef\".getSuffix(2);",
+      "kind": "text",
+      "expect": {
+        "$compileError": "Data type of argument at index '1' of the function 'getSuffix' did not match the required data type of '[TEXT]'."
+      }
+    },
+    {
+      "id": "getSuffix.past-end",
+      "builtin": "getSuffix",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"ab\".getSuffix(5);",
+      "kind": "text",
+      "expect": {
+        "$compileError": "Data type of argument at index '1' of the function 'getSuffix' did not match the required data type of '[TEXT]'."
+      }
+    },
+    {
+      "id": "getSuffix.empty",
+      "builtin": "getSuffix",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".getSuffix(1);",
+      "kind": "text",
+      "expect": {
+        "$compileError": "Data type of argument at index '1' of the function 'getSuffix' did not match the required data type of '[TEXT]'."
+      }
+    },
+    {
+      "id": "getSuffix.sep",
+      "builtin": "getSuffix",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"ab:cd\".getSuffix(\":\");",
+      "kind": "text"
+    },
+    {
+      "id": "getSuffix.missing-sep",
+      "builtin": "getSuffix",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "absent"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abcd\".getSuffix(\":\");",
+      "kind": "text"
+    },
+    {
+      "id": "getSuffix.empty-source",
+      "builtin": "getSuffix",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".getSuffix(\":\");",
+      "kind": "text"
+    },
+    {
+      "id": "concat.two",
+      "builtin": "concat",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"ab\".concat(\"cd\");",
+      "kind": "text"
+    },
+    {
+      "id": "concat.empty",
+      "builtin": "concat",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".concat(\"a\");",
+      "kind": "text"
+    },
+    {
+      "id": "toList.sep",
+      "builtin": "toList",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"a/b/c\".toList(\"/\");",
+      "kind": "list"
+    },
+    {
+      "id": "toList.no-sep",
+      "builtin": "toList",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abc\".toList();",
+      "kind": "list"
+    },
+    {
+      "id": "toList.consecutive",
+      "builtin": "toList",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"a//b\".toList(\"/\");",
+      "kind": "list"
+    },
+    {
+      "id": "toList.empty-source",
+      "builtin": "toList",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".toList(\",\");",
+      "kind": "list"
+    },
+    {
+      "id": "toList.missing-sep",
+      "builtin": "toList",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"abc\".toList(\"/\");",
+      "kind": "list"
+    },
+    {
+      "id": "put.then-get",
+      "builtin": "put",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "map"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = Map();\nbag.put(\"a\", \"x\");\ngolden = bag.get(\"a\");",
+      "kind": "text"
+    },
+    {
+      "id": "put.replace",
+      "builtin": "put",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "map"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = {\"a\": \"x\"};\nbag.put(\"a\", \"y\");\ngolden = bag.get(\"a\");",
+      "kind": "text"
+    },
+    {
+      "id": "put.null",
+      "builtin": "put",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "null"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = Map();\nbag.put(\"a\", null);\ngolden = bag.get(\"a\");",
+      "kind": "text"
+    },
+    {
+      "id": "containKey.hit",
+      "builtin": "containKey",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "map"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = {\"a\": \"x\"};\ngolden = bag.containKey(\"a\");",
+      "kind": "bool"
+    },
+    {
+      "id": "containKey.miss",
+      "builtin": "containKey",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "map"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = {\"a\": \"x\"};\ngolden = bag.containKey(\"z\");",
+      "kind": "bool"
+    },
+    {
+      "id": "containKey.null-value",
+      "builtin": "containKey",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "null"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = Map();\nbag.put(\"a\", null);\ngolden = bag.containKey(\"a\");",
+      "kind": "bool"
+    },
+    {
+      "id": "containsKey.hit",
+      "builtin": "containKey",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "spelling"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = {\"a\": \"x\"};\ngolden = bag.containsKey(\"a\");",
+      "kind": "bool",
+      "expect": {
+        "$compileError": "Not able to find 'containsKey' function"
+      }
+    },
+    {
+      "id": "size.list",
+      "builtin": "size",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "list"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\", \"b\"};\ngolden = items.size();",
+      "kind": "number"
+    },
+    {
+      "id": "size.empty-list",
+      "builtin": "size",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = List();\ngolden = items.size();",
+      "kind": "number"
+    },
+    {
+      "id": "size.map",
+      "builtin": "size",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "map"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = {\"a\": \"x\", \"b\": \"y\"};\ngolden = bag.size();",
+      "kind": "number"
+    },
+    {
+      "id": "size.empty-map",
+      "builtin": "size",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "map",
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = Map();\ngolden = bag.size();",
+      "kind": "number"
+    },
+    {
+      "id": "addAll.order",
+      "builtin": "addAll",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "mutation"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\"};\nextra = {\"b\", \"c\"};\nitems.addAll(extra);\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "addAll.empty",
+      "builtin": "addAll",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "items = {\"a\"};\nextra = List();\nitems.addAll(extra);\ngolden = items;",
+      "kind": "list"
+    },
+    {
+      "id": "getYear.literal",
+      "builtin": "getYear",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026'.getYear();",
+      "kind": "number"
+    },
+    {
+      "id": "getMonth.literal",
+      "builtin": "getMonth",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026'.getMonth();",
+      "kind": "number"
+    },
+    {
+      "id": "getDay.literal",
+      "builtin": "getDay",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026'.getDay();",
+      "kind": "number"
+    },
+    {
+      "id": "getHour.date-only",
+      "builtin": "getHour",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026'.getHour();",
+      "kind": "number"
+    },
+    {
+      "id": "getHour.time",
+      "builtin": "getHour",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "time"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026 18:30:45'.getHour();",
+      "kind": "number"
+    },
+    {
+      "id": "getMinutes.time",
+      "builtin": "getMinutes",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "time"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026 18:30:45'.getMinutes();",
+      "kind": "number"
+    },
+    {
+      "id": "getSeconds.time",
+      "builtin": "getSeconds",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "time"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026 18:30:45'.getSeconds();",
+      "kind": "number"
+    },
+    {
+      "id": "addDay.month-end",
+      "builtin": "addDay",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "month-end"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '31-Jan-2020'.addDay(1);",
+      "kind": "date"
+    },
+    {
+      "id": "addDay.negative-leap",
+      "builtin": "addDay",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "negative",
+        "leap"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '01-Mar-2020'.addDay(-1);",
+      "kind": "date"
+    },
+    {
+      "id": "addDay.keeps-time",
+      "builtin": "addDay",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "time"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026 18:30:00'.addDay(1);",
+      "kind": "date"
+    },
+    {
+      "id": "addMonth.clamp-leap",
+      "builtin": "addMonth",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "month-end",
+        "leap"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '31-Jan-2020'.addMonth(1);",
+      "kind": "date"
+    },
+    {
+      "id": "addMonth.clamp-nonleap",
+      "builtin": "addMonth",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "month-end"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '31-Jan-2021'.addMonth(1);",
+      "kind": "date"
+    },
+    {
+      "id": "addMonth.negative",
+      "builtin": "addMonth",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '31-Mar-2020'.addMonth(-1);",
+      "kind": "date"
+    },
+    {
+      "id": "addYear.leap-day",
+      "builtin": "addYear",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "leap"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '29-Feb-2020'.addYear(1);",
+      "kind": "date"
+    },
+    {
+      "id": "addYear.plain",
+      "builtin": "addYear",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026'.addYear(-1);",
+      "kind": "date"
+    },
+    {
+      "id": "addWeek.one",
+      "builtin": "addWeek",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026'.addWeek(1);",
+      "kind": "date"
+    },
+    {
+      "id": "addWeek.negative",
+      "builtin": "addWeek",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026'.addWeek(-1);",
+      "kind": "date"
+    },
+    {
+      "id": "addHour.midnight",
+      "builtin": "addHour",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "time"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026 22:00:00'.addHour(5);",
+      "kind": "date"
+    },
+    {
+      "id": "addHour.negative",
+      "builtin": "addHour",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "negative",
+        "time"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026 01:00:00'.addHour(-2);",
+      "kind": "date"
+    },
+    {
+      "id": "addMinutes.carry",
+      "builtin": "addMinutes",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "time"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026 18:50:00'.addMinutes(20);",
+      "kind": "date"
+    },
+    {
+      "id": "addSeconds.carry",
+      "builtin": "addSeconds",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "time"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026 18:59:50'.addSeconds(15);",
+      "kind": "date"
+    },
+    {
+      "id": "addBusinessDay.tuesday",
+      "builtin": "addBusinessDay",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "business"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026'.addBusinessDay(1);",
+      "kind": "date"
+    },
+    {
+      "id": "addBusinessDay.friday",
+      "builtin": "addBusinessDay",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "business",
+        "weekend"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '09-Oct-2026'.addBusinessDay(1);",
+      "kind": "date"
+    },
+    {
+      "id": "addBusinessDay.saturday",
+      "builtin": "addBusinessDay",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "business",
+        "weekend"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '10-Oct-2026'.addBusinessDay(1);",
+      "kind": "date"
+    },
+    {
+      "id": "addBusinessDay.zero",
+      "builtin": "addBusinessDay",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "zero"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026'.addBusinessDay(0);",
+      "kind": "date"
+    },
+    {
+      "id": "addBusinessDay.negative",
+      "builtin": "addBusinessDay",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '05-Oct-2026'.addBusinessDay(-1);",
+      "kind": "date"
+    },
+    {
+      "id": "toDate.drops-time",
+      "builtin": "toDate",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "time"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026 18:30:45'.toDate();",
+      "kind": "date"
+    },
+    {
+      "id": "toTime.keeps",
+      "builtin": "toTime",
+      "capture": "value",
+      "resultKind": "date",
+      "edges": [
+        "time"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026 18:30:45'.toTime();",
+      "kind": "date"
+    },
+    {
+      "id": "toString.pattern",
+      "builtin": "toString",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "format"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026'.toString(\"dd-MMM-yyyy\");",
+      "kind": "text"
+    },
+    {
+      "id": "toString.time-pattern",
+      "builtin": "toString",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "format",
+        "time"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026 18:30:45'.toString(\"yyyy-MM-dd HH:mm:ss\");",
+      "kind": "text"
+    },
+    {
+      "id": "diffDays.five",
+      "builtin": "diffDays",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026' - '01-Oct-2026';",
+      "kind": "number"
+    },
+    {
+      "id": "diffDays.negative",
+      "builtin": "diffDays",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '01-Oct-2026' - '06-Oct-2026';",
+      "kind": "number"
+    },
+    {
+      "id": "diffDays.same",
+      "builtin": "diffDays",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "zero"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026' - '06-Oct-2026';",
+      "kind": "number"
+    },
+    {
+      "id": "date.cmp.gt",
+      "builtin": "cmp",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026' > '01-Oct-2026';",
+      "kind": "bool"
+    },
+    {
+      "id": "date.cmp.eq",
+      "builtin": "cmp",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "date"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = '06-Oct-2026' == '06-Oct-2026';",
+      "kind": "bool"
+    },
+    {
+      "id": "date.cmp.lt-null",
+      "builtin": "cmp",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "null",
+        "date",
+        "one-side"
+      ],
+      "needsForm": false,
+      "notes": "Blank or null date ordering is not published. The Creator result is the vector. Do not treat a shim throw as Deluge.",
+      "script": "golden = null < '01-Jan-2020';",
+      "kind": "bool",
+      "additional": true
+    },
+    {
+      "id": "date.cmp.gt-null",
+      "builtin": "cmp",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "null",
+        "date",
+        "one-side"
+      ],
+      "needsForm": false,
+      "notes": "Blank or null date ordering is not published. The Creator result is the vector. Do not treat a shim throw as Deluge.",
+      "script": "golden = null > '01-Jan-2020';",
+      "kind": "bool",
+      "additional": true
+    },
+    {
+      "id": "date.cmp.lte-null",
+      "builtin": "cmp",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "null",
+        "date",
+        "one-side"
+      ],
+      "needsForm": false,
+      "notes": "Blank or null date ordering is not published. The Creator result is the vector. Do not treat a shim throw as Deluge.",
+      "script": "golden = null <= '01-Jan-2020';",
+      "kind": "bool",
+      "additional": true
+    },
+    {
+      "id": "date.cmp.gte-null",
+      "builtin": "cmp",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "null",
+        "date",
+        "one-side"
+      ],
+      "needsForm": false,
+      "notes": "Blank or null date ordering is not published. The Creator result is the vector. Do not treat a shim throw as Deluge.",
+      "script": "golden = null >= '01-Jan-2020';",
+      "kind": "bool",
+      "additional": true
+    },
+    {
+      "id": "date.cmp.lt-null-null",
+      "builtin": "cmp",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "null",
+        "date",
+        "both-sides"
+      ],
+      "needsForm": false,
+      "notes": "Both sides are blank dates: toDate of empty text. The Creator result is the vector.",
+      "script": "left = \"\".toDate();\nright = \"\".toDate();\ngolden = left < right;",
+      "kind": "bool",
+      "additional": true
+    },
+    {
+      "id": "date.cmp.gt-null-null",
+      "builtin": "cmp",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "null",
+        "date",
+        "both-sides"
+      ],
+      "needsForm": false,
+      "notes": "Both sides are blank dates: toDate of empty text. The Creator result is the vector.",
+      "script": "left = \"\".toDate();\nright = \"\".toDate();\ngolden = left > right;",
+      "kind": "bool",
+      "additional": true
+    },
+    {
+      "id": "date.cmp.lte-null-null",
+      "builtin": "cmp",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "null",
+        "date",
+        "both-sides"
+      ],
+      "needsForm": false,
+      "notes": "Both sides are blank dates: toDate of empty text. The Creator result is the vector.",
+      "script": "left = \"\".toDate();\nright = \"\".toDate();\ngolden = left <= right;",
+      "kind": "bool",
+      "additional": true
+    },
+    {
+      "id": "date.cmp.gte-null-null",
+      "builtin": "cmp",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "null",
+        "date",
+        "both-sides"
+      ],
+      "needsForm": false,
+      "notes": "Both sides are blank dates: toDate of empty text. The Creator result is the vector.",
+      "script": "left = \"\".toDate();\nright = \"\".toDate();\ngolden = left >= right;",
+      "kind": "bool",
+      "additional": true
+    },
+    {
+      "id": "date.rel.bad-eq",
+      "builtin": "cmp",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "date",
+        "text",
+        "client-server"
+      ],
+      "needsForm": false,
+      "notes": "Unrecognized date text, converted with toDate() from double-quoted TEXT. Single quotes are a date literal in Deluge, and an illegal date constant blocks saving the whole function. The Creator message is the vector.",
+      "script": "left = \"not-a-date\".toDate();\nright = \"not-a-date\".toDate();\ngolden = left == right;",
+      "kind": "bool",
+      "additional": true
+    },
+    {
+      "id": "abs.negative",
+      "builtin": "abs",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = abs(-3);",
+      "kind": "number"
+    },
+    {
+      "id": "abs.zero",
+      "builtin": "abs",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "zero"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = abs(0);",
+      "kind": "number"
+    },
+    {
+      "id": "abs.positive",
+      "builtin": "abs",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "integer"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = abs(3);",
+      "kind": "number"
+    },
+    {
+      "id": "sqrt.square",
+      "builtin": "sqrt",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "integer"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = sqrt(9);",
+      "kind": "number"
+    },
+    {
+      "id": "sqrt.zero",
+      "builtin": "sqrt",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "zero"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = sqrt(0);",
+      "kind": "number"
+    },
+    {
+      "id": "sqrt.negative",
+      "builtin": "sqrt",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = sqrt(-1);",
+      "kind": "number"
+    },
+    {
+      "id": "floor.integer",
+      "builtin": "floor",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "integer"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = floor(3);",
+      "kind": "number",
+      "expect": {
+        "$compileError": "Data type of argument at index '1' of the function 'floor' did not match the required data type of '[DECIMAL]'."
+      }
+    },
+    {
+      "id": "floor.whole-decimal",
+      "builtin": "floor",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "floor/ceil require DECIMAL. A trailing decimal point is the whole-number case that compiles.",
+      "script": "golden = floor(3.0);",
+      "kind": "number"
+    },
+    {
+      "id": "floor.decimal",
+      "builtin": "floor",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = floor(1.9);",
+      "kind": "number"
+    },
+    {
+      "id": "floor.negative",
+      "builtin": "floor",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = floor(-1.2);",
+      "kind": "number"
+    },
+    {
+      "id": "ceil.integer",
+      "builtin": "ceil",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "integer"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = ceil(3);",
+      "kind": "number",
+      "expect": {
+        "$compileError": "Data type of argument at index '1' of the function 'ceil' did not match the required data type of '[DECIMAL]'."
+      }
+    },
+    {
+      "id": "ceil.whole-decimal",
+      "builtin": "ceil",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = ceil(3.0);",
+      "kind": "number"
+    },
+    {
+      "id": "ceil.decimal",
+      "builtin": "ceil",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = ceil(1.2);",
+      "kind": "number"
+    },
+    {
+      "id": "ceil.negative",
+      "builtin": "ceil",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = ceil(-1.2);",
+      "kind": "number"
+    },
+    {
+      "id": "min.three",
+      "builtin": "min",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "integer"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = min(3, -1, 2);",
+      "kind": "number",
+      "expect": {
+        "$compileError": "The number of arguments for 'min' function does not match the number of mandatory params '2'."
+      }
+    },
+    {
+      "id": "min.two",
+      "builtin": "min",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "integer"
+      ],
+      "needsForm": false,
+      "notes": "Creator accepts exactly two arguments.",
+      "script": "golden = min(3, -1);",
+      "kind": "number"
+    },
+    {
+      "id": "min.two-negative",
+      "builtin": "min",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = min(-2, -5);",
+      "kind": "number"
+    },
+    {
+      "id": "max.three",
+      "builtin": "max",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "integer"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = max(3, -1, 2);",
+      "kind": "number",
+      "expect": {
+        "$compileError": "The number of arguments for 'max' function does not match the number of mandatory params '2'."
+      }
+    },
+    {
+      "id": "max.two",
+      "builtin": "max",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "integer"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = max(3, -1);",
+      "kind": "number"
+    },
+    {
+      "id": "max.two-negative",
+      "builtin": "max",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = max(-2, -5);",
+      "kind": "number"
+    },
+    {
+      "id": "power.cube",
+      "builtin": "power",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "integer"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = power(2, 3);",
+      "kind": "number"
+    },
+    {
+      "id": "power.zero",
+      "builtin": "power",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "zero"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = power(5, 0);",
+      "kind": "number"
+    },
+    {
+      "id": "power.negative-exp",
+      "builtin": "power",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = power(2, -1);",
+      "kind": "number"
+    },
+    {
+      "id": "toLong.decimal-text",
+      "builtin": "toLong",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"12.9\".toLong();",
+      "kind": "number"
+    },
+    {
+      "id": "toLong.negative-text",
+      "builtin": "toLong",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "negative"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"-12.9\".toLong();",
+      "kind": "number"
+    },
+    {
+      "id": "toLong.integer-text",
+      "builtin": "toLong",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "integer"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"12\".toLong();",
+      "kind": "number"
+    },
+    {
+      "id": "toLong.empty",
+      "builtin": "toLong",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".toLong();",
+      "kind": "number"
+    },
+    {
+      "id": "toLong.text",
+      "builtin": "toLong",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "text"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"12a\".toLong();",
+      "kind": "number"
+    },
+    {
+      "id": "toLong.null",
+      "builtin": "toLong",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "null"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "mark = null;\ngolden = mark.toLong();",
+      "kind": "number"
+    },
+    {
+      "id": "toLong.date-midnight",
+      "builtin": "toLong",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "date",
+        "timezone"
+      ],
+      "needsForm": false,
+      "notes": "Epoch millis of that civil time in Asia/Calcutta (UTC+5:30, no DST).",
+      "script": "golden = '06-Oct-2026 00:00:00'.toLong();",
+      "kind": "number"
+    },
+    {
+      "id": "toLong.date-evening",
+      "builtin": "toLong",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "date",
+        "timezone"
+      ],
+      "needsForm": false,
+      "notes": "Published Deluge example is 0 in America/Los_Angeles. This app zone is Asia/Calcutta, so the vector must not be assumed 0.",
+      "script": "golden = '31-Dec-1969 16:00:00'.toLong();",
+      "kind": "number"
+    },
+    {
+      "id": "toNumber.alias",
+      "builtin": "toNumber",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"12.9\".toNumber();",
+      "kind": "number"
+    },
+    {
+      "id": "toNumber.null",
+      "builtin": "toNumber",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "null"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "mark = null;\ngolden = mark.toNumber();",
+      "kind": "number"
+    },
+    {
+      "id": "toDecimal.text",
+      "builtin": "toDecimal",
+      "capture": "value",
+      "resultKind": "decimal",
+      "edges": [
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"10.50\".toDecimal();",
+      "kind": "decimal"
+    },
+    {
+      "id": "toDecimal.integer",
+      "builtin": "toDecimal",
+      "capture": "value",
+      "resultKind": "decimal",
+      "edges": [
+        "integer"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"10\".toDecimal();",
+      "kind": "decimal"
+    },
+    {
+      "id": "toDecimal.empty",
+      "builtin": "toDecimal",
+      "capture": "value",
+      "resultKind": "decimal",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"\".toDecimal();",
+      "kind": "decimal"
+    },
+    {
+      "id": "toDecimal.text-bad",
+      "builtin": "toDecimal",
+      "capture": "value",
+      "resultKind": "decimal",
+      "edges": [
+        "text"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = \"nope\".toDecimal();",
+      "kind": "decimal"
+    },
+    {
+      "id": "toMap.json-get",
+      "builtin": "toMap",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "map"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = \"{\\\"a\\\":\\\"x\\\",\\\"b\\\":\\\"y\\\"}\".toMap();\ngolden = bag.get(\"a\");",
+      "kind": "text"
+    },
+    {
+      "id": "toMap.deluge-text",
+      "builtin": "toMap",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "map"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = \"{a:x,b:y}\".toMap();\ngolden = bag.get(\"a\");",
+      "kind": "text"
+    },
+    {
+      "id": "toMap.empty",
+      "builtin": "toMap",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "bag = \"\".toMap();\ngolden = bag.get(\"a\");",
+      "kind": "text"
+    },
+    {
+      "id": "isNull.null",
+      "builtin": "isNull",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "null"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isNull(null);",
+      "kind": "bool"
+    },
+    {
+      "id": "isNull.empty-string",
+      "builtin": "isNull",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isNull(\"\");",
+      "kind": "bool"
+    },
+    {
+      "id": "isNull.zero",
+      "builtin": "isNull",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "number"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isNull(0);",
+      "kind": "bool"
+    },
+    {
+      "id": "isBlank.empty",
+      "builtin": "isBlank",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isBlank(\"\");",
+      "kind": "bool"
+    },
+    {
+      "id": "isBlank.null",
+      "builtin": "isBlank",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "null"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isBlank(null);",
+      "kind": "bool"
+    },
+    {
+      "id": "isBlank.space",
+      "builtin": "isBlank",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "space"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isBlank(\" \");",
+      "kind": "bool"
+    },
+    {
+      "id": "isBlank.zero",
+      "builtin": "isBlank",
+      "capture": "value",
+      "resultKind": "bool",
+      "edges": [
+        "number"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = isBlank(0);",
+      "kind": "bool"
+    },
+    {
+      "id": "ifnull.null",
+      "builtin": "ifnull",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "null"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = ifnull(null, \"x\");",
+      "kind": "text"
+    },
+    {
+      "id": "ifnull.present",
+      "builtin": "ifnull",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "string"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = ifnull(\"y\", \"x\");",
+      "kind": "text"
+    },
+    {
+      "id": "ifnull.empty",
+      "builtin": "ifnull",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "empty"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = ifnull(\"\", \"x\");",
+      "kind": "text"
+    },
+    {
+      "id": "decimal.add",
+      "builtin": "decimal",
+      "capture": "value",
+      "resultKind": "decimal",
+      "edges": [
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = 10.50 + 0.25;",
+      "kind": "decimal"
+    },
+    {
+      "id": "decimal.sub",
+      "builtin": "decimal",
+      "capture": "value",
+      "resultKind": "decimal",
+      "edges": [
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = 1.0 - 0.3;",
+      "kind": "decimal"
+    },
+    {
+      "id": "decimal.mul",
+      "builtin": "decimal",
+      "capture": "value",
+      "resultKind": "decimal",
+      "edges": [
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = 1.25 * 4;",
+      "kind": "decimal"
+    },
+    {
+      "id": "decimal.div",
+      "builtin": "decimal",
+      "capture": "value",
+      "resultKind": "decimal",
+      "edges": [
+        "decimal"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "golden = 1.0 / 4;",
+      "kind": "decimal"
+    },
+    {
+      "id": "foreach.null",
+      "builtin": "forEach",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "null",
+        "for-each"
+      ],
+      "needsForm": false,
+      "notes": "for each over null. The collection page says iterations equal the number of values and does not mention null. Not assumed to be zero iterations.",
+      "script": "items = null;\nn = 0;\nfor each item in items\n{\nn = n + 1;\n}\ngolden = n;",
+      "kind": "number",
+      "additional": true
+    },
+    {
+      "id": "foreach.empty",
+      "builtin": "forEach",
+      "capture": "value",
+      "resultKind": "number",
+      "edges": [
+        "empty",
+        "for-each"
+      ],
+      "needsForm": false,
+      "notes": "Empty collection: the documented zero-iteration control.",
+      "script": "items = List();\nn = 0;\nfor each item in items\n{\nn = n + 1;\n}\ngolden = n;",
+      "kind": "number",
+      "additional": true
+    },
+    {
+      "id": "getall.names-qty-positive",
+      "builtin": "getall",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form"
+      ],
+      "needsForm": true,
+      "notes": "",
+      "script": "golden = GoldenRow[Qty > 0].Name.getAll();",
+      "kind": "list"
+    },
+    {
+      "id": "getall.names-qty-negative",
+      "builtin": "getall",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form",
+        "negative"
+      ],
+      "needsForm": true,
+      "notes": "",
+      "script": "golden = GoldenRow[Qty < 0].Name.getAll();",
+      "kind": "list"
+    },
+    {
+      "id": "getall.names-qty-missing",
+      "builtin": "getall",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form",
+        "empty"
+      ],
+      "needsForm": true,
+      "notes": "",
+      "script": "golden = GoldenRow[Qty == 99].Name.getAll();",
+      "kind": "list"
+    },
+    {
+      "id": "getall.ada-qty",
+      "builtin": "getall",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "form"
+      ],
+      "needsForm": true,
+      "notes": "",
+      "script": "golden = GoldenRow[Name == \"Ada\"].Qty.getAll();",
+      "kind": "list"
+    },
+    {
+      "id": "distinct.status-open",
+      "builtin": "distinct",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form"
+      ],
+      "needsForm": true,
+      "notes": "",
+      "script": "golden = GoldenRow[Status == \"Open\"].distinct(Status);",
+      "kind": "list"
+    },
+    {
+      "id": "distinct.all-names",
+      "builtin": "distinct",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form"
+      ],
+      "needsForm": true,
+      "notes": "",
+      "script": "golden = GoldenRow[Qty != 99].distinct(Name);",
+      "kind": "list"
+    },
+    {
+      "id": "distinct.all-status",
+      "builtin": "distinct",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form"
+      ],
+      "needsForm": true,
+      "notes": "",
+      "script": "golden = GoldenRow[Qty != 99].distinct(Status);",
+      "kind": "list"
+    },
+    {
+      "id": "getall.names-open",
+      "builtin": "getall",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form"
+      ],
+      "needsForm": true,
+      "notes": "Form-field list from a fetch. In-memory list.getAll does not compile.",
+      "script": "golden = GoldenRow[Status == \"Open\"].Name.getAll();",
+      "kind": "list"
+    },
+    {
+      "id": "getall.names-open-spelling",
+      "builtin": "getall",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form",
+        "spelling"
+      ],
+      "needsForm": true,
+      "notes": "Sample apps spell the form-field method getall as well as getAll.",
+      "script": "golden = GoldenRow[Status == \"Open\"].Name.getall();",
+      "kind": "list"
+    },
+    {
+      "id": "getall.status-all",
+      "builtin": "getall",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form"
+      ],
+      "needsForm": true,
+      "notes": "",
+      "script": "golden = GoldenRow[Qty != 99].Status.getAll();",
+      "kind": "list"
+    },
+    {
+      "id": "removeelement.fetch-present",
+      "builtin": "removeelement",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form",
+        "mutation"
+      ],
+      "needsForm": true,
+      "notes": "Sample apps call removeElement on a list returned by field.getAll(), as a statement.",
+      "script": "names = GoldenRow[Status == \"Open\"].Name.getAll();\nnames.removeElement(\"Ada\");\ngolden = names;",
+      "kind": "list"
+    },
+    {
+      "id": "removeelement.fetch-absent",
+      "builtin": "removeelement",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form",
+        "absent"
+      ],
+      "needsForm": true,
+      "notes": "",
+      "script": "names = GoldenRow[Status == \"Open\"].Name.getAll();\nnames.removeElement(\"Zed\");\ngolden = names;",
+      "kind": "list"
+    },
+    {
+      "id": "removeelement.fetch-spelling",
+      "builtin": "removeelement",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form",
+        "spelling"
+      ],
+      "needsForm": true,
+      "notes": "",
+      "script": "names = GoldenRow[Qty != 99].Name.getAll();\nnames.removeelement(\"Bea\");\ngolden = names;",
+      "kind": "list"
+    },
+    {
+      "id": "removeall.fetch-subset",
+      "builtin": "removeall",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form",
+        "mutation"
+      ],
+      "needsForm": true,
+      "notes": "Sample apps call removeAll on getAll() lists. String.removeAll does not compile.",
+      "script": "names = GoldenRow[Qty != 99].Name.getAll();\ndrop = GoldenRow[Name == \"Ada\"].Name.getAll();\nnames.removeAll(drop);\ngolden = names;",
+      "kind": "list"
+    },
+    {
+      "id": "removeall.fetch-spelling",
+      "builtin": "removeall",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form",
+        "spelling"
+      ],
+      "needsForm": true,
+      "notes": "",
+      "script": "names = GoldenRow[Qty != 99].Name.getAll();\ndrop = GoldenRow[Status == \"Hold\"].Name.getAll();\nnames.removeall(drop);\ngolden = names;",
+      "kind": "list"
+    },
+    {
+      "id": "task.cancel.bare",
+      "builtin": "task:cancel",
+      "capture": "client",
+      "resultKind": null,
+      "edges": [
+        "client"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "cancel submit;"
+    },
+    {
+      "id": "task.cancel.guarded",
+      "builtin": "task:cancel",
+      "capture": "client",
+      "resultKind": null,
+      "edges": [
+        "client",
+        "condition"
+      ],
+      "needsForm": false,
+      "notes": "",
+      "script": "if(1 == 1)\n{\ncancel submit;\n}"
+    },
+    {
+      "id": "task.success.info",
+      "builtin": "task:success",
+      "capture": "workflow",
+      "resultKind": null,
+      "edges": [
+        "workflow"
+      ],
+      "needsForm": false,
+      "notes": "Paste into the GoldenRow on-success handler. Do not put it in c2c_golden_capture.",
+      "script": "info \"c2c-golden-success\";"
+    },
+    {
+      "id": "sendmail.dry-run",
+      "builtin": "sendmail",
+      "capture": "mock",
+      "resultKind": null,
+      "edges": [
+        "mock-only"
+      ],
+      "needsForm": false,
+      "notes": "Never execute this in Creator. The Node side records a dry-run transcript with performed false.",
+      "script": "sendmail[from: zoho.loginuserid to: \"nobody@example.test\" subject: \"c2c-golden\" message: \"synthetic capture - do not send\"];"
+    },
+    {
+      "id": "select.field-open",
+      "builtin": "select",
+      "capture": "client",
+      "resultKind": null,
+      "edges": [
+        "form",
+        "field"
+      ],
+      "needsForm": true,
+      "notes": "In sample apps the receiver is a picklist field in a form on-load workflow, not list.select. Not in the import: Creator rejects the GoldenRow_Select workflow block. Paste Tag.select(\"Open\"); by hand on GoldenRow, on add, on load. It does not return JSON.",
+      "script": "Tag.select(\"Open\");"
+    },
+    {
+      "id": "sort.by-asc",
+      "builtin": "sort",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form",
+        "asc"
+      ],
+      "needsForm": true,
+      "notes": "Sort pattern: `<fetch>.<Field> sort by <Field>` with no direction. Capture sorts the fetch, then projects Name, so the order is a list.",
+      "script": "rows = GoldenRow[Qty != 99] sort by Name;\ngolden = rows.Name.getAll();",
+      "kind": "list",
+      "residual": true
+    },
+    {
+      "id": "sort.by-desc",
+      "builtin": "sort",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form",
+        "desc"
+      ],
+      "needsForm": true,
+      "notes": "Sort pattern: `<fetch>.<Field> sort by <Field> desc`. Same projection as sort.by-asc.",
+      "script": "rows = GoldenRow[Qty != 99] sort by Name desc;\ngolden = rows.Name.getAll();",
+      "kind": "list",
+      "residual": true
+    },
+    {
+      "id": "sort.by-desc-range",
+      "builtin": "sort",
+      "capture": "value",
+      "resultKind": "list-number",
+      "edges": [
+        "form",
+        "desc",
+        "range"
+      ],
+      "needsForm": true,
+      "notes": "Sort pattern: `sort by <Date_field> desc range from 1 to 1`. Projects Qty. The section-3 rows make a Name list [\"Ada\"] whether or not the sort ran (first inserted row and the Qty 5 row are both Ada). Sorted range is [5]; the unsorted first row is Qty 2.",
+      "script": "rows = GoldenRow[Qty != 99] sort by Qty desc range from 1 to 1;\ngolden = rows.Qty.getAll();",
+      "kind": "list",
+      "residual": true
+    },
+    {
+      "id": "sort.foreach-desc",
+      "builtin": "sort",
+      "capture": "value",
+      "resultKind": "string",
+      "edges": [
+        "form",
+        "desc",
+        "for-each"
+      ],
+      "needsForm": true,
+      "notes": "Sort pattern: `for each i in <Form> sort by <Field> { ... }`. A bare collection name is split by this parser. The criteria fetch is the statement it does accept.",
+      "script": "order = \"\";\nfor each row in GoldenRow[Qty != 99] sort by Name desc\n{\norder = order + row.Name + \",\";\n}\ngolden = order;",
+      "kind": "text",
+      "residual": true
+    },
+    {
+      "id": "criteria.bare-and",
+      "builtin": "criteria-dynamic",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form",
+        "bare-name"
+      ],
+      "needsForm": true,
+      "notes": "Criteria pattern: a bare decision-box name as its own && term. A local is not a field, and Creator rejects the function at save. Billable and Approved are checkbox fields on FlagRow. Sorted by Name because parity.mjs sameValue is isDeepStrictEqual, not a set compare.",
+      "script": "rows = FlagRow[Status == \"Open\" && Billable && Approved] sort by Name;\ngolden = rows.Name.getAll();",
+      "kind": "list",
+      "residual": true
+    },
+    {
+      "id": "criteria.bare-false",
+      "builtin": "criteria-dynamic",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form",
+        "bare-name",
+        "false"
+      ],
+      "needsForm": true,
+      "notes": "A local set to false is not a criteria term. The usual false term is `<Field> == false` on a decision box. Billable is a checkbox on FlagRow. Only the Dee row is false, so [\"Dee\"] means the comparison ran. An empty form is also [].",
+      "script": "rows = FlagRow[Qty != 99 && Billable == false] sort by Name;\ngolden = rows.Name.getAll();",
+      "kind": "list",
+      "residual": true
+    },
+    {
+      "id": "criteria.var-ne",
+      "builtin": "criteria-dynamic",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form",
+        "variable"
+      ],
+      "needsForm": true,
+      "notes": "Criteria pattern: `ID != input.<Field>` beside other terms. A local replaces input. The field stays on the left. Sorted by Qty so the list is [\"Cy\",\"Bea\"] (Qty -1 then 0), not the insertion order [\"Bea\",\"Cy\"]. The harness does not compare getAll lists as a set.",
+      "script": "skip = \"Ada\";\nrows = GoldenRow[Name != skip && Status == \"Open\"] sort by Qty;\ngolden = rows.Name.getAll();",
+      "kind": "list",
+      "residual": true
+    },
+    {
+      "id": "getall.bare-field",
+      "builtin": "getall",
+      "capture": "value",
+      "resultKind": "list-string",
+      "edges": [
+        "form",
+        "bare-name"
+      ],
+      "needsForm": true,
+      "notes": "getAll pattern: `<Form>[<decision_box>].<Field>.getAll()`. GoldenRow.Status is text, and a text field with no operator does not save. Billable is a checkbox on FlagRow. A lone name in brackets is an index to this parser, so `sort by` would be a task:sort todo; `Billable == true` is the same decision-box test and accepts the sort. Insertion order of the true rows is Cy, Ada, Bea; the list is Ada, Bea, Cy. The common subform form `input.<subform>.<field>.getall()` is not in this function.",
+      "script": "rows = FlagRow[Billable == true] sort by Name;\ngolden = rows.Name.getAll();",
+      "kind": "list",
+      "residual": true
+    }
+  ]
+}

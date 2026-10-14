@@ -1,0 +1,67 @@
+name: Bug report
+description: A wrong conversion, a crash, or a refusal that should not happen
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste the contents, file names or URLs of a private `.ds`
+        export. `c2c corpus` and `c2c analyze` exist so a bug can be described
+        without one.
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: The exact command you ran
+      placeholder: "node dist/cli/src/c2c.js parse path/to/app.ds"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Output, exit code, error text
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        The input shape that triggers it (export shape, the constructs
+        involved), or a minimal synthetic `.ds` stripped of anything private.
+    validations:
+      required: true
+  - type: dropdown
+    id: shape
+    attributes:
+      label: Export shape
+      description: If known — the three shapes are listed under "What works today" in the README
+      options:
+        - A (2016 monolithic)
+        - B (2024/2025 monolithic)
+        - C (2026 multi-file folder)
+        - Unknown
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+      placeholder: "e.g. the output of git rev-parse --short HEAD"
+    validations:
+      required: false
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      placeholder: "node --version"
+    validations:
+      required: false

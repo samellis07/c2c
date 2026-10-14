@@ -1,0 +1,117 @@
+app: restaurants
+route: #/report/All_Restaurants
+state: empty
+viewport: phone 390
+---
+div class="c2c-app"
+  header class="c2c-topbar"
+    span
+      "Restaurants"
+  nav aria-label="Main menu"
+    div class="c2c-nav-section"
+      h2 class="c2c-nav-heading"
+        "App"
+      ul
+        li
+          a href="#/form/Restaurant"
+            svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+              path
+              path
+              path
+              path
+              path
+            span
+              "Restaurant"
+        li
+          a href="#/form/Visit"
+            svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+              path
+              path
+              path
+              path
+              path
+            span
+              "Visit"
+        li
+          a aria-current="page" href="#/report/All_Restaurants"
+            svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+              path
+              rect
+              path
+              path
+            span
+              "All Restaurants"
+        li
+          a href="#/page/Guide"
+            svg aria-hidden="true" class="lucide lucide-layout-dashboard c2c-icon"
+              rect
+              rect
+              rect
+              rect
+            span
+              "Dining Guide"
+  main tabindex="-1"
+    section class="c2c-card" data-report="All_Restaurants" data-view="list"
+      h1
+        "All Restaurants"
+      div class="c2c-report-tools"
+        form class="c2c-search-form" role="search"
+          label class="c2c-search"
+            svg aria-hidden="true" class="lucide lucide-search"
+              path
+              circle
+            input aria-label="Search All Restaurants" placeholder="Search" type="search" value=""
+          button class="button secondary sm" tabindex="0" type="submit"
+            span class="labelSlot"
+              span class="labelContent"
+                span class="labelPhase"
+                  "Search"
+      div data-state="empty"
+        section class="root"
+          div aria-hidden="true" class="icon"
+            span class="glyph"
+              svg aria-hidden="true" class="lucide lucide-folder"
+                path
+          div class="frame"
+            div class="copy"
+              h3
+                span class="line"
+                  "No records found"
+              p
+                span class="line"
+                  "Records added through the form appear here."
+  nav aria-label="Tabs"
+    a href="#/form/Restaurant"
+      svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+        path
+        path
+        path
+        path
+        path
+      span
+        "Restaurant"
+    a href="#/form/Visit"
+      svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+        path
+        path
+        path
+        path
+        path
+      span
+        "Visit"
+    a aria-current="page" href="#/report/All_Restaurants"
+      svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+        path
+        rect
+        path
+        path
+      span
+        "All Restaurants"
+    a href="#/page/Guide"
+      svg aria-hidden="true" class="lucide lucide-layout-dashboard c2c-icon"
+        rect
+        rect
+        rect
+        rect
+      span
+        "Dining Guide"

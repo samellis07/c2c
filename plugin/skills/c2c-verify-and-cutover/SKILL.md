@@ -1,0 +1,101 @@
+---
+name: c2c-verify-and-cutover
+description: "Prove a migrated Creator app works on Catalyst and go live with c2c: empirical limit probes (P-LIKE, P-OFFSET, P-JOIN, P-WIDTH, P-COLS, P-401, P-BULK, P-MAIL), smoke tests, given/when/then parity cases, IaC export diff, record counts, Dev to Production promotion and post-promotion checks, Creator freeze and delta sync, and rollback. Use for 'verify', 'is it working', 'smoke', 'parity', 'probe', 'go live', 'cutover', 'deploy to production', 'rollback', 'undo'."
+metadata:
+  version: "0.2.0"
+---
+
+# Verify, cut over, roll back
+
+Requires a green doctor. Every probe and every cutover action needs the user's explicit yes.
+
+**Rule — default settings only (C2C.md rule 13).** No browser automation, no permission-rule changes, no pre-made or supplied evidence — smoke and parity are verified from calls the agent makes or by the user's own actions read back afterwards, and every ask is a guided step in one batched checklist.
+
+**One credential, one refresher (C2C.md rule 14).** Serialize the `catalyst` calls (exports, Production deploys) — no parallel runs and no keep-fresh loop beside a run; on a read-only `401 INVALID_TOKEN` re-read the stored token rather than forcing a refresh.
+
+## Part A — Verify (Development)
+
+### A1. Probes (Rule: verify limits empirically)
+
+`c2c probe <id…> --confirm` creates scratch resources named `c2c_probe_<h8>` in the app's project, measures, deletes them, reads back the deletion, and writes `c2c-out/<app>/verify/limits.measured.json`.
+
+| Probe | Measures | Why |
+|---|---|---|
+| P-LIKE | `LIKE '*x*'` returns rows; `'%x%'` returns 0 | Every `contains` criterion [TESTED] |
+| P-OFFSET | ZCQL offset base | Paging [TESTED] |
+| P-UPD300 | ZCQL UPDATE/DELETE statement cap | Silent partial writes |
+| P-JOIN | max JOINs (Dev, and Prod at cutover) | Raises are per environment [UNVERIFIED] |
+| P-WIDTH | max SELECT columns + error text | 20 [DOC]; not yet confirmed |
+| P-COLS | columns per table by type on a scratch table | 100 [DOC]; a higher figure of 325 is [UNVERIFIED] |
+| P-401 | private route without a session → `401 NO_ACCESS`; run credential-free — `curl -s -o /dev/null -w '%{http_code}' <function-url>` prints `401` | Functions are public/`optional` by default [TESTED]; a signed-in session passes the gateway, so only a no-session probe proves the rule (`is_authenticated` is the only readable signal) |
+| P-BULK | bulk write with `fk_mapping` from a CSV in the bucket | Before any bulk load |
+| P-RATE | sustained writes/min on a scratch table | ~100/min/table [UNVERIFIED] |
+| P-SVC | Job Scheduling / Stratus usable on a fresh project with no "Start Exploring" | [UNVERIFIED] |
+| P-MAIL | one send from the verified sender to the user's own address | Sends real mail: explicit OK only |
+
+Run the probes the plan needs (it lists them), not all of them.
+
+### A2. Smoke
+
+`c2c smoke <ds> --project <id> --org <org> --confirm` — no browser automation, no token or cookie. It prints one step and exits 4: the user opens `<app url>#/admin/smoke` in their own browser, signed in to the app once (the deploy report's `slate.appUrl` names the page), waits until the page says Done or Failed, presses **Copy** beside the result code (a `c2cs1…` token under "Paste this into your AI chat (Claude or any LLM)") and pastes it into this chat. **Ask the user for that code**, then run `c2c smoke <ds> --result-code <code>` (or pipe it to `--result-code -`) — it unpacks the whole `c2c-smoke/1` block and verifies it: this app's origin and project, this source's smoke plan, freshness, every step passed — and writes the smoke report; a failed, foreign, stale or edited block exits 1 with the refused reasons, and a mistyped or cut-short code is refused by its check characters (ask the user to press Copy again). A user on the CLI may instead save the block to `smoke-result.txt` and run `c2c smoke <ds> --result smoke-result.txt`; it is the same check.
+
+Customer steps (in order) — tell the user exactly these, nothing else:
+
+1. Slate start: in the Catalyst console open the project → Slate → Start Exploring
+2. Accept invite: accept the app invite mail
+3. Sign in once: sign in to the deployed app once
+4. Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
+5. Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
+ Check the sign-in path too: before sign-in the app shows a clear signed-out state, and the framed sign-in page renders the login form — if it serves the app shell, the service worker is answering `/accounts/`, `/__catalyst/`, `/baas/`, `/server/` or cross-origin navigations it must bypass. After sign-in the user must land on the app root — a landing on `/app/` (404) means the `signIn` call is missing `{service_url}` (Slate has no redirect field in `catalyst.json`).
+
+### A3. Parity
+
+The parity runner (planned) executes the app's given/when/then cases against the deployed app. Until it ships: pick 3–5 business rules with the user (a required field, a unique field, an initial value, a workflow side effect, an approval transition), state them as given/when/then, run them through the UI with the user, and verify in the store. Known traps: a duplicate is enforced by the store (`409 DUPLICATE_VALUE`) but can surface as `500 request failed` [TESTED].
+
+### A4. Structure and data
+
+- `c2c verify --out c2c-out/<app> --confirm` (planned): `catalyst iac:export` → `iac:status export --id <job>` → download → **redact in memory** (exports hold function env values and cron headers in clear [TESTED]) → normalize (drop ids, timestamps, defaults) → diff against `verify/expected.normalized.json`; plus the provision read-backs. Exit 0 exact, 1 missing/changed, 2 extra. Delete the raw zip.
+- Counts per table equal `counts.json`; FK resolution 100%; file objects counted.
+
+**Green = probes recorded, smoke (or the manual smoke) passes, parity cases pass, verify exit 0, counts equal.** Write `verify/report.json` and summarise it for the user, including the per-app maintenance list (what they now own: N Deluge functions as Node code, M connections, …).
+
+## Part B — Cutover (the user drives; c2c checks)
+
+1. **Rehearse** the full data volume outside Development if the app is large (Dev row cap [UNVERIFIED]).
+2. **Production promotion is a console action by the user:** Catalyst console → Deploy to Production (a payment method is required). c2c cannot do it: no CLI/API for functions or schema [TESTED]. The CLI does have `catalyst deploy slate --production` and `ds:import --production` [CLI src] for later updates.
+3. **Post-promotion verify** (`c2c cutover --promote-check`, planned):
+   - `catalyst iac:export --production` diff against the template;
+   - every function deployed; crons and the job pool present (pre-defined crons migrate with the deployment [TESTED]; Stratus/Job Scheduling/Signals promotion: [UNVERIFIED]);
+   - auth login works in Prod (embedded auth has failed with `invalid_client` only in Prod [UNVERIFIED]); re-configure social logins; record the new ZAID;
+   - bucket names: a promotion can fail with `Bucket already exists` [UNVERIFIED] (global names);
+   - P-JOIN and P-COLS **in Prod** (raises do not carry over [UNVERIFIED]).
+4. **Freeze** Creator writes (the user: make forms read-only or announce a window). Then delta sync: records with `Modified_Time ≥ watermark` from fresh JSON report exports (the JSON export always carries record IDs; a CSV carries them only when the export includes the `ID` column — without one, delta sync sees edits as delete+insert) → `c2c migrate-data --confirm` (upsert by `c2c_source_id`).
+5. **Invite real users** (Prod allows 1,000 by default [UNVERIFIED]; request a higher limit from Zoho early) — each invite carries `redirect_url` = the Slate app URL; without it the invitee lands on the unhosted `/app/` path (404).
+6. **Switch links** (the user): bookmarks, embedded links, integrations pointing at Creator.
+7. Keep Creator read-only (not deleted) until the user signs off.
+
+## Part C — Rollback
+
+c2c never deletes projects, tables, rows or buckets on its own. Teardown happens only on the user's explicit request, or on a failure before the Slate "Start Exploring" step — a project that has taken a human or console step is kept (C2C.md rule 15). `c2c rollback --plan` (planned) prints the steps; the user performs the destructive ones.
+
+| Situation | Rollback |
+|---|---|
+| Bad code deploy (Dev) | Redeploy the previous c2c output: `c2c deploy … --confirm` from the previous `c2c-out` commit, or Slate: MCP `Rollback_Build` / `Redeploy_a_deployment` with the user's yes |
+| Bad data load | Rows carry `c2c_source_id`; the plan lists a ZCQL delete per table in batches (DELETE stops at 300 rows: loop until 0); the user approves each table. Or the user truncates in the console |
+| Wrong infra (greenfield) | No in-place undo. The user deletes the project in the console and re-imports/re-creates it; c2c re-runs provision and data (one project per app keeps the blast radius small) |
+| Cutover problem | Unfreeze Creator, switch links back. Creator remained the system of record until sign-off |
+| Production | Console only; the user decides |
+
+## Stop conditions
+
+- Any measured result that contradicts the plan's assumption → re-plan before cutover.
+- Smoke/parity failures on business rules the user marked critical.
+- Verify exit 1.
+- Post-promotion check failure → do not freeze Creator.
+
+## What to ask the user
+
+- Which probes to run (they create and delete scratch resources).
+- To sign in and do the manual smoke steps; to define 3–5 parity rules.
+- Before cutover: freeze window, Deploy to Production done, real-user invite list.
+- For any rollback: explicit approval per destructive step, which they perform.

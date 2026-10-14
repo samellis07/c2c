@@ -1,0 +1,37 @@
+/*
+ * Author       : synthetic
+ * Generated on : 01-Jan-2025 12:00:00
+ * Version      : 1.0
+ */
+application "Precheck_Formula"
+{
+	forms
+	{
+		form Item
+		{
+			Ext
+			(
+				type = integration
+				displayname = "External"
+			)
+			Total
+			(
+				type = formula
+				displayname = "Total"
+				value = input.Ext
+			)
+		}
+	}
+	reports
+	{
+		list All_Items
+		{
+			displayName = "All Items"
+			show all rows from Item
+			(
+				Ext as "External"
+				Total as "Total"
+			)
+		}
+	}
+}

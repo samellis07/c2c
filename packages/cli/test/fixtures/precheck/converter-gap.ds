@@ -1,0 +1,30 @@
+/*
+ * Author       : synthetic
+ * Generated on : 01-Jan-2025 12:00:00
+ * Version      : 1.0
+ */
+application "Precheck_Gap"
+{
+	forms
+	{
+		form Item
+		{
+			Pin
+			(
+				type = geolocation
+				displayname = "Pin"
+			)
+		}
+	}
+	reports
+	{
+		list All_Items
+		{
+			displayName = "All Items"
+			show all rows from Item
+			(
+				Pin as "Pin"
+			)
+		}
+	}
+}

@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noImplicitOverride": true,
+    "declaration": true,
+    "resolveJsonModule": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": "packages",
+    "types": ["node"],
+    "skipLibCheck": true
+  },
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "packages/*/test/**/*.d.ts", "packages/deluge/scripts/**/*.ts"]
+}

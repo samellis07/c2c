@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "feature-matrix/schema.json",
+  "title": "Creator-to-Catalyst feature matrix",
+  "description": "One row per Creator feature. status is only as high as the evidence object can prove.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "rows"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "rows": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/row" }
+    }
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "creatorApp": { "type": "string", "minLength": 1 },
+        "dsPath": { "type": "string", "minLength": 1, "pattern": "\\.ds$" },
+        "repo": { "type": "string", "minLength": 1 },
+        "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "path": { "type": "string", "minLength": 1 },
+        "testId": { "type": "string", "minLength": 1 },
+        "catalystProjectId": { "type": "string", "minLength": 1 },
+        "migrationRecord": { "type": "string", "minLength": 1 },
+        "e2eEvidence": { "type": "string", "minLength": 1 },
+        "e2eSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "area", "feature", "doc_url", "plan_tier", "enterprise_only", "status"],
+      "properties": {
+        "id": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "integer" }
+          ]
+        },
+        "area": { "type": "string", "minLength": 1 },
+        "feature": { "type": "string", "minLength": 1 },
+        "doc_url": { "type": "string", "minLength": 1 },
+        "plan_tier": { "type": "string", "minLength": 1 },
+        "enterprise_only": { "type": "boolean" },
+        "status": {
+          "enum": [
+            "not-started",
+            "built-in-Creator",
+            "adapter-written",
+            "migrated",
+            "verified"
+          ]
+        },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "helpSectionIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["status"],
+            "properties": { "status": { "const": "built-in-Creator" } }
+          },
+          "then": {
+            "required": ["evidence"],
+            "properties": {
+              "evidence": { "required": ["creatorApp", "dsPath"] }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": { "status": { "const": "adapter-written" } }
+          },
+          "then": {
+            "required": ["evidence"],
+            "properties": {
+              "evidence": { "required": ["repo", "sha", "path"] }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": { "status": { "const": "migrated" } }
+          },
+          "then": {
+            "required": ["evidence"],
+            "properties": {
+              "evidence": {
+                "required": ["repo", "sha", "path", "catalystProjectId", "migrationRecord"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": { "status": { "const": "verified" } }
+          },
+          "then": {
+            "required": ["evidence"],
+            "properties": {
+              "evidence": {
+                "required": [
+                  "repo",
+                  "sha",
+                  "path",
+                  "catalystProjectId",
+                  "migrationRecord",
+                  "testId",
+                  "e2eEvidence",
+                  "e2eSha256"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

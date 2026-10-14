@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/c2c\" doctor --local --quiet 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}

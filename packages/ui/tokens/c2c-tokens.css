@@ -1,0 +1,128 @@
+/* c2c design tokens: generated from packages/ui/src/tokens.ts by npm run tokens:css. Do not edit by hand. */
+:root{
+--c2c-accent:#0f3d4c;
+--c2c-accent-ink:#ffffff;
+--c2c-bg:#f4f7f8;
+--c2c-border:#d5dee2;
+--c2c-danger:#8d1d1d;
+--c2c-ease-standard:ease-in-out;
+--c2c-field-w:19rem;
+--c2c-focus-width:2px;
+--c2c-font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+--c2c-font-family-lato:Lato,system-ui,-apple-system,"Segoe UI",sans-serif;
+--c2c-font-size-2xs:0.65rem;
+--c2c-font-size-base:16px;
+--c2c-font-size-close:20px;
+--c2c-font-size-icon:18px;
+--c2c-font-size-l:1.25rem;
+--c2c-font-size-m:1rem;
+--c2c-font-size-s:0.875rem;
+--c2c-font-size-xl:1.5rem;
+--c2c-font-size-xs:0.72rem;
+--c2c-font-size-xs2:0.85rem;
+--c2c-ink:#142226;
+--c2c-input-height:2rem;
+--c2c-line:1.5;
+--c2c-line-tight:1.3;
+--c2c-menu-active-bg:#e9f0f2;
+--c2c-menu-active-ink:#0f3d4c;
+--c2c-menu-bg:#ffffff;
+--c2c-menu-head:#0f3d4c;
+--c2c-menu-ink:#0f3d4c;
+--c2c-menu-width:16rem;
+--c2c-motion-pulse:1.4s;
+--c2c-muted:#3f545c;
+--c2c-on-strong:#ffffff;
+--c2c-primary:#0f3d4c;
+--c2c-radius-l:12px;
+--c2c-radius-m:8px;
+--c2c-radius-s:4px;
+--c2c-scrim:rgba(17,17,26,.45);
+--c2c-shadow-l:0 8px 32px rgba(17,17,26,.25);
+--c2c-shadow-m:0 2px 8px rgba(20,34,38,0.10);
+--c2c-shadow-s:0 1px 2px rgba(20,34,38,0.08);
+--c2c-space-1:4px;
+--c2c-space-2:8px;
+--c2c-space-3:12px;
+--c2c-space-4:16px;
+--c2c-space-5:24px;
+--c2c-space-6:32px;
+--c2c-stripe:#f7fafb;
+--c2c-success:#1d6b3a;
+--c2c-surface:#ffffff;
+--c2c-tint:#e9f0f2;
+--c2c-toast-bg:#142226;
+--c2c-topbar-bg:#0f3d4c;
+--c2c-topbar-ink:#ffffff;
+--c2c-warn-bg:#fff4d6;
+}
+/* Dark scheme: opt-in per page, or follow the device with data-color-scheme="auto". */
+html[data-color-scheme="dark"]{
+--c2c-accent:#7cc4d8;
+--c2c-accent-ink:#ffffff;
+--c2c-bg:#0f1517;
+--c2c-border:#33454b;
+--c2c-danger:#ff9b9b;
+--c2c-ink:#e3eaec;
+--c2c-menu-active-bg:#223035;
+--c2c-menu-active-ink:#ffffff;
+--c2c-menu-bg:#182124;
+--c2c-menu-head:#1f6f86;
+--c2c-menu-ink:#c9dce2;
+--c2c-muted:#a9b8be;
+--c2c-on-strong:#0f1517;
+--c2c-primary:#1f6f86;
+--c2c-scrim:rgba(0,0,0,.6);
+--c2c-shadow-l:0 8px 32px rgba(0,0,0,.6);
+--c2c-shadow-m:0 2px 8px rgba(0,0,0,0.5);
+--c2c-shadow-s:0 1px 2px rgba(0,0,0,0.5);
+--c2c-stripe:#1c272a;
+--c2c-success:#7fd49c;
+--c2c-surface:#182124;
+--c2c-tint:#223035;
+--c2c-toast-bg:#e3eaec;
+--c2c-topbar-bg:#0b2a34;
+--c2c-topbar-ink:#ffffff;
+--c2c-warn-bg:#4a3b12;
+}
+html[data-color-scheme="dark"][data-theme]{--c2c-topbar-bg:#0b2a34;--c2c-topbar-ink:#ffffff}
+@media (prefers-color-scheme:dark){
+html[data-color-scheme="auto"]{
+--c2c-accent:#7cc4d8;
+--c2c-accent-ink:#ffffff;
+--c2c-bg:#0f1517;
+--c2c-border:#33454b;
+--c2c-danger:#ff9b9b;
+--c2c-ink:#e3eaec;
+--c2c-menu-active-bg:#223035;
+--c2c-menu-active-ink:#ffffff;
+--c2c-menu-bg:#182124;
+--c2c-menu-head:#1f6f86;
+--c2c-menu-ink:#c9dce2;
+--c2c-muted:#a9b8be;
+--c2c-on-strong:#0f1517;
+--c2c-primary:#1f6f86;
+--c2c-scrim:rgba(0,0,0,.6);
+--c2c-shadow-l:0 8px 32px rgba(0,0,0,.6);
+--c2c-shadow-m:0 2px 8px rgba(0,0,0,0.5);
+--c2c-shadow-s:0 1px 2px rgba(0,0,0,0.5);
+--c2c-stripe:#1c272a;
+--c2c-success:#7fd49c;
+--c2c-surface:#182124;
+--c2c-tint:#223035;
+--c2c-toast-bg:#e3eaec;
+--c2c-topbar-bg:#0b2a34;
+--c2c-topbar-ink:#ffffff;
+--c2c-warn-bg:#4a3b12;
+}
+html[data-color-scheme="auto"][data-theme]{--c2c-topbar-bg:#0b2a34;--c2c-topbar-ink:#ffffff}
+}
+@media (prefers-reduced-motion:reduce){
+:root{
+--c2c-motion-pulse:0s;
+}
+}
+/* Theme palettes keyed by the export's new-theme number. */
+html[data-theme="11"]{--c2c-accent:#e71e3a;--c2c-menu-active-bg:#e71e3a;--c2c-menu-active-ink:#ffffff;--c2c-menu-bg:#161625;--c2c-menu-head:#e71e3a;--c2c-menu-ink:#c9c9e0;--c2c-primary:#161625;--c2c-topbar-bg:#f1f1f6;--c2c-topbar-ink:#333333}
+html[data-theme="3"]{--c2c-accent:#de4956;--c2c-menu-active-bg:#101115;--c2c-menu-active-ink:#ffffff;--c2c-menu-bg:#232731;--c2c-menu-head:#de4956;--c2c-menu-ink:#cdd1d8;--c2c-primary:#232731;--c2c-topbar-bg:#f0f0f0;--c2c-topbar-ink:#333333}
+html[data-theme="9"]{--c2c-accent:#d03c6a;--c2c-menu-active-bg:#373570;--c2c-menu-active-ink:#ffffff;--c2c-menu-bg:#211f53;--c2c-menu-head:#d03c6a;--c2c-menu-ink:#cfcee8;--c2c-primary:#211f53;--c2c-topbar-bg:#ffffff;--c2c-topbar-ink:#333333}

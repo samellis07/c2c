@@ -1,0 +1,28 @@
+application "Code Signing Mobile"
+{
+	forms
+	{
+		form Item
+		{
+			Name ( type = text )
+		}
+	}
+	tablet
+	{
+		customize
+		{
+			layout = onecolumn
+			font = "default"
+			style = "3"
+			code signing = "team-example"
+			color options
+			{
+				color = chryslerpurple
+			}
+			logo
+			{
+				preference = "none"
+			}
+		}
+	}
+}

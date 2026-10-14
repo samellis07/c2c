@@ -1,0 +1,202 @@
+application "c2c-conn-rest-getpost"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Calcutta"
+	time format = "24-hr"
+
+	forms
+	{
+		form New_Contact
+		{
+			displayname = "New Contact"
+			Name
+			(
+				type = text
+			)
+		}
+		form Conn_Rest_Read_Write
+		{
+			displayname = "Conn Rest Read Write"
+			must have Rest_Verb
+			(
+				type = picklist
+				displayname = "Verb"
+				values = {"GET","POST"}
+				row = 1
+				column = 1
+				width = medium
+			)
+			Rest_Last_Name
+			(
+				type = text
+				displayname = "Last name"
+				row = 2
+				column = 1
+				width = medium
+			)
+			Rest_Response
+			(
+				type = textarea
+				displayname = "REST response"
+				row = 3
+				column = 1
+				width = medium
+			)
+			actions
+			{
+				on add
+				{
+					submit
+					(
+						type = submit
+						displayname = "Submit"
+					)
+					reset
+					(
+						type = reset
+						displayname = "Reset"
+					)
+				}
+				on edit
+				{
+					update
+					(
+						type = submit
+						displayname = "Update"
+					)
+					cancel
+					(
+						type = cancel
+						displayname = "Cancel"
+					)
+				}
+			}
+		}
+	}
+
+	reports
+	{
+		custom All_Contacts
+		{
+			displayName = "All Contacts"
+			show all rows from New_Contact
+			(
+				Name
+			)
+		}
+		list All_Conn_Rest_Read_Writes
+		{
+			displayName = "All Conn Rest Read Writes"
+			show all rows from Conn_Rest_Read_Write
+			(
+				Rest_Verb as "Verb"
+				Rest_Last_Name as "Last name"
+				Rest_Response as "REST response"
+			)
+		}
+	}
+
+	workflow
+	{
+		form
+		{
+			Conn_Rest_Read_Write_Call as "Conn Rest Read Write Call"
+			{
+				type = form
+				form = Conn_Rest_Read_Write
+				record event = on add or edit
+				on success
+				{
+					actions
+					{
+						custom deluge script
+						(
+							if(input.Rest_Verb == "GET")
+							{
+								apiUrl = "https://www.zohoapis.in/crm/v7/Leads?fields=Last_Name,Email,Company&per_page=5";
+								got = invokeurl
+								[
+									url :apiUrl
+									type :GET
+									connection:"c2c_crm"
+								];
+								input.Rest_Response = got.toString();
+							}
+							if(input.Rest_Verb == "POST")
+							{
+								apiUrl = "https://www.zohoapis.in/crm/v7/Leads";
+								rec = Map();
+								rec.put("Last_Name", input.Rest_Last_Name);
+								rec.put("Company", "c2c synthetic");
+								rows = List();
+								rows.add(rec);
+								payload = Map();
+								payload.put("data", rows);
+								hdr = Map();
+								hdr.put("Content-Type", "application/json");
+								posted = invokeurl
+								[
+									url :apiUrl
+									type :POST
+									body:payload.toString()
+									headers:hdr
+									connection:"c2c_crm"
+								];
+								input.Rest_Response = posted.toString();
+							}
+							success message "c2c-rest-called";
+						)
+					}
+				}
+			}
+		}
+	}
+
+	share_settings
+	{
+		role Hierarchy = {New_Contact,Conn_Rest_Read_Write}
+	}
+
+	web
+	{
+		forms
+		{
+			form New_Contact
+			{
+				label placement = left
+			}
+			form Conn_Rest_Read_Write
+			{
+				label placement = left
+			}
+		}
+		menu
+		{
+			space Space
+			{
+				displayname = "Space"
+				section Contacts
+				{
+					displayname = "Contacts"
+					form New_Contact
+					{
+					}
+					report All_Contacts
+					{
+					}
+				}
+				section Conn_Section_Rest_Read_Write
+				{
+					displayname = "c2c-conn-rest-getpost"
+					icon = "design-todo"
+					form Conn_Rest_Read_Write
+					{
+					}
+					report All_Conn_Rest_Read_Writes
+					{
+					}
+				}
+			}
+		}
+	}
+}

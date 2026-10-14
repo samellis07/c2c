@@ -1,0 +1,69 @@
+app: call-logs
+route: #/report/Recent_Calls
+state: loading
+viewport: phone 390
+---
+div class="c2c-app"
+  header class="c2c-topbar"
+    span
+      "Call Logs"
+  nav aria-label="Main menu"
+    div class="c2c-nav-section"
+      h2 class="c2c-nav-heading"
+        "App"
+      ul
+        li
+          a href="#/form/Log_Call"
+            svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+              path
+              path
+              path
+              path
+              path
+            span
+              "Log a Call"
+        li
+          a aria-current="page" href="#/report/Recent_Calls"
+            svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+              path
+              rect
+              path
+              path
+            span
+              "Recent Calls"
+  main tabindex="-1"
+    section class="c2c-card" data-report="Recent_Calls" data-view="list"
+      h1
+        "Recent Calls"
+      div class="c2c-report-tools"
+        form class="c2c-search-form" role="search"
+          label class="c2c-search"
+            svg aria-hidden="true" class="lucide lucide-search"
+              path
+              circle
+            input aria-label="Search Recent Calls" placeholder="Search" type="search" value=""
+          button class="button secondary sm" tabindex="0" type="submit"
+            span class="labelSlot"
+              span class="labelContent"
+                span class="labelPhase"
+                  "Search"
+      p class="c2c-loading" data-state="loading" role="status"
+        "Loading records…"
+  nav aria-label="Tabs"
+    a href="#/form/Log_Call"
+      svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
+        path
+        path
+        path
+        path
+        path
+      span
+        "Log a Call"
+    a aria-current="page" href="#/report/Recent_Calls"
+      svg aria-hidden="true" class="lucide lucide-table c2c-icon"
+        path
+        rect
+        path
+        path
+      span
+        "Recent Calls"

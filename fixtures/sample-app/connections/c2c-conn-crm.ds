@@ -1,0 +1,299 @@
+application "c2c-conn-crm"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Calcutta"
+	time format = "24-hr"
+
+	forms
+	{
+		form New_Contact
+		{
+			displayname = "New Contact"
+			Name
+			(
+				type = text
+			)
+		}
+		form Conn_Crm_Lead
+		{
+			displayname = "Conn Crm Lead"
+			must have Lead_Last_Name
+			(
+				type = text
+				displayname = "Last name"
+				row = 1
+				column = 1
+				width = medium
+			)
+			Lead_Company
+			(
+				type = text
+				displayname = "Company"
+				row = 2
+				column = 1
+				width = medium
+			)
+			Lead_Email
+			(
+				type = email
+				displayname = "Email"
+				row = 3
+				column = 1
+				width = medium
+			)
+			Crm_Response
+			(
+				type = textarea
+				displayname = "CRM response"
+				row = 4
+				column = 1
+				width = medium
+			)
+			actions
+			{
+				on add
+				{
+					submit
+					(
+						type = submit
+						displayname = "Submit"
+					)
+					reset
+					(
+						type = reset
+						displayname = "Reset"
+					)
+				}
+				on edit
+				{
+					update
+					(
+						type = submit
+						displayname = "Update"
+					)
+					cancel
+					(
+						type = cancel
+						displayname = "Cancel"
+					)
+				}
+			}
+		}
+		form Conn_Crm_Touch
+		{
+			displayname = "Conn Crm Touch"
+			must have Touch_Email
+			(
+				type = email
+				displayname = "Lead email"
+				row = 1
+				column = 1
+				width = medium
+			)
+			Touch_Note
+			(
+				type = text
+				displayname = "Note"
+				row = 2
+				column = 1
+				width = medium
+			)
+			Touch_Response
+			(
+				type = textarea
+				displayname = "CRM response"
+				row = 3
+				column = 1
+				width = medium
+			)
+			actions
+			{
+				on add
+				{
+					submit
+					(
+						type = submit
+						displayname = "Submit"
+					)
+					reset
+					(
+						type = reset
+						displayname = "Reset"
+					)
+				}
+				on edit
+				{
+					update
+					(
+						type = submit
+						displayname = "Update"
+					)
+					cancel
+					(
+						type = cancel
+						displayname = "Cancel"
+					)
+				}
+			}
+		}
+	}
+
+	reports
+	{
+		custom All_Contacts
+		{
+			displayName = "All Contacts"
+			show all rows from New_Contact
+			(
+				Name
+			)
+		}
+		list All_Conn_Crm_Leads
+		{
+			displayName = "All Conn Crm Leads"
+			show all rows from Conn_Crm_Lead
+			(
+				Lead_Last_Name as "Last name"
+				Lead_Company as "Company"
+				Lead_Email as "Email"
+				Crm_Response as "CRM response"
+			)
+		}
+		list All_Conn_Crm_Touches
+		{
+			displayName = "All Conn Crm Touches"
+			show all rows from Conn_Crm_Touch
+			(
+				Touch_Email as "Lead email"
+				Touch_Note as "Note"
+				Touch_Response as "CRM response"
+			)
+		}
+	}
+
+	workflow
+	{
+		form
+		{
+			Conn_Crm_Lead_Create as "Conn Crm Lead Create"
+			{
+				type = form
+				form = Conn_Crm_Lead
+				record event = on add or edit
+				on success
+				{
+					actions
+					{
+						custom deluge script
+						(
+							lead = Map();
+							lead.put("Last_Name", input.Lead_Last_Name);
+							lead.put("Company", input.Lead_Company);
+							lead.put("Email", input.Lead_Email);
+							lead.put("Description", "c2c synthetic");
+							opts = Map();
+							resp = zoho.crm.createRecord("Leads", lead, opts, "c2c_crm");
+							input.Crm_Response = resp.toString();
+							success message "c2c-crm-lead-sent";
+						)
+					}
+				}
+			}
+			Conn_Crm_Touch_Update as "Conn Crm Touch Update"
+			{
+				type = form
+				form = Conn_Crm_Touch
+				record event = on add or edit
+				on success
+				{
+					actions
+					{
+						custom deluge script
+						(
+							input.Touch_Response = thisapp.c2c_crm_touch_lead(input.Touch_Email, input.Touch_Note);
+							success message "c2c-crm-touch-done";
+						)
+					}
+				}
+			}
+		}
+	}
+
+	functions
+	{
+		Deluge
+		{
+			string c2c_crm_touch_lead(string leadEmail, string noteText)
+			{
+				found = zoho.crm.searchRecords("Leads", "(Email:equals:" + leadEmail + ")", 1, 1, Map(), "c2c_crm");
+				if(found.size() == 0)
+				{
+					return "no lead for " + leadEmail + ": " + found.toString();
+				}
+				lead = found.get(0);
+				change = Map();
+				change.put("Description", noteText);
+				updated = zoho.crm.updateRecord("Leads", lead.get("id").toLong(), change, Map(), "c2c_crm");
+				return updated.toString();
+			}
+		}
+	}
+
+	share_settings
+	{
+		role Hierarchy = {New_Contact,Conn_Crm_Lead,Conn_Crm_Touch}
+	}
+
+	web
+	{
+		forms
+		{
+			form New_Contact
+			{
+				label placement = left
+			}
+			form Conn_Crm_Lead
+			{
+				label placement = left
+			}
+			form Conn_Crm_Touch
+			{
+				label placement = left
+			}
+		}
+		menu
+		{
+			space Space
+			{
+				displayname = "Space"
+				section Contacts
+				{
+					displayname = "Contacts"
+					form New_Contact
+					{
+					}
+					report All_Contacts
+					{
+					}
+				}
+				section Conn_Section_Crm_Lead
+				{
+					displayname = "c2c-conn-crm"
+					icon = "design-todo"
+					form Conn_Crm_Lead
+					{
+					}
+					report All_Conn_Crm_Leads
+					{
+					}
+					form Conn_Crm_Touch
+					{
+					}
+					report All_Conn_Crm_Touches
+					{
+					}
+				}
+			}
+		}
+	}
+}

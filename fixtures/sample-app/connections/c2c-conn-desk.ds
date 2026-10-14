@@ -1,0 +1,236 @@
+application "c2c-conn-desk"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Calcutta"
+	time format = "24-hr"
+
+	forms
+	{
+		form New_Contact
+		{
+			displayname = "New Contact"
+			Name
+			(
+				type = text
+			)
+		}
+		form Conn_Desk_Ticket
+		{
+			displayname = "Conn Zoho Desk Record"
+			must have Ticket_Subject
+			(
+				type = text
+				displayname = "Subject"
+				row = 1
+				column = 1
+				width = medium
+			)
+			must have Ticket_Contact_Last_Name
+			(
+				type = text
+				displayname = "Contact last name"
+				row = 2
+				column = 1
+				width = medium
+			)
+			must have Ticket_Contact_Email
+			(
+				type = email
+				displayname = "Contact email"
+				row = 3
+				column = 1
+				width = medium
+			)
+			Ticket_Description
+			(
+				type = textarea
+				displayname = "Description"
+				row = 4
+				column = 1
+				width = medium
+			)
+			Desk_Response
+			(
+				type = textarea
+				displayname = "Desk response"
+				row = 5
+				column = 1
+				width = medium
+			)
+			actions
+			{
+				on add
+				{
+					submit
+					(
+						type = submit
+						displayname = "Submit"
+					)
+					reset
+					(
+						type = reset
+						displayname = "Reset"
+					)
+				}
+				on edit
+				{
+					update
+					(
+						type = submit
+						displayname = "Update"
+					)
+					cancel
+					(
+						type = cancel
+						displayname = "Cancel"
+					)
+				}
+			}
+		}
+	}
+
+	reports
+	{
+		custom All_Contacts
+		{
+			displayName = "All Contacts"
+			show all rows from New_Contact
+			(
+				Name
+			)
+		}
+		list All_Conn_Desk_Tickets
+		{
+			displayName = "All Conn Desk Tickets"
+			show all rows from Conn_Desk_Ticket
+			(
+				Ticket_Subject as "Subject"
+				Ticket_Contact_Last_Name as "Contact last name"
+				Ticket_Contact_Email as "Contact email"
+				Ticket_Description as "Description"
+				Desk_Response as "Desk response"
+			)
+		}
+	}
+
+	workflow
+	{
+		form
+		{
+			Conn_Desk_Ticket_Check as "Conn Desk Ticket Check"
+			{
+				type = form
+				form = Conn_Desk_Ticket
+				record event = on add or edit
+				on validate
+				{
+					actions
+					{
+						custom deluge script
+						(
+							if(thisapp.c2c_desk_org_id() == "FILL_DESK_ORG_ID")
+							{
+								alert "Set c2c_desk_org_id to the Zoho Desk organization ID first.";
+								cancel submit;
+							}
+							if(thisapp.c2c_desk_department_id() == "FILL_DESK_DEPARTMENT_ID")
+							{
+								alert "Set c2c_desk_department_id to a Zoho Desk department ID first.";
+								cancel submit;
+							}
+						)
+					}
+				}
+			}
+			Conn_Desk_Ticket_Create as "Conn Desk Ticket Create"
+			{
+				type = form
+				form = Conn_Desk_Ticket
+				record event = on add or edit
+				on success
+				{
+					actions
+					{
+						custom deluge script
+						(
+							contact = Map();
+							contact.put("lastName", input.Ticket_Contact_Last_Name);
+							contact.put("email", input.Ticket_Contact_Email);
+							ticket = Map();
+							ticket.put("subject", input.Ticket_Subject);
+							ticket.put("departmentId", thisapp.c2c_desk_department_id());
+							ticket.put("contact", contact);
+							ticket.put("description", input.Ticket_Description);
+							resp = zoho.desk.create(thisapp.c2c_desk_org_id().toLong(), "tickets", ticket, "c2c_desk");
+							input.Desk_Response = resp.toString();
+							success message "c2c-desk-ticket-sent";
+						)
+					}
+				}
+			}
+		}
+	}
+
+	functions
+	{
+		Deluge
+		{
+			string c2c_desk_org_id()
+			{
+				return "FILL_DESK_ORG_ID";
+			}
+			string c2c_desk_department_id()
+			{
+				return "FILL_DESK_DEPARTMENT_ID";
+			}
+		}
+	}
+
+	share_settings
+	{
+		role Hierarchy = {New_Contact,Conn_Desk_Ticket}
+	}
+
+	web
+	{
+		forms
+		{
+			form New_Contact
+			{
+				label placement = left
+			}
+			form Conn_Desk_Ticket
+			{
+				label placement = left
+			}
+		}
+		menu
+		{
+			space Space
+			{
+				displayname = "Space"
+				section Contacts
+				{
+					displayname = "Contacts"
+					form New_Contact
+					{
+					}
+					report All_Contacts
+					{
+					}
+				}
+				section Conn_Section_Desk_Ticket
+				{
+					displayname = "c2c-conn-desk"
+					icon = "design-todo"
+					form Conn_Desk_Ticket
+					{
+					}
+					report All_Conn_Desk_Tickets
+					{
+					}
+				}
+			}
+		}
+	}
+}
