@@ -323,6 +323,61 @@ test('app-level report criteria are listed once with scope app', () => {
   assert.equal(report.deluge.todo, 4);
 });
 
+test('relative report criteria compile while unsupported relative comparisons fail closed', () => {
+  const source = `application "Relative_Report_Criteria"
+{
+	forms
+	{
+		form Item
+		{
+			Added_Time
+			(
+				type = datetime
+			)
+		}
+	}
+	reports
+	{
+		list This_Week
+		{
+			show all rows from Item [Added_Time is this week]
+			(
+				Added_Time
+			)
+		}
+		list This_Month
+		{
+			show all rows from Item [Added_Time is this month]
+			(
+				Added_Time
+			)
+		}
+		list Unsupported
+		{
+			show all rows from Item [Added_Time > this week]
+			(
+				Added_Time
+			)
+		}
+	}
+}
+`;
+  const report = analyze(deriveIr(parse(source)));
+  assert.deepEqual(
+    report.deluge.todoLocations.filter((item) => item.location.startsWith('report ')),
+    [
+      { location: 'report Unsupported', construct: 'report-criteria', scope: 'app' },
+      {
+        location: 'report Unsupported',
+        construct: 'Filter not migrated: the report criteria could not be translated; the report returns no rows.',
+        scope: 'ui',
+      },
+    ],
+  );
+  assert.equal(report.determinism.todoCount, 2);
+  assert.equal(report.determinism.uiTodoCount, 1);
+});
+
 const galleryRoot = process.env.C2C_FIXTURES_DIR;
 const galleryDir = galleryRoot ? path.join(galleryRoot, 'gallery') : '';
 const galleryReady = !!galleryRoot && existsSync(galleryDir);
