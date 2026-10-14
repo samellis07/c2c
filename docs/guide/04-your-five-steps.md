@@ -1,13 +1,15 @@
-# 4. Your five steps — the ONLY things that need a human
+# 4. Your five steps — the run's human checklist
 
 The AI cannot click in the console, open mail, or sign in for you —
 and it is forbidden from trying
-([rules 2 and 13](../../plugin/C2C.md)). So the run pauses and
-asks for you at most **five** times, printed as one numbered
-checklist at the end of provisioning and deploying. Each item only
-appears when your app actually needs it. Steps 1–3 and 5 mirror
-the run's [human checklist](../../docs/human-steps.md); step 4 is
-the in-app check from the verify flow.
+([rules 2 and 13](../../plugin/C2C.md)). So instead of interrupting
+you piecemeal, the run collects everything only you can do into
+**five** steps, printed as one numbered `human checklist:` at the
+end of provisioning and deploying. The invite is always on the
+list; each other item appears only when your app actually needs
+it. Steps 1–3 and 5 match the checklist items in
+[human-steps.ts](../../packages/deploy/src/human-steps.ts); step 4
+is the in-app check from the verify flow, asked while verifying.
 
 ## 1. Start Slate once (only if your app has web screens)
 
@@ -16,8 +18,9 @@ the in-app check from the verify flow.
 - **Why:** on a brand-new project the first Slate deploy fails
   until the service has been opened in the console once.
 - **How the AI verifies:** the next Slate deploy finishes and your
-  app address answers. (Data Store, Functions and sign-in never need
-  this — Slate is the exception.)
+  app address answers. (Other services normally answer open with no
+  click — Slate on a fresh project is the one that needs it; see
+  [facts/errors.md](../../plugin/references/facts/errors.md).)
 
 ## 2. Accept the admin invite
 
@@ -26,37 +29,39 @@ the in-app check from the verify flow.
 - **Why:** this makes you the first App Administrator. Portal users
   are always re-invited, never copied with passwords.
 - **How the AI verifies:** it reads back your user record and sees
-  you confirmed. Open the invite at your new app's web address — an
-  invite opened anywhere else can land on a dead page.
+  you confirmed. The invite link carries your app's web address —
+  open it there. Without it you can land on an unhosted `/app/`
+  page (404) where the invite never completes.
 
 ## 3. Sign in once (only if your app has web screens)
 
 - **What you see:** your new app's web address, showing a
   **signed-out page with a login form**. Sign in. You should land on
   the app's home screen — not on a dead `/app/` page (if you land
-  there, tell the AI verbatim; it knows the cause).
+  there, tell the AI the exact address; it knows the fix).
 - **Why:** the first sign-in finishes activating the login.
 - **How the AI verifies:** your user record flips to confirmed and
   signed-in, and the app's checks pass from your session.
 
-## 4. Run the in-app check and paste its code into the chat
+## 4. Run the in-app check and paste its code into the chat (only if your app has web screens)
 
-- **What you see:** with you signed in, the AI asks you to try the
-  app — submit one record per main form, open each main report —
-  and to paste back what the app shows you.
-- **Why:** this is the first live signal that the migrated app
-  really works for a human, not just in the AI's checks.
-- **How the AI verifies:** it matches your pasted result against
-  the stored rows and the function logs it reads itself.
-- If your app does not show a code yet, just describe what you did
-  and saw; the AI checks the stored rows and logs itself.
+- **What you see:** your app's web address plus `#/admin/smoke`.
+  Open it while signed in, wait until the page says Done, press
+  **Copy** beside the result code, and paste the code into the chat.
+- **Why:** the code is the first live signal that the migrated app
+  really works for a human, not just in the AI's checks — it is
+  bound to your app, its checks, and its result.
+- **How the AI verifies:** it unpacks the code itself and checks
+  every step passed. A wrong, stale, or mistyped code is refused —
+  press Copy again and paste afresh.
 
 ## 5. Verify the mail sender (only if your app sends mail)
 
 - **What you see:** Catalyst console → **Mail** → Email
   Configuration → add the sender address. The service **emails a
   verification code to that address**; you type the code in.
-- **Why:** Catalyst only sends mail from verified senders.
+- **Why:** Catalyst only sends mail from verified senders
+  ([facts/auth.md](../../plugin/references/facts/auth.md)).
 - **How the AI verifies:** it lists the mail configuration and sees
   yours marked verified.
 
@@ -64,6 +69,10 @@ the in-app check from the verify flow.
 
 Everything else — analysis, planning, creating tables and buckets,
 deploying code, loading records, probes, counting, log-reading — is
-the AI's work, each piece read back and recorded. If the AI asks you
-to do anything not on this list of five, ask it which checklist item
-it belongs to: ad-hoc chores are how migrations go wrong.
+the AI's work, each piece read back and recorded. The exception is
+the guided console stages in chapter 3: the project, custom roles
+or connections, Deploy to Production, and freezing Creator and
+switching links stay yours, each with exact clicks. If the AI asks
+you to do anything beyond the five steps plus those stages, ask it
+which checklist item it belongs to: ad-hoc chores are how
+migrations go wrong.
