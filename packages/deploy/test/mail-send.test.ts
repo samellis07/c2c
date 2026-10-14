@@ -158,7 +158,7 @@ test('precheck: an app that sends mail with no verified sender is a blocker when
   assert.match(none[0].message, /no Catalyst Mail sender/);
   const unverified = mailSenderPrecheck(app, mailConfig(true, { from: OWNER }));
   assert.equal(unverified[0].severity, 'blocker');
-  assert.match(unverified[0].message, new RegExp(`${maskMailAddress(OWNER)} is not marked verified`));
+  assert.ok(unverified[0].message.includes(`${maskMailAddress(OWNER)} is not marked verified`));
   // The sender address never leaks into a finding.
   assert.doesNotMatch(unverified[0].message, /owner@example\.com/);
   assert.deepEqual(mailSenderPrecheck(app, mailConfig(true, { from: OWNER, verified: true })), []);
