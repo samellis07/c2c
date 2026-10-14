@@ -18,7 +18,14 @@
  *   primary := '(' or ')' | true | col IS [NOT] NULL | col IN (lit, …) | col LIKE 'x' | col op lit
  */
 
+import { decimal } from '../src/decimal.js';
+
 type Row = Record<string, string | null>;
+
+/** Data Store types relevant to criteria comparisons in the mock. */
+export type MockColumnType = 'int' | 'bigint' | 'decimal' | 'double' | 'string';
+export type MockTableSchema = Readonly<Record<string, MockColumnType>>;
+type MockSchema = Readonly<Record<string, readonly string[] | MockTableSchema>>;
 
 interface Tok {
   t: 'id' | 'num' | 'str' | 'op' | 'p';
@@ -94,7 +101,7 @@ function and3(values: Truth[]): Truth {
   return values.some((v) => v === null) ? null : true;
 }
 
-function compile(where: string, doubles: ReadonlySet<string>): Pred {
+function compile(where: string, types: Readonly<Record<string, MockColumnType>>): Pred {
   if (!where.trim()) return () => true;
   const toks = lex(where);
   let k = 0;
@@ -114,13 +121,18 @@ function compile(where: string, doubles: ReadonlySet<string>): Pred {
   };
   const cmp = (col: string, cell: string | null, value: string | null): number | null => {
     if (cell == null || value == null) return null;
-    if (col === 'ROWID') {
+    if (col === 'ROWID' || types[col] === 'int' || types[col] === 'bigint') {
       // ROWID is a BIGINT column: it compares as a number.
       const a = BigInt(cell);
       const b = BigInt(value);
       return a < b ? -1 : a > b ? 1 : 0;
     }
-    if (doubles.has(col)) {
+    if (types[col] === 'decimal') {
+      // Decimal columns are stored as canonical strings. Keep comparisons exact;
+      // converting through Number makes adjacent values near 0.3 indistinguishable.
+      return decimal.from(cell).compare(decimal.from(value));
+    }
+    if (types[col] === 'double') {
       const a = Number(cell);
       const b = Number(value);
       return a < b ? -1 : a > b ? 1 : 0;
@@ -224,7 +236,7 @@ function compile(where: string, doubles: ReadonlySet<string>): Pred {
   return pred;
 }
 
-function sorter(orderBy: string, doubles: ReadonlySet<string>): (a: Row, b: Row) => number {
+function sorter(orderBy: string, types: Readonly<Record<string, MockColumnType>>): (a: Row, b: Row) => number {
   const m = /^ORDER BY (.+)$/.exec(orderBy.trim());
   if (!m) return (a, b) => compareRowId(a, b);
   const keys = m[1]!.split(',').map((part) => {
@@ -239,7 +251,12 @@ function sorter(orderBy: string, doubles: ReadonlySet<string>): (a: Row, b: Row)
         const x = a[key.col] ?? null;
         const y = b[key.col] ?? null;
         if (x == null || y == null) d = x == null && y == null ? 0 : x == null ? -1 : 1;
-        else if (doubles.has(key.col)) d = Number(x) - Number(y);
+        else if (types[key.col] === 'decimal') d = decimal.from(x).compare(decimal.from(y));
+        else if (types[key.col] === 'int' || types[key.col] === 'bigint') {
+          const a = BigInt(x);
+          const b = BigInt(y);
+          d = a < b ? -1 : a > b ? 1 : 0;
+        } else if (types[key.col] === 'double') d = Number(x) - Number(y);
         else d = x < y ? -1 : x > y ? 1 : 0;
       }
       if (d !== 0) return key.desc ? -d : d;
@@ -262,12 +279,20 @@ export interface ZcqlCall {
   orderBy: string;
 }
 
-/** `doubles`: form → Double column names. Every other column is VarChar. */
-export function mockDatastore(doubles: Record<string, readonly string[]>) {
+/**
+ * Schema by form. Object entries name each column's type; the readonly-string-array
+ * form is retained for existing tests that only declare Double shadow columns.
+ * Undeclared columns default to VarChar, matching Catalyst's textual comparison.
+ */
+export function mockDatastore(schema: MockSchema) {
   const tables = new Map<string, Row[]>();
   const calls: ZcqlCall[] = [];
   let next = 1000;
-  const typed = (form: string) => new Set(doubles[form] ?? []);
+  const typed = (form: string): Readonly<Record<string, MockColumnType>> => {
+    const table = schema[form] ?? [];
+    if (Array.isArray(table)) return Object.fromEntries(table.map((col) => [col, 'double' as const]));
+    return table as MockTableSchema;
+  };
   const store = (value: unknown): string | null => (value == null ? null : String(value));
   const datastore = {
     async insert(form: string, rows: Record<string, unknown>[]) {
