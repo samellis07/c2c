@@ -315,14 +315,14 @@ test('mcp-observed: a second probe never orphans the first — both are tracked,
   // First probe verified server-side, but the session never ran its delete.
   const first = await begin(env);
   const probe1 = `c2cprobe${first.request}`;
-  const run1 = await observe(env, observation(first.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: {} }));
+  const run1 = await observe(env, observation(first.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { bucket_name: probe1 } }));
   assert.equal(run1.code, 0, run1.out + run1.err);
   // The second begin still reminds about the first probe, and the second
   // verified probe is APPENDED — both buckets stay tracked.
   const second = await begin(env);
   const probe2 = `c2cprobe${second.request}`;
   assert.match(second.out, new RegExp(probe1));
-  const run2 = await observe(env, observation(second.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: {}, [probe2]: {} }));
+  const run2 = await observe(env, observation(second.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { bucket_name: probe1 }, [probe2]: { bucket_name: probe2 } }));
   assert.equal(run2.code, 0, run2.out + run2.err);
   const tracked = JSON.parse(readFileSync(cleanupFile, 'utf8')) as { name: string }[];
   assert.deepEqual(tracked.map((p) => p.name).sort(), [probe1, probe2].sort());
@@ -341,14 +341,14 @@ test('mcp-observed: a partial cleanup keeps the remaining pending record', async
   const cleanupFile = join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json');
   const first = await begin(env);
   const probe1 = `c2cprobe${first.request}`;
-  assert.equal((await observe(env, observation(first.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: {} }))).code, 0);
+  assert.equal((await observe(env, observation(first.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { bucket_name: probe1 } }))).code, 0);
   const second = await begin(env);
   const probe2 = `c2cprobe${second.request}`;
-  assert.equal((await observe(env, observation(second.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: {}, [probe2]: {} }))).code, 0);
+  assert.equal((await observe(env, observation(second.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { bucket_name: probe1 }, [probe2]: { bucket_name: probe2 } }))).code, 0);
   // The session deleted only the first bucket: its entry drops, the second stays.
   const third = await begin(env);
   const probe3 = `c2cprobe${third.request}`;
-  const run3 = await observe(env, observation(third.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe2]: {}, [probe3]: {} }));
+  const run3 = await observe(env, observation(third.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe2]: { bucket_name: probe2 }, [probe3]: { bucket_name: probe3 } }));
   assert.equal(run3.code, 0, run3.out + run3.err);
   const tracked = JSON.parse(readFileSync(cleanupFile, 'utf8')) as { name: string }[];
   assert.deepEqual(tracked.map((p) => p.name).sort(), [probe2, probe3].sort());
