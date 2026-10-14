@@ -8,6 +8,8 @@ import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { serviceWorker } from '../../ui/src/generate.js';
 import { GENERATED_MANIFEST, HandEditedError, TEMPLATE_DIR, generateReactApp, reactAppSpec, writeReactApp, type ReactFile } from '../src/index.js';
 import { REACT_BUILD_NODE_RANGE } from '../../core/src/toolchain.js';
+import { ROUTE_CHUNK_BUDGETS, chunkBudgetProblems } from '../template/lib/c2c-ui/vite/plugin.js';
+import routeChunkBudgets from '../template/lib/c2c-ui/vite/route-chunk-budgets.json' with { type: 'json' };
 
 function field(name: string, type: string, extra = '', modifiers = ''): string {
   const head = modifiers ? `${modifiers} ${name}` : name;
@@ -377,4 +379,23 @@ test('React client handlers ship the exact modules the vanilla target emits', as
     assert.ok(emitted, `React app is missing generated handler ${key}`);
     assert.ok(String(emitted.data).endsWith(mod.source), `${key}: React handler diverges from the vanilla module`);
   }
+});
+
+
+test('route chunk budgets allow a 5% gzip increase and reject larger growth', () => {
+  const budgets = { version: 1, tolerance: ROUTE_CHUNK_BUDGETS.tolerance, samples: [], chunks: { 'runtime.js': 100 } };
+  assert.deepEqual(chunkBudgetProblems({ 'assets/runtime.ABCDEFGH.js': 105 }, budgets), [], 'exactly 5% is allowed');
+  assert.match(chunkBudgetProblems({ 'assets/runtime.ABCDEFGH.js': 106 }, budgets)[0]!, /over its 100 byte budget by more than 5%/);
+  assert.deepEqual(chunkBudgetProblems({ 'assets/unexpected.ABCDEFGH.js': 20 }, budgets), []);
+  assert.match(chunkBudgetProblems({ 'assets/unexpected.ABCDEFGH.js': 20 }, budgets, true).join(' '), /unbudgeted route chunk unexpected.js/);
+  assert.deepEqual(chunkBudgetProblems({}, budgets), [], 'unrelated generated apps may emit different chunk sets');
+  assert.match(chunkBudgetProblems({}, budgets, true).join(' '), /missing budgeted route chunk runtime.js/);
+});
+
+test('the committed route chunk budgets record the two sample apps and are self-consistent', () => {
+  assert.deepEqual(routeChunkBudgets.samples, ['fixtures/dialects/d1-minimal.ds', 'fixtures/dialects/d2-minimal.ds']);
+  assert.equal(routeChunkBudgets.tolerance, 0.05);
+  assert.ok(Object.keys(routeChunkBudgets.chunks).length > 0);
+  const template = generateReactApp(appOf());
+  assert.equal(text(template, 'lib/c2c-ui/vite/route-chunk-budgets.json'), JSON.stringify(routeChunkBudgets, null, 2) + '\n');
 });

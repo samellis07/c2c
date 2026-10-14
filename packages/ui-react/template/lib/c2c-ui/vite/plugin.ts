@@ -23,6 +23,7 @@
  * Everything here is deterministic: no clock, no randomness, sorted lists.
  */
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -35,12 +36,45 @@ export interface Budget {
   css: number;
 }
 
-// JS is only the eager graph (entry, model and shared chunks) but workflow
-// apps eagerly load approvals screens, handlers and the charts/report widgets
-// the React target adds (~213 KiB worst app). CSS covers every emitted
-// chunk (cssCodeSplit is off): reports, charts and workflow styling together
-// no longer fit the earlier 24 KiB allowance (~26.8 KiB worst app).
+// Aggregate ceiling for arbitrary apps; sample apps also have per-chunk gates below.
 export const DEFAULT_BUDGET: Budget = { js: 224 * 1024, css: 28 * 1024 };
+interface RouteChunkBudgets {
+  version: number;
+  tolerance: number;
+  samples: string[];
+  chunks: Record<string, number>;
+}
+
+export const ROUTE_CHUNK_BUDGETS: RouteChunkBudgets = JSON.parse(
+  readFileSync(fileURLToPath(new URL('./route-chunk-budgets.json', import.meta.url)), 'utf8'),
+) as RouteChunkBudgets;
+
+function stableChunkName(fileName: string): string {
+  return fileName.replace(/\.[A-Z0-9_-]{8}(?=\.(?:js|css)$)/, '');
+}
+
+export function chunkBudgetProblems(
+  sizes: Record<string, number>,
+  budgets: RouteChunkBudgets = ROUTE_CHUNK_BUDGETS,
+  requireComplete = false,
+): string[] {
+  const stableSizes = Object.fromEntries(Object.entries(sizes).map(([name, size]) => [stableChunkName(name.split('/').pop() ?? name), size]));
+  const problems: string[] = [];
+  for (const [name, actual] of Object.entries(stableSizes).sort(([a], [b]) => a.localeCompare(b))) {
+    const limit = budgets.chunks[name];
+    if (limit === undefined) {
+      if (requireComplete) problems.push(`unbudgeted route chunk ${name}`);
+    } else if (actual > limit * (1 + budgets.tolerance)) {
+      problems.push(`${name} is ${actual} bytes gzipped, over its ${limit} byte budget by more than 5%`);
+    }
+  }
+  if (requireComplete) {
+    for (const name of Object.keys(budgets.chunks).sort()) {
+      if (stableSizes[name] === undefined) problems.push(`missing budgeted route chunk ${name}`);
+    }
+  }
+  return problems;
+}
 
 /** Files under public/ that keep a stable URL and are not precached: c2c deploy rewrites them. */
 const STABLE = new Set(['c2c-config.js']);
@@ -120,6 +154,7 @@ export function c2cBuild(opts: { budget?: Budget; swTemplate: string }): Plugin 
           else deferredJs += gz;
         } else css += gz;
       }
+      problems.push(...chunkBudgetProblems(sizes));
       if (js > budget.js) problems.push(`JavaScript is ${js} bytes gzipped, over the ${budget.js} byte budget`);
       if (css > budget.css) problems.push(`CSS is ${css} bytes gzipped, over the ${budget.css} byte budget`);
       const styles = Object.values(bundle).filter((file) => file.type === 'asset' && file.fileName.endsWith('.css')).map((file) => file.fileName).sort();
@@ -143,7 +178,7 @@ export function c2cBuild(opts: { budget?: Budget; swTemplate: string }): Plugin 
         .replaceAll('@@cache@@', cacheId)
         .replaceAll('@@index@@', sha(indexText));
       this.emitFile({ type: 'asset', fileName: 'sw.js', source: sw });
-      const report = { budget, gzip: { js, deferredJs, css }, files: Object.fromEntries(Object.entries(sizes).sort(([a], [b]) => (a < b ? -1 : 1))) };
+      const report = { budget, routeChunkBudget: ROUTE_CHUNK_BUDGETS, gzip: { js, deferredJs, css }, files: Object.fromEntries(Object.entries(sizes).sort(([a], [b]) => (a < b ? -1 : 1))) };
       this.emitFile({ type: 'asset', fileName: 'c2c-build.json', source: `${JSON.stringify(report, null, 2)}\n` });
     },
   };
