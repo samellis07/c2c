@@ -166,3 +166,36 @@ test('a string argument is not an in-memory list aggregate', () => {
   assert.match(median.server, /shim\.todo\(ctx, "call:median"\)/);
   assert.doesNotMatch(median.server, /shim\.list\.aggregate/);
 });
+
+test('count() on a record-typed function parameter emits the record cardinality', async () => {
+  // A parameter holding one record or a record collection counts as 1, its
+  // rows, or 0 for null — without a Data Store read.
+  // (record count: https://www.zoho.com/deluge/help/data-access/aggregate-records/count.html)
+  const t = translate('string countIt(Faculty_Details d) { return d.count(); }');
+  assert.doesNotMatch(t.server, /shim\.todo\(/);
+  assert.doesNotMatch(t.server, /shim\.datastore\.aggregate/);
+  assert.match(t.server, /\(d \? \(Array\.isArray\(d\) \? d\.length : 1\) : 0\)/);
+  const run = new Function('ctx', 'd', `${t.server}\nreturn countIt(ctx, d);`) as (ctx: unknown, d: unknown) => Promise<unknown>;
+  assert.equal(await run({}, { ID: 1 }), 1);
+  assert.equal(await run({}, [{ ID: 1 }, { ID: 2 }, { ID: 3 }]), 3);
+  assert.equal(await run({}, null), 0);
+});
+
+test('a record-typed parameter guard `if (faculty_Obj.count() != 0)` needs no Data Store read', () => {
+  const t = translate(
+    [
+      'string checkIt(Faculty_Details faculty_Obj) {',
+      '  if (faculty_Obj.count() != 0) {',
+      '    return "yes";',
+      '  }',
+      '  return "no";',
+      '}',
+    ].join('\n'),
+  );
+  assert.doesNotMatch(t.server, /method:count/);
+  assert.doesNotMatch(t.server, /shim\.todo\(/);
+  assert.match(
+    t.server,
+    /\(faculty_Obj \? \(Array\.isArray\(faculty_Obj\) \? faculty_Obj\.length : 1\) : 0\)/,
+  );
+});
