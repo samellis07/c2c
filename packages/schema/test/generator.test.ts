@@ -54,6 +54,11 @@ test('every mapped field type has a status, a reason, and a plan', () => {
       const stored = plan.tables.flatMap((table) => table.columns).some((column) => column.matrixId === row.id);
       if (row.kind === 'none') assert.equal(stored, false, token);
       else assert.equal(stored, true, token);
+      if (row.dataType && row.kind === 'column' && !['lookup-single', 'lookup-multi'].includes(row.id)) {
+        const mapped = plan.tables.flatMap((table) => table.columns).filter((column) => column.matrixId === row.id && column.name === 'F');
+        assert.equal(mapped.length, 1, `${row.id} / ${token} primary column`);
+        assert.equal(mapped[0]!.dataType, row.dataType, `${row.id} / ${token} Catalyst type`);
+      }
       for (const column of plan.tables.flatMap((table) => table.columns)) {
         assert.notEqual(column.dataType, 'decimal');
       }
@@ -65,6 +70,16 @@ test('docs/schema-mapping.md matches the mapping table', () => {
   const doc = readFileSync(join(process.cwd(), 'docs/schema-mapping.md'), 'utf8');
   assert.equal(doc, schemaMappingMarkdown());
   for (const row of FIELD_TYPES) assert.ok(doc.includes(row.label), row.label);
+});
+
+test('Creator required, unique, and initial-value options reach the emitted column', () => {
+  const plan = planOf(field('Code', 'text', '\t\t\tinitial value = ready', 'must have unique'));
+  const column = plan.tables[0]!.columns.find((item) => item.name === 'Code')!;
+  assert.equal(column.dataType, 'VarChar');
+  assert.equal(column.length, 255);
+  assert.equal(column.mandatory, true);
+  assert.equal(column.unique, true);
+  assert.equal(column.defaultValue, 'ready');
 });
 
 test('varchar over 255 is promoted to text', () => {
