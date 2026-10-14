@@ -15,6 +15,7 @@ import {
   doctorGateForArgs,
   doctorJsonPath,
   doctorStamp,
+  DOCTOR_CHECK_IDS,
   evaluateGate,
   gateRefusalMessage,
   missingRequiredTools,
@@ -42,6 +43,66 @@ import { ALL_REQUIRED_MCP_TOOLS, MCP_TOOLS_GUIDANCE, NEVER_CALL_MCP_TOOLS, REQUI
 
 const ORG = '10000000000';
 const PROJECT = '10000000000013200';
+
+test('doctor check catalogue matches the documented specification', () => {
+  const spec = readFileSync(join(repoRoot(), 'plugin/references/doctor-spec.md'), 'utf8');
+  const documented = [...spec.matchAll(/^\| (D-[A-Z]\d+) \|/gm)].map((match) => match[1]!);
+  assert.deepEqual([...new Set(documented)].sort(), [...DOCTOR_CHECK_IDS].sort());
+});
+
+test('doctor offline coverage: conditional and warning checks return their documented outcomes', async () => {
+  const { dir, env } = greenWorkspace();
+  const scope = resolveScope({ cwd: dir, flags: {}, hooks: NO_HOOKS });
+  const run = (overrides: Partial<DoctorContext> = {}) =>
+    runDoctorChecks({ io: fakeIo(env).io, workspace: dir, scope, local: true, ...overrides });
+
+  // D-A4 is a WARN-only compatibility floor.
+  writeFileSync(join(env.C2C_CATALYST_SKILLS_DIR!, 'catalyst-by-zoho', 'SKILL.md'), '---\nname: catalyst-by-zoho\nmetadata:\n  version: "0.0.1"\n---\n');
+  const oldPlugin = (await run()).checks.find((check) => check.id === 'D-A4');
+  assert.equal(oldPlugin?.status, 'warn');
+  assert.match(oldPlugin!.fix!, /plugin update catalyst-by-zoho/);
+
+  // D-C2 fails below the compatibility floor and prints the install fix.
+  const oldCliIo = fakeIo(env, (command, args) =>
+    command === 'catalyst' && args[0] === '--version'
+      ? { code: 0, stdout: '1.27.1\n', stderr: '' }
+      : greenCatalyst(command, args),
+  );
+  const oldCliCode = await doctorCli([], oldCliIo.io, { hooks: NO_HOOKS });
+  assert.equal(oldCliCode, 1);
+  assert.match(oldCliIo.out(), /FAIL D-C2/);
+  assert.match(oldCliIo.out(), /npm install -g zcatalyst-cli@latest/);
+
+  // D-B4 passes with feature groups, warns when absent, and skips for direct shape.
+  const meta = parseEvidence(JSON.stringify(evidence()));
+  const featurePass = (await run({ evidence: meta })).checks.find((check) => check.id === 'D-B4');
+  assert.equal(featurePass?.status, 'pass');
+  const noFeatures = parseEvidence(JSON.stringify(evidence({ features: [] })));
+  const featureWarn = (await run({ evidence: noFeatures })).checks.find((check) => check.id === 'D-B4');
+  assert.equal(featureWarn?.status, 'warn');
+  const direct = parseEvidence(JSON.stringify(evidence({ shape: 'direct', tools: ['CatalystbyZoho_List_All_Tables'] })));
+  const featureSkip = (await run({ evidence: direct })).checks.find((check) => check.id === 'D-B4');
+  assert.equal(featureSkip?.status, 'skip');
+
+  // D-D1 passes a parseable export, fails empty input with the exact user fix, and skips without --app.
+  const app = join(dir, 'Widget.ds');
+  writeFileSync(app, 'application "Widget"\n{\n\tsection S\n\t{\n\t\tform F\n\t\t{\n\t\t\tName\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)\n\t\t}\n\t}\n}\n');
+  assert.equal((await run({ appPath: app })).checks.find((check) => check.id === 'D-D1')?.status, 'pass');
+  writeFileSync(app, '');
+  const badExport = (await run({ appPath: app })).checks.find((check) => check.id === 'D-D1');
+  assert.equal(badExport?.status, 'fail');
+  assert.match(badExport!.fix!, /Creator.*Settings.*Export/);
+  assert.equal((await run()).checks.find((check) => check.id === 'D-D1')?.status, 'skip');
+
+  // D-D2 and D-E2 are warning paths; D-F2 is a failure with its fix.
+  const creatorDc = (await run({ local: false, scope: { ...scope, creatorDc: 'creator.zoho.eu' } })).checks.find((check) => check.id === 'D-D2');
+  assert.equal(creatorDc?.status, 'warn');
+  const pinnedNode = (await run({ nodeVersion: '20.20.0' })).checks.find((check) => check.id === 'D-E2');
+  assert.equal(pinnedNode?.status, 'warn');
+  const production = (await run({ local: false, scope: { ...scope, env: 'Production' } })).checks.find((check) => check.id === 'D-F2');
+  assert.equal(production?.status, 'fail');
+  assert.match(production!.fix!, /set "env": "Development"/);
+});
 
 const dirs: string[] = [];
 function tmp(prefix = 'c2c-doctor-'): string {

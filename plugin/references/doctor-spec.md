@@ -111,6 +111,17 @@ Status words: **PASS**, **WARN** (continues), **FAIL** (red), **SKIP** (not appl
 | D-F5 | Per-table budgets from the plan | From `plan.json`: columns ≤ 100 per table in Dev [DOC]; unique varchar ≤ 2 per table (`Reached max number of columns of Unique varchar type`) [TESTED]; FK ≤ 15 [UNVERIFIED]; JOINs ≤ 4 [DOC]; SELECT width ≤ 20 [DOC] (not yet confirmed) | `budgets ok` | `FAIL D-F5: table <T> needs 3 unique varchar columns (<cols>); Catalyst allows 2.` → choose which fields lose "No Duplicate" in Catalyst (c2c then enforces them in the app layer), or let c2c's splitter handle it; re-run `/c2c:plan`. |
 | D-F6 | Dev user and API budgets | planned app users vs 25 Dev users [DOC] (a higher effective cap is [UNVERIFIED]); planned data rows vs Dev row cap [UNVERIFIED] | — | `WARN D-F6` with the numbers and the advice to rehearse full volume outside Dev (see `references/limits.md`). |
 
+### R. React build prerequisites
+
+These checks run when the target UI is React (the default, `--ui react`, or `ui: "react"` in `c2c-deploy.json`). They do not run for a vanilla target. They inspect the machine that builds the app; they do not install or update anything.
+
+| id | Check | Command | PASS | FAIL message → fix the USER runs | SKIP / WARN |
+|---|---|---|---|---|---|
+| D-R1 | Node can build the generated React app | `node --version`; must satisfy the generated app's Node range (`^20.19.0 || >=22.12.0`) | `node v<version>` | Node outside range → `install Node 20.20.1 (nvm install 20.20.1 && nvm use 20.20.1)` | Missing Node is a FAIL with the same fix. |
+| D-R2 | npm is available and meets the minimum major version | `npm --version`; minimum is `compat.json.reactBuild.npmMin` | `npm <version>` | npm below minimum → install Node 20.20.1 (npm ships with it), or `npm install -g npm@<min>` | Missing npm is a FAIL; install Node 20.20.1 because npm ships with it. |
+| D-R3 | npm registry is reachable for the React build | `npm ping --fetch-timeout 10000` | `npm registry reachable` | Unreachable registry is WARN: check the network connection or proxy, then run c2c doctor again; React deploy downloads packages with `npm ci` in `web/`. | SKIP when npm is unavailable or on `--local`; WARN does not make doctor red. |
+| D-R4 | npm cache is writable | `npm config get cache`, then create and remove a temporary probe in that cache | `npm cache writable` | Unknown location: repair Node/npm then run doctor again. Unwritable: make the reported cache writable, or use `npm config set cache <dir>`. | SKIP when npm is unavailable. |
+
 ### V. Consistency (CLI half, after `--mcp-observed`)
 
 | id | Check | FAIL → fix |
