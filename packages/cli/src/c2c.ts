@@ -174,11 +174,12 @@ import { buildUi, DomUnavailableError, formatUiReport, uiCorpus } from '../../ui
 import { generateReactApp, HandEditedError, writeReactApp } from '../../ui-react/src/index.js';
 import { defaultIo, deployCli, diffTemplate, editCli, formatDrift, hasReportJson, planCli, projectTemplateJson, provisionCli, readSourceBackup, readSourceCsv, readSourceJson, rollbackExportCli, seedMigrateCli, smokeCli, sourceBackupCli, sourceCsvCli, statusCli, syncDeltaCli, usersCli, verifyCli } from '../../deploy/src/index.js';
 import { cutoverCli } from './cutover.js';
-import { argvShapeProblems, seedArgsProblem } from './argv.js';
+import { ARGV_SPEC, argvShapeProblems, seedArgsProblem } from './argv.js';
 import { GATE_EXIT, defaultDoctorIo, doctorCli, doctorGateForArgs, doctorStamp, gateRefusalMessage, verifyVendorCli, workspaceDir, type DoctorStamp } from '../../doctor/src/index.js';
 import { FillTodoError, fillTodosMain } from '../../deluge/src/fill-todos.js';
 import { analyze, analyzeAsJson, analyzeAsText } from './analyze.js';
 import { precheck, precheckAsJson, precheckAsText } from './precheck.js';
+import { DISPATCH_COMMANDS } from './commands.js';
 
 /** precheck exit codes: input errors never share a code with "has blockers". */
 const PRECHECK_EXIT = { clean: 0, blockers: 1, missing: 3, unparsable: 4 } as const;
@@ -187,8 +188,7 @@ import { migrationReportAsJson, migrationReportAsText, migrationReportForDir } f
 import { readLock } from '../../deluge/src/index.js';
 import { bundleFromDir, bundleFromFiles, scoreFileOf, scoreUi, uiScoreAsText } from '../../ui-score/src/score.js';
 
-function usage(): never {
-  process.stderr.write(
+const USAGE =
     'usage: c2c parse <file|dir> [--json]\n       c2c corpus <dir> [--label name] [--out file] [--top n]\n' +
       '       c2c features <dir> [--unit dir|file] [--names] [--out file] [--apps file]\n' +
       '       c2c schema <file|dir> [--json|--iac|--report] [--out file] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--allow-empty]\n' +
@@ -237,8 +237,44 @@ function usage(): never {
       '       c2c fill-todos <file|dir> --lock <file> --report\n' +
       '       c2c doctor [--local] [--quiet]\n' +
       '       c2c --verify-vendor <dir>\n' +
-      '       c2c status --project <id> [--org <id>] [--app <name>] [--json] [--fake] [--table-budget <n>]\n',
-  );
+      '       c2c status --project <id> [--org <id>] [--app <name>] [--json] [--fake] [--table-budget <n>]\n';
+
+function helpRequested(cmd: string, args: readonly string[]): boolean {
+  const flags = ARGV_SPEC[cmd]?.flags;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--help' || arg === '-h') return true;
+    if (flags?.[arg] === 'value') i++;
+  }
+  return false;
+}
+
+function helpText(command?: string): string {
+  if (!command) return USAGE;
+  const lines = USAGE.trimEnd().split('\n');
+  const selected: string[] = [];
+  let includeContinuation = false;
+  for (const line of lines) {
+    const match = line.match(/(?:usage: )?c2c ([^ <]+)/);
+    if (match) {
+      includeContinuation = match[1] === command;
+      if (includeContinuation) selected.push(line);
+    } else if (includeContinuation && /^\s+\(/.test(line)) {
+      selected.push(line);
+    } else {
+      includeContinuation = false;
+    }
+  }
+  return selected.length ? `${selected.join('\n')}\n` : USAGE;
+}
+
+function printHelp(command?: string): number {
+  process.stdout.write(helpText(command));
+  return 0;
+}
+
+function usage(): never {
+  process.stderr.write(USAGE);
   process.exit(2);
 }
 
@@ -377,6 +413,8 @@ function doctorGateRefusal(args: readonly string[], opts: { createsProject?: boo
 function main(argv: string[]): number {
   const [cmd, ...restAll] = argv;
   if (!cmd) usage();
+  if (cmd === '--help' || cmd === '-h') return printHelp();
+  if (helpRequested(cmd, restAll)) return printHelp((DISPATCH_COMMANDS as readonly string[]).includes(cmd) ? cmd : undefined);
   // A flag the command does not know is refused, never silently ignored.
   const unknown = argvShapeProblems(cmd, restAll).filter((problem) => problem.startsWith('unknown flag '));
   if (unknown.length) {
