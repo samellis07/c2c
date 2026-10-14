@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deriveIr, parse } from '../../core/src/index.js';
+import { generateSchema } from '../../schema/src/generator.js';
 import type { FetchLike } from '../../data/src/migrate.js';
 import { catalystFailure, textResponse } from '../../data/test/catalyst-row-fake.js';
 import { LOADER_REPORT, STATE_FILE, writeState, type Io } from '../src/cli.js';
@@ -1106,4 +1107,105 @@ test('rollback export writes a renamed field under its link name and re-plans cl
   for (const table of replan.tables) {
     assert.deepEqual([table.table, table.added.length, table.changed.length, table.deleted.length], [table.table, 0, 0, 0]);
   }
+});
+
+/** A form with 260 text fields, over the 250-column cap: it splits into a base table plus a 1:1 extension. */
+function wideApp() {
+  const fields = Array.from({ length: 260 }, (_, index) => `Field_${index}\n(\ntype = text\n)`).join('\n');
+  const app = deriveIr(parse(`application "Wide"\n{\nform Wide_Form\n{\n${fields}\n}\n}\n`));
+  const schema = generateSchema(app);
+  const base = schema.tables.find((table) => table.role === 'form')!;
+  const exts = schema.tables.filter((table) => table.role === 'extension');
+  assert.equal(exts.length, 1);
+  return { app, base, ext: exts[0]! };
+}
+
+test('rollback export joins an extension table back onto the form row', () => {
+  const { app, base, ext } = wideApp();
+  const baseColumn = base.columns.find((column) => column.name === 'Field_0')!;
+  const extColumn = ext.columns.find((column) => /^Field_\d+$/.test(column.name))!;
+  const rows = new Map<string, Record<string, unknown>[]>([
+    [base.name, [{ ROWID: '9001', c2c_source_id: '1000000000003570201', [baseColumn.name]: 'base value' }]],
+    [ext.name, [{ ROWID: '9002', parent_rowid: '9001', [extColumn.name]: 'ext value' }]],
+  ]);
+  const result = rollbackExport(app, rows);
+  const files = new Map(result.files.map((file) => [file.path, file.body]));
+  const lines = files.get('import/Wide_Form.csv')!.trimEnd().split('\n');
+  assert.equal(lines.length, 2);
+  const header = lines[0]!.split(',');
+  const row = lines[1]!.split(',');
+  assert.equal(row[header.indexOf(baseColumn.name)], 'base value');
+  assert.equal(row[header.indexOf(extColumn.name)], 'ext value');
+  assert.equal(row[header.indexOf('ID')], '1000000000003570201');
+  assert.equal(header.includes('parent_rowid'), false);
+  assert.deepEqual(result.counts, [{ form: 'Wide_Form', table: base.name, rows: 1 }]);
+  // A joined extension is not a manual file and is not a gap to report.
+  assert.deepEqual(result.warnings, []);
+  assert.deepEqual(result.files.map((file) => file.path).filter((path) => path.startsWith('manual/') || path.startsWith('files/')), []);
+});
+
+test('rollback export writes an extension row whose parent is missing under manual/', () => {
+  const { app, base, ext } = wideApp();
+  const extColumn = ext.columns.find((column) => /^Field_\d+$/.test(column.name))!;
+  const rows = new Map<string, Record<string, unknown>[]>([
+    [ext.name, [{ ROWID: '9002', parent_rowid: '9999', [extColumn.name]: 'orphan value' }]],
+  ]);
+  const result = rollbackExport(app, rows);
+  const files = new Map(result.files.map((file) => [file.path, file.body]));
+  const orphan = files.get(`manual/${ext.name}.csv`)!;
+  const lines = orphan.trimEnd().split('\n');
+  const header = lines[0]!.split(',');
+  assert.equal(lines.length, 2);
+  const cells = lines[1]!.split(',');
+  assert.equal(cells[header.indexOf('parent_rowid')], '9999');
+  assert.equal(cells[header.indexOf(extColumn.name)], 'orphan value');
+  assert.match(result.warnings.join('\n'), new RegExp(`${ext.name}: 1 extension row\\(s\\) have no parent row in ${base.name}`));
+  // The parentless row is not silently merged into the import CSV.
+  assert.equal(files.get('import/Wide_Form.csv')!.trimEnd().split('\n').length, 1);
+});
+
+const APP_FILE = `application "Docs"
+{
+form Doc
+{
+Title
+(
+type = text
+)
+Attachment
+(
+type = file upload
+)
+}
+}
+`;
+
+test('rollback export lists file cells as Stratus keys instead of dropping them', () => {
+  const app = deriveIr(parse(APP_FILE));
+  const rows = new Map<string, Record<string, unknown>[]>([
+    [
+      'Doc',
+      [
+        { ROWID: '7001', c2c_source_id: '1000000000003570301', Title: 'Lease', Attachment: 'migrated/Doc/Attachment/1000000000003570301/lease.pdf' },
+        { ROWID: '7002', c2c_source_id: '1000000000003570302', Title: 'Empty' },
+      ],
+    ],
+  ]);
+  const result = rollbackExport(app, rows);
+  const files = new Map(result.files.map((file) => [file.path, file.body]));
+  // File cells are not report import data: the import CSV has no Attachment column.
+  assert.equal(files.get('import/Doc.csv')!.split('\n')[0], 'Title,ID');
+  const manifest = files.get('files/Doc.files.csv')!.trimEnd().split('\n');
+  assert.equal(manifest[0], 'ID,ROWID,Field,Object_Key,File_Name');
+  assert.equal(manifest.length, 2);
+  assert.equal(manifest[1], '1000000000003570301,7001,Attachment,migrated/Doc/Attachment/1000000000003570301/lease.pdf,lease.pdf');
+  assert.match(result.warnings.join('\n'), /1 file value\(s\) in Doc are Stratus object keys/);
+});
+
+test('rollback export writes no files manifest when no file cell holds a key', () => {
+  const app = deriveIr(parse(APP_FILE));
+  const rows = new Map<string, Record<string, unknown>[]>([['Doc', [{ ROWID: '7002', c2c_source_id: '1000000000003570302', Title: 'Empty' }]]]);
+  const result = rollbackExport(app, rows);
+  assert.deepEqual(result.files.map((file) => file.path).filter((path) => path.startsWith('files/')), []);
+  assert.deepEqual(result.warnings.filter((line) => line.includes('file value')), []);
 });

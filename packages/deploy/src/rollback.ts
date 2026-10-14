@@ -11,9 +11,15 @@
  * the same value, the cell is the parent's record id and the export lists it.
  * The last column, ID, is the Creator record id (c2c_source_id): leave it
  * unmapped on import. ids/<Form>.ids.csv maps every row to its record id, ROWID
- * and lookup record ids. Subform rows and multi lookups are not report import
+ * and lookup record ids. A form over the column cap stores fields on 1:1
+ * extension tables keyed by parent_rowid; the export joins them back onto the
+ * form's row, and an extension row with no parent lands under manual/ instead
+ * of being dropped. Subform rows and multi lookups are not report import
  * data; they are written under manual/ with their ids. System columns (users,
- * times, IP addresses), shadows and file fields are never exported.
+ * times, IP addresses) and shadows are never exported. File fields store a
+ * Stratus object key, which report import cannot load: each cell is listed in
+ * files/<Form>.files.csv (record id, field, key, file name) so the files can
+ * be fetched from the bucket and re-attached by hand.
  *
  * The import/ folder reads back with `--source-csv`, so a re-plan against the
  * last checkpoint shows no changes when the store and checkpoint agree.
@@ -21,6 +27,7 @@
 import type { App, Field } from '../../core/src/ir.js';
 import { generateSchema, type SchemaColumn, type SchemaTable } from '../../schema/src/generator.js';
 import { SOURCE_ID_COLUMN, SYSTEM_FIELD_COLUMNS } from '../../schema/src/mapping.js';
+import { EXTENSION_KEY } from '../../schema/src/limits.js';
 import { canonDecimal } from '../../data/src/integrity.js';
 import { cellKind } from './csv.js';
 import { compareIds, zcql } from './row-delta.js';
@@ -160,6 +167,7 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
   const formTables = schema.tables.filter((table) => table.role === 'form' && !table.nosql);
   const formatted = new Map<string, Formatted[]>();
   const headers = new Map<string, Header[]>();
+  const fileCells = new Map<string, { sourceId: string; rowid: string; field: string; key: string }[]>();
   for (const table of schema.tables) {
     if (table.nosql || table.role === 'system') continue;
     const fields = table.subform
@@ -167,11 +175,20 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
       : forms.get(table.form)?.fields ?? [];
     const list = headersOf(table, fields);
     headers.set(table.name, list);
+    const fileColumns = table.columns.filter((column) => cellKind(column) === 'file' && !column.shadowFor);
     const out: Formatted[] = [];
     for (const row of rows.get(table.name) ?? []) {
       const rowid = row.ROWID === undefined || row.ROWID === null ? '' : exactId(row.ROWID, 'ROWID');
       const source = row[SOURCE_ID_COLUMN];
       const sourceId = source === undefined || source === null ? '' : exactId(source, SOURCE_ID_COLUMN);
+      if (fileColumns.length) {
+        const entries = fileCells.get(table.name) ?? [];
+        for (const column of fileColumns) {
+          const key = text(row[column.name]);
+          if (key) entries.push({ sourceId, rowid, field: column.field ?? column.name, key });
+        }
+        if (entries.length) fileCells.set(table.name, entries);
+      }
       const cells = new Map<string, string>();
       for (const item of list) {
         const raw = text(row[item.column.name]);
@@ -195,11 +212,39 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
 
   const files: RollbackFile[] = [];
   const counts: RollbackExport['counts'] = [];
+  const orphans = new Map<string, Formatted[]>();
   for (const table of formTables) {
     const form = forms.get(table.form);
-    const list = headers.get(table.name) ?? [];
-    const lookups = list.filter((item) => item.column.relation);
+    const list = [...(headers.get(table.name) ?? [])];
+    const exts = schema.tables.filter((item) => item.role === 'extension' && item.extensionOf === table.name);
+    const extByParent = new Map<string, Formatted[]>();
+    for (const ext of exts) {
+      list.push(...(headers.get(ext.name) ?? []).filter((item) => item.column.name !== EXTENSION_KEY));
+      for (const record of formatted.get(ext.name) ?? []) {
+        const parent = record.cells.get(EXTENSION_KEY) ?? '';
+        const bucket = extByParent.get(parent) ?? [];
+        bucket.push(record);
+        extByParent.set(parent, bucket);
+      }
+    }
     const records = formatted.get(table.name) ?? [];
+    const consumed = new Set<Formatted>();
+    for (const record of records) {
+      for (const ext of extByParent.get(record.rowid) ?? []) {
+        consumed.add(ext);
+        for (const [header, value] of ext.cells) {
+          if (header !== EXTENSION_KEY) record.cells.set(header, value);
+        }
+      }
+    }
+    for (const ext of exts) {
+      const orphan = (formatted.get(ext.name) ?? []).filter((record) => !consumed.has(record));
+      if (orphan.length) {
+        warn(`${ext.name}: ${orphan.length} extension row(s) have no parent row in ${table.name}; they are written to manual/${ext.name}.csv`);
+        orphans.set(ext.name, orphan);
+      }
+    }
+    const lookups = list.filter((item) => item.column.relation);
     const missingIds = records.filter((row) => !row.sourceId).length;
     if (missingIds) warn(`${table.form}: ${missingIds} row(s) were created after migration and have no Creator record id; they import as new records`);
     const displayIds = new Map<string, Map<string, string>>();
@@ -266,6 +311,26 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
       warn(`${table.name}: ${records.length} ${table.role === 'child' ? 'subform' : 'multi lookup'} row(s) are not report import data; re-enter them from manual/${table.name}.csv`);
     }
   }
+  for (const [name, records] of orphans) {
+    const list = headers.get(name) ?? [];
+    const data = records.map((record) => [
+      record.sourceId,
+      record.rowid,
+      ...list.map((item) => {
+        const value = record.cells.get(item.header) ?? '';
+        const parent = item.column.relation && value ? byRowId.get(item.column.relation.table)?.get(value) : undefined;
+        return parent ? parent.sourceId : value;
+      }),
+    ]);
+    files.push({ path: `manual/${name}.csv`, body: csvDocument(['ID', 'ROWID', ...list.map((item) => item.header)], data) });
+  }
+  for (const [name, entries] of fileCells) {
+    const table = schema.tables.find((item) => item.name === name)!;
+    const label = table.role === 'form' ? table.form : name;
+    const data = entries.map((entry) => [entry.sourceId, entry.rowid, entry.field, entry.key, entry.key.split('/').pop() ?? '']);
+    files.push({ path: `files/${label}.files.csv`, body: csvDocument(['ID', 'ROWID', 'Field', 'Object_Key', 'File_Name'], data) });
+    warn(`${table.form}: ${entries.length} file value(s) in ${name} are Stratus object keys the report importer cannot load; fetch each object and re-attach it from files/${label}.files.csv`);
+  }
   const order = importOrder(formTables).map((name) => formTables.find((table) => table.name === name)!.form);
   files.push({ path: 'IMPORT_ORDER.txt', body: `${order.map((form, index) => `${index + 1}. import/${form}.csv`).join('\n')}\n` });
   files.push({ path: 'README.md', body: rollbackReadme(app, order, counts, warnings) });
@@ -288,7 +353,8 @@ function rollbackReadme(app: App, order: readonly string[], counts: RollbackExpo
     '- Lookups hold the parent display value. Import parents first.',
     '- Leave the `ID` column unmapped. Creator assigns new record ids on import.',
     '- `ids/<Form>.ids.csv` maps each row to its old record id, ROWID and lookup record ids.',
-    '- `manual/` holds subform and multi lookup rows, which the report importer does not load.',
+    '- `manual/` holds subform, multi lookup and orphaned extension rows, which the report importer does not load.',
+    '- `files/<Form>.files.csv` lists file-field cells as Stratus object keys; fetch each object from the bucket and re-attach it by hand — the importer cannot load files.',
     '',
     '## Notes',
     '',
