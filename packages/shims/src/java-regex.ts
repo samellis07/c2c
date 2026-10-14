@@ -149,6 +149,8 @@ class Parser {
   private readonly cs: string[];
   private i = 0;
   asciiOnly = false;
+  /** The pattern uses a `\p{..}` / `\P{..}` class, POSIX names included. */
+  usesProperty = false;
 
   constructor(private readonly src: string) {
     this.cs = Array.from(src);
@@ -365,6 +367,7 @@ class Parser {
       name = this.next();
     }
     const shown = `\\${negated ? 'P' : 'p'}{${name}}`;
+    this.usesProperty = true;
     const posix = POSIX[name];
     if (posix !== undefined) {
       return negated ? { out: `[^${posix}]`, inner: null } : { out: `[${posix}]`, inner: posix };
@@ -717,18 +720,26 @@ const CACHE_MAX = 256;
  * which is `String.matches`. Without `anchor` the pattern finds a substring,
  * which is `replaceAll`. Throws DelugeRuntimeError for an invalid pattern,
  * an unsupported construct, or a pattern that can backtrack without bound.
+ *
+ * `ignoreCase` is Java `Pattern.CASE_INSENSITIVE`, which folds US-ASCII
+ * letters only. JavaScript's `iu` folds Unicode, so the two agree only while
+ * no non-ASCII code point can take part in a fold: a pattern with a non-ASCII
+ * code point or a `\p{..}` property is refused, and `guardText` refuses a text
+ * with a non-ASCII letter that has a case.
  */
-export function compileJavaRegex(pattern: string, anchor = true): JavaRegex {
-  const key = `${anchor ? 'a' : 'u'}:${pattern}`;
+export function compileJavaRegex(pattern: string, anchor = true, ignoreCase = false): JavaRegex {
+  const key = `${anchor ? 'a' : 'u'}${ignoreCase ? 'i' : ''}:${pattern}`;
   const hit = CACHE.get(key);
   if (hit) return hit;
   const parser = new Parser(pattern);
   const tree = parser.parse();
   checkBacktracking(tree, pattern);
   const body = emit(tree);
+  if (ignoreCase && parser.usesProperty) refuse('\\p{..} with ignore case', pattern);
+  if (ignoreCase) refuseUnicodeFold(body, pattern);
   let re: RegExp;
   try {
-    re = new RegExp(anchor ? `^(?:${body})$` : body, anchor ? 'u' : 'gu');
+    re = new RegExp(anchor ? `^(?:${body})$` : body, `${anchor ? '' : 'g'}${ignoreCase ? 'i' : ''}u`);
   } catch {
     invalid(pattern);
   }
@@ -738,6 +749,27 @@ export function compileJavaRegex(pattern: string, anchor = true): JavaRegex {
   return out;
 }
 
+/**
+ * A compiled body whose case-insensitive match could differ between Java's
+ * US-ASCII folding and JavaScript's Unicode folding: a literal non-ASCII code
+ * point, emitted as `\u{..}` or raw. The fixed
+ * whitespace and line-terminator sets (`\uXXXX` form) have no case.
+ */
+function refuseUnicodeFold(body: string, pattern: string): void {
+  if (/[^\x00-\x7F]/.test(body)) refuse('non-ASCII character with ignore case', pattern);
+  for (const m of body.matchAll(/\\u\{([0-9a-f]+)\}/g)) {
+    if (parseInt(m[1]!, 16) > 0x7f) refuse('non-ASCII character with ignore case', pattern);
+  }
+}
+
+/** A non-ASCII letter with a case: Java's US-ASCII folding and Unicode folding disagree on it. */
+function hasNonAsciiCased(text: string): boolean {
+  for (const c of text) {
+    if (c.charCodeAt(0) > 0x7f && (c.toLowerCase() !== c || c.toUpperCase() !== c)) return true;
+  }
+  return false;
+}
+
 function hasNonBmp(text: string): boolean {
   for (let i = 0; i < text.length; i++) {
     if (text.codePointAt(i)! > 0xffff) return true;
@@ -745,7 +777,7 @@ function hasNonBmp(text: string): boolean {
   return false;
 }
 
-function guardText(text: string, pattern: string, asciiOnly: boolean, op: 'matches' | 'replaceAll'): void {
+function guardText(text: string, pattern: string, asciiOnly: boolean, op: 'matches' | 'replaceAll' | 'replaceFirst', ignoreCase = false): void {
   if (text.length > MATCH_INPUT_MAX) {
     throw new DelugeRuntimeError(`Text of ${text.length} characters is longer than the ${MATCH_INPUT_MAX} that ${op} evaluates`);
   }
@@ -754,6 +786,9 @@ function guardText(text: string, pattern: string, asciiOnly: boolean, op: 'match
   }
   if (hasNonBmp(text)) {
     throw new DelugeRuntimeError(`Unsupported regex feature non-BMP text in ${pattern}`);
+  }
+  if (ignoreCase && hasNonAsciiCased(text)) {
+    throw new DelugeRuntimeError(`Unsupported regex feature ignore case on non-ASCII letters in ${pattern}`);
   }
 }
 
@@ -834,12 +869,19 @@ function applyJavaReplacement(
   return out;
 }
 
-/** Java `String.replaceAll`: every match, with Java's replacement text. */
-export function javaReplaceAll(text: string, pattern: string, replacement: string): string {
-  const compiled = compileJavaRegex(pattern, false);
-  guardText(text, pattern, compiled.asciiOnly, 'replaceAll');
+/**
+ * Java `String.replaceAll`: every match, with Java's replacement text.
+ * `first` is `String.replaceFirst`; `ignoreCase` compiles the pattern with
+ * `Pattern.CASE_INSENSITIVE` (see compileJavaRegex).
+ */
+export function javaReplaceAll(text: string, pattern: string, replacement: string, first = false, ignoreCase = false): string {
+  const compiled = compileJavaRegex(pattern, false, ignoreCase);
+  guardText(text, pattern, compiled.asciiOnly, first ? 'replaceFirst' : 'replaceAll', ignoreCase);
   compiled.re.lastIndex = 0;
+  let done = false;
   return text.replace(compiled.re, (match: string, ...rest: unknown[]) => {
+    if (done) return match;
+    done = first;
     let end = rest.length;
     if (end > 0 && rest[end - 1] !== null && typeof rest[end - 1] === 'object') end -= 1;
     const captures = rest.slice(0, Math.max(0, end - 2)) as (string | undefined)[];

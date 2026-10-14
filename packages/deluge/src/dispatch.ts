@@ -33,6 +33,8 @@ const PREFERRED: Record<string, string> = ownTable({
   leftpad: 'leftPad',
   substring: 'subString',
   replaceall: 'replaceAll',
+  replaceallignorecase: 'replaceAllIgnoreCase',
+  replacefirstignorecase: 'replaceFirstIgnoreCase',
   indexof: 'indexOf',
   lastindexof: 'lastIndexOf',
   tolowercase: 'toLowerCase',
@@ -45,6 +47,7 @@ const PREFERRED: Record<string, string> = ownTable({
   isascii: 'isAscii',
   removeallalphanumeric: 'removeAllAlphaNumeric',
   hextotext: 'hexToText',
+  totext: 'toText',
   htmldecode: 'htmlDecode',
   htmlencode: 'htmlEncode',
   toxml: 'toXml',
@@ -333,7 +336,7 @@ export const LONGTAIL_METHODS = new Set([
  * Text functions emitted as `shim.string.<name>(text, ...args)`. Each has a
  * method form (`s.getAlpha()`) and a free form (`getAlpha(s)`).
  */
-export const TEXT_FUNCTIONS = new Set(['len', 'length', 'lower', 'toLowerCase', 'toUpperCase', 'trim', 'removeFirstOccurence', 'removeLastOccurence', 'getAlpha', 'getAlphaNumeric', 'subText', 'matches', 'encodeUrl', 'left', 'right', 'mid', 'ltrim', 'rtrim', 'repeat', 'reverse', 'startsWithIgnoreCase', 'textToHex', 'getSuffix', 'isAscii', 'removeAllAlphaNumeric', 'hexToText', 'htmlDecode', 'htmlEncode']);
+export const TEXT_FUNCTIONS = new Set(['len', 'length', 'lower', 'toLowerCase', 'toUpperCase', 'trim', 'removeFirstOccurence', 'removeLastOccurence', 'getAlpha', 'getAlphaNumeric', 'subText', 'matches', 'encodeUrl', 'left', 'right', 'mid', 'ltrim', 'rtrim', 'repeat', 'reverse', 'startsWithIgnoreCase', 'replaceAllIgnoreCase', 'replaceFirstIgnoreCase', 'textToHex', 'getSuffix', 'isAscii', 'removeAllAlphaNumeric', 'hexToText', 'htmlDecode', 'htmlEncode']);
 
 /**
  * XML builtins emitted as `shim.xml.<name>(...)`. Deluge names are
@@ -484,6 +487,7 @@ export const FILE_MANUAL = new Set([
 ]);
 
 export const REPLACE_FIRST = 'replaceFirst';
+export const TO_TEXT = 'toText';
 export const GET_PREFIX = 'getPrefix';
 export const GET_SUFFIX = 'getSuffix';
 export const GET_ALL = 'getAll';
@@ -560,6 +564,7 @@ export function recognisedBuiltinNames(): string[] {
   for (const n of MAP_METHODS) names.add(n); // determinism-allow: collects into a Set returned as a sorted array by recognisedBuiltinNames
   for (const n of FILE_METHODS) names.add(n); // determinism-allow: collects into a Set returned as a sorted array by recognisedBuiltinNames
   names.add(REPLACE_FIRST);
+  names.add(TO_TEXT);
   names.add(GET_PREFIX);
   names.add(GET_SUFFIX);
   names.add(GET_ALL);

@@ -49,6 +49,8 @@ import {
   removeLastOccurence,
   removeText,
   replaceAll,
+  replaceAllIgnoreCase,
+  replaceFirstIgnoreCase,
   subString,
   subText,
   toLowerCase,
@@ -726,6 +728,11 @@ export interface Shim {
     format(value: unknown, pattern: string, ctx: ShimContext): string | null;
     /** `toString()` with no pattern. A blank is empty text, not the literal "null". */
     text(value: unknown, ctx: ShimContext): string;
+    /**
+     * `value.toText(format[, timeZone])` (Java SimpleDateFormat, English).
+     * https://www.zoho.com/deluge/help/functions/common/to-text.html
+     */
+    toText(...args: any[]): string | null;
     addBusinessDay(value: unknown, n: number | bigint, ...args: unknown[]): dates.DelugeDate | null;
     edate(value: unknown, n: number | bigint, ctx: ShimContext): dates.DelugeDate | null;
     subBusinessDay(value: unknown, n: number | bigint, ...args: unknown[]): dates.DelugeDate | null;
@@ -813,6 +820,8 @@ export interface Shim {
   string: {
     replaceFirst(s: string, find: string, repl: string): string;
     replaceAll(value: unknown, find: unknown, repl: unknown, escape?: unknown): string | null;
+    replaceAllIgnoreCase(value: unknown, find: unknown, repl: unknown, escape?: unknown): string | null;
+    replaceFirstIgnoreCase(value: unknown, find: unknown, repl: unknown, escape?: unknown): string | null;
     remove(value: unknown, a?: unknown, b?: unknown): string | null;
     subString(value: unknown, start: unknown, end?: unknown): string | null;
     isAscii(value: unknown): boolean | null;
@@ -2037,6 +2046,35 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       if (value instanceof dates.DelugeDate) return dates.format(value, pattern);
       note({ op: 'error', code: 'DELUGE_RUNTIME', message: 'UnParsable date' });
       throw new DelugeRuntimeError('UnParsable date');
+    },
+    toText(...args: any[]) {
+      // functions/common/to-text: a date-time value, or text holding one, in
+      // the format, converted from the application time zone into `timeZone`
+      // when one is given. Anything else is refused: functions/number/text
+      // formats numbers and text such as "123123456" with the format, while
+      // functions/common/to-text reads a number as epoch milliseconds and
+      // returns unrecognised text unchanged.
+      const ctx = args.pop() as ShimContext;
+      const [value, pattern, timeZone] = args;
+      if (typeof pattern !== 'string') throw new DelugeRuntimeError('UnParsable date');
+      if (value == null) return '';
+      let date: dates.DelugeDate | null = null;
+      if (value instanceof dates.DelugeDate) {
+        date = value;
+      } else if (typeof value === 'string') {
+        try {
+          date = dates.parseLiteral(value);
+        } catch {
+          date = null;
+        }
+      }
+      if (!date) throw new DelugeRuntimeError('Unsupported toText format on a value that is not a date-time: the help pages disagree');
+      if (timeZone != null && !(typeof timeZone === 'string' && timeZone.trim() === '')) {
+        const ms = dates.epochMillis(date, dates.requireZone(ctx.appTimeZone));
+        const p = dates.partsInZone(new Date(ms), zoneArg(timeZone, ctx));
+        date = new dates.DelugeDate(p.y, p.m, p.d, p.hh, p.mm, p.ss);
+      }
+      return dates.formatJava(date, pattern);
     },
     text(value) {
       if (value == null) return '';
@@ -3542,6 +3580,8 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         return String(s).replace(find, repl);
       },
       replaceAll,
+      replaceAllIgnoreCase,
+      replaceFirstIgnoreCase,
       remove: removeText,
       isAscii,
       removeAllAlphaNumeric,

@@ -471,6 +471,129 @@ export function format(value: DelugeDate, pattern: string): string {
     .replace(/\u0000/g, () => literals[next++] ?? '');
 }
 
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+/** Pattern letters Java's SimpleDateFormat knows. Any other letter is not a date-time literal. */
+const JAVA_LETTERS = 'GyYMLwWDdFEuaHkKhmsSzZX';
+
+/**
+ * `toText` / `toString` with a date-time format: Java SimpleDateFormat, as
+ * functions/common/to-text.html lists its letters, in an English (US) locale
+ * and the zone the caller already resolved. Every field comes from `value`;
+ * nothing reads the host clock, zone or locale.
+ *
+ * - A run of one letter is one field. Numbers are zero-padded to the run
+ *   length; `yy` is the last two digits of the year and any other run of `y`
+ *   is the whole year (`y`, `yyy` and `yyyy` are 2019).
+ * - `M`/`MM` are numbers, `MMM` is `Jan` and `MMMM` is `January`; `E` to `EEE`
+ *   is `Tue` and `EEEE` is `Tuesday`; `a` is `AM`/`PM`; `G` is `AD`.
+ * - Weeks start on Sunday and the week holding 1 January is week 1
+ *   (functions/datetime/getweekofyear.html), so `Y` is the week year:
+ *   `'29-Dec-2019'.toText("YYYY")` is 2020, the page's own example.
+ * - Text in single quotes is literal and `''` is a quote. Other characters
+ *   that are not letters are literal.
+ * - A letter that is not a date-time literal gives null: "If any other value
+ *   apart from date-time literals are specified without single quotes, the
+ *   function will return null."
+ *
+ * Refused (DelugeRuntimeError): `S` (a value holds whole seconds), the zone
+ * letters `z`, `Z`, `X` (their text is not on the page), `L` (not on the
+ * page), and an unterminated quote.
+ */
+export function formatJava(value: DelugeDate, pattern: string): string | null {
+  let out = '';
+  let i = 0;
+  while (i < pattern.length) {
+    const c = pattern.charAt(i);
+    if (c === "'") {
+      if (pattern.charAt(i + 1) === "'") {
+        out += "'";
+        i += 2;
+        continue;
+      }
+      let j = i + 1;
+      for (;;) {
+        if (j >= pattern.length) throw new DelugeRuntimeError(`Unsupported date-time format with an unterminated quote: ${pattern}`);
+        if (pattern.charAt(j) === "'") {
+          if (pattern.charAt(j + 1) === "'") {
+            out += "'";
+            j += 2;
+            continue;
+          }
+          break;
+        }
+        out += pattern.charAt(j);
+        j += 1;
+      }
+      i = j + 1;
+      continue;
+    }
+    if (!/[A-Za-z]/.test(c)) {
+      out += c;
+      i += 1;
+      continue;
+    }
+    if (!JAVA_LETTERS.includes(c)) return null;
+    let n = 1;
+    while (pattern.charAt(i + n) === c) n += 1;
+    out += javaField(value, c, n, pattern);
+    i += n;
+  }
+  return out;
+}
+
+function javaField(value: DelugeDate, letter: string, n: number, pattern: string): string {
+  const dow = weekdaySun1(value);
+  switch (letter) {
+    case 'G':
+      if (value.y < 1) throw new DelugeRuntimeError(`Unsupported date-time format G before year 1: ${pattern}`);
+      return 'AD';
+    case 'y':
+      return n === 2 ? pad(value.y % 100) : pad(value.y, n);
+    case 'Y': {
+      const week = weekOfYear(value);
+      const year = week === 1 && value.m === 12 ? value.y + 1 : value.y;
+      return n === 2 ? pad(year % 100) : pad(year, n);
+    }
+    case 'M':
+      if (n >= 4) return MONTH_NAMES[value.m - 1]!;
+      if (n === 3) return MONTHS[value.m - 1]!;
+      return pad(value.m, n);
+    case 'w':
+      return pad(weekOfYear(value), n);
+    case 'W': {
+      const firstDow = weekdaySun1(new DelugeDate(value.y, value.m, 1));
+      return pad(Math.floor((value.d - 1 + firstDow - 1) / 7) + 1, n);
+    }
+    case 'D':
+      return pad(dayOfYear(value), n);
+    case 'd':
+      return pad(value.d, n);
+    case 'F':
+      return pad(Math.floor((value.d - 1) / 7) + 1, n);
+    case 'E':
+      return n >= 4 ? DAY_NAMES[dow - 1]! : DAY_NAMES[dow - 1]!.slice(0, 3);
+    case 'u':
+      return pad(dow === 1 ? 7 : dow - 1, n);
+    case 'a':
+      return value.hh < 12 ? 'AM' : 'PM';
+    case 'H':
+      return pad(value.hh, n);
+    case 'k':
+      return pad(value.hh === 0 ? 24 : value.hh, n);
+    case 'K':
+      return pad(value.hh % 12, n);
+    case 'h':
+      return pad(value.hh % 12 === 0 ? 12 : value.hh % 12, n);
+    case 'm':
+      return pad(value.mm, n);
+    case 's':
+      return pad(value.ss, n);
+    default:
+      throw new DelugeRuntimeError(`Unsupported date-time format letter ${letter}: ${pattern}`);
+  }
+}
+
 /** First day of the month, midnight (functions/datetime/tostartofmonth). */
 export function startOfMonth(value: DelugeDate): DelugeDate {
   return new DelugeDate(value.y, value.m, 1, 0, 0, 0);

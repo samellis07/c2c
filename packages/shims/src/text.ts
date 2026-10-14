@@ -82,6 +82,46 @@ export function replaceAll(value: unknown, find: unknown, repl: unknown, escape?
   return emptyToNull(javaReplaceAll(s, pattern, replacement));
 }
 
+/**
+ * `replaceAllIgnoreCase` / `replaceFirstIgnoreCase`: `replaceAll` /
+ * `replaceFirst` with the search matched without regard to case
+ * (functions/string/replaceallignorecase.html,
+ * functions/string/replacefirstignorecase.html). Both pages give the same
+ * fourth argument as `replaceAll`: by default (false) the search text is a
+ * regular expression; true escapes it, so the search text is literal. The
+ * pattern is a Java regular expression run with `Pattern.CASE_INSENSITIVE`
+ * (US-ASCII folding), refused where Unicode folding could give another answer.
+ * The replacement reads `\` and `$` as Java does.
+ *
+ * With true, the pages do not say whether the replacement is escaped as well,
+ * so a replacement holding `\` or `$` is refused rather than read either way,
+ * and so is an empty search text.
+ */
+export function replaceAllIgnoreCase(value: unknown, find: unknown, repl: unknown, escape?: unknown): string | null {
+  return replaceIgnoreCase(value, find, repl, escape, false);
+}
+
+export function replaceFirstIgnoreCase(value: unknown, find: unknown, repl: unknown, escape?: unknown): string | null {
+  return replaceIgnoreCase(value, find, repl, escape, true);
+}
+
+function replaceIgnoreCase(value: unknown, find: unknown, repl: unknown, escape: unknown, first: boolean): string | null {
+  if (value == null) return null;
+  const s = String(value);
+  if (s === '') return null;
+  let pattern = find == null ? '' : String(find);
+  const replacement = repl == null ? '' : String(repl);
+  if (escape === true || escape === 'true') {
+    const name = first ? 'replaceFirstIgnoreCase' : 'replaceAllIgnoreCase';
+    if (pattern === '') throw new DelugeRuntimeError(`Unsupported ${name} with an empty search text and true`);
+    if (/[\\$]/.test(replacement)) throw new DelugeRuntimeError(`Unsupported ${name} with \\ or $ in the replacement and true`);
+    // A backslash before a character that is not a letter or digit is that
+    // character in a Java pattern.
+    pattern = pattern.replace(/[^A-Za-z0-9]/g, (c) => (c.charCodeAt(0) < 0x80 ? `\\${c}` : c));
+  }
+  return emptyToNull(javaReplaceAll(s, pattern, replacement, first, true));
+}
+
 export function subString(value: unknown, start: unknown, end?: unknown): string | null {
   const s = value == null ? '' : String(value);
   const len = s.length;

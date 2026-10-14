@@ -4652,4 +4652,26 @@ test('a criteria field that shares a name with a local compares the fetched form
 test('report criteria on the application owner stay counted: no owner address is bound at deploy', () => {
   assert.deepEqual(reportCriteria('Members.Email == zoho.adminuserid'), { op: 'todo', construct: 'criteria-dynamic' });
   assert.deepEqual(reportCriteria('Members.Email == zoho.loginuserid'), { op: '==', field: 'Members.Email', value: { __bind: 'loginUserId' } });
+
+test('replaceAllIgnoreCase and replaceFirstIgnoreCase emit their shims in both forms', () => {
+  const t = translate('a = s.replaceAllIgnoreCase("x", "y", true);\nb = replaceFirstIgnoreCase(s, "x", "y");\nc = s.REPLACEALLIGNORECASE("x", "y");');
+  const server = stripComments(t.server);
+  assert.match(server, /shim\.string\.replaceAllIgnoreCase\(s, "x", "y", true\)/);
+  assert.match(server, /shim\.string\.replaceFirstIgnoreCase\(s, "x", "y"\)/);
+  assert.match(server, /shim\.string\.replaceAllIgnoreCase\(s, "x", "y"\)/);
+  assert.equal(t.todos.length, 0);
+});
+
+test('toText is toString without a format, formats a known date-time, and leaves any other formatted receiver a hole', () => {
+  const plain = translate('a = toText(x);\nb = x.toText();');
+  assert.equal(plain.todos.length, 0);
+  assert.match(stripComments(plain.server), /String\(x\)/);
+  const date = translate('a = zoho.currenttime.toText("MM/dd/YY");\nb = zoho.currentdate.toText("HH:mm", "Europe/Moscow");');
+  assert.equal(date.todos.length, 0);
+  assert.match(stripComments(date.server), /shim\.date\.toText\(shim\.zoho\.currentTime\(ctx\), "MM\/dd\/YY", ctx\)/);
+  assert.match(stripComments(date.server), /shim\.date\.toText\(shim\.zoho\.currentDate\(ctx\), "HH:mm", "Europe\/Moscow", ctx\)/);
+  for (const src of ['a = 2434.toText("000000000");', 'a = "123123456".toText("##,###");', 'a = x.toText("yyyy");', 'a = zoho.currenttime.toText("a", "b", "c");']) {
+    const t = translate(src);
+    assert.match(t.server, /shim\.todo\(ctx, "method:toText"\)/, src);
+  }
 });
