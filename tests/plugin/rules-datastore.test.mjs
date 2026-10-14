@@ -34,6 +34,15 @@ test('datastore.md: every rule carries a recipe or explicit rule line', () => {
   });
 });
 
+test('datastore.md: every Recipe and Rule line carries an evidence label', () => {
+  const text = readFileSync(file, 'utf8');
+  const lines = text.split('\n').filter((line) => /^(Recipe|Rule):/.test(line));
+  assert.ok(lines.length > 0, 'expected recipe and rule lines');
+  for (const line of lines) {
+    assert.match(line, /\[(?:TESTED|UNVERIFIED|DOC|CLI|MCP-LISTED)\]/, `missing evidence label: ${line}`);
+  }
+});
+
 test('datastore.md passes the generic hygiene scan', () => {
   assert.deepEqual(scanText('datastore.md', readFileSync(file, 'utf8')), []);
 });

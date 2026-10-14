@@ -83,9 +83,17 @@ test('required function/scheduling/AppSail recipes are present', () => {
   }
 });
 
-test('no provenance, labels or dates in the shipped rules', () => {
+test('every Recipe and Rule line carries an evidence label', () => {
   const md = text();
-  assert.equal(EVIDENCE_LABEL.test(md), false, md.match(EVIDENCE_LABEL)?.[0]);
+  const lines = md.split('\n').filter((line) => /^(Recipe|Rule):/.test(line));
+  assert.ok(lines.length > 0, 'expected recipe and rule lines');
+  for (const line of lines) {
+    assert.match(line, /\[(?:TESTED|UNVERIFIED|DOC|CLI|MCP-LISTED)\]/, `missing evidence label: ${line}`);
+  }
+});
+
+test('no status fields, dates or hard-coded data centres in shipped rules', () => {
+  const md = text();
   assert.equal(FIELD_LABEL.test(md), false, md.match(FIELD_LABEL)?.[0]);
   assert.equal(ISO_DATE.test(md), false, md.match(ISO_DATE)?.[0]);
   assert.equal(HARDCODED_DC.test(md), false, `hard-coded DC: ${md.match(HARDCODED_DC)?.[0]}`);
