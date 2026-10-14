@@ -43,6 +43,10 @@ export interface MailSender {
 
 /** Precheck rule id for an app that sends mail without a verified Catalyst Mail sender. */
 export const MAIL_SENDER_RULE = 'mail-sender-unverified';
+/** Canonical failure detail shared by precheck and generated runtime. */
+export function mailSenderFailure(from: string | null | undefined): string {
+  return from ? `the app sends mail and sender ${from} is not marked verified` : 'the app sends mail and no Catalyst Mail sender is set';
+}
 /** Delivery log: one row per sendmail the live function receives. */
 export const MAIL_LOG_TABLE = 'c2c_mail_log';
 const MAIL_DOC = 'https://docs.catalyst.zoho.com/en/cloud-scale/help/mail/introduction/';
@@ -117,10 +121,10 @@ export function mailSenderPrecheck(app: App, config: MailConfig): MailFinding[] 
   const severity = config.enabled ? 'blocker' : 'warning';
   const fix = 'Verify the sender in the Catalyst console (Mail), then deploy with --mail-from <address> --mail-sender-verified.';
   if (!config.from) {
-    return [{ check: MAIL_SENDER_RULE, severity, message: 'the app sends mail and no Catalyst Mail sender is set', fix, see: MAIL_DOC }];
+    return [{ check: MAIL_SENDER_RULE, severity, message: mailSenderFailure(config.from), fix, see: MAIL_DOC }];
   }
   if (!config.verifiedSenders.includes(config.from)) {
-    return [{ check: MAIL_SENDER_RULE, severity, message: `the app sends mail and sender ${config.from} is not marked verified`, fix, see: MAIL_DOC }];
+    return [{ check: MAIL_SENDER_RULE, severity, message: mailSenderFailure(config.from), fix, see: MAIL_DOC }];
   }
   return [];
 }
@@ -326,7 +330,8 @@ async function attempt(message, req, config) {
   const from = senderOf(message);
   const verified = config && Array.isArray(config.verifiedSenders) ? config.verifiedSenders : [];
   if (!from || !verified.includes(from)) {
-    return { performed: false, status: "refused", reason: \`sender \${from || "(none)"} is not a verified Catalyst Mail sender (precheck \${MAIL_SENDER_RULE})\` };
+    const failure = from ? \`the app sends mail and sender \${from} is not marked verified\` : "the app sends mail and no Catalyst Mail sender is set";
+    return { performed: false, status: "refused", code: MAIL_SENDER_RULE, reason: \`${failure} (precheck \${MAIL_SENDER_RULE})\` };
   }
   const rendered = renderInlineAttachments(message);
   const pdf = pdfAttachments(rendered.catalog, rendered.leftover);

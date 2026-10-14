@@ -310,7 +310,8 @@ test('live send: an unverified sender is refused, logged, and names the precheck
   const result = await mod.c2cGuardedMail(MESSAGE, {});
   assert.equal(result.performed, false);
   assert.equal(result.status, 'refused');
-  assert.match(result.reason, new RegExp(`not a verified Catalyst Mail sender \\(precheck ${MAIL_SENDER_RULE}\\)`));
+  assert.equal(result.code, MAIL_SENDER_RULE);
+  assert.match(result.reason, new RegExp(`the app sends mail and sender ${OWNER} is not marked verified \\(precheck ${MAIL_SENDER_RULE}\\)`));
   assert.deepEqual(calls.sendMail, []);
   assert.equal(calls.rows[0].row.status, 'refused');
   cleanup();

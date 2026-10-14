@@ -844,15 +844,16 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     const uiFlag = flag(rest, '--ui');
     if (uiFlag !== undefined && uiFlag !== 'vanilla' && uiFlag !== 'react') throw new Error('--ui must be vanilla or react');
     const uiConfigPath = findDeployConfig(target, flag(rest, '--config'));
-    const ui: DeployUi = uiFlag ?? (uiConfigPath ? readDeployConfig(uiConfigPath).ui : undefined) ?? 'react';
+    const deployConfig = uiConfigPath ? readDeployConfig(uiConfigPath) : undefined;
+    const ui: DeployUi = uiFlag ?? deployConfig?.ui ?? 'react';
     const subsetShims = rest.includes('--subset-shims') || io.env.C2C_SUBSET_SHIMS === '1';
     const bundle = buildDeploy(app, guard, rest.includes('--mail'), confirm, apiBase, functionEnv, {
-      from: flag(rest, '--mail-from'),
-      verified: rest.includes('--mail-sender-verified'),
+      from: flag(rest, '--mail-from') ?? deployConfig?.mail?.from,
+      verified: rest.includes('--mail-sender-verified') || deployConfig?.mail?.verified === true,
     }, {
       ...(slateDomain ? { slateDomain } : {}),
       ...(admin ? { admin } : {}),
-    }, deployMailRecipients(findDeployConfig(target, flag(rest, '--config'))), deploySource?.sourceData, ui, rest.includes('--async-on-success'), subsetShims);
+    }, deployConfig?.mail?.testRecipients ?? deployMailRecipients(uiConfigPath), deploySource?.sourceData, ui, rest.includes('--async-on-success'), subsetShims);
     const mailBlockers = bundle.mailFindings.filter((finding) => finding.severity === 'blocker');
     if (confirm && mailBlockers.length) {
       for (const finding of mailBlockers) io.stderr(`blocker ${finding.check}: ${finding.message}. ${finding.fix} ${finding.see}\n`);
@@ -1086,6 +1087,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         humanChecklist: humanChecklist({
           slate: services.includes('Web Client Hosting (Slate)'),
           sendsMail: bundle.sendsMail,
+          mailFrom: bundle.mail.from,
           slateStarted,
           connectionSecretKeys: readConnectionSecretKeys(cwd),
         }),

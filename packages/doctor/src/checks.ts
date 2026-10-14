@@ -32,6 +32,8 @@ import { FIDELITY_JSON, LOADER_REPORT, hasReportJson } from '../../deploy/src/cs
 import { localRefreshAllowed } from '../../deploy/src/rest.js';
 import { importingAgeMs, importingAgeState, isStuckImporting, stuckImportGuidedStep, STUCK_IMPORT_MAX_AGE_HOURS, unknownImportAgeGuidedStep, type ListedProject } from '../../deploy/src/stuck-import.js';
 import { fallbackForTool } from '../../deploy/src/mcp-registry.js';
+import { readDeployConfig } from '../../deploy/src/dc.js';
+import { generate as generateDeluge } from '../../deluge/src/generate.js';
 
 export interface DoctorContext {
   io: DoctorIo;
@@ -460,6 +462,26 @@ function checkD1(ctx: DoctorContext): { result: CheckResult; ir?: App } {
     return { result: fail('D-D1', `${basename(target)} is empty or not a .ds export`, fix) };
   }
   return { result: pass('D-D1', `export: ${basename(target)} ${Math.round(st.size / 1024)} KB, shape ${ir.shape}, parses`), ir };
+}
+
+/** Offline sender state check, using the same c2c-deploy.json fields as deploy. */
+export function checkMailSender(app: App, workspace: string): CheckResult[] {
+  const sendsMail = generateDeluge(app).files.some((file) => file.source.includes('shim.mail.send('));
+  if (!sendsMail) return [];
+  const path = join(workspace, 'c2c-deploy.json');
+  let sender: { from?: string; verified?: boolean } | undefined;
+  try {
+    sender = readDeployConfig(path).mail;
+  } catch (err) {
+    return [fail('D-M1', 'mail sender configuration could not be read', `fix ${path}: ${err instanceof Error ? err.message : 'invalid configuration'}`)];
+  }
+  if (!sender?.from) {
+    return [fail('D-M1', 'the app sends mail and no Catalyst Mail sender is set', 'set mail.from in c2c-deploy.json, verify it in Catalyst Mail, then set mail.verified to true')];
+  }
+  if (sender.verified !== true) {
+    return [{ ...fail('D-M1', 'the app sends mail and its sender is not marked verified', 'verify mail.from in Catalyst Mail, then set mail.verified to true in c2c-deploy.json'), screen: `mail sender ${maskEmail(sender.from)} is not marked verified` }];
+  }
+  return [{ ...pass('D-M1', 'the app sends mail and its sender is marked verified'), screen: `mail sender ${maskEmail(sender.from)} is marked verified` }];
 }
 
 function checkD2(ctx: DoctorContext): CheckResult {
@@ -1158,6 +1180,7 @@ export async function runDoctorChecks(ctx: DoctorContext): Promise<DoctorRun> {
 
   const d1 = checkD1(ctx);
   checks.push(d1.result);
+  if (d1.ir) checks.push(...checkMailSender(d1.ir, ctx.workspace));
   checks.push(ctx.local ? localSkip('D-D2') : checkD2(ctx));
   checks.push(ctx.local ? localSkip('D-D3') : checkD3(ctx));
 
