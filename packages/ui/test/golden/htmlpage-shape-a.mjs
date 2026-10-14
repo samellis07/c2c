@@ -94,7 +94,7 @@ function c2cUrlOk(url) {
 }
 
 const C2C_AUDIT_TAGS = new Set(["a","abbr","b","blockquote","br","caption","code","col","colgroup","dd","del","div","dl","dt","em","figcaption","figure","font","h1","h2","h3","h4","h5","h6","hr","i","img","ins","kbd","li","mark","ol","p","pre","q","s","samp","small","span","strong","sub","sup","table","tbody","td","tfoot","th","thead","tr","u","ul","var","wbr"]);
-const C2C_AUDIT_ATTRS = {"*":["data-style-dropped","title"],"a":["href","title","rel"],"font":["color","face","size"],"img":["alt","height","src","title","width"],"ol":["start","title"],"td":["colspan","rowspan","title"],"th":["colspan","rowspan","title"]};
+const C2C_AUDIT_ATTRS = {"*":["data-style-dropped","data-zml","title"],"a":["href","title","rel"],"font":["color","face","size"],"img":["alt","height","src","title","width"],"ol":["start","title"],"td":["colspan","rowspan","title"],"th":["colspan","rowspan","title"]};
 const C2C_AUDIT_URLS = /^(href|src|srcset|action|formaction|xlink:href|poster|cite|background|longdesc|profile|usemap|data|ping|manifest|codebase|archive|lowsrc|dynsrc|srcdoc)$/i;
 function c2cAttrAuditOk(tag, name, value) {
   const attr = String(name).toLowerCase();

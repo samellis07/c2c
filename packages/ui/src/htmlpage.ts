@@ -1343,7 +1343,8 @@ export function compileHtmlpage(
     if (isl.kind !== 'stmts') continue;
     try {
       const script = parse(isl.text.trim());
-      if (script.body.length === 1 && script.body[0].kind === 'expr') isl.kind = 'expr';
+      const only = script.body.length === 1 ? script.body[0] : undefined;
+      if (only && (only.kind === 'expr' || (only.kind === 'unknown' && only.reason === 'no-effect'))) isl.kind = 'expr';
     } catch {
       /* stays a statement island */
     }

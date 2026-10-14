@@ -3,8 +3,8 @@
   "docs": "packages/deluge/data/builtin-docs.json",
   "dispatch": "packages/deluge/src/dispatch.ts",
   "counts": {
-    "supported": 40,
-    "shimmed": 622,
+    "supported": 38,
+    "shimmed": 624,
     "todo": 56,
     "total": 718
   },

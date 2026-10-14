@@ -418,8 +418,8 @@ test(
   () => {
   const course = analyze(galleryDs('course-planner', 'Course_Planner.ds'));
   assertCountedOnce(course);
-  assert.equal(course.determinism.todoCount, 4);
-  assert.equal(course.determinism.uiTodoCount, 2);
+  assert.equal(course.determinism.todoCount, 3);
+  assert.equal(course.determinism.uiTodoCount, 1);
   assert.deepEqual(
     course.deluge.todoLocations.filter((item) => item.scope === 'app').map((item) => `${item.location}|${item.construct}`),
     ['report Ongoing_Courses_Student|report-criteria'],
@@ -470,17 +470,11 @@ test(
       scope: 'ui',
     },
     { location: 'page Crisis_View_Page.dspZml', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
-    { location: 'page Crisis_Details.dspZml #1', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
-    { location: 'page Crisis_Details.dspZml #2', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
-    { location: 'page Crisis_Details.dspZml #3', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
-    { location: 'page Crisis_Details.dspZml #4', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
-    { location: 'page Crisis_Details.dspZml #5', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
   ]);
 
   const management = analyze(galleryDs('employee-management', 'Employee_Management.ds'));
   assertCountedOnce(management);
   assert.deepEqual(management.deluge.todoLocations, [
-    { location: 'page Dashboard.dspZml', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
     { location: 'page Dashboard.dsp', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
     { location: 'page Employee_Profile.dsp', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
   ]);
