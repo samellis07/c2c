@@ -331,7 +331,7 @@ async function attempt(message, req, config) {
   const verified = config && Array.isArray(config.verifiedSenders) ? config.verifiedSenders : [];
   if (!from || !verified.includes(from)) {
     const failure = from ? \`the app sends mail and sender \${from} is not marked verified\` : "the app sends mail and no Catalyst Mail sender is set";
-    return { performed: false, status: "refused", code: MAIL_SENDER_RULE, reason: \`${failure} (precheck \${MAIL_SENDER_RULE})\` };
+    return { performed: false, status: "refused", code: MAIL_SENDER_RULE, reason: \`\${failure} (precheck \${MAIL_SENDER_RULE})\` };
   }
   const rendered = renderInlineAttachments(message);
   const pdf = pdfAttachments(rendered.catalog, rendered.leftover);
