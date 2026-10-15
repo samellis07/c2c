@@ -224,6 +224,25 @@ test('ensureSeedBucket reads only the bucket list and creates only after proven 
   });
 });
 
+test('malformed bucket list rows fail closed without creating a bucket', async () => {
+  for (const body of [
+    { data: [{}] },
+    { data: [{ bucket_name: null }] },
+    { data: [{ bucket_name: '' }] },
+    { data: { bucket_name: BUCKET } },
+    {},
+  ]) {
+    const calls: string[] = [];
+    const result = await ensureSeedBucket(async ({ method, path }) => {
+      calls.push(`${method} ${path}`);
+      return { status: 200, body };
+    }, PROJECT, BUCKET);
+    assert.equal(result.outcome, 'failed', JSON.stringify(body));
+    assert.match(result.detail, /bucket list|bucket_name/);
+    assert.deepEqual(calls, [`GET /baas/v1/project/${PROJECT}/bucket`]);
+  }
+});
+
 test('seed bucket list pagination finds exact names and refuses uncertain absence', async () => {
   const paths: string[] = [];
   const paged: RestFn = async ({ path }) => {
