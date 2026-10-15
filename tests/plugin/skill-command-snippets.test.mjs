@@ -56,6 +56,22 @@ const files = [
   ...markdownFiles(path.join(repo, 'plugin/references')),
 ];
 const snippets = files.flatMap(commandSnippets);
+const pluginDocs = markdownFiles(path.join(repo, 'plugin'));
+
+// The env file contains plaintext credentials, so plugin instructions must
+// keep it outside the generated tree that users commonly commit.
+test('plugin docs keep function-env.json outside c2c-out', () => {
+  const unsafePath = /c2c-out\/(?:<[^>]+>|[^/\s`'"<>]+)\/function-env\.json/;
+  assert.equal(unsafePath.test('c2c-out/<app>/function-env.json'), true);
+  assert.equal(unsafePath.test('c2c-out/my-app/function-env.json'), true);
+  const violations = pluginDocs.flatMap((file) => {
+    const text = readFileSync(file, 'utf8');
+    return [...text.matchAll(unsafePath)].map((match) =>
+      `${path.relative(repo, file)}: ${match[0]}`
+    );
+  });
+  assert.deepEqual(violations, []);
+});
 
 test('plugin skill and reference c2c command snippets parse against the CLI argument contract', () => {
   assert.ok(snippets.length >= 20, `found concrete contracted command snippets (${snippets.length})`);

@@ -31,7 +31,7 @@ Load `catalyst-authentication` (Connections section) and `catalyst-functions` (A
 3. **Mail:** ask which sender address to use (Creator's `from` must be admin, login user or verified: precheck rule 09). Create the configuration via MCP with the user's yes; the user enters the code they receive; read back verified. Do **not** send a test email without the user's explicit OK (it sends real mail).
 4. **Custom APIs:** enable API Gateway (CLI), create each route via MCP with the plan's method/path/target, read back, then call each once (expect the generated response or 401 when unauthenticated). A Custom API declared `GET` whose function writes, mails, or calls out is routed as `POST` (a state change is never a GET); the migration report names it as `custom-function-api-method`, and the gateway route uses `POST`.
 5. **TODO tasks:** every `zoho.*` task without an adapter is a TODO in `migration-report.json` with the task name and line. Draft fills only through `c2c fill-todos --accept` (`c2c-logic` step 2).
-6. **Env values** for third-party API keys: user fills `function-env.json`; never in chat, never in files under `c2c-out/` other than that one, which is git-ignored.
+6. **Env values** for third-party API keys: user fills `~/.c2c/<app>-function-env.json` outside the repository; never in chat or under `c2c-out/`.
 
 ## Decision rules
 
