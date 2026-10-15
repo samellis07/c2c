@@ -33,6 +33,7 @@ import { catalystBaseFor, dcEndpoints } from './dc.js';
 import { catalystScopeArgs, scrubCatalystEnv } from './scope.js';
 import { isExactGrantList, isPerRowGrantMatch, PLAN_CLI_PATH, PLAN_EMITTED_CLI_PATHS, PLAN_STEP_TOOL, PLAN_STEP_TOOLS, STEP_KINDS, sha256, type ProvisionStep, type StepEndpoint } from './offline-plan.js';
 import { readConnectionSecretKeys, writeOrUpdateFunctionEnv } from './function-env.js';
+import { connectionSecretItem } from './human-steps.js';
 import { applyTablePlan, type RestCall, type RestFn, type RestResult, type TableCreateStep } from './tables.js';
 import { restWithRetry, spawnWithRetry, type ReRead, type RestRetry, type RetryOptions } from './retry.js';
 import { assertProtectedProject } from './guards.js';
@@ -1561,11 +1562,7 @@ function humanChecklist(plan: ProvisionPlanFile, state?: ProvisionState, out?: s
   );
   const secretKeys = out ? readConnectionSecretKeys(out, plan.connectionSecretKeys) : (plan.connectionSecretKeys ?? []);
   if (secretKeys.length > 0) {
-    items.push(
-      secretKeys.length === 1
-        ? `Fill connection secret in function-env.json (${secretKeys[0]}): keep secret values out of chat and logs.`
-        : `Fill connection secrets in function-env.json (${secretKeys.join(', ')}): keep secret values out of chat and logs.`,
-    );
+    items.push(connectionSecretItem(secretKeys));
   }
   return items;
 }

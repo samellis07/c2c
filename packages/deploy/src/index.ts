@@ -95,7 +95,7 @@ export type { SmokeAuth, SmokeFetch, SmokeFieldPlan, SmokeInputs, SmokeKind, Smo
 export { cdpBrowser, openOnOrigin, pageFetch, runBrowserSmoke } from './browser.js';
 export type { BrowserSmokeResult, SmokeBrowser, SmokePage } from './browser.js';
 export { CONSOLE_SERVICES, formatPostDeploySteps, postDeploySteps, servicesTouched } from './post-deploy.js';
-export { formatHumanChecklist, humanChecklist } from './human-steps.js';
+export { connectionSecretItem, formatHumanChecklist, humanChecklist } from './human-steps.js';
 export type { HumanChecklistInput } from './human-steps.js';
 export {
   buildFunctionEnv,
