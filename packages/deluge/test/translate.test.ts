@@ -1719,10 +1719,10 @@ test('an assignment after an if replays that assignment', async () => {
   assert.equal(slots.c0, true);
 });
 
-test('a collection mutated with server data marks its later client read a todo', () => {
+test('a collection mutated with server data replays the update before its later client read', () => {
   // The mutation runs on the server only, so the client collection stays
-  // empty. A later client condition on it must be a counted manual item, not
-  // a silent read of the empty value.
+  // empty. A later client condition on it reads a prefetch slot that replays
+  // the update on a copy of the collection, never the empty client value.
   for (const src of [
     'l = List(); l.add(Orders[Status == "Open"].count()); if (l.size() > 0) { alert "x"; }',
     'm = Map(); m.put("k", Orders[Status == "Open"].count()); if (m.get("k") > 0) { alert "x"; }',
@@ -1730,9 +1730,9 @@ test('a collection mutated with server data marks its later client read a todo',
     'm = Map(); for each r in Orders[Status == "Open"] { m.put("k", r.Hours); } if (m.get("k") > 0) { alert "x"; }',
   ]) {
     const t = translate(src);
-    assert.equal(t.todos.filter((item) => item.construct === 'client-condition-uses-server').length, 1, src);
-    assert.match(stripComments(t.client), /await shim\.todo\(ctx, "client-condition-uses-server"\)/);
-    assert.doesNotMatch(stripComments(t.prefetch), /slots\["c\d+"\] = \(shim\.list\.(size|get)/);
+    assert.equal(t.todos.filter((item) => item.construct === 'client-condition-uses-server').length, 0, src);
+    const p = stripComments(t.prefetch);
+    assert.match(p, /\}\)\(shim\.list\.duplicate\((l|m)\)\);\nslots\["c0"\] = \(shim\.list\.(size|get)/, src);
   }
 });
 
