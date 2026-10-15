@@ -19,7 +19,7 @@ import { SmokePage } from './smoke/SmokePage';
 import { AppBoundary, rootErrorOptions } from './shell/ScreenBoundary';
 
 /** Screen components by route key (`form/<name>`, `report/<name>`, `page/<name>`, `flow/<name>[/<view>]`), written by the generator. */
-export type ScreenProps = { edit?: string; row?: string; view?: string };
+export type ScreenProps = { edit?: string; row?: string; record?: string; view?: string };
 export type RouteTable = Record<string, ComponentType<ScreenProps>>;
 
 /**
@@ -67,7 +67,7 @@ function App({ spec, routes, custom }: { spec: AppSpec; routes: RouteTable; cust
   // its report and their queries stay cold, and the shell paints the same
   // denied state the vanilla runtime shows.
   const denied =
-    (route.name === 'form' || route.name === 'report' || route.name === 'page') && deniedTargets(spec).has(route.id);
+    (route.name === 'form' || route.name === 'report' || route.name === 'page' || route.name === 'record') && deniedTargets(spec).has(route.id);
   return (
     <AuthGate>
       <AppShell title={spec.name} sections={sections} current={key}>
@@ -78,6 +78,7 @@ function App({ spec, routes, custom }: { spec: AppSpec; routes: RouteTable; cust
             key={route.name === 'form' ? `${key}/${route.edit ?? ''}` : route.name === 'report' ? `${key}/${route.row ?? ''}` : route.name === 'flow' ? `flow/${route.id}` : key}
             edit={route.name === 'form' ? route.edit : undefined}
             row={route.name === 'report' ? route.row : undefined}
+            record={route.name === 'record' ? route.row : undefined}
             view={route.name === 'flow' ? route.view : undefined}
           />
         ) : (

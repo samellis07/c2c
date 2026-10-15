@@ -11,6 +11,7 @@ export type Route =
   | { name: 'home' }
   | { name: 'form'; id: string; edit?: string }
   | { name: 'report'; id: string; row?: string }
+  | { name: 'record'; id: string; row: string }
   | { name: 'page'; id: string }
   /** The hidden admin smoke page — never in the nav. */
   | { name: 'smoke'; id: 'smoke' }
@@ -36,6 +37,7 @@ export function parseRoute(hash: string): Route | undefined {
   if (parts[0] === 'admin' && parts[1] === 'smoke') return { name: 'smoke', id: 'smoke' };
   if (parts[0] === 'form' && parts[1]) return { name: 'form', id: parts[1], edit: parts[2] === 'edit' ? parts[3] : undefined };
   if (parts[0] === 'report' && parts[1]) return { name: 'report', id: parts[1], row: parts[2] === 'row' ? parts[3] : undefined };
+  if (parts[0] === 'record' && parts[1] && parts[2]) return { name: 'record', id: parts[1], row: parts[2] };
   if (parts[0] === 'page' && parts[1]) return { name: 'page', id: parts[1] };
   if (parts[0] === 'flow' && parts[1]) return { name: 'flow', id: parts[1], view: parts[2] };
   return { name: 'missing', id: parts.join('/') };

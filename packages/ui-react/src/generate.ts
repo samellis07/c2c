@@ -242,6 +242,20 @@ export default function ${component}({ edit }: ScreenProps) {
 ${body}
   );
 }
+
+`;
+}
+
+function recordModule(form: FormSpec, component: string): string {
+  return `${HEADER}import { RecordSummary, type ScreenProps } from '@c2c/ui';
+import { model } from '../model';
+
+const form = model.forms[${q(form.name)}]!;
+
+/** Read-only summary for one server-authorized record. */
+export default function ${component}({ record }: ScreenProps) {
+  return <RecordSummary form={form} rowId={record} />;
+}
 `;
 }
 
@@ -463,6 +477,10 @@ export function generateReactApp(app: App, opts: ReactGenerateOptions = {}): Rea
     const module = unique(`forms/${stem(form.name)}`);
     gen(`src/generated/${module}.tsx`, formModule(form, component, governed.has(form.name)));
     routes.push({ key: `form/${form.name}`, component, module });
+    const recordComponent = unique(`${pascal(form.name)}RecordSummary`);
+    const recordModulePath = unique(`records/${stem(form.name)}`);
+    gen(`src/generated/${recordModulePath}.tsx`, recordModule(form, recordComponent));
+    routes.push({ key: `record/${form.name}`, component: recordComponent, module: recordModulePath });
   }
   for (const report of ui.model.reports.map((r) => spec.reports[r.name]!)) {
     const component = unique(`${pascal(report.name)}Report`);

@@ -7,6 +7,8 @@ import type { UiModel } from '../src/index.js';
 
 interface Runtime {
   boot(model: UiModel, doc: Document): Promise<void>;
+  parseRoute(hash: string): { name: string; id?: string; row?: string };
+  renderRoute(model: UiModel, route: { name: string; id?: string; row?: string }, doc: Document): string;
 }
 
 async function loadRuntime(): Promise<Runtime> {
@@ -96,6 +98,7 @@ function setup(hash: string, options: { submitOk: boolean; rows?: unknown[] }) {
     const body = JSON.parse(init.body) as Record<string, unknown>;
     calls.push({ url, body });
     if (body.op === 'query') return { ok: true, status: 200, json: async () => ({ rows: options.rows ?? [] }) };
+    if (url === '/forms/F/record') return { ok: true, status: 200, json: async () => ({ record: { Item_Name: '<unsafe>', Approved: true } }) };
     return { ok: options.submitOk, status: options.submitOk ? 200 : 500, json: async () => ({}) };
   }) as unknown as typeof fetch;
   return { win, doc: win.document, calls };
@@ -385,3 +388,17 @@ test('a report route fills its table body with the rows the query returns', asyn
   assert.ok(calls.some((c) => c.url === '/reports/R' && c.body.op === 'query'));
 });
 
+
+
+test('record summary route parses the untrusted row id and paints only projected fields as text', async () => {
+  const runtime = await loadRuntime();
+  assert.deepEqual(runtime.parseRoute('#/record/F/abc%2Fdef'), { name: 'record', id: 'F', row: 'abc/def' });
+  const { win, doc, calls } = setup('#/record/F/abc%2Fdef', { submitOk: true });
+  await runtime.boot(model, doc);
+  await settle();
+  const summary = doc.querySelector('[data-record-summary="F"]');
+  assert.ok(summary);
+  assert.equal(summary.querySelector('td')?.textContent, '<unsafe>');
+  assert.equal(summary.querySelector('td img'), null, 'record data is rendered as text');
+  assert.deepEqual(calls[0], { url: '/forms/F/record', body: { ROWID: 'abc/def' } });
+});
