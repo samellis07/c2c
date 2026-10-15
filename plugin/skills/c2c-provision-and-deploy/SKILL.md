@@ -113,5 +113,5 @@ Each limit below names its limit id, the c2c behaviour, and [its row](../../refe
 
 - Create the project in the console (or run the IaC import and confirm it in the browser).
 - Approve each phase: "tables (7), permissions (14), job pool, bucket — create now?".
-- Fill third-party connection secrets in `function-env.json` (if the end-of-flow checklist requests them; keep secret values out of chat and logs).
+- Fill third-party connection secrets in `~/.c2c/<app>-function-env.json` — copy the autofilled `<out>/function-env.json` there first (if the end-of-flow checklist requests them; keep secret values out of chat and logs).
 - Each console checklist item, then "done?".

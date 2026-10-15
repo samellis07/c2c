@@ -19,7 +19,8 @@ export interface HumanChecklistInput {
    */
   slateStarted?: boolean;
   /**
-   * Third-party secret keys declared on connections that need manual user entry in function-env.json.
+   * Third-party secret keys declared on connections that need manual user entry in
+   * ~/.c2c/<app>-function-env.json (the file passed to deploy --function-env).
    * Listed as at most ONE item naming the keys; secret values are kept out of chat and logs.
    */
   connectionSecretKeys?: readonly string[];
@@ -43,13 +44,23 @@ export function humanChecklist(input: HumanChecklistInput): string[] {
     );
   }
   if (input.connectionSecretKeys && input.connectionSecretKeys.length > 0) {
-    items.push(
-      input.connectionSecretKeys.length === 1
-        ? `Fill connection secret in function-env.json (${input.connectionSecretKeys[0]}): keep secret values out of chat and logs.`
-        : `Fill connection secrets in function-env.json (${input.connectionSecretKeys.join(', ')}): keep secret values out of chat and logs.`,
-    );
+    items.push(connectionSecretItem(input.connectionSecretKeys));
   }
   return items;
+}
+
+/**
+ * The secrets file lives outside the generated tree (~/.c2c/<app>-function-env.json,
+ * the file `c2c deploy --function-env` reads). The generated <out>/function-env.json
+ * carries the derivable keys plan/provision autofill; the user copies it there and
+ * types only the secret values. One item names the keys — never the values.
+ */
+export function connectionSecretItem(connectionSecretKeys: readonly string[]): string {
+  const fill =
+    connectionSecretKeys.length === 1
+      ? `fill connection secret (${connectionSecretKeys[0]})`
+      : `fill connection secrets (${connectionSecretKeys.join(', ')})`;
+  return `Copy <out>/function-env.json to ~/.c2c/<app>-function-env.json and ${fill} there: keep secret values out of chat and logs.`;
 }
 
 /** `human checklist:` followed by `1. …` lines. */

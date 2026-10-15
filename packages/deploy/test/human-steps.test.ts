@@ -123,6 +123,17 @@ test('an app with no Slate client and no mail lists only the admin invite', () =
   assert.deepEqual(humanChecklist({ slate: false, sendsMail: false }).map((item) => /invite/i.test(item)), [true]);
 });
 
+test('the connection-secret item fills ~/.c2c/<app>-function-env.json, copied from the autofilled <out>/function-env.json', () => {
+  const one = humanChecklist({ slate: false, sendsMail: false, connectionSecretKeys: ['MY_STRIPE_CLIENT_SECRET'] });
+  const item = one.find((i) => /function-env/i.test(i))!;
+  assert.match(item, /~\/\.c2c\/<app>-function-env\.json/, 'item must point at the file deploy --function-env reads');
+  assert.match(item, /<out>\/function-env\.json/, 'item must name the autofilled source file');
+  assert.match(item, /MY_STRIPE_CLIENT_SECRET/, 'item must name the key');
+  const many = humanChecklist({ slate: false, sendsMail: false, connectionSecretKeys: ['A_SECRET', 'B_TOKEN'] });
+  const manyItem = many.find((i) => /function-env/i.test(i))!;
+  assert.match(manyItem, /secrets \(A_SECRET, B_TOKEN\)/);
+});
+
 test('sendsMail is detected from the plan: a sendmail workflow flags true, a plain app false', () => {
   const mailer = buildDeploy(deriveIr(parse(MAIL_DS)), guardFor('Mailer', '1001'), true);
   const quiet = buildDeploy(deriveIr(parse(PLAIN_DS)), guardFor('Quiet', '1002'), true);

@@ -21,17 +21,19 @@ The items, in order:
    Configuration → add the sender address; the service mails a verification
    code to that address and the user enters it. Shown only when the app sends
    mail.
-5. **Fill connection secret in function-env.json** — for declared connections
-   with third-party credentials (e.g. client secrets, API keys, auth tokens),
-   enter the secret value in `function-env.json` under `--out`. All derivable
+5. **Fill connection secrets in `~/.c2c/<app>-function-env.json`** — for
+   declared connections with third-party credentials (e.g. client secrets, API
+   keys, auth tokens). `c2c plan` and `c2c provision` autofill all derivable
    keys (`PROJECT_ID`, `CATALYST_PROJECT_ID`, `DC`, `CATALYST_DC`, `ENV`,
    `CATALYST_ENV`, `APP_URL`, `CATALYST_APP_URL`, bucket names
    `C2C_STRATUS_BUCKET`, `STRATUS_BUCKET`, and table IDs `TABLE_ID`,
-   `TABLE_<NAME>_ID`) are autofilled by `c2c plan` and `c2c provision`.
-   Third-party secrets of declared connections are the only keys left for the
-   user. Those go into the checklist as at most ONE item naming the key(s), and
-   never into chat, logs, stdout, or files outside `function-env.json`. Shown
-   only when the app declares third-party connection secrets.
+   `TABLE_<NAME>_ID`) into `<out>/function-env.json`; copy that file to
+   `~/.c2c/<app>-function-env.json` — outside the generated tree and the
+   repository — and enter the secret values there. `c2c deploy --function-env`
+   reads that file. Third-party secrets of declared connections are the only
+   keys left for the user. Those go into the checklist as at most ONE item
+   naming the key(s), and never into chat, logs, stdout, or the generated
+   tree. Shown only when the app declares third-party connection secrets.
 
 Each item is conditional on the app, detected from the plan — never from a
 flag the user passes:
