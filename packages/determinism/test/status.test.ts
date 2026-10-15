@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, linkSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { emptyApp, type App, type Workflow } from '../../core/src/ir.js';
@@ -297,7 +297,7 @@ test('resolveSitesPath refuses in-repo paths and accepts outside paths', () => {
   assert.throws(() => resolveSitesPath(join(root, 'docs', 'sites.json')), /outside the repo tree/);
   assert.throws(() => resolveSitesPath(join(root, 'sub', '..', 'docs', 'sites.json')), /outside the repo tree/);
   const dir = mkdtempSync(join(tmpdir(), 'c2c-sites-'));
-  assert.equal(resolveSitesPath(join(dir, 'sites.json')), join(dir, 'sites.json'));
+  assert.equal(resolveSitesPath(join(dir, 'sites.json')), resolve(dir, 'sites.json'));
   // A path that escapes the root through .. is outside, not inside.
   assert.equal(resolveSitesPath(join(root, '..', 'outside-sites.json')), join(root, '..', 'outside-sites.json'));
 });
@@ -345,7 +345,7 @@ test('resolveSitesPath refuses every worktree, aliases, and symlink escapes', ()
     process.chdir(previousCwd);
   }
   // Outside every repo: accepted.
-  assert.equal(resolveSitesPath(join(dir, 'sites.json')), join(dir, 'sites.json'));
+  assert.equal(resolveSitesPath(join(dir, 'sites.json')), resolve(dir, 'sites.json'));
 });
 
 test('--sites writes per-app attribution; the rendered doc is byte-identical without it', () => {
@@ -402,6 +402,30 @@ test('--sites refuses hard links to repo files without changing their contents',
     // The probe is outside version control and is removed even on assertion failure.
     try { unlinkSync(hardlink); } catch { /* absent */ }
     try { unlinkSync(source); } catch { /* absent */ }
+  }
+});
+
+test('--sites atomically replaces a destination swapped to a repo symlink after validation', () => {
+  const fixtures = join(root, 'fixtures/redistributable');
+  const tmp = mkdtempSync(join(tmpdir(), 'c2c-sites-'));
+  const doc = join(tmp, 'doc.md');
+  const sites = join(tmp, 'sites.json');
+  const protectedFile = join(root, 'docs/sites-toctou-probe.json');
+  const original = '{"unchanged":true}\n';
+  writeFileSync(protectedFile, original);
+  const hookHost = globalThis as typeof globalThis & { __c2cBeforeSitesWrite?: (path: string) => void };
+  hookHost.__c2cBeforeSitesWrite = (path) => {
+    assert.equal(path, sites);
+    symlinkSync(protectedFile, path);
+  };
+  try {
+    assert.equal(main(['--dir', fixtures, '--out', doc, '--sites', sites]), 0);
+    assert.equal(readFileSync(protectedFile, 'utf8'), original);
+    assert.equal(JSON.parse(readFileSync(sites, 'utf8')).schema, 'c2c-determinism-sites/1');
+  } finally {
+    delete hookHost.__c2cBeforeSitesWrite;
+    try { unlinkSync(sites); } catch { /* absent */ }
+    try { unlinkSync(protectedFile); } catch { /* absent */ }
   }
 });
 

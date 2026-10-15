@@ -377,15 +377,17 @@ export function resolveSitesPath(path: string, root: string = repoRoot()): strin
   if (existing && (!existing.isFile() || existing.nlink !== 1)) {
     throw new Error(`determinism:status: --sites target must be a regular file with one link: ${destination}`);
   }
-  return destination;
+  return abs;
 }
 
 /** Atomically replace an outside-repo target without following a swapped link. */
 function writeSitesFile(path: string, contents: string): void {
-  const parent = dirname(path);
+  const requestedParent = dirname(path);
+  const parent = tryRealpath(requestedParent);
+  if (!parent) throw new Error(`determinism:status: --sites parent is unavailable: ${requestedParent}`);
   const parentBefore = statSync(parent);
-  if (!parentBefore.isDirectory() || tryRealpath(parent) !== parent) {
-    throw new Error(`determinism:status: --sites parent changed after validation: ${parent}`);
+  if (!parentBefore.isDirectory() || tryRealpath(requestedParent) !== parent) {
+    throw new Error(`determinism:status: --sites parent changed after validation: ${requestedParent}`);
   }
   const destination = join(parent, basename(path));
   const existing = lstatSync(destination, { throwIfNoEntry: false });
@@ -404,7 +406,7 @@ function writeSitesFile(path: string, contents: string): void {
     fsyncSync(fd);
     closeSync(fd);
     fd = undefined;
-    if (tryRealpath(parent) !== parent) throw new Error(`determinism:status: --sites parent changed after validation: ${parent}`);
+    if (tryRealpath(requestedParent) !== parent) throw new Error(`determinism:status: --sites parent changed after validation: ${requestedParent}`);
     const afterWriteParent = statSync(parent);
     if (afterWriteParent.dev !== parentBefore.dev || afterWriteParent.ino !== parentBefore.ino) {
       throw new Error(`determinism:status: --sites parent changed after validation: ${parent}`);
@@ -563,7 +565,10 @@ export function main(argv: string[]): number {
   writeFileSync(out, renderStatusDoc(status));
   if (sitesPath) {
     try {
-      writeSitesFile(sitesPath, `${JSON.stringify(siteAttributionForDir(dir, 'gallery'), null, 2)}\n`);
+      const contents = `${JSON.stringify(siteAttributionForDir(dir, 'gallery'), null, 2)}\n`;
+      const hook = (globalThis as typeof globalThis & { __c2cBeforeSitesWrite?: (path: string) => void }).__c2cBeforeSitesWrite;
+      hook?.(sitesPath);
+      writeSitesFile(sitesPath, contents);
     } catch (error) {
       process.stderr.write(`${(error as Error).message}\n`);
       return 2;
