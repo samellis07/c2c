@@ -129,6 +129,16 @@ file expression through as `{ kind: "file", file }` and raise no diagnostic.
 Like other notes they have no placeholder and `--accept` refuses them; they
 exist so the report names what was not carried over.
 
+A `pivottable` report adds a `Rebuild the pivot table manually: ...` note.
+The Creator export carries no pivot shelves — the row, column and measure
+(aggregation) fields — and Catalyst has no pivot builder to bind them, so the
+generated report renders the underlying rows as a list and shows that reason
+on the page. The note is counted as a residual item: the shelves cannot be
+reconstructed from the export, so the rebuild stays a human step. It is a UI
+stub, not a hole, so `fill-todos` never emits a task for it. A `pivotchart`
+is likewise an export with no chart settings; it renders as a generated chart
+report instead.
+
 ## What stays offline
 
 Emit, accept, and replay read the local app, the golden vectors already in the repo, and the lock file. They do not call Catalyst, Creator, or a model.
