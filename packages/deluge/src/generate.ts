@@ -437,7 +437,7 @@ function isHandlerWorkflow(w: Workflow): boolean {
  */
 function handlerLeaf(group: readonly Workflow[]): string {
   const labels = new Set(group.map((w) => w.event || w.name || 'handler'));
-  return labels.size === 1 ? slug([...labels][0]!) : `${eventKind(group[0]!.event)}-handlers`;
+  return labels.size === 1 ? slug([...labels].sort(compareEnUs)[0]!) : `${eventKind(group[0]!.event)}-handlers`;
 }
 
 /** Workflows of one app that share the /forms/<form>/<kind> route, in export order. */
@@ -545,7 +545,7 @@ function emitFormHandler(
     : serverParts.join('\n');
   if (serverBody.trim()) {
     const systemWrite =
-      writeKinds.size === 0 ? null : writeKinds.size === 1 ? [...writeKinds][0]! : 'add-or-edit';
+      writeKinds.size === 0 ? null : writeKinds.size === 1 ? [...writeKinds].sort(compareEnUs)[0]! : 'add-or-edit';
     const recordEvents = new Set(group.map((w) => (w.recordEvent ?? '').trim().toLowerCase()));
     const recordEvent =
       recordEvents.size === 1
@@ -555,7 +555,7 @@ function emitFormHandler(
           : scopes.has('edit')
             ? 'on edit'
             : 'on add';
-    const extraRecordEvents = recordEvents.size > 1 ? { recordEvents: [...new Set(group.map((w) => w.recordEvent ?? ''))] } : {};
+    const extraRecordEvents = recordEvents.size > 1 ? { recordEvents: [...new Set(group.map((w) => w.recordEvent ?? ''))].sort(compareEnUs) } : {};
     put(
       `functions/aio/${base}.mjs`,
       aioModule({
