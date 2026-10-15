@@ -508,6 +508,19 @@ test('HTML snippets drop slash, uppercase, and entity-encoded handlers', () => {
         'https://EXAMPLE.COM/manual.pdf',
         'https://example.com./manual.pdf',
         'https://ex\u0430mple.com/manual.pdf',
+        // The URL parser canonicalises each of these hosts onto an allowlisted
+        // name; the raw authority is not canonical, so they stay sandboxed.
+        'https://maps%2egoogle.com/maps/embed?pb=x',
+        'https://%6daps.google.com/maps/embed?pb=x',
+        'https://maps\u3002google.com/maps/embed?pb=x',
+        'https://maps\uFF0Egoogle\uFF61com/maps/embed?pb=x',
+        'https://maps.google.com:443/maps/embed?pb=x',
+        'https://maps.google.com:8443/maps/embed?pb=x',
+        'https:\\\\maps.google.com\\maps\\embed?pb=x',
+        'https://m\u00e4ps.google.com/maps/embed?pb=x',
+        'https://xn--80ak6aa92e.com/x.pdf',
+        'https://example%2ecom/manual.pdf',
+        'https://example.com:443/manual.pdf',
       ];
       const dropped = [
         'http://example.com/insecure',
