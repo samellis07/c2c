@@ -146,6 +146,6 @@ rounding during a load too.
 | insertRows / updateRows / deleteRows | 200 rows per call [TESTED] | chunked; update counts are checked |
 | ZCQL SELECT | 300 rows per query [DOC]; `IN` lists of up to 300 values [TESTED] | keyset paging; `IN` reads chunked |
 | ZCQL UPDATE / DELETE | 300 rows per statement, with no error for the rest [TESTED] | `updateAllWhere` / `deleteAllWhere` |
-| Request cut (Advanced I/O, AppSail) | about 30 s, not raisable (Advanced I/O [DOC]; AppSail [UNVERIFIED]) | `runOrDefer` → Job + 202 + poll |
+| Request cut (Advanced I/O, AppSail) | about 30 s, not raisable [DOC][TESTED] | `runOrDefer` → Job + 202 + poll |
 | Job function | 15 min [DOC] | `runWorkSlice` stops at 12 min and resubmits |
 | Bulk write | needs admin scope and a Stratus bucket; `fk_mapping` needs a unique reference column [TESTED] | lookup method chosen per edge; upload injected |
