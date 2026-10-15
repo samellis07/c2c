@@ -353,3 +353,58 @@ test('a retry reuses the base row when rollback cannot delete it', async () => {
   assert.equal(tables.Wide__e1!.length, 1);
   assert.equal(String(tables.Wide__e1![0]!.parent_rowid), String(tables.Wide![0]!.ROWID));
 });
+
+test('staged zcql refuses an unparsed stage, an unbound stage, and a foreign bind before reading', async () => {
+  const calls: string[] = [];
+  const runtime = createRuntime({
+    dryRun: false,
+    appTimeZone: 'UTC',
+    datastore: {
+      async query(form, where) {
+        calls.push(`${form}: ${where}`);
+        return [{ ROWID: '1', C0: 'a', C1: 'b' }];
+      },
+    },
+  });
+  const ctx = runtime.context({});
+  const read = (zcql: string[]) => runtime.shim.datastore.rows(ctx, runtime.shim.datastore.query(ctx, 'Item', { op: 'true' }, { zcql }));
+
+  await assert.rejects(read(['DELETE FROM Item']), /staged zcql could not be parsed, so it was not run as SELECT \*/);
+  assert.deepEqual(calls, []);
+
+  await assert.rejects(
+    read(['SELECT ROWID, C0 FROM Item ORDER BY ROWID', 'SELECT ROWID, C1 FROM Item ORDER BY ROWID']),
+    /staged zcql for Item has no row bind \(verified: false\)\. Refusing an unfiltered read/,
+  );
+  assert.equal(calls.length, 1, 'only the driving stage ran');
+
+  calls.length = 0;
+  await assert.rejects(
+    read(['SELECT ROWID, C0 FROM Item ORDER BY ROWID', 'SELECT ROWID, C1 FROM Other WHERE ROWID IN (:Other_ROWID) ORDER BY ROWID']),
+    /staged zcql bind :Other_ROWID is not a column of Item\. The stage was not run\./,
+  );
+  assert.equal(calls.join('\n').includes('Other:'), false);
+});
+
+test('a split insert whose base insert returns no ROWID writes no extension row', async () => {
+  const { layout } = splitLayout('Wide', 300);
+  const calls: string[] = [];
+  const runtime = createRuntime({
+    dryRun: false,
+    appTimeZone: 'UTC',
+    splits: { Wide: layout },
+    datastore: {
+      async insert(form) {
+        calls.push(form);
+        return {};
+      },
+    },
+  });
+  const values: Record<string, string> = {};
+  for (let index = 0; index < 300; index++) values[`T${index}`] = 'x';
+  await assert.rejects(
+    () => runtime.shim.datastore.insert(runtime.context({}), 'Wide', values),
+    /split write refused for Wide: the base insert returned no ROWID, so no extension row was written/,
+  );
+  assert.deepEqual(calls, [layout.base]);
+});
