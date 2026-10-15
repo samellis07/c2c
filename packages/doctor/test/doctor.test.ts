@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,6 +8,7 @@ import { test } from 'node:test';
 import {
   DEPLOY_CONFIG,
   EvidenceRejected,
+  EvidenceStale,
   MANIFEST_NAME,
   c2cVersion,
   dcOfCreatorHost,
@@ -27,6 +29,7 @@ import {
   maskEmail,
   runDoctorChecks,
   verifyVendorCli,
+  verifyProbe,
   verifyVendorDir,
   writeDoctorFile,
   dcTld,
@@ -1829,4 +1832,130 @@ test('D-F5 passes at the column cap and fails one over it, naming the table and 
 test('D-F5 passes a table at or under the stated default', () => {
   const result = f5TableBudgets([tableOf('Plain', limitValue('datastore.columns_per_table_default'))]);
   assert.equal(result.status, 'pass', result.detail);
+});
+
+// ---------- error paths and guards ----------
+
+test('doctor.json: a changed dc drops the earlier org/project and the MCP record bound to them', () => {
+  const dir = tmp();
+  writeDoctorFile(dir, doctorFile());
+  writeDoctorFile(dir, doctorFile({ scope: { dc: 'us' }, mcp: undefined }));
+  const merged = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as DoctorFile;
+  assert.deepEqual(merged.scope, { dc: 'us' });
+  assert.equal(merged.mcp, undefined);
+  // Re-stating the org and project with the new dc keeps them.
+  writeDoctorFile(dir, doctorFile({ scope: { dc: 'eu', org: ORG, project: PROJECT }, mcp: undefined }));
+  assert.deepEqual((JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as DoctorFile).scope, { dc: 'eu', org: ORG, project: PROJECT });
+});
+
+test('gate: a doctor.json that is not a JSON object is invalid, never green', () => {
+  for (const text of ['null', '{not json', '7']) {
+    const dir = tmp();
+    mkdirSync(join(dir, 'c2c-out', '.c2c'), { recursive: true });
+    writeFileSync(doctorJsonPath(dir), text);
+    const verdict = evaluateGate({ workspace: dir, scope: SCOPE });
+    assert.equal(verdict.status, 'invalid', text);
+    assert.equal(verdict.ok, false, text);
+  }
+});
+
+test('evidence: each scalar field is validated and the error names it', () => {
+  const cases: [Record<string, unknown>, RegExp][] = [
+    [{ host: 7 }, /evidence\.host must be a string/],
+    [{ server: 'catalyst by zoho!' }, /plain server name/],
+    [{ host_of_url: 'catalystbyzoho_zohomcp.in' }, /host name only/],
+    [{ transport: 'ftp' }, /evidence\.transport must be/],
+    [{ shape: 'flat' }, /evidence\.shape must be meta or direct/],
+    [{ at: 'yesterday' }, /evidence\.at is not a timestamp/],
+    [{ features: ['catalyst_datastore', 7] }, /evidence\.features must be a list of strings/],
+    [{ tools: 'CatalystbyZoho_List_All_Tables' }, /evidence\.tools must be a list of strings/],
+  ];
+  for (const [overrides, message] of cases) {
+    assert.throws(() => parseEvidence(JSON.stringify(evidence(overrides))), (err) => err instanceof EvidenceRejected && message.test(err.message), JSON.stringify(overrides));
+  }
+  assert.throws(() => parseEvidence('[]'), /not a JSON object/);
+  // Every accepted transport and shape still parses.
+  for (const transport of ['http', 'streamable-http', 'sse', 'stdio', 'local']) {
+    assert.equal(parseEvidence(JSON.stringify(evidence({ transport }))).transport, transport);
+  }
+});
+
+test('evidence: a project entry without a decimal id is stale, a non-entry is rejected', () => {
+  assert.throws(() => parseEvidence(JSON.stringify(evidence({ projects: [{ project_name: 'my-app' }] }))), (err) => err instanceof EvidenceStale && /no decimal id/.test(err.message));
+  assert.throws(() => parseEvidence(JSON.stringify(evidence({ projects: [7] }))), (err) => err instanceof EvidenceRejected && /not an id or an entry/.test(err.message));
+});
+
+test('mcp probe: no numeric org/project never calls REST, and a REST failure is unverifiable', async () => {
+  let calls = 0;
+  const counting = async () => {
+    calls++;
+    return { status: 200, body: { data: [{ bucket_name: 'c2cprobex' }] } };
+  };
+  for (const target of [{}, { org: ORG }, { org: 'acme', project: PROJECT }, { org: ORG, project: 'my-app' }]) {
+    const result = await verifyProbe(counting, target, 'c2cprobex');
+    assert.equal(result.status, 'unresolved', JSON.stringify(target));
+  }
+  assert.equal(calls, 0);
+  const failing = await verifyProbe(
+    async () => {
+      throw new Error('socket hang up');
+    },
+    { org: ORG, project: PROJECT },
+    'c2cprobex',
+  );
+  assert.equal(failing.status, 'unverifiable');
+  assert.match(failing.detail, /REST read-back failed: socket hang up/);
+});
+
+test('vendor: a non-file entry, an unreadable directory or an unreadable listed file is refused', (t) => {
+  if (process.getuid?.() === 0) return t.skip('root reads mode-000 files');
+  const fifo = vendorDir('none');
+  execFileSync('mkfifo', [join(fifo, 'pipe')]);
+  assert.match(verifyVendorDir(fifo).error ?? '', /non-file entry: pipe/);
+
+  const locked = vendorDir('none');
+  chmodSync(join(locked, 'sub'), 0o000);
+  try {
+    assert.match(verifyVendorDir(locked).error ?? '', /not readable: sub/);
+  } finally {
+    chmodSync(join(locked, 'sub'), 0o755);
+  }
+
+  const unreadable = vendorDir('none');
+  chmodSync(join(unreadable, 'a.js'), 0o000);
+  try {
+    const verdict = verifyVendorDir(unreadable);
+    assert.equal(verdict.ok, false);
+    assert.deepEqual(verdict.mismatched, ['a.js']);
+  } finally {
+    chmodSync(join(unreadable, 'a.js'), 0o644);
+  }
+});
+
+test('--verify-vendor: a usage error exits 2 and a manifest error exits 6 naming it', () => {
+  const { io, err } = fakeIo({});
+  assert.equal(verifyVendorCli([], io), 2);
+  assert.equal(verifyVendorCli(['a', 'b', 'c'], io), 2);
+  assert.equal(verifyVendorCli([vendorDir('manifest-missing')], io), 6);
+  assert.match(err(), /c2c: no readable MANIFEST\.sha256/);
+});
+
+test('scope: a malformed deploy config is refused with the reason', () => {
+  const cases: [string, RegExp][] = [
+    ['{not json', /is not valid JSON/],
+    ['["in"]', /is not a JSON object/],
+    [JSON.stringify({ dc: 7 }), /"dc" is not a string/],
+    [JSON.stringify({ dc: 'in', zohoDc: 'us' }), /sets "dc" in and "zohoDc" us; they must agree/],
+    [JSON.stringify({ dc: 'in', never_touch: ['123', 'prod'] }), /"never_touch" ids must be decimal strings/],
+    [JSON.stringify({ dc: 'in', never_touch: { prod: 'not-an-id' } }), /"never_touch" ids must be decimal strings/],
+  ];
+  for (const [text, message] of cases) {
+    const dir = tmp();
+    writeFileSync(join(dir, DEPLOY_CONFIG), text);
+    assert.throws(() => resolveScope({ cwd: dir, flags: {}, hooks: NO_HOOKS }), message, text);
+  }
+  // Agreeing dc/zohoDc (any case) and both never_touch forms are accepted.
+  const dir = tmp();
+  writeFileSync(join(dir, DEPLOY_CONFIG), JSON.stringify({ dc: 'in', zohoDc: 'IN', never_touch: { prod: ' 42 production ' } }));
+  assert.deepEqual(resolveScope({ cwd: dir, flags: {}, hooks: NO_HOOKS }).neverTouch, ['42 production']);
 });

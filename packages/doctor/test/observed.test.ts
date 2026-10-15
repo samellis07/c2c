@@ -11,11 +11,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import {
+  beginMcpRequest,
   DEPLOY_CONFIG,
   doctorCli,
   doctorJsonPath,
   evaluateGate,
   MCP_RESULT_MAX_BYTES,
+  mcpRequestPath,
+  ObservationRejected,
   OBSERVATION_MAX_BYTES,
   readStdinBounded,
   type DoctorFile,
@@ -23,6 +26,7 @@ import {
   type ScopeHooks,
   type SpawnResult,
 } from '../src/index.js';
+import { closeMcpRequest } from '../src/observed.js';
 import requiredTools from '../data/required-mcp-tools.json' with { type: 'json' };
 
 const ORG = '10000000000';
@@ -697,4 +701,42 @@ test('mcp-observed: the observation and each call result are size-bounded', asyn
   assert.equal(oversized.code, 1, oversized.out + oversized.err);
   assert.match(oversized.err, /larger than the \d+-byte limit/);
   assert.ok(!existsSync(doctorJsonPath(dir)));
+});
+
+test('mcp-observed: an unrequested call, or a missing orgs or probe call, is refused and nothing is recorded', async () => {
+  const cases: [(request: string) => unknown[], RegExp][] = [
+    [
+      (request) => [
+        { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(`c2cprobe${request}`) },
+        { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG]) },
+        { tool: 'CatalystbyZoho_List_All_Tables', result: { content: [] } },
+      ],
+      /calls\[2\] is not a call the MCP request asked for/,
+    ],
+    [(request) => [{ tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(`c2cprobe${request}`) }], /has no CatalystbyZoho_List_All_Organizations result/],
+    [() => [{ tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG]) }], /has no CatalystbyZoho_Create_Bucket result/],
+  ];
+  for (const [calls, message] of cases) {
+    const { dir, env } = workspace();
+    const { request } = await begin(env);
+    const run = await observe(env, observation(request, { calls: calls(request) }));
+    assert.notEqual(run.code, 0, run.out);
+    assert.match(run.err, message);
+    assert.ok(!existsSync(doctorJsonPath(dir)) || (JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile).mcp === undefined);
+    // A refused observation leaves the request open.
+    assert.ok(existsSync(join(dir, 'c2c-out', '.c2c', 'mcp-request.json')));
+  }
+});
+
+test('mcp request: closing the same request twice is refused (a racing second observation loses)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-observed-'));
+  dirs.push(dir);
+  const { request } = beginMcpRequest(dir);
+  closeMcpRequest(dir, request);
+  assert.ok(!existsSync(mcpRequestPath(dir)));
+  assert.throws(() => closeMcpRequest(dir, request), (err) => err instanceof ObservationRejected && /already answered/.test(err.message));
+  // A fresh begin clears the closed marker of the old request.
+  const next = beginMcpRequest(dir);
+  assert.ok(existsSync(join(dir, 'c2c-out', '.c2c', `mcp-request.${request}.closed`)) === false);
+  closeMcpRequest(dir, next.request);
 });
