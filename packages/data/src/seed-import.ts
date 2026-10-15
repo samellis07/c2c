@@ -420,7 +420,12 @@ function scalarValue(col: Column, i: number, rng: () => number, seen: Set<string
     }
     case 'datetime': {
       const d = new Date(Date.UTC(2025, Math.floor(rng() * 20), 1 + Math.floor(rng() * 28)));
-      return `${fmtDate(d)} ${String(Math.floor(rng() * 24)).padStart(2, '0')}:${String(Math.floor(rng() * 60)).padStart(2, '0')}:${String(Math.floor(rng() * 60)).padStart(2, '0')}`;
+      const hour = Math.floor(rng() * 24);
+      const minute = Math.floor(rng() * 60);
+      // Derive seconds from existing draws so adding this component does not
+      // shift the shared per-form stream used by later cells.
+      const seconds = fnv(`${i}:${d.toISOString()}:${hour}:${minute}`) % 60;
+      return `${fmtDate(d)} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
     }
     case 'time':
       return `${String(Math.floor(rng() * 24)).padStart(2, '0')}:${String(Math.floor(rng() * 60)).padStart(2, '0')}`;
