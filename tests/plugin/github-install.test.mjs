@@ -8,13 +8,14 @@
  */
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { packRuntime, runtimeLockText } from '../../scripts/vendor-plugin.mjs';
+import { acquireInstallLock, releaseInstallLock } from '../../plugin/runtime/fetch-runtime.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const node = process.execPath;
@@ -294,55 +295,134 @@ test('two waiters reclaim one dead lock and share exactly one completed install'
 });
 
 test('a waiter paused mid-reclaim cannot steal a newer live lock', async () => {
+  // Deterministic interleaving via the hooks parameter: B inspects the stale
+  // lock and pauses before the rename; A then reclaims it and takes a fresh
+  // lock; when B resumes it moves A's live lock aside and must link it back.
   const cache = path.join(temp, 'stale-lock-reclaim-race');
   const installed = path.join(cache, lock.sha256);
   const lockPath = `${installed}.lock`;
   mkdirSync(cache, { recursive: true });
   const dead = spawnSync(node, ['-e', '']);
   assert.equal(dead.status, 0);
-  writeFileSync(lockPath, JSON.stringify({ pid: dead.pid ?? 0, time: Date.now() }));
-  const fetcher = path.join(clone, 'plugin/runtime/fetch-runtime.mjs');
-  const pauseFile = path.join(temp, 'reclaim-paused');
-  const acquiredFile = path.join(temp, 'lock-acquired');
-  const run = (extra) => new Promise((resolve) => {
-    const child = spawn(node, [fetcher], { env: cleanEnv({ C2C_RUNTIME_DIR: cache, C2C_RUNTIME_ARCHIVE: archiveFile, ...extra }) });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => (stdout += chunk));
-    child.stderr.on('data', (chunk) => (stderr += chunk));
-    child.on('close', (status) => resolve({ status, stdout, stderr, pid: child.pid }));
-  });
-  const waitFor = async (file) => {
-    for (let i = 0; i < 3000 && !existsSync(file); i++) await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.equal(existsSync(file), true, `timed out waiting for ${file}`);
+  writeFileSync(lockPath, JSON.stringify({ pid: dead.pid ?? 0, time: Date.now(), token: 'stale-token' }));
+  const gate = () => {
+    let resolve;
+    const promise = new Promise((r) => (resolve = r));
+    return { promise, resolve };
   };
-  // B inspects the stale lock, then pauses before moving it aside.
-  const b = run({ C2C_TEST_LOCK_RECLAIM_BARRIER: pauseFile });
-  await waitFor(pauseFile);
-  // A reclaims the stale lock itself and holds its fresh lock; B's pause file
-  // proves it already judged the old lock stale before A's lock existed.
-  const a = run({ C2C_TEST_LOCK_ACQUIRED_FILE: acquiredFile, C2C_TEST_LOCK_HOLD_MS: '2000' });
-  await waitFor(acquiredFile);
-  const aPid = Number(readFileSync(acquiredFile, 'utf8').trim());
-  writeFileSync(`${pauseFile}.go`, 'go\n');
-  // While A still holds its fresh lock, B's rename must not keep it: the lock
-  // file at lockPath must still belong to A.
-  let keptLiveLock = false;
-  for (let i = 0; i < 300 && !keptLiveLock; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    try {
-      keptLiveLock = JSON.parse(readFileSync(lockPath, 'utf8')).pid === aPid;
-    } catch { /* lock momentarily moved aside */ }
-  }
-  const [ra, rb] = await Promise.all([a, b]);
-  assert.equal(keptLiveLock, true, 'B removed or kept the newer lock A was holding');
-  const runtime = path.join(installed, 'c2c');
-  for (const res of [ra, rb]) {
-    assert.equal(res.status, 0, `exit ${res.status}\nstderr=${res.stderr}`);
-    assert.equal(res.stdout.trim(), runtime);
-  }
-  assert.equal(existsSync(path.join(runtime, 'MANIFEST.sha256')), true);
-  assert.deepEqual(readdirSync(cache), [lock.sha256]);
+  const bPaused = gate();
+  const bResume = gate();
+  const bMoved = gate();
+  const bRestored = gate();
+  const aAcquired = gate();
+  const aRelease = gate();
+  const notReady = () => false;
+  // Each hook fires only on B's first reclaim pass; later loops run clean.
+  let bArmed = true;
+  const b = acquireInstallLock(lockPath, notReady, {
+    beforeReclaimRename: async () => {
+      if (!bArmed) return;
+      bPaused.resolve();
+      await bResume.promise;
+    },
+    beforeReclaimRestore: async (movedPath) => {
+      if (!bArmed) return;
+      bArmed = false;
+      bMoved.resolve(movedPath);
+      await bRestored.promise;
+    },
+  });
+  await bPaused.promise;
+  const a = acquireInstallLock(lockPath, notReady, {
+    onAcquired: async () => {
+      aAcquired.resolve();
+      await aRelease.promise;
+    },
+  });
+  await aAcquired.promise;
+  const aHolder = JSON.parse(readFileSync(lockPath, 'utf8'));
+  bResume.resolve();
+  // B has moved A's live lock aside and is paused just before restoring it:
+  // the moved file must be A's lock, intact, and the path must be free.
+  const movedPath = await bMoved.promise;
+  assert.deepEqual(JSON.parse(readFileSync(movedPath, 'utf8')), aHolder);
+  assert.equal(existsSync(lockPath), false);
+  bRestored.resolve();
+  // B linked the live lock back; A still holds lockPath.
+  for (let i = 0; i < 300 && !existsSync(lockPath); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(JSON.parse(readFileSync(lockPath, 'utf8')), aHolder, 'B removed or kept the newer lock A was holding');
+  aRelease.resolve();
+  const aToken = await a;
+  releaseInstallLock(lockPath, aToken);
+  const bToken = await b;
+  assert.notEqual(bToken, aToken);
+  releaseInstallLock(lockPath, bToken);
+  assert.deepEqual(readdirSync(cache), []);
+});
+
+test('a failed restoration leaves the moved live lock at its .stale- name', async () => {
+  // B judges the planted lock stale; before its rename a live lock C replaces
+  // it, and before B links C back a newer lock D takes the path. The link must
+  // fail and C must be left on disk, never unlinked as unproven debris.
+  const cache = path.join(temp, 'stale-lock-restore-fails');
+  const installed = path.join(cache, lock.sha256);
+  const lockPath = `${installed}.lock`;
+  mkdirSync(cache, { recursive: true });
+  const dead = spawnSync(node, ['-e', '']);
+  assert.equal(dead.status, 0);
+  const deadPid = dead.pid ?? 0;
+  writeFileSync(lockPath, JSON.stringify({ pid: deadPid, time: Date.now(), token: 'stale-token' }));
+  let sawMoved;
+  let bArmed = true;
+  const b = acquireInstallLock(lockPath, () => false, {
+    beforeReclaimRename: async () => {
+      if (!bArmed) return;
+      writeFileSync(lockPath, JSON.stringify({ pid: process.pid, time: Date.now(), token: 'live-c' }));
+    },
+    beforeReclaimRestore: async (movedPath) => {
+      if (!bArmed) return;
+      bArmed = false;
+      sawMoved = movedPath;
+      const fd = openSync(lockPath, 'wx', 0o600);
+      writeFileSync(fd, JSON.stringify({ pid: deadPid, time: Date.now(), token: 'live-d' }));
+      closeSync(fd);
+    },
+  });
+  const bToken = await b;
+  // C was moved aside, could not be linked back over D, and was kept.
+  assert.equal(existsSync(sawMoved), true, 'the moved live lock was deleted');
+  assert.equal(JSON.parse(readFileSync(sawMoved, 'utf8')).token, 'live-c');
+  assert.match(path.basename(sawMoved), /\.stale-/);
+  releaseInstallLock(lockPath, bToken);
+  rmSync(sawMoved, { force: true });
+  assert.deepEqual(readdirSync(cache), []);
+});
+
+test('C2C_TEST_* environment variables no longer alter lock behaviour', () => {
+  // Mutation case for the removed seams: with every old seam set, reclaim runs
+  // and no marker files appear and no hold delays the run.
+  const cache = path.join(temp, 'seam-inert');
+  const installed = path.join(cache, lock.sha256);
+  mkdirSync(cache, { recursive: true });
+  const dead = spawnSync(node, ['-e', '']);
+  assert.equal(dead.status, 0);
+  writeFileSync(`${installed}.lock`, JSON.stringify({ pid: dead.pid ?? 0, time: Date.now() }));
+  const marker = path.join(temp, 'seam-marker');
+  const res = spawnSync(node, [path.join(clone, 'plugin/runtime/fetch-runtime.mjs')], {
+    env: cleanEnv({
+      C2C_RUNTIME_DIR: cache,
+      C2C_RUNTIME_ARCHIVE: archiveFile,
+      C2C_TEST_LOCK_RECLAIM_BARRIER: marker,
+      C2C_TEST_LOCK_ACQUIRED_FILE: `${marker}-acquired`,
+      C2C_TEST_LOCK_HOLD_MS: '5000',
+    }),
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(existsSync(marker), false);
+  assert.equal(existsSync(`${marker}-acquired`), false);
+  assert.equal(existsSync(`${marker}.go`), false);
 });
 
 test('a group-writable runtime cache entry is refused before using a planted runtime', () => {

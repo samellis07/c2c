@@ -175,8 +175,11 @@ function pidAlive(pid) {
 /**
  * Exclusive install lock: O_EXCL creates the lock. Stale locks are atomically
  * renamed out of the way so only one waiter can reclaim a given lock file.
+ * `hooks` is a test-only injection point ({beforeReclaimRename,
+ * beforeReclaimRestore, onAcquired}); production callers pass none and no
+ * environment variable alters this behaviour.
  */
-async function acquireInstallLock(lockPath, isReady) {
+async function acquireInstallLock(lockPath, isReady, hooks = {}) {
   const token = randomBytes(16).toString('hex');
   for (;;) {
     mkdirSync(path.dirname(lockPath), { recursive: true });
@@ -195,13 +198,7 @@ async function acquireInstallLock(lockPath, isReady) {
       // A live process is never timed out, regardless of how long it has run.
       const stale = holder.pid ? !pidAlive(holder.pid) : age > LOCK_STALE_MS;
       if (stale) {
-        // Test-only seam: pause between judging the lock stale and moving it
-        // aside so a test can interleave a fresh lock creation.
-        const barrier = process.env.C2C_TEST_LOCK_RECLAIM_BARRIER;
-        if (barrier) {
-          writeFileSync(barrier, `${process.pid}\n`);
-          for (let i = 0; i < 3000 && !existsSync(`${barrier}.go`); i++) await sleep(10);
-        }
+        await hooks.beforeReclaimRename?.(lockPath);
         const reclaimed = `${lockPath}.stale-${process.pid}-${randomBytes(8).toString('hex')}`;
         try {
           renameSync(lockPath, reclaimed);
@@ -213,11 +210,18 @@ async function acquireInstallLock(lockPath, isReady) {
             && moved.ino === stat.ino && moved.dev === stat.dev && moved.mtimeMs === stat.mtimeMs
             && movedHolder.pid === holder.pid && movedHolder.token === holder.token && movedHolder.time === holder.time;
           if (!same) {
+            await hooks.beforeReclaimRestore?.(reclaimed);
             try {
               linkSync(reclaimed, lockPath);
-            } catch { /* a newer lock already holds the path */ }
+              rmSync(reclaimed, { force: true });
+            } catch {
+              // A newer lock already holds the path, so the moved lock cannot
+              // be linked back. Leave it at its .stale- name: it may be a live
+              // lock, and a lock that was not proven stale is never unlinked.
+            }
+          } else {
+            rmSync(reclaimed, { force: true });
           }
-          rmSync(reclaimed, { force: true });
         } catch { /* another waiter reclaimed it; retry */ }
         continue;
       }
@@ -229,11 +233,7 @@ async function acquireInstallLock(lockPath, isReady) {
     } finally {
       closeSync(fd);
     }
-    // Test-only seams: signal acquisition and hold the lock briefly so a test
-    // can observe interleavings between holders and waiters.
-    if (process.env.C2C_TEST_LOCK_ACQUIRED_FILE) writeFileSync(process.env.C2C_TEST_LOCK_ACQUIRED_FILE, `${process.pid}\n`);
-    const hold = Number(process.env.C2C_TEST_LOCK_HOLD_MS);
-    if (hold > 0) await sleep(hold);
+    await hooks.onAcquired?.(token);
     return token;
   }
 }
@@ -318,4 +318,4 @@ if (process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpath
   );
 }
 
-export { unpack };
+export { acquireInstallLock, releaseInstallLock, unpack };
