@@ -963,6 +963,7 @@ function confirmIo(store: ReturnType<typeof provisionStore>): {
           stderr: '',
         } satisfies SpawnResult;
       }
+      if (args.includes('slate:link')) return { code: 0, stdout: 'App Url: https://test-app-abc123.onslate.in\n', stderr: '' } satisfies SpawnResult;
       return { code: 0, stdout: '', stderr: '' } satisfies SpawnResult;
     },
     fetch: (async (url: string) => {

@@ -180,10 +180,14 @@ export function intakeBridgeFragment(view: AppWindow): void {
   } catch {
     // storage refused: fall back to the root route
   }
+  let replaceError: unknown;
   try {
-    view.history?.replaceState(null, '', `${view.location.pathname}${route === '/' ? '' : route}`);
-  } catch {
-    // a host without history keeps the fragment — still never sent anywhere
+    if (typeof view.history?.replaceState !== 'function') throw new Error('history.replaceState is unavailable');
+    view.history.replaceState(null, '', new URL(route, pageUrl(view).origin).href);
+  } catch (error) {
+    replaceError = error;
+    forgetBridgeToken(view);
+    try { view.location.hash = ''; } catch { /* location is read-only in some hosts */ }
   }
   let expected = '';
   try {
@@ -192,10 +196,10 @@ export function intakeBridgeFragment(view: AppWindow): void {
   } catch {
     // storage refused
   }
+  if (replaceError) throw replaceError;
   if (!token || !expected || !sameState(state, expected)) return;
   try {
     sessionStore(view)?.setItem(BRIDGE_TOKEN_KEY, token);
-    sessionStore(view)?.removeItem(BRIDGE_MARK);
   } catch {
     // storage refused: the token stays in this page only
   }
@@ -374,7 +378,7 @@ const redirected = new WeakSet<object>();
  * back from there, which would loop.
  */
 export function sessionExpired(view: AppWindow): void {
-  const detail: SessionExpiredDetail = { login: loginUrl(view), looping: recentSignIn(view) };
+  const detail: SessionExpiredDetail = { login: loginUrl(view), looping: bridgeConfigured(view) ? recentBridge(view) : recentSignIn(view) };
   let handled = false;
   try {
     const Event = (view as unknown as { CustomEvent?: typeof CustomEvent }).CustomEvent ?? globalThis.CustomEvent;

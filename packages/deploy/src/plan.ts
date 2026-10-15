@@ -113,17 +113,15 @@ export interface DeployBundle {
 }
 
 /**
- * Order: install the function's pinned dependencies, deploy the function (its URL
- * gives the API base the client needs), then link and deploy the Slate client.
+ * Order: deploy the API, build and serve Slate, then deploy c2c_auth with the
+ * served Slate origin in its environment. The bridge cannot run safely before
+ * the app URL is known.
  */
 export function deployCommands(slateName: string, org: string, projectId: string, ui: DeployUi = 'react'): DeployCommand[] {
   const scope = catalystScopeArgs(org, projectId);
   return [
     { id: 'install', command: 'npm', argv: ['install', '--omit=dev', '--no-audit', '--no-fund'], cwd: FUNCTION_DIR },
     { id: 'functions', argv: [...scope, 'deploy', '--only', `functions:${API_FUNCTION}`, '-ni'] },
-    // c2c_auth is the Slate auth bridge (auth-bridge.ts): no dependencies, so
-    // no install step — its env carries only C2C_SLATE_ORIGIN.
-    { id: 'functions-auth', argv: [...scope, 'deploy', '--only', `functions:${AUTH_FUNCTION}`, '-ni'] },
     // The React target deploys the built dist/, not its source: the app's
     // pinned dependencies are installed and `npm run build` writes web/dist
     // inside the deploy dir before the Slate steps.
@@ -135,6 +133,9 @@ export function deployCommands(slateName: string, org: string, projectId: string
       : []),
     { id: 'slate-link', argv: [...scope, 'slate:link', '--name', slateName, '--framework', 'static', '--source', ui === 'react' ? './web/dist' : './slate', '-ni'] },
     { id: 'slate', argv: [...scope, 'deploy', 'slate', slateName, '-ni'] },
+    // c2c_auth has no dependencies; cli.ts writes its validated C2C_SLATE_ORIGIN
+    // after the Slate URL is known and immediately before this deployment.
+    { id: 'functions-auth', argv: [...scope, 'deploy', '--only', `functions:${AUTH_FUNCTION}`, '-ni'] },
   ];
 }
 

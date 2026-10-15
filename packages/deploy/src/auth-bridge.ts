@@ -10,7 +10,7 @@
  */
 
 import { CATALYST_WEB_SDK } from '../../ui/src/generate.js';
-import { DC_ENDPOINTS, parseDc } from '../../core/src/dc.js';
+import { DC_ENDPOINTS, normalizeDc } from '../../core/src/dc.js';
 import { slateHost } from '../../auth/src/slate-host.js';
 
 export const AUTH_FUNCTION = 'c2c_auth';
@@ -34,7 +34,11 @@ export function slateOriginOf(slateDomain: string | undefined): string | undefin
 
 /** Portal auth domains init.js can name per DC (accounts.zohoportal.<ext>), plus the accounts endpoint itself. */
 function connectSrc(dc: string): string {
-  const endpoints = DC_ENDPOINTS[parseDc(dc)];
+  const normalized = normalizeDc(dc);
+  // Dry-run plans may carry the explicit <dc> placeholder. The deploy CLI
+  // resolves and validates a real DC before executing any function deployment.
+  if (!normalized) return '';
+  const endpoints = DC_ENDPOINTS[normalized];
   const host = endpoints.accounts.replace(/^https:\/\/accounts\./, '');
   const tail = host.replace(/^zoho(cloud)?\./, '');
   const portals = new Set<string>([endpoints.accounts, `https://accounts.zohoportal.${tail}`]);

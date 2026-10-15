@@ -78,12 +78,30 @@ function armedState(storage: Storage, state: string): void {
 test('a fragment with the matching state stores the token, strips the fragment and restores the route', () => {
   const { view, replaced, storage } = fakeWindow({ hash: '#c2c_auth=Bearer%20tok-1&state=s-43' });
   armedState(storage, 's-43');
-  storage.setItem('c2c.bridge.route', '/#/admin/smoke');
+  storage.setItem('c2c.bridge.route', '/app/#/admin/smoke');
   intakeBridgeFragment(view);
   assert.equal(storage.getItem('c2c.bridge.token'), 'Bearer tok-1');
   assert.equal(storage.getItem('c2c.bridge.state'), null, 'a state is consumed once');
-  assert.deepEqual(replaced, ['/app//#/admin/smoke']);
+  assert.deepEqual(replaced, ['https://app.example.test/app/#/admin/smoke']);
   assert.equal(hasBridgeToken(view), true);
+});
+
+test('fragment intake restores a saved route on a non-root app path', () => {
+  const { view, replaced, storage } = fakeWindow({ hash: '#c2c_auth=Bearer%20tok-1&state=s-43' });
+  view.location.pathname = '/nested/app/';
+  armedState(storage, 's-43');
+  storage.setItem('c2c.bridge.route', '/nested/app/#/admin/smoke');
+  intakeBridgeFragment(view);
+  assert.deepEqual(replaced, ['https://app.example.test/nested/app/#/admin/smoke']);
+});
+
+test('failed history cleanup drops the bridge token and hash, then surfaces the error', () => {
+  const { view, storage } = fakeWindow({ hash: '#c2c_auth=Bearer%20tok-1&state=s-43' });
+  armedState(storage, 's-43');
+  view.history.replaceState = () => { throw new Error('history denied'); };
+  assert.throws(() => intakeBridgeFragment(view), /history denied/);
+  assert.equal(storage.getItem('c2c.bridge.token'), null);
+  assert.equal(view.location.hash, '');
 });
 
 test('a fragment whose state does not match is refused — the token is dropped', () => {
@@ -91,7 +109,7 @@ test('a fragment whose state does not match is refused — the token is dropped'
   // No stored state at all (an attacker link in a fresh tab).
   intakeBridgeFragment(view);
   assert.equal(storage.getItem('c2c.bridge.token'), null);
-  assert.deepEqual(replaced, ['/app/'], 'the fragment is still stripped');
+  assert.deepEqual(replaced, ['https://app.example.test/'], 'the fragment is still stripped');
 
   const mismatch = fakeWindow({ hash: '#c2c_auth=bogus&state=wrong' });
   armedState(mismatch.storage, 'right');
@@ -109,7 +127,7 @@ test('bridge calls carry the token as Authorization and never send cookies', asy
 });
 
 test('a 401 drops the token and takes exactly one bridge trip; the next one inside the window is refused', async () => {
-  const { view, assigned, storage } = fakeWindow({ replies: [{ status: 401 }, { status: 401 }] });
+  const { view, assigned, storage, events } = fakeWindow({ replies: [{ status: 401 }, { status: 401 }] });
   storage.setItem('c2c.bridge.token', 'Bearer stale');
   const api = createApi(view);
   const reply = await api.post('/forms/Book/submit', {});
@@ -123,6 +141,9 @@ test('a 401 drops the token and takes exactly one bridge trip; the next one insi
   const again = await api.post('/forms/Book/submit', {});
   assert.equal(again.status, 401);
   assert.equal(assigned.length, 1, 'no second navigation inside the loop window');
+  assert.ok(storage.getItem('c2c.bridge.at'), 'the intake retry mark survives token intake');
+  const detail = (events[0] as CustomEvent<{ looping?: boolean }> | undefined)?.detail;
+  assert.equal(detail?.looping, true, 'the returned 401 is surfaced as a failed sign-in');
 });
 
 test('bridgeRedirect refuses a non-https bridge and navigates once', () => {

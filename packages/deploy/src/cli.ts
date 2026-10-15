@@ -25,6 +25,7 @@ import { slateHost } from '../../auth/src/slate-host.js';
 import { authPlan } from '../../auth/src/plan.js';
 import { canonicalUserIdentity } from '../../schema/src/identity.js';
 import { API_FUNCTION, FUNCTION_DIR, appOrigins, envVariables, secretEnvValues } from './function-dir.js';
+import { AUTH_FUNCTION, slateOriginOf } from './auth-bridge.js';
 import { buildDeploy, commandLine, deployFiles, migrateCatalystJson, writeDeployTree, type DeployCommand, type DeployFile, type DeployUi } from './plan.js';
 import { asyncLaneBlocker } from './events.js';
 import { mailSenderEvidenceFor, mailSenderEvidenceVerified, observeMailSenders, readMailSenderEvidence } from './mail.js';
@@ -965,7 +966,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     // Command skipping stays a --resume feature. An object-shaped slate means the
     // earlier slate:link died inside the CLI, so migration re-arms those two steps.
     const carried = resumeCommands && previous
-      ? previous.done.filter((id) => !(migratedSlate && (id === 'slate-link' || id === 'slate')))
+      ? previous.done.filter((id) => id !== 'functions-auth' && !(migratedSlate && (id === 'slate-link' || id === 'slate')))
       : [];
     const state: DeployState = {
       version: 1,
@@ -1248,6 +1249,19 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
           writeFileSync(join(cwd, 'slate', 'c2c-config.js'), config);
         }
         if (!apiBase) io.stdout(`warning: no API base; the Slate client calls /server/${API_FUNCTION} on its own domain. Pass --api-base <https://project-domain/server/${API_FUNCTION}>.\n`);
+      }
+      if (command.id === 'functions-auth') {
+        if (!state.slateUrl && !slateHost(slateDomainFlag)) await readBackSlate();
+        const slateOrigin = slateOriginOf(slateHost(slateDomainFlag ?? state.slateUrl));
+        if (!slateOrigin) {
+          io.stderr('c2c: cannot deploy c2c_auth without a known Slate app origin; deploy Slate first or pass --slate-domain <host>, then re-run with --resume\n');
+          return await finish(1);
+        }
+        const configPath = join(cwd, 'functions', AUTH_FUNCTION, 'catalyst-config.json');
+        const config = JSON.parse(readFileSync(configPath, 'utf8')) as { deployment?: { env_variables?: Record<string, string> } };
+        if (!config.deployment) config.deployment = {};
+        config.deployment.env_variables = { ...(config.deployment.env_variables ?? {}), C2C_SLATE_ORIGIN: slateOrigin };
+        writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
       }
       const program = command.command ?? 'catalyst';
       const spawnOnce = () => io.spawn(program, command.argv, { cwd: command.cwd ? join(cwd, command.cwd) : cwd, env: childEnv });

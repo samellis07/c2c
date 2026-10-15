@@ -3455,12 +3455,14 @@ export function intakeBridgeFragment(viewRef) {
   } catch {
     // storage refused: fall back to the root route
   }
+  let replaceError;
   try {
-    if (scope.history && typeof scope.history.replaceState === 'function') {
-      scope.history.replaceState(null, '', `${location.pathname}${route === '/' ? '' : route}`);
-    }
-  } catch {
-    // a host without history keeps the fragment — still never sent anywhere
+    if (!scope.history || typeof scope.history.replaceState !== 'function') throw new Error('history.replaceState is unavailable');
+    scope.history.replaceState(null, '', new URL(route, pageUrl(viewRef).origin).href);
+  } catch (error) {
+    replaceError = error;
+    forgetBridgeToken(viewRef);
+    try { location.hash = ''; } catch { /* location is read-only in some hosts */ }
   }
   let expected = '';
   try {
@@ -3470,12 +3472,12 @@ export function intakeBridgeFragment(viewRef) {
   } catch {
     // storage refused
   }
+  if (replaceError) throw replaceError;
   if (!token || !expected || !sameBridgeState(state, expected)) return;
   try {
     const store = bridgeStore(viewRef);
     if (store) {
       store.setItem(BRIDGE_TOKEN_KEY, token);
-      store.removeItem(BRIDGE_MARK);
     }
   } catch {
     // storage refused: the token stays in this page only

@@ -155,7 +155,7 @@ export function SessionExpiredPrompt() {
         <h2 id="c2c-session-title">Your session ended</h2>
         <p id="c2c-session-body">
           {expired.looping
-            ? 'Signing in again did not restore access. Your entries are kept on this page; ask the app administrator to check your app role.'
+            ? 'Sign-in did not complete. Access was not restored. Your entries are kept on this page; ask the app administrator to check your app role.'
             : 'Sign in again to continue. Your entries are kept.'}
         </p>
         <Button

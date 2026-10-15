@@ -57,10 +57,30 @@ test('a fragment with the matching state stores the token and strips the fragmen
   const runtime = await loadRuntime();
   const { view, replaced, sessionStorage } = fakeView({ hash: '#c2c_auth=tok-1&state=s-1' });
   sessionStorage.setItem('c2c.bridge.state', 's-1');
-  sessionStorage.setItem('c2c.bridge.route', '/#/form/Book');
+  sessionStorage.setItem('c2c.bridge.route', '/app/#/form/Book');
   runtime.intakeBridgeFragment(view);
   assert.equal(sessionStorage.getItem('c2c.bridge.token'), 'tok-1');
-  assert.deepEqual(replaced, ['/app//#/form/Book']);
+  assert.deepEqual(replaced, ['https://app.example.test/app/#/form/Book']);
+});
+
+test('fragment intake restores a saved route on a non-root app path', async () => {
+  const runtime = await loadRuntime();
+  const { view, replaced, sessionStorage } = fakeView({ hash: '#c2c_auth=tok-1&state=s-1' });
+  view.location.pathname = '/nested/app/';
+  sessionStorage.setItem('c2c.bridge.state', 's-1');
+  sessionStorage.setItem('c2c.bridge.route', '/nested/app/#/admin/smoke');
+  runtime.intakeBridgeFragment(view);
+  assert.deepEqual(replaced, ['https://app.example.test/nested/app/#/admin/smoke']);
+});
+
+test('failed history cleanup drops the bridge token and hash, then surfaces the error', async () => {
+  const runtime = await loadRuntime();
+  const { view, sessionStorage } = fakeView({ hash: '#c2c_auth=tok-1&state=s-1' });
+  sessionStorage.setItem('c2c.bridge.state', 's-1');
+  view.history.replaceState = () => { throw new Error('history denied'); };
+  assert.throws(() => runtime.intakeBridgeFragment(view), /history denied/);
+  assert.equal(sessionStorage.getItem('c2c.bridge.token'), null);
+  assert.equal(view.location.hash, '');
 });
 
 test('a mismatched or unsigned state drops the token (must fail without the compare)', async () => {
@@ -104,4 +124,19 @@ test('bridgeRedirect remembers the route and refuses a non-web bridge', async ()
   const evil = fakeView();
   (evil.view as Record<string, unknown>).C2C_AUTH_BRIDGE = 'javascript:alert(1)';
   assert.equal(runtime.bridgeRedirect(evil.view), false);
+});
+
+test('the retry mark survives token intake and bounds a persistent 401 to one bridge trip', async () => {
+  const runtime = await loadRuntime();
+  const { view, assigned, sessionStorage } = fakeView();
+  assert.equal(runtime.bridgeRedirect(view), true);
+  const state = sessionStorage.getItem('c2c.bridge.state');
+  assert.ok(state);
+  view.location.hash = `#c2c_auth=tok-1&state=${state}`;
+  runtime.intakeBridgeFragment(view);
+  assert.ok(sessionStorage.getItem('c2c.bridge.at'), 'intake must preserve the per-tab retry mark');
+  view.location.hash = '';
+  const refused = await runtime.apiCall(async () => ({ status: 401 }), view, '/admin/smoke');
+  assert.equal(refused.status, 401);
+  assert.equal(assigned.length, 1, 'a persistent 401 cannot re-bridge within the retry window');
 });

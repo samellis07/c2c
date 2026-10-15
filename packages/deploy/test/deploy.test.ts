@@ -317,6 +317,9 @@ function capture(env: NodeJS.ProcessEnv = { X_ZC_CREDENTIAL_PATH: SECRET }, deta
       if (args.includes('project:list')) {
         return { code: 0, stdout: FAITHFUL_PROJECT_LIST, stderr: '' };
       }
+      if (args.includes('slate:link')) {
+        return { code: 0, stdout: `App Url: https://${SLATE_DOMAIN}\n`, stderr: '' };
+      }
       return { code: 0, stdout: '', stderr: '' } satisfies SpawnResult;
     },
     fetch,
@@ -576,9 +579,9 @@ test('deploy --confirm spawns the Development CLI and still hides the credential
       [...scope, 'project:list'],
       ['install', '--omit=dev', '--no-audit', '--no-fund'],
       [...scope, 'deploy', '--only', 'functions:c2c_api', '-ni'],
-      [...scope, 'deploy', '--only', 'functions:c2c_auth', '-ni'],
       [...scope, 'slate:link', '--name', 'c2c-widget', '--framework', 'static', '--source', './slate', '-ni'],
       [...scope, 'deploy', 'slate', 'c2c-widget', '-ni'],
+      [...scope, 'deploy', '--only', 'functions:c2c_auth', '-ni'],
     ],
   );
   assert.deepEqual(cap.spawned.map((call) => call.command), ['catalyst', 'npm', 'catalyst', 'catalyst', 'catalyst', 'catalyst']);
@@ -820,7 +823,7 @@ test('a lossy project:list still fails closed when REST ids differ by one digit'
     if (args.includes('project:list')) return { code: 0, stdout: table, stderr: '' };
     return { code: 0, stdout: '', stderr: '' };
   };
-  const code = await deployCli([ds, '--project', projectId, '--org', '10000000000', '--projects', projects, '--confirm', '--function-env', 'new', '--ui', 'vanilla'], ok.io);
+  const code = await deployCli([ds, '--project', projectId, '--org', '10000000000', '--projects', projects, '--confirm', '--function-env', 'new', '--ui', 'vanilla', '--slate-domain', `https://${SLATE_DOMAIN}`], ok.io);
   assert.equal(code, 0);
   assert.equal(ok.restCalls[0]?.path, `/baas/v1/project/${projectId}`);
   assert.ok(ok.spawned.some((call) => call.args.includes('deploy')));
@@ -903,12 +906,12 @@ require('fs').appendFileSync(${JSON.stringify(npmLog)}, JSON.stringify({ args: p
   writeFileSync(log, '');
   const ok = capture(env);
   ok.io.spawn = catalystSpawn;
-  const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new'], ok.io);
+  const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--slate-domain', `https://${SLATE_DOMAIN}`], ok.io);
   assert.equal(code, 0);
   const calls = readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { args: string[]; env: Record<string, string> });
   assert.deepEqual(
     calls.map((call) => call.args.filter((arg) => arg === 'project:list' || arg === 'slate:link' || arg === 'deploy')),
-    [['project:list'], ['deploy'], ['deploy'], ['slate:link'], ['deploy']],
+    [['project:list'], ['deploy'], ['slate:link'], ['deploy'], ['deploy']],
   );
   const npmCalls = readFileSync(npmLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { args: string[]; cwd: string });
   assert.equal(npmCalls.length, 1);
@@ -1239,6 +1242,13 @@ test('a plain second --confirm re-runs the deploy commands but never re-posts au
   assert.equal(second.filter((call) => call.method === 'POST').length, 0);
   // The deploy commands still ran — idempotency is scoped to the auth ops.
   assert.ok(cap.spawned.length > spawnCount);
+  const resumeStart = cap.spawned.length;
+  assert.equal(await deployCli([...args, '--resume'], cap.io), 0);
+  assert.ok(cap.spawned.slice(resumeStart).some((call) => call.args.includes('functions:c2c_auth')));
+  const bridgeConfig = JSON.parse(readFileSync(join(out, 'functions', 'c2c_auth', 'catalyst-config.json'), 'utf8')) as {
+    deployment: { env_variables: Record<string, string> };
+  };
+  assert.equal(bridgeConfig.deployment.env_variables.C2C_SLATE_ORIGIN, 'https://c2c-widget-xyz.onslate.in');
   const state = JSON.parse(readFileSync(join(out, '.c2c-deploy-state.json'), 'utf8')) as { authDone?: string[]; authAdminUserId?: string };
   assert.equal(state.authAdminUserId, '10000000000000004');
   assert.deepEqual(state.authDone, ['admin-signup', 'cors-domain', 'enable-embedded', 'enable-hosted']);
@@ -3774,12 +3784,15 @@ test('a resumed run recovers the Slate URL from the API when the earlier run nev
   try {
     let listed = slateAppList();
     const first = noSlateUrlIo(() => listed);
-    assert.equal(await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out, '--resume'], first.io), 0);
+    assert.equal(await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out, '--resume'], first.io), 1);
+    assert.match(first.stderr(), /cannot deploy c2c_auth without a known Slate app origin/);
+    assert.equal(first.spawned.some((call) => call.args.includes('functions:c2c_auth')), false, 'an empty origin never reaches Catalyst');
     assert.equal((JSON.parse(readFileSync(join(out, '.c2c-deploy-state.json'), 'utf8')) as { slateUrl?: string }).slateUrl, undefined);
     // The app is deployed now; the resumed run skips every command but must still find the URL.
     listed = slateAppList(SLATE_DOMAIN);
     const second = noSlateUrlIo(() => listed);
     assert.equal(await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out, '--resume'], second.io), 0);
+    assert.ok(second.spawned.some((call) => call.args.includes('functions:c2c_auth')), 'resume applies the bridge once the Slate URL is known');
     assert.match(second.stdout(), /skip slate \(done in an earlier run\)/);
     assert.match(second.stdout(), /slate url \(from the Slate API\): https:\/\/c2c-widget-abc123\.onslate\.in/);
     const state = JSON.parse(readFileSync(join(out, '.c2c-deploy-state.json'), 'utf8')) as { slateUrl?: string };
@@ -3885,6 +3898,7 @@ test('a transient 500 from the functions deploy re-runs the command and deploys'
     cap.io.spawn = async (command, args, opts) => {
       cap.spawned.push({ command, args, env: opts.env });
       if (args.includes('project:list')) return { code: 0, stdout: FAITHFUL_PROJECT_LIST, stderr: '' };
+      if (args.includes('slate:link')) return { code: 0, stdout: `App Url: https://${SLATE_DOMAIN}\n`, stderr: '' };
       if (args.includes('--only')) {
         deploys += 1;
         if (deploys === 1) {
@@ -4103,9 +4117,10 @@ test('two Slate apps with the same name are reported and never guessed at', asyn
       ],
     }));
     const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out], cap.io);
-    assert.equal(code, 0, cap.stdout().slice(-800) + cap.stderr());
+    assert.equal(code, 1, cap.stdout().slice(-800) + cap.stderr());
     assert.match(cap.stdout(), /2 Slate apps named "c2c-widget"/);
     assert.match(cap.stdout(), /--slate-domain/);
+    assert.match(cap.stderr(), /cannot deploy c2c_auth without a known Slate app origin/);
     // Nothing is stored and CORS never runs with a guessed host.
     assert.equal(cap.restCalls.find((call) => call.method === 'POST' && call.path.endsWith('/cors-domain')), undefined);
     const state = JSON.parse(readFileSync(join(out, '.c2c-deploy-state.json'), 'utf8')) as { slateUrl?: string };
@@ -4123,8 +4138,9 @@ test('a missing Slate app reports that the URL was not found', async () => {
   try {
     const cap = noSlateUrlIo(() => ({ data: [{ id: '3000000000000123', name: 'other-app', domain: 'other-aa11.onslate.in' }] }));
     const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out], cap.io);
-    assert.equal(code, 0, cap.stdout().slice(-800) + cap.stderr());
+    assert.equal(code, 1, cap.stdout().slice(-800) + cap.stderr());
     assert.match(cap.stdout(), /slate url not found: no app named "c2c-widget"/);
+    assert.match(cap.stderr(), /cannot deploy c2c_auth without a known Slate app origin/);
     assert.equal(cap.restCalls.find((call) => call.method === 'POST' && call.path.endsWith('/cors-domain')), undefined);
   } finally {
     rmSync(out, { recursive: true, force: true });

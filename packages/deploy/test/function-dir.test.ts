@@ -394,7 +394,8 @@ test('deploy writes a Catalyst Advanced I/O function folder with pinned deps and
   const app = await sampleApp();
   const { files } = deployFiles(app, guardFor(app), false, { mode: 'live' });
   const fn = files.filter((file) => file.path.startsWith('functions/'));
-  assert.ok(fn.every((file) => file.path.startsWith('functions/c2c_api/')), 'every function file is inside the function folder');
+  assert.ok(fn.every((file) => file.path.startsWith('functions/c2c_api/') || file.path.startsWith('functions/c2c_auth/')), 'every function file is inside a named function folder');
+  assert.ok(fn.some((file) => file.path === 'functions/c2c_auth/catalyst-config.json'), 'the auth bridge function is emitted');
   const config = JSON.parse(text(files, 'functions/c2c_api/catalyst-config.json'));
   assert.deepEqual(config, {
     deployment: { name: 'c2c_api', stack: 'node20', type: 'advancedio', env_variables: { C2C_DEPLOY_MODE: 'live' } },
@@ -415,7 +416,7 @@ test('deploy writes a Catalyst Advanced I/O function folder with pinned deps and
   assert.equal(routes['POST /forms/Sample_Item/submit'], './aio/sample-item/submit.mjs');
   assert.equal(routes['POST /reports/All_Sample_Items'], './reports/all-sample-items.mjs');
   const catalyst = JSON.parse(text(files, 'catalyst.json'));
-  assert.deepEqual(catalyst.functions, { targets: ['c2c_api'], ignore: [], source: 'functions' });
+  assert.deepEqual(catalyst.functions, { targets: ['c2c_api', 'c2c_auth'], ignore: [], source: 'functions' });
   assert.match(text(files, 'slate/c2c-config.js'), /C2C_API_BASE = "\/server\/c2c_api"/);
   assert.match(text(files, 'slate/c2c-config.js'), /__catalyst\/sdk\/init\.js/);
   assert.match(text(files, 'slate/index.html'), /<script src="\.\/c2c-config\.js"><\/script>/);
@@ -1258,6 +1259,7 @@ function resumeIo(failOn: string | undefined) {
       spawned.push({ command, args, cwd: opts.cwd });
       if (args.includes('project:list')) return { code: 0, stdout: PROJECT_LIST, stderr: '' };
       if (failOn && args.includes(failOn)) return { code: 3, stdout: '', stderr: 'HTTP Error: 400 refreshing the access token' };
+      if (args.includes('slate:link')) return { code: 0, stdout: 'App Url: https://c2c-sample-app-abc123.onslate.in\n', stderr: '' };
       if (args.includes('--only')) return { code: 0, stdout: 'URL: https://c2c-sample-app-1.development.catalystserverless.in/server/c2c_api/\n', stderr: '' };
       return { code: 0, stdout: '', stderr: '' };
     },
@@ -1318,7 +1320,7 @@ test('deploy runs install, functions, slate in order and --resume skips finished
     assert.match(second.out(), /the generated bundle changed since the last run/);
     assert.deepEqual(
       second.spawned.map((s) => (s.command === 'npm' ? 'npm install' : s.args.find((a) => a === 'project:list' || a === 'slate:link' || a === 'deploy'))),
-      ['project:list', 'npm install', 'deploy', 'slate:link', 'deploy'],
+      ['project:list', 'npm install', 'deploy', 'slate:link', 'deploy', 'deploy'],
     );
     assert.match(second.out(), /post-deploy \(console\)/);
     const redeployed = JSON.parse(readFileSync(join(out, 'functions/c2c_api/c2c-deploy.json'), 'utf8')) as { allowedOrigins?: string[] };
@@ -1342,7 +1344,7 @@ test('deploy runs install, functions, slate in order and --resume skips finished
     );
     assert.ok(report.postDeploySteps.length >= 4);
     assert.equal(second.out().includes(SECRET), false);
-    assert.deepEqual((JSON.parse(readFileSync(join(out, STATE_FILE), 'utf8')) as { done: string[] }).done, ['install', 'functions', 'slate-link', 'slate']);
+    assert.deepEqual((JSON.parse(readFileSync(join(out, STATE_FILE), 'utf8')) as { done: string[] }).done, ['install', 'functions', 'slate-link', 'slate', 'functions-auth']);
     assert.match(readFileSync(join(out, 'functions/c2c_api/c2c-deploy.json'), 'utf8'), /"mode": "live"/);
     const third = resumeIo(undefined);
     assert.equal(await deployCli([...args, '--resume', '--api-base', 'http://insecure.example'], third.io), 1);
