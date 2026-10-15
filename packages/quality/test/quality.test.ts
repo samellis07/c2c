@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -710,6 +711,22 @@ test('gallery watchdog: a slow start before the first report does not eat the id
 const ROW = { compiles: { ok: true, modules: 2, nodeCheckFailures: 0, scanned: 2, freeIdentifiers: 0, modulesWithFreeIdentifiers: 0, freeByName: {}, typeChecked: 2, typeErrors: 0, typeByCode: {}, typeAdvisories: 0, templateTypeErrors: 0 }, smokeClean: { ok: true, handlers: 1, calls: 2, handlersWithCrash: 0, handlersCrashOnValid: 0, crashByClass: {}, delugeByClass: {}, unmappedByClass: {}, importFailures: 0 }, prefetch: { modules: 1, nonReads: 0, byOp: {} }, crashSignatures: {}, crashOnValidSignatures: {}, unmappedSignatures: {}, typeMessages: {} };
 const QUIET = () => ({ cores: 8, load1: 0 });
 
+test('gallery CLI ignores the removed --stall-idle argument', () => {
+  const result = spawnSync(process.execPath, [
+    join(root, 'dist/quality/src/gallery.js'),
+    '--once',
+    join(root, 'missing-test-app.ds'),
+    '--iterations',
+    '1',
+    '--heartbeat-ms',
+    '250',
+    '--stall-idle',
+  ], { encoding: 'utf8', timeout: 10_000 });
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /failure/);
+});
+
 /** A gallery of the redistributable dialect fixtures, plus any extra entries. */
 function fixtureGallery(extra: (dir: string) => void = () => {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-gallery-sweep-'));
@@ -721,7 +738,7 @@ function fixtureGallery(extra: (dir: string) => void = () => {}): string {
 test('gallery watchdog: an app process blocked with its heartbeat still running is killed, retried, and reported failed', async (t) => {
   // Parsing refuses a fifo ('is not a file'), so opening one no longer blocks
   // the app and the watchdog never fires. The child instead blocks its main
-  // thread (--stall-idle) while the heartbeat worker in that process keeps
+  // thread while the heartbeat worker in that process keeps
   // reporting. The file itself is a regular file.
   const dir = mkdtempSync(join(tmpdir(), 'c2c-gallery-blocked-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -730,7 +747,7 @@ test('gallery watchdog: an app process blocked with its heartbeat still running 
   const took: number[] = [];
   const run = async (target: string, n: number) => {
     const started = Date.now();
-    const r = await runApp(target, n, { idleMs, heartbeatMs: 250, stallIdle: true });
+    const r = await runApp(target, n, { idleMs, heartbeatMs: 250, testOnlyStallIdle: true });
     took.push(Date.now() - started);
     return r;
   };
