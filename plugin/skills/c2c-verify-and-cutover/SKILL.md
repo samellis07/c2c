@@ -26,7 +26,7 @@ There is no `c2c probe` CLI command yet. The probe rows below describe checks th
 | P-UPD300 | ZCQL UPDATE/DELETE statement cap | Silent partial writes |
 | P-JOIN | max JOINs (Dev, and Prod at cutover) | Raises are per environment [UNVERIFIED] |
 | P-WIDTH | max SELECT columns + error text | 20 [DOC]; not yet confirmed |
-| P-COLS | columns per table by type on a scratch table | 100 [DOC]; a higher figure of 325 is [UNVERIFIED] |
+| P-COLS | columns per table by type on a scratch table | hard cap 250 [UNVERIFIED]; default 100 [UNVERIFIED] |
 | P-401 | private route without a session → `401 NO_ACCESS`; run credential-free — `curl -s -o /dev/null -w '%{http_code}' <function-url>` prints `401` | Functions are public/`optional` by default [TESTED]; a signed-in session passes the gateway, so only a no-session probe proves the rule (`is_authenticated` is the only readable signal) |
 | P-BULK | bulk write with `fk_mapping` from a CSV in the bucket | Before any bulk load |
 | P-RATE | sustained writes/min on a scratch table | ~100/min/table [UNVERIFIED] |

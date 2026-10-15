@@ -507,25 +507,39 @@ test('the columns budget warns over the unverified default and fails only over t
   );
 });
 
-test('doctor, plan and the limits facts use the same column cap', () => {
+test('doctor, plan and the limits facts agree at the 250-column hard cap', () => {
   const cap = limitValue('datastore.columns_per_table');
   const columnsDefault = limitValue('datastore.columns_per_table_default');
   const facts = readFileSync(join(repoRoot(), 'plugin/references/facts/limits.md'), 'utf8');
+  assert.equal(cap, 250);
+  assert.equal(columnsDefault, 100);
   assert.match(facts, new RegExp(`Plan for ${cap} columns per table \\[UNVERIFIED\\]`));
   assert.match(facts, new RegExp(`the stated default is ${columnsDefault} columns per table \\[UNVERIFIED\\]`));
   assert.match(facts, new RegExp(`a table wider than ${cap} fails`));
+
   const overhead = wideColumnCount(1) - 1;
-  const app = wideApp(111 - overhead);
-  const tables = generateSchema(app).tables;
-  const plan = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false }).plan.budgets.find(
+  const atCapApp = wideApp(cap - overhead);
+  const atCapTables = generateSchema(atCapApp).tables;
+  const atCapPlan = buildOfflinePlan(atCapApp, { dc: 'in', dcSource: '--dc', mail: false }).plan.budgets.find(
     (item) => item.id === 'columns' && item.table === 'Wide',
   );
-  const doctor = f5TableBudgets(tables);
-  assert.ok(plan);
-  assert.equal(plan.status, 'warn');
-  assert.equal(doctor.status, 'warn', doctor.detail);
-  assert.match(plan.detail, new RegExp(`111/${cap} columns`));
-  assert.match(doctor.detail, new RegExp(`111/${cap} columns`));
+  assert.ok(atCapPlan);
+  assert.equal(atCapPlan.status, 'warn', atCapPlan.detail);
+  assert.match(atCapPlan.detail, new RegExp(`${cap}/${cap} columns`));
+  assert.equal(atCapTables.find((table) => table.name === 'Wide')?.columns.length, cap);
+  assert.equal(f5TableBudgets(atCapTables).status, 'warn');
+
+  const overCapApp = wideApp(cap + 1 - overhead);
+  const generatedOver = generateSchema(overCapApp).tables;
+  assert.ok(generatedOver.length > 1, 'schema splits a source form at the hard cap');
+  assert.ok(generatedOver.every((table) => table.columns.length <= cap));
+  const overCapPlan = buildOfflinePlan(overCapApp, { dc: 'in', dcSource: '--dc', mail: false });
+  assert.ok(overCapPlan.plan.budgets.filter((item) => item.id === 'columns').every((item) => item.status !== 'fail'));
+
+  const syntheticOverCap = { ...atCapTables[0]!, name: 'Over_Cap', columns: [...atCapTables[0]!.columns, atCapTables[0]!.columns[0]!] };
+  const doctorOver = f5TableBudgets([syntheticOverCap]);
+  assert.equal(doctorOver.status, 'fail', doctorOver.detail);
+  assert.equal(doctorOver.detail, `table Over_Cap needs ${cap + 1} columns (max ${cap})`);
 });
 
 test('the plan budgets the mover write calls against the stated Dev write rate', () => {

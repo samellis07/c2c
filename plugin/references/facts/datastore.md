@@ -43,12 +43,11 @@ with the column definition wrapped in a single-element JSON array.
 Rule: always send the array form. A plain JSON object is rejected with
 `400 JSON_PARSE_ERROR` ("Check if the input json is proper").
 
-### Assume 100 columns per table in Development
+### 250-column hard cap and 100-column default
 
-Rule: assume a table holds at most 100 columns in Development.
-`c2c plan` and `c2c doctor` count columns per generated table and warn
-above 100, which relies on the raised cap of 250 [UNVERIFIED]; they fail
-closed above 250, splitting wide forms into 1:1 side tables joined by ROWID.
+Rule: the 250-column hard cap and 100-column default are [UNVERIFIED].
+`c2c plan` and `c2c doctor` warn above 100 and fail above 250, splitting
+wide forms into 1:1 side tables joined by ROWID.
 Assume at most 130 text-type (varchar plus text) columns per table;
 `c2c plan` warns past that count and moves overflow text to Stratus
 before any write.
