@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, fstatSync, mkdtempSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -49,6 +49,18 @@ function risenFreight() {
     current: { [fixture]: { ...real, [construct]: real[construct] + 1 } },
     baseline: { [fixture]: { ...real } },
   };
+}
+
+
+// Read the content and the modification time through one descriptor, so both
+// describe the same file.
+function readWithMtime(file) {
+  const fd = openSync(file, 'r');
+  try {
+    return [readFileSync(fd, 'utf8'), fstatSync(fd).mtimeMs];
+  } finally {
+    closeSync(fd);
+  }
 }
 
 test('TODO kinds ratchet on committed fixtures', () => {
@@ -179,8 +191,7 @@ test('a real fixture count mutation fails the ratchet', () => {
 });
 
 test('UPDATE_TODO_RATCHET=1 still fails when a fixture count rises', () => {
-  const before = readFileSync(baselineFile, 'utf8');
-  const beforeMtime = statSync(baselineFile).mtimeMs;
+  const [before, beforeMtime] = readWithMtime(baselineFile);
   const child = spawnSync(
     process.execPath,
     [
@@ -200,6 +211,7 @@ test('UPDATE_TODO_RATCHET=1 still fails when a fixture count rises', () => {
   assert.match(output, /TodoRatchetError/);
   assert.match(output, /TODO_RATCHET_INCREASE/);
   assert.doesNotMatch(output, /Updated tests\/ratchet\/todo-kinds\.json/);
-  assert.equal(readFileSync(baselineFile, 'utf8'), before);
-  assert.equal(statSync(baselineFile).mtimeMs, beforeMtime);
+  const [after, afterMtime] = readWithMtime(baselineFile);
+  assert.equal(after, before);
+  assert.equal(afterMtime, beforeMtime);
 });
