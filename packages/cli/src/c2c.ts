@@ -167,7 +167,7 @@ import {
   type App,
 } from '../../core/src/index.js';
 import { generateSchema, schemaAsJson, schemaAsReport, schemaCorpusMarkdown } from '../../schema/src/index.js';
-import { canonicalSeedJson, emptyCheckpoint, generateCreatorImport, generateSeed, migrateData, type Checkpoint, type MigrateResponse } from '../../data/src/index.js';
+import { canonicalSeedJson, emptyCheckpoint, generateCreatorImport, generateSeed, migrateData, writeCheckpointFile, type Checkpoint, type MigrateResponse } from '../../data/src/index.js';
 import { accumulate, emptyNumbers, formatCorpus } from '../../deluge/src/index.js';
 import { authApplyPlan, authApplyReport, authAsJson, authAsReport, authPlan } from '../../auth/src/index.js';
 import { buildUi, DomUnavailableError, formatUiReport, uiCorpus } from '../../ui/src/index.js';
@@ -368,7 +368,7 @@ async function migrateCli(args: string[]): Promise<number> {
     tables,
     dryRun: true,
     checkpoint,
-    saveCheckpoint: (next) => writeFileSync(checkpointPath, `${JSON.stringify(next)}\n`),
+    saveCheckpoint: (next) => writeCheckpointFile(checkpointPath, next),
     fetch: (url, init) => globalThis.fetch(url, init) as Promise<MigrateResponse>,
   });
   for (const table of result.tables) {

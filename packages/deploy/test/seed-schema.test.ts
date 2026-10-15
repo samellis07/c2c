@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deriveIr, parse, parseFile } from '../../core/src/index.js';
@@ -403,6 +403,23 @@ test('migrate-data --seed plans by default and remaps lookups with --ds --confir
   assert.equal(liveCode, 0);
   assert.match(live.stdout(), /Book: source 1 written 1 mismatch false/);
   assert.equal(stored.get('Book')!.get('b1')!.columns.Author, stored.get('Author')!.get('a1')!.rowid);
+});
+
+test('migrate-data --seed --checkpoint creates the state directory in a fresh workspace', async () => {
+  const { dir, ds, seedPath, projects } = writeCliFiles(CANONICAL_SEED);
+  const checkpointPath = join(dir, 'c2c-out', 'Widget', 'state', 'data.json');
+  const { fetch } = storeFetch([]);
+  const live = cliCapture(fetch);
+  const code = await seedMigrateCli(
+    ['--seed', seedPath, '--app', 'Widget', '--project', '1001', '--org', '10000000000', '--projects', projects, '--ds', ds, '--checkpoint', checkpointPath, '--confirm'],
+    live.io,
+  );
+  assert.equal(code, 0, live.stderr());
+  const saved = JSON.parse(readFileSync(checkpointPath, 'utf8')) as { version: number; tables: Record<string, { done?: boolean }> };
+  assert.equal(saved.version, 1);
+  assert.equal(saved.tables.Author.done, true);
+  assert.equal(saved.tables.Book.done, true);
+  assert.deepEqual(readdirSync(join(dir, 'c2c-out', 'Widget', 'state')), ['data.json']);
 });
 
 test('migrate-data --seed --ds refuses a seed table outside the app schema before any write', async () => {

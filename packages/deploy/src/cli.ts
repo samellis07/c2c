@@ -13,6 +13,7 @@ import { LockedExportError, parseFileWithSidecars, parseProject, widgetCommandSt
 import { seedCompositeMap } from '../../data/src/seed.js';
 import { stratusRestSink } from '../../data/src/files.js';
 import { emptyCheckpoint, type Checkpoint, type FetchLike, type MigrateResult } from '../../data/src/migrate.js';
+import { writeCheckpointFile } from '../../data/src/checkpoint-file.js';
 import { emptyIntegrity, groupRefusals, integrityColumns, mandatoryMissingRefusals, type IntegrityReport } from '../../data/src/integrity.js';
 import { applyConstraintDecisions, columnRenamesOf, generateSchema, type ConstraintDecision, type SchemaPlan } from '../../schema/src/generator.js';
 import { FIDELITY_JSON, FIDELITY_MD, LOADER_REPORT, formatCsvPlan, hasReportJson, loaderColumns, migrateCsv, migrateLoaded, readSourceCsv, readSourceJson, type CsvLoad } from './csv.js';
@@ -1536,7 +1537,7 @@ export async function seedMigrateCli(args: readonly string[], io: Io): Promise<n
       dryRun: false,
       fetch: io.fetch,
       checkpoint,
-      saveCheckpoint: checkpointPath ? (next) => writeFileSync(checkpointPath, `${JSON.stringify(next)}\n`) : undefined,
+      saveCheckpoint: checkpointPath ? (next) => writeCheckpointFile(checkpointPath, next) : undefined,
       scope,
       columnsByTable,
       seedDir: dirname(seedPath),
@@ -1672,7 +1673,7 @@ export async function sourceCsvCli(args: readonly string[], io: Io): Promise<num
       catalystBase: flag(args, '--catalyst-base') ?? catalystBaseFor(guard.dc),
       fetch: io.fetch,
       checkpoint,
-      saveCheckpoint: checkpointPath ? (next) => writeFileSync(checkpointPath, `${JSON.stringify(next)}\n`) : undefined,
+      saveCheckpoint: checkpointPath ? (next) => writeCheckpointFile(checkpointPath, next) : undefined,
       scope,
       allowEmpty,
       constraints: provisioned.decisions,
@@ -1830,7 +1831,7 @@ export async function sourceBackupCli(args: readonly string[], io: Io): Promise<
       catalystBase: flag(args, '--catalyst-base') ?? catalystBaseFor(guard.dc),
       fetch: io.fetch,
       checkpoint,
-      saveCheckpoint: checkpointPath ? (next) => writeFileSync(checkpointPath, `${JSON.stringify(next)}\n`) : undefined,
+      saveCheckpoint: checkpointPath ? (next) => writeCheckpointFile(checkpointPath, next) : undefined,
       scope,
       constraints: provisioned.decisions,
     });
