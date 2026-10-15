@@ -277,6 +277,22 @@ ${field('Place', 'address', '\t\t\tlatitude\n\t\t\t(\n\t\t\t\ttype = decimal\n\t
     assert.equal(benign.html, '<b>ok</b>', tag);
   }
 
+  // A ZML <embed> with a static http(s) URL is an iframe; a templated or
+  // missing URL stays a manual TODO.
+  const embeds = elementsFromZml(
+    parseZml(
+      `<embed elementName="Map" url="https://example.com/map.pdf" width="300" height="800"/>` +
+        `<embed url="javascript:alert(1)"/>` +
+        `<embed url="<%=dynamic%>"/>` +
+        `<embed/>`,
+    ),
+  );
+  assert.equal(embeds[0].kind, 'embed');
+  assert.deepEqual(embeds[0].embed, { url: 'https://example.com/map.pdf', width: '300', height: '800' });
+  assert.equal(embeds[1].kind, 'todo');
+  assert.equal(embeds[2].kind, 'todo');
+  assert.equal(embeds[3].kind, 'todo');
+
   // Inner tags of a named widget (searchbar/searchbutton inside <search>) are
   // parts of that widget, not missing components: they stay off the leaf list.
   const searchTree = elementsFromZml(
@@ -474,6 +490,22 @@ test('HTML snippets drop slash, uppercase, and entity-encoded handlers', () => {
       for (const payload of payloads) assertNoActiveHtml(runtime.sanitizeSnippet(payload, runtimeWindow.document));
       assertNoActiveHtml(runtime.renderPage(page, runtimeWindow.document));
       assert.equal(runtime.sanitizeSnippet('<script>bad()</script><b onclick="x">ok</b>', runtimeWindow.document), '<b>ok</b>');
+      // A static-URL ZML <embed> draws as a lazy, no-referrer iframe; a
+      // non-http(s) spec renders nothing.
+      const embedded = runtime.renderPage(
+        {
+          name: 'E',
+          label: 'E',
+          status: 'generated',
+          elements: [
+            { tag: 'embed', kind: 'embed', embed: { url: 'https://example.com/map.pdf', width: '300', height: '800' }, children: [] },
+            { tag: 'embed', kind: 'embed', embed: { url: 'javascript:alert(1)' }, children: [] },
+          ],
+        },
+        runtimeWindow.document,
+      );
+      assert.match(embedded, /<iframe[^>]*src="https:\/\/example\.com\/map\.pdf"[^>]*width="300"[^>]*height="800"[^>]*loading="lazy"[^>]*referrerpolicy="no-referrer"/);
+      assert.doesNotMatch(embedded, /javascript:/);
     }).finally(() => rmSync(dir, { recursive: true, force: true }));
   } catch (err) {
     rmSync(dir, { recursive: true, force: true });

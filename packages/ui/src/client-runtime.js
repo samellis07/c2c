@@ -658,6 +658,14 @@ function renderElement(el, doc, parentReport, appModel) {
     const inner = el.src ? `<div data-snippet-src="${escapeHtml(el.src)}">${clean}</div>` : clean;
     return `${inner.trim() || markers ? `<div class="snippet">${inner}${markers}</div>` : ''}${kids}`;
   }
+  if (el.kind === 'embed') {
+    const spec = el.embed || {};
+    const url = typeof spec.url === 'string' && /^https?:\/\//i.test(spec.url) ? spec.url : '';
+    if (!url) return kids;
+    const embedWidth = /^[0-9]+$/.test(spec.width || '') ? ` width="${spec.width}"` : '';
+    const embedHeight = /^[0-9]+$/.test(spec.height || '') ? ` height="${spec.height}"` : '';
+    return `<iframe class="embed" src="${escapeHtml(url)}"${embedWidth}${embedHeight} loading="lazy" referrerpolicy="no-referrer" title="${escapeHtml(el.name || el.tag)}"></iframe>${kids}`;
+  }
   if (el.kind === 'todo') {
     // A page TODO is a migration note for the developer, not app content: it
     // stays in the migration report and goes to the console, never the page.

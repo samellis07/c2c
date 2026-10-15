@@ -29,7 +29,7 @@ export interface ZmlEnv {
 
 export interface UiElement {
   tag: string;
-  kind: 'container' | 'report' | 'chart' | 'form' | 'button' | 'text' | 'search' | 'gauge' | 'html' | 'todo' | 'kpi';
+  kind: 'container' | 'report' | 'chart' | 'form' | 'button' | 'text' | 'search' | 'gauge' | 'html' | 'todo' | 'kpi' | 'embed';
   name?: string;
   text?: string;
   /** A `type="form data"` cell: `thisapp.<Report>.<Field>.<fn>()` plus the row criteria. */
@@ -51,6 +51,8 @@ export interface UiElement {
   style?: Record<string, string>;
   /** `openUrl(..., "popup window")` actions a snippet would have run server-side. */
   popups?: UiPopup[];
+  /** A ZML `<embed>` element with a static http(s) URL, drawn as an iframe. */
+  embed?: { url: string; width?: string; height?: string };
   children: UiElement[];
 }
 
@@ -450,6 +452,29 @@ export function elementFromZml(
   }
   if (CONTAINERS.has(key)) {
     return { tag, kind: 'container', ...(name ? { name } : {}), ...(width ? { width } : {}), ...(style ? { style } : {}), children };
+  }
+  if (key === 'embed') {
+    // A static http(s) embed is an iframe. Any other source (a Deluge-templated
+    // or missing URL) stays a manual TODO rather than embed something else.
+    const source = (attr(attributes, ['url', 'src']) ?? '').trim();
+    if (/^https?:\/\//i.test(source)) {
+      const height = attr(attributes, ['height']);
+      const embedWidth = attr(attributes, ['width']);
+      return {
+        tag,
+        kind: 'embed',
+        ...(name ? { name } : {}),
+        embed: { url: source, ...(embedWidth ? { width: embedWidth } : {}), ...(height ? { height } : {}) },
+        children,
+      };
+    }
+    return {
+      tag,
+      kind: 'todo',
+      ...(name ? { name } : {}),
+      todo: `ZML <${tag}> has no generated component`,
+      children,
+    };
   }
   const kind = NAMED[key];
   if (!kind) {
