@@ -4368,7 +4368,8 @@ function callExpr(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fals
     }
     // Rows or values already in memory (`input.Subform.sum(Amount)`,
     // `numbers.average()`). `min`/`max` with an argument are the two-number
-    // functions and `distinct` is the list function, so they are not here.
+    // functions (functions/number/min.html, max.html) and `distinct` is the
+    // list function, so they are not here.
     const fieldArg = e.args[0];
     const fieldName = fieldArg && fieldArg.kind === 'name' ? fieldPath(fieldArg, scope) : null;
     // In-memory lists only, same as the free-call form: a string or other
@@ -4601,6 +4602,11 @@ function namedCall(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fal
   if (name === 'getFieldNames') return mergeFx('shim.record.getFieldNames(ctx.record)', args, { shim: true, list: true });
   if (name === 'getFieldValue') return mergeFx(`shim.record.getFieldValue(ctx.record, ${args[0]?.code ?? 'null'})`, args, { shim: true });
   if (name === 'getJson') return mergeFx(`shim.list.getJson(${args[0]?.code ?? 'null'}, ${args[1]?.code ?? 'null'})`, args, { shim: true });
+  // A list argument has no documented text form for reverse (see the method
+  // arm in directMethod), so the free call stays an untranslated call too.
+  if (name === 'reverse' && args[0]?.list) {
+    return mergeFx(`await shim.todo(ctx, "call:reverse")`, args, { shim: true, todo: true, constructs: ['call:reverse'] });
+  }
   if (TEXT_FUNCTIONS.has(name) && args.length) return mergeFx(`shim.string.${name}(${args.map((a) => a.code).join(', ')})`, args, { shim: true });
   if (name === 'find' && args.length >= 2) return mergeFx(`shim.list.indexOf(${args.map((a) => a.code).join(', ')})`, args, { shim: true });
   if (name === 'indexOf') return mergeFx(`shim.list.indexOf(${args.map((a) => a.code).join(', ')})`, args, { shim: true });
@@ -4872,6 +4878,19 @@ function directMethod(method: string, recv: Fx, args: Fx[]): Fx | null {
   if (method === 'getJson') return call(`shim.list.getJson(${recv.code}, ${args[0]?.code ?? 'null'})`);
   if (method === 'equalsIgnoreCase') return call(`shim.string.equalsIgnoreCase(${recv.code}, ${args[0]?.code ?? 'null'})`);
   if (BLANK_FUNCTIONS.has(method)) return call(`shim.isBlank(${recv.code})`);
+  // reverse() returns TEXT for both call forms; a non-text input is converted
+  // to text first (functions/string/reverse.html — its list example returns
+  // "31, 2, 1" and leaves the input as it was). No documented rule decides a
+  // list's text form here (Deluge `toString()` of a list is its JSON text,
+  // which cannot yield "1, 2, 13"), so a list — like a map, query, or date
+  // value — stays an untranslated call.
+  if (method === 'reverse' && (recv.list || recv.map || recv.query || recv.date)) {
+    return mergeFx(`await shim.todo(ctx, "method:reverse")`, [recv, ...args], {
+      shim: true,
+      todo: true,
+      constructs: ['method:reverse'],
+    });
+  }
   if (TEXT_FUNCTIONS.has(method) && textish) return call(`shim.string.${method}(${recv.code}${argList ? `, ${argList}` : ''})`);
   // `find` is `indexOf` (functions/string/find lists both spellings).
   if (method === 'find' && textish) return call(`shim.list.indexOf(${recv.code}${argList ? `, ${argList}` : ''})`);
