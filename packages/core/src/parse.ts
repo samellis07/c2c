@@ -160,8 +160,26 @@ function packageFlags(dir: string): { html: boolean; json: boolean; names: strin
       if (lower.endsWith('.html') || lower.endsWith('.htm')) html = true;
       if (!lower.endsWith('.json')) continue;
       json = true;
-      if (st.size > WIDGET_JSON_CAP) continue;
-      names.push(...widgetNamesInJson(readFileSync(p, 'utf8')));
+      // Read through one descriptor opened without following links, and check
+      // the kind and size on that same descriptor, so the file that is read is
+      // the file that was checked.
+      let fd: number;
+      try {
+        fd = openSync(p, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      } catch (err) {
+        // Gone since the listing, or replaced by a link: skip it, as the
+        // lstat walk does. Any other failure is reported as before.
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'ELOOP') continue;
+        throw err;
+      }
+      try {
+        const fst = fstatSync(fd);
+        if (!fst.isFile() || fst.size > WIDGET_JSON_CAP) continue;
+        names.push(...widgetNamesInJson(readFileSync(fd, 'utf8')));
+      } finally {
+        closeSync(fd);
+      }
     }
   };
   walk(dir);
