@@ -3,9 +3,9 @@
   "docs": "packages/deluge/data/builtin-docs.json",
   "dispatch": "packages/deluge/src/dispatch.ts",
   "counts": {
-    "supported": 44,
-    "shimmed": 626,
-    "todo": 48,
+    "supported": 40,
+    "shimmed": 632,
+    "todo": 46,
     "total": 718
   },
   "entries": [
@@ -6384,26 +6384,26 @@
       "kind": "function",
       "category": "number",
       "receivers": [
-        "none"
+        "list"
       ],
-      "arity": 1,
+      "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/functions/number/average.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
-      "snippet": "x = average(\"x\");"
+      "status": "shimmed",
+      "mapsTo": "shim.list.aggregate",
+      "snippet": "x = {1, 5, 2, 3}.average();"
     },
     {
       "name": "average",
       "kind": "function",
       "category": "number",
       "receivers": [
-        "number"
+        "none"
       ],
-      "arity": 0,
+      "arity": 1,
       "docUrl": "https://www.zoho.com/deluge/help/functions/number/average.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
-      "snippet": "x = (1).average();"
+      "status": "shimmed",
+      "mapsTo": "shim.list.aggregate",
+      "snippet": "x = average({1, 5, 2, 3});"
     },
     {
       "name": "ceil",
@@ -6761,26 +6761,26 @@
       "kind": "function",
       "category": "number",
       "receivers": [
-        "none"
+        "list"
       ],
-      "arity": 1,
+      "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/functions/number/median.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
-      "snippet": "x = median(\"x\");"
+      "status": "shimmed",
+      "mapsTo": "shim.list.aggregate",
+      "snippet": "x = {1, 5, 2, 3}.median();"
     },
     {
       "name": "median",
       "kind": "function",
       "category": "number",
       "receivers": [
-        "number"
+        "none"
       ],
-      "arity": 0,
+      "arity": 1,
       "docUrl": "https://www.zoho.com/deluge/help/functions/number/median.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
-      "snippet": "x = (1).median();"
+      "status": "shimmed",
+      "mapsTo": "shim.list.aggregate",
+      "snippet": "x = median({1, 5, 2, 3});"
     },
     {
       "name": "min",
@@ -6826,26 +6826,26 @@
       "kind": "function",
       "category": "number",
       "receivers": [
-        "number"
+        "list"
       ],
       "arity": 1,
       "docUrl": "https://www.zoho.com/deluge/help/functions/number/nth-largest.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
-      "snippet": "x = (1).nthLargest(\"x\");"
+      "status": "shimmed",
+      "mapsTo": "shim.number.nthLargest",
+      "snippet": "x = {300, 455, 124, 926, 780}.nthLargest(5);"
     },
     {
       "name": "nthSmallest",
       "kind": "function",
       "category": "number",
       "receivers": [
-        "number"
+        "list"
       ],
       "arity": 1,
       "docUrl": "https://www.zoho.com/deluge/help/functions/number/nth-smallest.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
-      "snippet": "x = (1).nthSmallest(\"x\");"
+      "status": "shimmed",
+      "mapsTo": "shim.number.nthSmallest",
+      "snippet": "x = {300, 455, 124, 926, 780}.nthSmallest(2);"
     },
     {
       "name": "pow",
@@ -7142,9 +7142,9 @@
       ],
       "arity": 1,
       "docUrl": "https://www.zoho.com/deluge/help/functions/number/tohex.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
-      "snippet": "x = toHex(\"x\");"
+      "status": "shimmed",
+      "mapsTo": "shim.number.toHex",
+      "snippet": "x = toHex(100);"
     },
     {
       "name": "toHex",
@@ -7155,9 +7155,9 @@
       ],
       "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/functions/number/tohex.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
-      "snippet": "x = (1).toHex();"
+      "status": "shimmed",
+      "mapsTo": "shim.number.toHex",
+      "snippet": "x = (100).toHex();"
     },
     {
       "name": "toLong",
@@ -7220,9 +7220,9 @@
       ],
       "arity": 2,
       "docUrl": "https://www.zoho.com/deluge/help/functions/number/towords.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
-      "snippet": "x = toWords(\"x\", \"x\");"
+      "status": "shimmed",
+      "mapsTo": "shim.number.toWords",
+      "snippet": "x = toWords(1989, \"en-us\");"
     },
     {
       "name": "toWords",
@@ -7233,9 +7233,9 @@
       ],
       "arity": 1,
       "docUrl": "https://www.zoho.com/deluge/help/functions/number/towords.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
-      "snippet": "x = (1).toWords(\"x\");"
+      "status": "shimmed",
+      "mapsTo": "shim.number.toWords",
+      "snippet": "x = (1989).toWords(\"en-us\");"
     },
     {
       "name": "concat",
@@ -8117,8 +8117,8 @@
       ],
       "arity": 4,
       "docUrl": "https://www.zoho.com/deluge/help/functions/string/replaceallignorecase.html",
-      "status": "shimmed",
-      "mapsTo": "shim.string.replaceAllIgnoreCase",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = replaceAllIgnoreCase(\"x\", \"x\", \"x\", \"x\");"
     },
     {
@@ -8130,8 +8130,8 @@
       ],
       "arity": 3,
       "docUrl": "https://www.zoho.com/deluge/help/functions/string/replaceallignorecase.html",
-      "status": "shimmed",
-      "mapsTo": "shim.string.replaceAllIgnoreCase",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = \"abc\".replaceAllIgnoreCase(\"x\", \"x\", \"x\");"
     },
     {
@@ -8182,8 +8182,8 @@
       ],
       "arity": 4,
       "docUrl": "https://www.zoho.com/deluge/help/functions/string/replacefirstignorecase.html",
-      "status": "shimmed",
-      "mapsTo": "shim.string.replaceFirstIgnoreCase",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = replaceFirstIgnoreCase(\"x\", \"x\", \"x\", \"x\");"
     },
     {
@@ -8195,8 +8195,8 @@
       ],
       "arity": 3,
       "docUrl": "https://www.zoho.com/deluge/help/functions/string/replacefirstignorecase.html",
-      "status": "shimmed",
-      "mapsTo": "shim.string.replaceFirstIgnoreCase",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = \"abc\".replaceFirstIgnoreCase(\"x\", \"x\", \"x\");"
     },
     {
@@ -8611,8 +8611,8 @@
       ],
       "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-text.html",
-      "status": "supported",
-      "mapsTo": "var x = String(\"abc\")",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = \"abc\".toText();"
     },
     {
@@ -8637,8 +8637,8 @@
       ],
       "arity": 1,
       "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-text.html",
-      "status": "supported",
-      "mapsTo": "var x = String(\"x\")",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = toText(\"x\");"
     },
     {
@@ -9261,8 +9261,8 @@
       ],
       "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-text.html",
-      "status": "supported",
-      "mapsTo": "var x = String(\"abc\")",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = \"abc\".toText();"
     },
     {
@@ -9274,8 +9274,8 @@
       ],
       "arity": 1,
       "docUrl": "https://www.zoho.com/deluge/help/functions/common/to-text.html",
-      "status": "supported",
-      "mapsTo": "var x = String(\"x\")",
+      "status": "todo",
+      "mapsTo": "shim.todo",
       "snippet": "x = toText(\"x\");"
     },
     {

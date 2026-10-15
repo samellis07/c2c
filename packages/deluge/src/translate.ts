@@ -4379,8 +4379,14 @@ function callExpr(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fals
       const id = jsIdent(obj.name);
       return mergeFx(`(${id} ? (Array.isArray(${id}) ? ${id}.length : 1) : 0)`, [q], { shim: true });
     }
-    if (method === 'average' || method === 'median') {
-      return mergeFx(`shim.list.aggregate(${q.code}, ${JSON.stringify(aggregateFn(method))})`, [q], { shim: true });
+    // `<numberList>.average()` / `.median()` take a NUMBER LIST or DECIMAL LIST
+    // receiver only. A member value is checked at run time; any other receiver
+    // (`(1).average()`) is not a documented call and stays a counted hole.
+    if ((method === 'average' || method === 'median') && e.args.length === 0 && !q.query && !q.todo) {
+      const fn = JSON.stringify(aggregateFn(method));
+      if (q.list) return mergeFx(`shim.list.aggregate(${q.code}, ${fn})`, [q], { shim: true });
+      if (obj.kind === 'member') return mergeFx(`shim.list.aggregate(shim.list.numberList(${q.code}, ${JSON.stringify(method)}), ${fn})`, [q], { shim: true });
+      return mergeFx(`await shim.todo(ctx, ${JSON.stringify('call:' + method)})`, [q], { shim: true, todo: true, constructs: [`call:${method}`] });
     }
     // Rows or values already in memory (`input.Subform.sum(Amount)`,
     // `numbers.average()`). `min`/`max` with an argument are the two-number
@@ -4593,7 +4599,7 @@ function namedCall(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fal
   }
   if (name === 'abs') return mergeFx(`shim.math.abs(${args[0]?.code ?? 'undefined'})`, args, { shim: true });
   if (name === 'toHex') return mergeFx(`shim.number.toHex(${args[0]?.code ?? 'null'})`, args, { shim: true });
-  if (name === 'toWords') return mergeFx(`shim.number.toWords(${args[0]?.code ?? 'null'}, ${args[1]?.code ?? 'null'})`, args, { shim: true });
+  if (name === 'toWords' && args[0]) return toWordsCall(args[0], args[1], args);
   if (name === 'nthLargest' || name === 'nthSmallest') return mergeFx(`shim.number.${name}(${args[0]?.code ?? 'null'}, ${args[1]?.code ?? 'null'})`, args, { shim: true });
   if (name === 'exp') return mergeFx(`shim.math.exp(${args[0]?.code ?? 'undefined'})`, args, { shim: true });
   if (name === 'frac') return mergeFx(`shim.math.frac(${args[0]?.code ?? 'undefined'})`, args, { shim: true });
@@ -4829,6 +4835,19 @@ function returnsDate(method: string): boolean {
   return method.startsWith('add') || method.startsWith('sub') || method.startsWith('toStart') || method === 'edate' || method === 'toDate' || method === 'toTime' || method === 'nextWeekDay' || method === 'previousWeekDay';
 }
 
+// toWords renders the page's English languages only. A literal language the
+// shim would refuse (`toWords(n, "fr")`) is a counted hole at translate time; a
+// computed one is checked by the shim, which refuses instead of guessing words.
+const TO_WORDS_RENDERED = new Set(['en-us', 'en-gb', 'en-in']);
+function toWordsCall(value: Fx, language: Fx | undefined, all: Fx[]): Fx {
+  const literal = language && /^"(?:[^"\\]|\\.)*"$/.test(language.code) ? JSON.parse(language.code) as string : null;
+  const constant = !language || literal !== null || /^-?\d/.test(language.code);
+  if (constant && (literal === null || !TO_WORDS_RENDERED.has(literal))) {
+    return mergeFx('await shim.todo(ctx, "call:toWords")', all, { shim: true, todo: true, constructs: ['call:toWords'] });
+  }
+  return mergeFx(`shim.number.toWords(${value.code}, ${language!.code})`, all, { shim: true });
+}
+
 function directMethod(method: string, recv: Fx, args: Fx[]): Fx | null {
   const a = args.map((x) => x.code);
   const argList = a.join(', ');
@@ -4873,10 +4892,9 @@ function directMethod(method: string, recv: Fx, args: Fx[]): Fx | null {
   if (method === 'cos') return call(`shim.number.cos(${recv.code})`, { decimal: true });
   if (method === 'tan') return call(`shim.number.tan(${recv.code})`, { decimal: true });
   if (method === 'asin') return call(`shim.number.asin(${recv.code})`, { decimal: true });
-  if (method === 'average' || method === 'median') return call(`shim.list.aggregate(${recv.code}, ${JSON.stringify(aggregateFn(method))})`);
   if (method === 'nthLargest' || method === 'nthSmallest') return call(`shim.number.${method}(${recv.code}, ${args[0]?.code ?? 'null'})`);
   if (method === 'toHex') return call(`shim.number.toHex(${recv.code})`);
-  if (method === 'toWords') return call(`shim.number.toWords(${recv.code}, ${args[0]?.code ?? 'null'})`);
+  if (method === 'toWords') return toWordsCall(recv, args[0], [recv, ...args]);
   if (MATH_SHIM_METHODS.has(method)) return call(`shim.math.${method}(${recv.code})`);
   if (method === 'isFile') return call(`shim.isFile(${recv.code})`);
   if (method === 'isEven') return call(`shim.math.isEven(${recv.code})`);

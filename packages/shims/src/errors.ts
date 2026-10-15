@@ -60,8 +60,8 @@ export class UncapturedDelugeError extends Error {
 export class UntranslatedConstruct extends Error {
   readonly code: string = 'C2C_UNTRANSLATED';
   readonly construct: string;
-  constructor(construct: string) {
-    super(`criteria: untranslated (${construct})`);
+  constructor(construct: string, scope = 'criteria') {
+    super(`${scope}: untranslated (${construct})`);
     this.name = 'UntranslatedConstruct';
     this.construct = construct;
   }

@@ -79,6 +79,62 @@ test('number-list and number-text builtins route through deterministic shims', a
   assert.equal(await run('numbers = {10, 2, 3}; out = numbers.median();'), 3);
 });
 
+test('number builtins refuse receivers and arguments the pages do not document', async () => {
+  // average/median take a NUMBER LIST or DECIMAL LIST receiver: a scalar or a
+  // null is not the documented call, so it stays a counted hole.
+  assert.deepEqual(translate('out = (1).average();').todos.map((x) => x.construct), ['call:average']);
+  assert.deepEqual(translate('x = 1; out = x.median();').todos.map((x) => x.construct), ['call:median']);
+  assert.deepEqual(translate('out = median(1);').todos.map((x) => x.construct), ['call:median']);
+  // A member receiver is checked at run time: a list value aggregates, a
+  // scalar refuses instead of becoming a one-element list.
+  assert.match(noTodo('out = input.Values.average();').server, /shim\.list\.numberList\(shim\.input\.get\(ctx, "Values"\), "average"\)/);
+  assert.equal(await run('out = input.Values.median();', { Values: [1, 5, 2, 3] }), 2.5);
+  await assert.rejects(run('out = input.Values.average();', { Values: 3 }), /average: expected a number list/);
+  await assert.rejects(run('out = input.Values.median();', { Values: null }), /median: expected a number list/);
+  // An empty number list still aggregates; average/median of no values is null.
+  assert.equal(await run('l = List(); out = l.average();'), null);
+});
+
+test('toWords renders only the documented English languages', async () => {
+  // The page's own examples, per language.
+  assert.equal(await run('out = 1989.toWords("en-us");'), 'one thousand nine hundred eighty-nine');
+  assert.equal(await run('out = 1989.13.toWords("en-us");'), 'one thousand nine hundred eighty-nine point one three');
+  assert.equal(await run('out = (-12).toWords("en-gb");'), 'minus twelve');
+  assert.equal(await run('out = 10000000.toWords("en-gb");'), 'ten million');
+  assert.equal(await run('out = 10000000.toWords("en-in");'), 'one crore');
+  // A literal language the shim does not render is a counted hole.
+  for (const [src, want] of [
+    ['out = toWords(24, "ko");', 'call:toWords'],
+    ['out = 1989.toWords("es");', 'call:toWords'],
+    ['out = toWords(1, 2);', 'call:toWords'],
+    ['out = toWords(1);', 'call:toWords'],
+  ] as const) {
+    assert.deepEqual(translate(src).todos.map((x) => x.construct), [want], src);
+  }
+  // A computed language reaches the shim, which refuses the unrendered ones
+  // instead of guessing words.
+  assert.match(noTodo('lang = "en-us"; out = 1989.toWords(lang);').server, /shim\.number\.toWords\(1989, lang\)/);
+  await assert.rejects(run('lang = "fr"; out = 1989.toWords(lang);'), /toWords: untranslated \(toWords-language-fr\)/);
+  // The page never shows where en-gb / en-in place "and": refuse those
+  // spellings rather than emit possibly wrong words.
+  await assert.rejects(run('out = 1234567.toWords("en-gb");'), /toWords-en-gb-and/);
+  await assert.rejects(run('out = 1000000000.toWords("en-in");'), /toWords-en-in-scale/);
+});
+
+test('toHex and the nth ranks refuse undocumented input', async () => {
+  // The page shows only a positive whole NUMBER (100 -> "64").
+  assert.equal(await run('out = toHex(100);'), '64');
+  await assert.rejects(run('out = toHex(1.5);'), /toHex-decimal/);
+  await assert.rejects(run('out = (-1).toHex();'), /toHex-negative/);
+  await assert.rejects(run('out = toHex(null);'), /toHex-null/);
+  // "The index argument starts from 1" and "cannot be greater than the size
+  // of the collection".
+  await assert.rejects(run('marks = {300, 455}; out = marks.nthLargest(0);'), /nthLargest: index 0/);
+  await assert.rejects(run('marks = {300, 455}; out = marks.nthLargest(3);'), /nthLargest: index 3/);
+  // A null member refuses rather than silently shifting every rank.
+  await assert.rejects(run('marks = {300, null}; out = marks.nthSmallest(1);'), /nthSmallest.*blank-member/);
+});
+
 test('date builtins: eomonth, toStartOfMonth, between-counts, day and week of year', async () => {
   for (const src of [
     'out = eomonth(d, 0).getDay();',

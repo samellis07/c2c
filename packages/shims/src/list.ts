@@ -405,6 +405,16 @@ function decimalText(v: unknown): string {
  * `min` and `max` also order date and date-time values and return the value.
  * `median` of an even count is the mean of the two middle values.
  */
+/**
+ * The receiver of `<numberList>.average()` / `.median()`: the pages document a
+ * NUMBER LIST or DECIMAL LIST only, so a scalar or null is refused instead of
+ * being read as a one-element list.
+ */
+export function numberList(value: unknown, fn: unknown): unknown[] {
+  if (!Array.isArray(value)) throw new DelugeRuntimeError(`${String(fn)}: expected a number list`);
+  return value;
+}
+
 export function aggregate(rows: unknown, fn: unknown, field?: unknown, exact?: unknown): unknown {
   const list = Array.isArray(rows) ? rows : rows == null ? [] : [rows];
   const name = String(fn).toLowerCase();
