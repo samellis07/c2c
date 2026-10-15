@@ -220,8 +220,124 @@ const STYLE_FUNCTIONS = new Set([
 /** Arguments of an allowed function: numbers with an optional unit, separated by spaces, commas or `/`. */
 const STYLE_ARGS = /^\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?(?:(?:\s*[,/]\s*|\s+)[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?)*\s*$/i;
 
-/** Arguments of a safe calc() call: numbers with an optional unit, separated by arithmetic operators (+, -, *, /) and spaces. */
-const CALC_ARGS = /^\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?(?:\s*[-+*/]\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?)*\s*$/i;
+/** Longest style attribute or declaration value the sanitizer scans; longer values are refused. */
+const STYLE_TEXT_MAX = 8192;
+
+/** Longest calc() argument list the sanitizer parses; longer values are refused. */
+const CALC_ARGS_MAX = 200;
+
+/** ASCII letter test for CSS units and function names (the regex [a-z] with the i flag). */
+function asciiLetter(ch: string): boolean {
+  const c = ch.charCodeAt(0) | 32;
+  return c >= 97 && c <= 122;
+}
+
+/**
+ * One pass over a calc() argument list, the same decisions as the old
+ * CALC_ARGS regex without the backtracking: a number is an optional sign,
+ * digits with an optional fraction (or a bare fraction like .5), then an
+ * optional unit (% or up to four letters); + - * / operators separate the
+ * numbers and spaces may sit around them.
+ */
+export function calcArgsSafe(args: string): boolean {
+  const text = String(args ?? '');
+  const n = text.length;
+  if (n === 0 || n > CALC_ARGS_MAX) return false;
+  let i = 0;
+  const spaces = (): void => {
+    while (i < n && /\s/.test(text[i])) i++;
+  };
+  const number = (): boolean => {
+    if (text[i] === '+' || text[i] === '-') i++;
+    let whole = 0;
+    while (i < n && text[i] >= '0' && text[i] <= '9') {
+      i++;
+      whole++;
+    }
+    let frac = 0;
+    if (text[i] === '.') {
+      i++;
+      while (i < n && text[i] >= '0' && text[i] <= '9') {
+        i++;
+        frac++;
+      }
+    }
+    return whole > 0 || frac > 0;
+  };
+  const unit = (): boolean => {
+    if (text[i] === '%') {
+      i++;
+      return true;
+    }
+    let letters = 0;
+    while (i < n && asciiLetter(text[i])) {
+      i++;
+      letters++;
+    }
+    return letters <= 4;
+  };
+  spaces();
+  if (!number() || !unit()) return false;
+  for (;;) {
+    spaces();
+    if (i >= n) return true;
+    const op = text[i];
+    if (op !== '+' && op !== '-' && op !== '*' && op !== '/') return false;
+    i++;
+    spaces();
+    if (!number() || !unit()) return false;
+  }
+}
+
+/**
+ * Remove css comments in one pass — the same spans the old
+ * /\/\*[\s\S]*?\*\//g replace dropped, pairing each opener with the next
+ * closer. An unterminated opener is literal text, like the regex left it.
+ */
+export function stripStyleComments(value: string): string {
+  const text = String(value ?? '');
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const start = text.indexOf('/*', i);
+    if (start < 0) return out + text.slice(i);
+    const end = text.indexOf('*/', start + 2);
+    if (end < 0) return out + text.slice(i);
+    out += text.slice(i, start);
+    i = end + 2;
+  }
+}
+
+/**
+ * Rewrite each name(args) call left to right — the same matches as the old
+ * /([-a-z0-9]*)\(([^()]*)\)/gi replace, without the regex: a call's name is
+ * the run of [-a-z0-9] characters ending at its '(' and its arguments are
+ * everything up to the next ')' with no '(' inside. Text that is not a call,
+ * or whose call never closes, is kept as is.
+ */
+export function replaceStyleCalls(text: string, decide: (name: string, args: string) => string): string {
+  const nameChar = (ch: string): boolean => ch === '-' || (ch >= '0' && ch <= '9') || asciiLetter(ch);
+  let out = '';
+  let i = 0;
+  const n = text.length;
+  let from = 0;
+  while (from < n) {
+    const open = text.indexOf('(', from);
+    if (open < 0) break;
+    let nameStart = open;
+    while (nameStart > i && nameChar(text[nameStart - 1])) nameStart--;
+    let close = open + 1;
+    while (close < n && text[close] !== '(' && text[close] !== ')') close++;
+    if (close >= n || text[close] === '(') {
+      from = open + 1;
+      continue;
+    }
+    out += text.slice(i, nameStart) + decide(text.slice(nameStart, open), text.slice(open + 1, close));
+    i = close + 1;
+    from = i;
+  }
+  return out + text.slice(i);
+}
 
 /**
  * Split an inline style into the declarations kept and the ones refused.
@@ -234,8 +350,10 @@ const CALC_ARGS = /^\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?(?:\s*[-+*/]\s*[
 export function cleanStyle(value: string): { style: string; dropped: string[] } {
   const kept: string[] = [];
   const dropped: string[] = [];
-  const hasComment = String(value ?? '').includes('/*');
-  const stripped = hasComment ? String(value ?? '').replace(/\/\*[\s\S]*?\*\//g, '') : String(value ?? '');
+  const source = String(value ?? '');
+  if (source.length > STYLE_TEXT_MAX) return { style: '', dropped: ['?'] };
+  const hasComment = source.includes('/*');
+  const stripped = hasComment ? stripStyleComments(source) : source;
   const rawPieces = stripped.split(';').map((piece) => piece.trim()).filter(Boolean);
   for (const text of rawPieces) {
     const colon = text.indexOf(':');
@@ -257,7 +375,7 @@ export function cleanStyle(value: string): { style: string; dropped: string[] } 
     else dropped.push(/^-?[-a-z]+$/.test(prop) ? prop : '?');
   }
   const hasDebris = rawPieces.length !== kept.length + dropped.length;
-  return { style: dropped.length ? kept.join('; ') : hasComment || hasDebris ? kept.join('; ') : String(value ?? ''), dropped };
+  return { style: dropped.length ? kept.join('; ') : hasComment || hasDebris ? kept.join('; ') : source, dropped };
 }
 
 /**
@@ -270,15 +388,15 @@ export function cleanStyle(value: string): { style: string; dropped: string[] } 
  */
 function safeStyleValue(raw: string, prop?: string): boolean {
   let text = String(raw ?? '').trim();
-  if (!text || /[;\\@]/.test(text) || text.includes('/*')) return false;
+  if (!text || text.length > STYLE_TEXT_MAX || /[;\\@]/.test(text) || text.includes('/*')) return false;
   if (prop === 'font-family') text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
   if (/['"]/.test(text)) return false;
   const flat = flatCss(text);
   if (flat.includes('url(') || flat.includes('expression')) return false;
-  const rest = text.replace(/([-a-z0-9]*)\(([^()]*)\)/gi, (_call, name: string, args: string) => {
+  const rest = replaceStyleCalls(text, (name: string, args: string) => {
     const fn = name.toLowerCase();
     if (STYLE_FUNCTIONS.has(fn) && STYLE_ARGS.test(args)) return ' ';
-    if (fn === 'calc' && CALC_ARGS.test(args)) return ' ';
+    if (fn === 'calc' && calcArgsSafe(args)) return ' ';
     return '(';
   });
   return !/[()]/.test(rest);
