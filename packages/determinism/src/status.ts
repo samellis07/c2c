@@ -377,9 +377,11 @@ export function resolveSitesPath(path: string, root: string = repoRoot()): strin
   }
   const parent = dirname(abs);
   const realParent = tryRealpath(parent);
-  if (!realParent || !statSync(realParent)?.isDirectory()) {
+  const parentDir = realParent ? openDirectoryNoFollow(realParent) : undefined;
+  if (!realParent || !parentDir) {
     throw new Error(`determinism:status: --sites parent must exist as a directory: ${parent}`);
   }
+  closeSync(parentDir.fd);
   const destination = join(realParent, basename(abs));
   const existing = lstatSync(destination, { throwIfNoEntry: false });
   if (existing && (!existing.isFile() || existing.nlink !== 1)) {
@@ -407,10 +409,13 @@ function singleSegment(name: string): boolean {
 }
 
 /**
- * Open `dir` by walking each ancestor with O_DIRECTORY|O_NOFOLLOW.
- * A symlink component fails the walk. The caller owns the returned fd.
+ * Open `dir` one component at a time with O_RDONLY|O_DIRECTORY|O_NOFOLLOW.
+ * A missing entry, a symlink, or a non-directory (ELOOP, ENOTDIR, ENOENT)
+ * refuses the walk. Identity is the fstat of the descriptor just opened.
+ * The caller owns the returned fd.
  */
 function openDirectoryNoFollow(dir: string): { fd: number; dev: string; ino: string } | undefined {
+  const componentFlags = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
   const rootPath = parse(dir).root;
   let fd: number | undefined;
   try {
@@ -419,13 +424,23 @@ function openDirectoryNoFollow(dir: string): { fd: number; dev: string; ino: str
     for (const part of dir.slice(rootPath.length).split(sep).filter(Boolean)) {
       if (part === '.' || part === '..') return undefined;
       const next = join(acc, part);
-      const listed = lstatSync(next, { bigint: true, throwIfNoEntry: false });
-      if (!listed || listed.isSymbolicLink() || !listed.isDirectory()) return undefined;
-      const nextFd = openSync(next, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-      const pinned = fstatSync(nextFd, { bigint: true });
-      if (pinned.dev !== listed.dev || pinned.ino !== listed.ino || !pinned.isDirectory()) {
+      let nextFd: number;
+      try {
+        nextFd = openSync(next, componentFlags);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ELOOP' || code === 'ENOTDIR' || code === 'ENOENT') return undefined;
+        throw err;
+      }
+      try {
+        const pinned = fstatSync(nextFd, { bigint: true });
+        if (!pinned.isDirectory()) {
+          closeSync(nextFd);
+          return undefined;
+        }
+      } catch (err) {
         closeSync(nextFd);
-        return undefined;
+        throw err;
       }
       closeSync(fd);
       fd = nextFd;
@@ -448,17 +463,23 @@ function openSitesAnchor(absPath: string, root: string = repoRoot()): SitesAncho
   const parent = dirname(absPath);
   const realParent = tryRealpath(parent);
   const base = basename(absPath);
-  if (!realParent || !statSync(realParent, { throwIfNoEntry: false })?.isDirectory() || !singleSegment(base)) {
+  if (!realParent || !singleSegment(base)) {
     throw new Error(`determinism:status: --sites parent must exist as a directory: ${parent}`);
   }
-  const problem = sitesLocationProblem(join(realParent, base), root);
-  if (problem) {
-    throw new Error(
-      `determinism:status: --sites path must be outside the repo tree: ${absPath} (resolves inside ${problem})`,
-    );
-  }
+  // Open first. A stat of this path before the open is the race the walk refuses.
   const opened = openDirectoryNoFollow(realParent);
   if (!opened) throw new Error(`determinism:status: --sites parent must exist as a directory: ${parent}`);
+  try {
+    const problem = sitesLocationProblem(join(realParent, base), root);
+    if (problem) {
+      throw new Error(
+        `determinism:status: --sites path must be outside the repo tree: ${absPath} (resolves inside ${problem})`,
+      );
+    }
+  } catch (error) {
+    closeSync(opened.fd);
+    throw error;
+  }
   return { requested: absPath, realParent, base, fd: opened.fd, dev: opened.dev, ino: opened.ino };
 }
 
@@ -529,13 +550,24 @@ const SITES_ANCHOR_CHILD = [
   "  fail('parent');",
   '}',
   "if (!sameDirectory()) fail('parent');",
-  'let existing;',
+  'let existingFd;',
   'try {',
-  '  existing = fs.lstatSync(base, { throwIfNoEntry: false });',
+  '  existingFd = fs.openSync(base, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);',
   '} catch (err) {',
-  "  fail('parent');",
+  "  if (!err || (err.code !== 'ENOENT' && err.code !== 'ELOOP')) fail('parent');",
+  '  existingFd = undefined;',
   '}',
-  "if (existing && !existing.isSymbolicLink() && (!existing.isFile() || existing.nlink !== 1)) fail('target');",
+  'if (existingFd !== undefined) {',
+  '  let st;',
+  '  try {',
+  '    st = fs.fstatSync(existingFd);',
+  '  } catch (err) {',
+  "    fail('parent');",
+  '  } finally {',
+  '    try { fs.closeSync(existingFd); } catch (closeErr) {}',
+  '  }',
+  "  if (!st || !st.isFile() || st.nlink !== 1) fail('target');",
+  '}',
   'try {',
   '  fs.renameSync(temp, base);',
   '} catch (err) {',
