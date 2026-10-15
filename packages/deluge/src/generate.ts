@@ -5008,7 +5008,7 @@ function translationWarning(t: Translation): GenerateWarning {
 function paymentStub(w: Workflow): string {
   return `${banner([
     `Payments workflow ${w.name}`,
-    'Not supported: payment workflows are out of scope for the migration.',
+    'payments are not supported in this version (counted)',
     'No gateway, sandbox charge, or payment SDK call is generated.',
   ])}export const support = "not-supported";
 export const reason = "Payments stay Not supported. No gateway is called.";

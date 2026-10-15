@@ -37,7 +37,7 @@ Load `catalyst-authentication` (Connections section) and `catalyst-functions` (A
 
 - A connection the plan references but the `.ds` does not define (precheck rule 18) blocks the workflows that use it: fix in Creator or remove the call.
 - Integrations to Zoho apps in another DC than Catalyst: allowed, but say data crosses regions.
-- Cliq integration-function bots: Integration Functions are not available in every data centre [DOC]: out of scope.
+- Cliq integration-function bots: Integration Functions are not available in every data centre [DOC]: not supported in this version (counted).
 - Never call Creator from a generated Catalyst function in the request path.
 - **Rule — default settings only (C2C.md rule 13).** No browser automation and no permission-rule changes: connection consent and console steps are guided asks the user performs (exact clicks, then "done?"), verified by the named read-back.
 

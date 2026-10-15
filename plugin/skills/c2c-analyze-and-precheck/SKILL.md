@@ -48,7 +48,7 @@ Creator lets latent faults into an app and its runtime tolerates them, but whole
 | precheck rule 14 / precheck rule 15 / precheck rule 16 | Deluge syntax re-generation rejects; `.ds` grammar; characters that break XML | `Improper Statement`; an import that fails on the `.ds` grammar; `SAXParseException` |
 | precheck rule 17 / precheck rule 18 | Cross-app / unshared dependencies; connection references that do not exist | `function you're trying to use is from an unshared application`; `connection X does not exist` |
 | precheck rule 19 / precheck rule 20 | Metadata limits; structural corruption | `You can add only up to four display fields …`; `This application has workflow version mismatches.` |
-| precheck rule 21 | Deprecated C4 payment components | An import that fails on payment components (payments are out of scope) |
+| precheck rule 21 | Deprecated C4 payment components | An import that fails on payment components (payments are not supported in this version (counted)) |
 | precheck rule 22 | Approver field set after approval association (WARN) | `Invalid user name found for Approver field` |
 | precheck rule 23 / precheck rule 24 | Same-app REST/invokeurl inside workflows (lock waits); self-triggering workflows (WARN) | `Lock wait timeout exceeded` |
 | precheck rule 25 / precheck rule 26 / precheck rule 27 | Quota-consuming patterns; statement-limit hotspots (5,000 per execution); null-guard lint (WARN) | `Number of statement execution limit exceed` |
