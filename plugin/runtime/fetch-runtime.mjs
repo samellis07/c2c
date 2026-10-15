@@ -21,7 +21,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { closeSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,8 +29,7 @@ import { gunzipSync } from 'node:zlib';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ENV_EXIT = 6;
-// An install holder that is dead or this old can only have crashed; a live
-// install takes seconds, never minutes.
+// Unreadable lock files can be left by a crash between O_EXCL and write.
 const LOCK_STALE_MS = 10 * 60 * 1000;
 const LOCK_POLL_MS = 120;
 
@@ -145,6 +144,15 @@ function manifestPresent(installed) {
   return lstatSync(path.join(installed, 'c2c', 'MANIFEST.sha256'), { throwIfNoEntry: false })?.isFile();
 }
 
+function assertTrustedDirectory(dir, label) {
+  const stat = lstatSync(dir, { throwIfNoEntry: false });
+  if (!stat) return;
+  const uid = typeof process.getuid === 'function' ? process.getuid() : stat.uid;
+  if (stat.isSymbolicLink() || !stat.isDirectory() || stat.uid !== uid || (stat.mode & 0o022) !== 0) {
+    throw new RuntimeError(`c2c: ${label} ${dir} must be a real directory owned by the current user and not writable by group or others. Set C2C_RUNTIME_DIR to a private directory.`);
+  }
+}
+
 /** Read the lock holder; {} when the file is gone or not yet fully written. */
 function lockHolder(lockPath) {
   try {
@@ -165,58 +173,78 @@ function pidAlive(pid) {
 }
 
 /**
- * Exclusive install lock: an O_EXCL lock file beside the runtime. Only the
- * holder fetches and unpacks; everyone else waits and then uses the finished
- * install. A lock left by a crashed run (dead pid, or older than
- * LOCK_STALE_MS) is reclaimed by the next caller.
+ * Exclusive install lock: O_EXCL creates the lock. Stale locks are atomically
+ * renamed out of the way so only one waiter can reclaim a given lock file.
  */
 async function acquireInstallLock(lockPath, isReady) {
+  const token = randomBytes(16).toString('hex');
   for (;;) {
     mkdirSync(path.dirname(lockPath), { recursive: true });
     let fd;
     try {
-      fd = openSync(lockPath, 'wx');
+      fd = openSync(lockPath, 'wx', 0o600);
     } catch (error) {
       if (error.code !== 'EEXIST') {
         throw new RuntimeError(`c2c: could not create the runtime install lock ${lockPath} (${error.message}). Set C2C_RUNTIME_DIR to a writable directory.`);
       }
-      if (isReady()) return false;
+      if (isReady()) return undefined;
       const stat = lstatSync(lockPath, { throwIfNoEntry: false });
-      if (!stat) continue; // the holder finished and released
+      if (!stat) continue;
       const holder = lockHolder(lockPath);
       const age = Date.now() - stat.mtimeMs;
-      // Stale only when positively identified: a readable dead pid, or any
-      // holder (even one still being written) older than LOCK_STALE_MS.
-      const stale = holder.pid ? !pidAlive(holder.pid) || age > LOCK_STALE_MS : age > LOCK_STALE_MS;
+      // A live process is never timed out, regardless of how long it has run.
+      const stale = holder.pid ? !pidAlive(holder.pid) : age > LOCK_STALE_MS;
       if (stale) {
-        // Reclaim only the stale file we inspected, not a fresh lock.
+        const reclaimed = `${lockPath}.stale-${process.pid}-${randomBytes(8).toString('hex')}`;
         try {
-          if (JSON.stringify(lockHolder(lockPath)) === JSON.stringify(holder)) rmSync(lockPath, { force: true });
-        } catch { /* raced; retry */ }
+          renameSync(lockPath, reclaimed);
+          rmSync(reclaimed, { force: true });
+        } catch { /* another waiter reclaimed it; retry */ }
         continue;
       }
       await sleep(LOCK_POLL_MS);
       continue;
     }
     try {
-      writeFileSync(fd, JSON.stringify({ pid: process.pid, time: Date.now() }));
+      writeFileSync(fd, JSON.stringify({ pid: process.pid, time: Date.now(), token }));
     } finally {
       closeSync(fd);
     }
-    return true;
+    return token;
   }
+}
+
+function releaseInstallLock(lockPath, token) {
+  if (!token) return;
+  try {
+    const holder = lockHolder(lockPath);
+    if (holder.token === token) rmSync(lockPath, { force: true });
+  } catch { /* best effort; never release another holder's lock */ }
 }
 
 export async function ensureRuntime(env = process.env) {
   const lock = readLock();
   const root = cacheRoot(env);
+  try {
+    mkdirSync(root, { recursive: true, mode: 0o700 });
+    assertTrustedDirectory(root, 'runtime directory');
+  } catch (error) {
+    if (error instanceof RuntimeError) throw error;
+    throw new RuntimeError(`c2c: could not prepare runtime directory ${root} (${error instanceof Error ? error.message : error}). Set C2C_RUNTIME_DIR to a writable private directory.`);
+  }
   const installed = path.join(root, lock.sha256);
   const runtime = path.join(installed, 'c2c');
-  if (manifestPresent(installed)) return runtime;
+  try {
+    assertTrustedDirectory(installed, 'runtime cache entry');
+    if (manifestPresent(installed)) return runtime;
+  } catch (error) {
+    if (error instanceof RuntimeError) throw error;
+    throw new RuntimeError(`c2c: could not inspect runtime cache entry ${installed} (${error instanceof Error ? error.message : error}).`);
+  }
 
   const lockPath = `${installed}.lock`;
-  const held = await acquireInstallLock(lockPath, () => manifestPresent(installed));
-  if (!held) return runtime; // a concurrent run finished the install
+  const token = await acquireInstallLock(lockPath, () => manifestPresent(installed));
+  if (!token) return runtime; // a concurrent run finished the install
   const staging = `${installed}.partial-${process.pid}-${randomBytes(4).toString('hex')}`;
   try {
     if (manifestPresent(installed)) return runtime;
@@ -237,9 +265,10 @@ export async function ensureRuntime(env = process.env) {
       unpack(tar, staging);
       if (manifestPresent(installed)) return runtime; // never delete a complete install
       if (lstatSync(installed, { throwIfNoEntry: false })) {
+        assertTrustedDirectory(installed, 'runtime cache entry');
         // A directory left by an interrupted older run has no manifest; move it
         // aside first so a reader never sees a half-deleted tree.
-        const stale = `${installed}.stale-${process.pid}`;
+        const stale = `${installed}.stale-${process.pid}-${randomBytes(8).toString('hex')}`;
         renameSync(installed, stale);
         rmSync(stale, { recursive: true, force: true });
       }
@@ -251,11 +280,11 @@ export async function ensureRuntime(env = process.env) {
     return runtime;
   } finally {
     rmSync(staging, { recursive: true, force: true });
-    rmSync(lockPath, { force: true });
+    releaseInstallLock(lockPath, token);
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(path.resolve(process.argv[1]))) {
   ensureRuntime().then(
     (dir) => process.stdout.write(`${dir}\n`),
     (error) => {

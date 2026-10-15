@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -190,6 +190,25 @@ test('offline first run exits 6 with one line naming the asset and C2C_RUNTIME_A
   assert.equal(existsSync(path.join(temp, 'offline-cache', lock.sha256)), false);
 });
 
+test('a runtime cache in a group-writable directory is refused before using a planted runtime', () => {
+  const cache = path.join(temp, 'unsafe-cache');
+  const installed = path.join(cache, lock.sha256);
+  mkdirSync(path.join(installed, 'c2c'), { recursive: true, mode: 0o700 });
+  writeFileSync(path.join(installed, 'c2c/MANIFEST.sha256'), 'planted\n');
+  chmodSync(cache, 0o777);
+  try {
+    const res = spawnSync(node, [path.join(clone, 'plugin/runtime/fetch-runtime.mjs')], {
+      env: cleanEnv({ C2C_RUNTIME_DIR: cache, C2C_RUNTIME_ARCHIVE: archiveFile }),
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 6, `stdout=${res.stdout}\nstderr=${res.stderr}`);
+    assert.match(res.stderr, /runtime directory .* must be a real directory owned by the current user/);
+    assert.equal(res.stdout, '');
+  } finally {
+    chmodSync(cache, 0o700);
+  }
+});
+
 test('a tampered runtime archive fails its checksum and is not unpacked', () => {
   const tampered = path.join(temp, 'tampered.tgz');
   const bytes = readFileSync(archiveFile);
@@ -246,6 +265,32 @@ test('a lock left by a dead process is reclaimed and the install proceeds', () =
   assert.equal(res.status, 0, res.stderr);
   assert.equal(res.stdout.trim(), path.join(lockDir, 'c2c'));
   assert.equal(existsSync(path.join(lockDir, 'c2c/MANIFEST.sha256')), true);
+});
+
+test('two waiters reclaim one dead lock and share exactly one completed install', async () => {
+  const cache = path.join(temp, 'stale-lock-race');
+  const installed = path.join(cache, lock.sha256);
+  mkdirSync(cache, { recursive: true });
+  const dead = spawnSync(node, ['-e', '']);
+  assert.equal(dead.status, 0);
+  writeFileSync(`${installed}.lock`, JSON.stringify({ pid: dead.pid ?? 0, time: Date.now() }));
+  const fetcher = path.join(clone, 'plugin/runtime/fetch-runtime.mjs');
+  const run = () => new Promise((resolve) => {
+    const child = spawn(node, [fetcher], { env: cleanEnv({ C2C_RUNTIME_DIR: cache, C2C_RUNTIME_ARCHIVE: archiveFile }) });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => (stdout += chunk));
+    child.stderr.on('data', (chunk) => (stderr += chunk));
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+  const results = await Promise.all([run(), run()]);
+  const runtime = path.join(installed, 'c2c');
+  for (const res of results) {
+    assert.equal(res.status, 0, `exit ${res.status}\nstderr=${res.stderr}`);
+    assert.equal(res.stdout.trim(), runtime);
+  }
+  assert.equal(existsSync(path.join(runtime, 'MANIFEST.sha256')), true);
+  assert.deepEqual(readdirSync(cache), [lock.sha256]);
 });
 
 test('an unpublished runtime asset (HTTP 404) names the release page and the source build', async () => {
