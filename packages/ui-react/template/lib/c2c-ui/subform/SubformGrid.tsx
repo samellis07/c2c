@@ -134,12 +134,24 @@ export function SubformGrid({ field, error, value }: FieldProps) {
     row?.querySelector<HTMLElement>('input:not([type="hidden"]), select:not([hidden]), textarea, button')?.focus();
   }, [rows]);
 
+  // `on add row` fires after the new row is in the grid, like the vanilla
+  // runtime whose document listener sees the final row set: the record read
+  // the handler makes must already hold the added row for `row` to bind.
+  const pendingAdds = useRef<number[]>([]);
+  useEffect(() => {
+    if (!pendingAdds.current.length) return;
+    const indexes = pendingAdds.current;
+    pendingAdds.current = [];
+    for (const index of indexes) state?.rowEvent?.(field.name, 'addrow', index);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires once per committed add.
+  }, [rows]);
+
   const add = () => {
     const index = rows.length;
     focusRow.current = next;
+    pendingAdds.current.push(index);
     setRows((list) => [...list, next]);
     setNext(next + 1);
-    state?.rowEvent?.(field.name, 'addrow', index);
   };
   const remove = (key: number, index: number) => {
     setRows((list) => list.filter((k) => k !== key));
