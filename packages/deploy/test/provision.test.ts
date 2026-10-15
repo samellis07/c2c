@@ -1414,6 +1414,7 @@ test('--record project: the project listing is reduced to the target entry and n
         {
           id: PROJECT,
           project_name: 'c2c-widget',
+          note: `${'x!'.repeat(100)}secret=CANARY_PROV_A`,
           jwtSecret: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.b3RoZXI',
           clientId: 'cid-target-canary',
           clientSecret: 'css-target-canary',
@@ -1428,6 +1429,7 @@ test('--record project: the project listing is reduced to the target entry and n
     data: { data: Record<string, unknown>[] };
   };
   assert.deepEqual(stored.data.data, [{ id: PROJECT, project_name: 'c2c-widget' }]);
+  assert.ok(!JSON.stringify(stored).includes('CANARY_PROV_A'), 'long secret-keyed strings are dropped before the project result is stored');
   assert.equal(readState(out).learned.projectId, PROJECT);
   // No secret field name, secret value or other-project identity exists in any written file.
   const blob = readdirSync(out, { recursive: true })
@@ -1453,6 +1455,21 @@ test('--record project: the project listing is reduced to the target entry and n
   ]) {
     assert.ok(!blob.includes(canary), `written files carry ${canary}`);
   }
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('--record does not learn long secret-keyed names from a read-back', async () => {
+  const out = writeMiniPlan();
+  const c = cap();
+  const canary = `${'x!'.repeat(100)}secret=CANARY_PROV_B`;
+  const raw = writeResult(out, 'bucket', mcpRows([
+    { bucket_name: 'c2c-widget-deadbeef' },
+    { name: canary, id: '123456' },
+  ]));
+  assert.equal(await provisionCli(['--out', out, '--record', 'bucket', '--result', raw, ...SCOPE], c.io), 0, c.err());
+  const state = readFileSync(join(out, 'provision', 'state.json'), 'utf8');
+  assert.ok(!state.includes('CANARY_PROV_B'), 'secret-keyed names are not persisted in learned.byName');
+  assert.equal(readState(out).learned.byName[canary], undefined);
   rmSync(out, { recursive: true, force: true });
 });
 
