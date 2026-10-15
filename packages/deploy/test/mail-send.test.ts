@@ -1072,3 +1072,124 @@ test('a scheduled job passes the Catalyst job context into patched mail', async 
     rmSync(out, { recursive: true, force: true });
   }
 });
+
+function invoke(handler: (req: unknown, res: unknown) => unknown, req: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
+  let status = 0;
+  let raw = '';
+  const res = {
+    writeHead(code: number) {
+      status = code;
+    },
+    end(body: string) {
+      raw = body;
+    },
+  };
+  return Promise.resolve(handler(req, res)).then(() => ({ status, body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {} }));
+}
+
+/** The live mailer with an Administrator share so a signed-in submit is writable. */
+const SUBMIT_MAIL_DS = MAILER_DS_LIVE.replace(
+  '\treports\n',
+  `\tshare_settings
+\t{
+\t\t"Administrator"
+\t\t{
+\t\t\tname = "Administrator"
+\t\t\ttype = Users_Permissions
+\t\t\tdescription = "This profile will have all the permissions."
+\t\t}
+\t}
+\treports
+`,
+);
+
+test('a live submit whose on-success sendmail is refused still answers 2xx; a real write failure still errors', async () => {
+  const bundle = buildDeploy(appOf(SUBMIT_MAIL_DS), guardFor('Mailer', '1001'), true, true, undefined, undefined, { from: OWNER, verified: true }, undefined, [OWNER]);
+  const submit = bundle.files.find((file) => file.path.endsWith('/on-success.mjs') && String(file.data).includes('shim.mail.send('));
+  assert.ok(submit, 'the mailer submit handler');
+  assert.match(String(submit.data), /mailGuarded: true/);
+  const out = mkdtempSync(join(tmpdir(), 'c2c-submit-mail-'));
+  writeDeployTree(out, bundle.files);
+  // No zohoConnections.orgInternal is configured: before mailGuarded, the
+  // org-internal guard threw ZohoConnectionRefused out of the on-success
+  // script AFTER the row committed and the submit answered 500 wrote:true.
+  // The allowlist excludes the script's recipient, so c2cGuardedMail refuses.
+  writeFileSync(join(out, 'functions/c2c_api/c2c-mail.json'), JSON.stringify({ ...VERIFIED, allowlist: ['allowed-only@example.com'] }));
+  const calls: FakeCall = { req: null, sendMail: [], rows: [] };
+  const mail = (await import(pathToFileURL(join(out, 'functions/c2c_api/c2c-mail.mjs')).href)) as {
+    setMailSdk: (factory: (req: unknown) => unknown) => void;
+  };
+  mail.setMailSdk((req: unknown) => {
+    calls.req = req;
+    return {
+      email: () => ({
+        sendMail: async (cfg: Record<string, unknown>) => {
+          calls.sendMail.push(cfg);
+          return { from_email: cfg.from_email };
+        },
+      }),
+      datastore: () => ({
+        table: (table: string) => ({
+          insertRow: async (row: Record<string, unknown>) => {
+            calls.rows.push({ table, row });
+            return { ROWID: '1', ...row };
+          },
+        }),
+      }),
+    };
+  });
+  const inserts: Record<string, unknown>[] = [];
+  const previousMode = process.env.C2C_DEPLOY_MODE;
+  const previousZone = process.env.C2C_APP_TIMEZONE;
+  const previousStore = (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+  try {
+    process.env.C2C_DEPLOY_MODE = 'live';
+    process.env.C2C_APP_TIMEZONE = 'Asia/Kolkata';
+    (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = {
+      async insert(_form: string, rows: Record<string, unknown>[]) {
+        inserts.push(...rows);
+        return { data: rows.map((row, i) => ({ ROWID: String(42001 + i), ...row })) };
+      },
+      async query() {
+        return [];
+      },
+    };
+    const handler = (
+      (await import(pathToFileURL(join(out, submit.path)).href)) as { default: (req: unknown, res: unknown) => unknown }
+    ).default;
+    const req = { user: { profile: 'Administrator', loginUser: OWNER }, body: { record: { Title: 'member' } } };
+    const refused = await invoke(handler, req);
+    assert.equal(refused.status, 200, JSON.stringify(refused.body));
+    assert.equal(refused.body.wrote, true);
+    assert.equal(inserts.length, 1);
+    // Nothing was sent, and the refusal is not a silent drop: it is counted
+    // as a row in the app's mail log the user can read back.
+    assert.deepEqual(calls.sendMail, []);
+    assert.equal(calls.rows.length, 1);
+    assert.equal(calls.rows[0]?.table, MAIL_LOG_TABLE);
+    assert.equal(calls.rows[0]?.row.status, 'refused');
+    assert.match(String(calls.rows[0]?.row.reason), /allowlist/);
+
+    // A real store failure on the row write still reports an error.
+    (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = {
+      async insert() {
+        throw new Error('datastore is down');
+      },
+      async query() {
+        return [];
+      },
+    };
+    const failed = await invoke(handler, req);
+    assert.equal(failed.status, 500, JSON.stringify(failed.body));
+    assert.equal(failed.body.wrote === true, false);
+    assert.ok(failed.body.error);
+  } finally {
+    if (previousMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+    else process.env.C2C_DEPLOY_MODE = previousMode;
+    if (previousZone === undefined) delete process.env.C2C_APP_TIMEZONE;
+    else process.env.C2C_APP_TIMEZONE = previousZone;
+    if (previousStore === undefined) delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+    else (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = previousStore;
+    rmSync(out, { recursive: true, force: true });
+  }
+});
