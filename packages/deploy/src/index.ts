@@ -113,6 +113,8 @@ export type { ColumnChange, FileChange, ModelPlan, PlanDelta, StoreDriver, Table
 export { editCli, opFromArgs } from './edit-cli.js';
 export { applyDelta, computeDelta, deletionRefusals, deltaTotals, formatDeltaPlan, MAX_DELETE_PERCENT, parseDeltaCheckpoint, rowFingerprint, tableChecksum, withDeletionsApplied } from './row-delta.js';
 export type { DeltaApplyResult, DeltaCheckpoint, DeltaPlan, DeltaTable, DeletionRefusal } from './row-delta.js';
+export { dataParity, formatParity, storeRowsFromDir, verifyCli } from './parity.js';
+export type { DataParityReport, ParityTableReport } from './parity.js';
 export { DELTA_SOURCES, deltaSource, readDeltaCheckpoint, readStateFile, rollbackExportCli, stateFilePath, syncDeltaCli } from './delta-cli.js';
 export { parseStoreRows, readStoreRows, rollbackExport } from './rollback.js';
 export type { RollbackExport, RollbackFile } from './rollback.js';

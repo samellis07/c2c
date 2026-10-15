@@ -135,6 +135,20 @@ export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
       '--seed': 'value',
     },
   },
+  verify: {
+    positional: 'none',
+    flags: {
+      '--allow-empty': 'bool',
+      '--data-parity': 'bool',
+      '--ds': 'value',
+      '--json': 'bool',
+      '--out': 'value',
+      '--rows': 'value',
+      '--source-backup': 'value',
+      '--source-csv': 'value',
+      '--source-json': 'value',
+    },
+  },
   status: {
     positional: 'none',
     flags: {

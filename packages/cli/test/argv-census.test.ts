@@ -28,6 +28,7 @@ const ROOTS: Record<string, string[]> = {
   seed: ['seedArgsProblem'],
   doctor: ['doctorCli'],
   status: ['statusCli'],
+  verify: ['verifyCli'],
 };
 
 const READ = /(?:\b(?:flag|valueOf)\(\s*(?:[\w.]+,\s*)?|\b(?:args|rest|restAll)\.(?:includes|indexOf)\(|\b(?:args|rest)\[\w+(?: \+ 1)?\] [!=]== )'(--[a-z][a-z0-9-]*)'/g;

@@ -214,6 +214,8 @@ export interface CsvGap {
 export interface CsvColumnNote {
   file: string;
   table: string;
+  /** Raw input record count, before materialization merges repeated IDs. */
+  rawCount?: number;
   mapped: { header: string; column: string }[];
   unmapped: { header: string; reason: string }[];
 }
@@ -499,7 +501,7 @@ function loadSource(dir: string, app: App, allowEmpty: boolean, format: 'csv' | 
     foreignKeys,
     skipped,
     relaxed,
-    columns: built.flatMap((item) => item.notes),
+    columns: built.flatMap((item) => item.notes.map((note) => ({ ...note, rawCount: grouped.get(item.table.table)?.filter((sheet) => sheet.file === note.file).reduce((sum, sheet) => sum + sheet.rows.length, 0) ?? 0 }))),
     missingRequired: built.flatMap((item) => item.missingRequired),
     missingMandatory: mandatoryMissingRefusals(ordered, loaderColumns(checked, ordered, foreignKeys)),
     absentFields,
@@ -1178,7 +1180,7 @@ function materialize(
     table: { table: spec.table, rows: [...rows.values()] },
     pending,
     raw,
-    notes: plans.map((plan) => ({ file: plan.sheet.file, table: spec.table, mapped: plan.mapped, unmapped: plan.unmapped })),
+    notes: plans.map((plan) => ({ file: plan.sheet.file, table: spec.table, rawCount: plan.sheet.rows.length, mapped: plan.mapped, unmapped: plan.unmapped })),
     missingRequired: gaps.missingRequired,
     absentFields: gaps.absentFields,
     derived,
