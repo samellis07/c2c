@@ -9,7 +9,7 @@ App: Freight Forwarding and Feeder Solution
 - Form Email — not supported in this version (counted)
 - C8 dialect — not supported in this version (counted)
 - Cliq bots — not supported in this version (counted)
-- Native mobile / MDM — not supported in this version (counted)
+- Native mobile / MDM — not supported in this version (counted; on the roadmap)
 - Marketplace publishing — not applicable (out of scope)
 - Zia AI builder — not applicable (out of scope)
 - On-prem Data Bridge — not applicable (out of scope)
