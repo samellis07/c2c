@@ -521,6 +521,12 @@ export function rangeSlotRequest(body: unknown): { slot?: string; from: number; 
 }
 
 export interface Shim {
+  /**
+   * Multi-event form handlers wrap each event body in this call so the host
+   * can trace or gate per event; generated code installs a pass-through when
+   * the runtime does not provide one.
+   */
+  __c2cScript?(index: number, run: () => Promise<unknown>): Promise<unknown>;
   todo(ctx: ShimContext, construct: string, detail?: unknown): Promise<unknown>;
   /**
    * Every generated `obj[key]` index read goes through this accessor: own

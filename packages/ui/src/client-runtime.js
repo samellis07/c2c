@@ -1590,7 +1590,7 @@ export function renderRoute(appModel, route, doc) {
   }
   if (route.name === 'report') {
     const report = (appModel.reports || []).find((item) => item.name === route.id);
-    if (report && route.row && report.form) {
+    if (report && route.row && report.form && !((report.detailBlocks || []).length || report.printTemplate)) {
       const form = (appModel.forms || []).find((item) => item.name === report.form);
       return form ? `${renderReport(report)}<section class="record-summary" data-record-summary="${escapeHtml(form.name)}" data-record-report="${escapeHtml(report.name)}" data-record-id="${escapeHtml(route.row)}"><p>Loading record…</p></section>` : `<p class="todo">Unknown report form.</p>`;
     }
@@ -4259,9 +4259,9 @@ export function boot(appModel, doc) {
       if (typeof value.label === 'string') return value.label;
       if (field && field.widget === 'subform') {
         const names = new Set((field.subfields || []).map((sub) => sub.name));
-        return Object.entries(value).filter(([name]) => names.has(name)).map(([, item]) => summaryValue(item)).filter(Boolean).join(', ');
+        return Object.entries(value).filter(([name]) => names.has(name)).map(([, item]) => summaryValue(item)).filter(Boolean).sort().join(', ');
       }
-      return Object.values(value).map((item) => summaryValue(item)).filter(Boolean).join(', ');
+      return Object.values(value).map((item) => summaryValue(item)).filter(Boolean).sort().join(', ');
     }
     return String(value);
   }
