@@ -157,6 +157,7 @@ canvas{border:1px solid var(--c2c-border);touch-action:none}
 svg.chart{display:block;width:100%;max-width:40rem;height:auto}
 .chart-tick{font-size:var(--c2c-font-size-2xs);fill:var(--c2c-muted)}
 .chart-empty{color:var(--c2c-muted);text-align:center;padding:var(--c2c-space-6) var(--c2c-space-4);margin:0}
+.chart-note{color:var(--c2c-muted);font-size:var(--c2c-font-size-2xs);margin:var(--c2c-space-2) 0 0}
 /* A phone card field the list does not show. */
 [data-report] td[data-phone-only]{display:none}
 [data-board] [data-phone-fields]{display:none}

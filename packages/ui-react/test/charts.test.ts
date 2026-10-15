@@ -10,7 +10,7 @@ import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { generateUi } from '../../ui/src/index.js';
 import { compileCriteria, decodeEntities } from '../src/charts.js';
 import { TEMPLATE_DIR, generateReactApp, reactAppSpec, writeReactApp } from '../src/index.js';
-import { chartSeries, dayOf, matches, metricValue, textOf, todayIn, valueAt, type Day } from '../template/lib/c2c-ui/charts/data.js';
+import { bucketsToSeries, chartSeries, dayOf, matches, metricValue, textOf, todayIn, valueAt, type Day } from '../template/lib/c2c-ui/charts/data.js';
 import type { ChartSpec, MetricSpec, PageElement } from '../template/lib/c2c-ui/types.js';
 
 /** ZML inside a page `Content="..."` literal: attribute quotes are single quotes, criteria quotes are entities. */
@@ -151,6 +151,45 @@ test('metrics and chart series fold the filtered rows', () => {
   assert.equal(byDay.dated, true);
   assert.deepEqual(byDay.categories.map((c) => c.key), ['2026-10-09', '2026-10-10']);
   assert.deepEqual(byDay.values, [[1, 2]]);
+});
+
+test('bucketsToSeries maps values by the measures the server kept, not position', () => {
+  const chart: ChartSpec = {
+    kind: 'bar',
+    title: 'T',
+    x: 'Status',
+    xLabel: 'Status',
+    measures: [
+      { fn: 'sum', field: 'Amount', label: 'Sum' },
+      { fn: 'sum', field: 'Secret', label: 'Secret' },
+      { fn: 'count', field: 'Status', label: 'Count' },
+    ],
+    filter: [],
+    notes: [],
+    todos: [],
+  };
+  // The server dropped the hidden Secret measure and says so in `measures`.
+  const series = bucketsToSeries(
+    {
+      buckets: [
+        { key: 'Open', values: [10, 3] },
+        { key: 'Shut', values: [4, 1] },
+      ],
+      measures: [
+        { fn: 'sum', field: 'Amount' },
+        { fn: 'count', field: 'Status' },
+      ],
+    },
+    chart,
+  );
+  assert.deepEqual(series.values, [[10, 4], [0, 0], [3, 1]], 'a dropped measure leaves zeros, never another measure’s values');
+  // Every measure dropped: the server's substitute count matches no requested
+  // measure, so nothing is drawn under a wrong label.
+  const allDropped = bucketsToSeries({ buckets: [{ key: 'Open', values: [5] }], measures: [{ fn: 'count', field: '' }] }, chart);
+  assert.deepEqual(allDropped.values, [[0], [0], [0]]);
+  // An endpoint that does not echo `measures` keeps the positional mapping.
+  const positional = bucketsToSeries({ buckets: [{ key: 'Open', values: [7, 8, 9] }] }, chart);
+  assert.deepEqual(positional.values, [[7], [8], [9]]);
 });
 
 test('a Creator page becomes a page spec: metric panels, charts, embeds, buttons, and every TODO listed', () => {

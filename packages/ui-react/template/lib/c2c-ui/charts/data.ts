@@ -3,7 +3,7 @@
  * the generator translated (see ChartSpec, MetricSpec) and folds them into
  * categories and values. Pure functions; the clock is a parameter.
  */
-import type { ChartSpec, FilterClause, MetricSpec } from '../types.js';
+import type { ChartSpec, FilterClause, MeasureSpec, MetricSpec } from '../types.js';
 
 export type Row = Record<string, unknown>;
 export interface Day {
@@ -182,6 +182,37 @@ export function chartSeries(rows: Row[], chart: ChartSpec, today: Day): Series {
     categories: keys.map((key) => ({ key: key || '(blank)', label: key || '(blank)' })),
     values: chart.measures.map((m) => keys.map((key) => (m === chart.measures[0] ? totals.get(key)! : fold(groups.get(key)!, m.fn, m.field)))),
     dated,
+  };
+}
+
+/** The `op: "aggregate"` reply body of a report endpoint. */
+export interface AggregateBody {
+  buckets?: { key: string; values: number[] }[];
+  /** The measures the server kept: one it cannot read is dropped. */
+  measures?: { fn: string; field: string }[];
+  dated?: boolean;
+  truncated?: boolean;
+  scanned?: number;
+}
+
+/**
+ * Server buckets → the Series the chart components draw. Values are matched
+ * to `body.measures` (the measures the server kept) by (fn, field), never by
+ * request position: a dropped measure leaves a zero series under its own
+ * label instead of shifting a later measure's values under it.
+ */
+export function bucketsToSeries(body: AggregateBody, chart: ChartSpec): Series {
+  const buckets = Array.isArray(body.buckets) ? body.buckets : [];
+  const kept = Array.isArray(body.measures) ? body.measures : null;
+  const slot = (measure: MeasureSpec, position: number): number =>
+    kept ? kept.findIndex((m) => m && m.fn === measure.fn && m.field === measure.field) : position;
+  return {
+    categories: buckets.map((b) => ({ key: b.key, label: b.key || '(blank)' })),
+    values: chart.measures.map((measure, position) => {
+      const index = slot(measure, position);
+      return buckets.map((b) => (index >= 0 && Array.isArray(b.values) ? Number(b.values[index]) || 0 : 0));
+    }),
+    dated: !!body.dated,
   };
 }
 

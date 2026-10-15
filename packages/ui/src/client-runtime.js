@@ -956,7 +956,7 @@ function chartTick(value) {
 }
 
 /** Draw a simple bar (or line, for date series) chart into the section's [data-chart]. */
-function drawChart(host, report, rows, order, folded) {
+function drawChart(host, report, rows, order, folded, meta) {
   if (!host) return;
   let buckets;
   let dated;
@@ -1022,6 +1022,10 @@ function drawChart(host, report, rows, order, folded) {
   }
   parts.push('</svg>');
   host.innerHTML = parts.join('');
+  const cap = folded || meta;
+  if (cap && cap.truncated) {
+    host.insertAdjacentHTML('beforeend', `<p class="chart-note">${escapeHtml(`Drawn from the first ${Number(cap.scanned) || 0} records.`)}</p>`);
+  }
 }
 
 /** Server-folded buckets → the {key, value} shape the drawing uses. */
@@ -1030,6 +1034,8 @@ function foldedBuckets(body) {
   if (!list) return null;
   return {
     dated: !!body.dated,
+    truncated: !!(body && body.truncated),
+    scanned: Number(body && body.scanned) || 0,
     buckets: list.map((bucket) => ({
       key: bucket && bucket.key != null ? String(bucket.key) : '',
       value: Number(bucket && Array.isArray(bucket.values) ? bucket.values[0] : 0) || 0,
@@ -1060,7 +1066,11 @@ function loadChart(report, section, viewRef) {
       // A static host has no data function: that is an empty report, not an error.
       if (!res || res.status === 404 || res.status === 405 || res.status === 501) return { rows: [] };
       if (!res.ok) throw new Error(`chart query ${res.status}`);
-      return responseJson(res).then((body) => ({ rows: Array.isArray(body && body.rows) ? body.rows : [] }));
+      return responseJson(res).then((body) => {
+        const rows = Array.isArray(body && body.rows) ? body.rows : [];
+        // The fold reads one page; a full page means more rows may follow.
+        return { rows, truncated: rows.length >= (report.pageSize || PAGE_SIZE), scanned: rows.length };
+      });
     });
   // The aggregate op folds on the server; an endpoint without it (or a group
   // field it refuses) falls back to the row query, which folds here.
@@ -1086,9 +1096,9 @@ function loadChart(report, section, viewRef) {
         drawChart(host, report, null, order, result.folded);
       } else {
         const rows = result.rows || [];
-        chartState.set(section, { rows, order });
+        chartState.set(section, { rows, order, truncated: !!result.truncated, scanned: result.scanned || rows.length });
         if (stateEl) stateEl.innerHTML = '';
-        drawChart(host, report, rows, order);
+        drawChart(host, report, rows, order, null, { truncated: !!result.truncated, scanned: result.scanned || rows.length });
       }
     })
     .catch(() => {
@@ -1106,7 +1116,7 @@ function toggleChartSort(report, section) {
   const state = chartState.get(section) || { rows: [], order: 'asc' };
   state.order = state.order === 'desc' ? 'asc' : 'desc';
   chartState.set(section, state);
-  drawChart(section && section.querySelector ? section.querySelector('[data-chart]') : null, report, state.rows || [], state.order, state.folded);
+  drawChart(section && section.querySelector ? section.querySelector('[data-chart]') : null, report, state.rows || [], state.order, state.folded, { truncated: !!state.truncated, scanned: state.scanned || 0 });
 }
 
 /** Load every chart panel inside a painted subtree (standalone or page-embedded). */

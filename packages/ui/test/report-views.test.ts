@@ -524,6 +524,25 @@ test('a chart report draws bars from its rows and sorts them', async () => {
   assert.deepEqual(flipped.slice(2), ['Nut', 'Bolt'], 'Sort toggles the category order');
 });
 
+test('a server-capped chart says it drew the first N records', async () => {
+  const { doc } = await bootDecorated('Report_Weekly', [], 'report', (body) =>
+    body.op === 'aggregate'
+      ? { op: 'aggregate', buckets: [{ key: 'Open', values: [12] }], dated: false, truncated: true, scanned: 3000 }
+      : { rows: [] },
+  );
+  await until(() => doc.querySelectorAll('[data-chart] rect').length === 1);
+  assert.match(doc.querySelector('.chart-note')?.textContent ?? '', /Drawn from the first 3000 records\./);
+});
+
+test('a chart folded from one full page of rows flags the cap', async () => {
+  const page = Array.from({ length: 300 }, (_, i) => ({ ROWID: String(i + 1), Product_Name: 'Bolt', Quantity: '1' }));
+  const { doc } = await bootDecorated('Report_Weekly', [], 'report', (body) =>
+    body.op === 'aggregate' ? {} : { rows: page },
+  );
+  await until(() => doc.querySelectorAll('[data-chart] rect').length === 1);
+  assert.match(doc.querySelector('.chart-note')?.textContent ?? '', /Drawn from the first 300 records\./);
+});
+
 test('an empty chart report says No Data Available', async () => {
   const { doc } = await bootDecorated('Report_Stock', []);
   await until(() => !!doc.querySelector('.chart-empty'));
@@ -553,7 +572,15 @@ async function loadViewsRuntime(): Promise<ViewsRuntime> {
   return (await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)) as ViewsRuntime;
 }
 
-async function bootDecorated(name: string, rows: Record<string, unknown>[], kind: 'report' | 'page' = 'report', recordId?: string, recordReply?: () => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>) {
+async function bootDecorated(
+  name: string,
+  rows: Record<string, unknown>[],
+  kind: 'report' | 'page' = 'report',
+  recordIdOrRespond?: string | ((body: { op?: string; page?: number }) => unknown),
+  recordReply?: () => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>,
+) {
+  const recordId = typeof recordIdOrRespond === 'string' ? recordIdOrRespond : undefined;
+  const respond = typeof recordIdOrRespond === 'function' ? recordIdOrRespond : undefined;
   (globalThis as { CSS?: unknown }).CSS ??= { escape: (value: string) => value };
   const runtime = await loadViewsRuntime();
   const model = decoratedViews();
@@ -562,7 +589,8 @@ async function bootDecorated(name: string, rows: Record<string, unknown>[], kind
   }).window as unknown as { document: Document; fetch: typeof fetch; location: { hash: string } };
   const recordReads: { url: string; body: Record<string, unknown> }[] = [];
   win.fetch = (async (url: string, init: { body: string }) => {
-    const body = JSON.parse(init.body) as Record<string, unknown>;
+    const body = JSON.parse(init.body) as Record<string, unknown> & { op?: string; page?: number };
+    if (respond) return { ok: true, status: 200, json: async () => respond(body) };
     if (body.ROWID != null) recordReads.push({ url, body });
     const matched = rows.find((row) => String(row.ROWID ?? '') === String(body.ROWID ?? ''));
     const payload = body.ROWID != null

@@ -9,7 +9,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import type { ChartSpec, ReportSpec } from '../types';
 import type { Api } from '../runtime/api';
 import { useEnv } from '../runtime/env';
-import { chartSeries, todayIn, type Day, type Row, type Series } from './data';
+import { bucketsToSeries, chartSeries, todayIn, type AggregateBody, type Day, type Row, type Series } from './data';
 
 /** At most this many pages per report (300 rows each by default). */
 export const MAX_PAGES = 10;
@@ -34,30 +34,12 @@ export async function readRows(api: Api, report: ReportSpec): Promise<Rows> {
   return { rows, truncated: true };
 }
 
-/** The server-side aggregate reply (`op: "aggregate"`) of a report endpoint. */
-export interface AggregateBody {
-  buckets?: { key: string; values: number[] }[];
-  dated?: boolean;
-  truncated?: boolean;
-  scanned?: number;
-}
-
 /** Chart rows: the folded series plus how much data was read. */
 export interface ChartRows {
   series: Series;
   truncated: boolean;
   /** Rows the fold read (server `scanned`, else the rows fetched). */
   scanned: number;
-}
-
-/** Server buckets → the Series the chart components draw. */
-export function bucketsToSeries(body: AggregateBody, chart: ChartSpec): Series {
-  const buckets = Array.isArray(body.buckets) ? body.buckets : [];
-  return {
-    categories: buckets.map((b) => ({ key: b.key, label: b.key || '(blank)' })),
-    values: chart.measures.map((_, m) => buckets.map((b) => (Array.isArray(b.values) ? Number(b.values[m]) || 0 : 0))),
-    dated: !!body.dated,
-  };
 }
 
 /**
