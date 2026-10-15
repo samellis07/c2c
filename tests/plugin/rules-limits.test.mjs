@@ -53,7 +53,8 @@ test('limits rules file exists with unique headings and a recipe on every rule',
 test('limits state the budgets c2c plan enforces', () => {
   const md = load();
   const must = [
-    'Plan for 100 columns per table',
+    'Plan for 250 columns per table',
+    'the stated default is 100 columns per table',
     'Reached max number of columns of Unique varchar type',
     'Plan for 15 foreign keys per table',
     'Plan for 130 text-type columns',

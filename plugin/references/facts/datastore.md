@@ -46,8 +46,9 @@ Rule: always send the array form. A plain JSON object is rejected with
 ### Assume 100 columns per table in Development
 
 Rule: assume a table holds at most 100 columns in Development.
-`c2c plan` counts columns per generated table and fails closed above
-the budget, splitting wide forms into 1:1 side tables joined by ROWID.
+`c2c plan` and `c2c doctor` count columns per generated table and warn
+above 100, which relies on the raised cap of 250 [UNVERIFIED]; they fail
+closed above 250, splitting wide forms into 1:1 side tables joined by ROWID.
 Assume at most 130 text-type (varchar plus text) columns per table;
 `c2c plan` warns past that count and moves overflow text to Stratus
 before any write.

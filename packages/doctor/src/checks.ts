@@ -20,7 +20,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { parseFile, type App } from '../../core/src/index.js';
 import { nodeSatisfies, REACT_BUILD_NODE_RANGE } from '../../core/src/toolchain.js';
-import { generateSchema } from '../../schema/src/index.js';
+import { generateSchema, limitValue, type SchemaTable } from '../../schema/src/index.js';
 import compat from '../data/compat.json' with { type: 'json' };
 import { MCP_TOOLS_GUIDANCE, REQUIRED_MCP_TOOLS } from './required-tools.js';
 import { dcOfCreatorHost, dcOfMcpHost, normalizeDc, type ResolvedScopeValues } from './scope.js';
@@ -792,20 +792,7 @@ function checkF(ctx: DoctorContext, ir: App | undefined, cliProjects: string[] |
   if (!ir) {
     out.push(skip('D-F5', 'no app; per-table budgets were not checked'));
   } else {
-    const schema = generateSchema(ir);
-    const breaches: string[] = [];
-    for (const table of schema.tables) {
-      if (table.columns.length > 100) breaches.push(`table ${table.name} needs ${table.columns.length} columns (max 100)`);
-      const uniques = table.columns.filter((c) => c.unique && c.dataType === 'VarChar').map((c) => c.name);
-      if (uniques.length > 2) breaches.push(`table ${table.name} needs ${uniques.length} unique varchar columns (${uniques.join(', ')}); Catalyst allows 2`);
-      const fks = table.columns.filter((c) => c.relation).length;
-      if (fks > 15) breaches.push(`table ${table.name} needs ${fks} foreign keys (max 15)`);
-    }
-    if (breaches.length) {
-      out.push(fail('D-F5', breaches.join('; '), 'choose which fields lose "No Duplicate" in Catalyst (c2c enforces them in the app layer), or let the splitter handle it; re-run /c2c:plan'));
-    } else {
-      out.push(pass('D-F5', 'budgets ok'));
-    }
+    out.push(f5TableBudgets(generateSchema(ir).tables));
   }
 
   const users = plan?.users;
@@ -843,6 +830,33 @@ function checkF(ctx: DoctorContext, ir: App | undefined, cliProjects: string[] |
     }
   }
   return out;
+}
+
+/**
+ * D-F5 per-table budgets. Same limits source as generation and `c2c plan`
+ * (schema CATALYST_LIMITS): the raised cap fails, the stated default of
+ * `datastore.columns_per_table_default` — documented [UNVERIFIED] in
+ * plugin/references/facts/limits.md — warns, matching the plan's budget row.
+ */
+export function f5TableBudgets(tables: readonly SchemaTable[]): CheckResult {
+  const maxColumns = limitValue('datastore.columns_per_table');
+  const columnsDefault = limitValue('datastore.columns_per_table_default');
+  const breaches: string[] = [];
+  const overDefault: string[] = [];
+  for (const table of tables) {
+    if (table.columns.length > maxColumns) breaches.push(`table ${table.name} needs ${table.columns.length} columns (max ${maxColumns})`);
+    else if (table.columns.length > columnsDefault)
+      overDefault.push(`table ${table.name}: ${table.columns.length}/${maxColumns} columns (over the unverified default ${columnsDefault}; relies on the raised cap — confirm with P-COLS)`);
+    const uniques = table.columns.filter((c) => c.unique && c.dataType === 'VarChar').map((c) => c.name);
+    if (uniques.length > 2) breaches.push(`table ${table.name} needs ${uniques.length} unique varchar columns (${uniques.join(', ')}); Catalyst allows 2`);
+    const fks = table.columns.filter((c) => c.relation).length;
+    if (fks > 15) breaches.push(`table ${table.name} needs ${fks} foreign keys (max 15)`);
+  }
+  if (breaches.length) {
+    return fail('D-F5', breaches.join('; '), 'split a table over the column cap into 1:1 side tables, choose which fields lose "No Duplicate" in Catalyst (c2c enforces them in the app layer), or let the splitter handle it; re-run /c2c:plan');
+  }
+  if (overDefault.length) return warn('D-F5', overDefault.join('; '));
+  return pass('D-F5', 'budgets ok');
 }
 
 // ---------- D-B*/D-V*: merged MCP evidence ----------
