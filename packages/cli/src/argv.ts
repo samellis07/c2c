@@ -46,6 +46,7 @@ export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
       '--allow-empty': 'bool',
       '--api-base': 'value',
       '--async-on-success': 'bool',
+      '--subset-shims': 'bool',
       '--backfill-shadows': 'bool',
       '--catalyst-base': 'value',
       '--confirm': 'bool',
