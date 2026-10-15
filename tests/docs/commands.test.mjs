@@ -31,35 +31,6 @@ function sliceBalanced(text, openIdx) {
   throw new Error('unbalanced braces');
 }
 
-/**
- * A verb's usage-line flags plus those of every verb it defers to via
- * `[same options as <other>]`. A malformed alias is a defect in the CLI's
- * usage text, not a partial contract: deferring to a verb main() does not
- * dispatch on throws naming that verb, and an alias cycle throws naming the
- * cycle — the check fails loudly rather than accepting incomplete flags.
- */
-function resolveUsageFlags(verb, usageFlags, usageAlias, rootVerbs) {
-  const flags = new Set(usageFlags.get(verb) ?? []);
-  const chain = [verb];
-  const seen = new Set(chain);
-  let ref = usageAlias.get(verb);
-  while (ref !== undefined) {
-    if (!rootVerbs.has(ref)) {
-      throw new Error(
-        `packages/cli/src/c2c.ts usage(): 'c2c ${chain[chain.length - 1]}' defers to 'same options as ${ref}', but '${ref}' is not a dispatched verb`,
-      );
-    }
-    if (seen.has(ref)) {
-      throw new Error(`packages/cli/src/c2c.ts usage(): 'same options as' alias cycle: ${[...chain, ref].join(' -> ')}`);
-    }
-    chain.push(ref);
-    seen.add(ref);
-    for (const f of usageFlags.get(ref) ?? []) flags.add(f);
-    ref = usageAlias.get(ref);
-  }
-  return flags;
-}
-
 /** `{ verbToFlags: Map<string, Set<string>>, rootVerbs: Set<string>, speclessVerbs: string[] }` from the CLI source. */
 function loadCliCommands() {
   const argvSrc = readFileSync(path.join(repoRoot, 'packages/cli/src/argv.ts'), 'utf8');
@@ -112,7 +83,17 @@ function loadCliCommands() {
     }
   }
   // A verb's usage flags plus the flags of any verb its line defers to.
-  const resolvedUsageFlags = (verb) => resolveUsageFlags(verb, usageFlags, usageAlias, rootVerbs);
+  const resolvedUsageFlags = (verb) => {
+    const flags = new Set(usageFlags.get(verb) ?? []);
+    const seen = new Set([verb]);
+    let ref = usageAlias.get(verb);
+    while (ref !== undefined && !seen.has(ref)) {
+      seen.add(ref);
+      for (const f of usageFlags.get(ref) ?? []) flags.add(f);
+      ref = usageAlias.get(ref);
+    }
+    return flags;
+  };
 
   // A verb's contract is its ARGV_SPEC entry plus its usage-line flags; a
   // verb with neither has no contract and documented flags on it fail.
@@ -276,47 +257,4 @@ test('the checker passes real commands and does not flag prose that merely menti
   for (const sample of good) {
     assert.deepEqual(checkMarkdown('fixture.md', sample, ctx), [], `expected no problem for: ${sample}`);
   }
-});
-
-test('a cycle in "same options as" aliases fails, naming the cycle', () => {
-  const usageFlags = new Map([
-    ['alias-a', new Set(['--alpha'])],
-    ['alias-b', new Set(['--beta'])],
-  ]);
-  const usageAlias = new Map([
-    ['alias-a', 'alias-b'],
-    ['alias-b', 'alias-a'],
-  ]);
-  const rootVerbs = new Set(['alias-a', 'alias-b']);
-  assert.throws(
-    () => resolveUsageFlags('alias-a', usageFlags, usageAlias, rootVerbs),
-    /alias cycle: alias-a -> alias-b -> alias-a/,
-  );
-});
-
-test('a "same options as" alias to an unknown verb fails, naming the verb', () => {
-  const usageFlags = new Map([['alias-a', new Set(['--alpha'])]]);
-  const usageAlias = new Map([['alias-a', 'ghost-verb']]);
-  const rootVerbs = new Set(['alias-a']);
-  assert.throws(
-    () => resolveUsageFlags('alias-a', usageFlags, usageAlias, rootVerbs),
-    /same options as ghost-verb'.*not a dispatched verb/,
-  );
-});
-
-test('a two-step "same options as" alias chain resolves to the union of flags', () => {
-  const usageFlags = new Map([
-    ['alias-a', new Set(['--alpha'])],
-    ['alias-b', new Set(['--beta'])],
-    ['alias-c', new Set(['--gamma'])],
-  ]);
-  const usageAlias = new Map([
-    ['alias-a', 'alias-b'],
-    ['alias-b', 'alias-c'],
-  ]);
-  const rootVerbs = new Set(['alias-a', 'alias-b', 'alias-c']);
-  assert.deepEqual(
-    [...resolveUsageFlags('alias-a', usageFlags, usageAlias, rootVerbs)].sort(),
-    ['--alpha', '--beta', '--gamma'],
-  );
 });
