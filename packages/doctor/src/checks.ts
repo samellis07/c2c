@@ -60,7 +60,7 @@ const fail = (id: string, detail: string, fix: string | null): CheckResult => ({
 const skip = (id: string, detail: string): CheckResult => ({ id, status: 'skip', detail, fix: null });
 
 /** The fix for a recorded evidence field that is present but not the shape a check can read. */
-const RE_RECORD = 'run /c2c:doctor again so the evidence is collected fresh, then c2c doctor --record-mcp';
+const RE_RECORD = 'run /c2c:doctor again so the evidence is collected fresh';
 
 /** A recorded list field: the strings, 'malformed' when present but not a list of strings, undefined when absent. */
 function recordedList(value: unknown): readonly string[] | 'malformed' | undefined {
@@ -810,7 +810,7 @@ function checkF(ctx: DoctorContext, ir: App | undefined, cliProjects: string[] |
       out.push(
         warn(
           'D-F4',
-          `org has ${orgTables} tables and the plan adds ${planned}; the org table-create limit is unpublished and can refuse at any count. On API_LIMIT_REACHED for table: stop creates, keep created tables, retry after 30/60/120 min; a project delete may not free capacity at once (c2c probe P-TABLES counts)`,
+          `org has ${orgTables} tables and the plan adds ${planned}; the org table-create limit is unpublished and can refuse at any count. On API_LIMIT_REACHED for table: stop creates, keep created tables, retry after 30/60/120 min; a project delete may not free capacity at once; use c2c status --table-budget <n> for a read-only estimate`,
         ),
       );
     } else {
