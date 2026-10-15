@@ -2867,6 +2867,16 @@ function clientCallRoute(path) {
 }
 
 export function browserShim(fetchImpl) {
+  return browserShimProxy(browserShimSurface(fetchImpl));
+}
+
+/**
+ * Every name the browser shim implements, in one table: the callables are
+ * its function entries and the namespaces its object entries (`list` is
+ * both; its methods are clientListMethods). packages/deluge/src/client-shim.ts
+ * lists exactly these names, which browser-shim-list.test checks both ways.
+ */
+export function browserShimSurface(fetchImpl) {
   const call = fetchImpl || globalThis.fetch;
   let seq = 0;
   /** Row objects handed out by `subform.currentRow`, back to their ctx position. */
@@ -2927,7 +2937,7 @@ export function browserShim(fetchImpl) {
       if (!ctx.formNonce) client.touch(ctx);
       const nonce = ctx.formNonce;
       const body = await postJson(clientCallRoute(path), { nonce, args: Array.isArray(args) ? args : [] });
-      if (!body || body.ok !== true || body.nonce !== nonce || ctx.formNonce !== nonce) throw clientBlocked(body);
+      if (!body || body.ok !== true || typeof body.error === 'string' || body.nonce !== nonce || ctx.formNonce !== nonce) throw clientBlocked(body);
       return body.value;
     },
     /**
@@ -2949,7 +2959,7 @@ export function browserShim(fetchImpl) {
         ...(Array.isArray(ctx.args) ? { args: ctx.args } : {}),
       });
       const slots = body && body.slots;
-      if (!body || body.ok === false || body.nonce !== nonce || ctx.formNonce !== nonce || !slots || typeof slots !== 'object' || Array.isArray(slots)) throw clientBlocked(body);
+      if (!body || body.ok === false || typeof body.error === 'string' || body.nonce !== nonce || ctx.formNonce !== nonce || !slots || typeof slots !== 'object' || Array.isArray(slots)) throw clientBlocked(body);
       if (!Object.prototype.hasOwnProperty.call(slots, slot)) throw clientBlocked(null);
       const got = slots[slot];
       if (got !== null && typeof got === 'object' && (got.ok === false || got.dryRun === true || got.performed === false)) throw clientBlocked(null);
@@ -2971,145 +2981,142 @@ export function browserShim(fetchImpl) {
       return null;
     }
   }
-  const listApi = clientListApi();
-  function stub() {
-    const target = function stubCall() {
-      return stub();
-    };
-    return new Proxy(target, {
-      get(_obj, prop) {
-        if (prop === 'then') return (resolve) => resolve(undefined);
-        if (prop === 'client') return client;
-        if (prop === 'get') return clientIndexGet;
-        if (prop === 'set') return clientIndexSet;
-        if (prop === 'todo') return async () => undefined;
-        if (prop === 'each') return (_ctx, value) => clientEach(value);
-        if (prop === 'list') return listApi;
-        if (prop === 'map') return () => ({});
-        if (typeof prop === 'string' && Object.prototype.hasOwnProperty.call(clientValueTests, prop)) return clientValueTests[prop];
-        if (prop === 'decimal') return clientDecimal();
-        if (prop === 'compare') return { eq: clientCompareEq, ne: (a, b) => !clientCompareEq(a, b) };
-        if (prop === 'date') {
-          return new Proxy(
-            {
-              rel: (a, b, op) => clientDateRel(a, b, op),
-              text: (value) => clientDateText(value),
-              format: (value, pattern) => clientFormat(value, pattern),
-            },
-            {
-              get(target, key) {
-                if (Object.prototype.hasOwnProperty.call(target, key)) return target[key];
-                return stub();
-              },
-            },
-          );
-        }
-        if (prop === 'record') {
-          // Rows are plain objects here, or a prefetched { __row, values } row.
-          // A record collection (array) is its first record; an empty one is null (data-access__update-records).
-          const valuesOf = (raw) => {
-            const row = Array.isArray(raw) ? (raw.length ? raw[0] : null) : raw;
-            return row && typeof row === 'object' && row.__row && row.values && typeof row.values === 'object' ? row.values : row;
-          };
-          return {
-            // `Form.Subform()` row constructor: a row value, like a fetched
-            // record, so record.set writes under `values`.
-            bind(_ctx, values, form) {
-              return { __row: true, form: form || '', values: { ...(values || {}) } };
-            },
-            get(row, ...path) {
-              let cur = valuesOf(row);
-              if (cur == null) return null;
-              // `ID` is logical: a record's id reads as its ROWID (same rule as
-              // getPath in packages/shims/src/runtime.ts).
-              for (const part of path) {
-                if (cur == null || typeof cur !== 'object') return undefined;
-                cur = part === 'ID' && !Object.hasOwn(cur, 'ID') ? (cur.ROWID ?? cur.rowid) : clientIndexGet(cur, part);
-              }
-              return cur;
-            },
-            set(row, path, value) {
-              const target = valuesOf(row);
-              if (!target || typeof target !== 'object') return value;
-              const parts = Array.isArray(path) ? path : [path];
-              const wrote = clientSetPath(target, parts, value);
-              // `row.Field = v` in a subform row event shows in that row's cell.
-              const at = wrote ? rowRefs.get(target) : undefined;
-              if (at && at.ctx.form && parts.length === 1) {
-                writeFieldValue(at.ctx.form, `${at.field}.${parts[0]}`, value, at.index);
-              }
-              return value;
-            },
-          };
-        }
-        if (prop === 'zoho') {
-          const zoho = {
-            // zoho.currentdate: the app-zone date with the time set to 00:00:00.
-            currentDate(ctx) {
-              const p = clientNow(ctx);
-              return clientDate(p.y, p.m, p.d, 0, 0, 0);
-            },
-            currentTime(ctx) {
-              const p = clientNow(ctx);
-              return clientDate(p.y, p.m, p.d, p.hh, p.mm, p.ss);
-            },
-          };
-          return new Proxy(zoho, {
-            get(target, key) {
-              if (Object.prototype.hasOwnProperty.call(target, key)) return target[key];
-              return stub();
-            },
-          });
-        }
-        if (prop === 'subform') {
-          return {
-            // Deluge `row` in a subform event: ctx.subformRow { field, index } into ctx.record.
-            currentRow(ctx, field) {
-              const at = ctx && ctx.subformRow;
-              if (!at || at.field !== field) return null;
-              const rows = ctx.record && ctx.record[field];
-              const row = Array.isArray(rows) ? rows[at.index] : undefined;
-              const found = row && typeof row === 'object' && !Array.isArray(row) ? row : null;
-              if (found && ctx) rowRefs.set(found, { ctx, field, index: at.index });
-              return found;
-            },
-          };
-        }
-        if (prop === 'input') {
-          return {
-            root(ctx) {
-              return ctx.record || {};
-            },
-            get(ctx, ...path) {
-              let cur = ctx.record || {};
-              for (const part of path) {
-                if (cur == null || typeof cur !== 'object') return undefined;
-                cur = part === 'ID' && !Object.hasOwn(cur, 'ID') ? (cur.ROWID ?? cur.rowid) : clientIndexGet(cur, part);
-              }
-              return cur;
-            },
-            set(ctx, path, value) {
-              if (!ctx.record) ctx.record = {};
-              const parts = Array.isArray(path) ? path : [path];
-              const wrote = clientSetPath(ctx.record, parts, value);
-              // `input.X = v` is Creator's set-value: the control on the open
-              // form shows the script's value, not just ctx.record.
-              const root = wrote ? ctx && ctx.form : undefined;
-              if (root && parts.length) {
-                if (parts.length === 1) writeFieldValue(root, parts[0], value);
-                else if (parts.length >= 2) writeFieldValue(root, `${parts[0]}.${parts[parts.length - 1]}`, value);
-              }
-            },
-          };
-        }
-        return stub();
+  return {
+    client,
+    get: clientIndexGet,
+    set: clientIndexSet,
+    todo: async () => undefined,
+    each: (_ctx, value) => clientEach(value),
+    list: clientListApi(),
+    map: () => ({}),
+    ...clientValueTests,
+    get decimal() {
+      return clientDecimal();
+    },
+    compare: { eq: clientCompareEq, ne: (a, b) => !clientCompareEq(a, b) },
+    date: withStubFallback({
+      rel: (a, b, op) => clientDateRel(a, b, op),
+      text: (value) => clientDateText(value),
+      format: (value, pattern) => clientFormat(value, pattern),
+    }),
+    record: (() => {
+      // Rows are plain objects here, or a prefetched { __row, values } row.
+      // A record collection (array) is its first record; an empty one is null (data-access__update-records).
+      const valuesOf = (raw) => {
+        const row = Array.isArray(raw) ? (raw.length ? raw[0] : null) : raw;
+        return row && typeof row === 'object' && row.__row && row.values && typeof row.values === 'object' ? row.values : row;
+      };
+      return {
+        // `Form.Subform()` row constructor: a row value, like a fetched
+        // record, so record.set writes under `values`.
+        bind(_ctx, values, form) {
+          return { __row: true, form: form || '', values: { ...(values || {}) } };
+        },
+        get(row, ...path) {
+          let cur = valuesOf(row);
+          if (cur == null) return null;
+          // `ID` is logical: a record's id reads as its ROWID (same rule as
+          // getPath in packages/shims/src/runtime.ts).
+          for (const part of path) {
+            if (cur == null || typeof cur !== 'object') return undefined;
+            cur = part === 'ID' && !Object.hasOwn(cur, 'ID') ? (cur.ROWID ?? cur.rowid) : clientIndexGet(cur, part);
+          }
+          return cur;
+        },
+        set(row, path, value) {
+          const target = valuesOf(row);
+          if (!target || typeof target !== 'object') return value;
+          const parts = Array.isArray(path) ? path : [path];
+          const wrote = clientSetPath(target, parts, value);
+          // `row.Field = v` in a subform row event shows in that row's cell.
+          const at = wrote ? rowRefs.get(target) : undefined;
+          if (at && at.ctx.form && parts.length === 1) {
+            writeFieldValue(at.ctx.form, `${at.field}.${parts[0]}`, value, at.index);
+          }
+          return value;
+        },
+      };
+    })(),
+    zoho: withStubFallback({
+      // zoho.currentdate: the app-zone date with the time set to 00:00:00.
+      currentDate(ctx) {
+        const p = clientNow(ctx);
+        return clientDate(p.y, p.m, p.d, 0, 0, 0);
       },
-      apply() {
-        return stub();
+      currentTime(ctx) {
+        const p = clientNow(ctx);
+        return clientDate(p.y, p.m, p.d, p.hh, p.mm, p.ss);
       },
-    });
-  }
-  return stub();
+    }),
+    subform: {
+      // Deluge `row` in a subform event: ctx.subformRow { field, index } into ctx.record.
+      currentRow(ctx, field) {
+        const at = ctx && ctx.subformRow;
+        if (!at || at.field !== field) return null;
+        const rows = ctx.record && ctx.record[field];
+        const row = Array.isArray(rows) ? rows[at.index] : undefined;
+        const found = row && typeof row === 'object' && !Array.isArray(row) ? row : null;
+        if (found && ctx) rowRefs.set(found, { ctx, field, index: at.index });
+        return found;
+      },
+    },
+    input: {
+      root(ctx) {
+        return ctx.record || {};
+      },
+      get(ctx, ...path) {
+        let cur = ctx.record || {};
+        for (const part of path) {
+          if (cur == null || typeof cur !== 'object') return undefined;
+          cur = part === 'ID' && !Object.hasOwn(cur, 'ID') ? (cur.ROWID ?? cur.rowid) : clientIndexGet(cur, part);
+        }
+        return cur;
+      },
+      set(ctx, path, value) {
+        if (!ctx.record) ctx.record = {};
+        const parts = Array.isArray(path) ? path : [path];
+        const wrote = clientSetPath(ctx.record, parts, value);
+        // `input.X = v` is Creator's set-value: the control on the open
+        // form shows the script's value, not just ctx.record.
+        const root = wrote ? ctx && ctx.form : undefined;
+        if (root && parts.length) {
+          if (parts.length === 1) writeFieldValue(root, parts[0], value);
+          else if (parts.length >= 2) writeFieldValue(root, `${parts[0]}.${parts[parts.length - 1]}`, value);
+        }
+      },
+    },
+  };
+}
+
+/** A namespace whose other members answer with the catch-all stub. */
+function withStubFallback(target) {
+  return new Proxy(target, {
+    get(obj, key) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
+      return browserShimProxy(null);
+    },
+  });
+}
+
+/**
+ * The `shim` client code sees: a surface name answers with its entry, and
+ * anything else is a catch-all stub that answers every call with another
+ * stub (the translator emits no such name into client code).
+ */
+function browserShimProxy(surface) {
+  const target = function stubCall() {
+    return browserShimProxy(surface);
+  };
+  return new Proxy(target, {
+    get(_obj, prop) {
+      if (prop === 'then') return (resolve) => resolve(undefined);
+      if (surface && typeof prop === 'string' && Object.prototype.hasOwnProperty.call(surface, prop)) return surface[prop];
+      return browserShimProxy(surface);
+    },
+    apply() {
+      return browserShimProxy(surface);
+    },
+  });
 }
 
 export async function runHandler(handler, ctx) {

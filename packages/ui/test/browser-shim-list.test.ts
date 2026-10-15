@@ -11,7 +11,7 @@ import { isNumber } from '../../shims/src/number.js';
 type Fn = (...args: unknown[]) => unknown;
 type Shim = Record<string, unknown>;
 
-async function runtime(): Promise<{ browserShim: (fetchImpl?: unknown) => Shim; clientListMethods: () => Record<string, Fn> }> {
+async function runtime(): Promise<{ browserShim: (fetchImpl?: unknown) => Shim; browserShimSurface: (fetchImpl?: unknown) => Shim; clientListMethods: () => Record<string, Fn> }> {
   return (await import(pathToFileURL(join(process.cwd(), 'packages/ui/src/client-runtime.js')).href)) as never;
 }
 
@@ -32,6 +32,52 @@ test('browserShim implements every shim name the translator may emit into client
   // The stub itself is detected, so the check above cannot pass vacuously.
   assert.equal(implemented((shim.string as Record<string, unknown>).trim), false);
   assert.equal(implemented((shim.list as Record<string, unknown>).aggregate), false);
+});
+
+test('the client-shim allowlist is exactly the surface the browser shim implements', async () => {
+  const rt = await runtime();
+  const surface = rt.browserShimSurface(async () => new Response('{}'));
+  const shim = rt.browserShim(async () => new Response('{}'));
+  const sorted = (names: Iterable<string>): string[] => [...names].sort();
+  // Callables are the surface's function entries; namespaces its object entries, plus `list`, which is both.
+  const callables = Object.keys(surface).filter((name) => typeof surface[name] === 'function');
+  const namespaces = Object.keys(surface).filter((name) => name === 'list' || (surface[name] !== null && typeof surface[name] === 'object'));
+  assert.deepEqual(sorted(Object.keys(surface)), sorted(new Set([...callables, ...namespaces])));
+  assert.deepEqual(sorted(callables), sorted(CLIENT_SHIM_CALLABLE));
+  assert.deepEqual(sorted(namespaces), sorted(CLIENT_SHIM_METHODS.keys()));
+  for (const ns of namespaces) {
+    const methods = ns === 'list' ? Object.keys(rt.clientListMethods()) : Object.keys(surface[ns] as object);
+    assert.deepEqual(sorted(methods), sorted(CLIENT_SHIM_METHODS.get(ns)!), ns);
+    for (const method of methods) assert.equal(implemented((shim[ns] as Record<string, unknown>)[method]), true, `${ns}.${method}`);
+  }
+  for (const name of callables) assert.equal(implemented(shim[name]), true, name);
+});
+
+async function blockedMessage(run: () => Promise<unknown>): Promise<string> {
+  try {
+    await run();
+  } catch (err) {
+    assert.equal((err as { c2cElementBlocked?: boolean }).c2cElementBlocked, true);
+    return (err as Error).message;
+  }
+  assert.fail('expected the client action to be blocked');
+}
+
+test('browser client.call and client.element refuse a reply that carries an error, like the server runtime', async () => {
+  const reply = (extra: Record<string, unknown>) =>
+    (async (_url: string, init: { body: string }) => {
+      const { nonce } = JSON.parse(init.body) as { nonce: string };
+      return new Response(JSON.stringify({ nonce, ...extra }));
+    }) as unknown;
+  const { browserShim } = await runtime();
+  const client = (fetchImpl: unknown) => browserShim(fetchImpl).client as Record<string, Fn>;
+  const ctx = () => ({ formNonce: 'n-1', prefetchPath: '/functions/form/prefetch', record: {} });
+
+  assert.equal(await client(reply({ ok: true, value: 7 })).call!(ctx(), 'Lookup.fn', []), 7);
+  assert.equal(await blockedMessage(() => client(reply({ ok: true, error: 'lookup failed', value: 7 })).call!(ctx(), 'Lookup.fn', []) as Promise<unknown>), 'lookup failed');
+
+  assert.equal(await client(reply({ slots: { s1: 3 } })).element!(ctx(), 'x', 1, 's1'), 3);
+  assert.equal(await blockedMessage(() => client(reply({ error: 'slot failed', slots: { s1: 3 } })).element!(ctx(), 'x', 1, 's1') as Promise<unknown>), 'slot failed');
 });
 
 const RECEIVERS: unknown[] = [
