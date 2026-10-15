@@ -101,6 +101,44 @@ For a fact-backed error, open its exact entry in the [errors facts ledger](../..
 | 5 | Doctor not green / stale / different scope (planned) | `/c2c:doctor` |
 | 6 | Node or plugin integrity problem (bin/c2c) | Node 20 or 22 (>=20.20 <23); reinstall the plugin |
 
+## Doctor check failures
+
+After `/c2c:doctor`, use the exact `FAIL D-*` id below. Only failing checks need a route; `WARN`, `SKIP`, and `NOTE` are not failures. User steps below are guided asks: state the command or setting and wait for the user to do it. Do not sign in, edit account settings, or use a browser for them. Fix local configuration or inputs in the workspace only when the user has asked for that change.
+
+| Check | Troubleshooting route |
+|---|---|
+| D-A1 | Install the official Catalyst skills for the host: Claude Code `/plugin marketplace add catalystbyzoho/claude-plugin`, then `/plugin install catalyst-by-zoho@catalyst-by-zoho`; OpenAI Codex — install the Catalyst agent skills per the Catalyst plugin's own Codex install instructions so that `~/.codex/skills/catalyst-by-zoho/SKILL.md` exists (doctor reads `${CODEX_HOME:-~/.codex}/skills/catalyst-by-zoho/SKILL.md`; the exact source repo path is [UNVERIFIED] per `references/doctor-spec.md` D-A1); Cursor sets `C2C_CATALYST_SKILLS_DIR` to the skills directory. Re-run doctor. |
+| D-A2 | Ask the user to run `/plugin enable catalyst-by-zoho@<marketplace>` in Claude Code and restart the session; then re-run doctor. |
+| D-A3 | Ask the user to restart the host session so the installed Catalyst skills load; on Codex, verify each required `~/.codex/skills/<name>/SKILL.md` exists; then re-record doctor evidence. |
+| D-C1 | Ask the user to install `zcatalyst-cli` with Node 20 (`npm install -g zcatalyst-cli`), then check `catalyst --version`. |
+| D-C2 | Ask the user to update `zcatalyst-cli` (`npm install -g zcatalyst-cli@latest`), then re-run doctor. |
+| D-C3 | Ask the user to run `catalyst login --dc <dc>` and complete the Zoho sign-in, then re-run doctor. |
+| D-C4 | Ask the user to `catalyst logout`, then `catalyst login --dc <dc>` with the account that owns the org. If CLI and MCP project lists differ, have the user re-sign in to the mismatched client and collect fresh evidence containing project ids/names only. |
+| D-C5 | Set the workspace `c2c-deploy.json` `dc` to the target DC, or pass `--dc <dc>`, then re-run doctor. |
+| D-D1 | Re-export the Creator app as a valid, non-empty `.ds` export and pass its path with `--app`; if parsing still fails, capture the exact parser error for maintainers. |
+| D-D3 | For a data migration, export each Creator report as CSV with its `ID` column, put the files and `counts.json` in `exports/<app>-data/`, and pass `--source-csv <dir>`. |
+| D-E1 | Install and select the pinned Node version shown by doctor (`nvm install <pinned> && nvm use <pinned>`), then re-run doctor. |
+| D-E3 | Reinstall the c2c plugin (`/plugin uninstall c2c`, then install again), then re-run doctor. |
+| D-E4 | Run c2c from the user's writable workspace folder, not inside the plugin directory; if it still cannot write, check workspace permissions. |
+| D-F1 | Choose an existing Catalyst project in `c2c-deploy.json`, or ask the user to delete an unused project / request a higher limit from Catalyst support. Never delete a project yourself. |
+| D-F2 | Set `env` to `Development` in `c2c-deploy.json`; production cutover follows `/c2c:verify`. If the selected project is protected, choose another project. |
+| D-F3 | Refresh the project table evidence with `/c2c:doctor`; if an update plan reports tables missing from or outside the plan, reconcile the plan with the target project before provisioning. |
+| D-F4 | Re-run `/c2c:doctor` to record the org table count. If the combined existing and planned count exceeds the limit, reduce the planned tables or ask Catalyst support about the limit. |
+| D-F5 | Reduce the per-table budget breach in `/c2c:plan`: choose which fields lose `No Duplicate` (c2c enforces them in the app layer), or let the splitter handle it; then plan again. |
+| D-B1 | Correct the Catalyst MCP server URL/entry for the target DC, restart the host session, and re-record doctor evidence. |
+| D-B2 | Align the MCP endpoint with the target Catalyst DC: correct its URL and restart, or ask the user to run `/catalyst-by-zoho:switch-dc <DC>`; re-record evidence. |
+| D-B3 | Ask the user to open `/mcp` in Claude Code or run `codex mcp login catalyst-by-zoho`, complete Zoho sign-in, then re-record evidence. |
+| D-B5 | Update/reconnect the Catalyst plugin's global MCP server, or ask the user to add all required “Catalyst by Zoho” tools under `mcp.zoho.com` → server → Tools → Config Tools; re-record evidence. |
+| D-B7 | Re-record org evidence using `/c2c:doctor --mcp-begin`, the `CatalystbyZoho_List_All_Organizations` call, and `c2c doctor --mcp-observed -`. If the MCP cannot see the target org, ask the user to sign it in to the Zoho account that owns the org. |
+| D-V1 | Compare target config, MCP endpoint, and CLI account DC; correct the mismatched endpoint/account using the D-B2 or D-C4 route, then re-record. |
+| D-V2 | Re-run `/c2c:doctor` in the target workspace and collect fresh MCP evidence; stale evidence cannot be reused. |
+| D-V3 | FAIL D-V3 means the recorded MCP server list in the doctor evidence is malformed — each `servers` entry must be an object `{name, host}`, never a bare name. Re-record the evidence with `/c2c:doctor` (`c2c doctor --mcp-begin`, make the MCP calls it names, then `c2c doctor --mcp-observed -`); if it still fails, the recorded evidence was hand-edited — regenerate it instead of patching the file. |
+| D-R1 | For a React UI, ask the user to install/select the pinned Node version shown by doctor, then re-run doctor. |
+| D-R2 | Install/select the pinned Node version (npm ships with it), or update npm to the minimum version shown by doctor; then re-run doctor. |
+| D-R4 | Repair the Node/npm installation if `npm config get cache` returns nothing. Otherwise ask the user to make the reported cache writable or choose a writable npm cache (`npm config set cache <dir>`). |
+
+Checks omitted from this table currently emit no `FAIL` result: D-A4, D-B4, D-B6, D-D2, D-E2, and D-R3 are warning/skip/info-only today; D-F6 is warning/pass-only. D-B6, D-F5 JOIN/SELECT, and D-F6 row-count limits may also be described as deferred notes. A new failing `D-*` must get a route here in the same change that adds the check.
+
 ## CLI credential errors (one credential, one refresher)
 
 `Error when refreshing the access token`, an empty stored token, or a read-only `401 INVALID_TOKEN` means a second process refreshed the same login — the refresh token rotates on refresh (the entry in `references/facts/errors.md`). Have the user stop every other `catalyst`/`c2c` process or keep-fresh loop sharing the credential, re-read the stored token (or `catalyst whoami`, then `catalyst login --dc <dc>` if it still fails), then resume with `--resume`. Never fix it by starting another refresher or by copying the credential to a second profile (C2C.md rule 14).
