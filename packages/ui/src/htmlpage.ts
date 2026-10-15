@@ -1413,6 +1413,74 @@ function hasExecuteFunctionButton(template: string): boolean {
   return false;
 }
 
+function isZcParam(param: string): boolean {
+  const [key] = param.split('=');
+  const k = key.trim().toLowerCase();
+  return k.startsWith('zc_') || k.startsWith('zc');
+}
+
+function escapeHtml(text: string): string {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Pre-pass for compileHtmlpage: rewrites `<iframe>` embeds of own reports
+ * (`<%=zoho.appuri%>report-embed/<Report>`) or own pages
+ * (`<%=zoho.appuri%>page-embed/<Page>`) to allowlisted static `<a>` links.
+ * Non-matching or unsafe iframes (external URLs, dynamic names/islands,
+ * unallowlisted query parameters) remain unchanged so the compiler refuses them.
+ */
+function rewriteEmbedIframes(template: string, app: App): string {
+  if (!template.includes('report-embed') && !template.includes('page-embed')) {
+    return template;
+  }
+  const IFRAME_RE = /<iframe\b((?:[^>"']|"[^"]*"|'[^']*')*?)(?:\/>|>(?:[\s\S]*?<\/iframe>)?)/gi;
+  return template.replace(IFRAME_RE, (match, attrText) => {
+    const attrs = parseZmlAttributes(attrText);
+    const src = attrs.src;
+    if (!src) return match;
+    const m = /^<%=\s*zoho\.appuri\s*%>(report-embed|page-embed)\/([^?#]+)(?:\?([^#]*))?$/i.exec(src.trim());
+    if (!m) return match;
+    const kind = m[1].toLowerCase();
+    const rawName = m[2];
+    if (rawName.includes('<%')) return match;
+    const rawQuery = m[3] ?? '';
+    if (rawQuery.includes('<%')) return match;
+    let name: string;
+    try {
+      name = decodeURIComponent(rawName);
+    } catch {
+      name = rawName;
+    }
+    const queryParts = rawQuery ? rawQuery.replace(/&amp;/g, '&').split('&').filter(Boolean) : [];
+    if (kind === 'report-embed') {
+      const rep = app.reports.find((r) => r.name === name);
+      if (!rep) return match;
+      for (const part of queryParts) {
+        if (!isZcParam(part)) return match;
+      }
+      const label = rep.displayName || rep.name;
+      const href = `#/report/${encodeURIComponent(name)}`;
+      return `<a href="${href}">${escapeHtml(label)}</a>`;
+    }
+    if (kind === 'page-embed') {
+      const pageDef = app.pages.find((p) => p.name === name);
+      if (!pageDef) return match;
+      const keptParams = queryParts.filter((part) => !isZcParam(part));
+      const queryStr = keptParams.length ? `?${keptParams.join('&')}` : '';
+      const href = `#/page/${encodeURIComponent(name)}${queryStr}`;
+      const label = pageDef.displayName || pageDef.name;
+      return `<a href="${href}">${escapeHtml(label)}</a>`;
+    }
+    return match;
+  });
+}
+
 /**
  * Compile a decoded `htmlpage` template into a generated endpoint plus the
  * sanitized static shell. Returns `{ ok: false }` for anything outside the
@@ -1428,6 +1496,7 @@ export function compileHtmlpage(
   const fail = (reason: string): HtmlpageCompiled => ({ ok: false, reason });
   const head = splitTemplate(decoded);
   head.template = convertZmlSnippetToHtml(head.template);
+  head.template = rewriteEmbedIframes(head.template, app);
   if (hasExecuteFunctionButton(head.template)) return fail(EXECUTE_FUNCTION_BUTTON);
   const chunks = splitChunks(head.template);
   if (!chunks) return fail('malformed Deluge island');
