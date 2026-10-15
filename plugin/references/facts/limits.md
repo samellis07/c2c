@@ -94,9 +94,9 @@ Recipe: POST /baas/v1/project/<project-id>/table/<table-id>/row with a JSON arra
 
 ### Write rate per table
 
-Rule: Plan for 100 writes per minute per table [UNVERIFIED]. Job functions share one rate bucket. c2c migrate-data checks the pace, stays at or under that rate, and honours Retry-After. Parallel jobs on the same table share the budget.
+Rule: The stated Data Store write rate is 100 requests per minute [UNVERIFIED] (`datastore.write_requests_per_minute`). It is reported only unless a generated batch is already more requests than this. The mover does not pace writes or retry using Retry-After.
 
-Recipe: POST /baas/v1/project/<project-id>/table/<table-id>/row paced to 100 calls per minute. On HTTP 429, sleep for Retry-After and retry the same idempotent batch.
+Recipe: A generated write batch is one bulk request. If the platform returns HTTP 429, stop and report the refusal; this limit does not add a mover rate cap.
 
 ### Concurrent Data Store calls
 
@@ -144,9 +144,9 @@ Recipe: POST /baas/v1/project/<project-id>/query with `{"query":"SELECT ROWID FR
 
 ### ZCQL SELECT width
 
-Rule: Plan for 20 columns in one SELECT [DOC]. c2c plan checks the select list and rejects a wider projection, including SELECT *. The observed wide-query refusal is `More than 30 select columns are not allowed` [TESTED]; stay at the documented 20.
+Rule: The stated ZCQL select cap is 30 columns [UNVERIFIED] (`zcql.select_columns`). c2c plan stages the select list into statements of at most 30 columns, preserving order and repeating the stitch key.
 
-Recipe: POST /baas/v1/project/<project-id>/query. Success is HTTP 200 for a list of at most 20 columns. Split a wider read into two queries.
+Recipe: POST /baas/v1/project/<project-id>/query. c2c plan stages a wider read into queries of at most 30 columns.
 
 ### ZCQL JOIN clauses
 
@@ -212,9 +212,9 @@ Recipe: GET /baas/v1/project/<project-id>/project-user with X-CATALYST-Environme
 
 ### Development API calls
 
-Rule: Plan for 200000 API calls per application in Development [UNVERIFIED]. c2c plan checks the mover's call estimate (rows divided by batch size, plus polls) and warns when the estimate is a large fraction of 200000. Prefer bulk write for a large table.
+Rule: Plan for 200000 API calls per application in Development [UNVERIFIED] (not currently listed in the limits registry). c2c plan estimates calls from the mover's per-batch and per-slice work and warns when the estimate is at or above 200000. Prefer bulk write for a large table.
 
-Recipe: Estimate calls before migrate-data --confirm. Success is an estimate under 200000, or an explicit switch to POST /bulk/write.
+Recipe: Estimate calls before migrate-data --confirm. The estimate warns at or above 200000; use POST /bulk/write for a large table.
 
 ### Stratus object size
 

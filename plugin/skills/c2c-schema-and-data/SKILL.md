@@ -45,8 +45,8 @@ Reserved ZCQL words (`FROM`, `TO`, …) as column names are renamed with a mappi
 - [L-VARCHAR-LENGTH](../../references/limits.md#l-varchar-length-varchar-length): single line ≤ 255, else `text` [TESTED] → split (REST truncates silently: validate before write);
 - [L-TEXT-LENGTH](../../references/limits.md#l-text-length-text-length): `text` ≤ 10,000 and not searchable [UNVERIFIED] → warn; larger values go to Stratus with a key column;
 - [L-DATE-WRITE](../../references/limits.md#l-date-write-date-strictness) / [L-DOUBLE-ROUNDING](../../references/limits.md#l-double-rounding-double-rounding): dates normalised to `yyyy-MM-dd`, doubles rounded HALF_UP client-side [TESTED] → normalize before write;
-- [L-ZCQL-JOINS](../../references/limits.md#l-zcql-joins-zcql-joins): JOINs per report ≤ 4 [DOC], each with one condition across declared foreign keys [ZC-06] → refuse, staged reads; [L-ZCQL-WIDTH](../../references/limits.md#l-zcql-width-zcql-select-columns): projection ≤ 20 columns until P-WIDTH is measured [ZC-05] → refuse; never `SELECT *`; assume no user-tunable indexes and a capped execution budget [ZC-12];
-- [L-ROW-BATCH](../../references/limits.md#l-row-batch-row-insert-batch): `/row` batches ≤ 200 [TESTED] → batch; [L-WRITE-RATE](../../references/limits.md#l-write-rate-data-store-write-rate): mover rate cap with `Retry-After` [UNVERIFIED] → cap;
+- [L-ZCQL-JOINS](../../references/limits.md#l-zcql-joins-zcql-joins): JOINs per report ≤ 4 [DOC], each with one condition across declared foreign keys [ZC-06] → refuse, staged reads; [L-ZCQL-WIDTH](../../references/limits.md#l-zcql-width-zcql-select-columns): projection ≤ 30 columns (`zcql.select_columns`) [UNVERIFIED] → split; never `SELECT *`; assume no user-tunable indexes and a capped execution budget [ZC-12];
+- [L-ROW-BATCH](../../references/limits.md#l-row-batch-row-insert-batch): `/row` batches ≤ 200 [TESTED] → batch; [L-WRITE-RATE](../../references/limits.md#l-write-rate-data-store-write-rate): 100 requests/minute [UNVERIFIED] → note (reported only; the mover does not pace writes);
 - [L-BULK-WRITE](../../references/limits.md#l-bulk-write-bulk-write): bulk job only after P-BULK passes [DOC] → refuse until probed;
 - [L-DEV-API-CALLS](../../references/limits.md#l-dev-api-calls-dev-api-calls): 200k Dev calls per app [DOC] → warn with the mover's call estimate;
 - [L-STRATUS-OBJECT](../../references/limits.md#l-stratus-object-stratus-single-object): single Stratus object 250 GB [UNVERIFIED] → note;
@@ -86,7 +86,7 @@ Default: the user's own Creator report exports as **JSON** — the JSON export a
 
 | Rows in the largest table | Path |
 |---|---|
-| ≤ 50,000 | `/row` inserts, JSON array ≤ 200 per call [TESTED], bounded pool ≤ 5, `Retry-After` wins |
+| ≤ 50,000 | `/row` inserts, JSON array ≤ 200 per call [TESTED], bounded pool ≤ 5 |
 | > 50,000, or the user wants speed | Bulk write job (CSV in the project bucket, `find_by` + `fk_mapping`) — only after **P-BULK** passes. `catalyst ds:import -ni` crashes (`reading 'bucket_name'`) [TESTED]: use the REST job, not the CLI command |
 | Dev row cap risk (very large app) | Rehearse in a non-Dev project; ask the user |
 
