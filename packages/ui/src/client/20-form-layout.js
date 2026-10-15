@@ -37,6 +37,7 @@ function formLayoutAnnotate(html, field) {
     for (const sub of field.subfields || []) {
       const spec = {
         name: sub.name,
+        label: sub.label || sub.name,
         widget: sub.widget,
         required: !!sub.required,
         lookup: sub.lookup && sub.lookup.endpoint ? sub.lookup.endpoint : '',
@@ -94,6 +95,7 @@ function formLayoutAddRow(button) {
   ops.appendChild(remove);
   tr.appendChild(ops);
   body.appendChild(tr);
+  formLayoutNameRows(body);
   // Lookup selects in the new row load their options like top-level fields.
   if (typeof loadLookupOptions === 'function' && typeof fillLookupSelect === 'function') {
     for (const select of tr.querySelectorAll('select[data-lookup]')) {
@@ -103,6 +105,38 @@ function formLayoutAddRow(button) {
         .then((options) => fillLookupSelect(select, options))
         .catch(() => {});
     }
+  }
+}
+
+/**
+ * Grid cells have no visible label of their own: each cell control is named
+ * after its column and row, and each remove button after its row. Called after
+ * rows are added, prefilled or removed so the row numbers stay current.
+ */
+function formLayoutNameRows(body) {
+  const subform = body && body.closest ? body.closest('.subform') : null;
+  if (!subform) return;
+  let columns = [];
+  try {
+    columns = JSON.parse(subform.getAttribute('data-columns') || '[]');
+  } catch {
+    return;
+  }
+  const labels = new Map(columns.map((column) => [column.name, column.label || column.name]));
+  // The grid's error message describes every cell control, as it does the Add button.
+  const slot = subform.parentElement ? subform.parentElement.querySelector('[data-error-for]') : null;
+  const errorId = slot && slot.id ? slot.id : '';
+  const rows = body.querySelectorAll('tr');
+  for (let i = 0; i < rows.length; i++) {
+    const n = i + 1;
+    for (const el of rows[i].querySelectorAll('[data-subfield]')) {
+      // A name or address cell is a group of labelled part inputs.
+      if (el.tagName === 'DIV') el.setAttribute('role', 'group');
+      el.setAttribute('aria-label', `${labels.get(el.getAttribute('data-subfield')) || ''}, row ${n}`);
+      if (errorId && el.tagName !== 'DIV') el.setAttribute('aria-describedby', errorId);
+    }
+    const remove = rows[i].querySelector('[data-remove-row]');
+    if (remove) remove.setAttribute('aria-label', `Remove row ${n}`);
   }
 }
 
@@ -247,6 +281,7 @@ export function fillSubformRows(box, rows) {
     tr.appendChild(ops);
     body.appendChild(tr);
   }
+  formLayoutNameRows(body);
   if (typeof loadLookupOptions === 'function' && typeof fillLookupSelect === 'function') {
     for (const select of body.querySelectorAll('select[data-lookup]')) {
       const endpoint = select.getAttribute('data-lookup');
