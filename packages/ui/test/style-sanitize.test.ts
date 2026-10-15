@@ -6,8 +6,13 @@ import { JSDOM } from 'jsdom';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { applyLabels } from '../src/decorations/labels.js';
 import { buildModel } from '../src/model.js';
-import { cleanStyle, sanitizeSnippet as buildSanitize } from '../src/pages.js';
-import { cleanPrintStyle } from '../../shims/src/print-template.js';
+import { calcArgsSafe, cleanStyle, replaceStyleCalls, sanitizeSnippet as buildSanitize, stripStyleComments } from '../src/pages.js';
+import {
+  calcArgsSafe as printCalcArgsSafe,
+  cleanPrintStyle,
+  replaceStyleCalls as printReplaceStyleCalls,
+  stripStyleComments as printStripStyleComments,
+} from '../../shims/src/print-template.js';
 
 // Inline style attributes are checked declaration by declaration, by two
 // copies of the same rule: the generator's sanitizer and the browser
@@ -163,4 +168,178 @@ test('a page snippet that loses a style declaration is listed as a TODO', () => 
   }).find((el) => el.kind === 'html');
   assert.match(snippet?.html ?? '', /style="color: red" data-style-dropped="transform"/);
   assert.match(snippet?.html ?? '', /style="border: 1px solid rgb\(1, 2, 3\)"/);
+});
+
+// ReDoS regression: the style scanners run in one pass where the old regexes
+// backtracked. The three sanitizer copies (browser runtime, page generator,
+// print templates) are tested against the regexes they replaced — same
+// decisions on every input the regex accepted, refusals only where the new
+// length caps cut in — plus adversarial inputs that finished in seconds.
+
+type RuntimeScanners = {
+  calcArgsSafe(args: string): boolean;
+  stripStyleComments(value: string): string;
+  replaceStyleCalls(text: string, decide: (name: string, args: string) => string): string;
+};
+
+async function runtimeScanners(): Promise<RuntimeScanners> {
+  return (await import(pathToFileURL(join(process.cwd(), 'packages/ui/src/client-runtime.js')).href)) as RuntimeScanners;
+}
+
+const REGEX_CALC_ARGS = /^\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?(?:\s*[-+*/]\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?)*\s*$/i;
+const REGEX_COMMENT = /\/\*[\s\S]*?\*\//g;
+const REGEX_CALL = /([-a-z0-9]*)\(([^()]*)\)/gi;
+
+/** Deterministic generator (a seeded LCG): same corpus every run, no Math.random. */
+function lcg(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1103515245 + 12345) >>> 0;
+    return s / 0x100000000;
+  };
+}
+
+test('the calc() scanner decides what the regex did, in all three sanitizers', async () => {
+  const run = await runtimeScanners();
+  const pick = lcg(20261016);
+  const numbers = ['0', '1', '12', '1.5', '.5', '1.', '007', '+2', '-3', '+.5', '-0.', '1.2.3', '.', '+', 'e3', '1e3'];
+  const units = ['', '%', 'px', 'em', 'deg', 'ms', 'abcd', 'abcde', 'e', 'PX', 'pxx'];
+  const ops = ['+', '-', '*', '/'];
+  const spaces = ['', ' ', '  ', '\t', '\n'];
+  const corpus: string[] = [
+    '1px + 2px',
+    '70% - 1.5px',
+    '1em*2',
+    '100% / 2',
+    '1px - -2px',
+    '1PX + 2PX',
+    '1px\n+\n2px',
+    ' 1px + 2px ',
+    '1e',
+    '1e3px',
+    '1px, 2px',
+    '1px; 2px',
+    'calc(1px)',
+    'url(x)',
+    '',
+    ' ',
+    '.5px + .25em',
+    '1. + .5',
+    '1px +',
+    '+ 1px',
+    '1 px',
+    '1px 2px',
+    '- -2px',
+  ];
+  for (let k = 0; k < 4000; k++) {
+    let piece = '';
+    const terms = 1 + Math.floor(pick() * 4);
+    for (let t = 0; t < terms; t++) {
+      if (t > 0) piece += spaces[Math.floor(pick() * spaces.length)] + ops[Math.floor(pick() * ops.length)] + spaces[Math.floor(pick() * spaces.length)];
+      piece += numbers[Math.floor(pick() * numbers.length)] + units[Math.floor(pick() * units.length)];
+    }
+    if (pick() < 0.3) piece += 'xyz'.slice(0, Math.floor(pick() * 3) + 1);
+    corpus.push(piece);
+  }
+  for (const args of corpus) {
+    const expected = REGEX_CALC_ARGS.test(args);
+    assert.equal(calcArgsSafe(args), expected, `pages copy: ${JSON.stringify(args)}`);
+    assert.equal(printCalcArgsSafe(args), expected, `print copy: ${JSON.stringify(args)}`);
+    assert.equal(run.calcArgsSafe(args), expected, `runtime copy: ${JSON.stringify(args)}`);
+  }
+  for (const args of ['1px+'.repeat(60) + '1px', '1'.repeat(500), '1px '.repeat(60)]) {
+    assert.equal(calcArgsSafe(args), false, `pages copy over cap: ${args.slice(0, 20)}`);
+    assert.equal(printCalcArgsSafe(args), false, `print copy over cap`);
+    assert.equal(run.calcArgsSafe(args), false, `runtime copy over cap`);
+  }
+});
+
+test('the comment stripper removes what the regex removed, in all three sanitizers', async () => {
+  const run = await runtimeScanners();
+  const pick = lcg(70707);
+  const pieces = ['a', ';', '/', '*', '/*', '*/', ' ', 'x:y', '/*/', '/**/'];
+  const corpus: string[] = [
+    'a:1;/* b:2; */c:3',
+    '/* only */',
+    'unterminated /* comment',
+    'closer with no opener */',
+    '/* a /* b */ c */ d',
+    '/**/',
+    '/*/',
+    'nested /* /* */ text',
+  ];
+  for (let k = 0; k < 4000; k++) {
+    const count = Math.floor(pick() * 12);
+    let piece = '';
+    for (let t = 0; t < count; t++) piece += pieces[Math.floor(pick() * pieces.length)];
+    corpus.push(piece);
+  }
+  for (const value of corpus) {
+    const expected = value.replace(REGEX_COMMENT, '');
+    assert.equal(stripStyleComments(value), expected, `pages copy: ${JSON.stringify(value)}`);
+    assert.equal(printStripStyleComments(value), expected, `print copy: ${JSON.stringify(value)}`);
+    assert.equal(run.stripStyleComments(value), expected, `runtime copy: ${JSON.stringify(value)}`);
+  }
+});
+
+test('the call matcher rewrites what the regex rewrote, in all three sanitizers', async () => {
+  const run = await runtimeScanners();
+  const pick = lcg(424242);
+  const mark = (name: string, args: string) => `[${name}|${args}]`;
+  const pieces = ['a', 'b', '-', '0', '9', '(', ')', 'x', ' ', '.', ',', 'rgb(', 'calc('];
+  const corpus: string[] = [
+    'rgb(1, 2, 3)',
+    'calc(1px + 2px)',
+    'foo(bar)',
+    'x foo(bar) y',
+    'a(b c(d)',
+    '(ab(cd)',
+    'ab(cd',
+    'foo((x))',
+    'f(a)b(c)',
+    'a(b)d)e(f)',
+    'a (x)',
+    'a-b(x)',
+    '1px solid rgb(1,2,3) url(x)',
+  ];
+  for (let k = 0; k < 4000; k++) {
+    const count = Math.floor(pick() * 14);
+    let piece = '';
+    for (let t = 0; t < count; t++) piece += pieces[Math.floor(pick() * pieces.length)];
+    corpus.push(piece);
+  }
+  for (const value of corpus) {
+    const expected = value.replace(REGEX_CALL, (_call, name: string, args: string) => mark(name, args));
+    assert.equal(replaceStyleCalls(value, mark), expected, `pages copy: ${JSON.stringify(value)}`);
+    assert.equal(printReplaceStyleCalls(value, mark), expected, `print copy: ${JSON.stringify(value)}`);
+    assert.equal(
+      run.replaceStyleCalls(value, (name: string, args: string) => mark(name, args)),
+      expected,
+      `runtime copy: ${JSON.stringify(value)}`,
+    );
+  }
+});
+
+test('pathological style values finish fast instead of backtracking', async () => {
+  const runSnippet = await runtime();
+  const runtimeSnippet = (html: string, doc: unknown) => runSnippet.sanitizeSnippet(html, doc);
+  const doc = new JSDOM('<!doctype html><html><body></body></html>').window.document;
+  const cases: Array<[string, () => unknown]> = [
+    ['calc digits over the cap', () => cleanStyle(`width:calc(${'1'.repeat(50000)}x)`)],
+    ['calc digits over the cap (print)', () => cleanPrintStyle(`width:calc(${'1'.repeat(50000)}x)`)],
+    ['calc almost-expression', () => calcArgsSafe(`${'1px + '.repeat(30)}x`)],
+    ['calc almost-expression (print)', () => printCalcArgsSafe(`${'1px + '.repeat(30)}x`)],
+    ['comment openers', () => cleanStyle('/*'.repeat(20000))],
+    ['comment openers (print)', () => cleanPrintStyle('/*'.repeat(20000))],
+    ['comment openers under the cap', () => stripStyleComments(`${'/*'.repeat(3000)}a`)],
+    ['unclosed call', () => cleanStyle(`width:${'a'.repeat(3000)}(${'b'.repeat(3000)}`)],
+    ['unclosed call (print)', () => cleanPrintStyle(`width:${'a'.repeat(3000)}(${'b'.repeat(3000)}`)],
+    ['unclosed call in a snippet', () => runtimeSnippet(`<div style="width:${'a'.repeat(3000)}(${'b'.repeat(3000)}">x</div>`, doc)],
+  ];
+  for (const [label, runCase] of cases) {
+    const start = performance.now();
+    runCase();
+    const ms = performance.now() - start;
+    assert.ok(ms < 50, `${label}: ${ms.toFixed(1)}ms`);
+  }
 });
