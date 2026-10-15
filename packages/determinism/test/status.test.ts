@@ -486,6 +486,68 @@ test('--sites refuses an ancestor directory replaced by a repo symlink during th
   }
 });
 
+test('--sites refuses an intermediate symlink that resolves back to the pinned directory', () => {
+  const fixtures = join(root, 'fixtures/redistributable');
+  const tmp = mkdtempSync(join(tmpdir(), 'c2c-sites-'));
+  const doc = join(tmp, 'doc.md');
+  const mid = join(tmp, 'mid');
+  const parent = join(mid, 'leaf');
+  mkdirSync(parent, { recursive: true });
+  const sites = join(parent, 'sites.json');
+  // `decoy` sits outside the repo. Once `mid` is swapped to a link at it,
+  // `mid/leaf` still names the pinned directory: without the no-follow
+  // component guard the re-walk lands on the same inode and the write
+  // proceeds, so the refusal has to come from the walk itself.
+  const decoy = join(tmp, 'decoy');
+  mkdirSync(decoy);
+  const hookHost = globalThis as typeof globalThis & { __c2cBeforeSitesWrite?: (path: string) => void };
+  hookHost.__c2cBeforeSitesWrite = (path) => {
+    assert.equal(path, sites);
+    symlinkSync(join(tmp, 'mid.old', 'leaf'), join(decoy, 'leaf'));
+    renameSync(mid, join(tmp, 'mid.old'));
+    symlinkSync(decoy, mid);
+  };
+  try {
+    assert.equal(main(['--dir', fixtures, '--out', doc, '--sites', sites]), 2);
+    assert.equal(existsSync(doc), true, 'the scan finished before the write was refused');
+    assert.equal(existsSync(sites), false);
+  } finally {
+    delete hookHost.__c2cBeforeSitesWrite;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('--sites refuses an intermediate symlink into the repo that resolves back to the pinned directory', () => {
+  const fixtures = join(root, 'fixtures/redistributable');
+  const tmp = mkdtempSync(join(tmpdir(), 'c2c-sites-'));
+  const doc = join(tmp, 'doc.md');
+  const mid = join(tmp, 'mid');
+  const parent = join(mid, 'leaf');
+  mkdirSync(parent, { recursive: true });
+  const sites = join(parent, 'sites.json');
+  // Same shape as the outside case, but the swapped component points inside
+  // this checkout: the final component links back to the pinned directory,
+  // so only the component-level no-follow guard refuses the walk.
+  const decoy = join(root, 'docs', 'sites-component-probe');
+  mkdirSync(decoy);
+  const hookHost = globalThis as typeof globalThis & { __c2cBeforeSitesWrite?: (path: string) => void };
+  hookHost.__c2cBeforeSitesWrite = (path) => {
+    assert.equal(path, sites);
+    symlinkSync(join(tmp, 'mid.old', 'leaf'), join(decoy, 'leaf'));
+    renameSync(mid, join(tmp, 'mid.old'));
+    symlinkSync(decoy, mid);
+  };
+  try {
+    assert.equal(main(['--dir', fixtures, '--out', doc, '--sites', sites]), 2);
+    assert.equal(existsSync(doc), true, 'the scan finished before the write was refused');
+    assert.equal(existsSync(sites), false);
+  } finally {
+    delete hookHost.__c2cBeforeSitesWrite;
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(decoy, { recursive: true, force: true });
+  }
+});
+
 test('committed status doc equals a fresh gallery computation', { skip: !statusDir() && 'needs C2C_FIXTURES_DIR or C2C_GALLERY_DIR' }, () => {
   const dir = statusDir();
   assert.ok(dir);
