@@ -349,6 +349,14 @@ interface Binding {
   bound?: boolean;
   /** Emit the replayed value under this name instead of the dep key (a previous `var name`). */
   emitAs?: string;
+  /** The binding a previous-value dep key copies; replay compares this, not the copy. */
+  origin?: Binding;
+  /**
+   * The code applies list mutators only to a fresh copy of the receiver
+   * (`shim.list.duplicate`), so replaying it changes no value the program
+   * holds. Only the effect calls in {@link NON_READ_EFFECT} refuse it.
+   */
+  localCopy?: boolean;
   rowReads?: RowRead[];
 }
 
@@ -432,6 +440,8 @@ interface Scope {
   loops: { frame: number; assigned: Set<string> }[];
   /** The binding object already replayed into the prefetch function per name. */
   emitted: Map<string, Binding>;
+  /** List updates (`L.add(x)`) in the `for each` body being translated, for {@link loopListUpdate}. */
+  listUpdates?: { name: string; value: Fx }[];
   /** Names bound in the prefetch module without a replayed assignment (params, `row`). */
   prefetchBound: Set<string>;
   /** The app's form link names; a bare one is the form's collection. */
@@ -750,13 +760,21 @@ function emitPlainBindings(names: readonly string[], scope: Scope, rows: Set<str
 const NON_READ_REPLAY =
   /\bshim\.(?:mail\.send|http\.(?:getUrl|postUrl|invokeurl)|datastore\.(?:insert|update|delete|setField|flush)|zoho\.task|thisapp\.call|list\.(?:add|addAll|put|putAll|clear|insert|insertAll|remove|removeAll|removeElement|deleteItem|deleteAll|deleteKey|deleteKeys|update))\s*\(/;
 
+/** The calls in {@link NON_READ_REPLAY} that write, send, or leave the app — every one but the list mutators. */
+const NON_READ_EFFECT = /\bshim\.(?:mail\.send|http\.(?:getUrl|postUrl|invokeurl)|datastore\.(?:insert|update|delete|setField|flush)|zoho\.task|thisapp\.call)\s*\(/;
+
 function nonReadReplay(code: string): boolean {
   return NON_READ_REPLAY.test(code);
 }
 
+/** `nonReadReplay` for a recorded binding: a copy-on-write list update is a read of its receiver. */
+function bindingNonRead(binding: Binding): boolean {
+  return binding.localCopy ? NON_READ_EFFECT.test(binding.code) : nonReadReplay(binding.code);
+}
+
 /** An app function, an untranslated call, or a non-read must not be replayed into a row map. */
 function bindingReplayRefused(binding: Binding): boolean {
-  return binding.appFunction || binding.todo || !!binding.sideEffect || nonReadReplay(binding.code);
+  return binding.appFunction || binding.todo || !!binding.sideEffect || bindingNonRead(binding);
 }
 
 /**
@@ -789,7 +807,7 @@ function closureReplayRefused(names: readonly string[], scope: Scope, rows: Set<
     seen.add(name);
     const binding = scope.bindings.get(name);
     if (!binding) return false;
-    if (binding.appFunction || binding.todo || (nonRead && nonReadReplay(binding.code)) || useBeforeDef(binding, scope)) return true;
+    if (binding.appFunction || binding.todo || (nonRead && bindingNonRead(binding)) || useBeforeDef(binding, scope)) return true;
     return binding.reads.some((dep) => walk(dep));
   };
   return names.some((name) => walk(name));
@@ -815,7 +833,7 @@ function collectionReplayRefused(col: Fx, scope: Scope): boolean {
     if (!binding) {
       return !(scope.clientData.has(name) || scope.row.has(name) || scope.prefetchBound.has(name));
     }
-    if (binding.appFunction || binding.todo || nonReadReplay(binding.code) || useBeforeDef(binding, scope)) return true;
+    if (binding.appFunction || binding.todo || bindingNonRead(binding) || useBeforeDef(binding, scope)) return true;
     return binding.reads.some((dep) => walk(dep));
   };
   return col.reads.some((name) => walk(name));
@@ -1359,14 +1377,7 @@ function slotExpr(value: Fx, scope: Scope): string | null {
   // one slot) emits after its dependents instead of being overwritten by a
   // re-emitted earlier one.
   ordered.sort((a, b) => a.binding.seq - b.binding.seq);
-  for (const item of ordered) {
-    // A param placeholder records the previous value and emits nothing.
-    // A previous-value rewrite emits under the real name, never the dep key.
-    if (item.binding.bound) continue;
-    if (scope.emitted.get(item.name) === item.binding) continue;
-    scope.emitted.set(item.name, item.binding);
-    scope.prefetch.push(`var ${jsIdent(item.binding.emitAs ?? item.name)} = ${item.binding.code};`);
-  }
+  emitOrdered(ordered, scope);
   const id = `c${scope.slot++}`;
   scope.prefetch.push(`slots[${JSON.stringify(id)}] = ${value.code};`);
   return `slots[${JSON.stringify(id)}]`;
@@ -1407,7 +1418,7 @@ function flowOk(binding: Binding, scope: Scope): boolean {
  * assignment would repeat a single iteration.
  */
 function dominates(name: string, binding: Binding, scope: Scope): boolean {
-  if (binding.sideEffect || binding.appFunction || binding.todo || binding.unboundReads.length || nonReadReplay(binding.code) || !flowOk(binding, scope)) return false;
+  if (binding.sideEffect || binding.appFunction || binding.todo || binding.unboundReads.length || bindingNonRead(binding) || !flowOk(binding, scope)) return false;
   for (const loop of scope.loops) {
     if (loop.assigned.has(name) && binding.flow < loop.frame) return false;
   }
@@ -1617,6 +1628,16 @@ function underLoop<T>(scope: Scope, assigned: Set<string>, f: () => T): T {
  * does not dominate this point, is never replayed — the prefetch would run
  * the effect a second time, or repeat one iteration of a loop-carried name.
  */
+/**
+ * A name already on the walk stack is not a cycle when the read recorded an
+ * earlier version of it: `t = a.intersect(b); a.removeAll(t)` reads the `a`
+ * from before the update. Recorded deps always predate the binding, so the
+ * walk still ends, and the replay emits both versions in assignment order.
+ */
+function olderVersion(dep: Binding | undefined, binding: Binding): boolean {
+  return dep !== undefined && dep.seq < binding.seq;
+}
+
 function bindingOk(name: string, binding: Binding, scope: Scope, stack: Set<string>): boolean {
   if (!dominates(name, binding, scope)) return false;
   stack.add(name);
@@ -1626,7 +1647,7 @@ function bindingOk(name: string, binding: Binding, scope: Scope, stack: Set<stri
       // A self-read resolves to the binding this assignment replaced.
       return depBinding ? bindingOk(dep, depBinding, scope, stack) : scope.prefetchBound.has(name);
     }
-    if (scope.clientData.has(dep) || stack.has(dep)) return false;
+    if (scope.clientData.has(dep) || (stack.has(dep) && !olderVersion(depBinding, binding))) return false;
     return depBinding ? bindingOk(dep, depBinding, scope, stack) : scope.prefetchBound.has(dep);
   });
   stack.delete(name);
@@ -1889,7 +1910,7 @@ function collectChain(
   stack.add(name);
   for (const dep of binding.reads) {
     const depBinding = binding.deps.get(dep);
-    const fail = dep !== name && stack.has(dep);
+    const fail = dep !== name && stack.has(dep) && !olderVersion(depBinding, binding);
     if (fail || (depBinding ? !collectChain(dep, depBinding, scope, stack, out, seen) : !scope.prefetchBound.has(dep))) {
       stack.delete(name);
       return false;
@@ -1901,20 +1922,55 @@ function collectChain(
 }
 
 
+/**
+ * Key in `scope.emitted` for the binding a prefetch variable holds now. A
+ * name key says the binding was emitted once; a later version of the same
+ * variable (a self-assign, a list update) may have overwritten it since.
+ */
+const HOLDS = '\u0001holds:';
+
+/**
+ * Emits a sorted replay closure. The longest prefix the variables already
+ * hold is skipped: every variable named there holds the last version the
+ * prefix assigns it, so the rest of the closure starts from the state the
+ * prefix would leave. A param placeholder records the previous value and
+ * emits nothing; a previous-value rewrite emits under the real name.
+ */
+function emitOrdered(ordered: readonly { name: string; binding: Binding }[], scope: Scope): void {
+  const items = ordered.filter((item) => !item.binding.bound);
+  let skip = 0;
+  const last = new Map<string, Binding>();
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    last.set(jsIdent(item.binding.emitAs ?? item.name), item.binding.origin ?? item.binding);
+    let held = true;
+    for (const [id, origin] of last) if (scope.emitted.get(HOLDS + id) !== origin) held = false;
+    if (held) skip = i + 1;
+  }
+  for (const item of items.slice(skip)) emitReplay(item.name, item.binding, scope);
+}
+
+/**
+ * Emits one replayed binding unless its variable already holds that value.
+ * `n = 0; n = n + 1; n = n + 1` read after each step replays the chain from
+ * the first value again instead of applying a self-assign twice.
+ */
+function emitReplay(name: string, binding: Binding, scope: Scope): void {
+  const id = jsIdent(binding.emitAs ?? name);
+  const origin = binding.origin ?? binding;
+  if (scope.emitted.get(HOLDS + id) === origin) return;
+  scope.emitted.set(name, binding);
+  scope.emitted.set(HOLDS + id, origin);
+  scope.prefetch.push(`var ${id} = ${binding.code};`);
+}
+
 /** Emit `name`'s recorded binding chain into the prefetch module, in assignment order. */
 function replayNow(name: string, scope: Scope): boolean {
   const ordered: { name: string; binding: Binding }[] = [];
   const seen = new Set<Binding>();
   if (!emitBinding(name, scope, new Set(), ordered, seen)) return false;
   ordered.sort((a, b) => a.binding.seq - b.binding.seq);
-  for (const item of ordered) {
-    // A param placeholder records the previous value and emits nothing.
-    // A previous-value rewrite emits under the real name, never the dep key.
-    if (item.binding.bound) continue;
-    if (scope.emitted.get(item.name) === item.binding) continue;
-    scope.emitted.set(item.name, item.binding);
-    scope.prefetch.push(`var ${jsIdent(item.binding.emitAs ?? item.name)} = ${item.binding.code};`);
-  }
+  emitOrdered(ordered, scope);
   return true;
 }
 
@@ -2435,7 +2491,15 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
   const assigned = assignedNames(s.body);
   assigned.add(s.name);
   if (s.index) assigned.add(s.index);
-  const body = underLoop(scope, assigned, () => statement(s.body, scope, stats, todos));
+  const outerUpdates = scope.listUpdates;
+  const updates: { name: string; value: Fx }[] = [];
+  scope.listUpdates = updates;
+  let body: Out;
+  try {
+    body = underLoop(scope, assigned, () => statement(s.body, scope, stats, todos));
+  } finally {
+    scope.listUpdates = outerUpdates;
+  }
   scope.elementVars.delete(s.name);
   scope.elementCollections.delete(s.name);
   if (!hadClientData) scope.clientData.delete(s.name);
@@ -2487,6 +2551,7 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
         ? `for (var [${jsIdent(s.index)}, ${name}] of shim.each(ctx, ${source}).entries())`
         : `for (var ${name} of shim.each(ctx, ${source}))`;
   const head = headFor(iter);
+  loopListUpdate(s, col, colRefused, updates, body.server, head, atCollection.bindings, scope);
   // Field writes on a fetched row are record.set. Deluge persists them
   // (fetch example 4: https://www.zoho.com/deluge/help/fetch-records/fetch-collection-records.html
   // and https://www.zoho.com/deluge/help/data-access/update-records.html).
@@ -2763,7 +2828,7 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
         scope.bindings.set(
           key,
           prior
-            ? { ...prior, emitAs: name }
+            ? { ...prior, emitAs: name, origin: prior.origin ?? prior }
             : {
                 code: '',
                 reads: [],
@@ -2936,6 +3001,133 @@ const COLLECTION_MUTATORS = new Set([
   'deletekeys',
 ]);
 
+/** The local list or map a `L.add(x)`-style statement updates in place, or null. */
+function listUpdateReceiver(e: Expr, scope: Scope): string | null {
+  if (e.kind !== 'call' || e.callee.kind !== 'member' || e.callee.object.kind !== 'name') return null;
+  const method = canonicalBuiltin(e.callee.property).toLowerCase();
+  if (!LIST_MUTATORS.has(method) && !COLLECTION_MUTATORS.has(method)) return null;
+  const name = e.callee.object.name;
+  if (!scope.local.has(name) || scope.row.has(name) || scope.clientData.has(name)) return null;
+  return name;
+}
+
+/**
+ * Another binding may hold the same collection object as `name` (`b = a`,
+ * or `a` stored into another updated collection). The server updates that
+ * object in place, but a replay updates a copy, so the two would disagree.
+ */
+function heldElsewhere(name: string, scope: Scope): boolean {
+  const id = jsIdent(name);
+  for (const [key, binding] of scope.bindings) {
+    if (key === name || key.startsWith(`\0${name}#`)) continue;
+    const code = binding.code.trim();
+    if (code === id || code === `(${id})`) return true;
+    if (binding.localCopy && binding.reads.includes(name)) return true;
+  }
+  return false;
+}
+
+/**
+ * The binding for `name` after an in-place update whose replay is `code`.
+ * The previous value is a dep key, as for a self-assign, so the replay emits
+ * the earlier binding first. `before` resolves the other reads.
+ */
+function listUpdateBinding(name: string, prior: Binding, code: string, reads: readonly string[], before: Map<string, Binding>, scope: Scope): Binding {
+  const key = `\0${name}#${scope.depSeq.next++}`;
+  scope.bindings.set(key, { ...prior, emitAs: name, origin: prior.origin ?? prior });
+  const recorded = [key];
+  for (const r of reads) if (r !== name && !recorded.includes(r)) recorded.push(r);
+  const deps = new Map<string, Binding | undefined>();
+  for (const r of recorded) deps.set(r, r === key ? scope.bindings.get(key) : before.get(r));
+  return {
+    code,
+    reads: recorded,
+    unboundReads: [],
+    appFunction: false,
+    todo: false,
+    sideEffect: false,
+    deps,
+    seq: scope.clock.seq++,
+    flow: scope.flowStack[scope.flowStack.length - 1]!,
+    localCopy: true,
+  };
+}
+
+/** The update reads nothing the prefetch must not run: no write, send, app call, or name bound only later. */
+function listUpdateReadOnly(value: Fx, loopVar?: string): boolean {
+  return (
+    !value.sideEffect &&
+    !value.appFunction &&
+    !value.todo &&
+    value.unboundReads.every((r) => r === loopVar) &&
+    !NON_READ_EFFECT.test(value.code)
+  );
+}
+
+/**
+ * `L.add(x)` / `L.removeElement(x)` / `L.removeAll(xs)` … on a local list or
+ * map changes the value a later prefetch slot must see. The binding becomes
+ * the update applied to a copy of the previous value, so `L` replays with the
+ * update. An update the prefetch must not run, or a collection another binding
+ * shares, drops the binding: a later server-side read of `L` stays a counted
+ * todo rather than replaying the value from before the update.
+ * Returns false when `e` is not such an update or `L` has no binding.
+ */
+function recordListUpdate(e: Expr, value: Fx, scope: Scope): boolean {
+  const name = listUpdateReceiver(e, scope);
+  if (!name) return false;
+  scope.listUpdates?.push({ name, value });
+  const prior = scope.bindings.get(name);
+  if (!prior) return false;
+  if (!(scope.list.has(name) || scope.map.has(name)) || !listUpdateReadOnly(value) || heldElsewhere(name, scope)) {
+    scope.bindings.delete(name);
+    return true;
+  }
+  const id = jsIdent(name);
+  const code = `await (async (${id}) => {\n  ${value.code};\n  return ${id};\n})(shim.list.duplicate(${id}))`;
+  scope.bindings.set(name, listUpdateBinding(name, prior, code, value.reads, scope.bindings, scope));
+  return true;
+}
+
+/**
+ * A `for each` whose body only updates one local list declared before it
+ * (`for each r in Form[…] { ids.add(r.ID); }`) leaves one value the prefetch
+ * can rebuild: the same loop over the same collection, run on a copy of the
+ * list's value from before the loop. Returns the name it rebound, or null when
+ * the body has any other statement, the collection or an update is not a pure
+ * read, or the loop shape is indexed.
+ */
+function loopListUpdate(
+  s: Extract<Stmt, { kind: 'forEach' }>,
+  col: Fx,
+  colRefused: boolean,
+  updates: readonly { name: string; value: Fx }[],
+  serverBody: string,
+  head: string,
+  before: Map<string, Binding>,
+  scope: Scope,
+): string | null {
+  if (s.index || s.iteratesIndex || colRefused) return null;
+  const stmts = s.body.kind === 'block' ? s.body.body : [s.body];
+  if (!stmts.length || updates.length !== stmts.length || stmts.some((st) => st.kind !== 'expr')) return null;
+  const name = updates[0]!.name;
+  if (name === s.name || updates.some((u) => u.name !== name)) return null;
+  const prior = before.get(name);
+  if (!prior || !(scope.list.has(name) || scope.map.has(name)) || heldElsewhere(name, scope)) return null;
+  if (col.todo || col.appFunction || col.sideEffect || col.unboundReads.length || col.reads.includes(name) || NON_READ_EFFECT.test(col.code)) return null;
+  if (!updates.every((u) => listUpdateReadOnly(u.value, s.name))) return null;
+  const body = serverBody
+    .split('\n')
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join('\n');
+  if (!body.trim()) return null;
+  const reads = [...col.reads, ...updates.flatMap((u) => u.value.reads)].filter((r) => r !== s.name);
+  const id = jsIdent(name);
+  const code = `await (async (${id}) => {\n${indent(`${head} {\n${indent(body)}\n}`)}\n  return ${id};\n})(shim.list.duplicate(${id}))`;
+  scope.bindings.set(name, listUpdateBinding(name, prior, code, reads, before, scope));
+  return name;
+}
+
 function exprStmt(e: Expr, span: { start: number; end: number }, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
   if (e.kind === 'colonCall') return colonStmt(e, span, scope, stats, todos);
   const choice = choiceTask(e, scope);
@@ -2970,13 +3162,14 @@ function exprStmt(e: Expr, span: { start: number; end: number }, scope: Scope, s
   }
   const v = expr(e, scope);
   account(stats, todos, v, span);
+  const updated = recordListUpdate(e, v, scope);
   // A mutating call on a local collection whose argument is server-fed puts
   // the real value on the server only. Mark the receiver server-bound and
   // drop its recorded binding (the binding holds only the pre-mutation
   // value): a later client read must become a counted manual item, not a
   // silent read of the client's stale empty collection. A later client
   // rebind clears the mark through the usual assignment path.
-  if (v.serverOnly && e.kind === 'call' && e.callee.kind === 'member') {
+  if (!updated && v.serverOnly && e.kind === 'call' && e.callee.kind === 'member') {
     const receiver = memberPath(e.callee.object);
     if (
       receiver !== null &&
