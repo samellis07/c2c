@@ -395,7 +395,7 @@ export async function serverGate(treeDir, opts = {}) {
         const anon = await call(port, functionName, route.method, route.path, { body: bodyFor(route, rowId) });
         const touched = dataCalls() - callsBefore;
         checks.a = !isJson401(anon)
-          ? cell('fail', `${anon.status} ${/json/i.test(anon.type) ? 'json' : anon.type || 'no type'}`, anon.status === 401 ? entryRef("send(res, 401, { error: 'sign in required' })") : handlerRef)
+          ? cell('fail', `${anon.status} ${/json/i.test(anon.type) ? 'json' : anon.type || 'no type'}`, anon.status === 401 ? entryRef("errorReply(res, 401, 'Sign in required')") : handlerRef)
           : touched
             ? cell('fail', `401 after ${touched} Data Store call(s)`, handlerRef)
             : cell('pass', '401');
@@ -404,7 +404,7 @@ export async function serverGate(treeDir, opts = {}) {
           const reply = await call(port, functionName, route.method, route.path, { session: token, body: bodyFor(route, rowId) });
           if (!(reply.status === 403 && reply.json && reply.json.code === 'ROLE_UNMAPPED')) roleFails.push(`${reply.status} for ${role}`);
         }
-        checks.a2 = roleFails.length ? cell('fail', roleFails.join(', '), entryRef("send(res, 401, { error: 'sign in required' })")) : cell('pass', '403 ROLE_UNMAPPED');
+        checks.a2 = roleFails.length ? cell('fail', roleFails.join(', '), entryRef("errorReply(res, 401, 'Sign in required')")) : cell('pass', '403 ROLE_UNMAPPED');
         if (route.method === 'GET') {
           checks.a3 = cell('n/a', 'GET has no body');
         } else {
@@ -462,14 +462,14 @@ export async function serverGate(treeDir, opts = {}) {
       {
         id: 'unknown-route',
         title: 'unknown path, no principal -> 401',
-        ...(isJson401(entry404) ? cell('pass', '401') : cell('fail', `${entry404.status} before auth`, entryRef("send(res, 404, { error: 'no such endpoint' })"))),
+        ...(isJson401(entry404) ? cell('pass', '401') : cell('fail', `${entry404.status} before auth`, entryRef("errorReply(res, 404, 'No such endpoint')"))),
       },
     ];
     if (entry405) {
       entryChecks.push({
         id: 'wrong-method',
         title: `DELETE ${firstPost.pattern}, no principal -> 401`,
-        ...(isJson401(entry405) ? cell('pass', '401') : cell('fail', `${entry405.status} before auth`, entryRef("send(res, 405, { error: 'method not allowed' })"))),
+        ...(isJson401(entry405) ? cell('pass', '401') : cell('fail', `${entry405.status} before auth`, entryRef("errorReply(res, 405, 'Method not allowed')"))),
       });
     }
     for (const { spec, message } of importErrors) {

@@ -478,8 +478,9 @@ test('text that is not a number in a number field is a 400 naming the field, and
   assert.equal((await submit('Item', { Name: 'ten', Stock: 100 })).status, 200);
   const refused = await submit('Order', { Item_Name: 'ten', Qty: 'abc' });
   assert.equal(refused.status, 400, JSON.stringify(refused.body));
+  assert.equal(refused.body.code, 'BAD_REQUEST');
   assert.equal(refused.body.field, 'Qty');
-  assert.match(String(refused.body.error), /Qty is "abc", not a valid number value/);
+  assert.match(String(refused.body.message), /Qty is "abc", not a valid number value/);
   assert.equal(rows('Order').length, 0);
   assert.equal(rows('Item').find((row) => row.Name === 'ten')!.Stock, '100');
 });
@@ -566,8 +567,9 @@ test('text that is not a number in a subform number field is a 400 naming the su
   assert.equal((await submit('Item', { Name: 'ten', Stock: 100 })).status, 200);
   const refused = await submit('Order', { Item_Name: 'ten', Lines: [{ Qty: '1' }, { Qty: 'abc' }] });
   assert.equal(refused.status, 400, JSON.stringify(refused.body));
+  assert.equal(refused.body.code, 'BAD_REQUEST');
   assert.equal(refused.body.field, 'Lines[1].Qty');
-  assert.match(String(refused.body.error), /Lines\[1\]\.Qty is "abc", not a valid number value/);
+  assert.match(String(refused.body.message), /Lines\[1\]\.Qty is "abc", not a valid number value/);
   assert.equal(rows('Order').length, 0);
   assert.equal(rows('Item').find((row) => row.Name === 'ten')!.Stock, '100');
 });

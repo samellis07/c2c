@@ -129,6 +129,36 @@ function send(res, status, body, err) {
   res.end(JSON.stringify(body, jsonReplacer));
 }
 
+/** Every failed request uses {code,message}; caller input and runtime details stay private. */
+function errorReply(res, status, message, extra = {}, err) {
+  const code = status === 400 ? 'BAD_REQUEST'
+    : status === 401 ? 'UNAUTHENTICATED'
+      : status === 403 ? 'FORBIDDEN'
+        : status === 404 ? 'NOT_FOUND'
+          : status === 405 ? 'METHOD_NOT_ALLOWED'
+            : status === 413 ? 'PAYLOAD_TOO_LARGE'
+              : status === 422 ? 'UNPROCESSABLE_ENTITY'
+                : status === 409 ? 'CONFLICT'
+                  : status === 429 ? 'TOO_MANY_REQUESTS'
+                    : status >= 500 ? 'INTERNAL_ERROR' : 'REQUEST_FAILED';
+  send(res, status, { code, message, ...extra }, err);
+}
+
+function normalizeErrorBody(body, responseStatus) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+  const out = { ...body };
+  const oldMessage = typeof out.message === 'string' ? out.message : typeof out.error === 'string' ? out.error : '';
+  const status = Number.isInteger(out.status) ? out.status : responseStatus;
+  if (typeof out.code !== 'string') {
+    out.code = status === 401 ? 'UNAUTHENTICATED' : status === 403 ? 'FORBIDDEN' : status === 404 ? 'NOT_FOUND' : status === 400 ? 'BAD_REQUEST' : status === 422 ? 'UNPROCESSABLE_ENTITY' : status >= 500 ? 'INTERNAL_ERROR' : 'REQUEST_FAILED';
+  }
+  if (typeof out.message !== 'string') out.message = oldMessage && !/request failed|kaboom|stack|node_modules|\/Users\/|\/private\//i.test(oldMessage) ? oldMessage : status >= 500 ? 'Request failed' : 'Request failed';
+  delete out.error;
+  delete out.stack;
+  delete out.status;
+  return out;
+}
+
 /** The Creator app time zone: C2C_APP_TIMEZONE, else c2c-deploy.json appTimeZone, else none. */
 function appTimeZone() {
   const fromEnv = typeof process.env.C2C_APP_TIMEZONE === 'string' ? process.env.C2C_APP_TIMEZONE.trim() : '';
@@ -257,11 +287,11 @@ module.exports = async function c2cApi(req, res) {
     const method = String(req.method || 'GET').toUpperCase();
     const matched = matchRoute(method, path);
     if (!matched) {
-      send(res, 404, { error: 'no such endpoint' });
+      errorReply(res, 404, 'No such endpoint');
       return;
     }
     if (matched.methodNotAllowed) {
-      send(res, 405, { error: 'method not allowed' });
+      errorReply(res, 405, 'Method not allowed');
       return;
     }
     const body = await readBody(req);
@@ -269,7 +299,7 @@ module.exports = async function c2cApi(req, res) {
     const { resolvePrincipal } = await load('c2c-principal.mjs');
     const principal = await resolvePrincipal(sdk, req);
     if (!principal) {
-      send(res, 401, { error: 'sign in required' });
+      errorReply(res, 401, 'Sign in required');
       return;
     }
     const handlerModule = await load(matched.spec);
@@ -286,7 +316,7 @@ module.exports = async function c2cApi(req, res) {
         body.record = reader.input(form, body.record);
       } catch (err) {
         if (!(err instanceof FieldValueError)) throw err;
-        send(res, 400, { error: err.message, field: err.field });
+        errorReply(res, 400, err.message, { field: err.field });
         return;
       }
     }
@@ -309,18 +339,41 @@ module.exports = async function c2cApi(req, res) {
     const store = await load('c2c-store.mjs');
     const handler = handlerModule.default;
     const call = { url: path + routeSearch(req.url), method, headers: req.headers, body, params: matched.params, catalyst: { user: principal } };
-    await store.runWithDatastore(datastore, () => handler(call, res));
+    await store.runWithDatastore(datastore, async () => {
+      const originalEnd = res.end;
+      res.end = function normalizedEnd(body) {
+        if (typeof body === 'string') {
+          try {
+            const parsed = JSON.parse(body);
+            if (parsed && typeof parsed === 'object' && (Object.hasOwn(parsed, 'error') || res.statusCode >= 400)) {
+              body = JSON.stringify(normalizeErrorBody(parsed, res.statusCode), jsonReplacer);
+            }
+          } catch {
+            /* Leave non-JSON responses unchanged. */
+          }
+        }
+        return originalEnd.call(this, body);
+      };
+      try {
+        await handler(call, res);
+      } finally {
+        res.end = originalEnd;
+      }
+    });
   } catch (err) {
     // A write-rule refusal or store error that escaped the handler still gets
     // the mapped 4xx, not an opaque 500.
     try {
       const { replyStoreError } = await load('vendor/shims/store-errors.js');
       const table = err && typeof err === 'object' && typeof err.table === 'string' ? err.table : 'datastore';
-      if (!res.headersSent && replyStoreError(res, err, { live: true, table })) return;
+      if (!res.headersSent && replyStoreError(res, err, { live: true, table })) {
+        // Older vendored classifiers may emit `error`; normalize at the entry boundary.
+        return;
+      }
     } catch {
       /* the classifier is best-effort; fall through to the generic reply */
     }
-    const status = err && Number.isInteger(err.status) ? err.status : 500;
-    send(res, status, { error: status === 500 ? 'request failed' : err.message }, err);
+    const status = err && Number.isInteger(err.status) && err.status >= 400 && err.status < 500 ? err.status : 500;
+    errorReply(res, status, status === 500 ? 'Request failed' : 'Invalid request', {}, err);
   }
 };

@@ -281,7 +281,7 @@ test('the default markers keep a real bypass red end to end', async () => {
   const file = join(dir, 'functions/c2c_api/index.js');
   const entry = readFileSync(file, 'utf8');
   // Planted: an unmapped role is let through as if it were mapped (a2 -> 200).
-  const planted = entry.replace("send(res, 401, { error: 'sign in required' })", "send(res, 200, { rows: [{ Title: 'secret' }] })");
+  const planted = entry.replace("errorReply(res, 401, 'Sign in required')", "send(res, 200, { rows: [{ Title: 'secret' }] })");
   assert.notEqual(planted, entry);
   writeFileSync(file, planted);
   const report = await runGate(dir, 'bypass', { client: false });
