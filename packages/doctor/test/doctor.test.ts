@@ -15,6 +15,7 @@ import {
   doctorGateForArgs,
   doctorJsonPath,
   doctorStamp,
+  f5TableBudgets,
   evaluateGate,
   gateRefusalMessage,
   missingRequiredTools,
@@ -36,6 +37,8 @@ import {
   type ScopeHooks,
   type SpawnResult,
 } from '../src/index.js';
+import { limitValue } from '../../schema/src/limits.js';
+import type { SchemaColumn, SchemaTable } from '../../schema/src/generator.js';
 import requiredTools from '../data/required-mcp-tools.json' with { type: 'json' };
 import { repoRoot } from '../../core/src/toolchain.js';
 import { ALL_REQUIRED_MCP_TOOLS, MCP_TOOLS_GUIDANCE, NEVER_CALL_MCP_TOOLS, REQUIRED_MCP_TOOLS } from '../src/required-tools.js';
@@ -1598,4 +1601,32 @@ test('D-D3: a dir holding only JSON report exports passes; an empty dir fails', 
   assert.equal(fail?.status, 'fail', JSON.stringify(fail));
   assert.match(fail?.detail ?? '', /no CSV or JSON exports found/);
   assert.match(fail?.fix ?? '', /JSON \(preferred/);
+});
+
+// ---------- D-F5 ----------
+
+function tableOf(name: string, columns: number): SchemaTable {
+  const cols = Array.from({ length: columns }, (_, i) => ({ name: `F${i}`, creatorType: 'text', matrixId: 'text', status: 'full', dataType: 'Text' }) as unknown as SchemaColumn);
+  return { name, form: name, role: 'form', nosql: false, columns: cols };
+}
+
+test('D-F5 passes the column budget for a 111-column table', () => {
+  const result = f5TableBudgets([tableOf('New_Deal', 111)]);
+  assert.notEqual(result.status, 'fail', result.detail);
+  assert.equal(result.status, 'warn');
+  assert.match(result.detail, new RegExp(`New_Deal: 111/${limitValue('datastore.columns_per_table')} columns`));
+});
+
+test('D-F5 passes at the column cap and fails one over it, naming the table and count', () => {
+  const cap = limitValue('datastore.columns_per_table');
+  assert.notEqual(f5TableBudgets([tableOf('Wide', cap)]).status, 'fail');
+  const over = f5TableBudgets([tableOf('Small', 3), tableOf('Wide', cap + 1)]);
+  assert.equal(over.status, 'fail');
+  assert.equal(over.detail, `table Wide needs ${cap + 1} columns (max ${cap})`);
+  assert.match(over.fix ?? '', /side tables/);
+});
+
+test('D-F5 passes a table at or under the stated default', () => {
+  const result = f5TableBudgets([tableOf('Plain', limitValue('datastore.columns_per_table_default'))]);
+  assert.equal(result.status, 'pass', result.detail);
 });

@@ -18,6 +18,7 @@ import { promisify } from 'node:util';
 import { openZip } from '../src/zipfile.js';
 import { buildOfflinePlan, planCli, PLAN_STEP_TOOLS, resolveDc, type ProvisionStep } from '../src/offline-plan.js';
 import { ALL_REQUIRED_MCP_TOOLS, REQUIRED_MCP_TOOLS } from '../../doctor/src/required-tools.js';
+import { f5TableBudgets } from '../../doctor/src/checks.js';
 import { loadApp, type Io } from '../src/cli.js';
 import { deriveIr, parse, parseFile, type App } from '../../core/src/index.js';
 import { generateSchema, type SourceTableData } from '../../schema/src/generator.js';
@@ -504,6 +505,27 @@ test('the columns budget warns over the unverified default and fails only over t
     built.plan.budgets.some((item) => item.id === 'columns' && item.status === 'fail'),
     false,
   );
+});
+
+test('doctor, plan and the limits facts use the same column cap', () => {
+  const cap = limitValue('datastore.columns_per_table');
+  const columnsDefault = limitValue('datastore.columns_per_table_default');
+  const facts = readFileSync(join(repoRoot(), 'plugin/references/facts/limits.md'), 'utf8');
+  assert.match(facts, new RegExp(`Plan for ${cap} columns per table \\[UNVERIFIED\\]`));
+  assert.match(facts, new RegExp(`the stated default is ${columnsDefault} columns per table \\[UNVERIFIED\\]`));
+  assert.match(facts, new RegExp(`a table wider than ${cap} fails`));
+  const overhead = wideColumnCount(1) - 1;
+  const app = wideApp(111 - overhead);
+  const tables = generateSchema(app).tables;
+  const plan = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false }).plan.budgets.find(
+    (item) => item.id === 'columns' && item.table === 'Wide',
+  );
+  const doctor = f5TableBudgets(tables);
+  assert.ok(plan);
+  assert.equal(plan.status, 'warn');
+  assert.equal(doctor.status, 'warn', doctor.detail);
+  assert.match(plan.detail, new RegExp(`111/${cap} columns`));
+  assert.match(doctor.detail, new RegExp(`111/${cap} columns`));
 });
 
 test('the plan budgets the mover write calls against the stated Dev write rate', () => {

@@ -42,7 +42,7 @@ Every row below has a stable limit id (`L-…`). Skills cite the id of each limi
 
 ### L-COLUMNS: Columns per table (Development)
 
-Value: 100; "no upper limit" in Production. Label: [DOC] (a higher figure of 325 is [UNVERIFIED]). Behaviour: refuse — `c2c plan` fails a table wider than 100; split overflow fields into 1:1 side tables. Probe: P-COLS.
+Value: 100; "no upper limit" in Production. Label: [DOC] (a higher figure of 325 is [UNVERIFIED]). Behaviour: warn — `c2c plan` and `c2c doctor` warn on a table over 100, which relies on the raised cap of 250 [UNVERIFIED]; refuse — they fail a table wider than 250; split overflow fields into 1:1 side tables. Probe: P-COLS.
 
 ### L-UNIQUE-VARCHAR: Unique varchar columns per table
 
