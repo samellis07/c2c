@@ -94,6 +94,13 @@ Rule: verify a project's configuration by exporting it, then delete the ZIP.
 
 Rule: `DELETE /baas/v1/project/<project-id>` → `200`; while the Production environment is enabled it fails `400 INVALID_OPERATION` ("This project is currently in the production environment. Disable the project's production environment to complete this operation."). Disabling Production is a console step the user performs. Deleted names linger as `Deleted` rows in the import history.
 
+### A project still 'Importing' holds its name and cannot be deleted
+
+Rule: `DELETE /baas/v1/project/<project-id>` on a project whose `project_type` is `Importing` fails `400 INVALID_OPERATION` ("Your project is importing. Kindly wait for some time") — the refusal persists for as long as the import does, however long that takes. An import that never finishes leaves a project that cannot be deleted and still holds its name.
+
+- Before posting an import, c2c lists the org's projects and skips every name a listed project still shows as `Importing` — the documented suffix (`<name>-2`, `<name>-3`, …) is tried next instead of colliding.
+- A project still `Importing` takes no writes: a resume, a provision step or a deploy refuses it. One with a known age of at least 6 hours is treated as stuck — the run prints one guided step (check the project in the Catalyst console; if it stays Importing, contact Catalyst support) and stops that branch. If the age is unknown, writes remain stopped with neutral guidance to check its status in the Catalyst console and re-run later; doctor warns instead of failing. The delete is never retried.
+
 ### Tear down only on request, or before the first console step
 
 Rule: c2c tears a project down only when the user explicitly asks, or when a failure struck before the Slate "Start Exploring" step — the first human/console step in the flow. A project that has taken any human or console step is kept: stop, report the state, and let the user decide.

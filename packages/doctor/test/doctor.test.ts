@@ -1060,6 +1060,71 @@ test('D-F4 warns whenever the plan adds tables, passes with the count otherwise,
   }
 });
 
+// ---------- D-F7 ----------
+
+test('D-F7: a target project still "Importing" past the stuck bound fails with the one guided step — the list is read once, nothing retried', async () => {
+  const { dir, env } = greenWorkspace();
+  const { io, out } = fakeIo(env, greenCatalyst);
+  let lists = 0;
+  io.listProjects = async (org) => {
+    lists++;
+    assert.equal(org, ORG);
+    return [{ name: 'c2c-widget', id: PROJECT, projectType: 'Importing', createdTime: 'Oct 08, 2020 05:00 AM' }];
+  };
+  const code = await doctorCli([], io, { hooks: NO_HOOKS });
+  assert.equal(code, 1, out());
+  const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as DoctorFile;
+  const df7 = file.checks.find((c) => c.id === 'D-F7');
+  assert.ok(df7, `D-F7 missing: ${out()}`);
+  assert.equal(df7.status, 'fail');
+  assert.match(df7.detail, /check the project in the Catalyst console; if it stays Importing, contact Catalyst support/);
+  assert.equal(lists, 1, 'the org list is read once — the delete is never retried');
+});
+
+test('D-F7: an Importing project under the bound warns; a Live target passes', async () => {
+  // Thirty minutes old — still importing but not yet stuck.
+  const { dir, env } = greenWorkspace();
+  const { io, out } = fakeIo(env, greenCatalyst);
+  io.listProjects = async () => [{ name: 'c2c-widget', id: PROJECT, projectType: 'Importing', createdTime: new Date(Date.now() - 30 * 60 * 1000).toISOString() }];
+  assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 0, out());
+  const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as DoctorFile;
+  const df7 = file.checks.find((c) => c.id === 'D-F7');
+  assert.equal(df7?.status, 'warn', JSON.stringify(df7));
+  assert.match(df7?.detail ?? '', /still "Importing"/);
+
+  const ws2 = greenWorkspace();
+  const second = fakeIo(ws2.env, greenCatalyst);
+  second.io.listProjects = async () => [{ name: 'c2c-widget', id: PROJECT, projectType: 'Live' }];
+  assert.equal(await doctorCli([], second.io, { hooks: NO_HOOKS }), 0, second.out());
+  const file2 = JSON.parse(readFileSync(doctorJsonPath(ws2.dir), 'utf8')) as DoctorFile;
+  const df7b = file2.checks.find((c) => c.id === 'D-F7');
+  assert.equal(df7b?.status, 'pass', JSON.stringify(df7b));
+});
+
+test('D-F7: an Importing project with unknown age warns with neutral guidance', async () => {
+  const { dir, env } = greenWorkspace();
+  const { io, out } = fakeIo(env, greenCatalyst);
+  io.listProjects = async () => [{ name: 'c2c-widget', id: PROJECT, projectType: 'Importing' }];
+  assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 0, out());
+  const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as DoctorFile;
+  const df7 = file.checks.find((c) => c.id === 'D-F7');
+  assert.equal(df7?.status, 'warn', JSON.stringify(df7));
+  assert.match(df7?.detail ?? '', /still importing; check its status in the Catalyst console and re-run later/);
+  assert.doesNotMatch(df7?.detail ?? '', /contact Catalyst support/);
+});
+
+test('D-F7: an unreadable org list degrades to a skip, never a fail', async () => {
+  const { dir, env } = greenWorkspace();
+  const { io, out } = fakeIo(env, greenCatalyst);
+  io.listProjects = async () => {
+    throw new Error('list failed');
+  };
+  assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 0, out());
+  const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as DoctorFile;
+  const df7 = file.checks.find((c) => c.id === 'D-F7');
+  assert.equal(df7?.status, 'skip', JSON.stringify(df7));
+});
+
 // ---------- doctor run ----------
 
 test('doctor: a fully provisioned workspace runs green and writes doctor.json', async () => {

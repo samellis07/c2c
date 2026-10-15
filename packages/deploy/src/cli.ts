@@ -29,6 +29,7 @@ import { CONSOLE_SERVICES, formatPostDeploySteps, postDeploySteps, servicesTouch
 import { appTimeZone, generateUi, slateConfigSource } from '../../ui/src/generate.js';
 import { emptyRegistry, type ProjectRegistry } from './registry.js';
 import { catalystRestCall, listCatalystProjects, readCliAccessToken } from './rest.js';
+import { importingAgeState, isStuckImporting, projectDataRecord, stuckImportGuidedStep, unknownImportAgeGuidedStep, type ListedProject } from './stuck-import.js';
 import { spawnWithRetry, restWithRetry, type RetryOptions } from './retry.js';
 import { readSlateAppUrl, slateConfigToml } from './slate.js';
 import { applyEdits, editsPathFor, readEdits, withEdits } from './edit.js';
@@ -103,7 +104,7 @@ export interface Io {
   /** The Catalyst CLI login's active org id. Tests inject this. Production reads only `active_org`, never a token. */
   cliOrg?: (env: NodeJS.ProcessEnv) => string | undefined;
   /** Projects in the configured org. Tests inject this. Production lists them with one GET. */
-  listProjects?: (org: string) => Promise<readonly { name: string; id: string }[]>;
+  listProjects?: (org: string) => Promise<readonly ListedProject[]>;
   /** Reads stdin to the end (`smoke --result -`). Tests inject this. */
   stdin?: () => string;
 }
@@ -402,6 +403,9 @@ export function defaultIo(): Io {
     env: process.env,
     spawn: catalystSpawn,
     fetch: (url, init) => globalThis.fetch(url, init) as ReturnType<Io['fetch']>,
+    // The org list (name/id/project_type/created_time only) — the held-name
+    // check before an import POST and the name lookup both read it.
+    listProjects: (org) => listCatalystProjects(process.env, org),
   };
 }
 
@@ -416,7 +420,28 @@ export async function assertLiveProject(io: Io, org: string, projectId: string):
     throw new Error('catalyst project details did not report the guarded org and project');
   }
   assertProjectDetails(details.result.body, org, projectId);
+  assertNotImporting(details.result.body, projectId);
   return admin;
+}
+
+/**
+ * An 'Importing' project takes no writes. One with known age past the bound
+ * gets stuck guidance; unknown age gets neutral guidance. The delete is never retried.
+ */
+export function assertNotImporting(body: unknown, projectId: string): void {
+  const data = projectDataRecord(body);
+  const name = typeof data.project_name === 'string' ? data.project_name : undefined;
+  const listed: ListedProject = {
+    name: name ?? projectId,
+    id: projectId,
+    ...(typeof data.project_type === 'string' ? { projectType: data.project_type } : {}),
+    ...(typeof data.created_time === 'string' ? { createdTime: data.created_time } : {}),
+  };
+  if (listed.projectType !== 'Importing') return;
+  const ageState = importingAgeState(listed);
+  if (isStuckImporting(listed)) throw new Error(stuckImportGuidedStep(listed));
+  if (ageState === 'unknown') throw new Error(unknownImportAgeGuidedStep(listed));
+  throw new Error(`project ${projectId} is still "Importing" — it cannot take writes until Catalyst finishes the import; re-run once the import completes`);
 }
 
 /** Retry scheduling for one run: printed lines, the injected clock when a test gives one. */

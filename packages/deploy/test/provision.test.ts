@@ -3489,6 +3489,76 @@ test('a taken project name reports the queried org before retrying with the -2 s
   rmSync(out, { recursive: true, force: true });
 });
 
+test('a name held by a still-"Importing" project is skipped for the next suffix — never POSTed into the collision', async () => {
+  const out = writeImportPlan();
+  const api = fakeImportApi();
+  const c = cap(undefined, api.fetch);
+  // The org list shows a project still mid-import under the wanted name — it
+  // cannot be deleted, so the name stays taken and the run takes the -2 name.
+  c.io.listProjects = async () => [
+    { name: 'c2c-widget', id: '777', projectType: 'Importing', createdTime: 'Oct 08, 2026 05:00 AM' },
+    { name: 'other-app', id: '778', projectType: 'Live' },
+  ];
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import', '--org', ORG, '--dc', 'in'], c.io), 0, c.err());
+  // The held name never reaches a POST — the one POST is the -2 name.
+  const posts = api.calls.filter((line) => line.startsWith('POST'));
+  assert.equal(posts.length, 1, `one import POST:\n${api.calls.join('\n')}`);
+  assert.match(c.out(), /project name "c2c-widget" is held by a project still "Importing" in org 10000000000 — trying "c2c-widget-2"/);
+  const state = readState(out);
+  assert.equal(state.learned.importName, 'c2c-widget-2');
+  assert.equal(state.learned.projectId, PROJECT);
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('a project still "Importing" with known age past the stuck bound refuses with support guidance', async () => {
+  const out = writeMiniPlan();
+  const c = cap();
+  const paths: string[] = [];
+  c.io.rest = async (call) => {
+    paths.push(`${call.method} ${call.path}`);
+    if (call.method === 'GET' && call.path === `/baas/v1/project/${PROJECT}`) {
+      return {
+        status: 200,
+        body: {
+          status: 'success',
+          data: {
+            id: PROJECT,
+            project_name: 'c2c-widget',
+            project_type: 'Importing',
+            created_time: 'Oct 08, 2026 05:00 AM',
+            env_details: [{ env_name: 'Development', env_zgid: ORG, id: ORG }],
+          },
+        },
+      };
+    }
+    return { status: 500, body: {} };
+  };
+  const code = await provisionCli(['--out', out, '--confirm', '--run', 'tables', ...SCOPE], c.io);
+  assert.equal(code, 1);
+  assert.match(c.err(), /still "Importing"/);
+  assert.match(c.err(), /check the project in the Catalyst console; if it stays Importing, contact Catalyst support/);
+  assert.deepEqual(paths, [`GET /baas/v1/project/${PROJECT}`], 'one details read — the branch stops; nothing is retried or deleted');
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('an Importing project with unknown age stops writes with neutral guidance', async () => {
+  const out = writeMiniPlan();
+  const c = cap();
+  const paths: string[] = [];
+  c.io.rest = async (call) => {
+    paths.push(`${call.method} ${call.path}`);
+    if (call.method === 'GET' && call.path === `/baas/v1/project/${PROJECT}`) {
+      return { status: 200, body: { status: 'success', data: { id: PROJECT, project_name: 'c2c-widget', project_type: 'Importing', created_time: 'unreadable', env_details: [{ env_name: 'Development', env_zgid: ORG, id: ORG }] } } };
+    }
+    return { status: 500, body: {} };
+  };
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'tables', ...SCOPE], c.io), 1);
+  assert.match(c.err(), /still importing; check its status in the Catalyst console and re-run later/);
+  assert.doesNotMatch(c.err(), /contact Catalyst support/);
+  assert.deepEqual(paths, [`GET /baas/v1/project/${PROJECT}`]);
+  rmSync(out, { recursive: true, force: true });
+});
+
 test('--next reaches the import when a plan has a stale project-creation row ahead of it', async () => {
   const out = writeImportPlan();
   const planPath = join(out, 'provision', 'plan.json');

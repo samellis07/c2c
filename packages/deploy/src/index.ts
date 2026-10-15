@@ -88,6 +88,8 @@ export { readDeployConfig, resolveProvisionScope } from './provision-config.js';
 export type { DeployConfig, ProvisionScope } from './provision-config.js';
 export { assertProjectPath, assertSlatePath, catalystRestCall, decodeRestPayload, listCatalystProjects, parseProjectList, readCliAccessToken } from './rest.js';
 export { assertProjectDetails, assertReportedScope, catalystScopeArgs, cliRenderedProjectId, scrubCatalystEnv } from './scope.js';
+export { catalystCreatedMs, importingAgeMs, importingAgeState, isStuckImporting, projectDataRecord, stuckImportGuidedStep, unknownImportAgeGuidedStep, STUCK_IMPORT_MAX_AGE_HOURS, STUCK_IMPORT_MAX_AGE_MS } from './stuck-import.js';
+export type { ListedProject } from './stuck-import.js';
 export { assertSmokeCookie, assertSmokeUrl, describeSmokeAuth, executeSmoke, formatSmokePlan, planSmoke, smokeCookieName } from './smoke.js';
 export type { SmokeAuth, SmokeFetch, SmokeFieldPlan, SmokeInputs, SmokeKind, SmokeResult, SmokeRunOptions, SmokeStep } from './smoke.js';
 export { cdpBrowser, openOnOrigin, pageFetch, runBrowserSmoke } from './browser.js';

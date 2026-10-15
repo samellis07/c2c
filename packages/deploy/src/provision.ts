@@ -1329,6 +1329,17 @@ async function runImportStep(ctx: Ctx, args: Record<string, unknown>): Promise<{
   const stuck = Object.entries(ctx.state.learned.imports ?? {}).filter(([, row]) => row.status === 'stuck');
   // Names this invocation posted: only a verifiably-ended import frees them.
   const posted: string[] = [];
+  // Names a listed project still holds as 'Importing': it cannot be deleted,
+  // so the sequence takes the next documented suffix instead of colliding on
+  // the 409. A list that cannot be read blocks nothing — a taken name still
+  // answers 409 and moves to the next suffix.
+  let heldNames: string[] = [];
+  try {
+    const listed = ctx.io.listProjects ? await ctx.io.listProjects(ctx.scope.org!) : [];
+    heldNames = listed.filter((project) => project.projectType === 'Importing').map((project) => project.name);
+  } catch {
+    heldNames = [];
+  }
   try {
     const result = await runProjectImport({
       baseUrl: catalystBaseFor(ctx.scope.dc!),
@@ -1340,6 +1351,7 @@ async function runImportStep(ctx: Ctx, args: Record<string, unknown>): Promise<{
         : {}),
       name,
       takenNames: stuck.map(([blocked]) => blocked),
+      heldNames,
       stuckIds: Object.fromEntries(stuck.flatMap(([blocked, row]) => (row.importId !== undefined ? [[blocked, row.importId]] : []))),
       // The import id is on disk before the deploy confirm, so an interrupted
       // run re-polls exactly the import it started and nothing else.

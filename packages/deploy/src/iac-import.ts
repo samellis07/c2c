@@ -191,7 +191,7 @@ export interface ImportFetch {
 
 export interface ImportAttempt {
   name: string;
-  outcome: 'imported' | 'duplicate' | 'ended';
+  outcome: 'imported' | 'duplicate' | 'ended' | 'held';
 }
 
 export interface ImportResult {
@@ -319,6 +319,12 @@ export async function runProjectImport(opts: {
   takenNames?: readonly string[];
   /** Import ids a previous stuck run recorded, by name — resolved before the first POST, whatever name this run is minting. */
   stuckIds?: Readonly<Record<string, string>>;
+  /**
+   * Names a listed project in the org still holds as 'Importing' — a project
+   * stuck mid-import cannot be deleted and keeps its name, so the sequence
+   * skips it without a POST instead of colliding on the 409.
+   */
+  heldNames?: readonly string[];
   /** Called with the import id as soon as the POST answers, before the deploy confirm and the poll. */
   onPosted?: (name: string, importId: string) => void;
   bundle: Buffer;
@@ -479,8 +485,17 @@ export async function runProjectImport(opts: {
     attempts.push({ name: blocked, outcome: 'ended' });
   }
 
+  // A listed project still in 'Importing' holds its name for as long as the
+  // import runs — it cannot be deleted, so the sequence skips the name
+  // instead of spending a POST on the 409.
+  const held = new Set((opts.heldNames ?? []).map((entry) => entry.trim().toLowerCase()));
   for (let attempt = 0; attempt < maxNames; attempt++) {
     const name = sequenceName(attempt);
+    if (held.has(name.toLowerCase())) {
+      attempts.push({ name, outcome: 'held' });
+      report(`import: project name "${name}" is held by a project still "Importing" in org ${opts.org} — trying "${sequenceName(attempt + 1)}"`);
+      continue;
+    }
     report(`import: POST /baas/v1/project/import org=${opts.org} project_name="${name}"`);
     const posted = await catalystFetch(`${base}/baas/v1/project/import`, {
       method: 'POST',

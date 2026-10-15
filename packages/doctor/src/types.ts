@@ -36,6 +36,8 @@ export interface DoctorIo {
   tokenTag?: () => Promise<string | undefined>;
   /** Forces one Catalyst CLI token refresh (nothing is kept). Used only with C2C_ALLOW_LOCAL_REFRESH=1. */
   refreshToken?: (org?: string) => Promise<unknown>;
+  /** Org project rows reduced to name/id/project_type/created_time. Tests inject this; production lists through the Catalyst CLI token (one GET /baas/v1/project). */
+  listProjects?: (org: string) => Promise<readonly { name: string; id: string; projectType?: string; createdTime?: string }[]>;
 }
 
 export type { ResolvedScopeValues as ResolvedScope } from './scope.js';

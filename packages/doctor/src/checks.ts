@@ -30,6 +30,7 @@ import type { CheckResult, DoctorIo, SpawnResult } from './types.js';
 import { invalidTokenOutput, readWithNewerToken } from '../../deploy/src/retry.js';
 import { FIDELITY_JSON, LOADER_REPORT, hasReportJson } from '../../deploy/src/csv.js';
 import { localRefreshAllowed } from '../../deploy/src/rest.js';
+import { importingAgeMs, importingAgeState, isStuckImporting, stuckImportGuidedStep, STUCK_IMPORT_MAX_AGE_HOURS, unknownImportAgeGuidedStep, type ListedProject } from '../../deploy/src/stuck-import.js';
 
 export interface DoctorContext {
   io: DoctorIo;
@@ -706,7 +707,7 @@ function readPlanInfo(ctx: DoctorContext): PlanInfo | undefined {
   }
 }
 
-function checkF(ctx: DoctorContext, ir: App | undefined, cliProjects: string[] | undefined): CheckResult[] {
+function checkF(ctx: DoctorContext, ir: App | undefined, cliProjects: string[] | undefined, projectRows: readonly ListedProject[] | undefined): CheckResult[] {
   const out: CheckResult[] = [];
   const { project } = ctx.scope;
   // The CLI project list is the only project source: the MCP project tools
@@ -814,6 +815,32 @@ function checkF(ctx: DoctorContext, ir: App | undefined, cliProjects: string[] |
     out.push(warn('D-F6', `${users} planned app users vs 25 Dev users (1000 observed; rehearse full volume outside Development)`));
   } else {
     out.push(pass('D-F6', `${users} planned app users`));
+  }
+
+  // D-F7: a target project still 'Importing' holds its name and cannot be
+  // deleted — past the stuck bound the run stops on the one guided step.
+  if (!project) {
+    out.push(skip('D-F7', 'no target project'));
+  } else if (projectRows === undefined) {
+    out.push(skip('D-F7', 'the org project list could not be read with project_type'));
+  } else {
+    const row = projectRows.find((entry) => entry.id === project);
+    if (!row) {
+      out.push(skip('D-F7', 'the target project is not in the org list'));
+    } else if (row.projectType === 'Importing') {
+      const ageState = importingAgeState(row);
+      if (ageState === 'stuck' && isStuckImporting(row)) {
+        out.push(fail('D-F7', stuckImportGuidedStep(row), 'check the project in the Catalyst console; if it stays Importing, contact Catalyst support — a stuck import cannot be deleted and holds its name'));
+      } else if (ageState === 'unknown') {
+        out.push(warn('D-F7', unknownImportAgeGuidedStep(row)));
+      } else {
+        const age = importingAgeMs(row);
+        const hours = age === undefined ? 'unknown age' : `${Math.max(0, Math.floor(age / 3600000))}h`;
+        out.push(warn('D-F7', `project ${project} ("${row.name}") is still "Importing" (${hours}; stuck past ${STUCK_IMPORT_MAX_AGE_HOURS}h)`));
+      }
+    } else {
+      out.push(pass('D-F7', 'the target project is not stuck importing'));
+    }
   }
   return out;
 }
@@ -1057,9 +1084,21 @@ export async function runDoctorChecks(ctx: DoctorContext): Promise<DoctorRun> {
   checks.push(...(await checkReact(ctx)));
 
   if (ctx.local) {
-    for (const id of ['D-F1', 'D-F2', 'D-F3', 'D-F4', 'D-F5', 'D-F6']) checks.push(localSkip(id));
+    for (const id of ['D-F1', 'D-F2', 'D-F3', 'D-F4', 'D-F5', 'D-F6', 'D-F7']) checks.push(localSkip(id));
   } else {
-    checks.push(...checkF(ctx, d1.ir, cliProjects));
+    // The org project rows carry project_type/created_time — the only signal
+    // for a project stuck 'Importing' (D-F7). One read-only GET through
+    // io.listProjects (production: the CLI token; tests inject it); an
+    // unreadable answer degrades D-F7 to a skip, never a fail.
+    let projectRows: readonly ListedProject[] | undefined;
+    if (ctx.scope.org && ctx.scope.project && ctx.io.listProjects) {
+      try {
+        projectRows = await ctx.io.listProjects(ctx.scope.org);
+      } catch {
+        projectRows = undefined;
+      }
+    }
+    checks.push(...checkF(ctx, d1.ir, cliProjects, projectRows));
   }
 
   if (ctx.evidence) {
