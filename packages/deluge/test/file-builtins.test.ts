@@ -48,6 +48,24 @@ test('file tasks with no stored bytes, type, charset, or password stay named man
   }
 });
 
+test('file-content TODOs preserve the documented Creator vs invokeUrl distinction', () => {
+  const dispatch = readFileSync(join(repoRoot(), 'packages/deluge/src/dispatch.ts'), 'utf8');
+  assert.match(dispatch, /Zoho documents getFileContent\/getFileSize\/getFileType/);
+  assert.match(dispatch, /invokeUrl FILE/);
+  assert.match(dispatch, /Creator upload fields use the separate `content` attribute/);
+  assert.match(dispatch, /bytes, byte length and MIME type are not present in the key/);
+  assert.match(dispatch, /guessing from a filename would not implement the documented API/);
+
+  const docs = JSON.parse(readFileSync(join(repoRoot(), 'packages/deluge/data/builtin-docs.json'), 'utf8')) as {
+    entries: { name: string; docUrl: string }[];
+  };
+  const urls = new Map(docs.entries.map((entry) => [entry.name, entry.docUrl]));
+  assert.equal(urls.get('getFileContent'), 'https://www.zoho.com/deluge/help/file/get-file-content.html');
+  assert.equal(urls.get('getFileSize'), 'https://www.zoho.com/deluge/help/file/get-file-size.html');
+  assert.equal(urls.get('getFileType'), 'https://www.zoho.com/deluge/help/file/get-file-type.html');
+  assert.equal(urls.get('content'), 'https://www.zoho.com/deluge/help/file-attributes/content.html');
+});
+
 test('a shimmed file builtin body does not call shim.todo', () => {
   const src = readFileSync(join(repoRoot(), 'packages/shims/src/file-values.ts'), 'utf8');
   assert.doesNotMatch(src, /shim\.todo/);
