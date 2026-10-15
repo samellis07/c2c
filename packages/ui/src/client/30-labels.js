@@ -107,6 +107,15 @@ function applyFields(formEl, form) {
             else block.appendChild(hint);
           }
           hint.textContent = String(field.help);
+          // The hint describes the field's controls, ahead of any error message.
+          const errorSlot = block.querySelector('[data-error-for]');
+          if (!hint.id && errorSlot && errorSlot.id) hint.id = errorSlot.id.replace(/-error$/, '-help');
+          if (hint.id) {
+            for (const control of block.querySelectorAll('input:not([type="hidden"]), select, textarea')) {
+              const ids = (control.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean);
+              if (!ids.includes(hint.id)) control.setAttribute('aria-describedby', [hint.id, ...ids].join(' '));
+            }
+          }
         }
         if (field.placeholder !== undefined) {
           const inputs = block.querySelectorAll('input, textarea');
