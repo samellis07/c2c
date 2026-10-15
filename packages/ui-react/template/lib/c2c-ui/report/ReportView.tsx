@@ -155,7 +155,7 @@ function ViewStub({ report }: { report: ReportSpec }) {
 }
 
 function ReportList({ report }: { report: ReportSpec }) {
-  const { api } = useEnv();
+  const { api, spec } = useEnv();
   const custom = useCustomization();
   const own = custom.reports?.[report.name];
   const [page, setPage] = useState(0);
@@ -167,6 +167,12 @@ function ReportList({ report }: { report: ReportSpec }) {
   const [attempt, setAttempt] = useState(0);
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const [actionNote, setActionNote] = useState<string | null>(null);
+  const [selectedRows, setSelectedRows] = useState<ReadonlySet<string>>(new Set());
+  const [bulkField, setBulkField] = useState('');
+  const [bulkValue, setBulkValue] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const bulkForm = report.form ? spec.forms[report.form] : undefined;
+  const bulkFields = (bulkForm?.fields ?? []).filter((field) => field.generated && !field.readonly && ['text', 'textarea', 'email', 'phone', 'number', 'decimal', 'percent', 'currency', 'date', 'datetime', 'time', 'decision', 'select', 'radio', 'url'].includes(field.widget));
   const deny = useAccessDenied();
 
   const body = useMemo(() => buildQuery(report, { page, q, filter, sort }), [report, page, q, filter, sort]);
@@ -307,6 +313,41 @@ function ReportList({ report }: { report: ReportSpec }) {
       return paint ? <span style={paint}>{text}</span> : text;
     },
   }));
+  const canBulkEdit = !!bulkForm && report.rowActions.edit && bulkFields.length > 0;
+  if (canBulkEdit) columns.unshift({
+    key: '__bulkSelect', label: 'Select', sortable: false, phone: true,
+    render: (_value: unknown, row: Row): ReactNode => {
+      const id = row.ROWID === undefined || row.ROWID === '' ? '' : String(row.ROWID);
+      if (!id) return null;
+      const checked = selectedRows.has(id);
+      return <input type="checkbox" aria-label={`Select record ${id}`} checked={checked} disabled={bulkBusy || (!checked && selectedRows.size >= 25)} onChange={(event) => setSelectedRows((prev) => {
+        const next = new Set(prev);
+        if (event.currentTarget.checked && next.size < 25) next.add(id); else next.delete(id);
+        return next;
+      })} />;
+    },
+  });
+  const applyBulk = async () => {
+    if (!bulkForm || !bulkField || !selectedRows.size || bulkBusy) return;
+    setBulkBusy(true);
+    setActionNote(null);
+    const endpoint = bulkForm.editSubmitEndpoint || bulkForm.submitEndpoint;
+    const failures: string[] = [];
+    let updated = 0;
+    for (const rowId of selectedRows) {
+      try {
+        const reply = await api.post<{ error?: string }>(endpoint, { ROWID: rowId, record: { [bulkField]: bulkValue } });
+        if (!reply.ok) failures.push(`${rowId} (${actionFailure(reply.status, reply.body?.error || 'not updated')})`);
+        else updated += 1;
+      } catch {
+        failures.push(`${rowId} (request failed)`);
+      }
+    }
+    setBulkBusy(false);
+    setSelectedRows(new Set());
+    setActionNote(failures.length ? `Updated ${updated} of ${updated + failures.length} rows. Failed rows: ${failures.join('; ')}` : `Updated ${updated} rows.`);
+    setAttempt((n) => n + 1);
+  };
   const hasForm = !!report.form;
   const editable = hasForm && report.rowActions.edit;
   const deletable = hasForm && report.rowActions.delete && report.deleteEndpoint;
@@ -405,6 +446,32 @@ function ReportList({ report }: { report: ReportSpec }) {
         ))}
         <Slot>{own?.slots?.toolbar}</Slot>
       </div>
+      {canBulkEdit ? (
+        <div className="c2c-report-tools" data-bulk-edit>
+          <label>
+            Field to edit
+            <select aria-label="Field to edit" value={bulkField} onChange={(event) => { setBulkField(event.currentTarget.value); setBulkValue(''); }}>
+              <option value="">Choose a field</option>
+              {bulkFields.map((field) => <option key={field.name} value={field.name}>{field.label}</option>)}
+            </select>
+          </label>
+          <label>
+            New value
+            {(() => {
+              const field = bulkFields.find((item) => item.name === bulkField);
+              if (field && ['select', 'radio', 'decision'].includes(field.widget)) {
+                const choices = field.widget === 'decision' ? ['true', 'false'] : field.choices ?? [];
+                return <select aria-label="New value" value={bulkValue} onChange={(event) => setBulkValue(event.currentTarget.value)}><option value="">Choose a value</option>{choices.map((value) => <option key={value} value={value}>{value}</option>)}</select>;
+              }
+              return <input aria-label="New value" type={field?.widget === 'number' ? 'number' : 'text'} value={bulkValue} onChange={(event) => setBulkValue(event.currentTarget.value)} disabled={!field} />;
+            })()}
+          </label>
+          <Button type="button" variant="secondary" size="sm" disabled={!selectedRows.size || !bulkField || bulkBusy} onClick={() => void applyBulk()}>
+            {bulkBusy ? 'Updating…' : `Edit ${selectedRows.size} selected`}
+          </Button>
+          <span aria-live="polite">Maximum 25 rows per batch.</span>
+        </div>
+      ) : null}
       {actionNote ? (
         <p className="c2c-notice" role="status">
           {actionNote}

@@ -22,8 +22,27 @@ async function loadRuntime() {
   return (await import(`data:text/javascript;base64,${Buffer.from(clientRuntimeSource()).toString('base64')}`)) as {
     renderForm(form: unknown): string;
     applyActions(actions: Record<string, unknown>[], root: unknown): string[];
+    applyBulkEdit(view: unknown, form: unknown, rowIds: string[], patch: Record<string, unknown>): Promise<{ rowId: string; ok: boolean; error?: string }[]>;
   };
 }
+
+test('bulk edit submits each selected row through its edit endpoint and reports partial failures', async () => {
+  const runtime = await loadRuntime();
+  const requests: { url: string; body: Record<string, unknown> }[] = [];
+  const view = { fetch: async (url: string, init: RequestInit) => {
+    requests.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+    return { ok: requests.length !== 2, status: requests.length === 2 ? 422 : 200, json: async () => ({ error: 'validation refused' }) };
+  } };
+  const result = await runtime.applyBulkEdit(view, { editSubmitEndpoint: '/forms/Order/edit' }, ['1', '2', '3'], { Status: 'Closed' });
+  assert.deepEqual(requests.map((request) => request.url), ['/forms/Order/edit', '/forms/Order/edit', '/forms/Order/edit']);
+  assert.deepEqual(requests.map((request) => request.body), [1, 2, 3].map((ROWID) => ({ ROWID: String(ROWID), record: { Status: 'Closed' } })));
+  assert.deepEqual(result, [
+    { rowId: '1', ok: true },
+    { rowId: '2', ok: false, error: 'validation refused' },
+    { rowId: '3', ok: true },
+  ]);
+  await assert.rejects(() => runtime.applyBulkEdit(view, { submitEndpoint: '/forms/Order' }, Array.from({ length: 26 }, (_, i) => String(i)), { Status: 'Closed' }), /1 and 25/);
+});
 
 // A test DOM has no navigation: `location.assign` and `location.reload`
 // would hit the DOM's unimplemented navigation. The window's `location` cannot
