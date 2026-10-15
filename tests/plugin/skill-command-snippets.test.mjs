@@ -66,7 +66,7 @@ test('plugin docs keep function-env.json outside c2c-out', () => {
   assert.equal(unsafePath.test('c2c-out/my-app/function-env.json'), true);
   const violations = pluginDocs.flatMap((file) => {
     const text = readFileSync(file, 'utf8');
-    return [...text.matchAll(unsafePath)].map((match) =>
+    return [...text.matchAll(new RegExp(unsafePath, 'g'))].map((match) =>
       `${path.relative(repo, file)}: ${match[0]}`
     );
   });
