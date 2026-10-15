@@ -17,7 +17,7 @@ A residual TODO item is an untranslated Deluge hole or one generated UI stub
 so an app with a stub is not deterministic.
 0 of the 10 deterministic apps still have UI TODO stubs (0 in total).
 
-The builtin catalogue lists 56 TODO entries
+The builtin catalogue lists 45 TODO entries
 (`docs/deluge-builtins.json` `counts.todo`). That is not the corpus residual counted here: one
 TODO item per untranslated construct occurrence.
 
@@ -25,15 +25,15 @@ TODO item per untranslated construct occurrence.
 |---|---:|
 | corpus apps | 67 |
 | deterministic apps | 10 (14.9%) |
-| residual TODO items | 570 |
-| distinct TODO kinds | 19 |
+| residual TODO items | 562 |
+| distinct TODO kinds | 16 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
-## Top 19 TODO kinds
+## Top 16 TODO kinds
 
 | construct | count |
 |---|---:|
-| `client-condition-uses-server` | 321 |
+| `client-condition-uses-server` | 319 |
 | `Server-side Deluge snippet requires manual translation` | 111 |
 | `client-loop-uses-server` | 86 |
 | `criteria-dynamic` | 10 |
@@ -43,15 +43,12 @@ TODO item per untranslated construct occurrence.
 | `Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)` | 4 |
 | `method:(app identifier)` | 4 |
 | `report-criteria` | 4 |
-| `method:count` | 3 |
-| `alert-in-unverified-event` | 2 |
 | `call:(app identifier)` | 2 |
 | `Rebuild the pivot table manually:(app identifier)` | 2 |
 | `report-conditional-format` | 2 |
 | `method:toLong` | 1 |
 | `sendmail-attachment:view` | 1 |
 | `task:sort` | 1 |
-| `ZML <embed> has no generated component` | 1 |
 
 ## Sole-kind unblocks
 
@@ -60,7 +57,7 @@ clears the app. The count is apps, not items.
 
 | construct | apps |
 |---|---:|
-| `Server-side Deluge snippet requires manual translation` | 10 |
+| `Server-side Deluge snippet requires manual translation` | 11 |
 | `client-condition-uses-server` | 9 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)` | 1 |
 
@@ -76,7 +73,7 @@ clears the app. The count is apps, not items.
   "kinds": [
     {
       "construct": "client-condition-uses-server",
-      "count": 321
+      "count": 319
     },
     {
       "construct": "Server-side Deluge snippet requires manual translation",
@@ -115,14 +112,6 @@ clears the app. The count is apps, not items.
       "count": 4
     },
     {
-      "construct": "method:count",
-      "count": 3
-    },
-    {
-      "construct": "alert-in-unverified-event",
-      "count": 2
-    },
-    {
       "construct": "call:(app identifier)",
       "count": 2
     },
@@ -145,32 +134,9 @@ clears the app. The count is apps, not items.
     {
       "construct": "task:sort",
       "count": 1
-    },
-    {
-      "construct": "ZML <embed> has no generated component",
-      "count": 1
     }
   ],
   "perAppConstructSets": [
-    {
-      "constructs": [
-        "alert-in-unverified-event",
-        "client-condition-uses-server",
-        "client-loop-uses-server",
-        "method:count",
-        "Server-side Deluge snippet requires manual translation",
-        "task:sort"
-      ],
-      "items": 28
-    },
-    {
-      "constructs": [
-        "alert-in-unverified-event",
-        "client-condition-uses-server",
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 4
-    },
     {
       "constructs": [
         "call:(app identifier)",
@@ -274,6 +240,15 @@ clears the app. The count is apps, not items.
         "Server-side Deluge snippet requires manual translation"
       ],
       "items": 184
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "client-loop-uses-server",
+        "Server-side Deluge snippet requires manual translation",
+        "task:sort"
+      ],
+      "items": 21
     },
     {
       "constructs": [
@@ -382,6 +357,13 @@ clears the app. The count is apps, not items.
         "Server-side Deluge snippet requires manual translation"
       ],
       "items": 3
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 4
     },
     {
       "constructs": [
@@ -551,17 +533,16 @@ clears the app. The count is apps, not items.
       "constructs": [
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 7
+      "items": 4
     },
     {
       "constructs": [
-        "Server-side Deluge snippet requires manual translation",
-        "ZML <embed> has no generated component"
+        "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 5
+      "items": 7
     }
   ],
-  "todoTotal": 570,
+  "todoTotal": 562,
   "totalApps": 67
 }
 ```
