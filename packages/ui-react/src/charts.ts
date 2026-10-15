@@ -413,10 +413,10 @@ function convert(ctx: Ctx, node: ZmlElement): PageElement[] {
       out.push({ kind: 'todo', tag: node.tag, reason: lost.reason });
     }
     for (const child of ui.children ?? []) {
-      if (child.kind === 'todo') out.push({ kind: 'todo', tag: child.tag, reason: child.todo ?? `ZML <${child.tag}> has no generated component`, ...(child.siteId ? { siteId: child.siteId } : {}) });
+      if (child.kind === 'todo' && child.siteId) out.push({ kind: 'todo', tag: child.tag, reason: child.todo ?? `ZML <${child.tag}> has no generated component`, siteId: child.siteId });
     }
     for (const reason of triggers) out.push({ kind: 'todo', tag: node.tag, reason });
-    if (raw && !html && !ui.droppedTags?.length && !ui.children?.some((child) => child.kind === 'todo')) out.push({ kind: 'todo', tag: node.tag, reason: 'the HTML snippet is built by a server-side script; it is not generated yet' });
+    if (raw && !html && !ui.droppedTags?.length && !ui.children?.some((child) => child.siteId)) out.push({ kind: 'todo', tag: node.tag, reason: 'the HTML snippet is built by a server-side script; it is not generated yet' });
     return [...out, ...kids()];
   }
   if (ui.kind === 'chart') {
