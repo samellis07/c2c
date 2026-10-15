@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { deriveIr, parse } from '../../core/src/index.js';
 import { emptyCheckpoint, migrateData, type FetchLike, type MigrateResponse } from '../src/migrate.js';
 import type { IntegrityColumn } from '../src/integrity.js';
-import { prepareColumns } from '../src/integrity.js';
+import { duplicateUniqueRefusals, mandatoryMissingRefusals, prepareCell, prepareColumns } from '../src/integrity.js';
 import { quirkRowServer } from './catalyst-row-fake.js';
 import { migrateCsv } from '../../deploy/src/csv.js';
 import { migrateSeed } from '../../deploy/src/seed.js';
@@ -580,4 +580,56 @@ test('a 19-digit source id survives the load as a string end to end', async () =
   assert.equal(store.posts[0]?.[0]?.c2c_source_id, big);
   assert.equal(store.stored.get(`Vendor\0${big}`)?.c2c_source_id, big);
   assert.equal(result.tables[0]?.mismatch, false);
+});
+
+test('mandatoryMissingRefusals names every source row missing a required cell, and nothing else', () => {
+  const columns: Record<string, IntegrityColumn[]> = {
+    Book: [
+      { name: 'Title', dataType: 'VarChar', required: true },
+      { name: 'Note', dataType: 'VarChar' },
+    ],
+    Free: [{ name: 'Anything', dataType: 'VarChar' }],
+  };
+  const refusals = mandatoryMissingRefusals(
+    [
+      { table: 'Book', rows: [{ id: 'b1', columns: { Title: 'Kept' } }, { id: 'b2', columns: { Title: '', Note: 'x' } }, { id: 'b3', columns: {} }] },
+      { table: 'Free', rows: [{ id: 'f1', columns: {} }] },
+      { table: 'Unknown', rows: [{ id: 'u1', columns: {} }] },
+    ],
+    columns,
+  );
+  assert.deepEqual(refusals, [
+    { table: 'Book', column: 'Title', sourceId: 'b2', rule: 'mandatory-missing' },
+    { table: 'Book', column: 'Title', sourceId: 'b3', rule: 'mandatory-missing' },
+  ]);
+});
+
+test('duplicateUniqueRefusals refuses each repeat of a unique value but not repeated empty cells', () => {
+  const refusals = duplicateUniqueRefusals(
+    [
+      {
+        table: 'Customer',
+        rows: [
+          { id: 'c1', columns: { Email: 'a@example.com', Code: '' } },
+          { id: 'c2', columns: { Email: 'b@example.com', Code: '' } },
+          { id: 'c3', columns: { Email: 'a@example.com' } },
+          { id: 'c4', columns: { Email: 'a@example.com' } },
+        ],
+      },
+    ],
+    { Customer: ['Email', 'Code'] },
+  );
+  assert.deepEqual(refusals, [
+    { table: 'Customer', column: 'Email', sourceId: 'c3', rule: 'duplicate-unique' },
+    { table: 'Customer', column: 'Email', sourceId: 'c4', rule: 'duplicate-unique' },
+  ]);
+});
+
+test('prepareCell returns only the rule for a refused cell, and the canonical value otherwise', () => {
+  const column: IntegrityColumn = { name: 'Code', dataType: 'VarChar', length: 3 };
+  assert.deepEqual(prepareCell(column, 'toolong'), { rule: 'text-length' });
+  assert.deepEqual(prepareCell(column, 'ok'), { value: 'ok' });
+  const date: IntegrityColumn = { name: 'Due', dataType: 'Date' };
+  assert.deepEqual(prepareCell(date, '31-Jan-2024'), { value: '2024-01-31' });
+  assert.deepEqual(prepareCell(date, 'soon'), { rule: 'date-format' });
 });

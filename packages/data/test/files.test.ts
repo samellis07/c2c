@@ -209,3 +209,16 @@ test('the Stratus REST sink PUTs without overwrite and treats 409 as an existing
   assert.throws(() => stratusObjectUrl('Bad_Bucket', 'in', 'production', 'a'), /bucket name/);
   assert.throws(() => stratusObjectUrl('c2c-demo', 'xx', 'production', 'a'), /no Stratus host/);
 });
+
+test('an object Stratus already holds counts as existing, not uploaded, and is not overwritten', async () => {
+  const sink = memorySink();
+  sink.objects.set('migrated/Order/Photo/101/a.png', { bytes: 'earlier-copy', type: 'image/png' });
+  const checkpoint = emptyFileCheckpoint();
+  const result = await migrateFileBytes({ ...base, sink, checkpoint, dryRun: false });
+  assert.equal(result.ok, true);
+  assert.equal(result.tables[0].uploaded, 1);
+  assert.equal(result.tables[0].existing, 1);
+  assert.equal(checkpoint.tables.Order.uploaded, 1);
+  assert.equal(checkpoint.tables.Order.existing, 1);
+  assert.deepEqual(sink.objects.get('migrated/Order/Photo/101/a.png'), { bytes: 'earlier-copy', type: 'image/png' });
+});
