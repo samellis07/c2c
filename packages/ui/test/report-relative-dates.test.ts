@@ -433,3 +433,38 @@ test('a report criteria Field is this week compiles and a failed criteria still 
     rmSync(built.dir, { recursive: true, force: true });
   }
 });
+
+test('a report criteria on the application owner stays counted with owner guidance', () => {
+  const body = `\tsection Main
+\t{
+\t\tform Add_Item
+\t\t{
+\t\t\tNote
+\t\t\t(
+\t\t\t\ttype = text
+\t\t\t)
+\t\t}
+\t\tlist Owner_Rows
+\t\t{
+\t\t\tshow all rows from Add_Item [Note == "a" && Members.Email == zoho.adminuserid]
+\t\t\t(
+\t\t\t\tNote
+\t\t\t)
+\t\t}
+\t\tlist Member_Rows
+\t\t{
+\t\t\tshow all rows from Add_Item [Lookup.Field]
+\t\t\t(
+\t\t\t\tNote
+\t\t\t)
+\t\t}
+\t}`;
+  const builtUi = buildUi(deriveIr(parse(`application "Demo"\n{\n${body}\n}\n`)));
+  const owner = builtUi.model.reports.find((report) => report.name === 'Owner_Rows');
+  const other = builtUi.model.reports.find((report) => report.name === 'Member_Rows');
+  assert.equal(owner?.status, 'todo');
+  assert.match(owner?.todo ?? '', /Filter not migrated/);
+  assert.match(owner?.todo ?? '', /zoho\.adminuserid \(the application owner email\)/);
+  assert.equal(other?.status, 'todo');
+  assert.doesNotMatch(other?.todo ?? '', /adminuserid/);
+});
