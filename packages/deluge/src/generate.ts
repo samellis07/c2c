@@ -30,7 +30,8 @@ import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, writeLiveSource
 import { applyFillLock, reportLock, type FillLock, type StaleFill } from './fill-todos.js';
 import { afterCommitModule, ASYNC_ON_SUCCESS_WARNING, assertAsyncSuccessDeferrable, deadLetterModule, EVENT_FUNCTION_MODULE, eventSweeperModule, successSpecs, type AsyncCandidate } from './events.js';
 import { EVENT_SWEEPER_MODULE, JOB_LIVE_IMPORTS, jobLiveHelpers, planSchedules, schedulingConfig, sweeperModule, SWEEPER_MODULE, type SchedulePlan } from './schedules.js';
-import { emittedReadOnly, emittedThisappCalls, jsIdent, reportCriteria, translate, type AlertEventClass, type CriteriaFunction, type TodoItem, type TranslateOptions, type TranslateStats } from './translate.js';
+import { unsupportedClientShims } from './client-shim.js';
+import { emittedReadOnly, emittedThisappCalls, jsIdent, reportCriteria, translate, type AlertEventClass, type ClientGap, type CriteriaFunction, type TodoItem, type TranslateOptions, type TranslateStats } from './translate.js';
 import { normType } from './types.js';
 import { mutatesParameters } from './param-mutation.js';
 import { withoutDecimalAudit } from './audit.js';
@@ -485,7 +486,8 @@ function emitFormHandler(
     addStats(stats, translated.stats);
     todos.push(...shift(translated.todos, w.deluge));
     recordAlertDiags(translated.todos, w.deluge, w, alertDiagnostics);
-    const guarded = gateAction(app, w, translated, todos);
+    countClientGaps(stats, todos, translated, w.deluge);
+    const guarded = gateAction(app, w, translated, todos, true);
     const rules = fieldRuleSource(app, w, todos);
     const systemWrite = systemWriteKind(w);
     // The stamp and row binding join only a real script: a workflow with no
@@ -494,8 +496,8 @@ function emitFormHandler(
       ? [systemStampSource(systemWrite), subformRowSource(subform, guarded.server), guarded.server].filter((part) => part.trim()).join('\n')
       : '';
     if (server) writeKinds.add(systemWrite!);
-    const prefetch = [subformRowSource(subform, translated.prefetch), translated.prefetch].filter((part) => part.trim()).join('\n');
     const clientBody = [subformRowSource(subform, guarded.client), rules, guarded.client].filter((part) => part.trim()).join('\n');
+    const prefetch = [subformRowSource(subform, translated.prefetch), translated.prefetch, zohoSlotLines(clientBody)].filter((part) => part.trim()).join('\n');
     if (!server.trim() && !prefetch.trim() && !clientBody.trim() && todos.length === todosBefore) {
       warnings.push({
         construct: 'workflow-empty',
@@ -555,6 +557,7 @@ function emitFormHandler(
             ? 'on edit'
             : 'on add';
     const extraRecordEvents = recordEvents.size > 1 ? { recordEvents: [...new Set(group.map((w) => w.recordEvent ?? ''))].sort(compareEnUs) } : {};
+
     put(
       `functions/aio/${base}.mjs`,
       aioModule({
@@ -663,6 +666,13 @@ export function schedulePlansFor(app: App): Map<Workflow, SchedulePlan> {
 
 /** The emitted placeholder for a `workflow-action-condition` gap. Shared with fill-todos. */
 export const ACTION_CONDITION_GAP = 'await shim.todo(ctx, "workflow-action-condition");';
+/**
+ * True when a form handler's `actions (criteria)` guard would gate client code
+ * the browser cannot evaluate (client-shim.ts). Shared with fill-todos.
+ */
+export function clientGuardGap(client: string, guard: string): boolean {
+  return client.trim() !== '' && unsupportedClientShims(guard).length > 0;
+}
 
 /**
  * A schedule `form = Name[criteria]` whose criteria does not translate is a
@@ -1372,6 +1382,7 @@ function emitFunction(
     slot = tr.nextSlot;
     addStats(stats, tr.stats);
     todos.push(...shift(tr.todos, d));
+    countClientGaps(stats, todos, tr, d);
     recordAlertDiags(tr.todos, d, { form: fn.form, event: fn.name, name: fn.name }, alertDiagnostics);
     return tr;
   });
@@ -1466,13 +1477,43 @@ function emitFunction(
   }
 }
 
-function emptyTranslate(): { server: string; client: string; prefetch: string; usesElement?: boolean; nextSlot: number; stats: TranslateStats; todos: TodoItem[] } {
-  return { server: '', client: '', prefetch: '', nextSlot: 0, stats: EMPTY_STATS(), todos: [] };
+function emptyTranslate(): { server: string; client: string; prefetch: string; usesElement?: boolean; nextSlot: number; stats: TranslateStats; todos: TodoItem[]; clientGaps: ClientGap[] } {
+  return { server: '', client: '', prefetch: '', nextSlot: 0, stats: EMPTY_STATS(), todos: [], clientGaps: [] };
+}
+
+/** Client statements the browser cannot run, counted where the client part ships (translate.ts gateClientShims). */
+function countClientGaps(stats: TranslateStats, todos: TodoItem[], tr: { clientGaps: readonly ClientGap[] }, raw: RawDeluge | null): void {
+  for (const gap of tr.clientGaps) {
+    if (gap.bucket !== 'todo') {
+      stats[gap.bucket]--;
+      stats.todo++;
+    }
+  }
+  todos.push(...shift(tr.clientGaps.map((gap) => gap.todo), raw));
 }
 
 function shift(items: TodoItem[], raw: RawDeluge | null): TodoItem[] {
   if (!raw) return items;
   return items.map((t) => ({ ...t, start: t.start + raw.span.start, end: t.end + raw.span.start }));
+}
+
+/**
+ * `zoho.<env>` constants in shipped client code are server-evaluated reads:
+ * the browser shim answers `shim.zoho.<env>(ctx)` from `ctx.slots["zoho.<env>"]`,
+ * so every client body that references one needs the matching line in its
+ * prefetch. `zoho.currentdate`/`currenttime` are computed on the client and
+ * take no slot.
+ */
+export const ZOHO_SLOT_ENVS = ['adminUser', 'adminUserId', 'appName', 'appUri', 'loginUser', 'loginUserId'] as const;
+
+export function zohoSlotLines(client: string): string {
+  const lines: string[] = [];
+  for (const env of ZOHO_SLOT_ENVS) {
+    if (new RegExp(`\\bshim\\.zoho\\.${env}\\s*\\(`).test(client)) {
+      lines.push(`slots["zoho.${env}"] = shim.zoho.${env}(ctx);`);
+    }
+  }
+  return lines.join('\n');
 }
 
 /** A condition that does not translate is a counted `field-rule-condition` TODO, like gateAction. */
@@ -1489,6 +1530,11 @@ function fieldRuleSource(app: App, w: Workflow, todos: TodoItem[]): string {
       if (guard.startsWith('await shim.todo(')) {
         todos.push({ construct: 'field-rule-condition', start: rule.span.start, end: rule.span.end });
         return guard;
+      }
+      // Field rules run only in the browser: a condition it cannot evaluate is a counted gap.
+      if (unsupportedClientShims(guard).length) {
+        todos.push({ construct: 'client-shim-unsupported', start: rule.span.start, end: rule.span.end });
+        return '';
       }
       return `if (${guard}) {\n${indent(lines)}\n}`;
     })
@@ -1511,6 +1557,7 @@ function gateAction(
   w: Workflow,
   translated: { server: string; client: string },
   todos: TodoItem[],
+  shipsClient = false,
 ): { server: string; client: string } {
   const condition = w.actionCondition?.trim();
   if (!condition) return { server: translated.server, client: translated.client };
@@ -1522,6 +1569,11 @@ function gateAction(
       server: translated.server.trim() ? gap : '',
       client: translated.client.trim() ? gap : '',
     };
+  }
+  if (shipsClient && clientGuardGap(translated.client, guard.code)) {
+    // The server keeps the guard; the browser cannot evaluate it, so the client part is a counted gap.
+    todos.push({ construct: 'client-shim-unsupported', start: w.span.start, end: w.span.end });
+    return { server: gate(translated.server, guard.code), client: '' };
   }
   return { server: gate(translated.server, guard.code), client: gate(translated.client, guard.code) };
 }
@@ -4053,6 +4105,7 @@ if (!prefetched || prefetched.ok !== true || prefetched.nonce !== ctx.formNonce)
   return actions;
 }
 const slots = prefetched.slots;
+ctx.slots = slots;
 `
     : '';
   const usesRoundTrip = body.includes('shim.client.element(') || body.includes('shim.client.call(');

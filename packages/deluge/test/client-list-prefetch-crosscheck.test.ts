@@ -127,6 +127,24 @@ const CASES: { name: string; src: string; record?: Record<string, unknown>; want
     src: 't = 0; for each r in Items[ID != 0] { t = t + r.Code; } if (t == 6) { alert "six"; }',
     want: ['alert six'],
   },
+  {
+    name: 'a conditional loop trimming a list by input row indexes',
+    src: 'assets = Items[ID != 0].Code.getAll(); if (assets.size() != 0) { for each r in input.Lines { if (r.Ref != null) { assets.remove(r.Ref); } } } input.Pick:ui.add(assets);',
+    record: { Lines: [{ Ref: 1 }] },
+    want: ['ui ["Pick"] [[1,3]]'],
+  },
+  {
+    name: 'a conditional loop building a client list that trims a server list',
+    src: 'sel = List(); for each row_ in input.Lines { if (row_.Ref != null) { sel.add(row_.Ref); } } l = Items[ID != 0].Code.getAll(); l.removeAll(sel); input.Pick:ui.add(l);',
+    record: { Lines: [{ Ref: 1 }, { Ref: null }, { Ref: 3 }] },
+    want: ['ui ["Pick"] [[2]]'],
+  },
+  {
+    name: 'a client-built list trimmed by its distinct values',
+    src: 'sel = List(); for each row_ in input.Lines { if (row_.Ref != null) { sel.add(row_.Ref); } } l = Items[ID != 0].Code.getAll(); l.removeAll(sel.distinct()); input.Pick:ui.add(l);',
+    record: { Lines: [{ Ref: 1 }, { Ref: 1 }, { Ref: 3 }] },
+    want: ['ui ["Pick"] [[2]]'],
+  },
 ];
 
 for (const c of CASES) {
