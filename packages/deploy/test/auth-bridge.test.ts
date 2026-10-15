@@ -143,6 +143,12 @@ test('authBridgeFiles emits the function tree and catalyst-config carries the or
   assert.deepEqual(unconfigured.deployment.env_variables, {});
 });
 
+test('authBridgeFiles can render a dry-run with an unresolved DC placeholder', () => {
+  const files = authBridgeFiles('<dc>', undefined);
+  assert.equal(files.length, 3);
+  assert.match(String(files.find((file) => file.path.endsWith('/index.js'))?.data), /connect-src/);
+});
+
 test('slateOriginOf returns https://host for a valid Slate host and undefined otherwise', () => {
   assert.equal(slateOriginOf('app-abc123.onslate.in'), 'https://app-abc123.onslate.in');
   assert.equal(slateOriginOf('https://app-abc123.onslate.in'), 'https://app-abc123.onslate.in');

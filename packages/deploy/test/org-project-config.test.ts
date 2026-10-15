@@ -126,6 +126,7 @@ function capture(opts: {
     spawn: async (_command: string, args: string[]) => {
       spawned.push({ args });
       if (args.includes('project:list')) return { code: 0, stdout: projectList('acme-app', PROJECT_ID), stderr: '' } satisfies SpawnResult;
+      if (args.includes('slate:link')) return { code: 0, stdout: 'App Url: https://acme-app-abc123.onslate.in\n', stderr: '' } satisfies SpawnResult;
       return { code: 0, stdout: '', stderr: '' } satisfies SpawnResult;
     },
     fetch: async () => {

@@ -117,6 +117,7 @@ function capture(env: NodeJS.ProcessEnv = { X_ZC_CREDENTIAL_PATH: SECRET }): {
     spawn: async (command, args, opts) => {
       spawned.push({ command, args, cwd: opts.cwd, env: opts.env });
       if (args.includes('project:list')) return { code: 0, stdout: FAITHFUL_PROJECT_LIST, stderr: '' };
+      if (args.includes('slate:link')) return { code: 0, stdout: 'App Url: https://c2c-widget-abc123.onslate.in\n', stderr: '' };
       if (args.includes('--only')) {
         return { code: 0, stdout: 'Deployed functions:c2c_api https://c2c-widget-1001.development.catalystserverless.in/server/c2c_api', stderr: '' };
       }
@@ -345,6 +346,6 @@ test('the bundle digest ignores the rewritten client config for both targets', (
   assert.ok(react.files.every((f) => !f.path.startsWith('slate/')));
   assert.deepEqual(
     react.commands.map((c) => c.id),
-    ['install', 'functions', 'ui-deps', 'ui-build', 'slate-link', 'slate'],
+    ['install', 'functions', 'ui-deps', 'ui-build', 'slate-link', 'slate', 'functions-auth'],
   );
 });
