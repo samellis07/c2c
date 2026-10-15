@@ -921,7 +921,9 @@ function parseCsvSheet(file: string, text: string): SourceSheet {
 function parseJsonSheet(file: string, text: string): SourceSheet {
   let parsed: unknown;
   try {
-    parsed = parseJsonExact(text);
+    // Creator decimal and percent cells can be JSON number tokens. Preserve
+    // their source spelling so high precision values never pass through IEEE-754.
+    parsed = parseJsonExact(text, { preserveNumberLiterals: true });
   } catch {
     throw new Error(`JSON ${file} is not JSON`);
   }
