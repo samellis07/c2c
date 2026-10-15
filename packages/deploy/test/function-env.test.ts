@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, wr
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { test } from 'node:test';
-import { applyFunctionEnvSecrets, functionIdFromList, liveFunctionVariables } from '../src/function-env.js';
-import { isSecretEnvName, secretEnvValues } from '../src/function-dir.js';
+import { applyFunctionEnvSecrets, buildFunctionEnv, functionIdFromList, liveFunctionVariables } from '../src/function-env.js';
+import { envVariables, isSecretEnvName, RESERVED_ENV_KEYS, secretEnvValues } from '../src/function-dir.js';
 import type { RestCall, RestFn } from '../src/tables.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { parse, deriveIr } from '../../core/src/index.js';
@@ -247,10 +247,9 @@ test('Acceptance 1: a fixture app with no third-party connections ends plan+prov
     const fenvPath = join(out, 'function-env.json');
     const fenv = JSON.parse(readFileSync(fenvPath, 'utf8')) as Record<string, string>;
 
-    assert.equal(fenv.PROJECT_ID, PROJECT);
-    assert.equal(fenv.CATALYST_PROJECT_ID, PROJECT);
-    assert.equal(fenv.DC, 'in');
-    assert.equal(fenv.ENV, 'Development');
+    // Catalyst refuses these names in env_variables: the generated file never carries them.
+    for (const reserved of RESERVED_ENV_KEYS) assert.equal(fenv[reserved], undefined, `${reserved} must not be generated`);
+    assert.equal(fenv.C2C_ZOHO_DC, 'in');
     assert.ok(fenv.TABLE_ID === '101' || fenv.TABLE_ITEM_ID === '101' || fenv.TABLE_ID_ITEM === '101', 'table id must be autofilled');
 
     // Human checklist must have ZERO function-env human items
@@ -489,4 +488,29 @@ test('functionIdFromList and liveFunctionVariables tolerate envelope shapes', ()
   assert.equal(functionIdFromList({ data: [] }), undefined);
   assert.deepEqual(liveFunctionVariables({ data: { configuration: { environment: { variables: { A: '1' } } } } }), { A: '1' });
   assert.throws(() => liveFunctionVariables({}), /unknown shape/);
+});
+
+// Catalyst refused a deploy whose env_variables carried these names:
+// "HTTP Error: 400, environment_variables must not contain reserved keywords".
+test('buildFunctionEnv never emits a reserved name, even from an older file', () => {
+  const env = buildFunctionEnv({
+    dc: 'in',
+    env: 'Development',
+    projectId: '1001',
+    appUrl: 'https://app.onslate.in',
+    existingEnv: { CATALYST_DC: 'in', CATALYST_ENV: 'Development', CATALYST_PROJECT_ID: '1', DC: 'in', ENV: 'Development', PROJECT_ID: '1', X_ZOHO_CATALYST_ORG_ID: '2', MY_CLIENT_SECRET: 'kept' },
+  });
+  for (const reserved of RESERVED_ENV_KEYS) assert.equal(env[reserved], undefined, reserved);
+  assert.equal(env.C2C_ZOHO_DC, 'in');
+  assert.equal(env.APP_URL, 'https://app.onslate.in');
+  assert.equal(env.MY_CLIENT_SECRET, 'kept');
+  // The DC still carries over from an older file that only had the reserved name.
+  assert.equal(buildFunctionEnv({ existingEnv: { DC: 'eu' } }).C2C_ZOHO_DC, 'eu');
+});
+
+test('envVariables refuses a reserved name and keeps a non-reserved CATALYST_ name', () => {
+  for (const reserved of RESERVED_ENV_KEYS) {
+    assert.throws(() => envVariables('live', { [reserved]: 'x' }), new RegExp(`function env: ${reserved} is a name Catalyst reserves`));
+  }
+  assert.equal(envVariables('live', { CATALYST_APP_URL: 'https://a.onslate.in' }).CATALYST_APP_URL, 'https://a.onslate.in');
 });

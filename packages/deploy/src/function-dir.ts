@@ -85,6 +85,21 @@ const NUMBER_FIELDS: readonly string[] = ['number', 'auto-number'];
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
+ * Env names Catalyst refuses in env_variables ("HTTP Error: 400,
+ * environment_variables must not contain reserved keywords"). [UNVERIFIED] No
+ * documented list exists in the facts: these are only the names with evidence —
+ * a deploy carrying the first six was refused and passed once they were removed,
+ * and X_ZOHO_CATALYST_ORG_ID per facts/functions.md. Other names are not assumed
+ * reserved. The generated function reads none of them; values it needs come from
+ * the Catalyst runtime or c2c's own C2C_* names.
+ */
+export const RESERVED_ENV_KEYS: readonly string[] = ['CATALYST_DC', 'CATALYST_ENV', 'CATALYST_PROJECT_ID', 'DC', 'ENV', 'PROJECT_ID', 'X_ZOHO_CATALYST_ORG_ID'];
+
+export function isReservedEnvKey(name: string): boolean {
+  return RESERVED_ENV_KEYS.includes(name);
+}
+
+/**
  * A --function-env name that marks a secret: token/secret/key/password/credential
  * anywhere in the name, case-insensitive. Secret VALUES are never written into
  * the generated tree — the generated project is the customer's and is often
@@ -147,6 +162,9 @@ export function envVariables(mode: 'live' | 'dry-run', env: Readonly<Record<stri
   for (const [key, value] of Object.entries(env).sort(([a], [b]) => byPath(a, b))) {
     if (!ENV_KEY.test(key)) throw new Error(`function env: ${JSON.stringify(key)} is not an environment variable name`);
     if (typeof value !== 'string') throw new Error(`function env: ${key} must be a string`);
+    if (isReservedEnvKey(key)) {
+      throw new Error(`function env: ${key} is a name Catalyst reserves and refuses in environment_variables — remove it from the --function-env file`);
+    }
     // Secret names are kept so `catalyst deploy` neither erases the variable nor
     // gains the value: the real value is POSTed to the function at deploy time.
     merged[key] = isSecretEnvName(key) ? '' : value;

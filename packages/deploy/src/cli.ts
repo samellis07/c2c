@@ -20,7 +20,7 @@ import { FIDELITY_JSON, FIDELITY_MD, LOADER_REPORT, formatCsvPlan, hasReportJson
 import { readSourceBackup } from './backup.js';
 import { ALLOWED_ENV, GuardError, assertProtectedName, assertProtectedProject, catalystProjectName, checkGuards, confirmGuardLines, planScopeLines, type GuardOk } from './guards.js';
 import { parseJsonExact } from './json-exact.js';
-import { applyAuthProvision, formatAuthProvision, slateUrlFrom } from './auth.js';
+import { APP_URL_LINE, applyAuthProvision, formatAuthProvision, slateUrlFrom } from './auth.js';
 import { slateHost } from '../../auth/src/slate-host.js';
 import { API_FUNCTION, FUNCTION_DIR, envVariables, secretEnvValues } from './function-dir.js';
 import { buildDeploy, commandLine, deployFiles, migrateCatalystJson, writeDeployTree, type DeployCommand, type DeployFile, type DeployUi } from './plan.js';
@@ -34,7 +34,7 @@ import { emptyRegistry, type ProjectRegistry } from './registry.js';
 import { catalystRestCall, listCatalystProjects, readCliAccessToken } from './rest.js';
 import { importingAgeState, isStuckImporting, projectDataRecord, stuckImportGuidedStep, unknownImportAgeGuidedStep, type ListedProject } from './stuck-import.js';
 import { spawnWithRetry, restWithRetry, type RetryOptions } from './retry.js';
-import { readSlateAppUrl, slateConfigToml } from './slate.js';
+import { readSlateAppUrl, slateAppName, slateConfigToml, slateNameProblem, waitForSlateApp } from './slate.js';
 import { applyEdits, editsPathFor, readEdits, withEdits } from './edit.js';
 import { unsupportedSchemaOps } from './delta.js';
 import { assertProjectDetails, assertReportedScope, catalystScopeArgs, scrubCatalystEnv } from './scope.js';
@@ -756,7 +756,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
   const { target, rest } = targetOf(args);
   if (!target) {
     io.stderr(
-      'usage: c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address>]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--subset-shims] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>]\n' +
+      'usage: c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address>]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--slate-name <name>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--subset-shims] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>]\n' +
         '       c2c deploy <file|dir> --backfill-shadows [--confirm] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
         '       --source-* measures the Creator data so is_mandatory/is_unique are provisioned only where the records allow it\n' +
         '       org: --org, else c2c-deploy.json, else the project registry (--projects), else the Catalyst CLI login (active_org)\n' +
@@ -782,7 +782,16 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
       }
     }
     const confirm = rest.includes('--confirm');
+    // Offline argument checks run before the guard, which can read the project
+    // list: a named --function-env file (reserved names included) and --slate-name.
+    const functionEnvFlag = flag(rest, '--function-env');
+    const namedFunctionEnv = functionEnvFlag !== undefined && !rest.includes('--backfill-shadows') ? readFunctionEnv(functionEnvFlag, confirm) : undefined;
+    const slateNameFlag = flag(rest, '--slate-name');
+    if (rest.includes('--slate-name') && slateNameFlag === undefined) throw new Error('--slate-name needs a name');
+    const slateNameError = slateNameFlag === undefined ? undefined : slateNameProblem(slateNameFlag);
+    if (slateNameError) throw new Error(`--slate-name: ${slateNameError}`);
     const guard = confirm ? await prepareGuard(target, rest, appLink, io) : planGuard(target, rest, appLink);
+    const slateName = slateNameFlag ?? slateAppName(guard.projectName);
     for (const name of ['--source-backup', '--source-csv', '--source-json']) {
       if (rest.includes(name) && flag(rest, name) === undefined) throw new Error(`${name} needs a path`);
     }
@@ -838,7 +847,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
             ...(adminRoleId !== undefined ? { roleId: adminRoleId } : {}),
           };
     let apiBase = apiBaseFlag ?? previous?.apiBase;
-    const functionEnv = readFunctionEnv(flag(rest, '--function-env'), confirm);
+    const functionEnv = namedFunctionEnv ?? readFunctionEnv(functionEnvFlag, confirm);
     const slateDomain = slateHost(slateDomainFlag ?? previous?.slateUrl);
     // The UI the Slate app serves: --ui, else c2c-deploy.json `ui`, else react.
     // The flag wins so a scripted run can override a pinned config without editing it.
@@ -884,7 +893,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     }, {
       ...(slateDomain ? { slateDomain } : {}),
       ...(admin ? { admin } : {}),
-    }, deployConfig?.mail?.testRecipients ?? deployMailRecipients(uiConfigPath), deploySource?.sourceData, ui, rest.includes('--async-on-success'), subsetShims);
+    }, deployConfig?.mail?.testRecipients ?? deployMailRecipients(uiConfigPath), deploySource?.sourceData, ui, rest.includes('--async-on-success'), subsetShims, slateName);
     const mailBlockers = bundle.mailFindings.filter((finding) => finding.severity === 'blocker');
     if (confirm && mailBlockers.length) {
       for (const finding of mailBlockers) io.stderr(`blocker ${finding.check}: ${finding.message}. ${finding.fix} ${finding.see}\n`);
@@ -989,7 +998,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         return;
       }
       try {
-        const found = await readSlateAppUrl(restFn, guard.projectId, guard.projectName, retry);
+        const found = await readSlateAppUrl(restFn, guard.projectId, slateName, retry);
         slateListed = found.listed;
         slateSeen = slateSeen || found.apps.length > 0;
         if (found.url) {
@@ -1206,7 +1215,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
       // The CLI can finish slate:link and deploy slate without printing the URL.
       if (!state.slateUrl && (command.id === 'slate' || command.id === 'slate-link')) await readBackSlate();
       // Only the slate build's own output is the live app URL in the report.
-      const built = command.id === 'slate' ? /App Url:\s*(https:\/\/[^\s"'<>]+)/i.exec(combined)?.[1] : undefined;
+      const built = command.id === 'slate' ? APP_URL_LINE.exec(combined)?.[1] : undefined;
       if (built && !slateUrl) {
         slateUrl = built;
         io.stdout(`slate url: ${built}\n`);
@@ -1226,6 +1235,19 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         if (command.id === 'slate' && /No such app with the given id/i.test(combined) && built) {
           slateNotice = `Catalyst CLI reported "404, No such app with the given id exists" after a live Slate build (${slateUrl}). The app is served at that URL; verify it in the console before sharing it.`;
           io.stdout(`${slateNotice}\n`);
+          ran.push(command);
+          state.done.push(command.id);
+          writeState(cwd, state);
+          continue;
+        }
+        // The build printed its App Url but the CLI still exited non-zero, and
+        // the Slate app list can lag the build: poll it (bounded). The app named
+        // in the list is the proof it is served; an app that never appears
+        // stays a failure.
+        if (command.id === 'slate' && built && (await waitForSlateApp(restFn, guard.projectId, slateName, built, retry))) {
+          slateNotice = `Catalyst CLI exited ${result.code} after the Slate build printed ${built}; the Slate app list names "${slateName}", so the app is served. Verify it in the console before sharing it.`;
+          io.stdout(`${slateNotice}\n`);
+          state.slateUrl = built;
           ran.push(command);
           state.done.push(command.id);
           writeState(cwd, state);
@@ -2138,7 +2160,7 @@ export async function smokeCli(args: readonly string[], io: Io, opts?: { browser
         let why: string | undefined;
         try {
           const admin = await assertLiveProject(io, guard.org, guard.projectId);
-          const read = await readSlateAppUrl(admin, guard.projectId, guard.projectName, retryLog(io));
+          const read = await readSlateAppUrl(admin, guard.projectId, slateAppName(guard.projectName), retryLog(io));
           bound = read.url;
           why = read.note;
         } catch (err) {
