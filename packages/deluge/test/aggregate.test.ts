@@ -272,9 +272,8 @@ test('count() on a fetch local is the number of matching rows', async () => {
   assert.equal(ne0none.value, 'no');
 
   const text = translate('localStringVar = "x";\nout = localStringVar.count();');
-  assert.match(text.server, /shim\.todo\(ctx, "method:count"\)/);
+  assert.match(text.server, /Array\.isArray\(localStringVar\)/);
   assert.doesNotMatch(text.server, /shim\.datastore\.aggregate/);
-  assert.ok(text.todos.some((item) => item.construct === 'method:count'));
 });
 
 test('count() on a row binding counts the fetch it was given', async () => {
@@ -321,8 +320,8 @@ test('count() on a row binding counts the fetch it was given', async () => {
   assert.equal(await run('if(faculty_Obj.count() != 0) { out = "yes"; } else { out = "no"; }', queryFor({ op: '==', field: 'ID', value: 99 })), 'no');
 
   const text = translate('localStringVar = "x";\nout = localStringVar.count();', opts);
-  assert.match(text.server, /shim\.todo\(ctx, "method:count"\)/);
+  assert.match(text.server, /Array\.isArray\(localStringVar\)/);
   const reassigned = translate('faculty_Obj = "x";\nout = faculty_Obj.count();', opts);
-  assert.match(reassigned.server, /shim\.todo\(ctx, "method:count"\)/);
+  assert.match(reassigned.server, /Array\.isArray\(faculty_Obj\)/);
   assert.doesNotMatch(reassigned.server, /shim\.datastore\.aggregate/);
 });
