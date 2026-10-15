@@ -2356,3 +2356,67 @@ test('datastore.historyRows reads only the flow history table, without the calle
   const unboundCtx = unbound.context({});
   await assert.rejects(() => unbound.shim.datastore.historyRows(unboundCtx, 'C2C_Flow_History', { op: 'true' }), /flow history table/);
 });
+
+test('shim.list.get bounds and type behaviour (mutation proof target)', () => {
+  const runtime = createRuntime({ dryRun: true });
+  const shim = runtime.shim;
+  const ctx = runtime.context({});
+
+  const emptyList = shim.list();
+  const oneList = shim.list();
+  oneList.push('a');
+  const threeList = shim.list();
+  threeList.push('a', 'b', 'c');
+
+  const cases = [-1, 0, 2, 3, 99, '0', 1.5];
+
+  const expectError = (fn: () => unknown, message: string) => {
+    let err: Error | undefined;
+    try { fn(); } catch (e: any) { err = e; }
+    assert.ok(err, 'expected an error');
+    assert.equal(err.message, message);
+  };
+
+  for (const c of cases) {
+    const msg = `Given index ${c} is greater than the list size`;
+    expectError(() => shim.list.get(emptyList, c), msg);
+    if (c === 0 || c === '0') {
+      assert.equal(shim.list.get(oneList, c), 'a');
+      assert.equal(shim.list.get(threeList, c), 'a');
+    } else if (c === 2) {
+      expectError(() => shim.list.get(oneList, c), msg);
+      assert.equal(shim.list.get(threeList, c), 'c');
+    } else {
+      expectError(() => shim.list.get(oneList, c), msg);
+      expectError(() => shim.list.get(threeList, c), msg);
+    }
+  }
+
+  // Fetched collection (Form[c].get(i) path over fake rows)
+  const form0: unknown[] = [];
+  const form1 = [shim.record.bind(ctx, {id: 1}, 'F')];
+  const form3 = [shim.record.bind(ctx, {id: 1}, 'F'), shim.record.bind(ctx, {id: 2}, 'F'), shim.record.bind(ctx, {id: 3}, 'F')];
+
+  const fcases = [0, 5];
+  for (const c of fcases) {
+    const msg = `Given index ${c} is greater than the list size`;
+    expectError(() => shim.list.get(form0, c), msg);
+    if (c === 0) {
+      assert.equal(shim.record.get(shim.list.get(form1, c), 'id'), 1);
+      assert.equal(shim.record.get(shim.list.get(form3, c), 'id'), 1);
+    } else {
+      expectError(() => shim.list.get(form1, c), msg);
+      expectError(() => shim.list.get(form3, c), msg);
+    }
+  }
+
+  // Map key
+  const map = { a: 1, b: 2 };
+  assert.equal(shim.list.get(map, 'a'), 1);
+  assert.equal(shim.list.get(map, 'c'), null);
+  assert.equal(shim.list.get(map, 0), null);
+
+  // String
+  assert.equal(shim.list.get('hello', 0), null);
+  assert.equal(shim.list.get('hello', 'e'), null);
+});
