@@ -56,6 +56,7 @@ export interface UiElement {
   droppedTags?: string[];
   /** Static CSS rules in `<style>` elements the sanitizer dropped from `html`; the page counts them as one TODO. */
   droppedStyleRules?: number;
+  staticCss?: string;
   /** Endpoint the runtime POSTs to for a server-rendered snippet (`data-snippet-src`). */
   src?: string;
   href?: string;
@@ -74,6 +75,8 @@ export interface UiElement {
   embed?: { url: string; width?: string; height?: string };
   children: UiElement[];
 }
+
+export interface ScopedStyle { css: string; droppedRules: number }
 
 /** A Creator `openUrl("#Form:X","popup window")` action lifted from a snippet. */
 export interface UiPopup {
@@ -393,6 +396,115 @@ export function cleanStyle(value: string): { style: string; dropped: string[] } 
   return { style: dropped.length ? kept.join('; ') : hasComment || hasDebris ? kept.join('; ') : source, dropped };
 }
 
+/** Scan static CSS without regex parsing/backtracking. Unsupported constructs fail closed. */
+export function carryStaticStyle(css: string, scope: string): ScopedStyle {
+  const rules: string[] = [];
+  let droppedRules = 0;
+  let uncommented = '';
+  let quote = '', comment = '', lineWhitespace = true;
+  for (let n = 0; n < css.length; n++) {
+    const ch = css[n]!;
+    if (comment === 'block') { if (ch === '*' && css[n + 1] === '/') { comment = ''; n++; uncommented += ' '; } continue; }
+    if (comment === 'line') { if (ch === '\n' || ch === '\r') { comment = ''; uncommented += ch; lineWhitespace = true; } continue; }
+    if (quote) { uncommented += ch; if (ch === '\\' && n + 1 < css.length) uncommented += css[++n]!; else if (ch === quote) quote = ''; if (ch === '\n' || ch === '\r') lineWhitespace = true; else if (!/\s/.test(ch)) lineWhitespace = false; continue; }
+    if (lineWhitespace && ch === '/' && css[n + 1] === '/') { comment = 'line'; n++; continue; }
+    if (ch === '/' && css[n + 1] === '*') { comment = 'block'; n++; continue; }
+    if (ch === '"' || ch === "'") quote = ch;
+    uncommented += ch;
+    if (ch === '\n' || ch === '\r') lineWhitespace = true;
+    else if (!/\s/.test(ch)) lineWhitespace = false;
+  }
+  css = uncommented;
+  let i = 0;
+  const skip = () => { while (i < css.length && (css[i]!.trim() === '' || css[i] === ';')) i++; };
+  const declarations = (body: string): string[] | null => {
+    const out: string[] = []; let start = 0, depth = 0, quote = '', comment = false;
+    for (let n = 0; n <= body.length; n++) {
+      const ch = body[n] ?? ';';
+      if (comment) { if (ch === '*' && body[n + 1] === '/') { comment = false; n++; } continue; }
+      if (quote) { if (ch === '\\') n++; else if (ch === quote) quote = ''; continue; }
+      if (ch === '/' && body[n + 1] === '*') { comment = true; n++; continue; }
+      if (ch === '"' || ch === "'") { quote = ch; continue; }
+      if (ch === '(') depth++; else if (ch === ')') depth--;
+      else if (ch === ';' && depth === 0) {
+        const part = body.slice(start, n).trim(); start = n + 1;
+        if (!part) continue;
+        const colon = part.indexOf(':'); if (colon <= 0) return null;
+        const cleaned = cleanStyle(part);
+        if (cleaned.dropped.length || !cleaned.style) return null;
+        out.push(cleaned.style);
+      }
+    }
+    return out.length ? out : body.trim() ? null : [];
+  };
+  while (i < css.length) {
+    skip(); if (i >= css.length) break;
+    const start = i; let quote = '', comment = false, parens = 0;
+    for (; i < css.length; i++) {
+      const ch = css[i]!;
+      if (comment) { if (ch === '*' && css[i + 1] === '/') { comment = false; i++; } continue; }
+      if (quote) { if (ch === '\\') i++; else if (ch === quote) quote = ''; continue; }
+      if (ch === '/' && css[i + 1] === '*') { comment = true; i++; continue; }
+      if (ch === '"' || ch === "'") { quote = ch; continue; }
+      if (ch === '(') parens++; else if (ch === ')') parens--;
+      else if (ch === '{' && parens === 0) break;
+      else if (ch === ';' && parens === 0 && css.slice(start, i).trim().startsWith('@')) break;
+      else if (ch === '}' && parens === 0) break;
+    }
+    if (i >= css.length || css[i] !== '{') {
+      const statementEnd = css.indexOf(';', i);
+      if (css.slice(start, i).trim().startsWith('@') && statementEnd >= 0) { droppedRules++; i = statementEnd + 1; continue; }
+      droppedRules++; break;
+    }
+    const head = css.slice(start, i).trim();
+    let depth = 1, end = i + 1; quote = ''; comment = false;
+    for (; end < css.length && depth; end++) {
+      const ch = css[end]!;
+      if (comment) { if (ch === '*' && css[end + 1] === '/') { comment = false; end++; } continue; }
+      if (quote) { if (ch === '\\') end++; else if (ch === quote) quote = ''; continue; }
+      if (ch === '/' && css[end + 1] === '*') { comment = true; end++; continue; }
+      if (ch === '"' || ch === "'") { quote = ch; continue; }
+      if (ch === '{') depth++; else if (ch === '}') depth--;
+    }
+    if (depth) { droppedRules++; break; }
+    const body = css.slice(i + 1, end - 1); i = end;
+    if (head.startsWith('@media') && (head.length === 6 || /\s/.test(head[6]!))) {
+      const condition = head.slice(6).trim();
+      const lower = condition.toLowerCase();
+      let conditionSafe = !!condition && !lower.includes('url') && !lower.includes('expression');
+      let conditionDepth = 0;
+      for (const ch of condition) {
+        if (/[a-zA-Z0-9\s():.,%/-]/.test(ch)) {
+          if (ch === '(') conditionDepth++;
+          else if (ch === ')' && --conditionDepth < 0) conditionSafe = false;
+        } else conditionSafe = false;
+      }
+      if (conditionDepth !== 0) conditionSafe = false;
+      if (!conditionSafe) { droppedRules++; continue; }
+      const nested = carryStaticStyle(body, scope);
+      droppedRules += nested.droppedRules;
+      if (nested.css) rules.push(`@media ${condition}{${nested.css}}`);
+      continue;
+    }
+    if (head.startsWith('@')) { droppedRules++; continue; }
+    const decl = declarations(body);
+    const sels: string[] = [];
+    let selectorStart = 0, selectorDepth = 0, selectorQuote = '', selectorSyntaxOkay = true;
+    for (let n = 0; n <= head.length; n++) {
+      const ch = head[n] ?? ',';
+      if (selectorQuote) { if (ch === '\\') n++; else if (ch === selectorQuote) selectorQuote = ''; continue; }
+      if (ch === '"' || ch === "'") selectorQuote = ch;
+      else if (ch === '(' || ch === '[') selectorDepth++;
+      else if (ch === ')' || ch === ']') { selectorDepth--; if (selectorDepth < 0) selectorSyntaxOkay = false; }
+      else if (ch === ',' && selectorDepth === 0) { sels.push(head.slice(selectorStart, n).trim()); selectorStart = n + 1; }
+    }
+    const safeSelector = (s: string) => !!s && !/[{};@\\<]/.test(s) && !/url\s*\(|expression\s*\(/i.test(s);
+    if (!decl || !selectorSyntaxOkay || selectorDepth !== 0 || selectorQuote || !sels.every(safeSelector)) { droppedRules++; continue; }
+    rules.push(`${sels.map((s) => `${scope} ${s}`).join(',')}{${decl.join(';')}}`);
+  }
+  return { css: rules.join('\n'), droppedRules };
+}
+
 /**
  * One inline-style or exported presentation value: keywords, numbers,
  * lengths, `#hex`, the allowed functions with numeric arguments, `calc()`
@@ -404,6 +516,7 @@ export function cleanStyle(value: string): { style: string; dropped: string[] } 
 function safeStyleValue(raw: string, prop?: string): boolean {
   let text = String(raw ?? '').trim();
   if (!text || text.length > STYLE_TEXT_MAX || /[;\\@]/.test(text) || text.includes('/*')) return false;
+  if (!text || /[;\\@<>]/.test(text) || text.includes('/*')) return false;
   if (prop === 'font-family') text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
   if (/['"]/.test(text)) return false;
   const flat = flatCss(text);
@@ -550,6 +663,25 @@ export function droppedStyleRules(raw: string): number {
   };
   walk(parsed.documentElement);
   return rules;
+}
+
+export function carriedStyleRules(raw: string, scope: string): ScopedStyle {
+  if (!/<\s*style/i.test(String(raw ?? ''))) return { css: '', droppedRules: 0 };
+  const win = domWindow();
+  const parsed = new win.DOMParser().parseFromString(String(raw ?? ''), 'text/html');
+  const carried: string[] = []; let droppedRules = 0;
+  const walk = (node: DomNode) => {
+    if (node.nodeType !== 1) return;
+    if ((node.tagName || '').toLowerCase() === 'style') {
+      const result = carryStaticStyle((node.textContent ?? '').replace(/<%[\s\S]*?%>/g, ' '), scope);
+      if (result.css) carried.push(result.css);
+      droppedRules += result.droppedRules;
+      return;
+    }
+    for (const child of listOf(node.childNodes)) walk(child);
+  };
+  walk(parsed.documentElement);
+  return { css: carried.join('\n'), droppedRules };
 }
 
 /** The TODO reason and manual step for a page's dropped `<style>` CSS. */
@@ -752,7 +884,7 @@ export function elementFromZml(
       const id = env ? `s${env.seq ? env.seq.n++ : 0}` : 's0';
       const compiled = env ? compileHtmlpage(env.app, env.page, name ?? tag, decoded, { id }) : null;
       const styleRules = droppedStyleRules(decoded);
-      const lostCss = styleRules ? { droppedStyleRules: styleRules } : {};
+      const lostCss = styleRules ? { droppedStyleRules: styleRules, staticCss: decoded } : {};
       const actionItems = imageActionTodos(imageActions, compiled && !compiled.ok ? compiled.reason : undefined);
       if (compiled?.ok && compiled.staticOnly) {
         return { tag, kind, ...(name ? { name } : {}), html: compiled.html ?? '', ...lostCss, ...(compiled.droppedTags?.length ? { droppedTags: compiled.droppedTags } : {}), ...(popups.length ? { popups } : {}), children: [...actionItems, ...children] };
@@ -801,7 +933,7 @@ export function elementFromZml(
     const droppedTags: string[] = [];
     const html = sanitizeSnippet(source, undefined, droppedTags);
     const styleRules = droppedStyleRules(source);
-    const lostCss = styleRules ? { droppedStyleRules: styleRules } : {};
+    const lostCss = styleRules ? { droppedStyleRules: styleRules, staticCss: source } : {};
     const actionItems = imageActionTodos(imageActions);
     return {
       tag,

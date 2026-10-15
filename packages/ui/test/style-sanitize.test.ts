@@ -14,6 +14,7 @@ import {
   stripStyleComments as printStripStyleComments,
 } from '../../shims/src/print-template.js';
 import { droppedStyleRules, sanitizeSnippet as buildSanitize } from '../src/pages.js';
+import { carryStaticStyle, droppedStyleRules, sanitizeSnippet as buildSanitize } from '../src/pages.js';
 
 // Inline style attributes are checked declaration by declaration, by two
 // copies of the same rule: the generator's sanitizer and the browser
@@ -356,24 +357,33 @@ function pageModel(snippets: string[]) {
   const elements = model.pages[0]?.elements.flatMap(function all(el): typeof model.pages[0]['elements'] {
     return [el, ...el.children.flatMap(all)];
   }) ?? [];
-  return { model, html: elements.filter((el) => el.kind === 'html'), styleTodos: model.todos.filter((item) => item.name === 'Home.style') };
+  return { model, html: elements.filter((el) => el.kind === 'html'), styleTodos: model.todos.filter((item) => item.name === 'Home.style'), scopedCss: model.pages[0]?.scopedCss ?? '' };
 }
 
-test('static <style> CSS dropped from page snippets is one counted manual step per page', () => {
-  const { html, styleTodos } = pageModel([
+test('static <style> CSS is carried under the page scope and only rejected rules count', () => {
+  const { html, styleTodos, scopedCss } = pageModel([
     '<style>.card { color: red; } /* a { } */ .title { font-weight: 700 }</style><div class="card">Hi</div>',
     '<div><style>@media (max-width: 600px) { .card { color: blue } }</style><p>Ok</p></div>',
   ]);
-  assert.equal(styleTodos.length, 1, JSON.stringify(styleTodos));
-  assert.equal(styleTodos[0].area, 'zml');
-  assert.match(styleTodos[0].reason, /drops 3 static style rules/);
-  assert.deepEqual(styleTodos[0].manualReasons, ['sanitizer-loss']);
-  assert.match(styleTodos[0].manualStep ?? '', /^page Home: The sanitizer drops 3 static style rules in <style> elements\./);
+  assert.equal(styleTodos.length, 0, JSON.stringify(styleTodos));
+  assert.match(scopedCss, /^\[data-page="Home"\] \.card\{color: red\}/);
+  assert.match(scopedCss, /\.title\{font-weight: 700\}/);
+  assert.match(scopedCss, /@media \(max-width: 600px\)\{\[data-page="Home"\] \.card\{color: blue\}\}/);
   assert.equal(html.length, 2);
   for (const el of html) {
-    assert.doesNotMatch(el.html ?? '', /<style|color|font-weight/i);
+    assert.doesNotMatch(el.html ?? '', /<style/i);
     assert.equal('droppedStyleRules' in el, false, 'the count stays off the generated element');
   }
+});
+
+test('CSS tokenizer scopes selectors and refuses fetches, unsafe selectors, malformed declarations and at-rules once each', () => {
+  const result = carryStaticStyle('.x, .y:hover { color: red; width: 80% } @import "x"; .z{background:url(https://x)} </style><script>{', '[data-page="Home"]');
+  assert.equal(result.css, '[data-page="Home"] .x,[data-page="Home"] .y:hover{color: red;width: 80%}');
+  assert.equal(result.droppedRules, 3);
+  assert.deepEqual(carryStaticStyle('.x{color:red}', '[data-page="a"]'), { css: '[data-page="a"] .x{color:red}', droppedRules: 0 });
+  const responsive = carryStaticStyle('@media (min-width: 768px) { .x > .y { width: 20% } }', '[data-page="a"]');
+  assert.deepEqual(responsive, { css: '@media (min-width: 768px){[data-page="a"] .x > .y{width: 20%}}', droppedRules: 0 });
+  assert.equal(carryStaticStyle('@media (url(x)) {.x{color:red}}', '[data-page="a"]').droppedRules, 1);
 });
 
 test('dangerous <style> CSS is dropped whole and counted', () => {
@@ -415,13 +425,13 @@ test('a page snippet lists each removed script, style, SVG, and template tag onc
   ]);
 });
 
-test('a page snippet with static <style> CSS counts style rules and does not double-count the <style> element', () => {
+test('a page snippet with carried static <style> CSS suppresses the generic style TODO', () => {
   const zml = `<zml><dsp id='html_snippet'><![CDATA[<script>bad()</script><style>.x{}</style>]]></dsp></zml>`;
   const app: App = deriveIr(parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${zml.replace(/"/g, '\\"')}"\n\t\t}\n\t}\n}\n`));
   const model = buildModel(app);
   const styleTodos = model.todos.filter((t) => t.name === 'Home.style');
-  assert.equal(styleTodos.length, 1);
-  assert.equal(styleTodos[0].reason, 'Static <style> CSS not carried over: the page sanitizer drops 1 static style rule');
+  assert.equal(styleTodos.length, 0);
+  assert.match(model.pages[0]?.scopedCss ?? '', /\[data-page="Home"\] \.x\{\}/);
   assert.equal(model.todos.filter((t) => t.reason === 'The <style> element is removed from this page snippet by the sanitizer').length, 0, 'no double count of <style>');
   assert.equal(model.todos.filter((t) => t.reason.includes('<script>')).length, 1);
 });

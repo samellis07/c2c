@@ -377,7 +377,7 @@ test('a snippet popup keeps its trigger words: a link plus a TODO, never a silen
   assert.ok(page.todos.some((todo) => /opened on its own/.test(todo)), 'the lost triggers are listed with the page TODOs');
 });
 
-test('the React page spec lists distinct dropped snippet tags as page TODOs', () => {
+test('the React page spec lists distinct dropped snippet tags and carries safe page CSS', () => {
   const zml = `<zml><dsp id='snippet'><![CDATA[<script>bad()</script><svg><script>nested()</script></svg><style>.x{}</style><template><b>hidden</b></template>]]></dsp></zml>`;
   const page = reactAppSpec(nitApp(zml)).pages?.Dashboard;
   assert.ok(page, 'the page is in the spec');
@@ -385,17 +385,17 @@ test('the React page spec lists distinct dropped snippet tags as page TODOs', ()
     '<dsp>: The <script> element is removed from this page snippet by the sanitizer',
     '<dsp>: The <svg> element is removed from this page snippet by the sanitizer',
     '<dsp>: The <template> element is removed from this page snippet by the sanitizer',
-    '<dsp>: Static <style> CSS not carried over: the page sanitizer drops 1 static style rule',
   ]);
+  assert.match(page.scopedCss ?? '', /\[data-page="Dashboard"\] \.x\{\}/);
 });
 
-test('React and vanilla report the same static style rule TODO', () => {
+test('React and vanilla carry the same safe static style rules', () => {
   const zml = `<zml><dsp id='snippet'><![CDATA[<style>.x{color:red}</style><p>Kept</p>]]></dsp></zml>`;
   const app = nitApp(zml);
-  const react = reactAppSpec(app).pages?.Dashboard?.todos.find((entry) => entry.includes('Static <style> CSS'));
-  const vanilla = generateUi(app).model.todos.find((entry) => entry.reason.includes('Static <style> CSS'))?.reason;
-  assert.equal(react, '<dsp>: Static <style> CSS not carried over: the page sanitizer drops 1 static style rule');
-  assert.equal(vanilla, 'Static <style> CSS not carried over: the page sanitizer drops 1 static style rule');
+  const reactPage = reactAppSpec(app).pages?.Dashboard;
+  const vanilla = generateUi(app).model.pages[0]?.scopedCss;
+  assert.match(reactPage?.scopedCss ?? '', /\[data-page="Dashboard"\] \.x\{color:red\}/);
+  assert.equal(reactPage?.scopedCss, vanilla);
 });
 
 test('React retains identical ExecuteFunction button sites separately', () => {
