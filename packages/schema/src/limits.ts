@@ -10,6 +10,7 @@ export type LimitAction = 'split' | 'stage' | 'blocker' | 'report';
 
 export interface CatalystLimit {
   id: string;
+  label: string;
   /** Null when no number is stated. */
   value: number | null;
   unit: string;
@@ -38,6 +39,7 @@ export const TABLE_NAME_LENGTH_UNVERIFIED = 'table-name-length-unverified';
 export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   {
     id: 'datastore.columns_per_table',
+    label: 'Columns per table (generation cap)',
     value: 250,
     unit: 'columns',
     verified: false,
@@ -47,6 +49,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'datastore.columns_per_table_default',
+    label: 'Columns per table (default)',
     value: 100,
     unit: 'columns',
     verified: false,
@@ -56,6 +59,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'datastore.columns_per_table_ceiling',
+    label: 'Columns per table (stated ceiling)',
     value: 325,
     unit: 'columns',
     verified: false,
@@ -64,6 +68,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'datastore.text_columns',
+    label: 'Text-type columns per table',
     value: 130,
     unit: 'columns',
     verified: false,
@@ -73,6 +78,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'datastore.varchar_chars',
+    label: 'Varchar length (stated)',
     value: 250,
     unit: 'characters',
     verified: false,
@@ -82,6 +88,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'datastore.text_chars',
+    label: 'Text length',
     value: 10000,
     unit: 'characters',
     verified: false,
@@ -90,6 +97,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'datastore.unique_text_columns',
+    label: 'Unique varchar columns',
     value: 2,
     unit: 'columns',
     verified: false,
@@ -99,6 +107,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'datastore.fk_columns',
+    label: 'Foreign keys per table',
     value: 15,
     unit: 'columns',
     verified: false,
@@ -108,6 +117,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'datastore.tables_per_org',
+    label: 'Tables per organisation',
     value: null,
     unit: 'tables',
     verified: false,
@@ -117,6 +127,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'zcql.joins',
+    label: 'ZCQL JOINs',
     value: 4,
     unit: 'joins',
     verified: false,
@@ -126,6 +137,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'zcql.select_columns',
+    label: 'ZCQL SELECT columns',
     value: 30,
     unit: 'columns',
     verified: false,
@@ -135,6 +147,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'datastore.write_requests_per_minute',
+    label: 'Data Store write rate',
     value: 100,
     unit: 'requests/minute',
     verified: false,
@@ -144,6 +157,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'datastore.rows_per_table_dev',
+    label: 'Development row cap per table',
     value: null,
     unit: 'rows',
     verified: false,
@@ -153,6 +167,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'datastore.concurrency_dev',
+    label: 'Data Store concurrency (Development)',
     value: 15,
     unit: 'concurrent requests',
     verified: false,
@@ -161,6 +176,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'function.concurrency_dev',
+    label: 'Function concurrency (Development)',
     value: 10,
     unit: 'concurrent executions',
     verified: false,
@@ -170,6 +186,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'url.throttle',
+    label: 'URL throttle',
     value: null,
     unit: 'requests',
     verified: false,
@@ -178,6 +195,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'function.timeout_seconds',
+    label: 'Function timeout',
     value: 30,
     unit: 'seconds',
     verified: false,
@@ -186,6 +204,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'job.timeout_minutes',
+    label: 'Job timeout',
     value: 15,
     unit: 'minutes',
     verified: false,
@@ -194,6 +213,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'api.calls_dev',
+    label: 'Development API calls',
     value: 200000,
     unit: 'API calls',
     verified: false,
@@ -203,6 +223,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: 'bulk.rows_per_call',
+    label: 'Bulk rows per call',
     value: null,
     unit: 'rows',
     verified: false,
@@ -211,6 +232,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
   },
   {
     id: TABLE_NAME_LENGTH_UNVERIFIED,
+    label: 'Data Store table name length',
     value: null,
     unit: 'characters',
     verified: false,

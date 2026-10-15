@@ -188,12 +188,14 @@ Values below are [UNVERIFIED] unless the registry says otherwise. The schema reg
 | Text-type columns per table | `datastore.text_columns` | 130 | columns | false |
 | Varchar length (stated) | `datastore.varchar_chars` | 250 | characters | false |
 | Text length | `datastore.text_chars` | 10000 | characters | false |
-| Unique text columns | `datastore.unique_text_columns` | 2 | columns | false |
+| Unique varchar columns | `datastore.unique_text_columns` | 2 | columns | false |
 | Foreign keys per table | `datastore.fk_columns` | 15 | columns | false |
 | Tables per organisation | `datastore.tables_per_org` | unstated | tables | false |
 | ZCQL JOINs | `zcql.joins` | 4 | joins | false |
 | ZCQL SELECT columns | `zcql.select_columns` | 30 | columns | false |
 | Data Store write rate | `datastore.write_requests_per_minute` | 100 | requests/minute | false |
+| Development row cap per table | `datastore.rows_per_table_dev` | unstated | rows | false |
+| Development API calls | `api.calls_dev` | 200000 | API calls | false |
 | Data Store concurrency (Development) | `datastore.concurrency_dev` | 15 | concurrent requests | false |
 | Function concurrency (Development) | `function.concurrency_dev` | 10 | concurrent executions | false |
 | Data Store table name length | `table-name-length-unverified` | unstated | characters | false |

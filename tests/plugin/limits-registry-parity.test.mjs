@@ -11,29 +11,9 @@ const facts = readFileSync(path.join(repo, 'plugin/references/facts/limits.md'),
 const schemaSkill = readFileSync(path.join(repo, 'plugin/skills/c2c-schema-and-data/SKILL.md'), 'utf8');
 const verifySkill = readFileSync(path.join(repo, 'plugin/skills/c2c-verify-and-cutover/SKILL.md'), 'utf8');
 
-// The registry does not carry the docs' human-readable label, so the expected
-// label for every key is stated here and compared like value, unit, verified.
-const EXPECTED_LABELS = new Map([
-  ['datastore.columns_per_table', 'Columns per table (generation cap)'],
-  ['datastore.columns_per_table_default', 'Columns per table (default)'],
-  ['datastore.columns_per_table_ceiling', 'Columns per table (stated ceiling)'],
-  ['datastore.text_columns', 'Text-type columns per table'],
-  ['datastore.varchar_chars', 'Varchar length (stated)'],
-  ['datastore.text_chars', 'Text length'],
-  ['datastore.unique_text_columns', 'Unique text columns'],
-  ['datastore.fk_columns', 'Foreign keys per table'],
-  ['datastore.tables_per_org', 'Tables per organisation'],
-  ['zcql.joins', 'ZCQL JOINs'],
-  ['zcql.select_columns', 'ZCQL SELECT columns'],
-  ['datastore.write_requests_per_minute', 'Data Store write rate'],
-  ['datastore.concurrency_dev', 'Data Store concurrency (Development)'],
-  ['function.concurrency_dev', 'Function concurrency (Development)'],
-  ['table-name-length-unverified', 'Data Store table name length'],
-  ['url.throttle', 'URL throttle'],
-  ['function.timeout_seconds', 'Function timeout'],
-  ['job.timeout_minutes', 'Job timeout'],
-  ['bulk.rows_per_call', 'Bulk rows per call'],
-]);
+// Every registry entry in CATALYST_LIMITS carries its canonical label, so the
+// expected label map is derived from the schema registry rather than copied.
+const EXPECTED_LABELS = new Map(CATALYST_LIMITS.map((limit) => [limit.id, limit.label]));
 
 function parseLimitTable(markdown) {
   const rows = new Map();
@@ -57,11 +37,17 @@ function assertRegistryParity(markdown) {
   }]));
   assert.deepEqual([...documented.keys()].sort(), [...expected.keys()].sort(), 'document every registry key exactly once');
   assert.deepEqual([...EXPECTED_LABELS.keys()].sort(), [...expected.keys()].sort(), 'state an expected label for every registry key');
-  for (const [key, value] of expected) assert.deepEqual(documented.get(key), value, `documented metadata drift for ${key}`);
+  for (const [key, value] of expected) {
+    assert.ok(typeof value.label === 'string' && value.label.trim().length > 0, `missing label on registry key ${key}`);
+    assert.deepEqual(documented.get(key), value, `documented metadata drift for ${key}`);
+  }
 }
 
 test('documented limit values, units, and verified flags match the schema registry', () => {
   assertRegistryParity(docs);
+  const uniqueHeading = facts.match(/^### (Unique varchar columns)\n\nRule: At most 2 columns per table may be data_type varchar with is_unique true \[TESTED\]\.[^\n]*A text column cannot be unique\./m);
+  assert.ok(uniqueHeading, 'facts/limits.md must record the [TESTED] Unique varchar columns heading and rule');
+  assert.equal(EXPECTED_LABELS.get('datastore.unique_text_columns'), uniqueHeading[1]);
 });
 
 test('RED: changing a documented registry value fails parity', () => {
@@ -72,6 +58,8 @@ test('RED: changing a documented registry value fails parity', () => {
 test('RED: changing a documented registry label fails parity', () => {
   const mutated = docs.replace('| ZCQL SELECT columns | `zcql.select_columns` |', '| ZCQL SELECT projection | `zcql.select_columns` |');
   assert.throws(() => assertRegistryParity(mutated), /documented metadata drift for zcql\.select_columns/);
+  const mislabelled = docs.replace('| Unique varchar columns | `datastore.unique_text_columns` |', '| Unique text columns | `datastore.unique_text_columns` |');
+  assert.throws(() => assertRegistryParity(mislabelled), /documented metadata drift for datastore\.unique_text_columns/);
 });
 
 test('RED: deleting a registry row fails parity', () => {
@@ -83,7 +71,7 @@ test('the facts and skills reflect the current limit behavior', () => {
   assert.match(facts, /warns when the estimate is at or above 200000/);
   assert.match(facts, /mover does not pace writes or retry using Retry-After/);
   assert.match(facts, /at most 30 columns/);
-  assert.match(schemaSkill, /columns ≤ 250 per table/);
+  assert.match(schemaSkill, /the raised cap is 250 \[UNVERIFIED\]/);
   assert.match(schemaSkill, /projection ≤ 30 columns/);
   assert.match(verifySkill, /30 columns \(`zcql\.select_columns`/);
 });
