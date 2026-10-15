@@ -184,7 +184,7 @@ export function computeShimModules(generated: readonly FunctionFile[], dir = shi
   for (const name of allShimNames) {
     const content = readFileSync(join(dir, name), 'utf8');
     const matches = [...content.matchAll(/from\s+['"]\.\/([a-z0-9\-]+)(?:\.js)?['"]/g)];
-    shimDeps[name] = [...new Set(matches.map((m) => `${m[1]}.js`))];
+    shimDeps[name] = [...new Set(matches.map((m) => `${m[1]}.js`))].sort();
   }
 
   const directRoots = new Set<string>();
@@ -247,7 +247,7 @@ export function computeShimModules(generated: readonly FunctionFile[], dir = shi
 
   // Transitive closure
   const closure = new Set<string>(directRoots);
-  const queue = [...directRoots];
+  const queue = [...directRoots].sort();
   while (queue.length > 0) {
     const cur = queue.shift()!;
     const deps = shimDeps[cur] ?? [];
