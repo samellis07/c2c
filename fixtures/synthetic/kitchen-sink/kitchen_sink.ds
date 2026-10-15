@@ -330,6 +330,16 @@ application "Kitchen_Sink_Studio"
 				Session_Date descending
 			)
 		}
+		pivotchart Bookings_By_Status
+		{
+			displayName = "Bookings by Status"
+			show all rows from Booking
+			(
+				Status as "Status"
+				Headcount as "Headcount"
+				Session_Date as "Session Date"
+			)
+		}
 		list All_Rooms
 		{
 			displayName = "All Rooms"
@@ -617,6 +627,7 @@ application "Kitchen_Sink_Studio"
 					{
 						All_Bookings = {"View","Edit"}
 						Held_Bookings = {"View"}
+						Bookings_By_Status = {"View"}
 					}
 				}
 			}
@@ -649,6 +660,9 @@ application "Kitchen_Sink_Studio"
 				{
 				}
 				list Held_Bookings
+				{
+				}
+				pivotchart Bookings_By_Status
 				{
 				}
 				page Front_Desk

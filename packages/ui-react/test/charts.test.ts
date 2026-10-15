@@ -234,7 +234,22 @@ test('the built app draws the dashboard from the report rows', { skip: haveBuild
     ];
     const calls: string[] = [];
     (dom.window as unknown as { fetch: unknown }).fetch = async (url: string, init: { body: string }) => {
-      calls.push(`${url} ${JSON.parse(init.body).page}`);
+      const body = JSON.parse(init.body) as { op?: string; page?: number; group?: string; measures?: { fn: string; field: string }[] };
+      calls.push(`${url} ${body.op === 'aggregate' ? 'aggregate' : body.page}`);
+      if (body.op === 'aggregate') {
+        // The same fold the report endpoint does: group, then count/sum per bucket.
+        const groups = new Map<string, { key: string; values: number[] }>();
+        for (const row of rows as Record<string, unknown>[]) {
+          const key = String(row[body.group ?? ''] ?? '');
+          const bucket = groups.get(key) ?? { key, values: (body.measures ?? []).map(() => 0) };
+          for (const [i, m] of (body.measures ?? []).entries()) bucket.values[i]! += m.fn === 'count' ? 1 : Number(row[m.field]) || 0;
+          groups.set(key, bucket);
+        }
+        return new Response(JSON.stringify({ op: 'aggregate', buckets: [...groups.values()], scanned: rows.length, truncated: false }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       return new Response(JSON.stringify({ rows }), { status: 200, headers: { 'content-type': 'application/json' } });
     };
     const runtime = readdirSync(join(out, 'dist/assets')).find((name) => name.startsWith('runtime.'))!;
@@ -254,9 +269,12 @@ test('the built app draws the dashboard from the report rows', { skip: haveBuild
     assert.equal(page.querySelector('[data-page] details.todo')?.getAttribute('data-todo-count'), '2');
     assert.ok(page.querySelector('[data-embed="report"] [data-report="All_Orders"]'), 'the report embed shows the records');
     assert.equal(page.querySelector('a.c2c-page-button')?.getAttribute('href'), '#/form/Add_Order');
-    // The metric and the donut share one read of All_Orders; the embedded list reads its own page.
+    // The metric and the embedded list read All_Orders rows; the donut and the
+    // chart report fold server-side through the aggregate op instead.
     assert.equal(calls.filter((call) => call === '/reports/All_Orders 0').length, 2);
-    assert.equal(calls.filter((call) => call === '/reports/Orders_Chart 0').length, 1);
+    assert.equal(calls.filter((call) => call === '/reports/All_Orders aggregate').length, 1);
+    assert.equal(calls.filter((call) => call === '/reports/Orders_Chart aggregate').length, 1);
+    assert.equal(calls.filter((call) => call === '/reports/Orders_Chart 0').length, 0);
   } finally {
     rmSync(out, { recursive: true, force: true });
   }

@@ -1103,6 +1103,124 @@ function dateFieldKinds(app: App, formName: string): Record<string, 'date' | 'da
   return out;
 }
 
+/**
+ * The server-side chart fold emitted into every report function: the same
+ * bucketing the browser chart applies (dates group by calendar day, blanks
+ * fold under the empty key, two-decimal sums), so a chart report and a page
+ * chart read one bounded aggregate instead of every row.
+ */
+const aggregateHelpers = `const AGGREGATE_ROW_CAP = ${LIMITS.zcqlRowsPerQuery * 10};
+const AGG_PAGE = ${LIMITS.zcqlRowsPerQuery};
+const AGG_IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const AGG_MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+// The text a value is grouped and compared by (mirrors the client fold).
+function aggText(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (Array.isArray(value)) return value.map(aggText).join(", ");
+  if (typeof value === "object") {
+    for (const key of ["display_value", "zc_display_value", "label", "value", "key"]) {
+      const inner = value[key];
+      if (typeof inner === "string" || typeof inner === "number") return String(inner);
+    }
+    return Object.values(value).map(aggText).filter(Boolean).join(" ");
+  }
+  return String(value).trim();
+}
+
+// A number from a stored value: numbers, numeric strings with group separators or a currency sign.
+function aggNumber(value) {
+  if (typeof value === "number") return value;
+  if (typeof value === "boolean") return value ? 1 : 0;
+  const text = aggText(value).replace(/[,\\s]/g, "").replace(/^[^\\d.-]+/, "");
+  if (!text) return NaN;
+  return Number(text);
+}
+
+// A calendar day from 2026-10-09, 2026-10-09T10:00:00, 09-Oct-2026 or 09-Oct-2026 10:00:00.
+function aggDayOf(value) {
+  const text = aggText(value);
+  let m = /^(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:$|[T ])/.exec(text);
+  if (m) return aggDayValid(Number(m[1]), Number(m[2]), Number(m[3]));
+  m = /^(\\d{1,2})[-/ ]([A-Za-z]{3})[A-Za-z]*[-/ ](\\d{4})(?:$|\\s)/.exec(text);
+  if (m) {
+    const month = AGG_MONTHS.indexOf(m[2].toLowerCase()) + 1;
+    return month ? aggDayValid(Number(m[3]), month, Number(m[1])) : null;
+  }
+  return null;
+}
+
+function aggDayValid(y, m, d) {
+  return m >= 1 && m <= 12 && d >= 1 && d <= 31 ? { y, m, d } : null;
+}
+
+function aggSerial(day) {
+  return Math.round(Date.UTC(day.y, day.m - 1, day.d) / 86400000);
+}
+
+// One measure over a bucket: row count (or non-blank count for a named field), else the rounded sum.
+function aggFold(rows, fn, field) {
+  if (fn === "count") {
+    if (field && field !== "ID" && rows.some((row) => field in row)) return rows.filter((row) => aggText(row[field]) !== "").length;
+    return rows.length;
+  }
+  let total = 0;
+  for (const row of rows) {
+    const n = aggNumber(row ? row[field] : undefined);
+    if (Number.isFinite(n)) total += n;
+  }
+  return Math.round(total * 100) / 100;
+}
+
+// body.group and each body.measures field must be a stored or report column
+// the caller's profile reads: a hidden group would leak what it holds through
+// the bucket keys, so the whole request fails; a hidden measure just drops
+// that measure. An empty measure list folds the record count.
+function aggregateSpec(body, readable) {
+  const group = typeof body.group === "string" ? body.group.trim() : "";
+  if (!AGG_IDENT.test(group) || !aggregateFields.includes(group) || !readableField(group, readable)) return null;
+  const measures = [];
+  for (const item of Array.isArray(body.measures) ? body.measures : []) {
+    if (!item || typeof item !== "object") continue;
+    const fn = typeof item.fn === "string" ? item.fn.toLowerCase() : "";
+    if (fn !== "count" && fn !== "sum" && fn !== "value") continue;
+    const field = typeof item.field === "string" ? item.field.trim() : "";
+    if (field && (!AGG_IDENT.test(field) || !aggregateFields.includes(field) || !readableField(field, readable))) continue;
+    if (fn !== "count" && !field) continue;
+    measures.push({ fn, field });
+  }
+  if (!measures.length) measures.push({ fn: "count", field: "" });
+  return { group, measures, order: body.order === "value" ? "value" : "key" };
+}
+
+// Group the projected rows by the group field and fold every measure per
+// bucket. Date and date-time values group by calendar day. Order: date order
+// for a dated axis, first-measure totals for "value", else the bucket key.
+function aggregateRows(rows, spec) {
+  const groups = new Map();
+  for (const row of rows) {
+    const value = row ? row[spec.group] : undefined;
+    const day = aggDayOf(value);
+    const key = day ? day.y + "-" + String(day.m).padStart(2, "0") + "-" + String(day.d).padStart(2, "0") : aggText(value);
+    let bucket = groups.get(key);
+    if (!bucket) groups.set(key, (bucket = []));
+    bucket.push(row);
+  }
+  const keys = [...groups.keys()];
+  const days = new Map(keys.map((key) => [key, aggDayOf(key)]));
+  const dated = keys.length > 0 && keys.filter((key) => days.get(key)).length > keys.length / 2;
+  const totals = new Map(keys.map((key) => [key, aggFold(groups.get(key), spec.measures[0].fn, spec.measures[0].field)]));
+  if (dated) keys.sort((a, b) => (days.get(a) ? aggSerial(days.get(a)) : Infinity) - (days.get(b) ? aggSerial(days.get(b)) : Infinity));
+  else if (spec.order === "value") keys.sort((a, b) => totals.get(b) - totals.get(a) || (a < b ? -1 : a > b ? 1 : 0));
+  else keys.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return {
+    dated,
+    buckets: keys.map((key) => ({ key, values: spec.measures.map((m) => (m === spec.measures[0] ? totals.get(key) : aggFold(groups.get(key), m.fn, m.field))) })),
+  };
+}
+`;
+
 function reportStub(app: App, report: UiModel['reports'][number], projection: readonly string[]): string {
   const formName = report.form ?? '';
   const ident = formName && /^[A-Za-z_][A-Za-z0-9_]*$/.test(formName) ? formName : '';
@@ -1111,6 +1229,7 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
   const wantsRelative = criteriaHasRelative(base) || named.some((item) => criteriaHasRelative(item.criteria));
   const criteriaRef = wantsRelative ? 'applied' : 'scoped.criteria';
   const columns = report.columns.map((column) => column.field);
+  const aggFields = [...new Set([...columns, ...projection])].filter((field) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(field));
   const decimals = Object.hasOwn(decimalColumnsOf(app), formName) ? decimalColumnsOf(app)[formName]! : {};
   const exact = Object.keys(decimals).length > 0;
   const exactNote = exact
@@ -1170,6 +1289,29 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
             range: { from: offset + 1, to: offset + pageSize },
           })
         : await datastore.query(formName, where, pageSize, offset, orderBy, projection);`;
+  // One bounded page read for the aggregate op: ORDER BY ROWID keeps the fold
+  // stable; the decimal shadow/exact-read path is the same as the list read.
+  const aggQuery = exact
+    ? `const aggResolved = await resolveLookupCriteria(datastore, ${criteriaRef}, principal);
+        const aggWhere = zcqlPredicate(compileCriteria(aggResolved, undefined, decimalColumns));
+        const aggRead = (aggOffset, aggLimit) =>
+          needsExactRead(aggResolved, undefined, decimalColumns)
+            ? queryExact((form, w, l, off, ob) => datastore.query(form, w, l, off, ob, projection), formName, aggWhere, {
+                criteria: aggResolved,
+                decimals: decimalColumns,
+                range: { from: aggOffset + 1, to: aggOffset + aggLimit },
+              })
+            : datastore.query(formName, aggWhere, aggLimit, aggOffset, "ORDER BY ROWID", projection);`
+    : `const aggResolved = await resolveLookupCriteria(datastore, ${criteriaRef}, principal);
+        const aggWhere = zcqlPredicate(compileCriteria(aggResolved));
+        const aggRead = (aggOffset, aggLimit) =>
+          needsExactRead(aggResolved, undefined, decimalColumns)
+            ? queryExact((form, w, l, off, ob) => datastore.query(form, w, l, off, ob, projection), formName, aggWhere, {
+                criteria: aggResolved,
+                decimals: decimalColumns,
+                range: { from: aggOffset + 1, to: aggOffset + aggLimit },
+              })
+            : datastore.query(formName, aggWhere, aggLimit, aggOffset, "ORDER BY ROWID", projection);`;
   const relativePrelude = wantsRelative
     ? `const dateFieldKinds = ${JSON.stringify(dateFieldKinds(app, formName))};
 function reportInstant() {
@@ -1282,6 +1424,8 @@ ${indent}}
     'A live query runs only when functions/c2c-deploy.json mode is "live", body.op is "query", and a datastore adapter is installed.',
     'body.filter is a predefined filter label. It applies only when that label was baked in from the report. A field-only filter has no criteria and does not filter. An unknown string is ignored and is not compiled as criteria.',
     'body.q, body.filter and body.sort use only fields the caller\'s profile reads; a hidden field is ignored, so no condition or order reveals its values.',
+    'body.op "aggregate" folds rows on the server: body.group is the bucket field, body.measures the count/sum/value folds, body.order "key" or "value". It reads at most AGGREGATE_ROW_CAP rows through the same criteria and profile scope as "query" (ORDER BY ROWID pages, so the fold is stable), and truncated marks the cap. Dry run folds body.rows.',
+    'The aggregate group field must be a readable stored column or report column, else the request fails 400; a hidden measure field drops that measure. Bucket keys follow the chart fold: dates group by calendar day.',
     'A criteria that did not migrate fails closed: zero rows and notice "filter not migrated", never an unfiltered read.',
     ...(wantsRelative
       ? ['A relative date is evaluated when the report is read, in the application time zone. A week starts on Sunday (https://www.zoho.com/deluge/help/functions/datetime/getweekofyear.html). today is 00:00:00 (https://www.zoho.com/deluge/help/functions/datetime/today.html). A missing time zone fails closed.']
@@ -1301,6 +1445,8 @@ export const lookupParents = ${JSON.stringify(parents)};
 /** Stored part column of each lookup parent's composite parts: "Name.first_name" -> "Name_first_name". */
 export const parentParts = ${JSON.stringify(parentParts)};
 export const reportSort = ${JSON.stringify(report.sort)};
+/** Fields an aggregate request may group or fold: the report's columns plus the form's stored columns. */
+const aggregateFields = ${JSON.stringify(aggFields)};
 ${exactConst}const namedFilters = ${JSON.stringify(named)};
 ${stageConst}
 
@@ -1356,6 +1502,7 @@ function combineCriteria(base, extras) {
   return { op: "and", args };
 }
 
+${aggregateHelpers}
 ${scopedReadSource()}
 // The parent read scope for one lookup display, or null when the caller may
 // not read that display: a hidden parent form or display field, a parent read
@@ -1594,7 +1741,7 @@ ${requirePrincipal()}
   try {
     const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
     const deploy = deployConfig();
-    if (deploy.mode === "live" && body.op === "query") {
+    if (deploy.mode === "live" && (body.op === "query" || body.op === "aggregate")) {
       const datastore = await liveDatastore();
       if (!datastore || typeof datastore.query !== "function") {
         send(res, 500, { dryRun: false, wrote: false, error: "live datastore is not configured" });
@@ -1622,7 +1769,49 @@ ${requirePrincipal()}
         });
         return;
       }
-${liveBind}      ${liveQuery}${attachRows}
+${liveBind}      if (body.op === "aggregate") {
+        // Server-side chart fold: the same scope, criteria, projection and
+        // stage field rules as the list read, in ORDER BY ROWID pages up to
+        // AGGREGATE_ROW_CAP rows.
+        const spec = aggregateSpec(body, readableFields);
+        if (!spec) {
+          send(res, 400, { dryRun: false, error: "the aggregate request needs a readable group field on this report" });
+          return;
+        }
+        ${aggQuery}
+${stageLoad('        ')}        ${wantsRelative ? 'let' : 'const'} aggRows = [];
+        let aggScanned = 0;
+        let aggTruncated = false;
+        for (let aggOffset = 0; ; aggOffset += AGG_PAGE) {
+          const aggQueried = await aggRead(aggOffset, AGG_PAGE);
+          const list = Array.isArray(aggQueried) ? aggQueried : [];
+          for (const row of list) {
+            ${stageApply ? 'let' : 'const'} projected = projectFields(row && typeof row === "object" ? row : {}, scoped.fields);${stageApply ? `\n            ${stageApply}` : ''}
+            aggRows.push(projected);
+          }
+          aggScanned += list.length;
+          if (list.length < AGG_PAGE) break;
+          if (aggScanned >= AGGREGATE_ROW_CAP) {
+            aggTruncated = true;
+            break;
+          }
+        }
+${wantsRelative ? '        if (relative) aggRows = aggRows.filter((row) => matchRow(row, aggResolved, decimalColumns));\n' : ''}        await resolveLookupDisplays(datastore, aggRows, lookupColumns, principal);
+        const agg = aggregateRows(aggRows, spec);
+        send(res, 200, {
+          dryRun: false,
+          op: "aggregate",
+          group: spec.group,
+          measures: spec.measures,
+          buckets: agg.buckets,
+          dated: agg.dated,
+          truncated: aggTruncated,
+          scanned: aggScanned,
+          criteria: ${criteriaRef},
+        });
+        return;
+      }
+      ${liveQuery}${attachRows}
 ${stageLoad('      ')}      ${rowWord} = (Array.isArray(queried) ? queried : []).map((row) => {
         ${stageApply ? 'let' : 'const'} projected = projectFields(row && typeof row === "object" ? row : {}, scoped.fields);${stageApply ? `\n        ${stageApply}` : ''}
         if (${JSON.stringify(columns.includes('ID'))} && projected.ID === undefined && row && typeof row === "object") projected.ID = row.ROWID ?? row.rowid;
@@ -1664,7 +1853,27 @@ ${stageLoad('    ')}    ${rowWord} = suppliedRows(req).map((row) => {
       if (${JSON.stringify(columns.includes('ID'))} && projected.ID === undefined && row && typeof row === "object") projected.ID = row.ROWID ?? row.rowid;
       return projected;
     });
-${wantsRelative ? '    if (relative) rows = rows.filter((row) => matchRow(row, applied, decimalColumns));\n' : ''}    send(res, 200, {
+${wantsRelative ? '    if (relative) rows = rows.filter((row) => matchRow(row, applied, decimalColumns));\n' : ''}    if (body.op === "aggregate") {
+      const spec = aggregateSpec(body, scoped.fields);
+      if (!spec) {
+        send(res, 400, { dryRun: true, error: "the aggregate request needs a readable group field on this report" });
+        return;
+      }
+      const agg = aggregateRows(rows, spec);
+      send(res, 200, {
+        dryRun: true,
+        op: "aggregate",
+        group: spec.group,
+        measures: spec.measures,
+        buckets: agg.buckets,
+        dated: agg.dated,
+        truncated: false,
+        scanned: rows.length,
+        criteria: ${criteriaRef},
+      });
+      return;
+    }
+    send(res, 200, {
       dryRun: true,
       rows,
       fields: scoped.fields ?? null,

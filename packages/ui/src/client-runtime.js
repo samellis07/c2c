@@ -956,13 +956,25 @@ function chartTick(value) {
 }
 
 /** Draw a simple bar (or line, for date series) chart into the section's [data-chart]. */
-function drawChart(host, report, rows, order) {
+function drawChart(host, report, rows, order, folded) {
   if (!host) return;
-  if (!rows || !rows.length) {
+  let buckets;
+  let dated;
+  if (folded) {
+    // Server-aggregated buckets ({key, value}); the sort toggle reverses.
+    dated = folded.dated;
+    buckets = order === 'desc' ? [...folded.buckets].reverse() : folded.buckets;
+  } else {
+    if (!rows || !rows.length) {
+      host.innerHTML = '<p class="chart-empty">No Data Available</p>';
+      return;
+    }
+    ({ buckets, dated } = chartBuckets(report, rows, order));
+  }
+  if (!buckets.length) {
     host.innerHTML = '<p class="chart-empty">No Data Available</p>';
     return;
   }
-  const { buckets, dated } = chartBuckets(report, rows, order);
   const max = buckets.reduce((top, bucket) => Math.max(top, bucket.value), 0);
   const w = 640;
   const h = 220;
@@ -1012,6 +1024,19 @@ function drawChart(host, report, rows, order) {
   host.innerHTML = parts.join('');
 }
 
+/** Server-folded buckets → the {key, value} shape the drawing uses. */
+function foldedBuckets(body) {
+  const list = body && Array.isArray(body.buckets) ? body.buckets : null;
+  if (!list) return null;
+  return {
+    dated: !!body.dated,
+    buckets: list.map((bucket) => ({
+      key: bucket && bucket.key != null ? String(bucket.key) : '',
+      value: Number(bucket && Array.isArray(bucket.values) ? bucket.values[0] : 0) || 0,
+    })),
+  };
+}
+
 /** Query the report's endpoint and draw (or empty-state) its chart. */
 function loadChart(report, section, viewRef) {
   const host = section && section.querySelector ? section.querySelector('[data-chart]') : null;
@@ -1023,23 +1048,48 @@ function loadChart(report, section, viewRef) {
     return Promise.resolve();
   }
   if (stateEl) stateEl.innerHTML = reportStateHtml('loading');
-  return apiCall(call, viewRef, report.queryEndpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ op: 'query', page: 0, pageSize: report.pageSize || PAGE_SIZE }),
-  })
-    .then((res) => {
+  const post = (payload) =>
+    apiCall(call, viewRef, report.queryEndpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  const axes = chartAxes(report);
+  const foldRows = () =>
+    post({ op: 'query', page: 0, pageSize: report.pageSize || PAGE_SIZE }).then((res) => {
       // A static host has no data function: that is an empty report, not an error.
       if (!res || res.status === 404 || res.status === 405 || res.status === 501) return { rows: [] };
       if (!res.ok) throw new Error(`chart query ${res.status}`);
-      return responseJson(res);
-    })
-    .then((body) => {
-      const rows = Array.isArray(body && body.rows) ? body.rows : [];
+      return responseJson(res).then((body) => ({ rows: Array.isArray(body && body.rows) ? body.rows : [] }));
+    });
+  // The aggregate op folds on the server; an endpoint without it (or a group
+  // field it refuses) falls back to the row query, which folds here.
+  const first = axes.label
+    ? post({ op: 'aggregate', group: axes.label, measures: [{ fn: axes.measure ? 'sum' : 'count', field: axes.measure || '' }], order: 'key' }).then((res) => {
+        if (res && res.ok) {
+          return responseJson(res).then((body) => {
+            const folded = foldedBuckets(body);
+            return folded ? { folded } : foldRows();
+          });
+        }
+        if (res && (res.status === 404 || res.status === 405 || res.status === 501)) return { rows: [] };
+        // A refused or failed aggregate falls back to the row query, which folds here.
+        return foldRows();
+      })
+    : foldRows();
+  return first
+    .then((result) => {
       const order = (chartState.get(section) || {}).order || 'asc';
-      chartState.set(section, { rows, order });
-      if (stateEl) stateEl.innerHTML = '';
-      drawChart(host, report, rows, order);
+      if (result.folded) {
+        chartState.set(section, { folded: result.folded, order });
+        if (stateEl) stateEl.innerHTML = '';
+        drawChart(host, report, null, order, result.folded);
+      } else {
+        const rows = result.rows || [];
+        chartState.set(section, { rows, order });
+        if (stateEl) stateEl.innerHTML = '';
+        drawChart(host, report, rows, order);
+      }
     })
     .catch(() => {
       if (stateEl) stateEl.innerHTML = reportStateHtml('error');
@@ -1051,12 +1101,12 @@ function chartReportOf(appModel, section) {
   return ((appModel && appModel.reports) || []).find((item) => item && item.name === name) || null;
 }
 
-/** Sort toggle for a chart section: flips the stored order and redraws cached rows. */
+/** Sort toggle for a chart section: flips the stored order and redraws the cached fold or rows. */
 function toggleChartSort(report, section) {
   const state = chartState.get(section) || { rows: [], order: 'asc' };
   state.order = state.order === 'desc' ? 'asc' : 'desc';
   chartState.set(section, state);
-  drawChart(section && section.querySelector ? section.querySelector('[data-chart]') : null, report, state.rows, state.order);
+  drawChart(section && section.querySelector ? section.querySelector('[data-chart]') : null, report, state.rows || [], state.order, state.folded);
 }
 
 /** Load every chart panel inside a painted subtree (standalone or page-embedded). */
