@@ -67,9 +67,28 @@ const STEPS: Record<SnippetReason, string> = {
 
 /** Deluge code inside the snippet's `<% %>` islands. */
 function islandCode(source: string): string {
-  const parts: string[] = [];
-  for (const match of source.matchAll(/<%=?([\s\S]*?)%>/g)) parts.push(match[1] ?? '');
-  return parts.join('\n');
+  return splitIslands(source).islands.join('\n');
+}
+
+/**
+ * Split `<% %>` islands from the markup with a linear scan (a lazy regex is
+ * quadratic on many unclosed `<%`). An unclosed `<%` stays in the markup.
+ */
+function splitIslands(source: string): { islands: string[]; markup: string } {
+  const islands: string[] = [];
+  let markup = '';
+  let pos = 0;
+  for (;;) {
+    const open = source.indexOf('<%', pos);
+    if (open < 0) break;
+    const start = source[open + 2] === '=' ? open + 3 : open + 2;
+    const close = source.indexOf('%>', start);
+    if (close < 0) break;
+    markup += source.slice(pos, open);
+    islands.push(source.slice(start, close));
+    pos = close + 2;
+  }
+  return { islands, markup: markup + source.slice(pos) };
 }
 
 /** Header parameters of `htmlpage name(a, b)`. */
@@ -110,7 +129,7 @@ function droppedTags(markup: string): string[] {
  */
 export function serverSnippetGuidance(source: string, refusal: string | undefined, location: string): SnippetGuidance {
   const code = islandCode(source);
-  const markup = source.replace(/<%[\s\S]*?%>/g, '').replace(/^\s*htmlpage\b[^\n]*\n?/i, '');
+  const markup = splitIslands(source).markup.replace(/^\s*htmlpage\b[^\n]*\n?/i, '');
   const reasons: SnippetReason[] = [];
   if (WRITE_PATTERNS.some((re) => re.test(code)) || refusal === 'island is not a read-only render') reasons.push('write');
   if (/\bopenUrl\s*\(/i.test(code) || refusal === 'openUrl could not be rewritten') reasons.push('render-navigation');
