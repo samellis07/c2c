@@ -3230,19 +3230,23 @@ test('reverse on a list, map, date, or query receiver stays a counted todo', asy
   // it), so a list receiver keeps the counted method:reverse todo. A map,
   // date, or record query receiver has no documented text form either, so it
   // keeps the same todo.
-  for (const src of [
-    'out = {"a", "b"}.reverse();',
-    'out = {1, 2, 13}.reverse();',
-    'l = {"a", "b"}; out = l.reverse();',
-    'out = reverse({1, 2, 13});',
-    'm = {"a": 1, "b": 2}; out = m.reverse();',
-    'out = today.reverse();',
-    'out = Orders[ID != 0].reverse();',
-  ]) {
+  for (const [src, expected] of [
+    ['out = {"a", "b"}.reverse();', 'method:reverse'],
+    ['out = {1, 2, 13}.reverse();', 'method:reverse'],
+    ['l = {"a", "b"}; out = l.reverse();', 'method:reverse'],
+    ['out = reverse({1, 2, 13});', 'call:reverse'],
+    ['m = {"a": 1, "b": 2}; out = m.reverse();', 'method:reverse'],
+    ['out = today.reverse();', 'method:reverse'],
+    ['out = Orders[ID != 0].reverse();', 'method:reverse'],
+  ] as Array<[string, string]>) {
     const t = translate(src);
     assert.match(t.server, /shim\.todo\(ctx, "(method:reverse|call:reverse)"\)/, src);
     assert.doesNotMatch(t.server, /shim\.string\.reverse/, src);
     assert.doesNotMatch(t.server, /shim\.list\.reverse/, src);
+    // The analyzer ledger counts the same hidden TODO (kind + count), so
+    // dropping the TODO registration fails here, not just on the shim text.
+    assert.deepEqual(t.todos.map((item) => item.construct), [expected], src);
+    assert.equal(t.stats.todo, 1, src);
   }
 });
 
@@ -3267,22 +3271,26 @@ test('0-argument min and max stay a counted todo on every receiver', async () =>
   // same functions). A 0-argument call therefore keeps the counted
   // method:min / method:max todo on every receiver — a list, a member, or a
   // scalar — instead of the list aggregate.
-  for (const src of [
-    'out = {1, 2}.min();',
-    'out = {1, 2}.max();',
-    'l = {9, 1, 4}; out = l.min();',
-    'out = List().min();',
-    'out = "abc".max();',
-    's = "abc"; out = s.min();',
-    'out = (10).max();',
-    'n = 10; out = n.min();',
-    'm = {"k": 10}; out = m.k.max();',
-    'm = {"k": "abc"}; out = m.k.min();',
-    'out = input.Amount.max();',
-  ]) {
+  for (const [src, expected] of [
+    ['out = {1, 2}.min();', 'method:min'],
+    ['out = {1, 2}.max();', 'method:max'],
+    ['l = {9, 1, 4}; out = l.min();', 'method:min'],
+    ['out = List().min();', 'method:min'],
+    ['out = "abc".max();', 'method:max'],
+    ['s = "abc"; out = s.min();', 'method:min'],
+    ['out = (10).max();', 'method:max'],
+    ['n = 10; out = n.min();', 'method:min'],
+    ['m = {"k": 10}; out = m.k.max();', 'method:max'],
+    ['m = {"k": "abc"}; out = m.k.min();', 'method:min'],
+    ['out = input.Amount.max();', 'method:max'],
+  ] as Array<[string, string]>) {
     const t = translate(src);
     assert.match(t.server, /shim\.todo\(ctx, "method:(min|max)"\)/, src);
     assert.doesNotMatch(t.server, /shim\.list\.aggregate/, src);
+    // The analyzer ledger counts the same hidden TODO (kind + count), so
+    // dropping the TODO registration fails here, not just on the shim text.
+    assert.deepEqual(t.todos.map((item) => item.construct), [expected], src);
+    assert.equal(t.stats.todo, 1, src);
   }
 });
 
