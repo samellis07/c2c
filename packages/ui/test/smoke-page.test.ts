@@ -473,3 +473,85 @@ test('#/admin/smoke shows the result code with a Copy button and the paste-into-
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('#/admin/smoke leaves pending when the auth SDK never settles', async () => {
+  const { dir, runtime, model } = await loadRuntime(DS);
+  try {
+    const bootWithAuth = async (auth: unknown, timeouts: Record<string, number>) => {
+      const dom = new JSDOM('<!doctype html><body><header><strong id="app-title"></strong></header><nav id="nav"></nav><main id="main"></main></body></html>', {
+        url: 'http://localhost/slate/index.html',
+      });
+      const view = dom.window as unknown as {
+        location: { hash: string };
+        fetch: unknown;
+        catalyst?: unknown;
+        C2C_SMOKE_PLAN?: unknown;
+        C2C_SMOKE_PROJECT?: string;
+        document: Document;
+      } & Record<string, number>;
+      view.location.hash = '#/admin/smoke';
+      view.fetch = async () => fakeReply(401, '{"error":"authenticated caller required"}');
+      view.C2C_SMOKE_PLAN = smokePlan();
+      view.C2C_SMOKE_PROJECT = '1001';
+      view.catalyst = auth;
+      Object.assign(view, timeouts);
+      const boot = runtime.boot as (model: UiModel, doc: unknown) => Promise<void>;
+      await boot(model, view.document);
+      for (let i = 0; i < 400; i++) {
+        const state = view.document.querySelector('[data-smoke-state]')?.getAttribute('data-smoke-state');
+        if (state && state !== 'pending' && state !== 'running') return { dom, state, doc: view.document };
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      return { dom, state: 'timeout', doc: view.document };
+    };
+    // The Catalyst SDK on a host without its auth endpoints (Slate answers
+    // /baas/* 404) leaves generateAuthToken pending forever — the page must
+    // still send the call and land on a clear answer, not hang on 'pending'.
+    const hanging = { isUserAuthenticated: async () => ({}), generateAuthToken: () => new Promise(() => {}) };
+    const first = await bootWithAuth(hanging, { C2C_AUTH_TIMEOUT_MS: 20 });
+    assert.equal(first.state, 'not-signed-in');
+    // Both SDK calls pending is the same hang one step earlier.
+    const pending = { isUserAuthenticated: () => new Promise(() => {}), generateAuthToken: () => new Promise(() => {}) };
+    const second = await bootWithAuth(pending, { C2C_AUTH_TIMEOUT_MS: 20 });
+    assert.equal(second.state, 'not-signed-in');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('#/admin/smoke reports a stalled access check instead of waiting forever', async () => {
+  const { dir, runtime, model } = await loadRuntime(DS);
+  try {
+    const dom = new JSDOM('<!doctype html><body><header><strong id="app-title"></strong></header><nav id="nav"></nav><main id="main"></main></body></html>', {
+      url: 'http://localhost/slate/index.html',
+    });
+    const view = dom.window as unknown as {
+      location: { hash: string };
+      fetch: unknown;
+      C2C_SMOKE_PLAN?: unknown;
+      C2C_SMOKE_PROJECT?: string;
+      C2C_SMOKE_STATUS_TIMEOUT_MS?: number;
+      document: Document;
+    };
+    view.location.hash = '#/admin/smoke';
+    view.fetch = () => new Promise(() => {});
+    view.C2C_SMOKE_PLAN = smokePlan();
+    view.C2C_SMOKE_PROJECT = '1001';
+    view.C2C_SMOKE_STATUS_TIMEOUT_MS = 20;
+    const boot = runtime.boot as (model: UiModel, doc: unknown) => Promise<void>;
+    await boot(model, view.document);
+    let state = 'timeout';
+    for (let i = 0; i < 400; i++) {
+      const current = view.document.querySelector('[data-smoke-state]')?.getAttribute('data-smoke-state');
+      if (current && current !== 'pending' && current !== 'running') {
+        state = current;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    assert.equal(state, 'failed');
+    assert.match(view.document.querySelector('[data-smoke-state]')?.textContent ?? '', /timed out/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

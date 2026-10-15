@@ -700,11 +700,18 @@ export function mountSmoke(section: Element, model: SmokeModel, view: AppWindow)
     setState('unavailable', 'No smoke plan is embedded in this build.');
     return;
   }
-  void apiCall(view, '/admin/smoke', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ op: 'status' }),
-  })
+  // The access check must always settle: a dropped connection or an auth
+  // SDK call that never resolves must not leave the page on "Checking
+  // access…" forever — report the stall instead.
+  const statusWait = typeof view.C2C_SMOKE_STATUS_TIMEOUT_MS === 'number' ? view.C2C_SMOKE_STATUS_TIMEOUT_MS : 30000;
+  void Promise.race([
+    apiCall(view, '/admin/smoke', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'status' }),
+    }),
+    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('smoke status timeout')), statusWait)),
+  ])
     .then(async (res) => {
       // Authorization is the documented status shape — { ok: true, dryRun,
       // mode, forms } — never a bare 2xx: a sign-in page or any HTML answer
@@ -746,5 +753,12 @@ export function mountSmoke(section: Element, model: SmokeModel, view: AppWindow)
       }
       setState(result.ok ? 'done' : 'failed', result.ok ? 'Done — every check passed.' : 'Failed — see the steps below.');
     })
-    .catch(() => setState('failed', 'The smoke run failed to finish.'));
+    .catch((err) =>
+      setState(
+        'failed',
+        err instanceof Error && err.message === 'smoke status timeout'
+          ? 'Timed out checking access — the smoke service or sign-in did not answer. Reload to retry.'
+          : 'The smoke run failed to finish.',
+      ),
+    );
 }

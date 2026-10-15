@@ -501,3 +501,73 @@ test('#/admin/smoke shows the result code with a Copy button and the paste-into-
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('#/admin/smoke leaves pending when the auth SDK never settles', async () => {
+  const { dir, runtime } = await loadSmokeRuntime();
+  try {
+    const bootWithAuth = async (auth: unknown) => {
+      const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/' });
+      const view = dom.window as unknown as {
+        fetch: unknown;
+        catalyst?: unknown;
+        C2C_SMOKE_PLAN?: unknown;
+        C2C_SMOKE_PROJECT?: string;
+        C2C_AUTH_TIMEOUT_MS?: number;
+      };
+      view.fetch = async () => fakeReply(401, '{"error":"authenticated caller required"}');
+      view.C2C_SMOKE_PLAN = smokePlan();
+      view.C2C_SMOKE_PROJECT = '1001';
+      view.C2C_AUTH_TIMEOUT_MS = 20;
+      view.catalyst = auth;
+      const section = smokeSection(dom.window.document as unknown as Document);
+      runtime.mountSmoke(section, runtime.smokeModel(spec()), view);
+      for (let i = 0; i < 400; i++) {
+        const state = section.querySelector('[data-smoke-state]')?.getAttribute('data-smoke-state');
+        if (state && state !== 'pending' && state !== 'running') return state;
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      return 'timeout';
+    };
+    // The Catalyst SDK on a host without its auth endpoints (Slate answers
+    // /baas/* 404) leaves generateAuthToken pending forever — the page must
+    // still send the call and land on a clear answer, not hang on 'pending'.
+    const hanging = { isUserAuthenticated: async () => ({}), generateAuthToken: () => new Promise(() => {}) };
+    assert.equal(await bootWithAuth(hanging), 'not-signed-in');
+    const pending = { isUserAuthenticated: () => new Promise(() => {}), generateAuthToken: () => new Promise(() => {}) };
+    assert.equal(await bootWithAuth(pending), 'not-signed-in');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('#/admin/smoke reports a stalled access check instead of waiting forever', async () => {
+  const { dir, runtime } = await loadSmokeRuntime();
+  try {
+    const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/' });
+    const view = dom.window as unknown as {
+      fetch: unknown;
+      C2C_SMOKE_PLAN?: unknown;
+      C2C_SMOKE_PROJECT?: string;
+      C2C_SMOKE_STATUS_TIMEOUT_MS?: number;
+    };
+    view.fetch = () => new Promise(() => {});
+    view.C2C_SMOKE_PLAN = smokePlan();
+    view.C2C_SMOKE_PROJECT = '1001';
+    view.C2C_SMOKE_STATUS_TIMEOUT_MS = 20;
+    const section = smokeSection(dom.window.document as unknown as Document);
+    runtime.mountSmoke(section, runtime.smokeModel(spec()), view);
+    let state = 'timeout';
+    for (let i = 0; i < 400; i++) {
+      const current = section.querySelector('[data-smoke-state]')?.getAttribute('data-smoke-state');
+      if (current && current !== 'pending' && current !== 'running') {
+        state = current;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    assert.equal(state, 'failed');
+    assert.match(section.querySelector('[data-smoke-state]')?.textContent ?? '', /timed out/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
