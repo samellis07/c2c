@@ -12,6 +12,7 @@
  */
 import { isSymlinkRefusedError } from '../../core/src/fs-kind.js';
 import { readRegularFile, type FileRead } from './read-file.js';
+import { loadMcpEvidence, mcpCarryRefusal } from './mcp-state.js';
 import { c2cVersion, doctorJsonPath } from './report.js';
 import type { CheckResult, DoctorFile } from './types.js';
 
@@ -271,22 +272,26 @@ export function isMcpCheckId(id: string): boolean {
 
 /**
  * The MCP record a run without new evidence carries forward, so a bare
- * `c2c doctor` shows the same D-B verdict the gate reads: a failed
- * observation stays red until a new one is recorded, and a verified one
- * keeps the gate open until it ages out. Only a record from the same c2c
- * version, bound to exactly this dc/org/project and less than 12 h old is
- * carried; anything else is dropped and D-B reports not recorded.
+ * `c2c doctor` shows the same D-B verdict the gate reads. doctor.json is not
+ * signed, so its rows can only lower trust: failed rows are carried, so a
+ * failed observation stays red until a new one is recorded, but passing or
+ * warning rows are carried only while the signed MCP state (mcp-state.ts)
+ * verifies for this workspace and scope with the same observed `at`. Only a
+ * record from the same c2c version, bound to exactly this dc/org/project and
+ * at most 12 h old is carried (mcpCarryRefusal); anything else is dropped and
+ * D-B reports not recorded.
  */
-export function carriedMcpRecord(input: { workspace: string; scope: GateScope; version?: string; now?: Date }): { mcp: NonNullable<DoctorFile['mcp']>; checks: CheckResult[] } | undefined {
+export function carriedMcpRecord(input: { workspace: string; scope: GateScope; env: NodeJS.ProcessEnv; version?: string; now?: Date }): { mcp: NonNullable<DoctorFile['mcp']>; checks: CheckResult[]; signed: boolean } | undefined {
   const file = readGateFile(input.workspace);
   if (file === undefined || file === 'invalid' || !file.mcp || !Array.isArray(file.checks)) return undefined;
-  if (file.c2c !== (input.version ?? c2cVersion())) return undefined;
+  const version = input.version ?? c2cVersion();
+  const now = input.now ?? new Date();
   const bound = file.mcp.scope;
-  if (!bound || typeof bound !== 'object' || missingScopeFields(input.scope).some((key) => key !== 'project') || !scopeEquals(bound, input.scope)) return undefined;
-  const now = (input.now ?? new Date()).getTime();
-  const mcpAt = Date.parse(file.mcp.at ?? '');
-  if (!Number.isFinite(mcpAt) || now - mcpAt > DOCTOR_MAX_AGE_MS || now - mcpAt < 0) return undefined;
-  const checks = file.checks.filter((c) => c && typeof c.id === 'string' && isMcpCheckId(c.id) && CHECK_STATUSES.has(c.status));
-  if (!checks.some((c) => c.id.startsWith('D-B'))) return undefined;
-  return { mcp: file.mcp, checks: checks.map(({ id, status, detail, fix }) => ({ id, status, detail, fix })) };
+  if (!bound || typeof bound !== 'object') return undefined;
+  if (mcpCarryRefusal({ c2c: file.c2c, scope: bound, at: file.mcp.at }, { version, scope: input.scope, now })) return undefined;
+  const signed = loadMcpEvidence(input.workspace, input.scope, { env: input.env, version, now });
+  const trusted = signed.status === 'reused' && signed.at === file.mcp.at;
+  const checks = file.checks.filter((c) => c && typeof c.id === 'string' && isMcpCheckId(c.id) && CHECK_STATUSES.has(c.status) && (trusted || c.status === 'fail'));
+  if (trusted ? !checks.some((c) => c.id.startsWith('D-B')) : checks.length === 0) return undefined;
+  return { mcp: file.mcp, checks: checks.map(({ id, status, detail, fix }) => ({ id, status, detail, fix })), signed: trusted };
 }

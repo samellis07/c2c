@@ -1244,6 +1244,9 @@ export async function runDoctorChecks(ctx: DoctorContext): Promise<DoctorRun> {
     checks.push(...checkV(ctx, ctx.evidence));
   } else if (ctx.carried) {
     // The same rows the gate reads: a failed observation stays red until a new one is recorded.
+    // Only failed rows are carried without a signed record, so D-A3/D-B may have no row left.
+    if (!ctx.carried.checks.some((c) => c.id === 'D-A3')) checks.push(skip('D-A3', 'agent half not recorded yet'));
+    if (!ctx.carried.checks.some((c) => c.id.startsWith('D-B'))) checks.push(skip('D-B', ctx.evidenceNote ?? 'agent half not recorded yet (run c2c doctor --mcp-begin; the agent makes the MCP calls it names and pipes the results into c2c doctor --mcp-observed -)'));
     checks.push(...ctx.carried.checks);
   } else {
     checks.push(skip('D-A3', 'agent half not recorded yet'));

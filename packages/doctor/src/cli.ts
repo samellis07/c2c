@@ -316,7 +316,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
           : undefined;
   // Nothing new or reused: carry the last MCP record for this exact scope, so
   // doctor and the gate read the same D-B rows and agree on the verdict.
-  const carried = evidence === undefined ? carriedMcpRecord({ workspace, scope: { dc: scope.dc, org: scope.org, project: scope.project } }) : undefined;
+  const carried = evidence === undefined ? carriedMcpRecord({ workspace, scope: { dc: scope.dc, org: scope.org, project: scope.project }, env: io.env, ...(now ? { now: now() } : {}) }) : undefined;
 
   const ctx: DoctorContext = {
     io,
@@ -363,7 +363,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
       io.stdout(`${JSON.stringify({ ...file, ...(path ? { doctorJson: path } : {}) }, null, 2)}\n`);
     } else {
       io.stdout(formatTable(run.checks, file, reuseNote));
-      if (carried) io.stdout(`D-B/D-V: from the MCP observation recorded at ${carried.mcp.at}; run c2c doctor --mcp-begin to record a new one\n`);
+      if (carried) io.stdout(`D-B/D-V: ${carried.signed ? '' : 'failed rows '}from the MCP observation recorded at ${carried.mcp.at}; run c2c doctor --mcp-begin to record a new one\n`);
       if (path) io.stdout(`doctor.json: ${path}\n`);
       else io.stdout('(local run; doctor.json not updated)\n');
     }
