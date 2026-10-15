@@ -576,11 +576,12 @@ test('deploy --confirm spawns the Development CLI and still hides the credential
       [...scope, 'project:list'],
       ['install', '--omit=dev', '--no-audit', '--no-fund'],
       [...scope, 'deploy', '--only', 'functions:c2c_api', '-ni'],
+      [...scope, 'deploy', '--only', 'functions:c2c_auth', '-ni'],
       [...scope, 'slate:link', '--name', 'c2c-widget', '--framework', 'static', '--source', './slate', '-ni'],
       [...scope, 'deploy', 'slate', 'c2c-widget', '-ni'],
     ],
   );
-  assert.deepEqual(cap.spawned.map((call) => call.command), ['catalyst', 'npm', 'catalyst', 'catalyst', 'catalyst']);
+  assert.deepEqual(cap.spawned.map((call) => call.command), ['catalyst', 'npm', 'catalyst', 'catalyst', 'catalyst', 'catalyst']);
   assert.equal(cap.spawned.every((call) => call.env.X_ZC_CREDENTIAL_PATH === SECRET), true);
   for (const call of cap.spawned) {
     assert.equal(call.env.PATH, process.env.PATH);
@@ -907,7 +908,7 @@ require('fs').appendFileSync(${JSON.stringify(npmLog)}, JSON.stringify({ args: p
   const calls = readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { args: string[]; env: Record<string, string> });
   assert.deepEqual(
     calls.map((call) => call.args.filter((arg) => arg === 'project:list' || arg === 'slate:link' || arg === 'deploy')),
-    [['project:list'], ['deploy'], ['slate:link'], ['deploy']],
+    [['project:list'], ['deploy'], ['deploy'], ['slate:link'], ['deploy']],
   );
   const npmCalls = readFileSync(npmLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { args: string[]; cwd: string });
   assert.equal(npmCalls.length, 1);
@@ -3894,7 +3895,8 @@ test('a transient 500 from the functions deploy re-runs the command and deploys'
     };
     const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out], cap.io);
     assert.equal(code, 0, cap.stdout().slice(-800) + cap.stderr());
-    assert.equal(deploys, 2);
+    // c2c_api fails once and retries, then the c2c_auth deploy runs: 3 --only calls.
+    assert.equal(deploys, 3);
     assert.match(cap.stdout(), /retry 1\/3 in \d+ms: catalyst --org 10000000000 --project 1001 deploy --only functions:c2c_api -ni \(exit 2\)/);
   } finally {
     rmSync(out, { recursive: true, force: true });

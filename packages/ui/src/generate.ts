@@ -2696,9 +2696,24 @@ function indexHtml(model: UiModel): string {
 
 /** Default function name and base path for the generated Advanced I/O function. */
 export const API_FUNCTION = 'c2c_api';
+/**
+ * The c2c_auth bridge URL for a deployed API base: the function origin's
+ * /server/c2c_auth/bridge. Undefined for a relative or absent base (a local
+ * preview has no function host to bridge to).
+ */
+export function authBridgeUrl(apiBase: string | undefined): string | undefined {
+  if (typeof apiBase !== 'string' || !apiBase) return undefined;
+  try {
+    const parsed = new URL(apiBase);
+    if (parsed.protocol !== 'https:') return undefined;
+    return `${parsed.origin}/server/c2c_auth/bridge`;
+  } catch {
+    return undefined;
+  }
+}
 export const DEFAULT_API_BASE = `/server/${API_FUNCTION}`;
 /** Catalyst Web SDK that provides catalyst.auth.generateAuthToken (v4.6.1+). */
-export const CATALYST_WEB_SDK = 'https://static.zohocdn.com/catalyst/sdk/js/4.6.1/catalystWebSDK.js';
+export const CATALYST_WEB_SDK = 'https://static.zohocdn.com/catalyst/sdk/js/4.6.2/catalystWebSDK.js';
 
 /**
  * slate/c2c-config.js. A classic script with a stable URL, loaded before the runtime.
@@ -2707,7 +2722,7 @@ export const CATALYST_WEB_SDK = 'https://static.zohocdn.com/catalyst/sdk/js/4.6.
  * appTimeZone: the Creator app `time zone` setting, so a client `zoho.currentdate`
  * is the app-zone day, not the browser's. Absent when the app sets none.
  */
-export function slateConfigSource(opts: { apiBase?: string; auth?: boolean; appTimeZone?: string; smokePlan?: readonly unknown[]; smokeProject?: string }): string {
+export function slateConfigSource(opts: { apiBase?: string; auth?: boolean; authBridge?: string; appTimeZone?: string; smokePlan?: readonly unknown[]; smokeProject?: string }): string {
   const lines = [
     '// c2c runtime config. Stable URL (not content-hashed). c2c deploy rewrites this file.',
     `globalThis.C2C_API_BASE = ${JSON.stringify(opts.apiBase ?? DEFAULT_API_BASE)};`,
@@ -2722,7 +2737,12 @@ export function slateConfigSource(opts: { apiBase?: string; auth?: boolean; appT
   if (opts.smokePlan && opts.smokeProject && /^[0-9]{1,24}$/.test(opts.smokeProject)) {
     lines.push(`globalThis.C2C_SMOKE_PROJECT = ${JSON.stringify(opts.smokeProject)};`);
   }
-  if (opts.auth) {
+  if (opts.auth && opts.authBridge) {
+    // Token bridge (design d'): the Slate origin serves no /baas routes, so the
+    // Web SDK cannot mint a functions token here. The app instead redirects to
+    // c2c_auth on the function origin and gets the token back in a fragment.
+    lines.push(`globalThis.C2C_AUTH_BRIDGE = ${JSON.stringify(opts.authBridge)};`);
+  } else if (opts.auth) {
     lines.push(
       `document.write(${JSON.stringify(`<script src="${CATALYST_WEB_SDK}"></scr`)} + "ipt>");`,
       `document.write(${JSON.stringify('<script src="/__catalyst/sdk/init.js"></scr')} + "ipt>");`,

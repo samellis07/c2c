@@ -31,7 +31,7 @@ import { mailSenderEvidenceFor, mailSenderEvidenceVerified, observeMailSenders, 
 import { humanChecklist } from './human-steps.js';
 import { applyFunctionEnvSecrets, readConnectionSecretKeys } from './function-env.js';
 import { CONSOLE_SERVICES, formatPostDeploySteps, postDeploySteps, servicesTouched, type ConsoleService, type PostDeployStep } from './post-deploy.js';
-import { appTimeZone, generateUi, slateConfigSource } from '../../ui/src/generate.js';
+import { appTimeZone, authBridgeUrl, generateUi, slateConfigSource } from '../../ui/src/generate.js';
 import { emptyRegistry, type ProjectRegistry } from './registry.js';
 import { catalystRestCall, listCatalystProjects, readCliAccessToken } from './rest.js';
 import { importingAgeState, isStuckImporting, projectDataRecord, stuckImportGuidedStep, unknownImportAgeGuidedStep, type ListedProject } from './stuck-import.js';
@@ -1229,7 +1229,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         }
       }
       if (command.id === 'slate-link' || command.id === 'slate') {
-        const config = slateConfigSource({ apiBase, auth: true, appTimeZone: appTimeZone(app), smokePlan: smokePlanOf(app, guard), smokeProject: guard.projectId });
+        const config = slateConfigSource({ apiBase, auth: true, authBridge: authBridgeUrl(apiBase), appTimeZone: appTimeZone(app), smokePlan: smokePlanOf(app, guard), smokeProject: guard.projectId });
         if (ui === 'react') {
           // The built tree is what the Slate steps link and deploy, so the
           // config must land in dist/ — written here, after `npm run build`,
