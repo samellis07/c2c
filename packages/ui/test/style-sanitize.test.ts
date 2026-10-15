@@ -6,7 +6,8 @@ import { JSDOM } from 'jsdom';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { applyLabels } from '../src/decorations/labels.js';
 import { buildModel } from '../src/model.js';
-import { sanitizeSnippet as buildSanitize } from '../src/pages.js';
+import { cleanStyle, sanitizeSnippet as buildSanitize } from '../src/pages.js';
+import { cleanPrintStyle } from '../../shims/src/print-template.js';
 
 // Inline style attributes are checked declaration by declaration, by two
 // copies of the same rule: the generator's sanitizer and the browser
@@ -34,6 +35,18 @@ const VECTORS: Array<[string, string, string | null, string[]]> = [
   ['empty declarations', 'color:red;;', 'color:red;;', []],
   ['font shorthand with a slash', 'font: 12px/1.5 Arial', 'font: 12px/1.5 Arial', []],
   ['commented-out declaration beside a valid one', 'height:35px;/* border:1px solid #ededed; */', 'height:35px', []],
+  // Safe calc() is carried over. A trailing token with no colon is not a declaration.
+  ['calc() addition', 'width:calc(1px + 2px)', 'width:calc(1px + 2px)', []],
+  ['calc() with subtraction and decimals', 'width:calc(70% - 1.5px)', 'width:calc(70% - 1.5px)', []],
+  ['calc() multiplication', 'width:calc(1em*2)', 'width:calc(1em*2)', []],
+  ['calc() division', 'width:calc(100% / 2)', 'width:calc(100% / 2)', []],
+  ['calc() double minus', 'width:calc(1px - -2px)', 'width:calc(1px - -2px)', []],
+  ['calc() case and units', 'width:CALC(1PX + 2PX)', 'width:CALC(1PX + 2PX)', []],
+  ['calc() across newlines', 'width:calc(1px\n+\n2px)', 'width:calc(1px\n+\n2px)', []],
+  ['calc() important flag', 'width:calc(1px + 2px) !important', 'width:calc(1px + 2px) !important', []],
+  ['calc() with a comment stripped', 'width:calc(1px /**/ + 2px)', 'width:calc(1px  + 2px)', []],
+  ['trailing non-declaration identifier ignored', 'font-size:15px;text', 'font-size:15px', []],
+  ['trailing brace stripped', 'width:1px;}', 'width:1px', []],
   // One bad declaration no longer takes the safe ones with it.
   ['malformed declaration beside a valid one', 'margin=10px; color: red', 'color: red', ['?']],
   ['url() beside a width', 'width: 80%; background: url(//example.test/x)', 'width: 80%', ['background']],
@@ -57,7 +70,28 @@ const VECTORS: Array<[string, string, string | null, string[]]> = [
   ['element()', 'background:element(#x)', null, ['background']],
   ['attr()', 'content:attr(data-x)', null, ['content']],
   ['var()', 'width:var(--x)', null, ['width']],
-  ['calc()', 'width:calc(1px + 2px)', null, ['width']],
+  ['calc() containing url()', 'width:calc(url(x))', null, ['width']],
+  ['calc() plus url()', 'width:calc(1px + url(x))', null, ['width']],
+  ['calc() glued to url()', 'width:calc(1px)url(x)', null, ['width']],
+  ['calc() containing expression()', 'width:calc(expression(alert(1)))', null, ['width']],
+  ['calc() plus var()', 'width:calc(1px + var(--x))', null, ['width']],
+  ['nested calc()', 'width:calc(calc(1px) + 1px)', null, ['width']],
+  ['quoted calc()', 'width:calc("1px")', null, ['width']],
+  ['backslash inside calc()', 'width:calc(1\\70 x)', null, ['width']],
+  ['backslash before calc close', 'width:calc(1px\\29 )', null, ['width']],
+  ['escaped calc name', 'width:c\\61 lc(1px)', null, ['width']],
+  ['escaped leading calc', 'width:\\63 alc(1px)', null, ['width']],
+  ['calc split onto a url()', 'width:calc(1px ; background:url(x))', null, ['width', 'background']],
+  ['unbalanced calc()', 'width:calc(1px', null, ['width']],
+  ['empty calc()', 'width:calc()', null, ['width']],
+  ['prefixed calc()', 'width:-webkit-calc(1px)', null, ['width']],
+  ['comma in calc()', 'width:calc(1px, 2px)', null, ['width']],
+  ['attr() in calc()', 'width:calc(attr(x))', null, ['width']],
+  ['env() in calc()', 'width:calc(env(safe-area-inset-bottom))', null, ['width']],
+  ['NUL inside calc()', 'width:calc(1\u0000px)', null, ['width']],
+  ['fullwidth digit in calc()', 'width:calc(\uFF11px)', null, ['width']],
+  ['scientific notation in calc()', 'width:calc(1e3px)', null, ['width']],
+  ['calc breakout after a semicolon', 'width:calc(1px + 2px);}body{background:red', 'width:calc(1px + 2px)', ['?']],
   ['newline-joined image-set', 'color:red\nbackground:image-set("https://example.test/x" 1x)', null, ['color']],
   ['escaped property name', 'w\\69dth:1px', null, ['?']],
   ['escaped behavior', 'b\\65havior:url(x.htc)', null, ['?']],
@@ -97,6 +131,7 @@ test('a style attribute keeps its safe declarations and names the dropped ones, 
     assert.equal(out.dropped, dropped.length ? dropped.join(' ') : null, `${label}: data-style-dropped`);
     assert.deepEqual(fromRuntime, dropped, `${label}: runtime report`);
     assert.deepEqual(fromBuild, dropped, `${label}: build report`);
+    assert.deepEqual(cleanPrintStyle(value), cleanStyle(value), `${label}: print template sanitizer agrees`);
     if (out.style) assert.doesNotMatch(out.style, /url|image|expression|attr|var\(|\\|\/\*|@|behavior|binding/i, `${label}: no fetch survives`);
   }
 });
