@@ -711,3 +711,50 @@ test('the apply script pins the first admin role: --admin-role only accepts App 
     await api.close();
   }
 });
+
+test('principalRoleMap drops a profile role the access policy does not know', () => {
+  const plan = authPlan(appOf(DEMO));
+  const { Stranger: _dropped, ...profiles } = plan.accessPolicy.profiles;
+  const map = principalRoleMap({ ...plan, accessPolicy: { ...plan.accessPolicy, profiles } });
+  assert.deepEqual(map, { Customers: 'Customers', Staff: 'Staff' });
+  // An inherited key is not a profile either.
+  const inherited = principalRoleMap({
+    ...plan,
+    roles: [{ role_name: 'toString', clone_role: 'App User', source: 'profile', portal: false }],
+  });
+  assert.deepEqual(inherited, {});
+});
+
+test('an export with no profiles plans no roles, no invites, and a validator that denies every signup', () => {
+  const apply = authApplyPlan(authPlan(appOf(`\tform Item\n\t{\n\t\tQty\n\t\t(\n\t\t\ttype = number\n\t\t)\n\t}`)));
+  assert.deepEqual(apply.roles, []);
+  assert.deepEqual(apply.invites, []);
+  assert.deepEqual(apply.customUserValidation.assignableRoles, []);
+  const report = authApplyReport(apply);
+  for (const line of [
+    '## Roles\n- none\n',
+    '## Table permissions\n- none (a role with no rows here reads no tables)\n',
+    '## Invites\n- none (no portal profile in the export)\n',
+    '- no portal role is planned, so the generated validator denies every signup\n',
+  ]) {
+    assert.equal(report.includes(line), true, line);
+  }
+  assert.equal(report.includes('- assignable roles:'), false);
+});
+
+test('the apply report names the portal flag and hierarchy parent of each role', () => {
+  const plan = authPlan(
+    appOf(
+      DEMO.replace(
+        '\t\t\tCEO\n\t\t\t{\n\t\t\t\tdescription = "Top"\n\t\t\t}',
+        '\t\t\tCEO\n\t\t\t{\n\t\t\t\t"Clerk"\n\t\t\t\t{\n\t\t\t\t\tdescription = "Desk"\n\t\t\t\t}\n\t\t\t}',
+      ),
+    ),
+  );
+  const apply = authApplyPlan(plan);
+  assert.equal(apply.roles.find((role) => role.role_name === 'Clerk')?.parent, 'CEO');
+  assert.equal('parent' in (apply.roles.find((role) => role.role_name === 'CEO') ?? {}), false);
+  const report = authApplyReport(apply);
+  assert.equal(report.includes('- Clerk (clone of App User, parent CEO) — POST /role'), true);
+  assert.equal(report.includes('- Customers (clone of App User, portal) — POST /role'), true);
+});

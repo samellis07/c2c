@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { deriveIr, parse } from '../../core/src/index.js';
 import { RecordAccessError, authorizeDelete, authorizeRead, authorizeWrite } from '../../shims/src/access.js';
 import { createRuntime } from '../../shims/src/runtime.js';
-import { authAsReport, authPlan } from '../src/index.js';
+import { authAsJson, authAsReport, authPlan } from '../src/index.js';
 
 function appOf(body: string) {
   return deriveIr(parse(`application "Demo"\n{\n${body}\n}\n`));
@@ -371,4 +371,139 @@ test('case-only profile and hierarchy role names remain visible with a collision
   ]);
   assert.equal(authAsReport(plan).includes(collision[0]), true);
   assert.equal(authAsReport(plan), authAsReport(authPlan(app)));
+});
+
+function profileBlock(name: string, type: string, modules = ''): string {
+  const body = modules ? `\t\t\tModulePermissions\n\t\t\t{\n${modules}\t\t\t}\n` : '';
+  return `\t\t"${name}"\n\t\t{\n\t\t\tname = "${name}"\n\t\t\ttype = ${type}\n${body}\t\t}\n`;
+}
+
+function moduleBlock(form: string, enabled: string, reports: string): string {
+  return `\t\t\t\t${form}\n\t\t\t\t{\n\t\t\t\t\tenabled = ${enabled}\n\t\t\t\t\tReportPermissions\n\t\t\t\t\t{\n\t\t\t\t\t\tAll_${form}s = ${reports}\n\t\t\t\t\t}\n\t\t\t\t}\n`;
+}
+
+const ITEM_FORM = `\tform Item
+\t{
+\t\tQty
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t}
+\tlist All_Items
+\t{
+\t\tshow all rows from Item
+\t\t(
+\t\t\tQty
+\t\t)
+\t}
+`;
+
+test('a renamed built-in profile never lands on a name another profile already holds', () => {
+  for (const order of [
+    ['App User', 'Creator App User'],
+    ['Creator App User', 'App User'],
+  ]) {
+    const plan = authPlan(
+      appOf(`\tshare_settings\n\t{\n${order.map((name) => profileBlock(name, 'Users_Permissions')).join('')}\t}`),
+    );
+    const names = plan.roles.map((role) => role.role_name);
+    assert.equal(new Set(names).size, names.length, `duplicate role names for ${order.join(' + ')}: ${names.join(', ')}`);
+    const renamed = plan.roles.find((role) => role.profile === 'App User');
+    assert.equal(renamed?.role_name, 'Creator Creator App User');
+    assert.equal(renamed?.clone_role, 'App User');
+  }
+});
+
+test('a disabled module grants neither table permissions nor page access', () => {
+  const plan = authPlan(
+    appOf(
+      `${ITEM_FORM}\tshare_settings\n\t{\n${profileBlock('Staff', 'Users_Permissions', moduleBlock('Item', 'false', '{"View","Edit","Delete"}') + `\t\t\t\tDashboard\n\t\t\t\t{\n\t\t\t\t\tenabled = "False"\n\t\t\t\t}\n`)}\t}`,
+    ),
+  );
+  assert.deepEqual(plan.tablePermissions, []);
+  assert.deepEqual(plan.pageAccess, []);
+});
+
+test('write verbs without a read verb grant no table permission at all', () => {
+  const plan = authPlan(
+    appOf(`${ITEM_FORM}\tshare_settings\n\t{\n${profileBlock('Clerk', 'Users_Permissions', moduleBlock('Item', 'true', '{"Add","Edit","Delete"}'))}\t}`),
+  );
+  assert.deepEqual(plan.tablePermissions, []);
+});
+
+test('Create and View All module flags grant insert and a GLOBAL read', () => {
+  const plan = authPlan(
+    appOf(`${ITEM_FORM}\tshare_settings\n\t{\n${profileBlock('Lead', 'Users_Permissions', moduleBlock('Item', '{Create, Viewall, Bogus}', '{}'))}\t}`),
+  );
+  assert.deepEqual(plan.tablePermissions, [{ table: 'Item', role: 'Lead', permissions: ['SELECT', 'INSERT'], scope: 'GLOBAL' }]);
+});
+
+test('nested hierarchy roles keep their parent and skip names a profile already owns', () => {
+  const plan = authPlan(
+    appOf(`\tshare_settings
+\t{
+${profileBlock('Manager', 'Users_Permissions')}\t\troles
+\t\t{
+\t\t\tCEO
+\t\t\t{
+\t\t\t\t"Manager"
+\t\t\t\t{
+\t\t\t\t\t"Clerk"
+\t\t\t\t\t{
+\t\t\t\t\t\tdescription = "Front desk"
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`),
+  );
+  assert.deepEqual(
+    plan.roles.map(({ role_name, source, parent }) => ({ role_name, source, parent })),
+    [
+      { role_name: 'Manager', source: 'profile', parent: undefined },
+      { role_name: 'CEO', source: 'hierarchy', parent: undefined },
+      { role_name: 'Clerk', source: 'hierarchy', parent: 'Manager' },
+    ],
+  );
+});
+
+test('an export with no profiles reports no roles and its JSON round-trips', () => {
+  const plan = authPlan(appOf(ITEM_FORM));
+  assert.deepEqual(plan.roles, []);
+  assert.equal(authAsReport(plan).includes('No profiles or hierarchy roles in the export.'), true);
+  const json = authAsJson(plan);
+  assert.equal(json.endsWith('}\n'), true);
+  assert.deepEqual(JSON.parse(json), plan);
+});
+
+test('an untyped admin profile clones App Administrator and a module with no enabled flag still grants', () => {
+  const plan = authPlan(
+    appOf(`${ITEM_FORM}\tshare_settings
+\t{
+\t\t"Site Admins"
+\t\t{
+\t\t\tname = "Site Admins"
+\t\t\tModulePermissions
+\t\t\t{
+\t\t\t\tItem
+\t\t\t\t{
+\t\t\t\t\tReportPermissions
+\t\t\t\t\t{
+\t\t\t\t\t\tAll_Items = {"View"}
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t\tDashboard
+\t\t\t\t{
+\t\t\t\t\tenabled = true
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`),
+  );
+  assert.deepEqual(
+    plan.roles.map(({ role_name, clone_role, portal }) => ({ role_name, clone_role, portal })),
+    [{ role_name: 'Site Admins', clone_role: 'App Administrator', portal: false }],
+  );
+  assert.deepEqual(plan.tablePermissions, [{ table: 'Item', role: 'Site Admins', permissions: ['SELECT'], scope: 'ORG' }]);
+  assert.deepEqual(plan.pageAccess, [{ page: 'Dashboard', role: 'Site Admins' }]);
 });
