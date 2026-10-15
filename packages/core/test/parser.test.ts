@@ -653,7 +653,54 @@ test('header parsing tolerates variants', () => {
     generatedOn: 'b',
     version: '3.0',
   });
+  assert.deepEqual(parseHeader('/*\n * Author       : someone\n * Generated on : 04-Jan-2025 15:24:33\n * Version      : 1.0\n */'), {
+    author: 'someone',
+    generatedOn: '04-Jan-2025 15:24:33',
+    version: '1.0',
+  });
+  assert.deepEqual(parseHeader('/*\n * Author       : x\n * Generated on : 01-Jan-2016\n * Version      : 3.0\n */'), {
+    author: 'x',
+    generatedOn: '01-Jan-2016',
+    version: '3.0',
+  });
   assert.equal(parseHeader('form X {}'), undefined);
+  assert.equal(parseHeader('/* no keys */'), undefined);
+  assert.deepEqual(parseHeader('/* * AUTHOR: a\n * author: b */'), { author: 'b' });
+  assert.deepEqual(parseHeader('/* * Generated on: */'), { generatedOn: '' });
+  assert.equal(parseHeader(`/* * Author: past the cap ${' '.repeat(2 * 1024 * 1024)}*/`), undefined);
+});
+
+test('header parsing stays linear on long whitespace and star lines', () => {
+  const kib = 1024;
+  const make = {
+    spaces: (n: number) => ' '.repeat(n),
+    stars: (n: number) => `/*${'*'.repeat(n)}`,
+    starLine: (n: number) => `/*\n${'*'.repeat(n)}\n*/`,
+    authorSpaces: (n: number) => `/*\n * Author: ${' '.repeat(n)}\n*/`,
+  };
+  const perCall = (src: string): number => {
+    parseHeader(src);
+    const start = performance.now();
+    let calls = 0;
+    let elapsed = 0;
+    do {
+      parseHeader(src);
+      calls += 1;
+      elapsed = performance.now() - start;
+    } while (elapsed < 80);
+    return elapsed / calls;
+  };
+  for (const [name, build] of Object.entries(make)) {
+    const big = build(1024 * kib);
+    const started = performance.now();
+    parseHeader(big);
+    const once = performance.now() - started;
+    assert.ok(once < 100, `${name}: 1 MiB took ${once.toFixed(1)} ms`);
+    const small = perCall(build(256 * kib));
+    const large = perCall(big);
+    const ratio = large / small;
+    assert.ok(ratio < 6, `${name}: 1 MiB / 256 KiB = ${ratio.toFixed(2)} (${large.toFixed(3)} ms / ${small.toFixed(3)} ms)`);
+  }
 });
 
 // ---------------------------------------------------------------------------
