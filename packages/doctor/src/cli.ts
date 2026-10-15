@@ -17,7 +17,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { basename } from 'node:path';
 import { runDoctorChecks, type DoctorContext } from './checks.js';
-import { peekCliTokenTag, refreshCliAccessToken } from '../../deploy/src/rest.js';
+import { listCatalystProjects, peekCliTokenTag, refreshCliAccessToken } from '../../deploy/src/rest.js';
 import { EvidenceRejected, EvidenceStale, mcpRecord, parseEvidence, type McpEvidence } from './evidence.js';
 import { beginMcpRequest, closeMcpRequest, mcpRequestInstructions, parseObservation, readStdinBounded, type Observed } from './observed.js';
 import { clearPendingCleanup, probeDeleteCall, probeNameOf, readPendingCleanups, verifyProbe, writePendingCleanup, type ProbeTarget } from './mcp-probe.js';
@@ -86,6 +86,8 @@ export function defaultDoctorIo(): DoctorIo {
     refreshToken: async (org) => {
       await refreshCliAccessToken(process.env, org);
     },
+    // The org list for D-F7 (project_type/created_time only — the raw listing carries other projects' secrets).
+    listProjects: (org) => listCatalystProjects(process.env, org),
   };
 }
 

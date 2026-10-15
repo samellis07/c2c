@@ -16,6 +16,7 @@ import { parseJsonExact } from './json-exact.js';
 import { invalidTokenAnswer, readWithNewerToken } from './retry.js';
 import { catalystScopeArgs, scrubCatalystEnv } from './scope.js';
 import type { RestCall, RestResult } from './tables.js';
+import type { ListedProject } from './stuck-import.js';
 
 const HOOK = `const fs = require('fs');
 const path = require('path');
@@ -173,13 +174,13 @@ function browserPrefix(projectId: string): string {
   return `/browser360/v1/project/${projectId}/`;
 }
 
-/** Rows of GET /baas/v1/project. A non-decimal id (a rounded double) is dropped, not coerced. */
-export function parseProjectList(body: unknown): { name: string; id: string }[] {
+/** Rows of GET /baas/v1/project. A non-decimal id (a rounded double) is dropped, not coerced. Only name, id, project_type and created_time survive — the raw listing carries other projects' secrets. */
+export function parseProjectList(body: unknown): ListedProject[] {
   if (!body || typeof body !== 'object') throw new Error('catalyst project list did not return projects');
   const record = body as Record<string, unknown>;
   const data = Array.isArray(record.data) ? record.data : Array.isArray(body) ? (body as unknown[]) : undefined;
   if (!data) throw new Error('catalyst project list did not return projects');
-  const out: { name: string; id: string }[] = [];
+  const out: ListedProject[] = [];
   for (const item of data) {
     if (!item || typeof item !== 'object') continue;
     const row = item as Record<string, unknown>;
@@ -187,7 +188,12 @@ export function parseProjectList(body: unknown): { name: string; id: string }[] 
     const nameValue = row.project_name ?? row.name;
     const name = typeof nameValue === 'string' ? nameValue.trim() : '';
     if (!id || !name) continue;
-    out.push({ id, name });
+    out.push({
+      id,
+      name,
+      ...(typeof row.project_type === 'string' ? { projectType: row.project_type } : {}),
+      ...(typeof row.created_time === 'string' ? { createdTime: row.created_time } : {}),
+    });
   }
   return out;
 }
@@ -202,7 +208,7 @@ function decimalString(value: unknown): string | undefined {
  * List projects in one org. One GET /baas/v1/project, nothing else: the hook
  * refuses every other method and path. Ids stay the digit strings from the body.
  */
-export async function listCatalystProjects(env: NodeJS.ProcessEnv, org: string, opts: { log?: (line: string) => void } = {}): Promise<{ name: string; id: string }[]> {
+export async function listCatalystProjects(env: NodeJS.ProcessEnv, org: string, opts: { log?: (line: string) => void } = {}): Promise<ListedProject[]> {
   if (!/^[0-9]+$/.test(org)) throw new Error('refusing to list projects without a decimal org id');
   const decoded = await catalystRestCall(env, org, org, { method: 'GET', path: '/baas/v1/project' }, { exact: true, ...opts });
   if (decoded.status < 200 || decoded.status >= 300) throw new Error('catalyst project list failed');
