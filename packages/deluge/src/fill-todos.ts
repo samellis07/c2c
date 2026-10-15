@@ -35,6 +35,7 @@ import {
   approvalScriptOptions,
   approverGap,
   emittedFieldRuleConditionFor,
+  eventKind,
   functionScriptOptions,
   generate,
   scheduleCriteriaGap,
@@ -877,6 +878,19 @@ function walk(app: App): { flat: WalkCall[]; drafts: Draft[] } {
     group.push(w);
     approvalGroups.set(key, group);
   }
+  const formGroups = new Map<string, Workflow[]>();
+  const formGroupKey = (w: Workflow): string => `${w.form || 'form'}\u0000${eventKind(w.event)}`;
+  for (const w of app.workflows) {
+    if (isPayment(w) || isApproval(w) || isSchedule(w)) continue;
+    if (isBlueprint(w) && !(w.deluge || w.fieldRules?.length)) continue;
+    const group = formGroups.get(formGroupKey(w)) ?? [];
+    group.push(w);
+    formGroups.set(formGroupKey(w), group);
+  }
+  const pushFormGroupOnce = (workflow: Workflow): void => {
+    const group = formGroups.get(formGroupKey(workflow));
+    if (group && group[0] === workflow) pushFormGroup(state, app, group);
+  };
   for (const workflow of app.workflows) {
     if (isPayment(workflow)) continue;
     if (isBlueprint(workflow)) {
@@ -918,7 +932,7 @@ function walk(app: App): { flat: WalkCall[]; drafts: Draft[] } {
           pushApprovers(state, app, workflow, transitionOwnerProperties(transition, app), transition.name, spec.form, true);
         }
       }
-      if (workflow.deluge || workflow.fieldRules?.length) pushForm(state, app, workflow);
+      pushFormGroupOnce(workflow);
     } else if (isApproval(workflow)) {
       const key = workflow.name || `approval:${workflow.form ?? ''}`;
       const group = approvalGroups.get(key)!;
@@ -927,7 +941,7 @@ function walk(app: App): { flat: WalkCall[]; drafts: Draft[] } {
     } else if (isSchedule(workflow)) {
       pushSchedule(state, app, workflow, schedulePlans.get(workflow));
     } else {
-      pushForm(state, app, workflow);
+      pushFormGroupOnce(workflow);
     }
   }
   for (const fn of app.functions) pushFunction(state, app, fn);
@@ -1029,25 +1043,39 @@ function pushSchedule(state: WalkState, app: App, workflow: Workflow, plan: Sche
   state.drafts.push(...draftsOf(serverOnly(gated)));
 }
 
-function pushForm(state: WalkState, app: App, workflow: Workflow): void {
-  const fragment = workflow.deluge
-    ? translateFragment(
-        state,
-        workflow.deluge.text,
-        workflow.deluge.span.start,
-        workflowIr(workflow, workflow.deluge.span),
-        workflowScriptOptions(app, workflow),
-        app,
-      )
-    : emptyFragment(workflowIr(workflow, workflow.span));
-  const { fragment: gated, suppressed } = gateFragment(state, app, workflow, fragment, true);
-  if (suppressed) pushGateNote(state, workflow);
-  const rules = fieldRuleCalls(state, app, workflow);
-  state.flat.push(...gated.server, ...gated.prefetch);
-  for (const rule of rules) state.flat.push(rule);
-  state.flat.push(...gated.client);
-  state.drafts.push(...draftsOf(gated));
-  state.drafts.push(...fieldRuleDrafts(app, workflow, rules));
+/**
+ * One merged form-event module in emitted order: the server body runs every
+ * script of the group in export order (slotStart chains the slot counters),
+ * then the merged prefetch body, then each workflow's client module.
+ */
+function pushFormGroup(state: WalkState, app: App, group: readonly Workflow[]): void {
+  let slot = 0;
+  const gatedList: { workflow: Workflow; gated: Fragment }[] = [];
+  for (const workflow of group) {
+    const fragment = workflow.deluge
+      ? translateFragment(
+          state,
+          workflow.deluge.text,
+          workflow.deluge.span.start,
+          workflowIr(workflow, workflow.deluge.span),
+          { ...workflowScriptOptions(app, workflow), slotStart: slot },
+          app,
+        )
+      : emptyFragment(workflowIr(workflow, workflow.span));
+    slot = fragmentNextSlot(fragment);
+    const { fragment: gated, suppressed } = gateFragment(state, app, workflow, fragment, true);
+    if (suppressed) pushGateNote(state, workflow);
+    gatedList.push({ workflow, gated });
+  }
+  for (const { gated } of gatedList) state.flat.push(...gated.server);
+  for (const { gated } of gatedList) state.flat.push(...gated.prefetch);
+  for (const { workflow, gated } of gatedList) {
+    const rules = fieldRuleCalls(state, app, workflow);
+    for (const rule of rules) state.flat.push(rule);
+    state.flat.push(...gated.client);
+    state.drafts.push(...draftsOf(gated));
+    state.drafts.push(...fieldRuleDrafts(app, workflow, rules));
+  }
 }
 
 function pushFunction(state: WalkState, app: App, fn: FunctionDef): void {

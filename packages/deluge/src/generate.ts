@@ -192,6 +192,21 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
     approvalGroups.set(key, group);
   }
   const schedulePlans = schedulePlansFor(app);
+  // Every workflow whose script serves /forms/<form>/<kind> is grouped: one
+  // module carries all of a form event's scripts (deploy keeps one module per
+  // route, so sibling modules would silently never run).
+  const handlerGroups = new Map<string, Workflow[]>();
+  for (const w of app.workflows) {
+    if (!isHandlerWorkflow(w)) continue;
+    const key = `${w.form || 'form'}${eventKind(w.event)}`;
+    const group = handlerGroups.get(key) ?? [];
+    group.push(w);
+    handlerGroups.set(key, group);
+  }
+  const emitHandlers = (w: Workflow): void => {
+    const group = handlerGroups.get(`${w.form || 'form'}${eventKind(w.event)}`);
+    if (group && group[0] === w) emitFormHandler(app, group, put, stats, todos, alertDiagnostics, warnings, clientCalls.names, calledFunctions, options?.schema, !!options?.asyncOnSuccess, recordHandler);
+  };
   const thisappEntries: ThisappEntry[] = [];
   const warnings: GenerateWarning[] = [];
   const clientCalls = clientCallFunctions(app);
@@ -207,26 +222,13 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
     }
     if (workflowKind(w) === 'blueprint') {
       emitBlueprint(app, w, specOf.get(w), put, stats, todos, alertDiagnostics, options?.schema);
-      if (w.deluge || w.fieldRules?.length) emitFormHandler(app, w, put, stats, todos, alertDiagnostics, clientCalls.names, calledFunctions, options?.schema, !!options?.asyncOnSuccess, recordHandler);
+      emitHandlers(w);
     } else if (workflowKind(w) === 'approval') {
       const key = w.name || `approval:${w.form ?? ''}`;
       const group = approvalGroups.get(key)!;
       if (group[0] === w) emitApproval(app, group, specOf.get(w)!, put, stats, todos, alertDiagnostics, options?.schema);
     } else if (workflowKind(w) === 'schedule') emitSchedule(app, w, schedulePlans.get(w)!, put, stats, todos, alertDiagnostics, options?.schema);
-    else {
-      const filesBefore = files.length;
-      const todosBefore = todos.length;
-      emitFormHandler(app, w, put, stats, todos, alertDiagnostics, clientCalls.names, calledFunctions, options?.schema, !!options?.asyncOnSuccess, recordHandler);
-      // A form workflow with no script and no field rules writes nothing. Name it in the
-      // migration report so the declaration is not absent from both the tree and the report.
-      if (files.length === filesBefore && todos.length === todosBefore) {
-        warnings.push({
-          construct: 'workflow-empty',
-          name: w.name || w.form || 'workflow',
-          note: 'This workflow has no script and no field rules, so no handler is generated.',
-        });
-      }
-    }
+    else emitHandlers(w);
   }
   // Every Advanced I/O form handler imports the shared request helpers from
   // one app-local module. Emit it only when this app has at least one AIO file.
@@ -409,83 +411,187 @@ function recordAlertDiags(
   }
 }
 
+/**
+ * The record-event scope a form-handler script runs under: `on add`, `on
+ * edit`, `on delete`, or both writes. A merged module guards each script by
+ * its scope only when the group mixes scopes.
+ */
+function recordScope(w: Workflow): 'add' | 'edit' | 'del' | 'both' {
+  const rec = (w.recordEvent ?? '').trim().toLowerCase();
+  if (rec === 'on add' || rec === 'create') return 'add';
+  if (rec === 'on edit' || rec === 'update') return 'edit';
+  if (rec === 'on delete') return 'del';
+  return 'both';
+}
+
+/** A workflow whose script lands in a form-handler module (one per form event kind). */
+function isHandlerWorkflow(w: Workflow): boolean {
+  const kind = workflowKind(w);
+  return kind === 'form' || (kind === 'blueprint' && !!(w.deluge || w.fieldRules?.length));
+}
+
+/**
+ * The module leaf for a form event group: the shared event slug, or the kind
+ * when the merged events differ. The group's `put` path is
+ * `functions/aio/<form>/<leaf>.mjs`.
+ */
+function handlerLeaf(group: readonly Workflow[]): string {
+  const labels = new Set(group.map((w) => w.event || w.name || 'handler'));
+  return labels.size === 1 ? slug([...labels][0]!) : `${eventKind(group[0]!.event)}-handlers`;
+}
+
+/** Workflows of one app that share the /forms/<form>/<kind> route, in export order. */
+function handlerGroup(app: App, form: string, kind: string): Workflow[] {
+  return app.workflows.filter((w) => isHandlerWorkflow(w) && (w.form || 'form') === form && eventKind(w.event) === kind);
+}
+
 function emitFormHandler(
   app: App,
-  w: Workflow,
+  group: readonly Workflow[],
   put: (path: string, source: string) => void,
   stats: TranslateStats,
   todos: TodoItem[],
   alertDiagnostics: AlertDiagnostic[],
+  warnings: GenerateWarning[],
   clientCallFunctions: ReadonlySet<string>,
   calledFunctions: Set<string>,
   schema?: SchemaPlan,
   asyncOnSuccess = false,
   recordHandler?: (entry: { path: string; kind: string; candidate: AsyncCandidate }) => void,
 ): void {
-  const subform = subformEventField(w.event);
-  const translated = w.deluge ? translateInApp(app, w.deluge.text, { ...workflowScriptOptions(app, w), clientCallFunctions: [...clientCallFunctions] }) : emptyTranslate();
-  addStats(stats, translated.stats);
-  todos.push(...shift(translated.todos, w.deluge));
-  recordAlertDiags(translated.todos, w.deluge, w, alertDiagnostics);
-  const guarded = gateAction(app, w, translated, todos);
-  const rules = fieldRuleSource(app, w, todos);
-  const form = w.form || 'form';
-  const kind = eventKind(w.event);
-  const base = `${slug(form)}/${slug(w.event || w.name || 'handler')}`;
-  const systemWrite = systemWriteKind(w);
-  if (guarded.server.trim()) {
-    recordHandler?.({
-      path: `functions/aio/${base}.mjs`,
-      kind,
-      candidate: {
-        name: w.name || `${form} ${w.event || 'handler'}`,
-        server: guarded.server,
-        client: guarded.client,
-        deluge: w.deluge?.text ?? '',
-      },
-    });
+  const first = group[0]!;
+  const form = first.form || 'form';
+  const kind = eventKind(first.event);
+  const base = `${slug(form)}/${handlerLeaf(group)}`;
+  // The route is one per form event kind, so every script of the group lands
+  // in this module in export order. Each script keeps its own prefetch slot
+  // namespace (slotStart chains) — the bodies cannot be concatenated raw.
+  const scopes = new Set(group.map(recordScope));
+  const mixedScopes = scopes.size > 1;
+  const hasDelScope = scopes.has('del');
+  const subformFields = new Set(group.map((w) => subformEventField(w.event)).filter((f): f is string => !!f));
+  const multiSubform = subformFields.size > 1;
+  let slot = 0;
+  const serverParts: string[] = [];
+  const prefetchParts: string[] = [];
+  const clientParts: { w: Workflow; body: string; prefetchPath: string }[] = [];
+  let prefetchElement = false;
+  let hasPrefetch = false;
+  const writeKinds = new Set<'insert' | 'update' | 'add-or-edit'>();
+  for (const w of group) {
+    const subform = subformEventField(w.event);
+    const todosBefore = todos.length;
+    const translated = w.deluge ? translateInApp(app, w.deluge.text, { ...workflowScriptOptions(app, w), clientCallFunctions: [...clientCallFunctions], slotStart: slot }) : emptyTranslate();
+    slot = translated.nextSlot || slot;
+    addStats(stats, translated.stats);
+    todos.push(...shift(translated.todos, w.deluge));
+    recordAlertDiags(translated.todos, w.deluge, w, alertDiagnostics);
+    const guarded = gateAction(app, w, translated, todos);
+    const rules = fieldRuleSource(app, w, todos);
+    const systemWrite = systemWriteKind(w);
+    // The stamp and row binding join only a real script: a workflow with no
+    // server body contributes nothing and is named `workflow-empty` below.
+    const server = guarded.server.trim()
+      ? [systemStampSource(systemWrite), subformRowSource(subform, guarded.server), guarded.server].filter((part) => part.trim()).join('\n')
+      : '';
+    if (server) writeKinds.add(systemWrite!);
+    const prefetch = [subformRowSource(subform, translated.prefetch), translated.prefetch].filter((part) => part.trim()).join('\n');
+    const clientBody = [subformRowSource(subform, guarded.client), rules, guarded.client].filter((part) => part.trim()).join('\n');
+    if (!server.trim() && !prefetch.trim() && !clientBody.trim() && todos.length === todosBefore) {
+      warnings.push({
+        construct: 'workflow-empty',
+        name: w.name || w.form || 'workflow',
+        note: 'This workflow has no script and no field rules, so no handler is generated.',
+      });
+    }
+    // Record-event scope and subform guards apply only when the merged module
+    // mixes them; a uniform group runs the bodies exactly as one script.
+    const conds: string[] = [];
+    if (mixedScopes) {
+      const scope = recordScope(w);
+      if (scope === 'add') conds.push('!ctx.rowId');
+      else if (scope === 'edit') conds.push(hasDelScope ? 'ctx.rowId && !ctx.deleting' : 'ctx.rowId');
+      else if (scope === 'del') conds.push('ctx.deleting');
+      else if (hasDelScope) conds.push('!ctx.deleting');
+    }
+    if (multiSubform && subform) conds.push(`ctx.subformRow && ctx.subformRow.field === ${JSON.stringify(subform)}`);
+    const wrap = (part: string): string => (part.trim() && conds.length ? `if (${conds.join(' && ')}) {\n${indent(part)}\n}` : part);
+    if (server.trim()) serverParts.push(wrap(server));
+    if (prefetch.trim()) {
+      hasPrefetch = true;
+      prefetchParts.push(wrap(prefetch));
+      if (translated.usesElement) prefetchElement = true;
+    }
+    const prefetchPath = prefetch.trim() ? `/forms/${encodeURIComponent(form)}/${kind}/prefetch` : '';
+    if (clientBody.trim()) clientParts.push({ w, body: clientBody, prefetchPath });
+    if (server.trim()) {
+      recordHandler?.({
+        path: `functions/aio/${base}.mjs`,
+        kind,
+        candidate: {
+          name: w.name || `${form} ${w.event || 'handler'}`,
+          server: guarded.server,
+          client: guarded.client,
+          deluge: w.deluge?.text ?? '',
+        },
+      });
+    }
+  }
+  const serverBody = serverParts.join('\n');
+  if (serverBody.trim()) {
+    const systemWrite =
+      writeKinds.size === 0 ? null : writeKinds.size === 1 ? [...writeKinds][0]! : 'add-or-edit';
+    const recordEvents = new Set(group.map((w) => (w.recordEvent ?? '').trim().toLowerCase()));
+    const recordEvent =
+      recordEvents.size === 1
+        ? first.recordEvent
+        : scopes.has('both') || (scopes.has('add') && scopes.has('edit'))
+          ? 'on add or edit'
+          : scopes.has('edit')
+            ? 'on edit'
+            : 'on add';
+    const extraRecordEvents = recordEvents.size > 1 ? { recordEvents: [...new Set(group.map((w) => w.recordEvent ?? ''))] } : {};
     put(
       `functions/aio/${base}.mjs`,
       aioModule({
         app,
         form,
-        title: `Form handler ${w.event || w.name}`,
+        title: `Form handler ${first.event || first.name}`,
         // The on-delete script is a post-delete script, not the delete
         // endpoint itself: `/forms/<form>/delete` is owned by the generated
         // delete stub, which imports this module after the row is removed.
         path: `/forms/${encodeURIComponent(form)}/${kind === 'delete' ? 'delete-script' : kind}`,
-        recordEvent: w.recordEvent,
+        recordEvent,
+        ...extraRecordEvents,
         systemWrite,
         validateSpecs: systemWrite ? validateSiblingSpecs(app, form) : undefined,
-        body: [systemStampSource(systemWrite), subformRowSource(subform, guarded.server), guarded.server].filter((part) => part.trim()).join('\n'),
+        body: serverBody,
         schema,
         deferSuccess: asyncOnSuccess && kind === 'success',
       }),
     );
   }
-  const clientBody = [subformRowSource(subform, guarded.client), rules, guarded.client].filter((s) => s.trim()).join('\n');
-  const prefetchPath = translated.prefetch.trim() ? `/forms/${encodeURIComponent(form)}/${kind}/prefetch` : '';
-  if (prefetchPath) {
+  if (hasPrefetch) {
     put(
       `functions/aio/${base}-prefetch.mjs`,
       prefetchModule({
         app,
-        title: `Prefetch for ${w.event || w.name}`,
-        path: prefetchPath,
+        title: `Prefetch for ${first.event || first.name}`,
+        path: `/forms/${encodeURIComponent(form)}/${kind}/prefetch`,
         dir: '../../',
-        body: [subformRowSource(subform, translated.prefetch), translated.prefetch].filter((s) => s.trim()).join('\n'),
+        body: prefetchParts.join('\n'),
         form,
         formGrant: 'write',
         schema,
-        element: !!translated.usesElement,
+        element: prefetchElement,
       }),
     );
   }
-  if (clientBody.trim()) {
-    collectClientCalls(clientBody, calledFunctions);
+  for (const part of clientParts) {
+    collectClientCalls(part.body, calledFunctions);
     put(
-      `client/handlers/${base}.mjs`,
-      clientModule(clientBody, prefetchPath, { form, event: w.event, when: kind, recordEvent: w.recordEvent }),
+      `client/handlers/${slug(form)}/${slug(part.w.event || part.w.name || 'handler')}.mjs`,
+      clientModule(part.body, part.prefetchPath, { form, event: part.w.event, when: kind, recordEvent: part.w.recordEvent }),
     );
   }
 }
@@ -1102,20 +1208,14 @@ function emitBlueprint(
  * file as nothing to run.
  */
 function onEditWorkflowSpecs(app: App, form: string): { validate: string[]; success: string[] } {
-  const validate: string[] = [];
-  const success: string[] = [];
-  for (const other of app.workflows) {
-    if ((other.form || 'form') !== form) continue;
-    if (workflowKind(other) !== 'form') continue;
-    const record = (other.recordEvent ?? '').toLowerCase();
-    if (record && !record.includes('edit')) continue;
-    const kind = eventKind(other.event);
-    const spec = `../aio/${slug(form)}/${slug(other.event || other.name || 'handler')}.mjs`;
-    if (kind === 'validate') validate.push(spec);
-    else if (kind === 'success') success.push(spec);
+  const out: { validate: string[]; success: string[] } = { validate: [], success: [] };
+  for (const kind of ['validate', 'success'] as const) {
+    const group = handlerGroup(app, form, kind).filter((other) => workflowKind(other) === 'form');
+    const record = (o: Workflow) => (o.recordEvent ?? '').toLowerCase();
+    if (!group.some((o) => !record(o) || record(o).includes('edit'))) continue;
+    out[kind].push(`../aio/${slug(form)}/${handlerLeaf(group)}.mjs`);
   }
-  const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
-  return { validate: [...new Set(validate)].sort(byName), success: [...new Set(success)].sort(byName) };
+  return out;
 }
 
 /** `Send as "Send"` is an internal name plus a display label; the label wins. */
@@ -1362,8 +1462,8 @@ function emitFunction(
   }
 }
 
-function emptyTranslate(): { server: string; client: string; prefetch: string; usesElement?: boolean; stats: TranslateStats; todos: TodoItem[] } {
-  return { server: '', client: '', prefetch: '', stats: EMPTY_STATS(), todos: [] };
+function emptyTranslate(): { server: string; client: string; prefetch: string; usesElement?: boolean; nextSlot: number; stats: TranslateStats; todos: TodoItem[] } {
+  return { server: '', client: '', prefetch: '', nextSlot: 0, stats: EMPTY_STATS(), todos: [] };
 }
 
 function shift(items: TodoItem[], raw: RawDeluge | null): TodoItem[] {
@@ -1521,9 +1621,10 @@ export function workflowRowOptions(app: App, w: Workflow): Pick<TranslateOptions
  */
 const SUBFORM_ROW_HELPER = `/** body.subformRow, when it names a row of this event's subform in record. Anything else is no row. */
 function requestSubformRow(req, subform, record) {
+  const fields = Array.isArray(subform) ? subform : [subform];
   const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : null;
   const at = body && body.subformRow;
-  if (!at || typeof at !== "object" || at.field !== subform || !Number.isInteger(at.index) || at.index < 0) return undefined;
+  if (!at || typeof at !== "object" || !fields.includes(at.field) || !Number.isInteger(at.index) || at.index < 0) return undefined;
   const rows = record && typeof record === "object" ? record[subform] : undefined;
   if (!Array.isArray(rows) || at.index >= rows.length) return undefined;
   const row = rows[at.index];
@@ -1631,7 +1732,16 @@ function requestElement(req) {
 
 /** The subform literal of \`shim.subform.currentRow(ctx, "Sub")\` in a generated body, as JS source. */
 function currentRowField(body: string): string | null {
-  return /shim\.subform\.currentRow\(ctx, ("(?:[^"\\]|\\.)*")\)/.exec(body)?.[1] ?? null;
+  return currentRowFields(body)[0] ?? null;
+}
+
+/** Every distinct subform literal a generated body names, in source order. A merged form module can bind more than one. */
+function currentRowFields(body: string): string[] {
+  const out: string[] = [];
+  for (const m of body.matchAll(/shim\.subform\.currentRow\(ctx, ("(?:[^"\\]|\\.)*")\)/g)) {
+    if (!out.includes(m[1]!)) out.push(m[1]!);
+  }
+  return out;
 }
 
 /** A `var`, `var [...]`, or `function` declaration of `id` in a body suppresses an emitted binding of the same name. */
@@ -2698,28 +2808,28 @@ function systemStampSource(kind: 'insert' | 'update' | 'add-or-edit' | null): st
  * validates belong to the delete path, never to a submit.
  */
 export function validateSiblingSpecs(app: App, form: string): { add: string[]; edit: string[] } {
+  const group = handlerGroup(app, form, 'validate').filter((other) => !systemWriteKind(other));
   const add: string[] = [];
   const edit: string[] = [];
-  for (const other of app.workflows) {
-    if ((other.form || 'form') !== form) continue;
-    if (eventKind(other.event) !== 'validate') continue;
-    if (systemWriteKind(other)) continue;
+  if (!group.length) return { add, edit };
+  const spec = `./${handlerLeaf(handlerGroup(app, form, 'validate'))}.mjs`;
+  let hasServer = false;
+  let coversAdd = false;
+  let coversEdit = false;
+  for (const other of group) {
     const translated = other.deluge ? translateInApp(app, other.deluge.text) : emptyTranslate();
     const guarded = gateAction(app, other, translated, []);
-    if (!guarded.server.trim()) continue;
-    const spec = `./${slug(other.event || other.name || 'handler')}.mjs`;
-    const record = (other.recordEvent ?? '').toLowerCase();
-    // Unscoped and `on add or edit` validates run in both contexts.
-    if (record === 'on edit') edit.push(spec);
-    else if (record === 'on delete') continue;
-    else if (record === 'on add') add.push(spec);
-    else {
-      add.push(spec);
-      edit.push(spec);
-    }
+    if (guarded.server.trim()) hasServer = true;
+    const scope = recordScope(other);
+    if (scope === 'add' || scope === 'both') coversAdd = true;
+    if (scope === 'edit' || scope === 'both') coversEdit = true;
   }
-  const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
-  return { add: [...new Set(add)].sort(byName), edit: [...new Set(edit)].sort(byName) };
+  // Unscoped and `on add or edit` validates run in both contexts.
+  if (hasServer) {
+    if (coversAdd) add.push(spec);
+    if (coversEdit) edit.push(spec);
+  }
+  return { add, edit };
 }
 
 /**
@@ -3573,6 +3683,8 @@ function aioModule(opts: {
   title: string;
   path: string;
   recordEvent?: string;
+  /** Every record event the merged scripts declared, when they differ. Scanners classify by this list. */
+  recordEvents?: string[];
   systemWrite?: 'insert' | 'update' | 'add-or-edit' | null;
   /** `./on-validate.mjs` siblings by record event scope. Imported only after deploy mode is live. */
   validateSpecs?: { add: string[]; edit: string[] };
@@ -3640,8 +3752,9 @@ export const fields = ${JSON.stringify(schema.fields)};${schema.ruleDenied.lengt
     ? `authorizeWrite(access, principal, formName, record, { readonlyFields, fieldNames, fields${schema.ruleDenied.length ? ', ruleDenied: fieldRuleDenied' : ''} }${writeOp ? `, ${writeOp}` : ''})`
     : `authorizeWrite(access, principal, formName, record${writeOp ? `, undefined, ${writeOp}` : ''})`;
   const mailFrom = opts.body.includes('shim.mail.send') ? ', mailFrom: process.env.C2C_MAIL_FROM' : '';
-  const subformField = currentRowField(opts.body);
-  const usesSubformRow = subformField !== null;
+  const subformFields = currentRowFields(opts.body);
+  const usesSubformRow = subformFields.length > 0;
+  const subformField = subformFields.length === 1 ? subformFields[0]! : `[${subformFields.join(', ')}]`;
   const subformRowCtx = usesSubformRow ? `\n    subformRow: requestSubformRow(req, ${subformField}, accepted),` : '';
   const subformRowHelper = usesSubformRow ? `\n${SUBFORM_ROW_HELPER}` : '';
   const liveImport = opts.systemWrite
@@ -3741,7 +3854,8 @@ export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.strin
 export const access = ${accessLiteral(opts.app)};
 export const formName = ${JSON.stringify(opts.form)};
 export const recordEvent = ${JSON.stringify(opts.recordEvent ?? null)};
-${schemaExports}
+${opts.recordEvents ? `export const recordEvents = ${JSON.stringify(opts.recordEvents)};
+` : ''}${schemaExports}
 ${subformRowHelper}${liveHelpersBlock}export async function handle(ctx) {
   const shim = ctx.shim;
 ${indent(opts.body)}
@@ -3902,8 +4016,9 @@ ${indent(wrapped)}
 }
 
 function prefetchModule(opts: { app: App; title: string; path: string; body: string; dir?: string; params?: string[]; form?: string; formGrant?: 'read' | 'write'; schema?: SchemaPlan; element?: boolean }): string {
-  const subformField = currentRowField(opts.body);
-  const subformRow = subformField !== null;
+  const subformFields = currentRowFields(opts.body);
+  const subformRow = subformFields.length > 0;
+  const subformField = subformFields.length === 1 ? subformFields[0]! : `[${subformFields.join(', ')}]`;
   const usesThis = usesThisapp(opts.body);
   const thisappImport = usesThis ? `import { functions } from ${JSON.stringify(`${opts.dir ?? '../'}thisapp.mjs`)};\n` : '';
   const params = opts.params ?? [];

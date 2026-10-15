@@ -159,19 +159,27 @@ export function successSpecs(files: readonly { path: string; source: string }[])
     const isDeleteScript = !!match?.[1].endsWith('/delete-script');
     if (!isSuccess && !isDeleteScript) continue;
     const rec = /export const recordEvent = (null|"[^"]*");/.exec(file.source);
-    const scope = rec?.[1] && rec[1] !== 'null' ? JSON.parse(rec[1]).toLowerCase() : '';
+    const merged = /export const recordEvents = (\[[^\]]*\]);/.exec(file.source);
+    const scopes = merged
+      ? (JSON.parse(merged[1]) as string[]).map((scope) => scope.toLowerCase())
+      : [rec?.[1] && rec[1] !== 'null' ? JSON.parse(rec[1]).toLowerCase() : ''];
     const spec = `../aio/${form}/${parts[3]}`;
     const bucket = byForm.get(form) ?? { add: [], edit: [], del: [] };
     if (isDeleteScript) {
-      // The on-delete script runs after every delete; an add/edit-scoped one
-      // is not reachable through the delete path (mirrors siblingSpecs).
-      if (scope !== 'on add' && scope !== 'on edit') bucket.del.push(spec);
-    } else if (scope === 'on add') bucket.add.push(spec);
-    else if (scope === 'on edit') bucket.edit.push(spec);
-    else if (scope === 'on delete') bucket.del.push(spec);
-    else {
-      bucket.add.push(spec);
-      bucket.edit.push(spec);
+      // The on-delete script runs after every delete; a module whose scripts
+      // are all add/edit-scoped is not reachable through the delete path
+      // (mirrors siblingSpecs).
+      if (scopes.some((scope) => scope !== 'on add' && scope !== 'on edit')) bucket.del.push(spec);
+    } else {
+      for (const scope of scopes) {
+        if (scope === 'on add') bucket.add.push(spec);
+        else if (scope === 'on edit') bucket.edit.push(spec);
+        else if (scope === 'on delete') bucket.del.push(spec);
+        else {
+          bucket.add.push(spec);
+          bucket.edit.push(spec);
+        }
+      }
     }
     byForm.set(form, bucket);
   }

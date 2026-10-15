@@ -508,6 +508,16 @@ test('shim imports are rewritten relative to each file and parameterised routes 
     'GET /lookups/:form/:field': './lookups/lookup.mjs',
     'POST /uploads/:form/:field': './uploads/stratus-upload.mjs',
   });
+  // Two modules emitting the same route must be refused: keeping the first
+  // would silently never run the second (same form event, several scripts).
+  assert.throws(
+    () =>
+      routeTable([
+        { path: 'a.mjs', data: 'export const endpoint = { type: "advancedio", method: "POST", path: "/forms/A/success" };\n' },
+        { path: 'b.mjs', data: 'export const endpoint = { type: "advancedio", method: "POST", path: "/forms/A/success" };\n' },
+      ]),
+    /duplicate route POST \/forms\/A\/success/,
+  );
 });
 
 test('principal: the Catalyst role picks the Creator profile and an unmapped role or no user is refused', async () => {
