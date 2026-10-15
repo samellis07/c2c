@@ -73,6 +73,10 @@ ${tab(5)}{
 ${tab(6)}cancel delete;
 ${tab(5)}}
 ${tab(4)})
+${tab(4)}on success
+${tab(4)}(
+${tab(5)}result = "deleted";
+${tab(4)})
 ${tab(4)}}
 ${tab(3)}}
 ${tab(2)}}
@@ -230,6 +234,57 @@ test('the generated delete endpoint removes a permitted row in live mode', async
     else process.env.C2C_DEPLOY_MODE = prevMode;
     if (prevZone === undefined) delete process.env.C2C_APP_TIMEZONE;
     else process.env.C2C_APP_TIMEZONE = prevZone;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('delete success workflow failure is reported after the row has committed', async () => {
+  const built = buildUi(deriveIr(parse(SOURCE)));
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-delete-success-failure-'));
+  const prevMode = process.env.C2C_DEPLOY_MODE;
+  try {
+    writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
+    mkdirSync(join(dir, 'node_modules'), { recursive: true });
+    symlinkSync(process.cwd(), join(dir, 'node_modules/creator-to-catalyst'));
+    const successModule = built.files.find((file) =>
+      file.path.startsWith('functions/aio/item/') && /\/success"/.test(String(file.data)),
+    );
+    assert.ok(successModule, 'delete-scoped on-success module was not generated');
+    for (const file of built.files) {
+      const full = join(dir, file.path);
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(
+        full,
+        file === successModule
+          ? 'export async function handle() { throw new Error("workflow failed"); }\n'
+          : file.data,
+      );
+    }
+
+    const require = createRequire(import.meta.url);
+    const fakeSdk = require(join(repoRoot(), 'tools/catalyst-harness/fake-zcatalyst-sdk-node.cjs')) as FakeSdk;
+    const { createSdkDatastore } = (await import(
+      pathToFileURL(join(repoRoot(), 'packages/deploy/fn/c2c-sdk-datastore.mjs')).href
+    )) as { createSdkDatastore: (app: unknown, opts?: Record<string, unknown>) => SdkDatastore };
+    process.env.C2C_DEPLOY_MODE = 'live';
+    const sdkApp = fakeSdk.initialize({});
+    const datastore = createSdkDatastore(sdkApp, { projections: () => '*' });
+    const store = (await import(pathToFileURL(join(dir, 'functions/c2c-store.mjs')).href)) as {
+      setDatastore(next: unknown): unknown;
+    };
+    store.setDatastore(datastore);
+    const del = (await import(pathToFileURL(join(dir, 'functions/aio/item/delete.mjs')).href)) as {
+      default: (req: unknown, res: unknown) => unknown;
+    };
+    const id = String((await sdkApp.datastore().table('Item').insertRows([{ Name: 'committed', Owner: 'ada@example.test' }]))[0].ROWID);
+    const result = await invoke(del.default, { ...staff, body: { ROWID: id } });
+    assert.equal(result.status, 500, JSON.stringify(result.body));
+    assert.equal(result.body.deleted, true, 'the response must distinguish post-commit failure from failed deletion');
+    assert.equal(result.body.error, 'request failed');
+    assert.ok(!(fakeSdk.state().tables.Item ?? []).some((row) => String(row.ROWID) === id), 'success workflow failure must not restore a deleted row');
+  } finally {
+    if (prevMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+    else process.env.C2C_DEPLOY_MODE = prevMode;
     rmSync(dir, { recursive: true, force: true });
   }
 });
