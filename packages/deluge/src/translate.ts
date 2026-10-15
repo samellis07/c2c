@@ -50,6 +50,7 @@ import {
 } from './dispatch.js';
 import { connectionArgIndex, resolveConnectionArgument, walk, type DeclaredConnection } from './connections.js';
 import { parse, parseExpression } from './parser.js';
+import { unsupportedClientShims } from './client-shim.js';
 import { lex } from './lexer.js';
 import { criteriaHasRecordQuery, criteriaHasTodo, type Criteria } from '../../shims/src/criteria.js';
 import type { SchemaPlan } from '../../schema/src/generator.js';
@@ -85,6 +86,18 @@ export interface TranslateResult {
   nextSlot: number;
   stats: TranslateStats;
   todos: TodoItem[];
+  /**
+   * Statements whose client part was dropped because it needs a shim the
+   * browser runtime does not implement. Not in `todos` or `stats`: only an
+   * emitter that ships the client part counts them (`client-shim-unsupported`).
+   */
+  clientGaps: ClientGap[];
+}
+
+/** One dropped client statement and the stats bucket it was counted in. */
+export interface ClientGap {
+  todo: TodoItem;
+  bucket: 'translated' | 'shimmed' | 'todo';
 }
 
 export interface TranslateOptions {
@@ -434,6 +447,8 @@ interface Scope {
   elementCollections: Map<string, string>;
   /** Per-element slots emitted into `prefetch` (client round trips). */
   elementSlots: number;
+  /** Client statements dropped by gateClientShims. */
+  clientGaps: ClientGap[];
   declaredServer: Set<string>;
   declaredClient: Set<string>;
   /** Form fields that a bare name reads via `input`. */
@@ -444,6 +459,11 @@ interface Scope {
   rowFields: { row: string; names: Set<string> } | null;
   rowAlias: { name: string; row: string } | null;
   approval: boolean;
+  /**
+   * True inside a catch arm whose try body emitted no client code: the client
+   * catch can never run, so its `info` is the server's log of the caught value.
+   */
+  serverCatch: boolean;
   bindings: Map<string, Binding>;
   /** Monotonic ids shared with nested function scopes: binding seq and flow frames. */
   clock: { seq: number; flow: number };
@@ -468,6 +488,10 @@ interface Scope {
   /** Dotted `thisapp` names allowed to become `shim.client.call` in a client condition. */
   clientCallFunctions: Set<string>;
   prefetch: string[];
+  /** Client `var` declarations for server-bound lists the client now mutates (see {@link clientListUpdateLine}). */
+  clientDecls: string[];
+  /** Server-bound locals the client declared from a prefetch slot: a name here is client-bound but not arm-class state. */
+  clientDeclared: Set<string>;
   /** Server loops currently being translated, outermost first. */
   rowFrames: LoopFrame[];
   /** Every server loop in this translation, including ones already closed. */
@@ -573,6 +597,13 @@ function mergeFx(code: string, parts: Fx[], flags: Partial<Fx> = {}): Fx {
   });
 }
 
+/** Every name the expression reads resolves to a client variable or the record the client already holds. */
+function allClientReads(value: Fx, scope: Scope): boolean {
+  const ok = (r: string) =>
+    r === 'input' || r === 'old' || scope.clientData.has(r) || scope.clientDeclared.has(r) || (scope.local.has(r) && !scope.serverOnly.has(r));
+  return value.reads.every(ok) && value.unboundReads.every(ok);
+}
+
 function clientExpr(value: Fx, scope: Scope, todoConstruct = 'client-condition-uses-server', allowClientCall = false): { code: string; todo: boolean; shim: boolean } {
   // A server-only unit has no client to evaluate anything on: no slot, no
   // replayed call, and no client-split todo.
@@ -605,7 +636,10 @@ function clientExpr(value: Fx, scope: Scope, todoConstruct = 'client-condition-u
   if (value.appFunction || value.todo) {
     return { code: `await shim.todo(ctx, ${JSON.stringify(todoConstruct)})`, todo: true, shim: true };
   }
-  if (!value.serverOnly || value.clientReady) return { code: value.code, todo: false, shim: false };
+  // A shim the browser runtime does not implement is evaluated like a server
+  // read: the prefetch computes it and the client reads the slot.
+  const clientReady = value.clientReady || (!value.sideEffect && allClientReads(value, scope));
+  if ((!value.serverOnly || clientReady) && !unsupportedClientShims(value.code).length) return { code: value.code, todo: false, shim: false };
   // A non-record loop element is client data the client can send back:
   // the prefetch endpoint evaluates the server part for that one element.
   // A same-app function call never runs this way. Two elements, or a record
@@ -1408,7 +1442,7 @@ function slotExpr(value: Fx, scope: Scope): string | null {
 }
 
 function prefetchable(name: string, scope: Scope, stack: Set<string>): boolean {
-  if (stack.has(name) || scope.clientData.has(name)) return false;
+  if (stack.has(name) || scope.clientData.has(name) || scope.clientDeclared.has(name)) return false;
   const binding = scope.bindings.get(name);
   if (!binding) return scope.prefetchBound.has(name);
   if (binding.appFunction || binding.todo || binding.unboundReads.length) return false;
@@ -1681,7 +1715,7 @@ function bindingOk(name: string, binding: Binding, scope: Scope, stack: Set<stri
       // A self-read resolves to the binding this assignment replaced.
       return depBinding ? bindingOk(dep, depBinding, scope, stack) : scope.prefetchBound.has(name);
     }
-    if (scope.clientData.has(dep) || (stack.has(dep) && !olderVersion(depBinding, binding))) return false;
+    if (scope.clientData.has(dep) || scope.clientDeclared.has(dep) || (stack.has(dep) && !olderVersion(depBinding, binding))) return false;
     return depBinding ? bindingOk(dep, depBinding, scope, stack) : scope.prefetchBound.has(dep);
   });
   stack.delete(name);
@@ -1915,7 +1949,7 @@ function emitBinding(
   out: { name: string; binding: Binding }[],
   seen: Set<Binding>,
 ): boolean {
-  if (scope.clientData.has(name) || stack.has(name)) return false;
+  if (scope.clientData.has(name) || scope.clientDeclared.has(name) || stack.has(name)) return false;
   const binding = scope.bindings.get(name);
   if (!binding) return scope.prefetchBound.has(name);
   return collectChain(name, binding, scope, stack, out, seen);
@@ -2051,10 +2085,12 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
       : null,
     rowAlias: options.rowAlias && options.rowNames?.includes(options.rowAlias.row) ? options.rowAlias : null,
     approval: options.approval ?? false,
+    serverCatch: false,
     bindings: new Map(),
     elementVars: new Set(),
     elementCollections: new Map(),
     elementSlots: 0,
+    clientGaps: [],
     clock: { seq: 0, flow: 1 },
     flowStack: [0],
     loops: [],
@@ -2065,6 +2101,8 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     clientCallFunctions: new Set((options.clientCallFunctions ?? []).map((n) => n.toLowerCase())),
     formFields: new Map(Object.entries(options.formFields ?? {}).sort().map(([k, v]) => [k, new Set(v)])),
     prefetch: [],
+    clientDecls: [],
+    clientDeclared: new Set(),
     rowFrames: [],
     knownLoops: [],
     depSeq: { next: 0 },
@@ -2091,8 +2129,9 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
   const prefetch = scope.deferred.length
     ? `if (ctx.rangeSlot) {\n${scope.deferred.join('\n')}\n}${eager.trim() ? ` else {\n${eager}\n}` : ''}`
     : eager;
-  if (scope.noClient) return { server: out.server, client: '', prefetch: '', usesElement: false, nextSlot: scope.slot, stats, todos };
-  return { server: out.server, client: out.client, prefetch, usesElement: scope.elementSlots > 0, nextSlot: scope.slot, stats, todos };
+  const client = [scope.clientDecls.join('\n'), out.client].filter((s) => s.trim()).join('\n');
+  if (scope.noClient) return { server: out.server, client: '', prefetch: '', usesElement: false, nextSlot: scope.slot, stats, todos, clientGaps: scope.clientGaps };
+  return { server: out.server, client, prefetch, usesElement: scope.elementSlots > 0, nextSlot: scope.slot, stats, todos, clientGaps: scope.clientGaps };
 }
 
 /** Line-start offsets of lines that directly follow a `//` comment-only line. */
@@ -2172,12 +2211,15 @@ function stmts(list: Stmt[], scope: Scope, stats: TranslateStats, todos: TodoIte
   let alertText: string | null = null;
   for (const s of list) {
     if (s.kind === 'alert') alertText = s.value.kind === 'string' ? s.value.value : null;
+    const before = { ...stats };
+    const declared = new Set(scope.declaredClient);
     const o =
       s.kind === 'cancelDelete'
         ? cancelDeleteOut(s, alertText, stats, todos)
         : s.kind === 'cancelSubmit'
           ? cancelSubmitOut(s, alertText, stats, todos)
           : statement(s, scope, stats, todos);
+    gateClientShims(s, o, scope, stats, before, declared);
     if (s.kind !== 'block') {
       const comment = delugeComment(s, scope.src);
       if (comment) {
@@ -2189,6 +2231,38 @@ function stmts(list: Stmt[], scope: Scope, stats: TranslateStats, todos: TodoIte
     if (o.client.trim()) client.push(o.client);
   }
   return { server: server.join('\n'), client: client.join('\n') };
+}
+
+/**
+ * Client code the browser cannot run is not emitted. A statement whose client
+ * part references a shim the browser runtime does not implement
+ * (`unsupportedClientShims`) keeps its server part, loses its client part, and
+ * is recorded in `clientGaps` for the emitter that ships the client part to
+ * count as a `client-shim-unsupported` todo. A block's statements were
+ * gated one by one already, so what is left on a compound statement comes
+ * from its own condition or collection. Names the dropped code declared or
+ * wrote read server-bound from here, like any other server-only write: a
+ * later client condition on them is prefetched, or is its own counted todo.
+ * A dropped simple statement with no client effect beyond those local
+ * values (no action, no field write, no round trip) is therefore not a gap.
+ */
+const COMPOUND_KINDS = new Set<Stmt['kind']>(['if', 'forEach', 'while', 'try']);
+/** Client code with an effect outside its own locals: a queued action, a field or row write, a server round trip, an early return. */
+const CLIENT_EFFECT = /\bactions\.push\(|\bshim\.(?:input|record|old)\.set\(|\bshim\.client\.|\breturn\b/;
+
+function gateClientShims(s: Stmt, o: Out, scope: Scope, stats: TranslateStats, before: TranslateStats, declared: ReadonlySet<string>): void {
+  if (s.kind === 'block' || s.kind === 'fn') return;
+  const dropped = o.client;
+  if (!unsupportedClientShims(dropped).length) return;
+  o.client = '';
+  for (const name of [...scope.declaredClient]) if (!declared.has(name)) scope.declaredClient.delete(name);
+  const written = assignedNames(s);
+  const root = s.kind === 'assign' ? rootName(s.target) : null;
+  if (root) written.add(root);
+  for (const name of [...written].sort()) if (scope.local.has(name)) scope.serverOnly.add(name);
+  if (!COMPOUND_KINDS.has(s.kind) && !CLIENT_EFFECT.test(dropped)) return;
+  const bucket = stats.todo > before.todo ? 'todo' : stats.shimmed > before.shimmed ? 'shimmed' : stats.translated > before.translated ? 'translated' : 'todo';
+  scope.clientGaps.push({ todo: { construct: 'client-shim-unsupported', start: s.span.start, end: s.span.end }, bucket });
 }
 
 function statement(s: Stmt, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
@@ -2210,10 +2284,12 @@ function statement(s: Stmt, scope: Scope, stats: TranslateStats, todos: TodoItem
       account(stats, todos, { todo: false, shim: false, constructs: [] }, s.span);
       return { server: `${s.kind};`, client: `${s.kind};` };
     case 'info': {
-      if (!scope.noClient) return clientPush('info', expr(s.value, scope), s.span, scope, stats, todos);
-      const v = expr(s.value, scope);
-      account(stats, todos, { todo: v.todo, shim: true, constructs: v.constructs }, s.span);
-      return { server: `shim.log.info(ctx, ${v.code});`, client: '' };
+      const value = expr(s.value, scope);
+      if (scope.noClient || scope.serverCatch) {
+        account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, s.span);
+        return { server: `shim.log.info(ctx, ${value.code});`, client: '' };
+      }
+      return clientPush('info', value, s.span, scope, stats, todos);
     }
     case 'alert': {
       // Live-tested on Creator: `alert` runs in on load, on validate, on
@@ -2349,7 +2425,45 @@ function serverOnlyAction(parts: { todo: boolean; constructs: string[] }[], span
   return { server: '', client: '' };
 }
 
+/**
+ * Client code that only binds plain locals: each line is a comment, a brace
+ * or else, an `if` head, or `[var ]name = expr;`. An expression may call only
+ * the pure shim helpers (a whole-namespace entry or a single helper of the
+ * element allowlist, never `each` or a list mutator), and never awaits, assigns, or touches
+ * `input`, `row` or `actions`. Such a half has nothing the client can show or send.
+ */
+function clientBindsLocalsOnly(code: string): boolean {
+  const pure = (e: string) => {
+    const rest = e.replace(/\bshim\.([A-Za-z]+)(?:\.([A-Za-z]+))?\s*\(/g, (call, ns: string, fn?: string) =>
+      (fn === undefined ? ns !== 'each' && ELEMENT_SHIM_ALLOW_SINGLE.has(ns) : ELEMENT_SHIM_ALLOW.get(ns) === true && !LIST_MUTATORS.has(fn.toLowerCase())) ? '(' : call,
+    );
+    return !/[\w$\])]\s*\(|\b(?:await|shim|input|row|actions|function|new|delete|yield)\b|`|\+\+|--|[^=!<>]=(?!=)/.test(rest);
+  };
+  return code.split('\n').every((line) => {
+    const t = line.trim();
+    if (!t || t.startsWith('//') || t === '}' || t === '} else {') return true;
+    const head = /^(?:\} else )?if \((.*)\) \{$/.exec(t);
+    if (head) return pure(head[1]!);
+    const bind = /^(?:var )?[A-Za-z_$][\w$]* = (.*);$/.exec(t);
+    return !!bind && pure(bind[1]!);
+  });
+}
+
+/**
+ * The client dropped a half that only bound locals. Those names now hold
+ * server values: a later client read is a counted todo, and a later client
+ * assignment declares the name again because the dropped `var` never ran.
+ */
+function dropClientNames(scope: Scope, names: Iterable<string>, declaredBefore: ReadonlySet<string>): void {
+  for (const name of names) {
+    scope.serverOnly.add(name);
+    scope.clientData.delete(name);
+  }
+  for (const name of [...scope.declaredClient]) if (!declaredBefore.has(name)) scope.declaredClient.delete(name);
+}
+
 function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
+  const declaredBefore = new Set(scope.declaredClient);
   // Tests are translated, and later slotted, against the bindings in force
   // before any arm. An assignment inside the then-arm must not become the
   // value an else-if test replays. Each arm is translated from those same
@@ -2439,7 +2553,13 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
   const clientTests = clientBits
     ? withBindings(scope, atTest, () => [clientExpr(test, scope, 'client-condition-uses-server', true), ...elifTests.map((t) => clientExpr(t, scope, 'client-condition-uses-server', true))])
     : [];
-  const clientCondTodo = clientTests.some((c) => c.todo);
+  // A test only the server can evaluate over arms that only bind locals: the
+  // server runs the if and the client keeps no copy of it.
+  const clientDropped =
+    clientTests.some((c) => c.todo) &&
+    [then.client, ...elifBodies.map((b) => b.client), els?.client ?? ''].every((c) => !c.trim() || clientBindsLocalsOnly(c));
+  if (clientDropped) dropClientNames(scope, assigned, declaredBefore);
+  const clientCondTodo = !clientDropped && clientTests.some((c) => c.todo);
   if (clientCondTodo) constructs.push('client-condition-uses-server');
   account(stats, todos, { todo: condTodo || clientCondTodo, shim: condShim || clientTests.some((c) => c.shim), constructs }, s.span);
   let server = '';
@@ -2449,7 +2569,7 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
     if (els) server += ` else {\n${indent(els.server)}\n}`;
   }
   let client = '';
-  if (clientBits) {
+  if (clientBits && !clientDropped) {
     const head = clientTests[0]!.code;
     client = `if (${head}) {\n${indent(then.client)}\n}`;
     for (let i = 0; i < elifTests.length; i++) {
@@ -2546,6 +2666,7 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
   const assigned = assignedNames(s.body);
   assigned.add(s.name);
   if (s.index) assigned.add(s.index);
+  const declaredBefore = new Set(scope.declaredClient);
   const outerUpdates = scope.listUpdates;
   const updates: { name: string; value: Fx }[] = [];
   scope.listUpdates = updates;
@@ -2562,6 +2683,7 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
   // A query becomes `rows()`, which is an array (empty → zero iterations).
   // Null also iterates zero times (`foreach.null`); `shim.each` does that.
   let clientTodo = false;
+  let clientDropped = false;
   let clientIter = '';
   let rangeSlot: { slot: string; from: string; to: string } | null = null;
   if (!scope.noClient && body.client.trim() && (col.serverOnly || col.todo || col.appFunction || colRefused)) {
@@ -2577,7 +2699,12 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
       // client and sent as a request parameter to the deferred slot read
       // instead of making the whole loop a counted todo.
       rangeSlot = withBindings(scope, atCollection, () => rangeSlotFor(col, scope));
-      if (!rangeSlot) {
+      if (!rangeSlot && clientBindsLocalsOnly(body.client)) {
+        // The body only binds locals: the server runs the loop and the
+        // client keeps no copy of it.
+        clientDropped = true;
+        dropClientNames(scope, assigned, declaredBefore);
+      } else if (!rangeSlot) {
         clientTodo = true;
         constructs.push('client-loop-uses-server');
         clientIter = resolved.code;
@@ -2621,7 +2748,7 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
       : `${head} {\n${indent(body.server)}\n}`
     : '';
   const clientPart = (): string => {
-    if (!body.client.trim()) return '';
+    if (!body.client.trim() || clientDropped) return '';
     if (rangeSlot) {
       const v = `range_${rangeSlot.slot}`;
       return (
@@ -2767,7 +2894,15 @@ function whileStmt(s: Extract<Stmt, { kind: 'while' }>, scope: Scope, stats: Tra
 
 function tryStmt(s: Extract<Stmt, { kind: 'try' }>, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
   const body = underFlow(scope, () => statement(s.body, scope, stats, todos));
-  const catchBody = s.catchBody ? underFlow(scope, () => statement(s.catchBody!, scope, stats, todos)) : undefined;
+  // An empty client try never throws, so only the server can reach the catch.
+  const outerCatch = scope.serverCatch;
+  scope.serverCatch = outerCatch || !body.client.trim();
+  let catchBody: Out | undefined;
+  try {
+    catchBody = s.catchBody ? underFlow(scope, () => statement(s.catchBody!, scope, stats, todos)) : undefined;
+  } finally {
+    scope.serverCatch = outerCatch;
+  }
   account(stats, todos, { todo: false, shim: false, constructs: [] }, s.span);
   const name = jsIdent(s.catchName ?? 'err');
   const wrap = (inner: string, alt: string) => {
@@ -3180,6 +3315,87 @@ function recordListUpdate(e: Expr, value: Fx, scope: Scope): boolean {
 }
 
 /**
+ * `L.mutate(args)` on a server-bound local list or map. The statement is
+ * server code, but the client can apply the same update to a duplicate of the
+ * prefetched list: the name's pre-update binding is served as a slot, a
+ * top-of-body `var L = slots[…]` declares it, and the mutator line runs in the
+ * client — including inside a `for each` over `input.<Subform>` rows or under
+ * an `if` whose test is client- or slot-resolvable.
+ * Args may only read names the client already holds (a loop element, a
+ * client local, `input`/`old`): anything else stays a server-only update.
+ * `prior` is the name's binding before {@link recordListUpdate} ran, so the
+ * replay works even when that recording dropped it.
+ */
+function clientListUpdateLine(e: Expr, v: Fx, prior: Binding | undefined, scope: Scope): string | null {
+  if (e.kind !== 'call' || e.callee.kind !== 'member' || e.callee.object.kind !== 'name') return null;
+  const method = canonicalBuiltin(e.callee.property).toLowerCase();
+  if (!LIST_MUTATORS.has(method) && !COLLECTION_MUTATORS.has(method)) return null;
+  const name = e.callee.object.name;
+  if (!scope.local.has(name) || scope.row.has(name) || scope.query.has(name)) return null;
+  if (unsupportedClientShims(v.code).length) return null;
+  // Already client-bound: the same call mutates the client's copy.
+  if (scope.clientData.has(name) || scope.clientDeclared.has(name)) return `${v.code};`;
+  if (!scope.serverOnly.has(name)) return null;
+  if (v.todo || v.appFunction || v.sideEffect) return null;
+  const clientBound = (r: string) =>
+    r === 'input' || r === 'old' || scope.clientData.has(r) || scope.clientDeclared.has(r) || (scope.local.has(r) && !scope.serverOnly.has(r));
+  if (!v.unboundReads.every(clientBound)) return null;
+  for (const r of v.reads) {
+    if (r === name) continue;
+    if (!clientBound(r)) return null;
+  }
+  // An enclosing loop the client cannot iterate — a server collection, or a
+  // collection that reads the name being mutated — replays nothing it should
+  // run twice. The update stays a counted todo rather than mutating a stale
+  // client copy.
+  for (const frame of scope.rowFrames) {
+    if (frame.iter.serverOnly || (frame.deps ?? []).includes(name)) return null;
+  }
+  // An update straight in a client-iterated loop body replays in the prefetch
+  // already (loopListUpdate); the client path applies under an `if`/`try`
+  // (a conditional body) or — outside a loop — when an arg resolves to the
+  // client alone: a loop element, a client-declared list, or a name with no
+  // replay.
+  const conditional = scope.flowStack.length > scope.loops.length + 1;
+  if (scope.loops.length && !conditional) return null;
+  if (!conditional) {
+    const uncovered = [...v.reads, ...v.unboundReads].some((r) => r !== name && !prefetchable(r, scope, new Set()));
+    if (!uncovered) return null;
+  }
+  // The value the name held before this statement is a prefetch slot. When
+  // this statement sits inside the client-iterated loop that mutates the name
+  // (`for each r in input.<Subform>`), the slot is the value at loop entry: the
+  // loop's write mark is lifted for the read. A second enclosing loop writing
+  // the name leaves it a todo — a snapshot cannot name a mid-loop value.
+  if (prior) {
+    const writers = scope.loops.filter((loop) => loop.assigned.has(name));
+    if (writers.length > 1 || (writers.length === 1 && writers[0] !== scope.loops[scope.loops.length - 1])) return null;
+    const writer = writers[0];
+    const writerIx = writer ? scope.loops.indexOf(writer) : -1;
+    if (writer) scope.loops.splice(writerIx, 1);
+    const mark = scope.prefetch.length;
+    const emittedMark = new Map(scope.emitted);
+    const ordered: { name: string; binding: Binding }[] = [];
+    const ok = collectChain(name, prior, scope, new Set(), ordered, new Set());
+    if (writer) scope.loops.splice(writerIx, 0, writer);
+    if (!ok) {
+      scope.prefetch.length = mark;
+      scope.emitted = emittedMark;
+      return null;
+    }
+    ordered.sort((a, b) => a.binding.seq - b.binding.seq);
+    emitOrdered(ordered, scope);
+  } else if (!scope.prefetchBound.has(name)) {
+    return null;
+  }
+  const id = `c${scope.slot++}`;
+  scope.prefetch.push(`slots[${JSON.stringify(id)}] = ${jsIdent(name)};`);
+  scope.clientDecls.push(`var ${jsIdent(name)} = shim.list.duplicate(slots[${JSON.stringify(id)}]);`);
+  scope.clientDeclared.add(name);
+  return `${v.code};`;
+}
+
+/**
  * A `for each` whose body only updates one local list declared before it
  * (`for each r in Form[…] { ids.add(r.ID); }`) leaves one value the prefetch
  * can rebuild: the same loop over the same collection, run on a copy of the
@@ -3253,6 +3469,8 @@ function exprStmt(e: Expr, span: { start: number; end: number }, scope: Scope, s
   }
   const v = expr(e, scope);
   account(stats, todos, v, span);
+  const updateName = listUpdateReceiver(e, scope);
+  const updatePrior = updateName ? scope.bindings.get(updateName) : undefined;
   const updated = recordListUpdate(e, v, scope);
   // A mutating call on a local collection whose argument is server-fed puts
   // the real value on the server only. Mark the receiver server-bound and
@@ -3274,6 +3492,14 @@ function exprStmt(e: Expr, span: { start: number; end: number }, scope: Scope, s
   }
   const line = v.code.trim().endsWith(';') ? v.code : `${v.code};`;
   if (v.serverOnly) {
+    const clientUpdate = clientListUpdateLine(e, v, updatePrior, scope);
+    if (clientUpdate !== null) {
+      taintServerMutated(e, scope);
+      return { server: line, client: clientUpdate };
+    }
+    // A mutation the client cannot run after the name was declared there
+    // leaves a stale copy: the name reads server-bound again.
+    if (updateName) scope.clientDeclared.delete(updateName);
     taintServerMutated(e, scope);
     return { server: line, client: '' };
   }
@@ -4033,7 +4259,7 @@ function readName(name: string, scope: Scope): Fx {
   if (name === 'input') return fx({ code: 'shim.input.root(ctx)', shim: true });
   if (name === 'old') return fx({ code: 'ctx.old', shim: true });
   const reads = localReads(name, scope);
-  const onClient = scope.clientData.has(name);
+  const onClient = scope.clientData.has(name) || scope.clientDeclared.has(name);
   const carried = carriedFlags(name, scope);
   if (scope.serverOnly.has(name) && scope.query.has(name)) {
     return fx({ code: jsIdent(name), query: true, serverOnly: true, shim: true, reads, clientReady: onClient, ...carried });

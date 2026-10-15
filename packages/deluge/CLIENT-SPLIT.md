@@ -15,6 +15,10 @@ A client action (`alert`, `info`, `openUrl`, `cancel submit`, show / hide / enab
 
 Dry-run `shim.client.prefetch` does not invent slots. With no adapter it returns `{ ok: false, slots: {} }` and records `client-prefetch` with `performed: false`. An injected `clientPrefetch` adapter is the server round-trip. It is called with the form-state nonce and must echo `{ slots, nonce }`.
 
+## Browser shim surface
+
+Client code runs against `browserShim` in `packages/ui/src/client-runtime.js`, not the server runtime. `packages/deluge/src/client-shim.ts` lists every `shim.<name>` and `shim.<namespace>.<method>` the browser implements (`list.*` and the null tests are ports of the pure functions in `packages/shims`, with the same results). A client value that needs anything else is evaluated like a server read: a condition or argument becomes a prefetch slot, and a local the browser cannot compute reads server-bound from there. A statement whose dropped client code had an effect of its own (a queued action, a field or row write, a round trip, a `return`), and a `for each` / `while` / `if` whose own collection or test cannot be slotted, is a counted `client-shim-unsupported` todo with no client code. A field-rule condition or `actions (criteria)` guard the browser cannot evaluate is counted the same way. The browser never reaches its catch-all stub for an emitted name.
+
 ## Authorization
 
 The prefetch endpoint and the server handler that reads the same records use one policy (`access` on the runtime):

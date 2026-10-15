@@ -96,3 +96,11 @@ test('a loop that does anything besides the list update stays a counted todo', (
 test('a loop over a collection that reads the updated list stays a counted todo', () => {
   assert.equal(todoCount('ids = Items[Kind == "a"].ID.getAll(); for each r in Items[ID in ids] { ids.add(r.ID); } if (ids.size() > 1) { alert "x"; }'), 1);
 });
+
+test('a conditional update inside a loop over a server collection stays a counted todo', () => {
+  assert.equal(todoCount('ids = List:Int(); for each r in Items[Kind == "a"] { if (r.Code > 0) { ids.add(r.Code); } } if (ids.size() > 1) { alert "x"; }'), 1);
+});
+
+test('a conditional update inside a loop whose collection reads the list stays a counted todo', () => {
+  assert.equal(todoCount('ids = Items[Kind == "a"].ID.getAll(); for each r in Items[ID in ids] { if (r.ID > 0) { ids.add(r.ID); } } if (ids.size() > 1) { alert "x"; }'), 1);
+});
