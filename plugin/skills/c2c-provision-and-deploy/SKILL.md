@@ -95,7 +95,7 @@ c2c deploy exports/<app>.ds --out c2c-out/<app> --project <id> --org <org> --con
 
 Each limit below names its limit id, the c2c behaviour, and [its row](../../references/limits.md).
 
-- [L-PROJECTS](../../references/limits.md#l-projects-projects-per-account): 50 projects per account [DOC] → refuse; doctor D-F1 fails when no slot — create nothing until the user frees one.
+- [L-PROJECTS](../../references/limits.md#l-projects-projects-per-account): plan for 50 projects per account [UNVERIFIED] → refuse; doctor D-F1 fails when no slot — create nothing until the user frees one.
 - [L-DEV-USERS](../../references/limits.md#l-dev-users-app-users-in-development): 25 app users in Development [DOC]; a higher effective cap is [UNVERIFIED] → warn.
 - [L-TABLE-CREATES](../../references/limits.md#l-table-creates-table-creates-per-org): org-wide table-create quota [TESTED] → warn + retry; on `API_LIMIT_REACHED` stop creates, keep created tables, retry after 30/60/120 min.
 - [L-JOB-TIME](../../references/limits.md#l-job-time-job-function): Job functions run 15 min [DOC] → split; generated Jobs chunk with self-resubmit and checkpoint.
