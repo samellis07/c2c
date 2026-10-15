@@ -490,28 +490,68 @@ test('HTML snippets drop slash, uppercase, and entity-encoded handlers', () => {
       for (const payload of payloads) assertNoActiveHtml(runtime.sanitizeSnippet(payload, runtimeWindow.document));
       assertNoActiveHtml(runtime.renderPage(page, runtimeWindow.document));
       assert.equal(runtime.sanitizeSnippet('<script>bad()</script><b onclick="x">ok</b>', runtimeWindow.document), '<b>ok</b>');
-      // Unknown HTTPS embeds stay fully sandboxed; PDFs and allowlisted maps
-      // use safe link-outs because browser viewers/widgets need frame privileges.
+      // Credential URLs and non-HTTPS schemes are dropped. Canonical PDFs and
+      // exact map hosts link out. Lookalike, uppercase, trailing-dot, and IDN
+      // hosts stay in a locked sandbox and never become a link-out.
+      const linkOuts: { url: string; label: string; name?: string }[] = [
+        { url: 'https://example.com/manual.pdf?download=1', label: 'Open PDF' },
+        { url: 'https://www.google.com/maps/embed?pb=abc', name: 'City Map', label: 'City Map' },
+        { url: 'https://maps.google.com/maps/embed?pb=ok', label: 'Open map' },
+      ];
+      const locked = [
+        'https://example.com/widget',
+        'https://maps.google.com.evil.example/maps/embed?pb=x',
+        'https://www.google.com.evil.example/maps/embed?pb=abc',
+        'https://WWW.GOOGLE.COM/maps/embed?pb=abc',
+        'https://www.google.com./maps/embed?pb=abc',
+        'https://www.g\u043eogle.com/maps/embed?pb=x',
+        'https://EXAMPLE.COM/manual.pdf',
+        'https://example.com./manual.pdf',
+        'https://ex\u0430mple.com/manual.pdf',
+      ];
+      const dropped = [
+        'http://example.com/insecure',
+        'http://example.com/manual.pdf',
+        'http://maps.google.com/maps/embed?pb=x',
+        'javascript:alert(1)',
+        'data:text/html,hi',
+        'data:application/pdf,AAAA',
+        'https://user:pass@maps.google.com/maps/embed?pb=x',
+        'https://user:@maps.google.com/maps/embed?pb=x',
+        'https://user:pass@example.com/manual.pdf',
+        'https://user@example.com/manual.pdf',
+      ];
       const embedded = runtime.renderPage(
         {
           name: 'E',
           label: 'E',
           status: 'generated',
           elements: [
-            { tag: 'embed', kind: 'embed', embed: { url: 'https://example.com/manual.pdf?download=1', width: '300', height: '800' }, children: [] },
-            { tag: 'embed', kind: 'embed', name: 'City Map', embed: { url: 'https://www.google.com/maps/embed?pb=abc' }, children: [] },
-            { tag: 'embed', kind: 'embed', embed: { url: 'https://example.com/widget' }, children: [] },
-            { tag: 'embed', kind: 'embed', embed: { url: 'http://example.com/insecure' }, children: [] },
-            { tag: 'embed', kind: 'embed', embed: { url: 'javascript:alert(1)' }, children: [] },
+            ...linkOuts.map((item) => ({
+              tag: 'embed',
+              kind: 'embed',
+              ...(item.name ? { name: item.name } : {}),
+              embed: { url: item.url, width: '300', height: '800' },
+              children: [],
+            })),
+            ...locked.map((url) => ({ tag: 'embed', kind: 'embed', embed: { url }, children: [] })),
+            ...dropped.map((url) => ({ tag: 'embed', kind: 'embed', embed: { url }, children: [] })),
           ],
         },
         runtimeWindow.document,
       );
-      assert.match(embedded, /<a href="https:\/\/example\.com\/manual\.pdf\?download=1" rel="noreferrer">Open PDF<\/a>/);
-      assert.match(embedded, /<a href="https:\/\/www\.google\.com\/maps\/embed\?pb=abc" rel="noreferrer">City Map<\/a>/);
+      const esc = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      for (const item of linkOuts) {
+        assert.match(embedded, new RegExp(`<a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">${item.label}</a>`));
+      }
+      assert.equal((embedded.match(/<a /g) || []).length, linkOuts.length, 'only canonical PDF and map embeds link out');
+      for (const url of locked) {
+        assert.match(embedded, new RegExp(`<iframe class="embed" src="${esc(url)}" sandbox=""`));
+        assert.doesNotMatch(embedded, new RegExp(`<a [^>]*href="${esc(url)}"`));
+      }
+      assert.equal((embedded.match(/<iframe/g) || []).length, locked.length, 'non-canonical https embeds stay sandboxed');
       assert.match(embedded, /<iframe[^>]*src="https:\/\/example\.com\/widget"[^>]*sandbox=""[^>]*loading="lazy"[^>]*referrerpolicy="no-referrer"/);
-      assert.equal((embedded.match(/<iframe/g) || []).length, 1, 'only the unknown HTTPS embed renders in a sandboxed frame');
-      assert.doesNotMatch(embedded, /http:\/\/example\.com|javascript:/);
+      for (const url of dropped) assert.equal(embedded.includes(url), false, url);
     }).finally(() => rmSync(dir, { recursive: true, force: true }));
   } catch (err) {
     rmSync(dir, { recursive: true, force: true });
