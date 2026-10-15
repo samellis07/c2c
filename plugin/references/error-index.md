@@ -16,71 +16,71 @@ and holds the specifics. Each row below gives the cause and the fix.
 
 | Code | Error | Cause | Fix |
 |---|---|---|---|
-| `C2C-CLI-000` | Uncaught `c2c` error | A failure no command handled | Re-run; if it repeats report the message |
-| `C2C-CLI-001` | Usage / unknown flag | Missing argument or a flag the command does not take | Follow the printed usage |
-| `C2C-CLI-002` | Input path missing | The file or directory argument does not exist | Check the path |
-| `C2C-CLI-003` | Locked Marketplace export | The .ds export is locked | Unlock it in Creator and re-export |
-| `C2C-CLI-004` | migrate-data write refused | `migrate-data` ran without `--dry-run` | Rehearse with `--dry-run` |
-| `C2C-CLI-005` | Bad `--report` | The value is not `Report:Table` | Pass `--report <Report>:<Table>` |
-| `C2C-CLI-006` | Checkpoint not version 1 | The checkpoint file is an older shape | Delete it and let the run write a fresh one |
-| `C2C-CLI-007` | Doctor gate refusal | A `--confirm` write needs a green, current doctor.json | Run `c2c doctor`, fix FAILs, retry |
-| `C2C-CLI-008` | `--lock` errors | `--lock` has no value or the file is missing | Pass a readable lock file |
-| `C2C-CLI-009` | precheck input | `precheck` got a directory or non-file | Pass exactly one `.ds` file |
-| `C2C-CLI-010` | precheck parse | The file is not a parseable Creator .ds export | Export the app from Creator again |
-| `C2C-CLI-011` | migration-report input | The argument is not an apps directory | Pass the corpus directory |
-| `C2C-CLI-012` | Conflicting `--source-*` | More than one source flag was passed | Keep exactly one source flag |
-| `C2C-CLI-013` | iac-drift input | A template file is unreadable or not JSON | Check both template paths |
-| `C2C-CLI-014` | seed arguments | Bad `--rows`, bad seed args or a non-file fixture name | Fix the flagged argument |
-| `C2C-CLI-015` | `ui`/`ui-react` needs `--out` | No output directory was passed | Pass `--out <dir>` |
-| `C2C-CLI-016` | score-ui failure | The bundle is unreadable or scoring failed | Rebuild the UI bundle and retry |
-| `C2C-CLI-017` | Quality gate failed | `analyze --quality` checks failed | Read docs/quality-gate.md |
-| `C2C-CLI-018` | DOM unavailable | jsdom could not be loaded for HTML sanitize/score | Reinstall the plugin or run npm ci |
-| `C2C-CLI-019` | fill-todos failure | A fill task failed its gates | Read the task error |
-| `C2C-CLI-020` | cutover/proof failure | The checklist or proof could not be produced | Read the message |
-| `C2C-CLI-021` | Utility script error | A repo utility script (`scripts/*.mjs`) refused | Follow the printed message |
-| `C2C-CLI-022` | Hand-edited generated file | `ui-react` found a hand-edited generated file | Move edits to src/custom or pass `--force` |
-| `C2C-DEPLOY-001` | `deploy` failed | Uncaught failure in the deploy run | Read the message; retry `--resume` |
-| `C2C-DEPLOY-002` | `plan` failed | The offline plan could not be built | Read the message; check the source |
-| `C2C-DEPLOY-003` | `provision` refusal | A provision step, scope, or read-back refused | Read the message; record steps in order |
-| `C2C-DEPLOY-004` | `edit` failed | The edit could not be computed or applied | Read the message |
-| `C2C-DEPLOY-005` | `migrate-data` failed | A seed/CSV/JSON/backup load failed | Read the message; the checkpoint resumes |
-| `C2C-DEPLOY-006` | `users` failed | The users plan/invite run failed | Read the message |
-| `C2C-DEPLOY-007` | `smoke` failed | The smoke run or check failed | Read the message |
-| `C2C-DEPLOY-008` | `sync-delta` failed | Delta apply failed; the checkpoint was not recorded | Re-run to resume |
-| `C2C-DEPLOY-009` | `rollback-export` failed | The export could not be produced | Read the message |
-| `C2C-DEPLOY-010` | `status` failed | A live read failed | Check org/project flags and login |
-| `C2C-DEPLOY-011` | Console first-use gate | A service was never opened in the project console | Do the named console step, re-run |
-| `C2C-DEPLOY-012` | Project guard refused | The run targets a guarded/wrong org or project | Fix `--org`/`--project` or the registry |
-| `C2C-DEPLOY-013` | Mail blocker | A `--mail` precheck finding blocks deploy | Fix the named finding |
-| `C2C-DEPLOY-014` | Async trigger blocker | `--triggers-wired` is blocked | Wire event triggers or drop the flag |
-| `C2C-DEPLOY-015` | Edits log can't apply live | Recorded edits change the store beyond rename | Re-plan instead of deploying the delta |
-| `C2C-DEPLOY-016` | Table step failed | A Data Store table/column call failed | Read the table error |
-| `C2C-DEPLOY-017` | Missing built web app | `web/dist` holds no built app after the build | Fix the web build and re-run |
-| `C2C-DEPLOY-018` | Build command failed | `npm run build` in web/ exited non-zero | Fix the build error, `deploy --confirm` |
-| `C2C-DEPLOY-019` | Slate never opened | The project never opened the Slate service | Console → Slate → Start Exploring, re-run |
-| `C2C-DEPLOY-020` | Source rows refused | An integrity rule refused rows | Fix the source rows |
-| `C2C-DEPLOY-021` | Command usage / arguments | A deploy-family command's arguments are wrong | Follow the printed usage or message |
-| `C2C-DEPLOY-022` | No schema columns | A confirmed load found tables with no export columns | Check `--ds` covers every table |
-| `C2C-DEPLOY-023` | `--seed --confirm` needs `--ds` | Schema check needs the app's .ds | Pass `--ds <file|dir>` |
-| `C2C-DEPLOY-024` | Stratus not opened / bucket | The Stratus service or seed bucket is missing | Console → Stratus, or provision step `bucket` |
-| `C2C-DEPLOY-025` | Load/table error | A table's rows failed to write | Read the per-table message |
-| `C2C-DEPLOY-026` | Repeated source ids | A table has duplicate `c2c_source_id` values | De-duplicate the source export |
-| `C2C-DEPLOY-027` | Mandatory values missing | Store-mandatory columns have empty cells | Fill the source or relax the constraint |
-| `C2C-DEPLOY-028` | smoke `--result` arguments | `--result`/`--result-code` args or binding missing | Pass the code/file and `--url`/`--project` |
-| `C2C-DEPLOY-029` | Smoke result refused | The pasted result failed verification | Re-copy the code from the app page |
-| `C2C-DEPLOY-030` | Browser unreachable | CDP endpoint did not answer | Check `--browser-cdp <endpoint>` |
-| `C2C-DEPLOY-031` | Plan budget failed | A measured budget is over its limit | See the named budget check |
-| `C2C-DEPLOY-032` | Destructive edit needs confirm | The edit drops columns or tables | Pass `--confirm` with `--apply` |
-| `C2C-DEPLOY-033` | Edit refused | The named edit is not allowed | Read the refusal reason |
-| `C2C-DOCTOR-001` | Doctor usage | Unknown flag or a missing/ill-typed value | Follow the printed usage |
-| `C2C-DOCTOR-002` | Scope resolution failed | dc/org/project could not be resolved | Pass flags or set c2c-deploy.json |
-| `C2C-DOCTOR-003` | Evidence stale | The MCP request expired before the evidence | Re-run `c2c doctor --mcp-begin` |
-| `C2C-DOCTOR-004` | Observation rejected | The piped observation failed the schema | Pipe each call's result verbatim |
-| `C2C-DOCTOR-005` | Evidence rejected | The evidence file failed the schema | Regenerate it from the calls |
-| `C2C-DOCTOR-006` | Evidence file missing | `--record-mcp` names no readable file | Check the path |
-| `C2C-DOCTOR-007` | Vendor check error | `--verify-vendor` could not read the dir | Check the plugin directory |
-| `C2C-DOCTOR-008` | Plugin files modified | The vendor manifest does not match | Reinstall the plugin |
-| `C2C-DOCTOR-009` | Doctor run failed | The doctor command itself failed | Read the message |
+| <a id="c2c-cli-000"></a>`C2C-CLI-000` | Uncaught `c2c` error | A failure no command handled | Re-run; if it repeats report the message |
+| <a id="c2c-cli-001"></a>`C2C-CLI-001` | Usage / unknown flag | Missing argument or a flag the command does not take | Follow the printed usage |
+| <a id="c2c-cli-002"></a>`C2C-CLI-002` | Input path missing | The file or directory argument does not exist | Check the path |
+| <a id="c2c-cli-003"></a>`C2C-CLI-003` | Locked Marketplace export | The .ds export is locked | Unlock it in Creator and re-export |
+| <a id="c2c-cli-004"></a>`C2C-CLI-004` | migrate-data write refused | `migrate-data` ran without `--dry-run` | Rehearse with `--dry-run` |
+| <a id="c2c-cli-005"></a>`C2C-CLI-005` | Bad `--report` | The value is not `Report:Table` | Pass `--report <Report>:<Table>` |
+| <a id="c2c-cli-006"></a>`C2C-CLI-006` | Checkpoint not version 1 | The checkpoint file is an older shape | Delete it and let the run write a fresh one |
+| <a id="c2c-cli-007"></a>`C2C-CLI-007` | Doctor gate refusal | A `--confirm` write needs a green, current doctor.json | Run `c2c doctor`, fix FAILs, retry |
+| <a id="c2c-cli-008"></a>`C2C-CLI-008` | `--lock` errors | `--lock` has no value or the file is missing | Pass a readable lock file |
+| <a id="c2c-cli-009"></a>`C2C-CLI-009` | precheck input | `precheck` got a directory or non-file | Pass exactly one `.ds` file |
+| <a id="c2c-cli-010"></a>`C2C-CLI-010` | precheck parse | The file is not a parseable Creator .ds export | Export the app from Creator again |
+| <a id="c2c-cli-011"></a>`C2C-CLI-011` | migration-report input | The argument is not an apps directory | Pass the corpus directory |
+| <a id="c2c-cli-012"></a>`C2C-CLI-012` | Conflicting `--source-*` | More than one source flag was passed | Keep exactly one source flag |
+| <a id="c2c-cli-013"></a>`C2C-CLI-013` | iac-drift input | A template file is unreadable or not JSON | Check both template paths |
+| <a id="c2c-cli-014"></a>`C2C-CLI-014` | seed arguments | Bad `--rows`, bad seed args or a non-file fixture name | Fix the flagged argument |
+| <a id="c2c-cli-015"></a>`C2C-CLI-015` | `ui`/`ui-react` needs `--out` | No output directory was passed | Pass `--out <dir>` |
+| <a id="c2c-cli-016"></a>`C2C-CLI-016` | score-ui failure | The bundle is unreadable or scoring failed | Rebuild the UI bundle and retry |
+| <a id="c2c-cli-017"></a>`C2C-CLI-017` | Quality gate failed | `analyze --quality` checks failed | Read docs/quality-gate.md |
+| <a id="c2c-cli-018"></a>`C2C-CLI-018` | DOM unavailable | jsdom could not be loaded for HTML sanitize/score | Reinstall the plugin or run npm ci |
+| <a id="c2c-cli-019"></a>`C2C-CLI-019` | fill-todos failure | A fill task failed its gates | Read the task error |
+| <a id="c2c-cli-020"></a>`C2C-CLI-020` | cutover/proof failure | The checklist or proof could not be produced | Read the message |
+| <a id="c2c-cli-021"></a>`C2C-CLI-021` | Utility script error | A repo utility script (`scripts/*.mjs`) refused | Follow the printed message |
+| <a id="c2c-cli-022"></a>`C2C-CLI-022` | Hand-edited generated file | `ui-react` found a hand-edited generated file | Move edits to src/custom or pass `--force` |
+| <a id="c2c-deploy-001"></a>`C2C-DEPLOY-001` | `deploy` failed | Uncaught failure in the deploy run | Read the message; retry `--resume` |
+| <a id="c2c-deploy-002"></a>`C2C-DEPLOY-002` | `plan` failed | The offline plan could not be built | Read the message; check the source |
+| <a id="c2c-deploy-003"></a>`C2C-DEPLOY-003` | `provision` refusal | A provision step, scope, or read-back refused | Read the message; record steps in order |
+| <a id="c2c-deploy-004"></a>`C2C-DEPLOY-004` | `edit` failed | The edit could not be computed or applied | Read the message |
+| <a id="c2c-deploy-005"></a>`C2C-DEPLOY-005` | `migrate-data` failed | A seed/CSV/JSON/backup load failed | Read the message; the checkpoint resumes |
+| <a id="c2c-deploy-006"></a>`C2C-DEPLOY-006` | `users` failed | The users plan/invite run failed | Read the message |
+| <a id="c2c-deploy-007"></a>`C2C-DEPLOY-007` | `smoke` failed | The smoke run or check failed | Read the message |
+| <a id="c2c-deploy-008"></a>`C2C-DEPLOY-008` | `sync-delta` failed | Delta apply failed; the checkpoint was not recorded | Re-run to resume |
+| <a id="c2c-deploy-009"></a>`C2C-DEPLOY-009` | `rollback-export` failed | The export could not be produced | Read the message |
+| <a id="c2c-deploy-010"></a>`C2C-DEPLOY-010` | `status` failed | A live read failed | Check org/project flags and login |
+| <a id="c2c-deploy-011"></a>`C2C-DEPLOY-011` | Console first-use gate | A service was never opened in the project console | Do the named console step, re-run |
+| <a id="c2c-deploy-012"></a>`C2C-DEPLOY-012` | Project guard refused | The run targets a guarded/wrong org or project | Fix `--org`/`--project` or the registry |
+| <a id="c2c-deploy-013"></a>`C2C-DEPLOY-013` | Mail blocker | A `--mail` precheck finding blocks deploy | Fix the named finding |
+| <a id="c2c-deploy-014"></a>`C2C-DEPLOY-014` | Async trigger blocker | `--triggers-wired` is blocked | Wire event triggers or drop the flag |
+| <a id="c2c-deploy-015"></a>`C2C-DEPLOY-015` | Edits log can't apply live | Recorded edits change the store beyond rename | Re-plan instead of deploying the delta |
+| <a id="c2c-deploy-016"></a>`C2C-DEPLOY-016` | Table step failed | A Data Store table/column call failed | Read the table error |
+| <a id="c2c-deploy-017"></a>`C2C-DEPLOY-017` | Missing built web app | `web/dist` holds no built app after the build | Fix the web build and re-run |
+| <a id="c2c-deploy-018"></a>`C2C-DEPLOY-018` | Build command failed | `npm run build` in web/ exited non-zero | Fix the build error, `deploy --confirm` |
+| <a id="c2c-deploy-019"></a>`C2C-DEPLOY-019` | Slate never opened | The project never opened the Slate service | Console → Slate → Start Exploring, re-run |
+| <a id="c2c-deploy-020"></a>`C2C-DEPLOY-020` | Source rows refused | An integrity rule refused rows | Fix the source rows |
+| <a id="c2c-deploy-021"></a>`C2C-DEPLOY-021` | Command usage / arguments | A deploy-family command's arguments are wrong | Follow the printed usage or message |
+| <a id="c2c-deploy-022"></a>`C2C-DEPLOY-022` | No schema columns | A confirmed load found tables with no export columns | Check `--ds` covers every table |
+| <a id="c2c-deploy-023"></a>`C2C-DEPLOY-023` | `--seed --confirm` needs `--ds` | Schema check needs the app's .ds | Pass `--ds <file|dir>` |
+| <a id="c2c-deploy-024"></a>`C2C-DEPLOY-024` | Stratus not opened / bucket | The Stratus service or seed bucket is missing | Console → Stratus, or provision step `bucket` |
+| <a id="c2c-deploy-025"></a>`C2C-DEPLOY-025` | Load/table error | A table's rows failed to write | Read the per-table message |
+| <a id="c2c-deploy-026"></a>`C2C-DEPLOY-026` | Repeated source ids | A table has duplicate `c2c_source_id` values | De-duplicate the source export |
+| <a id="c2c-deploy-027"></a>`C2C-DEPLOY-027` | Mandatory values missing | Store-mandatory columns have empty cells | Fill the source or relax the constraint |
+| <a id="c2c-deploy-028"></a>`C2C-DEPLOY-028` | smoke `--result` arguments | `--result`/`--result-code` args or binding missing | Pass the code/file and `--url`/`--project` |
+| <a id="c2c-deploy-029"></a>`C2C-DEPLOY-029` | Smoke result refused | The pasted result failed verification | Re-copy the code from the app page |
+| <a id="c2c-deploy-030"></a>`C2C-DEPLOY-030` | Browser unreachable | CDP endpoint did not answer | Check `--browser-cdp <endpoint>` |
+| <a id="c2c-deploy-031"></a>`C2C-DEPLOY-031` | Plan budget failed | A measured budget is over its limit | See the named budget check |
+| <a id="c2c-deploy-032"></a>`C2C-DEPLOY-032` | Destructive edit needs confirm | The edit drops columns or tables | Pass `--confirm` with `--apply` |
+| <a id="c2c-deploy-033"></a>`C2C-DEPLOY-033` | Edit refused | The named edit is not allowed | Read the refusal reason |
+| <a id="c2c-doctor-001"></a>`C2C-DOCTOR-001` | Doctor usage | Unknown flag or a missing/ill-typed value | Follow the printed usage |
+| <a id="c2c-doctor-002"></a>`C2C-DOCTOR-002` | Scope resolution failed | dc/org/project could not be resolved | Pass flags or set c2c-deploy.json |
+| <a id="c2c-doctor-003"></a>`C2C-DOCTOR-003` | Evidence stale | The MCP request expired before the evidence | Re-run `c2c doctor --mcp-begin` |
+| <a id="c2c-doctor-004"></a>`C2C-DOCTOR-004` | Observation rejected | The piped observation failed the schema | Pipe each call's result verbatim |
+| <a id="c2c-doctor-005"></a>`C2C-DOCTOR-005` | Evidence rejected | The evidence file failed the schema | Regenerate it from the calls |
+| <a id="c2c-doctor-006"></a>`C2C-DOCTOR-006` | Evidence file missing | `--record-mcp` names no readable file | Check the path |
+| <a id="c2c-doctor-007"></a>`C2C-DOCTOR-007` | Vendor check error | `--verify-vendor` could not read the dir | Check the plugin directory |
+| <a id="c2c-doctor-008"></a>`C2C-DOCTOR-008` | Plugin files modified | The vendor manifest does not match | Reinstall the plugin |
+| <a id="c2c-doctor-009"></a>`C2C-DOCTOR-009` | Doctor run failed | The doctor command itself failed | Read the message |
 
 ## Agent host, MCP and the doctor
 

@@ -118,7 +118,7 @@ if (isMain) {
     : extractCites(Array.isArray(doc) ? doc : doc.rows ?? []);
   const failures = checkCites(cites, { repo, rev });
   if (failures.length > 0) {
-    for (const f of failures) cliError(`stale cite row ${f.id}: ${f.spec} — ${f.reason}`);
+    for (const f of failures) console.error(`stale cite row ${f.id}: ${f.spec} — ${f.reason}`);
     cliError(`${failures.length} stale cite(s) of ${cites.length} at ${rev}`);
     process.exit(1);
   }

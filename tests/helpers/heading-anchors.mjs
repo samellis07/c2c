@@ -33,3 +33,11 @@ export function headingAnchors(markdown) {
   }
   return anchors;
 }
+
+export function documentAnchors(markdown) {
+  const anchors = headingAnchors(markdown);
+  for (const match of markdown.matchAll(/<a\s+(?:id|name)="([^"]+)"\s*>/g)) {
+    anchors.add(match[1].replace(/^user-content-/, ''));
+  }
+  return anchors;
+}

@@ -793,7 +793,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     const srcCsv = flag(rest, '--source-csv');
     const srcJson = flag(rest, '--source-json');
     const named = [srcBackup, srcCsv, srcJson].filter((value) => value !== undefined).length;
-    if (named > 1) throw new C2cError('C2C-CLI-012', 'c2c: pass at most one of --source-backup, --source-csv, or --source-json', { exitCode: 2 });
+    if (named > 1) throw new C2cError('C2C-CLI-012', 'c2c: pass at most one of --source-backup, --source-csv, or --source-json');
     if (rest.includes('--backfill-shadows')) {
       if (named) throw new Error('--backfill-shadows does not take a data source');
       return await backfillCli(app, guard, rest, confirm, io);
@@ -1507,7 +1507,7 @@ export async function seedMigrateCli(args: readonly string[], io: Io): Promise<n
     let checkpoint = emptyCheckpoint();
     if (checkpointPath && statSync(checkpointPath, { throwIfNoEntry: false })?.isFile()) {
       const parsed = JSON.parse(readFileSync(checkpointPath, 'utf8')) as Checkpoint;
-      if (parsed.version !== 1 || !parsed.tables) throw new C2cError('C2C-CLI-006', 'c2c: checkpoint is not version 1', { exitCode: 2 });
+      if (parsed.version !== 1 || !parsed.tables) throw new C2cError('C2C-CLI-006', 'c2c: checkpoint is not version 1');
       checkpoint = parsed;
     }
     const scope = await resolveScope(io, guard.org, guard.projectId);
@@ -1647,7 +1647,7 @@ export async function sourceCsvCli(args: readonly string[], io: Io): Promise<num
     let checkpoint = emptyCheckpoint();
     if (checkpointPath && statSync(checkpointPath, { throwIfNoEntry: false })?.isFile()) {
       const parsed = JSON.parse(readFileSync(checkpointPath, 'utf8')) as Checkpoint;
-      if (parsed.version !== 1 || !parsed.tables) throw new C2cError('C2C-CLI-006', 'c2c: checkpoint is not version 1', { exitCode: 2 });
+      if (parsed.version !== 1 || !parsed.tables) throw new C2cError('C2C-CLI-006', 'c2c: checkpoint is not version 1');
       checkpoint = parsed;
     }
     const scope = await resolveScope(io, guard.org, guard.projectId);
@@ -1808,7 +1808,7 @@ export async function sourceBackupCli(args: readonly string[], io: Io): Promise<
     let checkpoint = emptyCheckpoint();
     if (checkpointPath && statSync(checkpointPath, { throwIfNoEntry: false })?.isFile()) {
       const parsed = JSON.parse(readFileSync(checkpointPath, 'utf8')) as Checkpoint;
-      if (parsed.version !== 1 || !parsed.tables) throw new C2cError('C2C-CLI-006', 'c2c: checkpoint is not version 1', { exitCode: 2 });
+      if (parsed.version !== 1 || !parsed.tables) throw new C2cError('C2C-CLI-006', 'c2c: checkpoint is not version 1');
       checkpoint = parsed;
     }
     const scope = await resolveScope(io, guard.org, guard.projectId);

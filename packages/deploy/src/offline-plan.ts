@@ -1762,7 +1762,7 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
     const srcCsv = flag(args, '--source-csv');
     const srcJson = flag(args, '--source-json');
     const named = [srcBackup, srcCsv, srcJson].filter((value) => value !== undefined).length;
-    if (named > 1) throw new C2cError('C2C-CLI-012', 'c2c: pass at most one of --source-backup, --source-csv, or --source-json', { exitCode: 2 });
+    if (named > 1) throw new C2cError('C2C-CLI-012', 'c2c: pass at most one of --source-backup, --source-csv, or --source-json');
     const allowEmpty = args.includes('--allow-empty');
     const source = srcBackup !== undefined
       ? readSourceBackup(srcBackup, app, allowEmpty).sourceData

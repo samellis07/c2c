@@ -37,7 +37,7 @@ const sourceSha256 = createHash('sha256').update(raw).digest('hex');
 const cites = extractCites(sourceRows);
 const stale = checkCites(cites, { repo, rev: 'HEAD' });
 if (stale.length > 0) {
-  for (const f of stale) cliError(`stale cite row ${f.id}: ${f.spec} — ${f.reason}`);
+  for (const f of stale) process.stderr.write(`stale cite row ${f.id}: ${f.spec} — ${f.reason}\n`);
   cliError(`refusing to refresh: ${stale.length} stale cite(s) of ${cites.length} at HEAD`);
   process.exit(1);
 }

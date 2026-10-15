@@ -14,10 +14,12 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { anchorFor, documentAnchors } from '../helpers/heading-anchors.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const srcDirs = ['packages/cli/src', 'packages/deploy/src', 'packages/doctor/src'];
@@ -111,13 +113,21 @@ function sourceCodes(sourceTexts) {
   return new Set(sourceTexts.flatMap((text) => [...text.matchAll(codePattern)].map(([code]) => code)));
 }
 function indexCodes(text) {
-  return new Set([...text.matchAll(/^\| `(C2C-(?:CLI|DEPLOY|DOCTOR)-\d{3})` \|/gm)].map(([, code]) => code));
+  return new Set([...text.matchAll(/^\| (?:<a id="[^"]*"><\/a>)?`(C2C-(?:CLI|DEPLOY|DOCTOR)-\d{3})` \|/gm)].map(([, code]) => code));
 }
 function assertParity(sourceTexts, indexText) {
   const source = sourceCodes(sourceTexts);
   const indexed = indexCodes(indexText);
   assert.deepEqual([...source].filter((code) => !indexed.has(code)), [], 'source error code is missing from error-index.md');
   assert.deepEqual([...indexed].filter((code) => !source.has(code)), [], 'error-index.md code has no source error site');
+  // coded() prints `…error-index.md#<code lowercase>`; every code needs a real
+  // anchor in the rendered page — a heading slug or an explicit <a id>.
+  const anchors = documentAnchors(indexText);
+  assert.deepEqual(
+    [...indexed].filter((code) => !anchors.has(anchorFor(code))),
+    [],
+    'error-index.md code has no anchor for its #fragment link',
+  );
 }
 
 const sources = sourceFiles();
@@ -136,10 +146,12 @@ test('negative controls detect a missing index row, an orphan row, and an uncode
   const source = sourceCodes(texts);
   const indexed = indexCodes(read(index));
   const code = [...source][0];
-  const missingRow = read(index).replace(new RegExp('^\\| `' + code + '` \\|.*\\n', 'm'), '');
+  const missingRow = read(index).replace(new RegExp('^\\| (?:<a id="[^"]*"></a>)?`' + code + '` \\|.*\\n', 'm'), '');
   assert.throws(() => assertParity(texts, missingRow), /source error code is missing/);
-  const orphan = read(index).replace('| Code | Error |', '| Code | Error |\n| `C2C-DOCTOR-999` | invented boundary |');
+  const orphan = read(index).replace('| Code | Error |', '| Code | Error |\n| <a id="c2c-doctor-999"></a>`C2C-DOCTOR-999` | invented boundary |');
   assert.throws(() => assertParity(texts, orphan), /no source error site/);
+  const missingAnchor = read(index).replace(`<a id="${anchorFor(code)}"></a>`, '');
+  assert.throws(() => assertParity(texts, missingAnchor), /no anchor/);
   assert.ok(indexed.has(code));
   assert.deepEqual(uncodedErrors("io.stderr(`c2c: something broke\\n`);", 'mutation.ts'), [
     'mutation.ts: stderr write with no error code: c2c: something broke…',
@@ -160,4 +172,22 @@ test('CLI utility script errors carry the indexed code and link', () => {
   assert.equal(refresh.status, 2);
   assert.match(refresh.stderr, /\[C2C-CLI-021\]/);
   assert.match(refresh.stderr, /plugin\/references\/error-index\.md#c2c-cli-021/);
+});
+
+test('stale cites list rows plainly and print exactly one code', () => {
+  const source = {
+    cites: [
+      { id: 'row-a', spec: 'definitely/missing-a.txt' },
+      { id: 'row-b', spec: 'definitely/missing-b.txt' },
+    ],
+  };
+  const dir = mkdtempSync(path.join(tmpdir(), 'cites-'));
+  const file = path.join(dir, 'cites.json');
+  writeFileSync(file, JSON.stringify(source));
+  const run = spawnSync(process.execPath, [path.join(repo, scripts[0]), file], { encoding: 'utf8' });
+  assert.equal(run.status, 1);
+  assert.equal(run.stderr.match(/\[C2C-CLI-021\]/g)?.length, 1);
+  assert.equal(run.stderr.match(/error-index\.md#c2c-cli-021/g)?.length, 1);
+  assert.match(run.stderr, /stale cite row row-a/);
+  assert.match(run.stderr, /stale cite row row-b/);
 });
