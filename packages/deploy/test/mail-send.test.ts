@@ -227,10 +227,10 @@ test('a confirmed deploy marks the sender verified only from the live read-back,
   try {
     const { cap, calls } = mailRestIo({ data: [{ email_address: OWNER, status: 'PENDING' }] });
     const code = await inWorkspace(ws, () =>
-      deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--confirm', '--function-env', 'new', '--mail', '--mail-from', OWNER, '--mail-sender-verified'], cap.io),
+      deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--confirm', '--function-env', 'new', '--mail', '--mail-from', OWNER], cap.io),
     );
     assert.equal(code, 1);
-    // The attestation flag alone does not verify: the read-back (PENDING) rules.
+    // A PENDING read-back does not verify the sender.
     assert.match(cap.err(), new RegExp(`blocker ${MAIL_SENDER_RULE}`));
     assert.deepEqual(calls, ['GET /baas/v1/project/1001/email']);
     const evidence = readMailSenderEvidence(ws);
@@ -275,7 +275,7 @@ for (const [name, rest] of [
         return rest();
       };
       const code = await inWorkspace(ws, () =>
-        deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--confirm', '--function-env', 'new', '--mail', '--mail-from', OWNER, '--mail-sender-verified'], cap.io),
+        deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--confirm', '--function-env', 'new', '--mail', '--mail-from', OWNER], cap.io),
       );
       assert.equal(code, 1);
       assert.deepEqual(calls, ['GET /baas/v1/project/1001/email']);
@@ -326,19 +326,14 @@ test('a dry run consumes the persisted read-back: evidence verifies, the bare at
     assert.doesNotMatch(seen.out(), new RegExp(`precheck: blocker ${MAIL_SENDER_RULE}`));
     assert.match(seen.out(), new RegExp(`mail from: ${OWNER.replace(/[.@]/g, '\\$&')} \\(verified\\)`));
 
-    const bare = mkdtempSync(join(tmpdir(), 'c2c-mail-ws-'));
-    try {
-      const attested = io();
-      assert.equal(
-        await inWorkspace(bare, () =>
-          deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--mail', '--mail-from', OWNER, '--mail-sender-verified'], attested.io),
-        ),
-        0,
-      );
-      assert.match(attested.out(), new RegExp(`precheck: blocker ${MAIL_SENDER_RULE}`));
-    } finally {
-      rmSync(bare, { recursive: true, force: true });
-    }
+    const attested = io();
+    assert.equal(
+      await inWorkspace(ws, () =>
+        deployCli([ds, '--project', '1001', '--org', '10000000000', '--projects', registryFile(), '--mail', '--mail-from', OWNER, '--mail-sender-verified'], attested.io),
+      ),
+      1,
+    );
+    assert.match(attested.err(), /--mail-sender-verified is not taken as proof/);
   } finally {
     cleanup();
   }
