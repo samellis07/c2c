@@ -250,7 +250,9 @@ function assertMigratedRecord(r: ItemRecord, store: QuirkHandle): void {
   if (!r.ownerId) {
     assert.equal(item.Owner, undefined, `Item ${r.id} Owner should be undefined for empty`);
   } else {
-    assert.ok(item.Owner, `Item ${r.id} Owner was set`);
+    const parentRow = store.stored.get('Parent\0' + r.ownerId);
+    assert.ok(parentRow?.ROWID, `Parent ${r.ownerId} was stored with a ROWID`);
+    assert.equal(item.Owner, parentRow.ROWID, `Item ${r.id} Owner is remapped to parent ${r.ownerId} ROWID`);
     assert.notEqual(item.Owner, r.ownerId, `Item ${r.id} Owner is remapped to parent ROWID`);
   }
 
@@ -298,6 +300,7 @@ test('seeded Creator decimal exports round-trip through CSV and JSON imports', (
   const fraction = fc.bigInt({ min: 0n, max: 999_999_999_999_999_999n });
   const whole = fc.bigInt({ min: -9_999_999_999_999_999_999n, max: 9_999_999_999_999_999_999n });
   const generated = fc.sample(fc.tuple(whole, fraction), { seed: SEED, numRuns: 20 });
+  assert.equal(new Set(generated.map(([i, f]) => `${i}.${f}`)).size, generated.length, 'decimal samples are distinct');
   for (const [integer, fractional] of generated) {
     const sign = integer < 0n ? '-' : '';
     const magnitude = (integer < 0n ? -integer : integer).toString();
@@ -308,7 +311,17 @@ test('seeded Creator decimal exports round-trip through CSV and JSON imports', (
   }
 });
 
-test('comprehensive edge cases and many seeded records round-trip through CSV and JSON migrations', async () => {
+function assertDistinctSamples(samples: readonly ItemRecord[], format: string): void {
+  assert.equal(samples.length, 50, `expected 50 generated ${format} samples`);
+  const distinctPayloads = new Set(samples.map(({ id: _id, ...payload }) => JSON.stringify(payload)));
+  assert.ok(
+    distinctPayloads.size >= 45,
+    `expected at least 45 of 50 generated ${format} records to be pairwise distinct (got ${distinctPayloads.size})`,
+  );
+}
+
+test('comprehensive edge cases and many seeded records round-trip through CSV and JSON migrations', async (t) => {
+  t.diagnostic(`seed=${SEED}`);
   // Explicit deterministic edge records covering:
   // (1) type preservation (null, empty string, "null", numeric-looking strings)
   // (2) max-length values per field type
@@ -402,94 +415,99 @@ test('comprehensive edge cases and many seeded records round-trip through CSV an
     },
   ];
 
-  // (5) Run MANY generated records through migrate/read-back, with the seed printed on failure
-  const recordArbitrary = (id: string) =>
-    fc.record({
-      id: fc.constant(id),
-      title: fc.oneof(
-        fc.constant(null),
-        fc.constant(''),
-        fc.constant('null'),
-        fc.constant('007'),
-        fc.constant('1e3'),
-        fc.constant('-0'),
-        fc.constant('+1'),
-        fc.constant('42'),
-        fc.constant('0'),
-        fc.constant('0.00'),
-        fc.constant('1.5e-4'),
-        fc.constant('true'),
-        fc.constant('false'),
-        fc.constant('M'.repeat(255)),
-        fc.stringMatching(/^[A-Za-z0-9 _-]{1,30}$/),
-      ),
-      amount: fc.oneof(
-        fc.constant(null),
-        fc.constant(''),
-        fc
-          .tuple(
-            fc.bigInt({ min: -9_999_999_999_999_999_999n, max: 9_999_999_999_999_999_999n }),
-            fc.bigInt({ min: 0n, max: 999_999_999_999_999_999n }),
-          )
-          .map(([i, f]) => {
-            const sign = i < 0n ? '-' : '';
-            const mag = (i < 0n ? -i : i).toString();
-            return `${sign}${mag}.${f.toString().padStart(18, '0')}`;
-          }),
-      ),
-      rawAmountNumber: fc.boolean(),
-      when: fc.oneof(
-        fc.constant(null),
-        fc.constant(''),
-        fc.constant('29-Feb-2024'),
-        fc.constant('29-Feb-2000'),
-        fc.constant('29-Feb-2028'),
-        fc.constant('28-Feb-2024'),
-        fc.constant('01-Mar-2024'),
-        fc.constant('15-Jun-2025'),
-        fc.constant('31-Dec-2026'),
-      ),
-      at: fc.oneof(
-        fc.constant(null),
-        fc.constant(''),
-        fc.constant('08-Mar-2026 01:59:59'),
-        fc.constant('08-Mar-2026 02:00:00'),
-        fc.constant('08-Mar-2026 02:30:00'),
-        fc.constant('08-Mar-2026 03:00:00'),
-        fc.constant('01-Nov-2026 01:30:00'),
-        fc.constant('01-Nov-2026 02:00:00'),
-        fc.constant('29-Feb-2024 23:59:59'),
-        fc.constant('29-Feb-2000 12:00:00'),
-      ),
-      active: fc.oneof(fc.constant(null), fc.boolean()),
-      tags: fc.oneof(
-        fc.constant(null),
-        fc.constant([]),
-        fc.constant(['alpha']),
-        fc.constant(['東京']),
-        fc.constant(['alpha', '東京']),
-      ),
-      ownerId: fc.oneof(fc.constant(null), fc.constant(''), fc.constant('1001'), fc.constant('1002')),
-      relatedIds: fc.oneof(
-        fc.constant(null),
-        fc.constant([]),
-        fc.constant(['1001']),
-        fc.constant(['1002']),
-        fc.constant(['1001', '1002']),
-      ),
-    });
+  // (5) Run 50 varied generated records per format through migrate/read-back
+  const recordArbitrary = fc.record({
+    id: fc.constant('x'),
+    title: fc.oneof(
+      fc.constant(null),
+      fc.constant(''),
+      fc.constant('null'),
+      fc.constant('007'),
+      fc.constant('1e3'),
+      fc.constant('-0'),
+      fc.constant('+1'),
+      fc.constant('42'),
+      fc.constant('0'),
+      fc.constant('0.00'),
+      fc.constant('1.5e-4'),
+      fc.constant('true'),
+      fc.constant('false'),
+      fc.constant('M'.repeat(255)),
+      fc.stringMatching(/^[A-Za-z0-9 _-]{1,30}$/),
+    ),
+    amount: fc.oneof(
+      fc.constant(null),
+      fc.constant(''),
+      fc
+        .tuple(
+          fc.bigInt({ min: -9_999_999_999_999_999_999n, max: 9_999_999_999_999_999_999n }),
+          fc.bigInt({ min: 0n, max: 999_999_999_999_999_999n }),
+        )
+        .map(([i, f]) => {
+          const sign = i < 0n ? '-' : '';
+          const mag = (i < 0n ? -i : i).toString();
+          return `${sign}${mag}.${f.toString().padStart(18, '0')}`;
+        }),
+    ),
+    rawAmountNumber: fc.boolean(),
+    when: fc.oneof(
+      fc.constant(null),
+      fc.constant(''),
+      fc.constant('29-Feb-2024'),
+      fc.constant('29-Feb-2000'),
+      fc.constant('29-Feb-2028'),
+      fc.constant('28-Feb-2024'),
+      fc.constant('01-Mar-2024'),
+      fc.constant('15-Jun-2025'),
+      fc.constant('31-Dec-2026'),
+    ),
+    at: fc.oneof(
+      fc.constant(null),
+      fc.constant(''),
+      fc.constant('08-Mar-2026 01:59:59'),
+      fc.constant('08-Mar-2026 02:00:00'),
+      fc.constant('08-Mar-2026 02:30:00'),
+      fc.constant('08-Mar-2026 03:00:00'),
+      fc.constant('01-Nov-2026 01:30:00'),
+      fc.constant('01-Nov-2026 02:00:00'),
+      fc.constant('29-Feb-2024 23:59:59'),
+      fc.constant('29-Feb-2000 12:00:00'),
+    ),
+    active: fc.oneof(fc.constant(null), fc.boolean()),
+    tags: fc.oneof(
+      fc.constant(null),
+      fc.constant([]),
+      fc.constant(['alpha']),
+      fc.constant(['東京']),
+      fc.constant(['alpha', '東京']),
+    ),
+    ownerId: fc.oneof(fc.constant(null), fc.constant(''), fc.constant('1001'), fc.constant('1002')),
+    relatedIds: fc.oneof(
+      fc.constant(null),
+      fc.constant([]),
+      fc.constant(['1001']),
+      fc.constant(['1002']),
+      fc.constant(['1001', '1002']),
+    ),
+  });
 
-  const generatedRecords: ItemRecord[] = [];
-  for (let i = 0; i < 20; i++) {
-    const sample = fc.sample(recordArbitrary(String(1050 + i)), { seed: SEED, numRuns: 1 })[0]!;
-    generatedRecords.push(sample);
-  }
-
-  const allRecords = [...edgeRecords, ...generatedRecords];
+  // Negative guard check: repeated numRuns:1 calls with the same seed collapse to 1 distinct payload and must fail
+  const clonedSamples = Array.from({ length: 50 }, (_, i) => ({
+    ...fc.sample(recordArbitrary, { seed: SEED, numRuns: 1 })[0]!,
+    id: String(1050 + i),
+  }));
+  assert.throws(() => assertDistinctSamples(clonedSamples, 'cloned'), /pairwise distinct/);
 
   try {
-    await roundTripRecords('csv', allRecords);
-    await roundTripRecords('json', allRecords);
+    for (const format of ['csv', 'json'] as const) {
+      const rawSamples = fc.sample(recordArbitrary, { seed: SEED, numRuns: 50 });
+      const generatedRecords: ItemRecord[] = rawSamples.map((sample, i) => ({
+        ...sample,
+        id: String(1050 + i),
+      }));
+      assertDistinctSamples(generatedRecords, format);
+      await roundTripRecords(format, [...edgeRecords, ...generatedRecords]);
+    }
   } catch (error) {
     console.error(`FAILURE under seed ${SEED}`);
     throw error;
