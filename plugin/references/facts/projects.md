@@ -165,7 +165,7 @@ Rule: [TESTED] no API or CLI command opens a service on a project ("Start Explor
 | Gate | When | Console line | Probe c2c runs | Closed answer | Open answer |
 |---|---|---|---|---|---|
 | Cloud Scale (Data Store, Authentication) | every app | the project → Cloud Scale → Start Exploring | `GET /baas/v1/project/<project-id>/table` | an "access the … service" refusal or `INVALID_URL_PATTERN` | `200` success envelope |
-| Stratus | the app has file fields | the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name); done when it shows in the Stratus bucket list | `GET /baas/v1/project/<project-id>/bucket` | same | `200` with a bucket; an empty list does not complete the human step [UNVERIFIED] |
+| Stratus | the app has file fields | the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name); done when it shows in the Stratus bucket list [UNVERIFIED] | `GET /baas/v1/project/<project-id>/bucket` | same | `200` with a bucket; an empty list does not complete the human step [UNVERIFIED] |
 | SmartBrowz | the app renders PDF | the project → SmartBrowz → Start Exploring | the SmartBrowz browser-grid list | same | `200` |
 | Slate | the app ships a Slate client | the project → Slate → Start Exploring | `GET /slate/v1/project/<project-id>/app` | `400` "Please access the Slate service in your project's console before deploying via the CLI." | `200` `{"status":"success","data":[...]}` |
 
