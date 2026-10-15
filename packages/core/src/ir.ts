@@ -2102,9 +2102,16 @@ export function detectShape(doc: Document, header: Header | undefined): Shape {
   });
   if (creatorish) return 'C';
   if (fragmentKind(top)) return 'C';
-  const hasSemicolon = (nodes: Node[]): boolean =>
-    nodes.some((n) => (isToken(n) ? n.kind === 'punct' && n.text === ';' : hasSemicolon(n.children)));
-  if (hasSemicolon(doc.children)) return 'deluge';
+  // Iterative: the recursive form overflowed the call stack on deeply nested
+  // input (fuzz: 60k unclosed brackets).
+  const stack: Node[] = [...doc.children];
+  let semi = false;
+  while (stack.length > 0 && !semi) {
+    const n = stack.pop()!;
+    if (isToken(n)) semi = n.kind === 'punct' && n.text === ';';
+    else for (const c of n.children) stack.push(c);
+  }
+  if (semi) return 'deluge';
   return 'unknown';
 }
 
