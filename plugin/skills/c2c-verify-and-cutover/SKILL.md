@@ -65,13 +65,13 @@ The parity runner (planned) executes the app's given/when/then cases against the
 2. **Production promotion is a console action by the user:** Catalyst console → Deploy to Production (a payment method is required). c2c cannot do it: no CLI/API for functions or schema [TESTED]. The CLI does have `catalyst deploy slate --production` and `ds:import --production` [CLI] for later updates.
 3. **Post-promotion verify** (manual; there is no `c2c cutover` CLI command):
    - `catalyst iac:export --production` diff against the template;
-   - every function deployed; crons and the job pool present (pre-defined crons migrate with the deployment [obs]; Stratus/Job Scheduling/Signals promotion: PROBE FIRST);
-   - auth login works in Prod (embedded auth has failed with `invalid_client` only in Prod [SR]); re-configure social logins; record the new ZAID;
-   - bucket names: a promotion can fail with `Bucket already exists` [SR] (global names);
-   - P-JOIN and P-COLS **in Prod** (raises do not carry over [SR]).
+   - every function deployed; crons and the job pool present (pre-defined crons migrate with the deployment [TESTED]; Stratus/Job Scheduling/Signals promotion: [UNVERIFIED]);
+   - auth login works in Prod (embedded auth has failed with `invalid_client` only in Prod [UNVERIFIED]); re-configure social logins; record the new ZAID;
+   - bucket names: a promotion can fail with `Bucket already exists` [UNVERIFIED] (global names);
+   - P-JOIN and P-COLS **in Prod** (raises do not carry over [UNVERIFIED]).
 4. **Pre-cutover rollback baseline:** take the pre-cutover baseline (`c2c rollback-export --ds <app.ds> --out <dir> --confirm`) and keep the export outside the workspace. `c2c cutover-checklist` automatically verifies the `c2c-rollback-manifest.json` (`c2c-rollback-export/1`) the exporter writes — every table, every file checksum — and confirms the export lives outside the workspace, ticking both items automatically.
 5. **Freeze** Creator writes (the user: make forms read-only or announce a window). Announcing the window and stopping Creator data entry remain human items in the end-of-flow checklist. Then delta sync: records with `Modified_Time ≥ watermark` from fresh JSON report exports (the JSON export always carries record IDs; a CSV carries them only when the export includes the `ID` column — without one, delta sync sees edits as delete+insert) → `c2c migrate-data --confirm` (upsert by `c2c_source_id`).
-6. **Invite real users** (Prod allows 1,000 by default [SR]; raise via support early) — each invite carries `redirect_url` = the Slate app URL; without it the invitee lands on the unhosted `/app/` path (404).
+6. **Invite real users** (Prod allows 1,000 by default [UNVERIFIED]; request a higher limit from Zoho early) — each invite carries `redirect_url` = the Slate app URL; without it the invitee lands on the unhosted `/app/` path (404).
 7. **Switch links** (the user): bookmarks, embedded links, integrations pointing at Creator.
 8. Keep Creator read-only (not deleted) until the user signs off.
 
