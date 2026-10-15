@@ -11,6 +11,7 @@ import { createRuntime, LIMITS } from '../../shims/src/runtime.js';
 import { RecordAccessError } from '../../shims/src/access.js';
 import { mockDatastore } from '../../shims/test/zcql-mock.js';
 import { aioLibraryModule, conditionalFieldRules, emittedFieldRuleCondition, fieldRuleDenials, generate, measureActionCriteria, workflowKind, type AlertDiagnostic } from '../src/generate.js';
+import { mutatesParameters } from '../src/param-mutation.js';
 
 function stripComments(s: string) { return (s || '').replace(/^\s*\/\/ Deluge: .*\n?/gm, ''); }
 
@@ -2670,12 +2671,29 @@ test('a callee that mutates a parameter list or map is not a read-only client ca
   for (const body of [
     'l = List();\nl.add(n);\nl.sort();',
     'l = {n, 2};\nl.removeElement(n);\nl.insert(n);\nl.clear();',
+    'out = List();\nout.add(ids.get(0));',
+    'l = List();\nl.addAll(ids);',
     'k = ids.size() + m.keys().size();',
     'n = n + 1;',
   ]) {
     const g = generateWith(body);
     assert.equal(readOnly(g), true, body);
     assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false, body);
+  }
+});
+
+test('fresh collections may contain parameter values without aliasing the parameters', () => {
+  const params = [
+    { type: 'list', name: 'ids' },
+    { type: 'map', name: 'm' },
+    { type: 'int', name: 'n' },
+  ];
+  for (const body of [
+    'r = Map();\nr.put("k", input.Hours);',
+    'out = List();\nout.add(ids.get(0));',
+    'l = List();\nl.addAll(ids);',
+  ]) {
+    assert.equal(mutatesParameters([body], params), false, body);
   }
 });
 

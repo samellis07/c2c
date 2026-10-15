@@ -6,14 +6,11 @@
  * against deserialized arguments, which would hide that write, so such a
  * function is not read-only.
  *
- * The scan works on the Deluge AST. Names that share a value are grouped:
- * an assignment ties its target to every name its value reads, a `for each`
- * ties the element to the iterated collection, and a mutating call ties its
- * receiver to its arguments (the argument is now reachable through the
- * receiver). Starting from the collection-typed parameters and `input`, any
- * group that touches a tainted name is tainted. A mutator or a member/index
- * assignment whose receiver reads a tainted name is a parameter write. An
- * unparsed node that names a mutator counts as one.
+ * The scan tracks aliases separately from containers that hold tainted values.
+ * Assignments and `for each` propagate aliases; mutation calls only mark the
+ * receiver as containing tainted values. This avoids treating a fresh result
+ * collection as an alias of a parameter just because a parameter value was
+ * added to it. An unparsed node that names a mutator counts as a write.
  */
 import type { Script } from './ast.js';
 import { walk } from './connections.js';
@@ -53,12 +50,14 @@ export function mutatesParameters(scripts: readonly string[], params: readonly {
   const tainted = new Set<string>(['input']);
   for (const p of params) if (!SCALAR_TYPES.has(normType(p.type) ?? '')) tainted.add(p.name.toLowerCase());
   const groups: string[][] = [];
-  const writes: string[][] = [];
+  const derived: { targets: string[]; sources: string[] }[] = [];
+  const mutations: { receiver: string[]; args: string[] }[] = [];
+  const writes: { root: string[]; compound: boolean }[] = [];
   let opaque = false;
   const mutation = (receiver: unknown, args: unknown) => {
     const root = reads(receiver);
-    writes.push(root);
-    groups.push([...root, ...reads(args)]);
+    mutations.push({ receiver: root, args: reads(args) });
+    writes.push({ root, compound: (receiver as Node | null)?.kind !== 'name' });
   };
   for (const text of scripts) {
     let script: Script;
@@ -71,8 +70,11 @@ export function mutatesParameters(scripts: readonly string[], params: readonly {
       switch (n.kind) {
         case 'assign': {
           const target = n.target as Node;
-          groups.push([...reads(target), ...reads(n.value)]);
-          if (target.kind !== 'name') writes.push(reads(target));
+          const targets = reads(target);
+          const sources = reads(n.value);
+          if (target.kind === 'name' && (n.value as Node).kind === 'name') groups.push([...targets, ...sources]);
+          else if (target.kind === 'name') derived.push({ targets, sources });
+          if (target.kind !== 'name') writes.push({ root: targets, compound: true });
           return;
         }
         case 'forEach':
@@ -102,6 +104,7 @@ export function mutatesParameters(scripts: readonly string[], params: readonly {
     });
   }
   if (opaque) return true;
+  const containing = new Set<string>();
   for (let changed = true; changed; ) {
     changed = false;
     for (const group of groups) {
@@ -113,6 +116,24 @@ export function mutatesParameters(scripts: readonly string[], params: readonly {
         }
       }
     }
+    for (const { receiver, args } of mutations) {
+      if (!args.some((name) => tainted.has(name) || containing.has(name))) continue;
+      for (const name of receiver) {
+        if (!containing.has(name)) {
+          containing.add(name);
+          changed = true;
+        }
+      }
+    }
+    for (const { targets, sources } of derived) {
+      if (!sources.some((name) => tainted.has(name) || containing.has(name))) continue;
+      for (const name of targets) {
+        if (!tainted.has(name)) {
+          tainted.add(name);
+          changed = true;
+        }
+      }
+    }
   }
-  return writes.some((root) => root.some((name) => tainted.has(name)));
+  return writes.some(({ root, compound }) => root.some((name) => tainted.has(name) || (compound && containing.has(name))));
 }
