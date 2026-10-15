@@ -11,7 +11,8 @@
  * (the catalyst CLI's --org, a catalyst command's own --only) are not reads.
  */
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -115,4 +116,46 @@ test('smoke: --url is required only when the confirmed run drives a browser or c
   assert.deepEqual(argvProblems('smoke', ['app.ds', '--confirm', '--in-browser', '--cdp']), ['smoke --confirm requires --url']);
   assert.deepEqual(argvProblems('smoke', ['app.ds', '--confirm', '--auth-token', 't']), ['smoke --confirm requires --url']);
   assert.deepEqual(argvProblems('smoke', ['app.ds', '--confirm', '--cdp', '--url', 'https://app.example']), ['--cdp drives a local browser for --in-browser or --owner-session; pass one of them']);
+});
+
+test('argvProblems: a command with no argument contract is reported, not passed', () => {
+  assert.deepEqual(argvProblems('no-such-command', []), ['c2c has no no-such-command command with an argument contract']);
+});
+
+test('deploy: --function-env is validated offline and never echoes a value', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'c2c-argv-env-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = (name: string, text: string) => {
+    const at = path.join(dir, name);
+    writeFileSync(at, text);
+    return at;
+  };
+  assert.match(argvProblems('deploy', ['app.ds', '--confirm']).join('\n'), /^--confirm needs --function-env <file> /);
+  assert.deepEqual(argvProblems('deploy', ['app.ds', '--confirm', '--function-env', 'new']), []);
+  assert.deepEqual(argvProblems('deploy', ['app.ds']), []);
+  assert.deepEqual(argvProblems('deploy', ['app.ds', '--function-env', file('ok.json', '{"API_TOKEN":"s3cr3t-value"}')]), []);
+  assert.deepEqual(argvProblems('deploy', ['app.ds', '--function-env', path.join(dir, 'missing.json')]), ['--function-env must be a readable JSON file']);
+  assert.deepEqual(argvProblems('deploy', ['app.ds', '--function-env', file('bad.json', '{not json')]), ['--function-env must be a readable JSON file']);
+  assert.deepEqual(argvProblems('deploy', ['app.ds', '--function-env', file('array.json', '["a"]')]), ['--function-env must hold a JSON object of name -> string']);
+  assert.deepEqual(argvProblems('deploy', ['app.ds', '--function-env', file('num.json', '{"TOKEN":42}')]), ['--function-env: TOKEN must be a string']);
+  const badName = argvProblems('deploy', ['app.ds', '--function-env', file('name.json', '{"bad name":"s3cr3t-value"}')]);
+  assert.deepEqual(badName, ['function env: "bad name" is not an environment variable name']);
+  assert.doesNotMatch(badName.join('\n'), /s3cr3t/);
+});
+
+test('provision, seed, status: each command rule reports one first-line problem', () => {
+  assert.deepEqual(argvProblems('provision', []), ['usage: c2c provision --out <dir> [--status | --next | --confirm --run <id> | --record <id> [--result <file>] [--applied]]']);
+  assert.deepEqual(argvProblems('seed', ['app.ds']), ['c2c seed: --out directory is required']);
+  assert.deepEqual(argvProblems('seed', []), ['the app source must come first', 'c2c seed: --out directory is required']);
+  assert.deepEqual(argvProblems('status', []), ['c2c status: --project <project-id> is required']);
+  assert.deepEqual(argvProblems('status', ['--project', '<project-id>']), ['c2c status: --org <org-id> is required (or run with --fake)']);
+  assert.deepEqual(argvProblems('smoke', ['--confirm']), ['smoke needs the app source']);
+});
+
+test('migrate-data: --source-csv and --seed each need their own inputs', () => {
+  assert.deepEqual(argvProblems('migrate-data', ['--source-csv']), ['--source-csv needs a value', 'migrate-data --source-csv/--source-json needs the data dir and --ds']);
+  assert.deepEqual(argvProblems('migrate-data', ['--source-csv', 'data', '--ds', 'app.ds']), []);
+  assert.deepEqual(argvProblems('migrate-data', ['--seed', 'seed.json']), ['migrate-data --seed needs the seed file and --ds or --app']);
+  assert.deepEqual(argvProblems('migrate-data', ['--seed', 'seed.json', '--ds', 'app.ds']), []);
+  assert.deepEqual(argvProblems('migrate-data', ['--source-csv', 'data', '--ds', 'app.ds', '--seed', 'seed.json']), ['c2c: pass either --seed or --source-csv, not both']);
 });

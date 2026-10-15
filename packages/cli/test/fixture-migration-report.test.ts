@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,7 @@ import {
   listInRepoFixtures,
   migrationReportGoldenDir,
   type FixtureMigrationReport,
+  writeFixtureMigrationReports,
 } from '../src/fixture-migration-report.js';
 import { ownerScope } from '../src/scope-labels.js';
 
@@ -156,4 +158,41 @@ test('analyze prints the same scope labels and does not fold them into the score
   };
   assert.deepEqual(golden.features.scope, EXPECTED_SCOPE);
   assert.equal(golden.score.readiness, report.score.readiness);
+});
+
+test('markdown report spells out an empty TODO list, no manual steps, and a nameless app', () => {
+  const report: FixtureMigrationReport = {
+    schema: 'c2c-fixture-migration-report/1',
+    fixture: 'empty/app',
+    app: null,
+    scope: [],
+    todoCount: 0,
+    todoKinds: [],
+    manualSteps: [],
+  };
+  const md = fixtureMigrationReportAsMarkdown(report);
+  assert.match(md, /^# Migration report: empty\/app\n\nApp: \(none\)\n/);
+  assert.match(md, /## TODO counts\n\n0\n\n- none\n/);
+  assert.match(md, /## Manual steps\n\n- none\n$/);
+});
+
+test('writing the goldens replaces stale reports, keeps dotfiles, and is byte-stable', (t) => {
+  const repo = mkdtempSync(join(tmpdir(), 'c2c-fixture-reports-'));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  mkdirSync(join(repo, 'fixtures/one'), { recursive: true });
+  copyFileSync(join(root, 'fixtures/redistributable/library-application-system/library_application.ds'), join(repo, 'fixtures/one/library.ds'));
+  const out = migrationReportGoldenDir(repo);
+  mkdirSync(join(out, 'gone'), { recursive: true });
+  writeFileSync(join(out, 'gone/old.json'), '{}\n');
+  writeFileSync(join(out, 'gone/old.md'), '# old\n');
+  writeFileSync(join(out, '.keep'), '');
+  assert.deepEqual(writeFixtureMigrationReports(repo), ['one/library']);
+  const first = readFileSync(join(out, 'one/library.json'), 'utf8');
+  assert.equal(JSON.parse(first).fixture, 'one/library');
+  assert.ok(readFileSync(join(out, 'one/library.md'), 'utf8').startsWith('# Migration report: one/library\n'));
+  assert.equal(existsSync(join(out, 'gone/old.json')), false);
+  assert.equal(existsSync(join(out, 'gone/old.md')), false);
+  assert.equal(existsSync(join(out, '.keep')), true);
+  writeFixtureMigrationReports(repo);
+  assert.equal(readFileSync(join(out, 'one/library.json'), 'utf8'), first);
 });
