@@ -19,7 +19,7 @@ import { repoRoot } from '../../core/src/toolchain.js';
 const FORMS_ONLY = `application "Parity Forms"
 {
   time zone = "Asia/Kolkata"
-  form Ticket
+  form Booking
   {
     Subject
     (
@@ -30,9 +30,9 @@ const FORMS_ONLY = `application "Parity Forms"
       type = date
     )
   }
-  list Open_Tickets
+  list Open_Bookings
   {
-    show all rows from Ticket
+    show all rows from Booking
   }
 }
 `;
@@ -290,7 +290,7 @@ test('the parity check catches a dropped, reordered or extra step and a drifted 
     ['plan has no Slate gate while the deploy ships Slate', (a) => void (a.planJson = a.planJson.filter((step) => step.id !== 'slate-enable'))],
     ['plan.md loses a human step', (a) => void a.planMdHuman.pop()],
     ['provision prints a different checklist', (a) => void (a.doneNext.checklist = [...a.doneNext.checklist, 'Extra: a sixth step'])],
-    ['deploy creates an unplanned column', (a) => void (a.deploy = a.deploy.replace(/^- iac:import/m, '- create column Ticket.Extra data_type=varchar max_length=255 if missing\n- iac:import'))],
+    ['deploy creates an unplanned column', (a) => void (a.deploy = a.deploy.replace(/^- iac:import/m, '- create column Booking.Extra data_type=varchar max_length=255 if missing\n- iac:import'))],
     ['plan has no tables the deploy creates', (a) => void (a.tables = a.tables.slice(1))],
   ];
   for (const [what, mutate] of mutations) {
