@@ -348,7 +348,7 @@ class Parser {
       this.i++;
       const first = this.expectIdent();
       if (this.eat('ident', 'in')) {
-        const collection = this.expr(0, {});
+        const collection = this.loopCollection();
         const body = this.body();
         return { kind: 'forEach', name: first, iteratesIndex: true, collection, body, span: this.span(start, body.span.end) };
       }
@@ -356,7 +356,7 @@ class Parser {
     }
     const name = this.expectIdent();
     if (!this.eat('ident', 'in')) this.fail('for-in');
-    const collection = this.expr(0, {});
+    const collection = this.loopCollection();
     const body = this.body();
     return {
       kind: 'forEach',
@@ -366,6 +366,25 @@ class Parser {
       body,
       span: this.span(start, body.span.end),
     };
+  }
+
+  /**
+   * A loop collection. `for each r in Form sort by F` (or `range from a to b`)
+   * with no bracket iterates every record of the form in that order: the
+   * clause binds an all-records fetch, as `Form[ID != 0] sort by F` does.
+   */
+  private loopCollection(): Expr {
+    const collection = this.expr(0, {});
+    const clause = (this.is('ident', 'sort') && this.is('ident', 'by', 1)) || (this.is('ident', 'range') && this.is('ident', 'from', 1));
+    if (collection.kind !== 'name' || !clause) return collection;
+    const all: Expr = {
+      kind: 'criteria',
+      object: collection,
+      criteria: { kind: 'name', name: 'true', span: collection.span },
+      span: collection.span,
+    };
+    this.attachSortRange(all);
+    return all;
   }
 
   private whileStmt(): Stmt {
