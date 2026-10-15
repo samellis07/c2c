@@ -560,11 +560,17 @@ test('the Advanced I/O entry serves the generated handlers with a consistent err
   const functionDir = join(out, 'functions/c2c_api');
   const routes = JSON.parse(readFileSync(join(functionDir, 'routes.json'), 'utf8')) as Record<string, string>;
   routes['POST /unsafe-error'] = 'unsafe-error.mjs';
+  routes['POST /committed-error'] = 'committed-error.mjs';
   writeFileSync(join(functionDir, 'routes.json'), JSON.stringify(routes));
   writeFileSync(
     join(functionDir, 'unsafe-error.mjs'),
     `export default async function unsafeError(call, res) {\n  res.writeHead(500, { 'content-type': 'application/json' });\n  res.end(JSON.stringify({ message: 'Unable to cast SECRET_TOKEN_91', error: 'stack trace /private/app/index.js:12', stack: 'Error\\n at handler', query: 'SELECT * FROM ZCQL_SECRET' }));\n}\n`,
   );
+  writeFileSync(
+    join(functionDir, 'committed-error.mjs'),
+    `export default async function committedError(call, res) {\n  const { createRequire } = await import('node:module');\n  const sdk = createRequire(import.meta.url)('zcatalyst-sdk-node');\n  await sdk.initialize(call).datastore().table('Sample_Item').insertRows([{ Item_Name: 'Committed Once' }]);\n  res.writeHead(500, { 'content-type': 'application/json' });\n  res.end(JSON.stringify({ code: 'INTERNAL_ERROR', message: 'Internal server error', wrote: true, error: 'SECRET' }));\n}\n`,
+  );
+
   const req = createRequire(import.meta.url);
   const sdk = req(fake) as { setSession(token: string, user: unknown): void; state(): { tables: Record<string, Record<string, unknown>[]>; calls: unknown[][] } };
   sdk.setSession('t1', { user_id: '1', email_id: 'operator@example.test', role_details: { role_name: 'App Administrator' } });
@@ -640,6 +646,12 @@ test('the Advanced I/O entry serves the generated handlers with a consistent err
       console.error = originalError;
     }
     assert.equal(unsafe!.status, 500);
+    assert.equal(unsafe!.body.wrote, undefined, 'no write signal is added unless true');
+    const committed = await post('/server/c2c_api/committed-error', {}, 't1');
+    assert.equal(committed.status, 500);
+    assert.equal(committed.body.wrote, true, 'a committed write must survive 5xx sanitization');
+    assert.deepEqual(Object.keys(committed.body).sort(), ['code', 'correlationId', 'message', 'wrote']);
+    assert.equal((sdk.state().tables.Sample_Item ?? []).filter((row) => row.Item_Name === 'Committed Once').length, 1);
     assert.deepEqual(Object.keys(unsafe!.body).sort(), ['code', 'correlationId', 'message']);
     assert.equal(unsafe!.body.code, 'INTERNAL_ERROR');
     assert.equal(unsafe!.body.message, 'Internal server error');

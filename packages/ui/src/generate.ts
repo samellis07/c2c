@@ -1895,10 +1895,7 @@ ${flowCommit}${deferSuccess
       // generic fail. Catalyst's text never reaches the caller.
       if (replyStoreError(res, err, { live: true, table: formName, wrote: true })) return;
       const denied = err && (err.code === "RECORD_ACCESS_DENIED" || err.name === "RecordAccessError");
-      // Caller-facing texts only: Creator's own Deluge messages and the named
-      // live-refused policy denials. Adapter and JS internals stay server-side.
-      const reportable = err && (err.code === "DELUGE_RUNTIME" || err.code === "DELUGE_CONVERSION" || err.code === "ZOHO_CONNECTION_REFUSED");
-      const message = (denied || reportable) && err && err.message ? err.message : "request failed";
+      const message = denied && err && err.message ? err.message : "request failed";
       send(res, denied ? 403 : 500, { dryRun: false, wrote: true, error: message, values: projectReadable(access, principal, formName, ctx.record, submitted) });
       return;
     }
