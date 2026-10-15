@@ -2,8 +2,10 @@
  * `c2c doctor` argument handling and output. Read-only by contract:
  * the only writes are `c2c-out/.c2c/doctor.json`, the one-time
  * `c2c-out/.c2c/mcp-request.json` and its `mcp-request.<id>.closed` marker,
- * `c2c-out/.c2c/mcp-state.json` (the last accepted MCP evidence, reused by
- * later runs for MCP_EVIDENCE_MAX_AGE_HOURS) (plus the D-E4 probe).
+ * `c2c-out/.c2c/mcp-state.json` (the last accepted MCP evidence, signed and
+ * reused by later runs for MCP_EVIDENCE_MAX_AGE_HOURS), the per-user signing
+ * key outside the workspace (`~/.config/c2c/mcp-state.key`, created once)
+ * (plus the D-E4 probe).
  *
  *   c2c doctor [--app <ds>] [--dc <dc>] [--org <id>] [--project <id>] [--json]
  *   c2c doctor --mcp-begin           open a one-time request for the MCP calls to observe
@@ -165,7 +167,7 @@ function formatTable(checks: CheckResult[], file: DoctorFile, note?: string): st
   return `${lines.join('\n')}\n`;
 }
 
-async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks): Promise<number> {
+async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, now?: () => Date): Promise<number> {
   const workspace = workspaceDir(io.env);
   const cliHooks = hooks ?? cliStoreHooks(io.env);
   let scope;
@@ -293,11 +295,12 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
   }
 
   // No new evidence this run: reuse the last accepted record for this scope
-  // while it is inside its expiry window (mcp-state.ts).
+  // while it is inside its expiry window — only a record this doctor signed
+  // (mcp-state.ts); an unsigned or edited one is rejected and never used.
   let reuse: McpEvidenceReuse = { status: 'none' };
   const fresh = evidence !== undefined;
   if (evidence === undefined && parsed.recordMcp === undefined) {
-    reuse = loadMcpEvidence(workspace, scope);
+    reuse = loadMcpEvidence(workspace, scope, { env: io.env, ...(now ? { now: now() } : {}) });
     if (reuse.status === 'reused') {
       evidence = reuse.evidence;
       origin = reuse.origin;
@@ -308,7 +311,9 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
       ? `MCP evidence observed ${formatAge(reuse.ageMs)} ago (${reuse.at}), reused; re-check required after ${MCP_EVIDENCE_MAX_AGE_HOURS} h (by ${reuse.expires}): c2c doctor --mcp-begin`
       : reuse.status === 'expired'
         ? `MCP evidence observed ${formatAge(reuse.ageMs)} ago has expired; re-check required after ${MCP_EVIDENCE_MAX_AGE_HOURS} h: run c2c doctor --mcp-begin, make the calls it names, then pipe the results into c2c doctor --mcp-observed -`
-        : undefined;
+        : reuse.status === 'rejected'
+          ? `stored MCP evidence (c2c-out/.c2c/mcp-state.json) not used: ${reuse.reason}; run c2c doctor --mcp-begin, make the calls it names, then pipe the results into c2c doctor --mcp-observed -`
+          : undefined;
   // Nothing new or reused: carry the last MCP record for this exact scope, so
   // doctor and the gate read the same D-B rows and agree on the verdict.
   const carried = evidence === undefined ? carriedMcpRecord({ workspace, scope: { dc: scope.dc, org: scope.org, project: scope.project } }) : undefined;
@@ -349,7 +354,10 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
   // so it must not refresh `at` or turn a red doctor green for the gate.
   const path = parsed.local ? undefined : writeDoctorFile(workspace, file);
   // Only evidence accepted this run is stored; a reused record keeps its own `at`.
-  if (path && fresh && evidence && origin) writeMcpEvidence(workspace, evidence, run.scope, origin);
+  if (path && fresh && evidence && origin) {
+    const stored = writeMcpEvidence(workspace, evidence, run.scope, origin, { env: io.env });
+    if (typeof stored !== 'string' && !parsed.quiet) io.stderr(`c2c doctor: MCP evidence not kept for later runs: ${stored.refused}\n`);
+  }
   if (!parsed.quiet) {
     if (parsed.json) {
       io.stdout(`${JSON.stringify({ ...file, ...(path ? { doctorJson: path } : {}) }, null, 2)}\n`);
@@ -370,10 +378,10 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
   return run.green ? 0 : 1;
 }
 
-export async function doctorCli(args: readonly string[], io: DoctorIo, opts?: { hooks?: ScopeHooks }): Promise<number> {
+export async function doctorCli(args: readonly string[], io: DoctorIo, opts?: { hooks?: ScopeHooks; now?: () => Date }): Promise<number> {
   const parsed = parseArgs(args, io);
   if (parsed === 'usage') return 2;
-  return doctorMain(parsed, io, opts?.hooks);
+  return doctorMain(parsed, io, opts?.hooks, opts?.now);
 }
 
 /** `c2c --verify-vendor <dir>` — the bin/c2c integrity step. Exit 0 ok, 6 mismatch. */
