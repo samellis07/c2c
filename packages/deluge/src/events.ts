@@ -497,14 +497,17 @@ export async function replay(envelope, opts) {
     datastore, ...(datastore.now ? { now: datastore.now } : {}),
   });
   const env = envelope && typeof envelope === "object" ? { ...envelope } : {};
-  const key = env.key ? String(env.key) : markerKey({ form: env.form, action: env.action, recordId: env.rowId, eventTime: env.eventTime });
+  env.key = env.key ? String(env.key) : markerKey({ form: env.form, action: env.action, recordId: env.rowId, eventTime: env.eventTime });
+  if (!env.progress || typeof env.progress !== "object") env.progress = {};
   const record = await loadRow(datastore, env.form, env.table, env.rowId ? String(env.rowId) : "");
   const ctx = runtime.context({ record, old: record, rowId: env.rowId ? String(env.rowId) : "", appTimeZone });
   // The event fires after the commit: the row is already stored, so the
   // system-stamp guard must not re-stamp and a script throw is a post-write
   // failure, the same as in the synchronous endpoint.
   ctx.persisted = true;
-  return handle(ctx, { form: env.form, action: env.action, key, progress: env.progress || {} }, { datastore });
+  // The full envelope goes into handle: progress merges into it, so a
+  // mid-replay failure persists an envelope the next sweep can still reload.
+  return handle(ctx, env, { datastore });
 }
 
 export default async function listener(event, context) {

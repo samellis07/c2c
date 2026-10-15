@@ -3863,8 +3863,7 @@ ${opts.recordEvents ? `export const recordEvents = ${JSON.stringify(opts.recordE
 ` : ''}${schemaExports}
 ${subformRowHelper}${liveHelpersBlock}export async function handle(ctx) {
   const shim = ctx.shim;
-  if (!shim.__c2cScript) shim.__c2cScript = async (_index, run) => run();
-${indent(opts.body)}
+${opts.body.includes('__c2cScript') ? '  if (!shim.__c2cScript) shim.__c2cScript = async (_index, run) => run();\n' : ''}${indent(opts.body)}
 }
 
 export default async function handler(req, res) {

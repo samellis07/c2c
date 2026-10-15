@@ -53,6 +53,17 @@ function twoModuleApp(): App {
   });
 }
 
+/** Three same-event scripts merge into one module, so a replay can stop mid-module. */
+function threeModuleApp(): App {
+  return app({
+    workflows: [
+      workflow({ name: 'Jobs A success', form: 'Jobs', event: 'on success', deluge: { text: 'insert into First_Log[Note = "A"];', span: Z } }),
+      workflow({ name: 'Jobs B success', form: 'Jobs', event: 'on success', deluge: { text: 'insert into Second_Log[Note = "B"];', span: Z } }),
+      workflow({ name: 'Jobs C success', form: 'Jobs', event: 'on success', deluge: { text: 'insert into Third_Log[Note = "C"];', span: Z } }),
+    ],
+  });
+}
+
 /** An on-delete app: deletes stay synchronous, so the flag must not open the lane. */
 function deleteApp(): App {
   return app({
@@ -349,20 +360,78 @@ test('blocker 2: replay after a mid-module failure resumes at the failed script'
   }
 });
 
-test('form event cancellation stops later scripts in the merged module', async () => {
-  const a = app({ workflows: [
-    workflow({ name: 'Jobs A', form: 'Jobs', event: 'on success', deluge: { text: 'cancel submit "stop";', span: Z } }),
-    workflow({ name: 'Jobs B', form: 'Jobs', event: 'on success', deluge: { text: 'insert into Second_Log[Note = "B"];', span: Z } }),
-  ] });
-  const g = generate(a, { asyncOnSuccess: false });
-  const { datastore, tables } = mockDatastore({ Jobs: ['ROWID'], Second_Log: ['ROWID'] });
+test('a mid-replay failure keeps the full envelope so the next sweep reloads the row', async () => {
+  const g = generate(threeModuleApp(), { asyncOnSuccess: true });
+  const { datastore, tables } = mockDatastore({ Jobs: ['ROWID'], First_Log: ['ROWID'], Second_Log: ['ROWID'], Third_Log: ['ROWID'] });
   const [row] = await datastore.insert('Jobs', [{ Title: 'job-1' }]);
+  const rowId = String(row!.ROWID);
+  const originalInsert = datastore.insert.bind(datastore);
+  let failSecondOnce = true;
+  let failThirdOnce = true;
+  datastore.insert = async (table: string, values: Record<string, unknown>[]) => {
+    if (table === 'Second_Log' && failSecondOnce) {
+      failSecondOnce = false;
+      throw new Error('module B fails once');
+    }
+    if (table === 'Third_Log' && failThirdOnce) {
+      failThirdOnce = false;
+      throw new Error('module C fails once');
+    }
+    return originalInsert(table, values);
+  };
   (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = datastore;
   const { root, load } = await materialize(g, { mode: 'live', appTimeZone: 'UTC' });
   try {
-    const handler = await load('functions/aio/jobs/on-success.mjs');
-    await assert.rejects(handler.handle!({ shim: { validate: { cancelSubmit: () => { throw Object.assign(new Error('stop'), { code: 'SUBMIT_REFUSED' }); } } }, rowId: String(row!.ROWID) }));
-    assert.equal((tables.get('Second_Log') ?? []).length, 0, 'later script did not run after cancel submit');
+    const listener = await load('functions/events/after-commit.mjs');
+    const event = recordEvent('Jobs', 'insert', { ROWID: rowId });
+    await assert.rejects(listener.default!(event, { closeWithSuccess: () => undefined, closeWithFailure: () => undefined }), /module B fails once/);
+    const sweeper = await load('functions/job/c2c-event-sweeper.mjs');
+    // First sweep: script B resumes and succeeds, then script C fails. The
+    // progress update must not strip the envelope's row identity.
+    const first = await sweeper.sweep!({});
+    assert.equal(first.retried, 1, 'script C failed during the replay, so the marker re-arms');
+    const stored = JSON.parse(String((tables.get('C2CEventDeadLetter') ?? [])[0]!.Envelope)) as Record<string, unknown>;
+    assert.equal(stored.rowId, rowId, 'the replay-persisted envelope still names the row');
+    assert.equal(stored.table, 'Jobs', 'the replay-persisted envelope still names the table');
+    assert.equal(stored.v, DEAD_LETTER_ENVELOPE_VERSION);
+    assert.ok(stored.eventTime, 'the event time survives the replay update');
+    // Second sweep: the row reloads and the remaining script runs.
+    const second = await sweeper.sweep!({});
+    assert.equal(second.resolved, 1, 'the next sweep reloads the row and finishes the remaining script');
+    assert.equal((tables.get('First_Log') ?? []).length, 1, 'completed script A never repeated');
+    assert.equal((tables.get('Second_Log') ?? []).length, 1, 'script B ran once across live and replay');
+    assert.equal((tables.get('Third_Log') ?? []).length, 1, 'script C ran on the second sweep');
+  } finally {
+    delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('form event cancellation stops later scripts in the merged module', async () => {
+  const g = generate(twoModuleApp(), { asyncOnSuccess: true });
+  const { datastore, tables } = mockDatastore({ Jobs: ['ROWID'], First_Log: ['ROWID'], Second_Log: ['ROWID'] });
+  const [row] = await datastore.insert('Jobs', [{ Title: 'job-1' }]);
+  const rowId = String(row!.ROWID);
+  const originalInsert = datastore.insert.bind(datastore);
+  // A cancel submit can still surface at runtime inside a deferrable-looking
+  // module: the static classifier only sees the translated source.
+  datastore.insert = async (table: string, values: Record<string, unknown>[]) => {
+    if (table === 'First_Log') throw Object.assign(new Error('stop'), { code: 'SUBMIT_REFUSED' });
+    return originalInsert(table, values);
+  };
+  (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = datastore;
+  const { root, load } = await materialize(g, { mode: 'live', appTimeZone: 'UTC' });
+  try {
+    const closed: string[] = [];
+    const listener = await load('functions/events/after-commit.mjs');
+    await listener.default!(recordEvent('Jobs', 'insert', { ROWID: rowId }), {
+      closeWithSuccess: () => closed.push('success'),
+      closeWithFailure: () => closed.push('failure'),
+    });
+    assert.deepEqual(closed, ['success'], 'a cancel submit resolves the event instead of dead-lettering it');
+    assert.equal((tables.get('C2CEventDeadLetter') ?? []).length, 0, 'no dead-letter marker for a cancellation');
+    assert.equal((tables.get('Second_Log') ?? []).length, 0, 'the later script did not run after cancel submit');
+    assert.equal((tables.get('C2CEventProcessed') ?? []).length, 0, 'the cancelled module is not marked processed');
   } finally {
     delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
     rmSync(root, { recursive: true, force: true });
