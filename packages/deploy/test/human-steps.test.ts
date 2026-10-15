@@ -96,12 +96,31 @@ test('the checklist is one numbered list: slate start, admin invite, sign in, se
   assert.match(printed, /^human checklist:\n1\. .*Start Exploring[\s\S]*2\. .*invite[\s\S]*3\. .*[Ss]ign in[\s\S]*4\. .*sender/);
 });
 
-test('the live-run guide documents the shared five customer steps', () => {
+test('the live-run guide quotes the canonical five customer steps inside its marked region', () => {
   const guide = readFileSync(join(process.cwd(), 'docs/user/live-runs-human-steps.md'), 'utf8');
-  for (const item of CUSTOMER_STEPS) {
-    assert.ok(guide.includes(`“${item}”`), `guide is missing the shared customer step: ${item}`);
-  }
-  assert.ok(guide.includes('app-list response only proves connectivity'));
+  const region = guide.match(/<!-- c2c:human-steps:start -->\n([\s\S]*?)\n<!-- c2c:human-steps:end -->/);
+  assert.ok(region, 'guide is missing the <!-- c2c:human-steps:start/end --> marked region');
+  const lines = region![1]!.split('\n');
+  assert.deepEqual(lines, CUSTOMER_STEPS.map((step, i) => `${i + 1}. ${step}`), 'marked region must list the canonical steps verbatim');
+});
+
+test('the live-run guide states the per-project conditions exactly as the code applies them', () => {
+  const guide = readFileSync(join(process.cwd(), 'docs/user/live-runs-human-steps.md'), 'utf8');
+  // provision.ts drops the mail step without a `mail-sender` plan step and the
+  // Slate start once `slate-enable` is done/existing; deploy's humanChecklist
+  // is conditional on slate, sendsMail and slateStarted.
+  assert.match(guide, /mail-sender/);
+  assert.match(guide, /slate-enable/);
+  assert.match(guide, /`done` or `existing`/);
+  assert.match(guide, /sendsMail|sends mail/);
+  assert.match(guide, /slateStarted/);
+  // The deploy checklist never prints the in-app check; the guide must say so.
+  assert.match(guide, /does not print the\s+in-app check|does not print the in-app check/);
+});
+
+test('the live-run guide keeps the exact Slate activation evidence', () => {
+  const guide = readFileSync(join(process.cwd(), 'docs/user/live-runs-human-steps.md'), 'utf8');
+  assert.match(guide, /`?200 \[\]`? app-list response only proves connectivity/, 'guide must keep the exact `200 []` evidence wording');
 });
 
 test('a re-run after Slate started drops the Slate start and keeps numbering contiguous', () => {
