@@ -42,8 +42,8 @@ project it cannot find.
   [Verify the project before depending on it](../../plugin/references/facts/projects.md#verify-the-project-before-depending-on-it)).
   A direct "create project" call is refused
   ([`400 PROJECT_CREATION_NOT_ALLOWED`](../../plugin/references/facts/errors.md#400-project_creation_not_allowed)).
-  When the name is already in use, the AI adds a suffix and retries
-  the import with up to 5 names (`-2`, `-3`, …)
+  When the name is already in use, the AI adds a suffix and tries
+  up to 5 names in all (the name, then `-2` … `-5`)
   ([`409 DUPLICATE_ENTRY` on project import](../../plugin/references/facts/errors.md#409-duplicate_entry-on-project-import)).
   Those facts entries do not carry an evidence label.
 - When you already have a Development project that holds only this
