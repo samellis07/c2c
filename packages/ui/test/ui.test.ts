@@ -497,9 +497,31 @@ test('HTML snippets drop slash, uppercase, and entity-encoded handlers', () => {
         { url: 'https://example.com/manual.pdf?download=1', label: 'Open PDF' },
         { url: 'https://www.google.com/maps/embed?pb=abc', name: 'City Map', label: 'City Map' },
         { url: 'https://maps.google.com/maps/embed?pb=ok', label: 'Open map' },
+        // Encoded '@' in the path is a genuine canonical escape, not userinfo.
+        { url: 'https://example.com/manual%40.pdf', label: 'Open PDF' },
+        // A lookalike host inside the query is data, not the authority.
+        { url: 'https://example.com/x.pdf?next=//maps.google.com', label: 'Open PDF' },
+        // The map path match is case-insensitive on the exact allowed host.
+        { url: 'https://www.google.com/MAPS/embed?pb=x', label: 'Open map' },
       ];
       const locked = [
         'https://example.com/widget',
+        // The parser strips tabs and newlines, so these parse onto an
+        // allowlisted host — but the raw authority is not canonical.
+        'https://maps.goog\tle.com/maps/embed?pb=x',
+        'https://maps.google\n.com/maps/embed?pb=x',
+        'https://example.com/man\tual.pdf',
+        'https://exa\nmple.com/manual.pdf',
+        // A literal space in the path is not the percent-encoded canonical form.
+        'https://example.com/a b.pdf',
+        // Leading or trailing whitespace means the raw text is not canonical.
+        '  https://maps.google.com/maps/embed?pb=x',
+        'https://maps.google.com/maps/embed?pb=x ',
+        ' https://example.com/manual.pdf',
+        'https://example.com/manual.pdf\t',
+        // An uppercase scheme is not the canonical 'https:' the parser yields.
+        'HTTPS://maps.google.com/maps/embed?pb=x',
+        'HTTPS://EXAMPLE.COM/manual.pdf',
         'https://maps.google.com.evil.example/maps/embed?pb=x',
         'https://www.google.com.evil.example/maps/embed?pb=abc',
         'https://WWW.GOOGLE.COM/maps/embed?pb=abc',
@@ -533,6 +555,12 @@ test('HTML snippets drop slash, uppercase, and entity-encoded handlers', () => {
         'https://user:@maps.google.com/maps/embed?pb=x',
         'https://user:pass@example.com/manual.pdf',
         'https://user@example.com/manual.pdf',
+        // Protocol-relative URLs have no scheme the parser can resolve without
+        // a base, and a space inside the authority fails to parse at all.
+        '//maps.google.com/maps/embed?pb=x',
+        '//example.com/manual.pdf',
+        'https://maps.g oogle.com/maps/embed?pb=x',
+        'https://exam ple.com/manual.pdf',
       ];
       const embedded = runtime.renderPage(
         {
@@ -564,7 +592,10 @@ test('HTML snippets drop slash, uppercase, and entity-encoded handlers', () => {
       }
       assert.equal((embedded.match(/<iframe/g) || []).length, locked.length, 'non-canonical https embeds stay sandboxed');
       assert.match(embedded, /<iframe[^>]*src="https:\/\/example\.com\/widget"[^>]*sandbox=""[^>]*loading="lazy"[^>]*referrerpolicy="no-referrer"/);
-      for (const url of dropped) assert.equal(embedded.includes(url), false, url);
+      for (const url of dropped) {
+        assert.equal(embedded.includes(`src="${url}"`), false, url);
+        assert.equal(embedded.includes(`href="${url}"`), false, url);
+      }
     }).finally(() => rmSync(dir, { recursive: true, force: true }));
   } catch (err) {
     rmSync(dir, { recursive: true, force: true });
