@@ -35,10 +35,10 @@ means for you.
 |---|---|
 | What is broken in my export? | `precheck.json` — every blocker with Creator's own error text |
 | Will it convert? | `analyze.json` — readiness score, Deluge coverage, deterministic flag |
-| What exactly will be built? | `plan.md` — the blueprint you approve section by section |
+| What exactly will be built? | `plan.md` — the blueprint you review and approve before anything runs |
 | What did the run do? | `c2c-deploy-report.json` — written **even when a step failed**, so a failure still leaves a full record |
 | Did my data arrive whole? | per-table counts vs Creator's `counts.json`; links resolved 100% |
-| Is it proven working? | `verify/report.json` — probes, smoke, your business rules, plus the maintenance list of what you now own |
+| Is it proven working? | `c2c-proof.json` (and `c2c-proof.md`) — per-table counts and checksums, the smoke result, and readiness plus every manual item by name. The list of what you now own comes in the AI's summary |
 
 ## Counts must match, always
 
