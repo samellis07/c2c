@@ -1,7 +1,7 @@
 /** Dry-run commands must remain offline even if code bypasses the injected Io. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { planCli } from '../src/offline-plan.js';
@@ -28,7 +28,6 @@ test('provision dry-run and deploy plan make zero network attempts on a redistri
     const io = silentIo();
     const ds = readFileSync(fixture, 'utf8');
     const source = join(out, 'widget.ds');
-    const { writeFileSync } = await import('node:fs');
     writeFileSync(source, ds);
 
     assert.equal(await planCli([source, '--out', join(out, 'plan'), '--dc', 'in'], io), 0);
