@@ -32,6 +32,9 @@
  * table's types, and a refused child value names the subform, the row and the field
  * ("Lines[0].Qty").
  *
+ * A posted record (or subform row) with a "__proto__" key is refused (400): copying
+ * it would replace the copy's prototype.
+ *
  * A store read is lenient: a value that does not parse is returned as it came. A posted
  * value is strict: one that does not parse ("abc" in a number field) is refused with a
  * FieldValueError (status 400) naming the field, never read as NaN, 0 or text.
@@ -198,6 +201,12 @@ function own(map, key) {
  * path refuses a subform value that is not a list of rows).
  */
 export function inputRecord(record, types, renames = {}, opts = {}) {
+  for (const key of Object.keys(record)) {
+    // JSON.parse keeps "__proto__" as an own key; copying it with out[key] = value
+    // would set the copy's prototype, so a smuggled object's fields read as record
+    // fields while no own key names them. No Creator field has that name.
+    if (key === '__proto__') throw new FieldValueError(key, 'field', `${key} is not a field name`);
+  }
   if ((!types || typeof types !== 'object') && !opts.subforms) return record;
   const out = {};
   for (const key of Object.keys(record)) {
