@@ -806,6 +806,51 @@ test("D-A1: CODEX_HOME is searched and the host is reported as 'codex'", async (
   assert.equal(file.host, 'codex');
 });
 
+test("D-A1: ~/.claude/skills is searched and reported as 'claude-skills'", async () => {
+  const dir = tmp();
+  const home = join(dir, 'home');
+  writeSkills(join(home, '.claude'));
+  writeConfig(dir);
+  const { io, out } = fakeIo({ HOME: home, C2C_WORKSPACE: dir }, greenCatalyst);
+  const code = await doctorCli([], io, { hooks: NO_HOOKS });
+  assert.match(out(), /PASS D-A1/);
+  assert.match(out(), /claude-skills/);
+  assert.equal(code, 0, out());
+});
+
+test('D-A1: C2C_CATALYST_SKILLS_DIR wins over ~/.claude/skills', async () => {
+  const dir = tmp();
+  const home = join(dir, 'home');
+  const envSkills = writeSkills(home, '1.2.3');
+  writeSkills(join(home, '.claude'), '9.9.9');
+  writeConfig(dir);
+  const { io, out } = fakeIo({ HOME: home, C2C_WORKSPACE: dir, C2C_CATALYST_SKILLS_DIR: envSkills }, greenCatalyst);
+  const code = await doctorCli([], io, { hooks: NO_HOOKS });
+  assert.match(out(), /PASS D-A1/);
+  assert.match(out(), /skills-dir v1\.2\.3/);
+  assert.equal(code, 0, out());
+});
+
+test('D-A1: when nothing is found the failure lists every searched path', async () => {
+  const dir = tmp();
+  const home = join(dir, 'home');
+  mkdirSync(home, { recursive: true });
+  writeConfig(dir);
+  const envDir = join(home, 'envskills');
+  const { io, out } = fakeIo({ HOME: home, C2C_WORKSPACE: dir, C2C_CATALYST_SKILLS_DIR: envDir }, greenCatalyst);
+  assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 1);
+  assert.match(out(), /FAIL D-A1/);
+  for (const p of [
+    join(envDir, 'catalyst-by-zoho', 'SKILL.md'),
+    join(home, '.claude', 'skills', 'catalyst-by-zoho', 'SKILL.md'),
+    join(home, '.claude', 'plugins', 'cache'),
+    join(home, '.claude', 'plugins', 'marketplaces'),
+    join(home, '.codex/skills/catalyst-by-zoho/SKILL.md'),
+  ]) {
+    assert.ok(out().includes(p), `failure output is missing searched path ${p}`);
+  }
+});
+
 test('D-A1: an unreadable plugin directory reports a finding instead of crashing', async () => {
   const dir = tmp();
   const home = join(dir, 'home');
