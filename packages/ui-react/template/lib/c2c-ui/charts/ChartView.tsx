@@ -14,8 +14,8 @@ import { DonutChart } from '../arc/components/donut-chart/donut-chart';
 import { LineChart } from '../arc/components/line-chart/line-chart';
 import type { ChartSpec, ReportSpec } from '../types';
 import { useEnv } from '../runtime/env';
-import { chartSeries, todayIn, type Series } from './data';
-import { RowsScope, useRows } from './rows';
+import { type Series } from './data';
+import { RowsScope, useChartRows } from './rows';
 import './charts.css';
 
 /** Bars beyond this many categories are the smallest ones; they are left out and the chart says so. */
@@ -73,11 +73,10 @@ function Drawing({ chart, series }: { chart: ChartSpec; series: Series }) {
 
 /** The chart body: notes, TODOs, the three data states, the drawing. */
 export function ChartBody({ chart }: { chart: ChartSpec }) {
-  const { spec, view } = useEnv();
+  const { spec } = useEnv();
   const report: ReportSpec | undefined = chart.report ? spec.reports[chart.report] : undefined;
-  const { load, retry } = useRows(report);
-  const zone = (view as { C2C_APP_TIMEZONE?: unknown }).C2C_APP_TIMEZONE;
-  const series = load.state === 'ready' ? chartSeries(load.rows, chart, todayIn(typeof zone === 'string' ? zone : undefined, new Date())) : undefined;
+  const { load, retry } = useChartRows(report, chart);
+  const series = load.state === 'ready' ? load.series : undefined;
   return (
     <div className="c2c-chart" data-chart={chart.kind} data-chart-type={chart.creatorType}>
       {chart.notes.map((note) => (
@@ -102,7 +101,7 @@ export function ChartBody({ chart }: { chart: ChartSpec }) {
         </div>
       ) : (
         <>
-          {load.truncated ? <p className="c2c-chart-note">Drawn from the first {load.rows.length} records.</p> : null}
+          {load.state === 'ready' && load.truncated ? <p className="c2c-chart-note">Drawn from the first {load.scanned} records.</p> : null}
           <Drawing chart={chart} series={series} />
         </>
       )}
