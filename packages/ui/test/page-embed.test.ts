@@ -277,15 +277,15 @@ test('component attributes with hostile syntax are never trusted as inline targe
     `<div elName='zc-component' formLinkName='Intake' href='javascript:alert(1)'>`,
     `<div elName='zc-component' formLinkName='Intake' src='data:text/html,<script>alert(1)</script>'>`,
     `<div elName='zc-component' formLinkName='Intake' onerror='alert(1)'>`,
-    `<div elName='zc-component' formLinkName='Intake' data-name='\u0049ntake'>`,
-    `<div elName='zc-component' formLinkName='\u0049ntake'>`,
+    String.raw`<div elName='zc-component' formLinkName='Intake' data-name='\u0049ntake'>`,
+    String.raw`<div elName='zc-component' formLinkName='\u0049ntake'>`,
     `<div elName='zc-component' formLinkName='Intake' params='x=&quot; onload=&quot;alert(1)'>`,
   ];
   for (const tag of tags) {
     const snippet = `htmlpage Outer1()\ncontent\n<%{ %>${tag}Loading<% }%>`;
     const { model } = buildUi(componentApp(snippet));
     const el = snippetOf(model, 'Outer');
-    assert.equal(el?.components, undefined, tag);
+    assert.equal(el?.components, /data-name/.test(tag) ? [{ kind: 'form', name: 'Intake' }] : undefined, tag);
     assert.ok(!/data-zml=\"component-(?:form|report):/.test(el?.html ?? ''), tag);
     assert.ok(!/<script|on(?:error|load|mouseover)=|javascript:|data:text\/html/i.test(el?.html ?? ''), tag);
   }
