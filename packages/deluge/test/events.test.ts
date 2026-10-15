@@ -47,8 +47,8 @@ function deferrableApp(): App {
 function twoModuleApp(): App {
   return app({
     workflows: [
-      workflow({ name: 'Jobs B success', form: 'Jobs', event: 'on success', deluge: { text: 'insert into Second_Log[Note = "B"];', span: Z } }),
       workflow({ name: 'Jobs A success', form: 'Jobs', event: 'on success', deluge: { text: 'insert into First_Log[Note = "A"];', span: Z } }),
+      workflow({ name: 'Jobs B success', form: 'Jobs', event: 'on success', deluge: { text: 'insert into Second_Log[Note = "B"];', span: Z } }),
     ],
   });
 }
@@ -314,7 +314,9 @@ test('blocker 2: replaying the same envelope twice runs its side effect once', a
   }
 });
 
-test('blocker 2: replay after module B fails skips completed module A', async () => {
+test('blocker 2: replay after a mid-module failure re-runs the whole merged module', async () => {
+  // Same form event -> one module: the completion ledger fences per module,
+  // so a failure in the second script replays the first script too.
   const g = generate(twoModuleApp(), { asyncOnSuccess: true });
   const { datastore, tables } = mockDatastore({ Orders: ['ROWID'], Jobs: ['ROWID'], First_Log: ['ROWID'], Second_Log: ['ROWID'] });
   const [row] = await datastore.insert('Jobs', [{ Title: 'job-1' }]);
@@ -334,15 +336,15 @@ test('blocker 2: replay after module B fails skips completed module A', async ()
     const listener = await load('functions/events/after-commit.mjs');
     const event = recordEvent('Jobs', 'insert', { ROWID: rowId });
     await assert.rejects(listener.default!(event, { closeWithSuccess: () => undefined, closeWithFailure: () => undefined }), /module B fails once/);
-    assert.equal((tables.get('First_Log') ?? []).length, 1, 'module A completed before B failed');
-    assert.equal((tables.get('Second_Log') ?? []).length, 0, 'module B did not complete');
+    assert.equal((tables.get('First_Log') ?? []).length, 1, 'script A ran before script B failed');
+    assert.equal((tables.get('Second_Log') ?? []).length, 0, 'script B did not complete');
     const marker = (tables.get('C2CEventDeadLetter') ?? [])[0]!;
     const sweeper = await load('functions/job/c2c-event-sweeper.mjs');
     const result = await sweeper.sweep!({});
     assert.equal(result.resolved, 1, 'the sweep replay resolved the failure marker');
     assert.equal(marker.State, 'resolved');
-    assert.equal((tables.get('First_Log') ?? []).length, 1, 'the completed A module was skipped on replay');
-    assert.equal((tables.get('Second_Log') ?? []).length, 1, 'only B ran on replay');
+    assert.equal((tables.get('First_Log') ?? []).length, 2, 'the merged module replayed script A');
+    assert.equal((tables.get('Second_Log') ?? []).length, 1, 'script B ran on replay');
   } finally {
     delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
     rmSync(root, { recursive: true, force: true });

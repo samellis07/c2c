@@ -4981,6 +4981,45 @@ test('guard extraction still finds the return past the provenance comment', asyn
   assert.equal(wroteFine(await runHandle(server.source, { Amount: '50' })), false);
 });
 
+test('same form event: one merged module runs every script in export order', async () => {
+  // Two on-success workflows share /forms/Item/success: a second module would
+  // never be routed, so both scripts land in one module in export order.
+  const ir = app({
+    forms: [plainForm('Item', [plainField('Name')])],
+    workflows: [
+      workflow({ name: 'First', form: 'Item', event: 'on success', deluge: { text: 'insert into First_Log[Note = "A"];', span: Z } }),
+      workflow({ name: 'Second', form: 'Item', event: 'on success', deluge: { text: 'insert into Second_Log[Note = "B"];', span: Z } }),
+    ],
+  });
+  const g = generate(ir);
+  const aio = g.files.filter((f) => f.path.startsWith('functions/aio/item/'));
+  assert.deepEqual(aio.map((f) => f.path), ['functions/aio/item/on-success.mjs']);
+  const src = aio[0]!.source;
+  assert.ok(src.indexOf('First_Log') < src.indexOf('Second_Log'), 'scripts run in export order');
+  const mod = (await loadModule(src, 'merged.mjs')) as unknown as { handle: (ctx: unknown) => Promise<unknown> };
+  const { datastore, tables } = mockDatastore({ First_Log: ['ROWID'], Second_Log: ['ROWID'] });
+  const runtime = createRuntime({ dryRun: false, appTimeZone: 'UTC', datastore: datastore as never });
+  await mod.handle(runtime.context({ record: {} }));
+  assert.equal((tables.get('First_Log') ?? []).length, 1, 'the first script ran');
+  assert.equal((tables.get('Second_Log') ?? []).length, 1, 'the second script ran');
+});
+
+test('mixed record events in one merged module keep their add/edit/delete scopes', () => {
+  const ir = app({
+    forms: [plainForm('Item', [plainField('Name')])],
+    workflows: [
+      workflow({ name: 'AddOnly', form: 'Item', event: 'on success', recordEvent: 'on add', deluge: { text: 'x = 1;', span: Z } }),
+      workflow({ name: 'EditOnly', form: 'Item', event: 'on success', recordEvent: 'on edit', deluge: { text: 'y = 2;', span: Z } }),
+    ],
+  });
+  const g = generate(ir);
+  const server = g.files.find((f) => f.path === 'functions/aio/item/on-success.mjs');
+  assert.ok(server);
+  assert.match(stripComments(server.source), /export const recordEvents = \["on add","on edit"\];/);
+  assert.match(stripComments(server.source), /if \(!ctx\.rowId\) \{\n[\s\S]*?x = 1/);
+  assert.match(stripComments(server.source), /if \(ctx\.rowId(?: && !ctx\.deleting)?\) \{\n[\s\S]*?y = 2/);
+});
+
 test('actions criteria with show and on success emit both the client action and the server handler', () => {
   const ir = snippet(`\tform Item
 \t{
@@ -5412,23 +5451,28 @@ test('subform row events bind row on the server and the client and write through
       ],
     }),
   );
+  // Both input scripts share /forms/BOM/input, so one merged server module
+  // carries them; each client module stays per workflow for the field filter.
+  const inputServer = g.files.find((f) => f.path === 'functions/aio/bom/input-handlers.mjs');
+  assert.ok(inputServer, 'bom/input-handlers');
+  assert.match(stripComments(inputServer.source), /const d_row = shim\.subform\.currentRow\(ctx, "Parts"\);/);
+  assert.match(stripComments(inputServer.source), /shim\.record\.set\(d_row, \["Total"\], /);
+  assert.match(stripComments(inputServer.source), /var x = 1;|x = 1;/);
+  assert.match(stripComments(inputServer.source), /subformRow: requestSubformRow\(req, "Parts", accepted\)/);
+  check(inputServer.source, 'aio.mjs');
   for (const base of ['bom/on-user-input-of-parts-quantity', 'bom/on-add-row-of-parts']) {
-    const server = g.files.find((f) => f.path === `functions/aio/${base}.mjs`);
     const client = g.files.find((f) => f.path === `client/handlers/${base}.mjs`);
-    assert.ok(server, base);
     assert.ok(client, base);
-    for (const src of [server.source, client.source]) {
-      assert.match(stripComments(src), /const d_row = shim\.subform\.currentRow\(ctx, "Parts"\);/);
-      assert.match(stripComments(src), /shim\.record\.set\(d_row, \["Total"\], /);
-      assert.doesNotMatch(stripComments(src), /\brow\.Quantity\b/);
-    }
-    assert.match(stripComments(server.source), /subformRow: requestSubformRow\(req, "Parts", accepted\)/);
-    check(server.source, 'aio.mjs');
+    assert.match(stripComments(client.source), /const d_row = shim\.subform\.currentRow\(ctx, "Parts"\);/);
+    assert.match(stripComments(client.source), /shim\.record\.set\(d_row, \["Total"\], /);
+    assert.doesNotMatch(stripComments(client.source), /\brow\.Quantity\b/);
     check(client.source, 'client.mjs');
   }
-  const plain = g.files.find((f) => f.path === 'functions/aio/bom/on-user-input-of-parts.mjs');
-  assert.ok(plain);
-  assert.doesNotMatch(stripComments(plain.source), /currentRow|requestSubformRow/);
+  const addRowServer = g.files.find((f) => f.path === 'functions/aio/bom/on-add-row-of-parts.mjs');
+  assert.ok(addRowServer);
+  assert.match(stripComments(addRowServer.source), /const d_row = shim\.subform\.currentRow\(ctx, "Parts"\);/);
+  assert.match(stripComments(addRowServer.source), /subformRow: requestSubformRow\(req, "Parts", accepted\)/);
+  check(addRowServer.source, 'aio.mjs');
   const client = g.files.find((f) => f.path === 'client/handlers/bom/on-user-input-of-parts-quantity.mjs')!;
   const mod = (await loadModule(client.source, 'qty.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<unknown>>;
   const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });

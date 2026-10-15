@@ -410,7 +410,8 @@ export function routeTable(files: readonly FunctionFile[]): Record<string, strin
   const add = (method: string, path: string, spec: string) => {
     if (!path.startsWith('/')) return;
     const key = `${method} ${path}`;
-    if (!(key in routes)) routes[key] = spec;
+    if (key in routes) throw new Error(`duplicate route ${key}: ${spec} and ${routes[key]}`);
+    routes[key] = spec;
   };
   for (const file of sorted) {
     if (!file.path.endsWith('.mjs') || typeof file.data !== 'string') continue;

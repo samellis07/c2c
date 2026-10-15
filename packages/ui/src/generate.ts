@@ -2232,6 +2232,8 @@ ${requirePrincipal()}
       return;
     }
     const ctx = runtime.context({ record: row, old: row, principal, rowId });
+    // on delete-scoped scripts inside a merged form module run only here.
+    ctx.deleting = true;
     try {
 ${moduleRun('validateDel')}    } catch (err) {
       if (err && err.code === "DELETE_REFUSED") {
@@ -2380,19 +2382,24 @@ export function siblingSpecs(files: GeneratedFile[], formName: string, kind: 'va
     // is the stub's endpoint.
     if (!match?.[1].endsWith(`/${kind === 'delete' ? 'delete-script' : kind}`)) continue;
     const rec = /export const recordEvent = (null|"[^"]*");/.exec(file.source);
-    const scope = rec?.[1] && rec[1] !== 'null' ? JSON.parse(rec[1]).toLowerCase() : '';
+    const merged = /export const recordEvents = (\[[^\]]*\]);/.exec(file.source);
+    const scopes = merged
+      ? (JSON.parse(merged[1]) as string[]).map((scope) => scope.toLowerCase())
+      : [rec?.[1] && rec[1] !== 'null' ? JSON.parse(rec[1]).toLowerCase() : ''];
     const spec = `./${base}`;
-    if (scope === 'on add') add.push(spec);
-    else if (scope === 'on edit') edit.push(spec);
-    else if (scope === 'on delete') del.push(spec);
-    else {
-      // Unscoped and `on add or edit` modules run on insert and update. For
-      // `kind === 'delete'` the module is the on-delete script itself, which
-      // runs after every delete; for validate/success the delete path only
-      // runs `on delete`-scoped siblings.
-      add.push(spec);
-      edit.push(spec);
-      if (kind === 'delete') del.push(spec);
+    for (const scope of scopes) {
+      if (scope === 'on add') add.push(spec);
+      else if (scope === 'on edit') edit.push(spec);
+      else if (scope === 'on delete') del.push(spec);
+      else {
+        // Unscoped and `on add or edit` modules run on insert and update. For
+        // `kind === 'delete'` the module is the on-delete script itself, which
+        // runs after every delete; for validate/success the delete path only
+        // runs `on delete`-scoped siblings.
+        add.push(spec);
+        edit.push(spec);
+        if (kind === 'delete') del.push(spec);
+      }
     }
   }
   const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
