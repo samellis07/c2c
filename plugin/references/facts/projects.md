@@ -94,12 +94,12 @@ Rule: verify a project's configuration by exporting it, then delete the ZIP.
 
 Rule: `DELETE /baas/v1/project/<project-id>` → `200`; while the Production environment is enabled it fails `400 INVALID_OPERATION` ("This project is currently in the production environment. Disable the project's production environment to complete this operation."). Disabling Production is a console step the user performs. Deleted names linger as `Deleted` rows in the import history.
 
-### A project still 'Importing' holds its name and cannot be deleted
+### A project still 'Importing' is skipped and not written to
 
-Rule: `DELETE /baas/v1/project/<project-id>` on a project whose `project_type` is `Importing` fails `400 INVALID_OPERATION` ("Your project is importing. Kindly wait for some time") — the refusal persists for as long as the import does, however long that takes. An import that never finishes leaves a project that cannot be deleted and still holds its name.
+Rule: Assume a project whose `project_type` stays `Importing` keeps holding its name, and assume `DELETE /baas/v1/project/<project-id>` keeps failing `400 INVALID_OPERATION` ("Your project is importing. Kindly wait for some time") for as long as the import does [UNVERIFIED]. c2c does not call that delete [TESTED].
 
-- Before posting an import, c2c lists the org's projects and skips every name a listed project still shows as `Importing` — the documented suffix (`<name>-2`, `<name>-3`, …) is tried next instead of colliding.
-- A project still `Importing` takes no writes: a resume, a provision step or a deploy refuses it. One with a known age of at least 6 hours is treated as stuck — the run prints one guided step (check the project in the Catalyst console; if it stays Importing, contact Catalyst support) and stops that branch. If the age is unknown, writes remain stopped with neutral guidance to check its status in the Catalyst console and re-run later; doctor warns instead of failing. The delete is never retried.
+- Before posting an import, c2c lists the org's projects and skips every name a listed project still shows as `Importing`. The next suffix (`<name>-2`, `<name>-3`, …) is tried instead of colliding [TESTED].
+- A provision step refuses a project still `Importing` when the known age is at least 6 hours, and when the age cannot be read [TESTED]. Deploy and resume call that same guard before a write [TESTED]. At least 6 hours is treated as stuck — the run prints one guided step (check the project in the Catalyst console; if it stays Importing, contact Catalyst support) and stops that branch [TESTED]. If the age is unknown, writes remain stopped with neutral guidance to check its status in the Catalyst console and re-run later; doctor warns instead of failing [TESTED]. A known age under 6 hours is refused before any write as well [UNVERIFIED].
 
 ### Tear down only on request, or before the first console step
 
