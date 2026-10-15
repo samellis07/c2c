@@ -42,6 +42,15 @@ test('floats and exponents become numbers', () => {
   assert.deepEqual(parseJsonExact('[1.0]'), [1]);
 });
 
+test('Creator export mode preserves every numeric token spelling', () => {
+  assert.deepEqual(
+    parseJsonExact('{"amount":12345678901234567890.12345678901234567890,"count":1e3}', { preserveNumberLiterals: true }),
+    { amount: '12345678901234567890.12345678901234567890', count: '1e3' },
+  );
+  // Other callers retain the established number behavior.
+  assert.deepEqual(parseJsonExact('{"amount":1.25}'), { amount: 1.25 });
+});
+
 test('nested structures keep ids exact at every depth', () => {
   const parsed = parseJsonExact('{"a":[{"b":{"id":10000000000315013}}]}') as {
     a: [{ b: { id: string } }];

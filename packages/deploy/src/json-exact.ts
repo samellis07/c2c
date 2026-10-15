@@ -21,8 +21,8 @@ const INTEGER_LITERAL = /^-?(0|[1-9][0-9]*)$/;
  * `-0` stays the string "-0" and `1e3` becomes Number("1e3"), exactly as the
  * previous hand-rolled parser produced.
  */
-function exactNumber(literal: string): string | number {
-  return INTEGER_LITERAL.test(literal) ? literal : Number(literal);
+function exactNumber(literal: string, preserveAllNumbers: boolean): string | number {
+  return preserveAllNumbers || INTEGER_LITERAL.test(literal) ? literal : Number(literal);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -125,10 +125,10 @@ function restoreProtoKeys(value: unknown): unknown {
   return restored;
 }
 
-export function parseJsonExact(text: string): unknown {
+export function parseJsonExact(text: string, options: { preserveNumberLiterals?: boolean } = {}): unknown {
   return restoreProtoKeys(
     parseLosslessJson(renameProtoKeys(text), null, {
-      parseNumber: exactNumber,
+      parseNumber: (literal) => exactNumber(literal, options.preserveNumberLiterals === true),
       // The historical parser let a repeated key win silently; keep that.
       onDuplicateKey: ({ newValue }) => newValue,
     }),
