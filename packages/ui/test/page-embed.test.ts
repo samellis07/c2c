@@ -285,7 +285,7 @@ test('component attributes with hostile syntax are never trusted as inline targe
     const snippet = `htmlpage Outer1()\ncontent\n<%{ %>${tag}Loading<% }%>`;
     const { model } = buildUi(componentApp(snippet));
     const el = snippetOf(model, 'Outer');
-    assert.equal(el?.components, /data-name/.test(tag) ? [{ kind: 'form', name: 'Intake' }] : undefined, tag);
+    assert.deepEqual(el?.components, /data-name/.test(tag) ? [{ kind: 'form', name: 'Intake' }] : undefined, tag);
     assert.ok(!/data-zml=\"component-(?:form|report):/.test(el?.html ?? ''), tag);
     assert.ok(!/<script|on(?:error|load|mouseover)=|javascript:|data:text\/html/i.test(el?.html ?? ''), tag);
   }
