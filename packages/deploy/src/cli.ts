@@ -1679,7 +1679,7 @@ export async function sourceCsvCli(args: readonly string[], io: Io): Promise<num
     const missing = mandatoryMissingRefusals(loaded.tables, provisionedColumns);
     const overLength = overLengthRefusals(loaded.tables, provisionedColumns);
     if (overLength.length || missing.length) {
-      const integrity = { ...emptyIntegrity(), refusedByRule: groupRefusals(cellRuleRefusals(loaded.tables, provisionedColumns)) };
+      const integrity = { ...emptyIntegrity(), refusedByRule: groupRefusals([...cellRuleRefusals(loaded.tables, provisionedColumns), ...missing]) };
       const reportDir = dir;
       writeLoaderReport(reportDir, integrity);
       writeFidelityReport(reportDir, {
@@ -1843,7 +1843,7 @@ export async function sourceBackupCli(args: readonly string[], io: Io): Promise<
     const missing = mandatoryMissingRefusals(loaded.tables, provisionedColumns);
     const overLength = overLengthRefusals(loaded.tables, provisionedColumns);
     if (overLength.length || missing.length) {
-      const integrity = { ...emptyIntegrity(), refusedByRule: groupRefusals(cellRuleRefusals(loaded.tables, provisionedColumns)) };
+      const integrity = { ...emptyIntegrity(), refusedByRule: groupRefusals([...cellRuleRefusals(loaded.tables, provisionedColumns), ...missing]) };
       const reportDir = statSync(source).isDirectory() ? source : dirname(source);
       writeLoaderReport(reportDir, integrity);
       writeFidelityReport(reportDir, {
