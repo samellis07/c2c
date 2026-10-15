@@ -129,3 +129,7 @@ Rule: generated handlers log errors with context (never secrets or record values
 - MCP `Get_Logs` filters by resource, function, severity and date with pagination — plan log checks by filter, not by scrolling.
 - The console's DevOps → Logs → Application page filters by Log Type (Access/Application), Resources, Date/Time zone and Keyword, with a Configure Alert action — "Log messages for the last 5 mins may not be indexed", so log every failure inside the handler instead of relying on a later read.
 - Retention is short (about 7 days in Development, 14 in Production) and entries truncate around 1500 chars — log early, concise and once per failure.
+
+## Deluge client alerts
+
+Rule: `alert(message)` is allowed in form workflows for Subform on add row and Subform on delete row events, across Created, Created-or-Edited, and Edited record states. Do not treat those events as unverified; the Creator alert reference lists them as supported: https://www.zoho.com/deluge/help/client-functions/alert.html

@@ -365,14 +365,16 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
  * Classify the innermost event header an `alert` sits under. Live-tested on
  * Creator: `alert` runs in on load, on validate, on change / on user input,
  * and on click (custom action / button) actions; a form-workflow on success
- * rejects it at import. Everything else is 'unverified' — not proven
- * disallowed. The event string is a ` / `-joined header path (`on add / on
- * success`), so the leaf segment is the innermost header.
+ * rejects it at import. The Creator alert reference also lists Subform on add
+ * row and on delete row as supported; other events are 'unverified', not
+ * proven disallowed. The event string is a ` / `-joined header path (`on add
+ * / on success`), so the leaf segment is the innermost header.
+ * https://www.zoho.com/deluge/help/client-functions/alert.html
  * https://www.zoho.com/deluge/help/misc-tasks/alert-task.html
  */
 export function alertEventClass(event: string): AlertEventClass {
   const leaf = event.split(' / ').pop()?.trim().toLowerCase() ?? '';
-  if (/^on (load|validate|user input|change|click)\b/.test(leaf)) return 'allowed';
+  if (/^on (load|validate|user input|change|click)\b/.test(leaf) || /^on (add|delete) row of\s+[a-z_]\w*$/i.test(leaf)) return 'allowed';
   // Only the form-workflow `on success` is live-tested as rejected; even
   // `on delete success` is unverified, not proven disallowed.
   if (/^on success\b/.test(leaf)) return 'disallowed';
