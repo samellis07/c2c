@@ -1,10 +1,11 @@
 /**
  * Owner scope printed on every migration report.
  *
- * Payments, offline, Form Email, the C8 dialect, and Cliq bots are not
- * supported in this version (counted; on the roadmap). Marketplace
- * publishing, the Zia AI builder, and on-prem Data Bridge are not
- * applicable (out of scope). The array order is the published order.
+ * Payments, offline, Form Email, the C8 dialect, Cliq bots, and native
+ * mobile / MDM are not supported in this version (counted; on the
+ * roadmap). Marketplace publishing, the Zia AI builder, and on-prem
+ * Data Bridge are not applicable (out of scope). The array order is the
+ * published order.
  */
 
 export const OWNER_SCOPE = [
@@ -13,6 +14,7 @@ export const OWNER_SCOPE = [
   { feature: 'Form Email', label: 'not supported in this version (counted)' },
   { feature: 'C8 dialect', label: 'not supported in this version (counted)' },
   { feature: 'Cliq bots', label: 'not supported in this version (counted)' },
+  { feature: 'Native mobile / MDM', label: 'not supported in this version (counted)' },
   { feature: 'Marketplace publishing', label: 'not applicable (out of scope)' },
   { feature: 'Zia AI builder', label: 'not applicable (out of scope)' },
   { feature: 'On-prem Data Bridge', label: 'not applicable (out of scope)' },

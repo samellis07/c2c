@@ -25,6 +25,7 @@ const EXPECTED_SCOPE = [
   { feature: 'Form Email', label: 'not supported in this version (counted)' },
   { feature: 'C8 dialect', label: 'not supported in this version (counted)' },
   { feature: 'Cliq bots', label: 'not supported in this version (counted)' },
+  { feature: 'Native mobile / MDM', label: 'not supported in this version (counted)' },
   { feature: 'Marketplace publishing', label: 'not applicable (out of scope)' },
   { feature: 'Zia AI builder', label: 'not applicable (out of scope)' },
   { feature: 'On-prem Data Bridge', label: 'not applicable (out of scope)' },
@@ -46,9 +47,19 @@ test('owner-scope labels are exactly the published list', () => {
   assert.deepEqual(ownerScope(), EXPECTED_SCOPE);
   const supported = EXPECTED_SCOPE.filter((item) => item.label === 'not supported in this version (counted)').map((item) => item.feature);
   const absent = EXPECTED_SCOPE.filter((item) => item.label === 'not applicable (out of scope)').map((item) => item.feature);
-  assert.deepEqual(supported, ['Payments', 'Offline', 'Form Email', 'C8 dialect', 'Cliq bots']);
+  assert.deepEqual(supported, ['Payments', 'Offline', 'Form Email', 'C8 dialect', 'Cliq bots', 'Native mobile / MDM']);
   assert.deepEqual(absent, ['Marketplace publishing', 'Zia AI builder', 'On-prem Data Bridge']);
   assert.equal(new Set(EXPECTED_SCOPE.map((item) => item.label)).size, 2);
+});
+
+test('the six counted and three out-of-scope features match the published rule exactly', () => {
+  const counted = ownerScope().filter((item) => item.label === 'not supported in this version (counted)').map((item) => item.feature);
+  const outOfScope = ownerScope().filter((item) => item.label === 'not applicable (out of scope)').map((item) => item.feature);
+  assert.deepEqual(counted, ['Payments', 'Offline', 'Form Email', 'C8 dialect', 'Cliq bots', 'Native mobile / MDM']);
+  assert.deepEqual(outOfScope, ['Marketplace publishing', 'Zia AI builder', 'On-prem Data Bridge']);
+  assert.equal(counted.length, 6);
+  assert.equal(outOfScope.length, 3);
+  assert.equal(ownerScope().length, 9);
 });
 
 test('every in-repo fixture has a migration-report golden, and nothing else', () => {
