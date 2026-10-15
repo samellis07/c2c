@@ -370,6 +370,26 @@ Fix: POST /project-user with user_details.email_id, user_details.role_id, platfo
 
 Recipe: POST /baas/v1/project/<project-id>/project-user. Success is HTTP 200, is_confirmed false until the person confirms, then GET /project-user shows is_confirmed true.
 
+### `400 INVALID_INPUT` / `Email Id cannot contain '+' character`
+
+Rule: [TESTED] (live run, 15 Oct 2026) Add User refuses an email that contains `+`. A plus-alias address cannot be an app user.
+
+Cause: POST /baas/v1/project/<project-id>/project-user with user_details.email_id containing `+` (for example a `name+tag` mailbox).
+
+Fix: Invite the plain address without the `+` part, or another address the person owns. `c2c users plan` and `c2c users invite` refuse a `+` address before any request and name the user by id.
+
+Recipe: Fix the backup user list, then re-run `c2c users invite --confirm`. Success is HTTP 200 and the user in GET /project-user.
+
+### Role id unknown for `c2c users invite`
+
+Rule: [TESTED] (live run, 15 Oct 2026) GET /baas/v1/project/<project-id>/role returns `401 OAUTH_SCOPE_MISMATCH` for the CLI token, so a fresh project with no app users gives c2c no role id.
+
+Cause: The invite needs user_details.role_id. GET /role is refused and GET /project-user is empty, so no role_details carry the id.
+
+Fix: Read role_id with MCP CatalystbyZoho_List_All_Roles. It returns role_id as a string; copy it digit for digit. Or read it in the console. Then pass `--role-ids 'App Administrator=<id>'`. Never round-trip the id through a JSON number: a 17-digit id is past the exact integer range and comes back changed.
+
+Recipe: `c2c users invite ... --role-ids 'App Administrator=<id>' --confirm`. Success is HTTP 200 and the user in GET /project-user.
+
 ### `401` `{"error":"sign in required"}`
 
 Rule: `401 {"error":"sign in required"}` from the generated API means the caller is not an app user. The developer CLI token is not an app user.

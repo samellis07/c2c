@@ -36,7 +36,7 @@ import type { App } from '../../core/src/index.js';
 import { authPlan, type PlannedRole } from '../../auth/src/index.js';
 import { readBackupUserLists } from './backup.js';
 import { parseCsv } from './csv.js';
-import { adminFirstName, alreadyDone, errorCode, failureInfo, projectUsers, roleIdFromUsers, sanitizeMessage } from './auth.js';
+import { adminFirstName, alreadyDone, errorCode, failureInfo, idString, projectUsers, roleIdFromUsers, sanitizeMessage } from './auth.js';
 import { restWithRetry, type RetryOptions } from './retry.js';
 import type { RestCall, RestFn } from './tables.js';
 
@@ -451,6 +451,24 @@ export function writeUsersState(path: string, state: UsersState): void {
   renameSync(tmp, path);
 }
 
+/** Why a '+' address is refused before any request (live Add User reply). */
+export const PLUS_EMAIL_REASON =
+  "Catalyst Add User rejects a '+' in the email (Email Id cannot contain '+' character, INVALID_INPUT) — invite the plain address without the +alias";
+
+/**
+ * The guided fallback when no role id is known: GET /role is refused for the
+ * CLI token (401 OAUTH_SCOPE_MISMATCH), so the id comes from the MCP
+ * List_All_Roles tool (role_id is a string there — copy it as is) or the console.
+ */
+export function roleIdFallback(role: string): string {
+  return `Authentication > Roles: role ${role} has no id in this project (GET /role is refused for this token: 401 OAUTH_SCOPE_MISMATCH) — read role_id with the MCP CatalystbyZoho_List_All_Roles tool (a string; copy it digit for digit) or in the console, then pass --role-ids '${role}=<id>', or add the user via the Add User form`;
+}
+
+/** Ids of the users whose sign-in identity carries a '+' — sorted, never the identity itself. */
+export function plusAddressIds(users: readonly { id: string; identity: string }[]): string[] {
+  return [...new Set(users.filter((user) => user.identity.includes('+')).map((user) => user.id))].sort();
+}
+
 export interface InviteRow {
   id: string;
   role: string;
@@ -557,8 +575,12 @@ export async function inviteUsers(
       const uid = listed.user_id ?? listed.userId;
       record(
         { id: target.id, role: target.role, status: 'verified', detail: 'already a project user (GET /project-user)' },
-        typeof uid === 'string' || typeof uid === 'number' ? String(uid) : undefined,
+        idString(uid),
       );
+      continue;
+    }
+    if (target.identity.includes('+')) {
+      record({ id: target.id, role: target.role, status: 'failed', detail: `not sent — ${PLUS_EMAIL_REASON}` });
       continue;
     }
     const roleId = input.roleIds[target.role] ?? roleIdFromUsers(current, target.role);
@@ -576,7 +598,7 @@ export async function inviteUsers(
         id: target.id,
         role: target.role,
         status: 'pending',
-        console: `Authentication > Roles: role ${target.role} has no id in this project (GET /role is refused for this token) — read the id in the console and pass --role-ids ${target.role}=<id>, or add the user via the Add User form`,
+        console: roleIdFallback(target.role),
       });
       continue;
     }
@@ -604,7 +626,7 @@ export async function inviteUsers(
             const found = (projectUsers(again.body) ?? []).find((row) => rowIdentity(row) === identity);
             if (!found) return { resend: spec };
             const uid = found.user_id ?? found.userId;
-            return { applied: typeof uid === 'string' || typeof uid === 'number' ? String(uid) : '' };
+            return { applied: idString(uid) ?? '' };
           },
         });
         if (outcome.applied !== undefined) return { res: outcome.result, applied: outcome.applied };
@@ -641,8 +663,8 @@ export async function inviteUsers(
       const data = (body.data ?? {}) as Record<string, unknown>;
       const uid = body.user_id ?? data.user_id;
       record(
-        { id: target.id, role: target.role, status: 'invited', detail: `200 — invite sent${uid !== undefined ? ` (user_id recorded)` : ''}` },
-        typeof uid === 'string' || typeof uid === 'number' ? String(uid) : undefined,
+        { id: target.id, role: target.role, status: 'invited', detail: `200 — invite sent${idString(uid) ? ` (user_id recorded)` : ''}` },
+        idString(uid),
       );
       continue;
     }

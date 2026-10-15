@@ -78,6 +78,8 @@ must not continue until fixed.
 | `mail-sender-unverified` / `the app sends mail and sender <masked> is not marked verified` | The generated runtime's refusal (also deploy precheck `mail-sender-unverified`): the sender is not VERIFIED in Catalyst Mail — verify it in the console (Mail → Email Configuration), then re-run `c2c deploy app.ds --confirm --function-env function-env.json` so the live read-back records it; `mail.verified` is only the attestation |
 | `warning mail-sender-readback: the live Catalyst mail sender read-back for project <id> failed` | A confirmed `--mail` deploy could not read the sender state back (network error or refused request); the persisted record is not used, so the sender counts as unverified and the deploy is refused — check the CLI login and project access, then re-run `c2c deploy app.ds --confirm --function-env function-env.json` |
 | `403 PUBLIC_SIGNUP_ERROR` / `You cannot perform this action. Public Signup restricted.` | [§](facts/errors.md#403-public_signup_error) |
+| `400 INVALID_INPUT` / `Email Id cannot contain '+' character` on Add User | [§](facts/errors.md#400-invalid_input--email-id-cannot-contain--character) |
+| `users invite`: `role App Administrator has no id in this project (GET /role is refused ...)` | [§](facts/errors.md#role-id-unknown-for-c2c-users-invite) |
 | `401 {"error":"sign in required"}` / a browser `project-user/current` 401 | [§](facts/errors.md#401-errorsign-in-required) |
 | `401 NO_ACCESS` on a function URL | [§](facts/errors.md#401-no_access-on-a-function-url) |
 | `blocked by CORS policy` / no `Access-Control-Allow-Origin` | [§](facts/errors.md#cors-preflight-has-no-allow-origin) |

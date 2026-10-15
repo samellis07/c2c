@@ -58,6 +58,8 @@ Every generated API call needs a signed-in Catalyst app user with role App Admin
 
 - Any read-back mismatch (e.g. `embedded_auth:false` after enable).
 - `PUBLIC_SIGNUP_ERROR` on invite → do not turn public signup on to get around it; use `POST /project-user` / `Add_User` or the console.
+- A `+` in an invitee email → Add User rejects it (`Email Id cannot contain '+' character` [TESTED]); `c2c users` refuses it before any request. Ask for the plain address; never suggest a plus-alias.
+- `users invite` says a role has no id (GET /role → `401 OAUTH_SCOPE_MISMATCH` [TESTED]) → read `role_id` with MCP `List_All_Roles` (a string; copy it exactly) or the console, then re-run with `--role-ids 'App Administrator=<id>'`.
 - A preflight without ACAO after adding the domain.
 - The user has not confirmed the invite: everything after (smoke, parity through the UI) waits.
 

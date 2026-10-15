@@ -62,9 +62,12 @@ export {
   formatInviteResult,
   inviteUsers,
   parseSocialList,
+  plusAddressIds,
+  PLUS_EMAIL_REASON,
   readBackupUsers,
   readUsersState,
   newUsersSalt,
+  roleIdFallback,
   SOCIAL_PROVIDERS,
   userRefId,
   usersInvitesCsv,
@@ -116,7 +119,7 @@ export {
 } from './function-env.js';
 export type { DeclaredConnectionSecret, FunctionEnvInput } from './function-env.js';
 export type { ConsoleService, PostDeployStep } from './post-deploy.js';
-export { applyAuthProvision, authProvisionPlan, errorCode, formatAuthProvision, hostOf, projectUsers, slateUrlFrom } from './auth.js';
+export { applyAuthProvision, authProvisionPlan, errorCode, formatAuthProvision, hostOf, idString, projectUsers, roleIdFromUsers, slateUrlFrom } from './auth.js';
 export type { AuthOpId, AuthOpResult, AuthOpStatus, AuthProvisionInput, AuthProvisionResult } from './auth.js';
 export { restWithRetry, retryableStatus, retryDelayMs, spawnWithRetry, transientCatalystOutput } from './retry.js';
 export type { ReRead, RestRetry, RetryOptions, SpawnedResult } from './retry.js';

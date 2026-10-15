@@ -55,6 +55,8 @@ import {
   inviteUsers,
   newUsersSalt,
   parseSocialList,
+  plusAddressIds,
+  PLUS_EMAIL_REASON,
   readBackupUsers,
   readUsersState,
   userRefId,
@@ -2387,6 +2389,11 @@ export async function usersCli(args: readonly string[], io: Io): Promise<number>
     const social = parseSocialList(flag(rest, '--social'));
     const backupUsers = readBackupUsers(source);
     const plan = usersPlan(app, backupUsers, { salt, invited: new Set((state?.invited ?? []).map((entry) => entry.id)), social });
+    // Catalyst refuses a '+' address on Add User; refuse it here, before any
+    // file or request, naming users by id only.
+    const plannedIds = new Set(plan.users.map((user) => user.id));
+    const plus = plusAddressIds(backupUsers.map((user) => ({ id: userRefId(user.identity.trim().toLowerCase(), salt), identity: user.identity })).filter((user) => plannedIds.has(user.id)));
+    if (plus.length) throw new GuardError('configuration', `users ${plus.join(', ')}: the email contains '+' — ${PLUS_EMAIL_REASON}; fix the backup user list, then re-run`);
     // Keep the salt (and any previously invited ids) in the state file so the
     // next run reuses them — nothing else may carry the salt.
     writeUsersState(statePath, { version: 1, project: state?.project ?? '', salt, invited: state?.invited ?? [] });
