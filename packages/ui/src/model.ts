@@ -241,6 +241,8 @@ export interface UiTodo {
   area: 'field' | 'report' | 'page' | 'zml';
   name: string;
   reason: string;
+  /** Stable source occurrence identifier when multiple TODOs describe identical click sites. */
+  siteId?: string;
   /** Server-snippet TODOs: why the snippet stays counted. */
   manualReasons?: SnippetReason[];
   /** Server-snippet TODOs: the guided manual step, with its location. */
@@ -1006,6 +1008,7 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
       area: 'zml',
       name: `${page.name}.${el.tag}`,
       reason: el.todo || `ZML <${el.tag}> has no generated component`,
+      ...(el.siteId ? { siteId: el.siteId } : {}),
       ...(el.manualReasons ? { manualReasons: el.manualReasons } : {}),
       ...(el.manualStep ? { manualStep: el.manualStep } : {}),
     });

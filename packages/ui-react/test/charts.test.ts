@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
+import { generateUi } from '../../ui/src/index.js';
 import { compileCriteria, decodeEntities } from '../src/charts.js';
 import { TEMPLATE_DIR, generateReactApp, reactAppSpec, writeReactApp } from '../src/index.js';
 import { chartSeries, dayOf, matches, metricValue, textOf, todayIn, valueAt, type Day } from '../template/lib/c2c-ui/charts/data.js';
@@ -382,10 +383,19 @@ test('the React page spec lists distinct dropped snippet tags as page TODOs', ()
   assert.ok(page, 'the page is in the spec');
   assert.deepEqual(page.todos, [
     '<dsp>: The <script> element is removed from this page snippet by the sanitizer',
-    '<dsp>: The <style> element is removed from this page snippet by the sanitizer',
+    '<dsp>: Static <style> CSS not carried over: the page sanitizer drops 1 static style rule',
     '<dsp>: The <svg> element is removed from this page snippet by the sanitizer',
     '<dsp>: The <template> element is removed from this page snippet by the sanitizer',
   ]);
+});
+
+test('React and vanilla report the same static style rule TODO', () => {
+  const zml = `<zml><dsp id='snippet'><![CDATA[<style>.x{color:red}</style><p>Kept</p>]]></dsp></zml>`;
+  const app = nitApp(zml);
+  const react = reactAppSpec(app).pages?.Dashboard?.todos.find((entry) => entry.includes('Static <style> CSS'));
+  const vanilla = generateUi(app).model.todos.find((entry) => entry.reason.includes('Static <style> CSS'))?.reason;
+  assert.equal(react, '<dsp>: Static <style> CSS not carried over: the page sanitizer drops 1 static style rule');
+  assert.equal(vanilla, 'Static <style> CSS not carried over: the page sanitizer drops 1 static style rule');
 });
 
 test('the React page spec keeps one TODO when a server-side snippet fails to compile', () => {

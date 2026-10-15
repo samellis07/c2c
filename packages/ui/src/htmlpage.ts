@@ -41,6 +41,8 @@ export interface HtmlpageCompiled {
   staticOnly?: boolean;
   /** Sanitized static shell for the element (`el.html`). */
   html?: string;
+  /** Sanitizer-dropped tags found in static markup, including compiled paths. */
+  droppedTags?: string[];
   /** Endpoint path the client posts to. */
   src?: string;
   /** The generated endpoint module. */
@@ -1266,6 +1268,8 @@ function commentClose(input: string, from: number): number {
 /** A click action a ZML `<image>` declared that the generated markup does not run. */
 export interface ZmlImageAction {
   action: string;
+  /** Stable occurrence identifier within the source snippet. */
+  siteId: string;
   fn?: string;
   label?: string;
   element?: 'button';
@@ -1287,7 +1291,7 @@ export function zmlImageActions(template: string): ZmlImageAction[] {
     if (!action) continue;
     const fn = (attrs.functionname ?? attrs.function ?? '').trim();
     const label = ['elementname', 'name', 'id', 'value', 'src', 'alt'].map((k) => (attrs[k] ?? '').trim()).find(Boolean);
-    out.push({ action, ...(fn ? { fn } : {}), ...(label ? { label } : {}) });
+    out.push({ action, siteId: `image-${m.index}`, ...(fn ? { fn } : {}), ...(label ? { label } : {}) });
   }
   return out;
 }
@@ -1303,7 +1307,7 @@ export function zmlExecuteFunctionButtons(template: string): ZmlImageAction[] {
     if (action.replace(/\s+/g, '').toLowerCase() !== 'executefunction') continue;
     const fn = (attrs.functionname ?? attrs.function ?? '').trim();
     const label = ['elementname', 'name', 'id', 'value', 'text', 'label'].map((k) => (attrs[k] ?? '').trim()).find(Boolean);
-    out.push({ action: 'ExecuteFunction', ...(fn ? { fn } : {}), ...(label ? { label } : {}), element: 'button' });
+    out.push({ action: 'ExecuteFunction', siteId: `button-${m.index}`, ...(fn ? { fn } : {}), ...(label ? { label } : {}), element: 'button' });
   }
   return out;
 }
@@ -1600,10 +1604,13 @@ export function compileHtmlpage(
       .map((c) => c.text)
       .join('');
     if (droppedStyles(staticMarkup, false).length) return fail('static markup contains a dropped style declaration');
+    const droppedTags: string[] = [];
+    const html = sanitizeSnippet(staticMarkup, undefined, droppedTags);
     return {
       ok: true,
       staticOnly: true,
-      html: sanitizeSnippet(staticMarkup),
+      html,
+      ...(droppedTags.length ? { droppedTags } : {}),
     };
   }
   if (MARK_CHECK.test(head.template) || /\bc2c_(out|parts|static|str|esc|link|notes|css)\b/i.test(head.template))
@@ -1647,7 +1654,8 @@ export function compileHtmlpage(
   let combined = '';
   for (const chunk of chunks) combined += chunk.kind === 'static' ? chunk.text : marker(islandOrdinal(chunks, chunk));
   const nIslands = islands.length;
-  const sanitized = sanitizeSnippet(combined);
+  const droppedTags: string[] = [];
+  const sanitized = sanitizeSnippet(combined, undefined, droppedTags);
   MARK_SPLIT.lastIndex = 0;
   MARK_MATCH.lastIndex = 0;
   const pieces = sanitized.split(MARK_SPLIT);
@@ -1800,7 +1808,7 @@ export function compileHtmlpage(
       statics: cleanStatics,
     }),
   };
-  return { ok: true, html: cleanStatics.join(''), src: path, file };
+  return { ok: true, html: cleanStatics.join(''), ...(droppedTags.length ? { droppedTags } : {}), src: path, file };
 }
 
 function islandOrdinal(chunks: Chunk[], target: Chunk): number {

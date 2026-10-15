@@ -14,7 +14,7 @@
 import type { App } from '../../core/src/ir.js';
 import type { ZmlElement } from '../../core/src/zml.js';
 import type { UiModel, UiReport } from '../../ui/src/model.js';
-import { elementFromZml } from '../../ui/src/pages.js';
+import { droppedStyleRulesTodo, elementFromZml } from '../../ui/src/pages.js';
 import type { ChartSpec, FilterClause, MeasureSpec, MetricSpec, PageElement, PageSpec } from '../template/lib/c2c-ui/types.js';
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
@@ -403,9 +403,18 @@ function convert(ctx: Ctx, node: ZmlElement): PageElement[] {
     const html = (ui.html ?? '').trim();
     const out: PageElement[] = [];
     if (html || links.length) out.push({ kind: 'html', html, links });
-    // elementFromZml returns no dropped-tag metadata for an uncompiled
-    // server-side snippet, whose existing manual-translation TODO suffices.
-    for (const tag of ui.droppedTags ?? []) out.push({ kind: 'todo', tag: node.tag, reason: `The <${tag}> element is removed from this page snippet by the sanitizer` });
+    // Keep the same sanitizer loss details and precedence as the vanilla model.
+    for (const tag of ui.droppedTags ?? []) {
+      if (tag === 'style' && (ui.droppedStyleRules ?? 0) > 0) continue;
+      out.push({ kind: 'todo', tag: node.tag, reason: `The <${tag}> element is removed from this page snippet by the sanitizer` });
+    }
+    if ((ui.droppedStyleRules ?? 0) > 0) {
+      const lost = droppedStyleRulesTodo('page', ui.droppedStyleRules!);
+      out.push({ kind: 'todo', tag: node.tag, reason: lost.reason });
+    }
+    for (const child of ui.children ?? []) {
+      if (child.kind === 'todo') out.push({ kind: 'todo', tag: child.tag, reason: child.todo ?? `ZML <${child.tag}> has no generated component`, ...(child.siteId ? { siteId: child.siteId } : {}) });
+    }
     for (const reason of triggers) out.push({ kind: 'todo', tag: node.tag, reason });
     if (raw && !html && !ui.droppedTags?.length) out.push({ kind: 'todo', tag: node.tag, reason: 'the HTML snippet is built by a server-side script; it is not generated yet' });
     return [...out, ...kids()];

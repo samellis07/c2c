@@ -328,7 +328,7 @@ export type PageElement =
   | { kind: 'form'; form: string; label: string }
   | { kind: 'link'; label: string; href: string }
   | { kind: 'button'; label: string; href?: string; style?: Record<string, string> }
-  | { kind: 'todo'; tag: string; reason: string };
+  | { kind: 'todo'; tag: string; reason: string; siteId?: string };
 
 export interface PageSpec {
   name: string;

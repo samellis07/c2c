@@ -107,9 +107,17 @@ test('a plain non-island ExecuteFunction button is a counted manual step naming 
   assert.equal(model.pages[0].status, 'partial');
 });
 
+test('identical ExecuteFunction buttons each retain a stable source-site ID', () => {
+  const button = `<button action='ExecuteFunction' functionName='save' elementName='Save'>`;
+  const { model } = generateUi(appOf(snippetPage(`${button}${button}`)));
+  const todos = buttonTodos(model);
+  assert.equal(todos.length, 2);
+  assert.deepEqual(todos.map((todo) => todo.siteId), ['button-0', `button-${button.length}`]);
+});
+
 test('ExecuteFunction buttons inside Deluge islands are not counted as literal markup', () => {
   assert.deepEqual(zmlExecuteFunctionButtons(`<p><%= "<button action='ExecuteFunction'>" %></p>`), []);
   assert.deepEqual(zmlExecuteFunctionButtons(`<BUTTON ACTION="ExecuteFunction" functionName="save" name="Save">`), [
-    { action: 'ExecuteFunction', fn: 'save', label: 'Save', element: 'button' },
+    { action: 'ExecuteFunction', siteId: 'button-0', fn: 'save', label: 'Save', element: 'button' },
   ]);
 });

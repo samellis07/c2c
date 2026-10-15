@@ -210,12 +210,25 @@ test('empty server wrappers keep sanitized static markup without an endpoint', (
     const first = generateUi(appOf(source));
     const second = generateUi(appOf(source));
     assert.deepEqual(first.files, second.files, 'generation is byte-identical');
-    assert.deepEqual(first.model.todos, [], `empty body ${JSON.stringify(body)}`);
+    assert.deepEqual(first.model.todos.map((todo) => todo.reason), ['The <script> element is removed from this page snippet by the sanitizer'], `empty body ${JSON.stringify(body)}`);
     assert.deepEqual(uiSnippetFiles(first.model), [], 'static markup needs no endpoint');
     const html = htmlElements(first.model)[0].html ?? '';
     assert.match(html, /<p>static<\/p>/);
     assert.doesNotMatch(html, /%|&lt;%|<script|unsafe|htmlpage|comment only|secret_api_key|<img|javascript:/i);
   }
+});
+
+test('successful htmlpage compilation reports sanitizer-dropped tags from its static markup', () => {
+  const snippet = `htmlpage hp1()
+content
+<script>bad()</script><svg><path/></svg><template><b>hidden</b></template><p>Hello <%= input.name %></p>`;
+  const { model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
+  assert.deepEqual(model.todos.map((todo) => todo.reason), [
+    'The <script> element is removed from this page snippet by the sanitizer',
+    'The <svg> element is removed from this page snippet by the sanitizer',
+    'The <template> element is removed from this page snippet by the sanitizer',
+  ]);
+  assert.equal(uiSnippetFiles(model).length, 1, 'the page still compiles');
 });
 
 test('empty server wrappers keep dropped styles as a counted TODO', () => {
