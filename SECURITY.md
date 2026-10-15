@@ -31,3 +31,12 @@ migrate-data and smoke refuse — with a non-zero exit and no network call —
 unless `X_ZC_CREDENTIAL_PATH` is set and the environment is Development. A
 `.ds` export can contain connection names, addresses and keys; it is never
 uploaded anywhere by this tool.
+
+## Known limits of offline process traps
+
+The offline network trap guards Node's documented child-process APIs. Code that
+reaches undocumented native internals through `process.binding('spawn_sync')`
+can bypass those wrappers. The trap also cannot prevent code from constructing
+raw native TCP handles through `process.binding('tcp_wrap')`. These internals
+are outside the supported API surface; tests that need a stronger boundary
+must run in an OS-level network sandbox.

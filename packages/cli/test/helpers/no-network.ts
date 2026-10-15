@@ -1,5 +1,5 @@
 import { createRequire, syncBuiltinESMExports } from 'node:module';
-import { delimiter, resolve } from 'node:path';
+import { delimiter, resolve, isAbsolute } from 'node:path';
 import { realpathSync } from 'node:fs';
 
 const require = createRequire(import.meta.url);
@@ -118,14 +118,15 @@ export function trapNetwork(options: NetworkTrapOptions = {}): NetworkTrap {
   }
 
   const cp = require('node:child_process') as Record<string, unknown>;
-  const resolveExecutable = (value: unknown): string => {
+  const resolveExecutable = (value: unknown, cwd = process.cwd(), pathValue = process.env.PATH ?? ''): string => {
     const text = String(value ?? '');
     if (!text || /[\n\r]/.test(text)) return '';
     try {
-      if (text.includes('/') || text.includes('\\')) return realpathSync(resolve(text));
-      for (const directory of (process.env.PATH ?? '').split(delimiter)) {
-        if (!directory) continue;
-        try { return realpathSync(resolve(directory, text)); } catch { /* try next PATH entry */ }
+      const candidates = text.includes('/') || text.includes('\\')
+        ? [isAbsolute(text) ? text : resolve(cwd, text)]
+        : pathValue.split(delimiter).filter(Boolean).map((directory) => resolve(cwd, directory, text));
+      for (const candidate of candidates) {
+        try { return realpathSync(candidate); } catch { /* try next PATH entry */ }
       }
     } catch { /* unresolved commands are denied */ }
     return '';
@@ -137,15 +138,22 @@ export function trapNetwork(options: NetworkTrapOptions = {}): NetworkTrap {
   };
   const guardExec = (api: string) => (original: (...args: unknown[]) => unknown) => (...args: unknown[]): unknown => {
     const command = String(args[0] ?? '');
-    const opts = (args.find((arg) => arg && typeof arg === 'object' && !Array.isArray(arg)) ?? {}) as { shell?: unknown };
+    const opts = (args.find((arg) => arg && typeof arg === 'object' && !Array.isArray(arg)) ?? {}) as { shell?: unknown; cwd?: unknown; env?: unknown };
     const shellExec = api.endsWith('.exec') || api.endsWith('.execSync');
     const argv = args.find(Array.isArray) as unknown[] | undefined;
     if (opts.shell || shellExec || /[;|&`$\n\r]/.test(command) || argv?.some((value) => /[;|&`$\n\r]/.test(String(value)))) {
       return denyExec(api, 'shell command refused');
     }
-    const path = resolveExecutable(args[0]);
-    if (!allowedExecutables.has(path)) return denyExec(api, path || 'unknown executable');
-    return original.apply(cp, args);
+    const cwd = typeof opts.cwd === 'string' ? resolve(opts.cwd) : process.cwd();
+    const env = opts.env && typeof opts.env === 'object' ? opts.env as NodeJS.ProcessEnv : process.env;
+    const path = resolveExecutable(args[0], cwd, env.PATH ?? '');
+    if (!path || !allowedExecutables.has(path)) return denyExec(api, path || 'unknown executable');
+    // Pin the checked inode path. Passing the original name would resolve PATH/cwd
+    // a second time in child_process and re-open a symlink/lookup race.
+    const pinnedArgs = [...args];
+    pinnedArgs[0] = path;
+    const executableCall = () => original.apply(cp, pinnedArgs);
+    return executableCall();
   };
   const cpProbeArg = 'c2c-netprobe-nonexistent';
   const cpProbes: Record<string, () => unknown> = {
