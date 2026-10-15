@@ -25,7 +25,7 @@ import { clientRuntimeSource } from '../../ui/src/generate.js';
 import { buildUi } from '../../ui/src/index.js';
 import { TEMPLATE_DIR, generateReactApp } from '../src/index.js';
 import type { AppSpec, FormSpec } from '../template/lib/c2c-ui/types.js';
-import type { FormHandlers, HandlerModule } from '../template/lib/c2c-ui/form/handlers.js';
+import type { FormHandlers, HandlerCtx, HandlerModule } from '../template/lib/c2c-ui/form/handlers.js';
 
 interface Bundle {
   react: Record<string, any>;
@@ -775,6 +775,22 @@ test('subform row add and delete fire addrow/deleterow handlers with the row bou
   const app = appOf(ROW_EVENTS);
   const { spec, handlers } = generated(app);
   const form = spec.forms['Add_Order']!;
+  const reads: { at: HandlerCtx['subformRow']; lines: unknown }[] = [];
+  for (const handler of form.handlers ?? []) {
+    if (handler.when !== 'addrow') continue;
+    const load = handlers.modules[handler.module];
+    assert.ok(load, `no generated module for ${handler.event}`);
+    handlers.modules[handler.module] = async () => {
+      const mod = await load();
+      return {
+        ...mod,
+        clientActions: async (ctx: HandlerCtx) => {
+          reads.push({ at: ctx.subformRow, lines: structuredClone(ctx.record.Lines) });
+          return mod.clientActions?.(ctx) ?? [];
+        },
+      };
+    };
+  }
   const rendered = await renderForm(form, handlers);
   const grid = () => rendered.container.querySelectorAll('.c2c-subform tbody tr');
 
@@ -783,6 +799,8 @@ test('subform row add and delete fire addrow/deleterow handlers with the row bou
   clickButton(rendered, (button) => /Add Lines row/.test(button.textContent ?? ''), 'the grid renders an add-row button');
   await rendered.flush();
   assert.equal(grid().length, 2);
+  assert.deepEqual(reads[0]?.at, { field: 'Lines', index: 1 });
+  assert.deepEqual(reads[0]?.lines, [{ Qty: '' }, { Qty: '' }], 'the handler record keeps every drawn row at its grid index');
   const addedQty = rendered.container.querySelector('input[name="Lines[1].Qty"]') as HTMLInputElement | null;
   assert.ok(addedQty, 'the added row renders a Qty cell');
   assert.equal(addedQty.value, '7', 'the addrow handler ran with the new row bound');

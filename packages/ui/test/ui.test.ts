@@ -2481,9 +2481,12 @@ async function browserRuntime(): Promise<BrowserRuntime> {
   return (await import(`data:text/javascript;base64,${Buffer.from(clientRuntimeSource()).toString('base64')}`)) as unknown as BrowserRuntime;
 }
 
+function clientModule(source: string): string {
+  return `data:text/javascript,${encodeURIComponent(`export async function clientActions(ctx){ ${source} }`)}`;
+}
+
 function handlerModule(tag: string, ret = '[]'): string {
-  const source = `export async function clientActions(ctx){ (globalThis.__c2cOrder = globalThis.__c2cOrder || []).push(${JSON.stringify(tag)}); return ${ret}; }`;
-  return `data:text/javascript,${encodeURIComponent(source)}`;
+  return clientModule(`(globalThis.__c2cOrder = globalThis.__c2cOrder || []).push(${JSON.stringify(tag)}); return ${ret};`);
 }
 
 function workflowModel(
@@ -2619,16 +2622,32 @@ test('browser form edit route prefills the row, runs on-edit handlers and posts 
   assert.match(submit.body, /"Title":"stored"/);
 });
 
-test('browser subform row add and delete fire addrow/deleterow handlers with the row index', async () => {
+test('browser subform row add and delete fire addrow/deleterow handlers with the row bound', async () => {
   const runtime = await browserRuntime();
   (globalThis as { __c2cOrder?: string[] }).__c2cOrder = [];
   const model = workflowModel(
     [
-      { when: 'addrow', module: handlerModule('addrow') },
-      { when: 'deleterow', module: handlerModule('deleterow') },
+      {
+        when: 'addrow',
+        module: clientModule(`
+          (globalThis.__c2cOrder = globalThis.__c2cOrder || []).push('addrow');
+          const row = ctx.shim.subform.currentRow(ctx, 'Lines');
+          ctx.shim.record.set(row, ['Qty'], 7);
+          return [];
+        `),
+      },
+      {
+        when: 'deleterow',
+        module: clientModule(`
+          (globalThis.__c2cOrder = globalThis.__c2cOrder || []).push('deleterow');
+          const row = ctx.shim.subform.currentRow(ctx, 'Lines');
+          return [{ op: 'setValue', targets: ['Title'], value: ctx.shim.record.get(row, 'Qty') }];
+        `),
+      },
     ],
     {
       fields: [
+        { name: 'Title', label: 'Title', widget: 'text', required: false, unique: false, readonly: false, scan: false, status: 'generated' },
         {
           name: 'Lines',
           label: 'Lines',
@@ -2646,22 +2665,34 @@ test('browser subform row add and delete fire addrow/deleterow handlers with the
     },
   );
   const dom = new JSDOM('<!doctype html><body><main id="main"></main></body>', {
-    url: 'http://localhost/slate/index.html#/form/Item',
+    url: 'http://localhost/slate/index.html#/form/Item/edit/7',
   });
-  (dom.window as unknown as { fetch: typeof fetch }).fetch = (async () => okResponse({ dryRun: true })) as unknown as typeof fetch;
+  (dom.window as unknown as { fetch: typeof fetch }).fetch = (async (endpoint: string) => {
+    if (endpoint === '/forms/Item/record') return okResponse({ dryRun: false, record: { ROWID: '7', Title: '', Lines: [{}] } });
+    return okResponse({ dryRun: true });
+  }) as unknown as typeof fetch;
   await runtime.boot(model, dom.window.document);
-  for (let i = 0; i < 30; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+  for (let i = 0; i < 40; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const win = dom.window as unknown as JsWin;
+  const rows = () => [...win.document.querySelectorAll('.subform tbody tr')];
+  assert.equal(rows().length, 1, 'the stored empty row draws first');
+
   const add = win.document.querySelector('[data-add-row]');
   assert.ok(add);
   add.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
   for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
-  const remove = win.document.querySelector('[data-remove-row]');
-  assert.ok(remove, 'a subform row renders a remove button');
+  assert.equal(rows().length, 2);
+  const addedQty = rows()[1]?.querySelector('[data-subfield="Qty"]') as HTMLInputElement | null;
+  assert.equal(addedQty?.value, '7', 'the addrow handler wrote the new row only');
+
+  const remove = rows()[1]?.querySelector('[data-remove-row]');
+  assert.ok(remove, 'the second row renders a remove button');
   remove.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
   for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual((globalThis as { __c2cOrder?: string[] }).__c2cOrder, ['addrow', 'deleterow']);
-  assert.equal(win.document.querySelectorAll('.subform tbody tr').length, 0);
+  assert.equal(rows().length, 1);
+  const title = win.document.querySelector('input[name="Title"]') as HTMLInputElement | null;
+  assert.equal(title?.value, '7', 'the deleterow handler read the removed row');
 });
 
 test('browser report row paints conditional formats and notes an unmigrated rule', async () => {
