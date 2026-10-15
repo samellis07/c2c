@@ -18,6 +18,7 @@ import { criteriaHasTodo, sealRelativeCriteria } from '../../shims/src/criteria.
 import { LIMITS } from '../../shims/src/index.js';
 import { droppedStyleReason, droppedStyles, elementsFromZml, leaves, type UiElement, type ZmlEnv } from './pages.js';
 import type { HtmlpageFile } from './htmlpage.js';
+import type { SnippetReason } from './snippet-guidance.js';
 
 export type Widget =
   | 'text'
@@ -221,6 +222,10 @@ export interface UiTodo {
   area: 'field' | 'report' | 'page' | 'zml';
   name: string;
   reason: string;
+  /** Server-snippet TODOs: why the snippet stays counted. */
+  manualReasons?: SnippetReason[];
+  /** Server-snippet TODOs: the guided manual step, with its location. */
+  manualStep?: string;
 }
 
 /** Text-family widgets store a plain VarChar/Text value the run marker can occupy. */
@@ -971,7 +976,13 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
   const pageLeaves = leaves(elements);
   const todoLeaves = pageLeaves.filter((el) => el.kind === 'todo');
   for (const el of todoLeaves) {
-    todos.push({ area: 'zml', name: `${page.name}.${el.tag}`, reason: el.todo || `ZML <${el.tag}> has no generated component` });
+    todos.push({
+      area: 'zml',
+      name: `${page.name}.${el.tag}`,
+      reason: el.todo || `ZML <${el.tag}> has no generated component`,
+      ...(el.manualReasons ? { manualReasons: el.manualReasons } : {}),
+      ...(el.manualStep ? { manualStep: el.manualStep } : {}),
+    });
   }
   for (const el of pageLeaves) {
     const dropped = el.kind === 'html' && el.html ? droppedStyles(el.html, true) : [];

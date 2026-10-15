@@ -143,6 +143,12 @@ export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
     });
   }
   files.push({ path: 'ui-summary.json', data: JSON.stringify({ dryRun: true, summary: publicSummary(summary) }, null, 2) + '\n' });
+  // Guided steps for the counted server-snippet TODOs; the TODOs themselves
+  // stay in migration-report.json unchanged.
+  const manualSteps = model.todos
+    .filter((todo) => todo.manualStep)
+    .map((todo) => ({ area: todo.area, name: todo.name, reason: todo.reason, reasons: todo.manualReasons ?? [], step: todo.manualStep }));
+  if (manualSteps.length) files.push({ path: 'ui-manual-steps.json', data: JSON.stringify({ manualSteps }, null, 2) + '\n' });
   files.push({ path: 'c2c-build.txt', data: toolchainHeader() });
   return { model, summary, files };
 }

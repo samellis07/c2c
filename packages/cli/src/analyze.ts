@@ -24,7 +24,7 @@ import { FEATURES, appFacts, widgetManualItems, type App, type Dialect, type Raw
 import { compareEnUs } from '../../core/src/order.js';
 import { dedupeTodos, generate, reportLock, residualDeterminism, type FillLock, type TodoItem } from '../../deluge/src/index.js';
 import { fieldGapsOf, generateSchema, type FieldGap } from '../../schema/src/index.js';
-import { buildUi, type UiTodo } from '../../ui/src/index.js';
+import { buildUi, type SnippetReason, type UiTodo } from '../../ui/src/index.js';
 import { FEATURE_MATRIX, MATRIX_SNAPSHOT, type MatrixSnapshot } from './feature-matrix.js';
 import { ownerScope, type ScopeEntry } from './scope-labels.js';
 
@@ -88,6 +88,10 @@ export interface DelugeLocation {
    * `ui` — the hole is one generated UI stub. The location names the field, report, or page.
    */
   scope: 'app' | 'unit' | 'ui';
+  /** UI stubs from a server-side snippet: why it stays counted. */
+  manualReasons?: SnippetReason[];
+  /** UI stubs from a server-side snippet: the guided manual step. */
+  manualStep?: string;
 }
 
 export interface Blocker {
@@ -101,6 +105,10 @@ export interface Blocker {
   detail: string;
   /** Residual-hole blockers only. Same meaning as `DelugeLocation.scope`. */
   scope?: 'app' | 'unit' | 'ui';
+  /** Same meaning as `DelugeLocation.manualReasons`. */
+  manualReasons?: SnippetReason[];
+  /** Same meaning as `DelugeLocation.manualStep`. */
+  manualStep?: string;
 }
 
 export interface TodoKind {
@@ -285,7 +293,14 @@ function placeTodo(app: App, indexes: TodoIndexes, todo: TodoItem): { scope: 'ap
   return { scope: 'app', location: 'app' };
 }
 
-function disambiguateLocations(located: readonly { scope: DelugeLocation['scope']; location: string; construct: string }[]): DelugeLocation[] {
+/** The guided manual step of a server-snippet stub, when it has one. */
+function manualFields(item: { manualReasons?: SnippetReason[]; manualStep?: string }): { manualReasons?: SnippetReason[]; manualStep?: string } {
+  return item.manualStep ? { manualReasons: item.manualReasons ?? [], manualStep: item.manualStep } : {};
+}
+
+function disambiguateLocations(
+  located: readonly { scope: DelugeLocation['scope']; location: string; construct: string; manualReasons?: SnippetReason[]; manualStep?: string }[],
+): DelugeLocation[] {
   const groups = new Map<string, number>();
   for (const item of located) {
     const key = `${item.scope}|${item.location}|${item.construct}`;
@@ -300,7 +315,7 @@ function disambiguateLocations(located: readonly { scope: DelugeLocation['scope'
       seen.set(key, n);
       location = `${item.location} #${n}`;
     }
-    return { location, construct: item.construct, scope: item.scope };
+    return { location, construct: item.construct, scope: item.scope, ...manualFields(item) };
   });
 }
 
@@ -326,7 +341,9 @@ function uiLocation(todo: UiTodo): string {
 }
 
 function locateUiTodos(todos: readonly UiTodo[]): DelugeLocation[] {
-  return disambiguateLocations(todos.map((todo) => ({ scope: 'ui' as const, location: uiLocation(todo), construct: todo.reason })));
+  return disambiguateLocations(
+    todos.map((todo) => ({ scope: 'ui' as const, location: uiLocation(todo), construct: todo.reason, ...manualFields(todo) })),
+  );
 }
 
 function featureUses(app: App): { used: FeatureUse[]; unmapped: { area: string; feature: string; uses: number }[]; excluded: number; notObservable: number } {
@@ -391,7 +408,9 @@ export function analyze(app: App, options?: { lock?: FillLock }): AnalyzeReport 
   for (const u of feat.used) {
     if (u.verdict === 'blocker') blockers.push({ kind: 'feature', label: `${u.area} / ${u.feature}`, detail: `matrix status ${u.status}` });
   }
-  for (const t of todoLocations) blockers.push({ kind: t.scope === 'ui' ? 'ui' : 'deluge', label: t.location, detail: t.construct, scope: t.scope });
+  for (const t of todoLocations) {
+    blockers.push({ kind: t.scope === 'ui' ? 'ui' : 'deluge', label: t.location, detail: t.construct, scope: t.scope, ...manualFields(t) });
+  }
   for (const item of widgetManualItems(app.widgets)) {
     blockers.push({ kind: 'feature', label: `widget ${item.name}`, detail: item.detail });
   }
@@ -477,7 +496,7 @@ export function analyzeAsText(r: AnalyzeReport): string {
     `deluge: ${r.deluge.statements} statements  translated ${r.deluge.translated}  shimmed ${r.deluge.shimmed}  todo ${r.deluge.todo}  (${r.deluge.units} units)`,
     `deterministic: ${r.determinism.deterministic ? 'yes' : 'no'}  (todo items ${r.determinism.todoCount}, lock fills ${r.determinism.fillLockEntries}; UI TODO stubs ${r.determinism.uiTodoCount}, included in the todo items)`,
     `blockers: ${r.blockers.length}`,
-    ...r.blockers.map((b) => `  ${b.kind}: ${b.label} (${b.detail})`),
+    ...r.blockers.flatMap((b) => [`  ${b.kind}: ${b.label} (${b.detail})`, ...(b.manualStep ? [`    step: ${b.manualStep}`] : [])]),
     `effort (estimate, not a quote): ${r.effort.hours} h`,
     `catalyst (estimate): tables ${r.catalyst.tables}  nosql ${r.catalyst.nosqlCollections}  deluge units ${r.catalyst.delugeUnits}  functions ${r.catalyst.functions}  cron ${r.catalyst.cronJobs}  slate pages ${r.catalyst.slatePages}  cost ${r.catalyst.cost}`,
   ].join('\n');

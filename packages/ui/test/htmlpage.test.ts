@@ -2349,3 +2349,52 @@ for each step in steps
   assert.equal(refused.ok, false);
   assert.equal(refused.reason, 'island needs manual translation');
 });
+
+test('a write or external action anywhere in an island is refused as an effectful render: no endpoint, one counted TODO', () => {
+  const effects: Array<{ name: string; island: string }> = [
+    { name: 'insert into', island: 'if(Orders[Status == "open"].count() == 0)\n{\n\tinsert into Orders\n\t[\n\t\tStatus="open"\n\t]\n}' },
+    { name: 'assigned insert', island: 'row = insert into Orders [ Status : "open" ];' },
+    { name: 'criteria field write', island: 'Orders[Status == "open"].Name = "x";' },
+    { name: 'update', island: 'update Orders[Status == "open"] [ Status = "closed" ];' },
+    { name: 'delete', island: 'delete from Orders[Status == "open"];' },
+    { name: 'sendmail', island: 'sendmail\n[\n\tfrom :zoho.adminuserid\n\tto :"a@example.com"\n\tsubject :"x"\n\tmessage :"y"\n]' },
+    { name: 'invokeUrl', island: 'r = invokeurl\n[\n\turl :"https://example.com"\n\ttype :GET\n];' },
+  ];
+  for (const e of effects) {
+    const template = `htmlpage hp1()\ncontent\n<%{\n${e.island}\n%}\n<p><%= Orders[Status == "open"].count() %></p>`;
+    const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', template);
+    assert.equal(compiled.ok, false, e.name);
+    assert.equal(compiled.file, undefined, e.name);
+    assert.equal(compiled.src, undefined, e.name);
+    assert.equal(compiled.reason, 'island is not a read-only render', e.name);
+    const { model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(template)}`));
+    assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], e.name);
+    assert.ok(model.todos[0]?.manualReasons?.includes('write'), e.name);
+    assert.deepEqual(uiSnippetFiles(model), [], e.name);
+  }
+});
+
+test('the same read-only island without the write still compiles, so the effect alone is what refuses it', () => {
+  const compiled = compileHtmlpage(
+    appOf(ORDERS),
+    'Home',
+    'hp1',
+    'htmlpage hp1()\ncontent\n<%{\nif(Orders[Status == "open"].count() == 0)\n{\n\tn = 0;\n}\n%}\n<p><%= Orders[Status == "open"].count() %></p>',
+  );
+  assert.equal(compiled.ok, true, compiled.reason);
+});
+
+test('a text remove whose operands mix a date-to-text and a datetime-to-text stays the counted TODO', () => {
+  // Creator renders both operands in the app date format, so `str.remove(dt)`
+  // leaves the time. The shims render String(datetime) and date text in other
+  // formats, so a translation would not match Creator: the snippet stays counted.
+  const island = 'for each re in Orders[Status == "open"]\n{\n\tstr = re.Added_Time.toString();\n\tdte = re.Added_Time.toDate();\n\tdt = dte.toString();\n\ttym = str.remove(dt);\n}';
+  const template = `htmlpage hp1()\ncontent\n<%{\n${island}\n%}\n<p><%= Orders[Status == "open"].count() %></p>`;
+  const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', template);
+  assert.equal(compiled.ok, false, 'remove over mixed date texts must not compile');
+  assert.equal(compiled.file, undefined);
+  const { model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(template)}`));
+  assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO]);
+  assert.ok(model.todos[0]?.manualStep, 'the counted TODO carries a manual step');
+  assert.deepEqual(uiSnippetFiles(model), []);
+});

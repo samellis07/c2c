@@ -529,6 +529,28 @@ test(
   },
 );
 
+test('a write-bearing server snippet stays one counted UI blocker with a guided step', () => {
+  const app = deriveIr(
+    parse(`application "Demo"
+{
+\tpage Home
+\t{
+\t\tContent="<zml><layout><panel><dspZml name=\\"Audit\\" value=\\"<% insert into Audit [ Note = &quot;x&quot; ]; %>\\"/></panel></layout></zml>"
+\t}
+}
+`),
+  );
+  const r = analyze(app);
+  assert.equal(r.determinism.uiTodoCount, 1);
+  const ui = r.blockers.filter((b) => b.kind === 'ui');
+  assert.equal(ui.length, 1);
+  assert.equal(ui[0]?.label, 'page Home.dspZml');
+  assert.equal(ui[0]?.detail, 'Server-side Deluge snippet requires manual translation');
+  assert.equal(ui[0]?.manualReasons?.[0], 'write');
+  assert.match(ui[0]?.manualStep ?? '', /^snippet Audit on page Home: It writes during page rendering/);
+  assert.match(analyzeAsText(r), /\n {2}ui: page Home\.dspZml \(Server-side Deluge snippet requires manual translation\)\n {4}step: snippet Audit on page Home: /);
+});
+
 test('a page holding a server-side Deluge snippet counts one named UI blocker', () => {
   const app = deriveIr(
     parse(`application "Demo"

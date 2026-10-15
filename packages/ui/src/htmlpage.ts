@@ -485,6 +485,22 @@ const ALLOWED_EXPRS = new Set([
   'relative',
 ]);
 
+/** AST nodes that write a record, send a message, or call out of the app. */
+const EFFECT_NODES = new Set(['insert', 'deleteFrom', 'update', 'invokeurl', 'sendmail', 'pushnotification', 'mailAttachments']);
+
+/** True when any node in the tree is a write or an external action. */
+function hasEffectNode(node: unknown): boolean {
+  if (!node || typeof node !== 'object') return false;
+  if (Array.isArray(node)) return node.some(hasEffectNode);
+  const rec = node as Record<string, unknown>;
+  if (typeof rec.kind === 'string' && EFFECT_NODES.has(rec.kind)) return true;
+  if (rec.kind === 'assign' && assignsCriteriaField(rec.target as Expr)) return true;
+  for (const key of Object.keys(rec).sort()) {
+    if (key !== 'span' && hasEffectNode(rec[key])) return true;
+  }
+  return false;
+}
+
 /** True when the assignment target is a field of `Form[criteria]`. */
 function assignsCriteriaField(target: Expr): boolean {
   if (target.kind !== 'member') return false;
@@ -1530,6 +1546,9 @@ export function compileHtmlpage(
   } catch {
     return fail('Deluge islands do not parse');
   }
+  // A write or external action on render (`insert into`, `update`, `sendmail`,
+  // `invokeUrl`, ...) is never read-only, whatever else the island holds.
+  if (hasEffectNode(ast.body)) return fail('island is not a read-only render');
   if (!ast.body.every(stmtOk)) return fail('island outside the handled classes');
 
   let tr;
