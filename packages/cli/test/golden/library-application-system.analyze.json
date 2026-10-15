@@ -357,6 +357,10 @@
         "label": "not supported in this version (counted)"
       },
       {
+        "feature": "Native mobile / MDM",
+        "label": "not supported in this version (counted)"
+      },
+      {
         "feature": "Marketplace publishing",
         "label": "not applicable (out of scope)"
       },
