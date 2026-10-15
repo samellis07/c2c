@@ -13,8 +13,10 @@
  * - fires every row whose fire instant lies in (watermark, until];
  * - saves the cursor after each page and the watermark after the window ends;
  * - after firing a row, marks its due occurrences in `fired` (per schedule +
- *   ROWID), so a crash inside a page resumes without refiring the rows already
- *   fired. Only a crash between a fire and its mark can refire that one row.
+ *   ROWID + record fingerprint), so a crash inside a page resumes without
+ *   refiring the rows already fired and a reused ROWID never matches a stale
+ *   mark. Only a crash between a fire and its mark can refire that one row.
+ *   Once a window is fully swept its marks are pruned, so they stay bounded.
  *
  * A run that reaches its deadline saves the cursor and stops. The next tick
  * resumes the same window, so no row fires twice across runs.
@@ -25,7 +27,7 @@
  * This module never calls the network. `query`, `checkpoints` and `fire` are
  * injected by the generated Job function, and only in live deploy mode.
  */
-import { DelugeDate, addDays, addMonths, asDate, epochMillis, partsInZone } from './date.js';
+import { DelugeDate, NonexistentLocalTime, addDays, addMonths, asDate, epochMillis, partsInZone } from './date.js';
 import { compileCriteria, exactFilter, type Criteria, type DecimalColumns } from './criteria.js';
 
 export const SWEEP_PAGE_ROWS = 300;
@@ -62,14 +64,31 @@ export interface CheckpointStore {
 }
 
 /**
- * The occurrence instants a schedule already fired for one record. Keyed by
- * `fired|<schedule>|<ROWID>` inside the same table as the checkpoints, so a
- * crash mid-page resumes without refiring the rows it fired. A repeating
- * schedule keeps every fired instant, so the next period's occurrence fires.
+ * The occurrence instants a schedule already fired for one record, plus the
+ * record fingerprint they belong to. Keyed by `fired|<schedule>|<ROWID>`
+ * inside the same table as the checkpoints, so a crash mid-page resumes
+ * without refiring the rows it fired. Data Store can reuse the ROWID of a
+ * deleted record; the fingerprint keeps a stale mark from matching the new
+ * record, and {@link FiredMarks.prune} drops marks the moment their window
+ * is fully swept or their record is gone, so the marks stay bounded.
  */
+export interface FiredMark {
+  /** Identity of the record the instants belong to (see {@link recordFingerprint}). */
+  record: string;
+  instants: number[];
+}
+
 export interface FiredMarks {
-  get(key: string): Promise<number[] | undefined>;
-  put(key: string, instants: number[]): Promise<void>;
+  get(key: string): Promise<FiredMark | undefined>;
+  put(key: string, mark: FiredMark): Promise<void>;
+  /**
+   * Drop a schedule's marks that can never matter again: every stored
+   * instant at or before `horizon` (a completed window's end), and every
+   * mark whose record ROWID is no longer in the form (`exists` answers the
+   * ids that survive). Optional; a store without it keeps marks until the
+   * same record overwrites them.
+   */
+  prune?(schedule: string, horizon: number, exists: (rowIds: string[]) => Promise<Set<string>>): Promise<void>;
 }
 
 type Row = Record<string, unknown>;
@@ -139,8 +158,31 @@ function repeatShift(value: DelugeDate, repeat: Repeat, k: number): DelugeDate {
 
 const REPEAT_MS: Record<Repeat, number> = { daily: DAY_MS, weekly: 7 * DAY_MS, monthly: 28 * DAY_MS, yearly: 365 * DAY_MS };
 
-/** The first fire instant of a row, or null when the field is blank or not a date. */
-export function fireInstant(spec: FormScheduleSpec, row: Row): number | null {
+function addWallMinutes(value: DelugeDate, minutes: number): DelugeDate {
+  const t = new Date(Date.UTC(value.y, value.m - 1, value.d, value.hh, value.mm + minutes, value.ss));
+  return new DelugeDate(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate(), t.getUTCHours(), t.getUTCMinutes(), t.getUTCSeconds());
+}
+
+/**
+ * The instant of a wall time in the schedule's zone. A wall time inside a
+ * spring-forward gap never exists (02:30 on the day the clock jumps to
+ * 03:00); the occurrence fires at the first real instant after the gap, so
+ * the schedule still fires once that day instead of crashing or skipping.
+ * A wall time in a fall-back overlap resolves to the earlier instant
+ * (epochMillis keeps the first match), so it fires once, not twice.
+ */
+function zoneInstant(value: DelugeDate, timeZone: string): number {
+  for (let minutes = 0; ; minutes++) {
+    try {
+      return epochMillis(minutes === 0 ? value : addWallMinutes(value, minutes), timeZone);
+    } catch (err) {
+      if (!(err instanceof NonexistentLocalTime) || minutes >= 180) throw err;
+    }
+  }
+}
+
+/** The wall time a row fires at, or null when the field is blank or not a date. */
+function fireWall(spec: FormScheduleSpec, row: Row): DelugeDate | null {
   let base: DelugeDate | null;
   try {
     base = asDate(row[spec.field]);
@@ -149,8 +191,14 @@ export function fireInstant(spec: FormScheduleSpec, row: Row): number | null {
   }
   if (!base) return null;
   if (spec.fieldType === 'Date') base = new DelugeDate(base.y, base.m, base.d);
-  const shifted = withTime(calendarShift(base, spec.offset.amount, spec.offset.unit), spec.at);
-  return epochMillis(shifted, spec.timeZone) + spec.offset.amount * (MS[spec.offset.unit] ?? 0);
+  return withTime(calendarShift(base, spec.offset.amount, spec.offset.unit), spec.at);
+}
+
+/** The first fire instant of a row, or null when the field is blank or not a date. */
+export function fireInstant(spec: FormScheduleSpec, row: Row): number | null {
+  const shifted = fireWall(spec, row);
+  if (!shifted) return null;
+  return zoneInstant(shifted, spec.timeZone) + spec.offset.amount * (MS[spec.offset.unit] ?? 0);
 }
 
 /**
@@ -159,8 +207,10 @@ export function fireInstant(spec: FormScheduleSpec, row: Row): number | null {
  * is due. The sweep fires a due row once and marks every returned instant.
  */
 export function dueInstants(spec: FormScheduleSpec, row: Row, from: number, until: number): number[] {
-  const first = fireInstant(spec, row);
-  if (first === null || first > until) return [];
+  const firstWall = fireWall(spec, row);
+  if (!firstWall) return [];
+  const first = zoneInstant(firstWall, spec.timeZone) + spec.offset.amount * (MS[spec.offset.unit] ?? 0);
+  if (first > until) return [];
   if (!spec.repeat) return first > from ? [first] : [];
   let endDay: number | null = null;
   if (spec.end) {
@@ -172,13 +222,17 @@ export function dueInstants(spec: FormScheduleSpec, row: Row, from: number, unti
     }
     if (end) endDay = end.epochDay();
   }
-  const start = new DelugeDate(...wall(first, spec.timeZone));
+  // The repeat anchors on the configured wall time. Anchoring on the first
+  // resolved instant would drift a gap-shifted day (02:30 -> 03:00) onto
+  // every later occurrence; minute/hour offsets keep the instant-shifted
+  // wall of the first occurrence.
+  const start = MS[spec.offset.unit] === undefined ? firstWall : new DelugeDate(...wall(first, spec.timeZone));
   const out: number[] = [];
   let k = Math.max(0, Math.floor((from - first) / REPEAT_MS[spec.repeat]) - 2);
   for (let guard = 0; guard < 400; guard++, k++) {
     const occurrence = repeatShift(start, spec.repeat, k);
     if (endDay !== null && occurrence.epochDay() > endDay) break;
-    const at = epochMillis(occurrence, spec.timeZone);
+    const at = zoneInstant(occurrence, spec.timeZone);
     if (at > until) break;
     if (at > from) out.push(at);
   }
@@ -254,10 +308,13 @@ export async function sweepFormSchedules(opts: SweepOptions): Promise<SweepRepor
         if (exact && !exact(row)) continue;
         if (opts.fired && row.ROWID != null) {
           const key = `${spec.name}|${row.ROWID}`;
+          const record = recordFingerprint(spec, row);
           const done = await opts.fired.get(key);
-          if (done && due.every((instant) => done.includes(instant))) continue;
+          const seen = done && done.record === record ? done.instants : [];
+          if (seen.length && due.every((instant) => seen.includes(instant))) continue;
           await opts.fire(spec, row);
-          await opts.fired.put(key, done ? [...new Set([...done, ...due])].sort((a, b) => a - b) : due);
+          const instants = [...new Set([...seen, ...due])].filter((instant) => instant > from).sort((a, b) => a - b);
+          await opts.fired.put(key, { record, instants });
         } else {
           await opts.fire(spec, row);
         }
@@ -266,6 +323,14 @@ export async function sweepFormSchedules(opts: SweepOptions): Promise<SweepRepor
       if (page.length < SWEEP_PAGE_ROWS) {
         await opts.checkpoints.put(spec.name, { watermark: until });
         item.done = true;
+        // The window is fully swept: no mark can match a future window, so
+        // drop them all, plus marks whose record was deleted. Bounded by the
+        // marks of this schedule only.
+        await opts.fired?.prune?.(spec.name, until, async (rowIds) => {
+          if (!rowIds.length) return new Set<string>();
+          const rows = await opts.query(spec.form, `ROWID IN (${rowIds.join(', ')})`, rowIds.length, 0, 'ORDER BY ROWID');
+          return new Set(rows.map((row) => String(row.ROWID)));
+        });
         break;
       }
       cursor = String(page[page.length - 1]!.ROWID);
@@ -305,8 +370,21 @@ export function datastoreCheckpoints(
 }
 
 /**
+ * The record identity a fired mark is valid for: the record's created time
+ * when the row carries one, else the schedule-field values that produced the
+ * instants. A deleted record's mark never matches a new record that reuses
+ * its ROWID with a different created time. A row without either identity can
+ * only be told apart by those field values.
+ */
+export function recordFingerprint(spec: FormScheduleSpec, row: Row): string {
+  const created = row.CREATEDTIME ?? row.Created_Time ?? row.Added_Time;
+  if (created != null && created !== '') return `created:${String(created)}`;
+  return `fields:${JSON.stringify([row[spec.field] ?? null, spec.end ? row[spec.end] ?? null : null])}`;
+}
+
+/**
  * Fired marks in the same Data Store table as the checkpoints, under
- * `fired|<schedule>|<ROWID>` keys (`State` holds `{instants: number[]}`).
+ * `fired|<schedule>|<ROWID>` keys (`State` holds a {@link FiredMark}).
  * Cron names never contain `|`, so a mark cannot collide with a checkpoint.
  */
 export function datastoreFiredMarks(
@@ -314,6 +392,7 @@ export function datastoreFiredMarks(
     query(form: string, where: string, limit: number, offset: number, orderBy: string): Promise<Row[]>;
     insert(form: string, rows: Row[]): Promise<unknown>;
     update(form: string, rows: Row[]): Promise<unknown>;
+    delete?(form: string, rowIds: readonly unknown[]): Promise<unknown>;
   },
   table: string,
 ): FiredMarks {
@@ -322,14 +401,51 @@ export function datastoreFiredMarks(
     async get(key) {
       const row = await rowOf(key);
       if (!row || typeof row.State !== 'string') return undefined;
-      const instants = (JSON.parse(row.State) as { instants?: unknown }).instants;
-      return Array.isArray(instants) ? (instants as number[]) : undefined;
+      const state = JSON.parse(row.State) as { record?: unknown; instants?: unknown };
+      return {
+        record: typeof state.record === 'string' ? state.record : '',
+        instants: Array.isArray(state.instants) ? (state.instants as number[]) : [],
+      };
     },
-    async put(key, instants) {
+    async put(key, mark) {
       const row = await rowOf(key);
-      const State = JSON.stringify({ instants });
+      const State = JSON.stringify(mark);
       if (row) await datastore.update(table, [{ ROWID: row.ROWID, State }]);
       else await datastore.insert(table, [{ Job_Key: `fired|${key}`, State }]);
+    },
+    async prune(schedule, horizon, exists) {
+      const prefix = `fired|${schedule}|`;
+      const like = prefix.replace(/'/g, "''");
+      let cursor = '';
+      for (;;) {
+        const page = await datastore.query(table, `Job_Key LIKE '${like}%'${cursor ? ` AND ROWID > ${cursor}` : ''}`, SWEEP_PAGE_ROWS, 0, 'ORDER BY ROWID');
+        if (!page.length) break;
+        cursor = String(page[page.length - 1]!.ROWID);
+        const ids = page.map((row) => String(row.Job_Key).slice(prefix.length)).filter(Boolean);
+        const alive = await exists(ids);
+        const drop: string[] = [];
+        const shrink: Row[] = [];
+        for (const row of page) {
+          const id = String(row.Job_Key).slice(prefix.length);
+          let state: { record?: unknown; instants?: unknown } = {};
+          try {
+            state = JSON.parse(String(row.State ?? '{}')) as typeof state;
+          } catch {
+            /* a corrupt mark is treated as spent */
+          }
+          const stored = Array.isArray(state.instants) ? (state.instants as number[]) : [];
+          const instants = stored.filter((instant) => instant > horizon);
+          if (!alive.has(id) || instants.length === 0) drop.push(String(row.ROWID));
+          else if (instants.length !== stored.length) shrink.push({ ROWID: row.ROWID, State: JSON.stringify({ record: state.record, instants }) });
+        }
+        if (datastore.delete) {
+          if (drop.length) await datastore.delete(table, drop);
+        } else {
+          // Without a delete adapter the row stays but can never match.
+          for (const rowId of drop) shrink.push({ ROWID: rowId, State: JSON.stringify({ record: '', instants: [] }) });
+        }
+        if (shrink.length) await datastore.update(table, shrink);
+      }
     },
   };
 }
