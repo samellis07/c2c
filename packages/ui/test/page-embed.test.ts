@@ -288,6 +288,7 @@ test('component attributes with hostile syntax are never trusted as inline targe
     assert.deepEqual(el?.components, /data-name/.test(tag) ? [{ kind: 'form', name: 'Intake' }] : undefined, tag);
     assert.ok(!/data-zml=\"component-(?:form|report):/.test(el?.html ?? ''), tag);
     assert.ok(!/<script|on(?:error|load|mouseover)=|javascript:|data:text\/html/i.test(el?.html ?? ''), tag);
+    assert.ok(!/\\u0049ntake/i.test(tag) || !el?.components?.some((component) => component.name === 'Intake' && !/data-name/.test(tag)), tag);
   }
 });
 
