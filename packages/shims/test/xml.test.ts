@@ -153,3 +153,9 @@ test('executeXpath bounds // work and result size with a clear error', () => {
   // them; only the innermost a of each chain has text.
   assert.equal(executeXpath(doc, '//a[1]/text()'), Array(390).fill('x').join('-|-'));
 });
+
+test('toXml reads loose map text keywords and bare words, and rejects a value-less key', () => {
+  assert.equal(toXml('{a: true, b: false, d: Open}'), '<root><a>true</a><b>false</b><d>Open</d></root>');
+  assert.throws(() => toXml('{c: null}'), /null has no XML representation/);
+  assert.throws(() => toXml('{a: }'), /not JSON or map text/);
+});
