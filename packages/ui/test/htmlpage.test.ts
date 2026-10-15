@@ -480,8 +480,89 @@ r.Status = "pwned";
 <p>x</p>`,
       {},
     ],
+    [
+      `<%
+r = Orders[ID == 1];
+r.Status = "Done";
+%>
+<b><%= r.Status %></b>`,
+      {},
+    ],
+    [
+      `<%
+r = Orders[Status == "open"];
+r.Detail.Status = "pwned";
+%>
+<p>x</p>`,
+      {},
+    ],
+    [
+      `<%
+rows = Orders[Status == "open"];
+rows[0].Status = "pwned";
+%>
+<p>x</p>`,
+      {},
+    ],
+    [
+      `<%
+rows = Orders[Status == "open"];
+if (input.go == "yes") {
+  rows[0].Status = "pwned";
+}
+%>
+<p>x</p>`,
+      { go: 'yes' },
+    ],
+    [
+      `<%
+rows = Orders[Status == "open"];
+for each rec in rows {
+  rec.Status = "pwned";
+}
+%>
+<p>x</p>`,
+      {},
+    ],
+    [
+      `<%
+r = Orders[Status == "open"];
+s = r;
+s.Status = "pwned";
+%>
+<p>x</p>`,
+      {},
+    ],
   ];
   for (const [body, input] of cases) await assertStaysSnippet(body, input);
+});
+
+test('a write into a bound collection is refused at the read-only gate', () => {
+  // The downstream translator emits this write as an ordinary local mutation,
+  // so only the effect gate keeps it a counted snippet. Reverting the gate
+  // compiles the endpoint and fails this assertion.
+  const cases = [
+    `<%\nrows = Orders[Status == "open"];\nrows[0].Status = "Done";\n%><p>x</p>`,
+    `<%\nrows = Orders[Status == "open"];\nif (input.go == "yes") { rows[0].Status = "Done"; }\n%><p>x</p>`,
+    `<%\nrows = Orders[Status == "open"];\nfor each rec in rows { rec.Status = "Done"; }\n%><p>x</p>`,
+  ];
+  for (const body of cases) {
+    const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n${body}`);
+    assert.equal(compiled.ok, false, body);
+    assert.equal(compiled.reason, 'island is not a read-only render', body);
+  }
+});
+
+test('a local map or record read that does not write a bound record still compiles', () => {
+  const cases = [
+    `<%\nm = {"a": 1};\nm.a = 2;\n%><p><%= m.a %></p>`,
+    `<%\nx = Orders[ID == 1];\n%><p><%= x.Status %></p>`,
+    `<%\nrows = Orders[Status == "open"];\nn = rows.count();\n%><p><%= n %></p>`,
+  ];
+  for (const body of cases) {
+    const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', `htmlpage hp1()\ncontent\n${body}`);
+    assert.equal(compiled.ok, true, `${body}: ${compiled.reason}`);
+  }
 });
 
 test('getUrl stays a snippet and is not a compiled endpoint', async () => {
