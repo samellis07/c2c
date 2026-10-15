@@ -45,13 +45,13 @@ function profile(name: string, flags?: Record<string, string>): string {
     `${t(3)}permissions = {Chat:false, Predefined:false, ApiAccess:true, PIIAccess:true, ePHIAccess:true}`,
     `${t(3)}ModulePermissions`,
     `${t(3)}{`,
-    `${t(5)}Ticket`,
+    `${t(5)}Booking`,
     `${t(5)}{`,
     `${t(6)}enabled= Create,Viewall,Tab `,
     `${t(6)}allFieldsVisible= ${flags ? 'false' : 'true'} `,
     `${t(6)}ReportPermissions`,
     `${t(6)}{`,
-    `${t(7)}All_Tickets={"View"}`,
+    `${t(7)}All_Bookings={"View"}`,
     `${t(6)}}`,
   ];
   if (flags) {
@@ -70,7 +70,7 @@ const DS = `application "InputProbe"
 ${t(1)}time zone = "Asia/Kolkata"
 ${t(1)}forms
 ${t(1)}{
-${t(2)}form Ticket
+${t(2)}form Booking
 ${t(2)}{
 ${field('Title')}
 ${field('Qty', 'number')}
@@ -79,9 +79,9 @@ ${t(2)}}
 ${t(1)}}
 ${t(1)}reports
 ${t(1)}{
-${t(2)}list All_Tickets
+${t(2)}list All_Bookings
 ${t(2)}{
-${t(3)}show all rows from Ticket
+${t(3)}show all rows from Booking
 ${t(3)}(
 ${t(4)}Title
 ${t(4)}Qty
@@ -122,7 +122,7 @@ interface Reply {
 interface Client {
   /** POST a raw text body. `preRead` hands the entry req.body as a string or Buffer, as a runtime that read it would. */
   post(who: string | null, path: string, text: string, preRead?: 'string' | 'buffer'): Promise<Reply>;
-  tickets(): Record<string, unknown>[];
+  bookings(): Record<string, unknown>[];
   seed(rows: Record<string, unknown>[]): Promise<void>;
 }
 
@@ -140,8 +140,8 @@ async function withApp(run: (client: Client) => Promise<void>): Promise<void> {
     writeDeployTree(dir, deployFiles(app, guardFor(app), false, { mode: 'live' }).files);
     const require = createRequire(import.meta.url);
     const sdk = require(fake) as FakeSdk;
-    // The fake SDK is one module-level store: each test starts with no Ticket rows.
-    sdk.state().tables.Ticket?.splice(0);
+    // The fake SDK is one module-level store: each test starts with no Booking rows.
+    sdk.state().tables.Booking?.splice(0);
     sdk.setSession('lead', { user_id: '11', email_id: 'lead@example.test', role_details: { role_name: 'Lead' } });
     sdk.setSession('clerk', { user_id: '12', email_id: 'clerk@example.test', role_details: { role_name: 'Clerk' } });
     const entry = require(join(dir, 'functions/c2c_api/index.js')) as (rq: IncomingMessage, rs: ServerResponse) => Promise<void>;
@@ -175,9 +175,9 @@ async function withApp(run: (client: Client) => Promise<void>): Promise<void> {
       return { status: res.status, body: JSON.parse(await res.text()) as Record<string, unknown> };
     };
     const seed: Client['seed'] = async (rows) => {
-      await sdk.initialize({}).datastore().table('Ticket').insertRows(rows);
+      await sdk.initialize({}).datastore().table('Booking').insertRows(rows);
     };
-    await run({ post, tickets: () => sdk.state().tables.Ticket ?? [], seed });
+    await run({ post, bookings: () => sdk.state().tables.Booking ?? [], seed });
   } finally {
     if (server) {
       server.closeAllConnections();
@@ -189,56 +189,56 @@ async function withApp(run: (client: Client) => Promise<void>): Promise<void> {
 }
 
 test('a body that is not a JSON object is a 400 and writes nothing', async () => {
-  await withApp(async ({ post, tickets }) => {
+  await withApp(async ({ post, bookings }) => {
     for (const text of ['[{"record":{"Title":"array"}}]', '5', '"text"', 'null', 'true']) {
-      const res = await post('lead', '/forms/Ticket/submit', text);
+      const res = await post('lead', '/forms/Booking/submit', text);
       assert.equal(res.status, 400, `${text}: ${JSON.stringify(res.body)}`);
       assert.deepEqual(res.body, { code: 'BAD_REQUEST', message: 'Invalid request' });
     }
     // The same refusal holds before sign-in: the shape check runs ahead of the principal.
-    assert.equal((await post(null, '/forms/Ticket/submit', '[]')).status, 400);
-    assert.equal(tickets().length, 0, 'a refused body must not write');
+    assert.equal((await post(null, '/forms/Booking/submit', '[]')).status, 400);
+    assert.equal(bookings().length, 0, 'a refused body must not write');
     // An object body and an empty body still reach the handler.
-    assert.equal((await post('lead', '/forms/Ticket/submit', '{"record":{"Title":"ok"}}')).status, 200);
-    assert.equal(tickets().length, 1);
+    assert.equal((await post('lead', '/forms/Booking/submit', '{"record":{"Title":"ok"}}')).status, 200);
+    assert.equal(bookings().length, 1);
   });
 });
 
 test('a pre-read string or Buffer body over the byte cap is a 413, as a streamed one is', async () => {
-  await withApp(async ({ post, tickets }) => {
+  await withApp(async ({ post, bookings }) => {
     const padding = 'x'.repeat(MAX_BODY_BYTES);
     const big = `{"record":{"Title":"${padding}"}}`;
     for (const preRead of [undefined, 'string', 'buffer'] as const) {
-      const res = await post('lead', '/forms/Ticket/submit', big, preRead);
+      const res = await post('lead', '/forms/Booking/submit', big, preRead);
       assert.equal(res.status, 413, `${String(preRead)}: ${JSON.stringify(res.body)}`);
       assert.equal(res.body.code, 'PAYLOAD_TOO_LARGE');
     }
     // Multi-byte text is measured in bytes, not UTF-16 code units.
     const wide = `{"record":{"Title":"${'é'.repeat(MAX_BODY_BYTES / 2)}"}}`;
     assert.ok(wide.length < MAX_BODY_BYTES && Buffer.byteLength(wide) > MAX_BODY_BYTES);
-    assert.equal((await post('lead', '/forms/Ticket/submit', wide, 'string')).status, 413);
-    assert.equal(tickets().length, 0, 'an oversized body must not write');
+    assert.equal((await post('lead', '/forms/Booking/submit', wide, 'string')).status, 413);
+    assert.equal(bookings().length, 0, 'an oversized body must not write');
     for (const preRead of ['string', 'buffer'] as const) {
-      const res = await post('lead', '/forms/Ticket/submit', '{"record":{"Title":"small","Qty":"3"}}', preRead);
+      const res = await post('lead', '/forms/Booking/submit', '{"record":{"Title":"small","Qty":"3"}}', preRead);
       assert.equal(res.status, 200, `${preRead}: ${JSON.stringify(res.body)}`);
     }
-    assert.equal(tickets().length, 2);
+    assert.equal(bookings().length, 2);
   });
 });
 
 test('a posted record with a __proto__ key is a 400 naming it, and nothing is written', async () => {
-  await withApp(async ({ post, tickets }) => {
+  await withApp(async ({ post, bookings }) => {
     // JSON.stringify drops __proto__ from an object literal, so the text is written out.
     const text = '{"record":{"Title":"proto","__proto__":{"Internal_Notes":"smuggled","Qty":"not a number"}}}';
-    const res = await post('clerk', '/forms/Ticket/submit', text);
+    const res = await post('clerk', '/forms/Booking/submit', text);
     assert.equal(res.status, 400, JSON.stringify(res.body));
     assert.equal(res.body.field, '__proto__');
-    assert.equal(tickets().length, 0);
+    assert.equal(bookings().length, 0);
     assert.equal(({} as Record<string, unknown>).Internal_Notes, undefined, 'Object.prototype is untouched');
     // A key that only looks special is an ordinary unknown field: the write path names it.
-    const ctor = await post('lead', '/forms/Ticket/submit', '{"record":{"Title":"ctor","constructor":"x"}}');
+    const ctor = await post('lead', '/forms/Booking/submit', '{"record":{"Title":"ctor","constructor":"x"}}');
     assert.equal(ctor.status, 403, JSON.stringify(ctor.body));
-    assert.equal(tickets().length, 0);
+    assert.equal(bookings().length, 0);
   });
 });
 
@@ -280,7 +280,7 @@ test('a report query cannot filter, search or sort by a field hidden from the ca
       { Title: 'second', Qty: 2, Internal_Notes: 'aa-secret' },
     ]);
     const titles = async (who: string, query: Record<string, unknown>): Promise<string[]> => {
-      const res = await post(who, '/reports/All_Tickets', JSON.stringify({ op: 'query', ...query }));
+      const res = await post(who, '/reports/All_Bookings', JSON.stringify({ op: 'query', ...query }));
       assert.equal(res.status, 200, `${who} ${JSON.stringify(query)}: ${JSON.stringify(res.body)}`);
       const rows = res.body.rows as Record<string, unknown>[];
       if (who === 'clerk') for (const row of rows) assert.equal(Object.hasOwn(row, 'Internal_Notes'), false, 'the hidden field is projected away');
