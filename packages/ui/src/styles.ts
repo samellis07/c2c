@@ -20,7 +20,7 @@ h1{font-size:var(--c2c-font-size-xl);line-height:var(--c2c-line-tight);margin:0 
 h2{font-size:var(--c2c-font-size-l);line-height:var(--c2c-line-tight);margin:0 0 var(--c2c-space-3)}
 h3{font-size:var(--c2c-font-size-m);margin:var(--c2c-space-4) 0 var(--c2c-space-2)}
 :focus-visible{outline:var(--c2c-focus-width) solid var(--c2c-accent);outline-offset:2px;border-radius:var(--c2c-radius-s)}
-.skip{position:absolute;left:var(--c2c-space-3);top:-4rem;background:var(--c2c-accent);color:var(--c2c-accent-ink);padding:var(--c2c-space-2) var(--c2c-space-4);border-radius:var(--c2c-radius-s);z-index:60;text-decoration:none}
+.skip{position:absolute;left:var(--c2c-space-3);top:-4rem;background:var(--c2c-primary);color:var(--c2c-accent-ink);padding:var(--c2c-space-2) var(--c2c-space-4);border-radius:var(--c2c-radius-s);z-index:60;text-decoration:none}
 .skip:focus{top:var(--c2c-space-2)}
 .topbar{display:flex;align-items:center;gap:var(--c2c-space-3);background:var(--c2c-topbar-bg);color:var(--c2c-topbar-ink);padding:var(--c2c-space-3) var(--c2c-space-4);border-bottom:1px solid var(--c2c-border)}
 .topbar #app-title{font-size:var(--c2c-font-size-l);font-weight:700;flex:1}
