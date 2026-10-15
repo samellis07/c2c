@@ -28,6 +28,15 @@ The default UI is the React app: `c2c deploy` writes the React source under `c2c
 | File upload field | Upload to Stratus via the API | A live deploy must not show the "dry-run upload does not write bytes" text; if it does, the deploy ran in dry-run mode |
 | Menu / navigation | Generated nav | Check for page-only menu items without links and dead system links (approval/localization/connection) |
 
+## Unsupported report filters
+
+For `report-criteria` and `Filter not migrated` TODOs, use
+[the manual repair procedure](../../../docs/report-filters.md). Report and named
+filter criteria use the same compiler. Owner variables, function results and
+record-query values remain counted until resolved; configuring an owner env var
+alone does not translate them. Preserve authenticated record access and verify
+matching, nonmatching and missing-record cases before accepting a custom rule.
+
 ## Steps
 
 1. **Review** the UI section of `plan.md`: forms, reports by view type, pages, TODOs. Show the user which views degrade to tables.

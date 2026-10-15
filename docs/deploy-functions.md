@@ -89,10 +89,14 @@ committed file — the next deploy writes only their names.
 
 The deployed function reads configuration from its environment variables, set in `catalyst-config.json` (`env_variables`) via `--function-env`:
 
-- `C2C_ADMIN_USER`: The Creator application owner's username or email (e.g. `<owner-email>`).
-- `C2C_ADMIN_USERID`: The Creator application owner's user id.
-
-Each variable affects only the filters that use it: when `C2C_ADMIN_USER` is unset, report filters on `zoho.adminuser` match nothing; when `C2C_ADMIN_USERID` is unset, report filters on `zoho.adminuserid` match nothing. The runtime never guesses the owner, and these values are never read from a client request.
+`zoho.adminuser` and `zoho.adminuserid` in report criteria are currently unsupported.
+Setting `C2C_ADMIN_USER` or `C2C_ADMIN_USERID` does not make those criteria
+compile. They remain counted as `report-criteria`, with a separate UI notice,
+and the report returns no rows. `zoho.adminuserid` denotes the Creator
+application owner's email, not a Catalyst user id; see the variable entry in
+[`deluge-builtins.json`](deluge-builtins.json). Follow
+[the report filter repair procedure](report-filters.md) before deploying a
+report that depends on that identity.
 
 ## Outbound invokeurl (`outboundHosts`)
 
