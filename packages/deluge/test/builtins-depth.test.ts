@@ -209,6 +209,16 @@ test('math builtins acos..tanh and the sqrt method route through shim.math', () 
   }
 });
 
+// The free form has two mandatory parameters; any other count is the counted
+// call:atan2 todo, never a value.
+test('atan2 free form takes exactly two arguments', () => {
+  for (const src of ['out = atan2();', 'out = atan2(1);', 'out = atan2(1, 2, 3);']) {
+    const t = translate(src);
+    assert.deepEqual(t.todos.map((x) => x.construct), ['call:atan2'], src);
+    assert.match(t.server, /shim\.todo\(ctx, "call:atan2"\)/, src);
+  }
+});
+
 test('math builtins evaluate in radians, domain edges are null, null in is null out', async () => {
   for (const [src, want] of [
     ['out = acos(1);', 0],

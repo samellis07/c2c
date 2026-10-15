@@ -4562,6 +4562,12 @@ function namedCall(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fal
   if (name === 'frac') return mergeFx(`shim.math.frac(${args[0]?.code ?? 'undefined'})`, args, { shim: true });
   if (name === 'log') return mergeFx(`shim.math.log(${args[0]?.code ?? 'undefined'})`, args, { shim: true });
   if (MATH_SHIM_FUNCTIONS.has(name)) {
+    // `atan2(y, x)` has two mandatory parameters
+    // (https://www.zoho.com/deluge/help/functions/number/atan2.html); any
+    // other count is the counted call:atan2 todo, never a value.
+    if (name === 'atan2' && args.length !== 2) {
+      return mergeFx(`await shim.todo(ctx, "call:atan2")`, args, { shim: true, todo: true, constructs: ['call:atan2'] });
+    }
     return mergeFx(`shim.math.${name}(${args.map((a) => a.code).join(', ')})`, args, { shim: true });
   }
   const math = dispatchGet(MATH_FUNCTIONS, name);
