@@ -11,7 +11,7 @@
  * all refuse.
  */
 import { createHash } from 'node:crypto';
-import { lstatSync, readdirSync, readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const MANIFEST_NAME = 'MANIFEST.sha256';
@@ -51,15 +51,26 @@ function walk(dir: string, base: string, out: string[]): string | undefined {
   return undefined;
 }
 
+/**
+ * A regular file's bytes, read through one descriptor opened with O_NOFOLLOW
+ * and O_NONBLOCK: a symlink, FIFO or directory swapped in after the walk
+ * throws instead of being followed or blocking the read.
+ */
+function readNoFollow(path: string): Buffer {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error(`${path} is not a regular file`);
+    return readFileSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function verifyVendorDir(dir: string): VendorVerdict {
   const manifestPath = join(dir, MANIFEST_NAME);
-  const manifestStat = lstatSync(manifestPath, { throwIfNoEntry: false });
-  if (!manifestStat?.isFile() || manifestStat.isSymbolicLink()) {
-    return { ok: false, checked: 0, mismatched: [], error: `no readable ${MANIFEST_NAME}` };
-  }
   let text: string;
   try {
-    text = readFileSync(manifestPath, 'utf8');
+    text = readNoFollow(manifestPath).toString('utf8');
   } catch {
     return { ok: false, checked: 0, mismatched: [], error: `no readable ${MANIFEST_NAME}` };
   }
@@ -95,7 +106,7 @@ export function verifyVendorDir(dir: string): VendorVerdict {
     checked += 1;
     let actual: string;
     try {
-      actual = createHash('sha256').update(readFileSync(join(dir, rel))).digest('hex');
+      actual = createHash('sha256').update(readNoFollow(join(dir, rel))).digest('hex');
     } catch {
       mismatched.push(rel);
       continue;

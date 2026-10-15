@@ -10,7 +10,8 @@
  * or an MCP record bound to another scope are all refusals — never skipped
  * comparisons.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { isSymlinkRefusedError } from '../../core/src/fs-kind.js';
+import { readRegularFile, type FileRead } from './read-file.js';
 import { c2cVersion, doctorJsonPath } from './report.js';
 import type { CheckResult, DoctorFile } from './types.js';
 
@@ -66,9 +67,17 @@ export interface GateVerdict {
 
 function readGateFile(workspace: string): DoctorFile | 'invalid' | undefined {
   const path = doctorJsonPath(workspace);
-  if (!existsSync(path)) return undefined;
+  // One read: absent (or a symlink loop) is not-run; a directory, FIFO or unreadable file is invalid.
+  let read: FileRead;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as DoctorFile;
+    read = readRegularFile(path);
+  } catch (err) {
+    return isSymlinkRefusedError(err) ? undefined : 'invalid';
+  }
+  if (read.kind === 'missing') return undefined;
+  if (read.kind === 'not-file') return 'invalid';
+  try {
+    const parsed = JSON.parse(read.bytes.toString('utf8')) as DoctorFile;
     if (!parsed || typeof parsed !== 'object') return 'invalid';
     return parsed;
   } catch {
