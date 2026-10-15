@@ -1,8 +1,9 @@
 /**
  * `c2c doctor` argument handling and output. Read-only by contract:
  * the only writes are `c2c-out/.c2c/doctor.json`, the one-time
- * `c2c-out/.c2c/mcp-request.json` and its `mcp-request.<id>.closed` marker
- * (plus the D-E4 probe).
+ * `c2c-out/.c2c/mcp-request.json` and its `mcp-request.<id>.closed` marker,
+ * `c2c-out/.c2c/mcp-state.json` (the last accepted MCP evidence, reused by
+ * later runs for MCP_EVIDENCE_MAX_AGE_HOURS) (plus the D-E4 probe).
  *
  *   c2c doctor [--app <ds>] [--dc <dc>] [--org <id>] [--project <id>] [--json]
  *   c2c doctor --mcp-begin           open a one-time request for the MCP calls to observe
@@ -23,6 +24,7 @@ import { beginMcpRequest, closeMcpRequest, mcpRequestInstructions, parseObservat
 import { clearPendingCleanup, probeDeleteCall, probeNameOf, readPendingCleanups, verifyProbe, writePendingCleanup, type ProbeTarget } from './mcp-probe.js';
 import { catalystRestCall } from '../../deploy/src/rest.js';
 import { c2cVersion, detectHost, workspaceDir, writeDoctorFile } from './report.js';
+import { formatAge, loadMcpEvidence, MCP_EVIDENCE_MAX_AGE_HOURS, writeMcpEvidence, type McpEvidenceReuse } from './mcp-state.js';
 import { cliStoreHooks, resolveScope, type ScopeHooks } from './scope.js';
 import { verifyVendorDir } from './vendor.js';
 import { readRegularFile } from './read-file.js';
@@ -148,7 +150,7 @@ function parseArgs(args: readonly string[], io: DoctorIo): DoctorArgs | 'usage' 
   };
 }
 
-function formatTable(checks: CheckResult[], file: DoctorFile): string {
+function formatTable(checks: CheckResult[], file: DoctorFile, note?: string): string {
   const lines = [`c2c doctor ${file.c2c} — scope ${file.scope.dc ?? '?'}/${file.scope.org ?? '?'}/${file.scope.project ?? '?'}`];
   for (const c of checks) {
     const label = c.status.toUpperCase().padEnd(4);
@@ -158,6 +160,7 @@ function formatTable(checks: CheckResult[], file: DoctorFile): string {
   for (const d of file.deferred ?? []) {
     lines.push(`NOTE ${d.id}: deferred — ${d.reason}`);
   }
+  if (note) lines.push(`NOTE ${note}`);
   lines.push(`doctor: ${file.green ? 'green' : 'red'}`);
   return `${lines.join('\n')}\n`;
 }
@@ -289,9 +292,27 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
     }
   }
 
-  // No evidence this run: carry the last MCP record for this exact scope, so
+  // No new evidence this run: reuse the last accepted record for this scope
+  // while it is inside its expiry window (mcp-state.ts).
+  let reuse: McpEvidenceReuse = { status: 'none' };
+  const fresh = evidence !== undefined;
+  if (evidence === undefined && parsed.recordMcp === undefined) {
+    reuse = loadMcpEvidence(workspace, scope);
+    if (reuse.status === 'reused') {
+      evidence = reuse.evidence;
+      origin = reuse.origin;
+    }
+  }
+  const reuseNote =
+    reuse.status === 'reused'
+      ? `MCP evidence observed ${formatAge(reuse.ageMs)} ago (${reuse.at}), reused; re-check required after ${MCP_EVIDENCE_MAX_AGE_HOURS} h (by ${reuse.expires}): c2c doctor --mcp-begin`
+      : reuse.status === 'expired'
+        ? `MCP evidence observed ${formatAge(reuse.ageMs)} ago has expired; re-check required after ${MCP_EVIDENCE_MAX_AGE_HOURS} h: run c2c doctor --mcp-begin, make the calls it names, then pipe the results into c2c doctor --mcp-observed -`
+        : undefined;
+  // Nothing new or reused: carry the last MCP record for this exact scope, so
   // doctor and the gate read the same D-B rows and agree on the verdict.
   const carried = evidence === undefined ? carriedMcpRecord({ workspace, scope: { dc: scope.dc, org: scope.org, project: scope.project } }) : undefined;
+
   const ctx: DoctorContext = {
     io,
     workspace,
@@ -302,6 +323,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
     ...(evidence ? { evidence } : {}),
     ...(origin ? { evidenceSource: origin.source } : {}),
     ...(carried ? { carried: { checks: carried.checks, at: carried.mcp.at ?? '' } } : {}),
+    ...(reuseNote ? { evidenceNote: reuseNote } : {}),
     cliDc: cliHooks.cliDc,
     cliOrg: cliHooks.cliOrg,
   };
@@ -319,17 +341,20 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
     },
     checks: run.checks.map(({ id, status, detail, fix }) => ({ id, status, detail, fix })),
     ...(evidence ? { mcp: mcpRecord(evidence, { dc: run.scope.dc, org: run.scope.org, project: run.scope.project }, origin) } : carried ? { mcp: carried.mcp } : {}),
+    ...(reuse.status === 'reused' ? { mcpReused: { observedAt: reuse.at, expires: reuse.expires } } : {}),
     deferred: run.deferred,
     green: run.green,
   };
   // A --local hook run never persists: it skipped the account/network checks,
   // so it must not refresh `at` or turn a red doctor green for the gate.
   const path = parsed.local ? undefined : writeDoctorFile(workspace, file);
+  // Only evidence accepted this run is stored; a reused record keeps its own `at`.
+  if (path && fresh && evidence && origin) writeMcpEvidence(workspace, evidence, run.scope, origin);
   if (!parsed.quiet) {
     if (parsed.json) {
       io.stdout(`${JSON.stringify({ ...file, ...(path ? { doctorJson: path } : {}) }, null, 2)}\n`);
     } else {
-      io.stdout(formatTable(run.checks, file));
+      io.stdout(formatTable(run.checks, file, reuseNote));
       if (carried) io.stdout(`D-B/D-V: from the MCP observation recorded at ${carried.mcp.at}; run c2c doctor --mcp-begin to record a new one\n`);
       if (path) io.stdout(`doctor.json: ${path}\n`);
       else io.stdout('(local run; doctor.json not updated)\n');

@@ -288,6 +288,7 @@ export function parseEvidence(text: string): McpEvidence {
     if (!schemas || typeof schemas !== 'object' || Array.isArray(schemas)) throw new EvidenceRejected('evidence.schemas must be an object');
     const clean: McpEvidence['schemas'] = {};
     for (const [tool, value] of Object.entries(schemas as Record<string, unknown>)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(bareToolName(tool))) throw new EvidenceRejected('evidence.schemas holds a bad tool name');
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new EvidenceRejected(`evidence.schemas.${tool} must be an object`);
       const entry = value as Record<string, unknown>;
       clean[tool] = {

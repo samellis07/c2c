@@ -377,6 +377,7 @@ export function mcpRequestInstructions(request: McpRequest, target: ProbeTarget 
       transport: 'http, stdio, or local',
       shape: '<meta or direct>',
       tools: ['<every Catalyst tool name the session lists>'],
+      schemas: { '<each Catalyst tool name the session lists>': { path_variables: ['<its input schema path variable names>'], body: ['<its input schema body field names>'] } },
       calls: [
         { tool: PROBE_CALL, result: '<the call result, verbatim>' },
         { tool: ORGS_CALL, result: '<the call result, verbatim>' },

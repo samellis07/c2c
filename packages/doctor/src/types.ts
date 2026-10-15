@@ -69,6 +69,8 @@ export interface DoctorFile {
     /** The observed calls this record was derived from: the request id, the org/project ids and each result's digest. */
     observed?: { request: string; orgs: string[]; projects?: string[]; calls: { tool: string; digest: string }[] };
   };
+  /** Set when the mcp block was reused from an earlier observation (mcp-state.json) rather than observed this run. */
+  mcpReused?: { observedAt: string; expires: string };
   /** Spec items reported but not yet checked (id + reason); printed as NOTE lines. */
   deferred?: { id: string; reason: string }[];
   green: boolean;
