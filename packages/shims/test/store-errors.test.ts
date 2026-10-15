@@ -75,10 +75,11 @@ test('reply sends the mapped status with dryRun of the real mode and logs struct
     const err = sdkError('Duplicate value for SKU. Please give a different value', 409, 'DUPLICATE_VALUE');
     assert.equal(replyStoreError(res, err, { live: true, table: 'Product', wrote: false }), true);
     assert.equal(sent[0]!.status, 409);
+    assert.equal(sent[0]!.body.code, 'DUPLICATE_VALUE');
     assert.equal(sent[0]!.body.dryRun, false, 'dryRun reflects the live mode');
     assert.equal(sent[0]!.body.field, 'SKU');
-    assert.match(String(sent[0]!.body.error), /SKU/);
-    assert.doesNotMatch(String(sent[0]!.body.error), /Please give/);
+    assert.match(String(sent[0]!.body.message), /SKU/);
+    assert.doesNotMatch(String(sent[0]!.body.message), /Please give/);
     assert.ok(typeof sent[0]!.body.requestId === 'string' && sent[0]!.body.requestId.length > 0);
     assert.equal(logged.length, 1, 'one structured log line');
     const line = JSON.parse(logged[0]!) as Record<string, unknown>;
@@ -154,7 +155,8 @@ test('WriteRuleError classifies by its code and names its field', () => {
   };
   assert.equal(replyStoreError(res, missing, { live: true, table: 'Order' }), true);
   assert.equal(sent[0]!.status, 422);
+  assert.equal(sent[0]!.body.code, 'MANDATORY_MISSING');
   assert.equal(sent[0]!.body.field, 'Name');
-  assert.match(String(sent[0]!.body.error), /Name/);
-  assert.doesNotMatch(String(sent[0]!.body.error), /write refused/, 'c2c internals never reach the caller');
+  assert.match(String(sent[0]!.body.message), /Name/);
+  assert.doesNotMatch(String(sent[0]!.body.message), /write refused/, 'c2c internals never reach the caller');
 });

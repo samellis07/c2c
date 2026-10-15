@@ -545,7 +545,7 @@ test('principal: the Catalyst role picks the Creator profile and an unmapped rol
   }
 });
 
-test('the Advanced I/O entry serves the generated handlers: 401 without a user, 422 on an invalid direct POST, live writes through the SDK', async () => {
+test('the Advanced I/O entry serves the generated handlers with a consistent error shape across route families', async () => {
   const out = mkdtempSync(join(tmpdir(), 'c2c-fn-'));
   const fake = join(root, 'tools/catalyst-harness/fake-zcatalyst-sdk-node.cjs');
   const moduleAny = Module as unknown as { _resolveFilename: (request: string, ...rest: unknown[]) => string };
@@ -573,14 +573,34 @@ test('the Advanced I/O entry serves the generated handlers: 401 without a user, 
     });
     return { status: res.status, body: (await res.json()) as Record<string, unknown> };
   };
+  const assertErrorShape = (result: { status: number; body: Record<string, unknown> }) => {
+    assert.equal(typeof result.body.code, 'string', JSON.stringify(result.body));
+    assert.equal(typeof result.body.message, 'string', JSON.stringify(result.body));
+    assert.equal(Object.hasOwn(result.body, 'error'), false, JSON.stringify(result.body));
+    assert.doesNotMatch(JSON.stringify(result.body), /stack|node_modules|\/home\//i);
+  };
   try {
     const submit = '/server/c2c_api/forms/Sample_Item/submit';
-    assert.equal((await post(submit, { record: { Item_Name: 'x' } })).status, 401);
+    const unauth = await post(submit, { record: { Item_Name: 'x' } });
+    assert.equal(unauth.status, 401);
+    assertErrorShape(unauth);
     assert.equal((await post(submit, { record: { Item_Name: 'x' }, user: { profile: 'Administrator' } })).status, 401, 'a body principal is ignored');
     assert.equal((await post(submit, { record: { Item_Name: 'x' } }, 't2')).status, 401, 'App User maps to User, which this app does not define');
     const refused = await post(submit, { record: { Item_Name: 'Zero', Quantity: 0, Unit_Price: 5 } }, 't1');
     assert.equal(refused.status, 422);
-    assert.equal(refused.body.error, 'Quantity must be greater than zero');
+    assert.equal(refused.body.message, 'Quantity must be greater than zero');
+    assertErrorShape(refused);
+    const badJson = await fetch(`http://127.0.0.1:${port}${submit}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: 'c2c-harness-session=t1' },
+      body: '{not json}',
+    }).then(async (res) => ({ status: res.status, body: (await res.json()) as Record<string, unknown> }));
+    assert.equal(badJson.status, 400);
+    assertErrorShape(badJson);
+    const invalidField = await post(submit, { record: { Item_Name: 'typed', Quantity: 'not a quantity' } }, 't1');
+    assert.equal(invalidField.status, 400);
+    assert.match(String(invalidField.body.message), /Quantity is "not a quantity", not a valid number value/);
+    assertErrorShape(invalidField);
     const saved = await post('/server/c2c_api/execute/forms/Sample_Item/submit', { record: { Item_Name: 'Widget Alpha', Quantity: 10, Unit_Price: 25.5 } }, 't1');
     assert.equal(saved.status, 200, JSON.stringify(saved.body));
     assert.equal(saved.body.wrote, true);
@@ -596,8 +616,12 @@ test('the Advanced I/O entry serves the generated handlers: 401 without a user, 
     assert.deepEqual((report.body.rows as Record<string, unknown>[]).map((row) => row.Item_Name), ['Widget Alpha']);
     const zcql = sdk.state().calls.filter((call) => call[0] === 'zcql').map((call) => call[1] as string);
     assert.ok(zcql.length > 0 && zcql.every((sql) => !/WHERE true/i.test(sql)), zcql.join('\n'));
-    assert.equal((await post('/server/c2c_api/nope', {}, 't1')).status, 404);
-    assert.equal((await post(submit, {}, 't1', 'GET')).status, 405);
+    const missing = await post('/server/c2c_api/nope', {}, 't1');
+    assert.equal(missing.status, 404);
+    assertErrorShape(missing);
+    const wrongMethod = await post(submit, {}, 't1', 'GET');
+    assert.equal(wrongMethod.status, 405);
+    assertErrorShape(wrongMethod);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     moduleAny._resolveFilename = original;
@@ -749,6 +773,12 @@ test('a handler that throws after headers are sent still ends the response and l
       false,
       `the headersSent log must not carry the error message, saw: ${logged.join(' | ')}`,
     );
+    assert.doesNotMatch(await fetch(`http://127.0.0.1:${port}/server/c2c_api/late`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: 'c2c-harness-session=t1' },
+      body: '{}',
+      signal: AbortSignal.timeout(10_000),
+    }).then((response) => response.text()), /late boom/, 'server error details stay out of the client body');
   } finally {
     console.error = originalError;
     await new Promise<void>((resolve) => server.close(() => resolve()));

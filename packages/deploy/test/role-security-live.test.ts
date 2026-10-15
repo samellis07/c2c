@@ -237,7 +237,9 @@ test('every role is enforced server-side: owner sharing, hidden and read-only fi
     assert.equal(hiddenWrite.status, 403, JSON.stringify(hiddenWrite.body));
     const readOnlyWrite = await call('agent', '/forms/Ticket/submit', { record: { Title: 'a1', Priority: 'urgent' } });
     assert.equal(readOnlyWrite.status, 403, JSON.stringify(readOnlyWrite.body));
-    assert.match(String(readOnlyWrite.body.error), /Ticket\.Priority/);
+    assert.equal(readOnlyWrite.body.code, 'FORBIDDEN');
+    assert.match(String(readOnlyWrite.body.message), /Ticket\.Priority/);
+    assert.equal(Object.hasOwn(readOnlyWrite.body, 'error'), false);
 
     // Create is its own grant: the portal user adds a row they then own.
     const added = await call('cust', '/forms/Ticket/submit', { record: { Title: 'cust-new' } });

@@ -209,8 +209,9 @@ export function replyStoreError(
   const requestId = newRequestId();
   logStoreError({ code: classified.code, table: opts.table, field: classified.field, requestId });
   const body: Record<string, unknown> = {
+    code: classified.code,
+    message: storeErrorMessage(classified.code, classified.field, opts.table),
     dryRun: !opts.live,
-    error: storeErrorMessage(classified.code, classified.field, opts.table),
     requestId,
   };
   if (classified.field) body.field = classified.field;

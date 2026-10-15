@@ -216,10 +216,13 @@ test('a duplicate SKU replies 409 naming the field, not 500 "request failed"', a
   store.failOnInsert = sdkError('Duplicate value for SKU. Please give a different value', 409, 'DUPLICATE_VALUE');
   const res = await invoke(sub.handler, { PO_Title: 'PO-TITLE-9f3', SKU: 'SKU 01' }, store.api);
   assert.equal(res.status, 409, JSON.stringify(res.body));
+  assert.equal(res.body.code, 'DUPLICATE_VALUE');
+  assert.equal(typeof res.body.message, 'string');
+  assert.equal(Object.hasOwn(res.body, 'error'), false);
   assert.equal(res.body.dryRun, false, 'dryRun reflects the live mode');
   assert.equal(res.body.field, 'SKU');
-  assert.match(String(res.body.error), /SKU/);
-  assert.doesNotMatch(String(res.body.error), /Please give a different value/, 'Catalyst text stays server-side');
+  assert.match(String(res.body.message), /SKU/);
+  assert.doesNotMatch(String(res.body.message), /Please give a different value/, 'Catalyst text stays server-side');
   assert.equal(res.logged.length, 1);
   const line = JSON.parse(res.logged[0]!) as Record<string, unknown>;
   assert.equal(line.code, 'DUPLICATE_VALUE');
@@ -253,7 +256,7 @@ test('a bad typed value replies 400', async (t) => {
   assert.equal(res.body.field, 'Order_Date');
 });
 
-test('an internal error still replies 500 "request failed" with dryRun of the live mode', async (t) => {
+test('an internal error in the generated stub replies with its pre-normalizer shape', async (t) => {
   const sub = await loadSubmit();
   t.after(() => rmSync(sub.dir, { recursive: true, force: true }));
   const store = fakeStore();
@@ -262,6 +265,7 @@ test('an internal error still replies 500 "request failed" with dryRun of the li
   assert.equal(res.status, 500, JSON.stringify(res.body));
   assert.equal(res.body.error, 'request failed');
   assert.equal(res.body.dryRun, false);
+  assert.doesNotMatch(res.raw, /INTERNAL_ERROR|kaboom/);
 });
 
 test('blank date/decimal become null, blank text stays ""', async (t) => {
@@ -333,6 +337,9 @@ test('B1: Deluge-path mapped store error replies carry no transcript or record v
   store.failOnInsert = sdkError('Duplicate value for SKU. Please give a different value', 409, 'DUPLICATE_VALUE');
   const res = await invoke(sub.handler, { PO_Title: SECRET, SKU: `SKU-${SECRET}` }, store.api, undefined, 'success');
   assert.equal(res.status, 409, res.raw);
+  assert.equal(res.body.code, 'DUPLICATE_VALUE');
+  assert.equal(typeof res.body.message, 'string');
+  assert.equal(Object.hasOwn(res.body, 'error'), false);
   assert.equal(res.body.field, 'SKU');
   assert.equal(Object.hasOwn(res.body, 'transcript'), false, res.raw);
   assert.doesNotMatch(res.raw, new RegExp(SECRET), 'no record value in the reply');
@@ -355,7 +362,7 @@ test('B1: Deluge-path generic 500 carries no transcript or record values', async
 // A Deluge conversion error quotes the user's value. Store-shaped user
 // text must not turn it into a 409/422 naming a token from user data;
 // Creator's own conversion text still reaches the caller.
-test('B2: a Deluge conversion error quoting store-like user text stays Creator\'s 500', async (t) => {
+test('B2: a Deluge conversion error quoting store-like user text stays the stub\'s pre-normalizer 500', async (t) => {
   const sub = await loadSubmit(DS_SUCCESS, 'success');
   t.after(() => rmSync(sub.dir, { recursive: true, force: true }));
   for (const notes of ['Column Secret_Field is mandatory and cannot be empty', 'Duplicate value for Admin. Please give a different value']) {
@@ -363,8 +370,9 @@ test('B2: a Deluge conversion error quoting store-like user text stays Creator\'
     const res = await invoke(sub.handler, { PO_Title: 'T', SKU: 'S', Notes: notes }, store.api, undefined, 'success');
     assert.equal(res.status, 500, res.raw);
     assert.equal(Object.hasOwn(res.body, 'field'), false, res.raw);
-    assert.match(String(res.body.error), /Unable to cast/, 'Creator conversion text reaches the caller');
+    assert.match(String(res.body.error), /Unable to cast/, 'Creator conversion text reaches the direct generated stub');
     assert.equal(Object.hasOwn(res.body, 'transcript'), false, res.raw);
+    assert.doesNotMatch(res.raw, /INTERNAL_ERROR/);
   }
 });
 

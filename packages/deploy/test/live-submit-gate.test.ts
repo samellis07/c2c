@@ -174,14 +174,18 @@ async function liveSubmit(ds: string): Promise<{ status: number; body: Record<st
 test('a 500 never leaks an internal error: an uncaptured for-each throw replies "request failed"', async () => {
   const res = await liveSubmit(DS_INTERNAL);
   assert.equal(res.status, 500, JSON.stringify(res.body));
+  assert.equal(res.body.code, 'INTERNAL_ERROR');
   assert.equal(res.body.wrote, true, 'the row write precedes the on-success script');
-  assert.equal(res.body.error, 'request failed', 'an internal error message must not reach the client');
+  assert.equal(res.body.message, 'Request failed', 'an internal error message must not reach the client');
+  assert.equal(Object.hasOwn(res.body, 'error'), false);
   assert.equal(res.rows.length, 1, 'the write is not rolled back');
 });
 
 test('a Creator-text Deluge error still reports its message after the write', async () => {
   const res = await liveSubmit(DS_DELUGE);
   assert.equal(res.status, 500, JSON.stringify(res.body));
+  assert.equal(res.body.code, 'INTERNAL_ERROR');
   assert.equal(res.body.wrote, true);
-  assert.match(String(res.body.error), /Unable to cast/, 'DelugeRuntimeError text is caller-facing, not an internal detail');
+  assert.match(String(res.body.message), /Unable to cast/, 'DelugeRuntimeError text is caller-facing, not an internal detail');
+  assert.equal(Object.hasOwn(res.body, 'error'), false);
 });
