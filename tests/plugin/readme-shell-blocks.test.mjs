@@ -18,11 +18,13 @@ function shellSyntaxFailure(source) {
   return run.status === 0 ? null : `bash -n exited ${run.status}: ${run.stderr.trim()}`;
 }
 
-function* shellBlocks(file) {
-  const lines = readFileSync(file, 'utf8').split('\n');
+// Fences may be indented (blocks nested under a list item), so match them
+// with leading whitespace.
+function* shellBlocks(text) {
+  const lines = text.split('\n');
   let open = null;
   for (let i = 0; i < lines.length; i++) {
-    const fence = /^```(\S*)\s*$/.exec(lines[i]);
+    const fence = /^\s*```(\S*)\s*$/.exec(lines[i]);
     if (!open) {
       if (fence && /^(sh|bash|shell|zsh)$/.test(fence[1])) open = { start: i + 1, lines: [] };
       else if (fence) open = { start: i + 1, lines: null };
@@ -35,18 +37,35 @@ function* shellBlocks(file) {
   }
 }
 
+function shellFailures(label, text) {
+  const failures = [];
+  for (const block of shellBlocks(text)) {
+    const failure = shellSyntaxFailure(block.source);
+    if (failure) failures.push(`${label}:${block.line} ${failure}`);
+  }
+  return failures;
+}
+
 for (const doc of DOCS) {
   test(`every fenced shell block in ${doc} parses with bash -n`, () => {
-    const file = path.join(repo, doc);
-    const failures = [];
-    for (const block of shellBlocks(file)) {
-      const failure = shellSyntaxFailure(block.source);
-      if (failure) failures.push(`${doc}:${block.line} ${failure}`);
-    }
-    assert.deepEqual(failures, []);
+    assert.deepEqual(shellFailures(doc, readFileSync(path.join(repo, doc), 'utf8')), []);
   });
 }
 
+test('plugin/README.md install snippets nested under list items are checked', () => {
+  const text = readFileSync(path.join(repo, 'plugin/README.md'), 'utf8');
+  const sources = [...shellBlocks(text)].map((b) => b.source);
+  assert.ok(sources.some((src) => src.includes('~/.codex/prompts')), 'Codex install block not found');
+  assert.ok(sources.some((src) => src.includes('.cursor/rules/c2c.mdc')), 'Cursor install block not found');
+});
+
 test('a malformed shell block is reported as a failure', () => {
   assert.match(shellSyntaxFailure("printf '%s\\n' 'unterminated"), /^bash -n exited/);
+});
+
+test('an indented shell block with a bare <placeholder> fails bash -n', () => {
+  const text = '- step:\n  ```sh\n  for c in <plugin>/commands/*.md; do cp "$c" out/; done\n  ```\n';
+  const failures = shellFailures('sample', text);
+  assert.equal(failures.length, 1);
+  assert.match(failures[0], /^sample:2 bash -n exited/);
 });
