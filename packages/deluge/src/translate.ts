@@ -558,8 +558,10 @@ function clientExpr(value: Fx, scope: Scope, todoConstruct = 'client-condition-u
   // A read-only app function is an event-time server call, not a prefetch
   // replay. Every `thisapp` call in the expression must resolve to a callee
   // the generator classified read-only; one writer keeps the counted todo.
-  // The gate applies only where a condition decides the client actions: a
-  // `ui.add`/`openUrl` argument is not the measured condition path.
+  // The gate applies only where a condition decides the client actions: an
+  // `openUrl` argument is not the measured condition path. A field `:ui`
+  // argument (`input.F:ui.add(thisapp.Choices())`) takes the same call: a
+  // failed call throws, so the handler discards its actions.
   if (allowClientCall && value.appFunction && !value.todo && todoConstruct === 'client-condition-uses-server') {
     // The call's arguments run client-side, so every name the expression
     // reads must be bound there: a client-bound loop variable or a local
@@ -3268,8 +3270,9 @@ function colonStmt(e: Extract<Expr, { kind: 'colonCall' }>, span: { start: numbe
   const target = obj ? JSON.stringify(obj.root === 'input' || obj.root === 'row' ? obj.path : [obj.root, ...obj.path]) : expr(e.object, scope).code;
   const method = e.path.join('.');
   const ui = e.path[0] === 'ui';
-  // A server read in a `:ui` argument (`row.Items:ui.add(fetched_list)`) is a prefetch slot, like a client condition.
-  const clientArgs = ui ? args.map((a) => clientExpr(a, scope)) : [];
+  // A server read in a `:ui` argument (`row.Items:ui.add(fetched_list)`) is a prefetch slot, like a client condition;
+  // a read-only `thisapp` call there is an event-time client call.
+  const clientArgs = ui ? args.map((a) => clientExpr(a, scope, 'client-condition-uses-server', true)) : [];
   const constructs = args.flatMap((a) => a.constructs);
   if (!ui) constructs.push(`colon:${method}`);
   if (clientArgs.some((c) => c.todo)) constructs.push('client-condition-uses-server');
