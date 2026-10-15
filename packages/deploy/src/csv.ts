@@ -75,6 +75,8 @@ import {
   integrityColumns,
   mandatoryMissingRefusals,
   mergeIntegrity,
+  cellRuleRefusals,
+  overLengthRefusals,
   type IntegrityRefusal,
 } from '../../data/src/integrity.js';
 import { decimalShadow } from '../../shims/src/criteria.js';
@@ -247,6 +249,12 @@ export interface CsvLoad {
    * Confirm refuses before any write; plan reports the same list.
    */
   missingMandatory: IntegrityRefusal[];
+  /**
+   * Cells longer than their text column (varchar length, default 255), one entry
+   * per cell: table, column and source id, never the value. Confirm refuses
+   * before any write; plan reports the same list.
+   */
+  overLength?: IntegrityRefusal[];
   /** Non-required form fields the export does not carry at all. Reported, not refused. */
   absentFields: { form: string; table: string; field: string }[];
   derivedIds: { table: string; detail: string }[];
@@ -504,6 +512,7 @@ function loadSource(dir: string, app: App, allowEmpty: boolean, format: 'csv' | 
     columns: built.flatMap((item) => item.notes.map((note) => ({ ...note, rawCount: grouped.get(item.table.table)?.filter((sheet) => sheet.file === note.file).reduce((sum, sheet) => sum + sheet.rows.length, 0) ?? 0 }))),
     missingRequired: built.flatMap((item) => item.missingRequired),
     missingMandatory: mandatoryMissingRefusals(ordered, loaderColumns(checked, ordered, foreignKeys)),
+    overLength: overLengthRefusals(ordered, loaderColumns(checked, ordered, foreignKeys)),
     absentFields,
     derivedIds: built.flatMap((item) => item.derived),
     lookups: lookupPlan(active),
@@ -624,14 +633,21 @@ export async function migrateLoaded(opts: {
   // loaded.missingMandatory was measured on this source's own schema at read
   // time; a replayed provisioned decision may have settled the column already,
   // so under an explicit replay the internal check is the only authority.
-  const refused = [...(opts.constraints ? [] : loaded.missingMandatory), ...missing, ...uniqueDupes].filter(
+  // An over-length value refuses the load; the report then carries every cell
+  // the writer would refuse, so a row with two bad cells names both.
+  const overLength = overLengthRefusals(loaded.tables, columnsByTable);
+  const cells = overLength.length ? cellRuleRefusals(loaded.tables, columnsByTable) : [];
+  const refused = [...(opts.constraints ? [] : loaded.missingMandatory), ...missing, ...uniqueDupes, ...cells].filter(
     (item, index, all) => all.findIndex((other) => other.table === item.table && other.column === item.column && other.sourceId === item.sourceId && other.rule === item.rule) === index,
   );
   if (refused.length) {
     const names = [...new Set(refused.map((item) => `${item.table}.${item.column}`))].join(', ');
-    const label = uniqueDupes.length
+    const onlyCells = cells.length === refused.length;
+    const label = uniqueDupes.length || (cells.length && !onlyCells)
       ? `${refused.length} constraint violation(s)`
-      : `${refused.length} missing mandatory value(s)`;
+      : cells.length
+        ? `${refused.length} value(s) the store would alter (${overLength.length} over length)`
+        : `${refused.length} missing mandatory value(s)`;
     return {
       ok: false,
       dryRun: false,
@@ -642,7 +658,11 @@ export async function migrateLoaded(opts: {
       fidelity: loaded.fidelity,
       integrity: { ...emptyIntegrity(), refusedByRule: groupRefusals(refused) },
       ...preferredGaps(loaded, []),
-      error: `refused ${label} before any write: ${names} — the column is store-constrained; fix the source or re-provision it without the constraint`,
+      error: `refused ${label} before any write: ${names} — ${
+        cells.length && onlyCells
+          ? 'the value is longer than the column; shorten it in the source or re-provision the column as text'
+          : 'the column is store-constrained; fix the source or re-provision it without the constraint'
+      }`,
     };
   }
   const checkpoint = opts.checkpoint ?? emptyCheckpoint();
@@ -763,6 +783,10 @@ export function formatCsvPlan(loaded: CsvLoad, guard: Parameters<typeof planScop
     ...formatNameList(
       'mandatory missing (confirm will refuse before any write)',
       loaded.missingMandatory.map((item) => `${item.table}.${item.column} row ${item.sourceId}`),
+    ),
+    ...formatNameList(
+      `over length: ${loaded.overLength?.length ?? 0} value(s) (confirm will refuse before any write; the store would cut the value)`,
+      (loaded.overLength ?? []).map((item) => `${item.table}.${item.column} row ${item.sourceId}`),
     ),
     ...formatNameList('derived ids', [
       ...loaded.derivedIds.map((item) => item.detail),

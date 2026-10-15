@@ -65,10 +65,15 @@ returns HTTP 200 while storing only the leading characters of an
 over-length varchar value
 ([L-VARCHAR-LENGTH](references/limits.md#l-varchar-length-varchar-length)).
 
-Rule: [TESTED] clamp every varchar value to its `max_length` (assume 255 when
-the column definition carries none) before any write, and read back
-byte-exact after the write. Never treat a 200 as "stored what was
-sent".
+Rule: [DOC] refuse every varchar value longer than its `max_length` (assume
+255 when the column definition carries none) before any write; never
+clamp it, which is the same silent loss. Map any field that can hold
+more than 255 characters (multi line, rich text, single line with a
+larger or unknown-larger maxchar) to `text`. The `c2c migrate-data`
+plan lists each over-length value by table, column and source id
+(never the value), and a confirmed load refuses before the first
+write. Read back byte-exact after the write. Never treat a 200 as
+"stored what was sent".
 
 ### Assume text stores at most 10,000 characters and is not searchable
 
@@ -177,7 +182,8 @@ wall-clock strings on both paths.
 
 Rule: [TESTED] normalise every date to `yyyy-MM-dd` with a real calendar check,
 round every double with HALF_UP to the column's decimal digits, bound
-doubles to `max_length`, and clamp every varchar before any write.
+doubles to `max_length`, and refuse an over-length varchar before any
+write.
 Read back after the write.
 
 ### Set column default_value and also send defaults in the payload

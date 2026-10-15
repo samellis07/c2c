@@ -150,6 +150,43 @@ export function mandatoryMissingRefusals(
 }
 
 /**
+ * Source cells the writer would refuse (checkCell: text-length, decimal-scale,
+ * date-format, significant-digits), one refusal per cell: table, column and
+ * source id only, never the value.
+ */
+export function cellRuleRefusals(
+  tables: readonly { table: string; rows: readonly { id: string; columns: Record<string, unknown> }[] }[],
+  columnsByTable: Readonly<Record<string, readonly IntegrityColumn[] | undefined>>,
+): IntegrityRefusal[] {
+  const refusals: IntegrityRefusal[] = [];
+  for (const table of tables) {
+    const columns = columnsByTable[table.table] ?? [];
+    if (!columns.length) continue;
+    for (const row of table.rows) {
+      for (const column of columns) {
+        const checked = checkCell(column, row.columns[column.name]);
+        if ('rule' in checked) refusals.push({ table: table.table, column: column.name, sourceId: row.id, rule: checked.rule });
+      }
+    }
+  }
+  return refusals;
+}
+
+/**
+ * Source cells longer than their text column (rule text-length). Data Store
+ * varchar stores a longer value cut to its length without an error, so the
+ * plan lists these and a confirmed load refuses before the first write. The
+ * length test is the writer's own (checkCell), so the plan and the write agree.
+ * A load refused here reports every cellRuleRefusals item, not only these.
+ */
+export function overLengthRefusals(
+  tables: readonly { table: string; rows: readonly { id: string; columns: Record<string, unknown> }[] }[],
+  columnsByTable: Readonly<Record<string, readonly IntegrityColumn[] | undefined>>,
+): IntegrityRefusal[] {
+  return cellRuleRefusals(tables, columnsByTable).filter((item) => item.rule === 'text-length');
+}
+
+/**
  * Source rows repeating a value in a store-unique column, one refusal per repeat —
  * the column the source was provisioned with stays is_unique, so a load that would
  * store a second copy is refused before any write and the column must be

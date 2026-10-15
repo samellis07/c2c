@@ -18,7 +18,7 @@ ZCQL schema, planning, and data-load rules are indexed in `plugin/references/fac
 | Creator | Catalyst Data Store | Notes |
 |---|---|---|
 | Form (stateful) | 1 table named after the form link name | Stateless forms get **no** table |
-| Single line ≤ 255 | `varchar(255)` | > 255 or unknown → `text` (not searchable). ZCQL rejects over-length varchar honestly; REST inserts **truncate silently** [TESTED]: c2c validates length before writing ([ZC-10]) |
+| Single line ≤ 255 | `varchar(maxchar)`, `varchar(255)` when maxchar is not set | maxchar > 255 or a choice > 255 → `text` (not searchable). ZCQL rejects over-length varchar honestly; REST inserts **truncate silently** [TESTED]: the plan lists every over-length value (table, column, source id; never the value) and a confirmed load refuses before the first write ([ZC-10]) |
 | Multi line / rich text | `text` (≤ 10,000 [UNVERIFIED]) | Larger → Stratus object + key |
 | Number / Decimal / Currency / Percent | `bigint` / exact `varchar(64)` + `double` shadow `<Field>__n` | Catalyst has no decimal type [TESTED]. `double(15,2)` rounds silently on write (`0.105→0.10`) [TESTED]: round HALF_UP client-side first |
 | Date / Date-time | `date` / `datetime` | Send `yyyy-MM-dd` / `yyyy-MM-dd HH:mm:ss` only. `05-10-2026` is stored as `0011-04-18` [TESTED]. Blank → omit or `null`, never `""` (`400 INVALID_INPUT … date value expected`) [TESTED] |
@@ -42,7 +42,7 @@ Reserved ZCQL words (`FROM`, `TO`, …) as column names are renamed with a mappi
 - [L-UNIQUE-VARCHAR](../../references/limits.md#l-unique-varchar-unique-varchar-columns-per-table): unique varchar ≤ 2 [TESTED] → refuse; the user picks which fields keep DB uniqueness; the rest are enforced by the handler and the loader;
 - [L-FOREIGN-KEYS](../../references/limits.md#l-foreign-keys-foreign-keys-per-table): FKs ≤ 15 per table [UNVERIFIED] → warn; extra lookups as plain `bigint` ROWID;
 - [L-TEXT-COLUMNS](../../references/limits.md#l-text-columns-text-type-columns-per-table): text-type columns ≤ 130 per table [UNVERIFIED] → warn;
-- [L-VARCHAR-LENGTH](../../references/limits.md#l-varchar-length-varchar-length): single line ≤ 255, else `text` [TESTED] → split (REST truncates silently: validate before write);
+- [L-VARCHAR-LENGTH](../../references/limits.md#l-varchar-length-varchar-length): single line ≤ 255, else `text` [TESTED] → split (REST truncates silently: an over-length value is refused before any write, never clamped);
 - [L-TEXT-LENGTH](../../references/limits.md#l-text-length-text-length): `text` ≤ 10,000 and not searchable [UNVERIFIED] → warn; larger values go to Stratus with a key column;
 - [L-DATE-WRITE](../../references/limits.md#l-date-write-date-strictness) / [L-DOUBLE-ROUNDING](../../references/limits.md#l-double-rounding-double-rounding): dates normalised to `yyyy-MM-dd`, doubles rounded HALF_UP client-side [TESTED] → normalize before write;
 - [L-ZCQL-JOINS](../../references/limits.md#l-zcql-joins-zcql-joins): JOINs per report ≤ 4 [DOC], each with one condition across declared foreign keys [ZC-06] → refuse, staged reads; [L-ZCQL-WIDTH](../../references/limits.md#l-zcql-width-zcql-select-columns): projection ≤ 20 columns until P-WIDTH is measured [ZC-05] → refuse; never `SELECT *`; assume no user-tunable indexes and a capped execution budget [ZC-12];
