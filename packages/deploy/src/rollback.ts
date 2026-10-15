@@ -348,7 +348,7 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
     if (!entries.length) continue;
     const data = entries.map((entry) => [entry.sourceId, entry.rowid, entry.field, entry.key, entry.key.split('/').pop() ?? '']);
     files.push({ path: `files/${label}.files.csv`, body: csvDocument(['ID', 'ROWID', 'Field', 'Object_Key', 'File_Name'], data) });
-    warn(`${table.form}: ${entries.length} file value(s) in ${table.name} or its extension tables are Stratus object keys the report importer cannot load; fetch each object and re-attach it from files/${label}.files.csv`);
+    warn(`${table.form}: ${entries.length} file value(s) in ${table.form} are Stratus object keys the report importer cannot load; fetch each object and re-attach it from files/${label}.files.csv`);
   }
   for (const [name, tableEntries] of fileCells) {
     const table = schema.tables.find((item) => item.name === name)!;
