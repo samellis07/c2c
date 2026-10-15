@@ -23,12 +23,13 @@ import type { App } from '../../core/src/ir.js';
 import { lex } from '../../deluge/src/lexer.js';
 import { parse } from '../../deluge/src/parser.js';
 import type { Expr, Stmt } from '../../deluge/src/ast.js';
-import { translateInApp } from '../../deluge/src/generate.js';
+import { administratorProfiles, translateInApp } from '../../deluge/src/generate.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { criteriaHasRelative, criteriaHasTodo } from '../../shims/src/criteria.js';
 import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, sanitizeSnippet } from './pages.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { c2cUrlFunctionSource, flatUrl } from './url-policy.js';
+import { hasShapeCWrites, isShapeCGuarded, shapeCStmtOk, shapeCServerOk } from './htmlpage-shape-c.js';
 
 export interface HtmlpageFile {
   path: string;
@@ -680,7 +681,7 @@ function hasEffectNode(node: unknown): boolean {
 }
 
 /** True when the assignment target is a field of `Form[criteria]`. */
-function assignsCriteriaField(target: Expr): boolean {
+export function assignsCriteriaField(target: Expr): boolean {
   if (target.kind !== 'member') return false;
   let cur: Expr = target;
   while (cur.kind === 'member' || cur.kind === 'paren') {
@@ -770,7 +771,7 @@ function stmtOk(s: Stmt): boolean {
   }
 }
 
-function fieldNameOk(value: string | undefined): boolean {
+export function fieldNameOk(value: string | undefined): boolean {
   return value === undefined || /^[A-Za-z_]\w*$/.test(value);
 }
 
@@ -921,11 +922,13 @@ function endpointModule(opts: {
   name: string;
   path: string;
   forms: string[];
+  adminProfiles: string[];
   server: string;
   statics: string[];
+  hasWrites?: boolean;
 }): string {
   const banner = `/**\n${[
-    `htmlpage ${opts.name || opts.id} on page ${opts.page}: a server-side snippet compiled to a read-only endpoint.`,
+    `htmlpage ${opts.name || opts.id} on page ${opts.page}: a server-side snippet compiled to ${opts.hasWrites ? 'an endpoint with setup writes' : 'a read-only endpoint'}.`,
     `Advanced I/O POST ${opts.path}`,
     'Static markup was sanitized with the snippet allowlist at generation; every interpolated value is HTML-escaped',
     'for its context (text or attribute). The client sanitizes the response again before inserting it.',
@@ -952,8 +955,7 @@ export const access = JSON.parse(readFileSync(policyPath, "utf8"));
 
 export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(opts.path)}, dryRun: true };
 export const htmlpage = ${JSON.stringify({ page: opts.page, name: opts.name || opts.id, forms: opts.forms })};
-
-${statics}
+${opts.hasWrites ? `const adminProfiles = ${JSON.stringify(opts.adminProfiles)};\n\n` : '\n'}${statics}
 
 function isHidden(name) {
   return !!name && Array.isArray(access.hidden) && access.hidden.includes(name);
@@ -1116,10 +1118,26 @@ function deployConfig() {
     const parsed = JSON.parse(readFileSync(file, "utf8"));
     const mode = modeOverride() || (parsed && parsed.mode === "live" ? "live" : "dry-run");
     const appTimeZone = parsed && typeof parsed.appTimeZone === "string" ? parsed.appTimeZone : "";
-    return { mode, appTimeZone };
+    const origins = c2cPageOrigins(parsed && parsed.allowedOrigins);
+    return { mode, appTimeZone, origins };
   } catch (err) {
-    return { mode: modeOverride() || "dry-run", appTimeZone: "" };
+    return { mode: modeOverride() || "dry-run", appTimeZone: "", origins: [] };
   }
+}
+
+// c2c-deploy.json allowedOrigins names this app's own page origins — the
+// Slate URL origin and the function's own domain — written by c2c deploy.
+// Each entry is normalized to a URL origin (scheme + host + port), so a
+// wildcard or a path suffix can never widen the match.
+function c2cPageOrigins(list) {
+  const out = [];
+  for (const item of Array.isArray(list) ? list : []) {
+    try {
+      const parsed = new URL(String(item));
+      if ((parsed.protocol === "http:" || parsed.protocol === "https:") && !parsed.host.includes("*") && parsed.pathname === "/" && !parsed.search && !parsed.hash) out.push(parsed.origin);
+    } catch (err) {}
+  }
+  return out;
 }
 
 async function liveDatastore() {
@@ -1141,12 +1159,35 @@ async function liveDatastore() {
 }
 
 export default async function handler(req, res) {
-  const principal = principalFromRequest(req);
+${opts.hasWrites ? `  const headers = req && req.headers && typeof req.headers === "object" ? req.headers : {};
+  const header = (name) => headers[name] || headers[name.toLowerCase()] || "";
+  if (String(req && req.method || "").toUpperCase() !== "POST") {
+    send(res, 405, { dryRun: true, error: "POST required" });
+    return;
+  }
+  // The page is served by Slate and posts cross-origin to this function, so a
+  // Host match can never pass. A write runs only for a request whose Origin
+  // is one of this app's own configured page origins exactly.
+  const origin = String(header("origin") || "");
+  let requestOrigin = "";
+  try {
+    const parsedOrigin = new URL(origin);
+    if (parsedOrigin.protocol === "http:" || parsedOrigin.protocol === "https:") requestOrigin = parsedOrigin.origin;
+  } catch (err) {}
+  if (!requestOrigin || deployConfig().origins.indexOf(requestOrigin) < 0) {
+    send(res, 403, { dryRun: true, error: "request origin not allowed" });
+    return;
+  }
+` : ''}  const principal = principalFromRequest(req);
   if (!principal?.profile) {
     send(res, 401, { dryRun: true, error: "authenticated caller required" });
     return;
   }
-  for (const form of htmlpage.forms) {
+${opts.hasWrites ? `  if (!adminProfiles.includes(principal.profile)) {
+    send(res, 403, { dryRun: true, error: "administrator profile required" });
+    return;
+  }
+` : ''}  for (const form of htmlpage.forms) {
     if (isHidden(form)) {
       send(res, 403, { dryRun: true, error: "hidden form" });
       return;
@@ -1163,7 +1204,7 @@ export default async function handler(req, res) {
       dryRun: !live,
       appTimeZone,
       access,
-      ...(datastore ? { datastore } : {}),
+${opts.hasWrites ? '      adminUserId: principal.userId || "",\n' : ''}      ...(datastore ? { datastore } : {}),
     });
     const ctx = runtime.context({ record: input, old: {}, principal, appTimeZone });
     const rendered = await render(ctx);
@@ -1257,7 +1298,7 @@ const READ_ONLY_SHIM = new Set([
 
 const READ_ONLY_PREFIX = ['date.', 'string.', 'convert.'];
 
-function readOnlyShim(path: string): boolean {
+export function readOnlyShim(path: string): boolean {
   if (READ_ONLY_SHIM.has(path)) return true;
   return READ_ONLY_PREFIX.some((prefix) => path.startsWith(prefix) && /^[A-Za-z_][\w]*$/.test(path.slice(prefix.length)));
 }
@@ -1296,7 +1337,7 @@ function matchingParen(source: string, open: number): number {
  * Assigning through a fetched field, column, or row list is not a read.
  * The translator writes that as `await shim.datastore.field(...) = value`.
  */
-function assignsDatastoreRead(server: string): boolean {
+export function assignsDatastoreRead(server: string): boolean {
   const re = /\b(?:await\s+)?shim\.datastore\.(?:field|column|rows)\s*\(/g;
   for (const match of server.matchAll(re)) {
     const open = (match.index ?? 0) + match[0].length - 1;
@@ -1311,7 +1352,7 @@ function assignsDatastoreRead(server: string): boolean {
  * local is a request-local write. The same calls whose receiver is a
  * datastore read would change a fetched record.
  */
-function mutatesFetchedRead(server: string): boolean {
+export function mutatesFetchedRead(server: string): boolean {
   return /\bshim\.(?:list\.add|set)\s*\(\s*(?:await\s+)?shim\.datastore\.(?:field|column|rows)\b/.test(server);
 }
 
@@ -2008,12 +2049,19 @@ export function compileHtmlpage(
   } catch {
     return fail('Deluge islands do not parse');
   }
+  const isShapeC = hasShapeCWrites(ast);
   // A write or external action on render (`insert into`, `update`, `sendmail`,
-  // `invokeUrl`, ...) is never read-only, whatever else the island holds.
-  if (hasEffectNode(ast.body) || boundFieldWrite(ast.body, new Set())) {
+  // `invokeUrl`, ...) is never read-only, whatever else the island holds —
+  // except the Shape C setup writes, which carry their own guard rules.
+  if (!isShapeC && (hasEffectNode(ast.body) || boundFieldWrite(ast.body, new Set()))) {
     return fail('island is not a read-only render');
   }
-  if (!ast.body.every(stmtOk)) return fail('island outside the handled classes');
+  if (isShapeC) {
+    if (!isShapeCGuarded(ast)) return fail('island writes are unguarded');
+    if (!ast.body.every(shapeCStmtOk)) return fail('island outside the handled classes');
+  } else {
+    if (!ast.body.every(stmtOk)) return fail('island outside the handled classes');
+  }
 
   let tr;
   try {
@@ -2037,10 +2085,14 @@ export function compileHtmlpage(
   // the rows of a query, aggregates, and pure helpers. Any other shim call,
   // a functions.* call, an assignment through a fetched value, or an await
   // that is not one of those reads stays the same counted snippet.
-  if (!islandReadOnly(server)) return fail('island is not a read-only render');
+  if (isShapeC) {
+    if (!shapeCServerOk(server)) return fail('island is not an allowed write render');
+  } else {
+    if (!islandReadOnly(server)) return fail('island is not a read-only render');
+  }
 
   const forms = [
-    ...server.matchAll(/shim\.datastore\.(?:query|aggregate)\(ctx, "([^"]+)"/g),
+    ...server.matchAll(/shim\.datastore\.(?:query|aggregate|insert|update)\(ctx, "([^"]+)"/g),
     ...server.matchAll(/compileCriteria\(ctx\.shim, "([^"]+)"/g),
   ].map((m) => m[1]);
   const id = opts.id ?? 's0';
@@ -2053,8 +2105,10 @@ export function compileHtmlpage(
       name: head.name || elementName,
       path,
       forms: [...new Set(forms)].sort(),
+      adminProfiles: administratorProfiles(app),
       server,
       statics: cleanStatics,
+      hasWrites: isShapeC,
     }),
   };
   return withIncludes({ ok: true, html: cleanStatics.join(''), ...(droppedTags.length ? { droppedTags } : {}), src: path, file });

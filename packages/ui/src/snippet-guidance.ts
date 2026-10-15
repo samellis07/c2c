@@ -131,7 +131,7 @@ export function serverSnippetGuidance(source: string, refusal: string | undefine
   const code = islandCode(source);
   const markup = splitIslands(source).markup.replace(/^\s*htmlpage\b[^\n]*\n?/i, '');
   const reasons: SnippetReason[] = [];
-  if (WRITE_PATTERNS.some((re) => re.test(code)) || refusal === 'island is not a read-only render') reasons.push('write');
+  if (WRITE_PATTERNS.some((re) => re.test(code)) || refusal === 'island is not a read-only render' || refusal === 'island writes are unguarded' || refusal === 'island is not an allowed write render') reasons.push('write');
   if (/\bopenUrl\s*\(/i.test(code) || refusal === 'openUrl could not be rewritten') reasons.push('render-navigation');
   if (readsForCaller(code, headerParams(source))) reasons.push('caller-read');
   const embeds = [...markup.matchAll(/<\s*([A-Za-z][\w-]*)/g)].some((m) => EMBED_TAGS.has((m[1] ?? '').toLowerCase()));

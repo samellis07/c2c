@@ -11,7 +11,7 @@ import { columnRenamesOf, constraintDecisionNote, generateSchema, schemaAsJson, 
 import { appTimeZone, buildUi, slateConfigSource } from '../../ui/src/generate.js';
 import { mailTemplateCatalog } from '../../ui/src/decorations/print-templates.js';
 import { generateReactApp } from '../../ui-react/src/generate.js';
-import { API_FUNCTION, columnTypes, FUNCTION_DIR, functionDir, routeTable } from './function-dir.js';
+import { API_FUNCTION, appOrigins, columnTypes, FUNCTION_DIR, functionDir, routeTable } from './function-dir.js';
 import { planSmoke } from './smoke.js';
 import { slateAppName } from './slate.js';
 import { confirmGuardLines, planScopeLines, type GuardOk } from './guards.js';
@@ -80,6 +80,12 @@ export interface DeployOptions {
   source?: readonly SourceTableData[];
   /** The UI target the Slate app serves. Default react, which writes web/ and builds web/dist; vanilla is the fallback. */
   ui?: DeployUi;
+  /**
+   * This app's Slate host (bare host or the App Url slate:link prints). Its
+   * https origin goes into the function's `allowedOrigins` alongside the API
+   * base's origin — the only page origins the generated write endpoints accept.
+   */
+  slateDomain?: string;
   /** Opt-in async on-success lane: emit the event function, dead-letter store and sweep Job (docs/event-deadletter.md). */
   asyncOnSuccess?: boolean;
   /** Spike: copy only the subset of shim modules imported by generated code. Off by default. */
@@ -279,6 +285,7 @@ export function deployFiles(
       columns: columnTypes(schema.tables),
       env: opts.functionEnv,
       roleMap: principalRoleMap(authPlan(app)),
+      origins: appOrigins({ apiBase: opts.apiBase, slateDomain: opts.slateDomain }),
       ...(verifiedFrom ? { mailFrom: verifiedFrom } : {}),
       ...(opts.subsetShims !== undefined ? { subsetShims: opts.subsetShims } : {}),
     }),
@@ -320,7 +327,17 @@ export function buildDeploy(
     app,
     guard,
     mailEnabled,
-    { mode: confirm ? 'live' : 'dry-run', apiBase, functionEnv, mailTestRecipients, ...(source ? { source } : {}), ui, ...(asyncOnSuccess ? { asyncOnSuccess } : {}), ...(subsetShims !== undefined ? { subsetShims } : {}) },
+    {
+      mode: confirm ? 'live' : 'dry-run',
+      apiBase,
+      functionEnv,
+      mailTestRecipients,
+      ...(source ? { source } : {}),
+      ui,
+      ...(asyncOnSuccess ? { asyncOnSuccess } : {}),
+      ...(subsetShims !== undefined ? { subsetShims } : {}),
+      ...(auth?.slateDomain ? { slateDomain: auth.slateDomain } : {}),
+    },
     sender,
   );
   const commands = deployCommands(slateName, guard.org, guard.projectId, ui);

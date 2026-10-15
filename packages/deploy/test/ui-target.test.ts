@@ -334,7 +334,11 @@ test('the bundle digest ignores the rewritten client config for both targets', (
   for (const ui of ['vanilla', 'react'] as const) {
     const a = deployFiles(app, guard, false, { ui, apiBase: 'https://a.invalid/server/c2c_api' });
     const b = deployFiles(app, guard, false, { ui, apiBase: 'https://b.invalid/server/c2c_api' });
-    assert.equal(bundleDigest(a.files), bundleDigest(b.files), ui);
+    // The function's c2c-deploy.json stamps allowedOrigins from the API base,
+    // so it legitimately differs — that difference is what makes a resumed
+    // deploy re-run. Every other file still matches across client configs.
+    const strip = (files: { path: string; data: string | Buffer }[]) => files.filter((file) => file.path !== 'functions/c2c_api/c2c-deploy.json');
+    assert.equal(bundleDigest(strip(a.files)), bundleDigest(strip(b.files)), ui);
   }
   const react = buildDeploy(app, guard, false, false, undefined, undefined, {}, undefined, undefined, undefined, 'react');
   assert.ok(react.files.some((f) => f.path === 'web/public/c2c-config.js'));

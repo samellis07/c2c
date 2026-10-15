@@ -3117,7 +3117,27 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         return out;
       },
       async insert(ctx, form, values) {
-        const stamped = applySystemColumns(values, 'insert', ctx);
+        const fields = { ...values };
+        stripColumnKeys(fields, 'both');
+        warnLongStrings(form, fields);
+        let storedValues: Record<string, unknown> = fields;
+        // Only the page endpoints' setup-write runtime passes adminUserId —
+        // those islands run as the request principal, so the insert is
+        // screened at grant level (scalar values; no write schema travels with
+        // them). Every other insert path — submit boundaries already screened,
+        // workflow and blueprint scripts that run with the app's privileges —
+        // is untouched.
+        if (options.access && options.adminUserId !== undefined) {
+          try {
+            storedValues = authorizeWrite(options.access, ctx.principal, form, fields, undefined, 'insert').values;
+          } catch (err) {
+            if (err instanceof RecordAccessError) {
+              note({ op: 'error', code: err.code, message: err.message, form });
+            }
+            throw err;
+          }
+        }
+        const stamped = applySystemColumns(storedValues, 'insert', ctx);
         warnLongStrings(form, stamped);
         // authorizeWrite keeps composite nesting (Name: { first_name }); the
         // store has one flat column per part, so expand before the check.

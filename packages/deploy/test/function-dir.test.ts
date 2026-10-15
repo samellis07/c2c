@@ -19,7 +19,7 @@ import { repoRoot } from '../../core/src/toolchain.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from '../src/guards.js';
 import type { ProjectRegistry } from '../src/registry.js';
 import { deployFiles, writeDeployTree, type DeployFile } from '../src/plan.js';
-import { FUNCTION_DEPENDENCIES, computeShimModules, functionDir, injectSelectColumnCap, rewriteShimsImport, routeTable, vendoredShims } from '../src/function-dir.js';
+import { appOrigins, FUNCTION_DEPENDENCIES, computeShimModules, functionDir, injectSelectColumnCap, rewriteShimsImport, routeTable, vendoredShims } from '../src/function-dir.js';
 import { CATALYST_LIMITS, limitValue } from '../../schema/src/limits.js';
 import { bundleDigest, DEPLOY_REPORT, deployCli, functionBaseFrom, STATE_FILE, type Io, type SpawnResult } from '../src/cli.js';
 
@@ -1312,14 +1312,17 @@ test('deploy runs install, functions, slate in order and --resume skips finished
     assert.match(readFileSync(join(out, 'slate/c2c-config.js'), 'utf8'), /globalThis\.C2C_SMOKE_PROJECT = "1001";/);
     const second = resumeIo(undefined);
     assert.equal(await deployCli([...args, '--resume'], second.io), 0, second.err());
+    // The first run learned apiBase only after the function deployed, so the
+    // resumed bundle stamps allowedOrigins into c2c-deploy.json — a changed
+    // bundle, and every command runs again, redeploying the function with them.
+    assert.match(second.out(), /the generated bundle changed since the last run/);
     assert.deepEqual(
-      second.spawned.map((s) => s.args.find((a) => a === 'project:list' || a === 'slate:link' || a === 'deploy')),
-      ['project:list', 'slate:link', 'deploy'],
+      second.spawned.map((s) => (s.command === 'npm' ? 'npm install' : s.args.find((a) => a === 'project:list' || a === 'slate:link' || a === 'deploy'))),
+      ['project:list', 'npm install', 'deploy', 'slate:link', 'deploy'],
     );
-    assert.match(second.out(), /skip install/);
-    assert.match(second.out(), /skip functions/);
     assert.match(second.out(), /post-deploy \(console\)/);
-    // The resumed run skipped install and functions and created no tables, yet still lists the console steps.
+    const redeployed = JSON.parse(readFileSync(join(out, 'functions/c2c_api/c2c-deploy.json'), 'utf8')) as { allowedOrigins?: string[] };
+    assert.deepEqual(redeployed.allowedOrigins, ['https://c2c-sample-app-1.development.catalystserverless.in']);
     // The re-run confirmed Slate started (slate:link and slate deploy
     // succeeded), so the end-of-run checklist drops the Slate start item:
     // no part of the output names it.
@@ -1330,7 +1333,7 @@ test('deploy runs install, functions, slate in order and --resume skips finished
       postDeploySteps: { kind: string; services: string[]; text: string }[];
     };
     assert.equal(report.exitCode, 0);
-    assert.deepEqual(report.skipped, ['install', 'functions']);
+    assert.deepEqual(report.skipped, []);
     assert.equal(report.postDeploySteps[0]?.kind, 'configure');
     // Three built-in configures plus one per auth op that needed the console (no --slate-domain/--admin flags here).
     assert.ok(
@@ -1626,4 +1629,40 @@ test('subset shims: computes byte savings on small fixture apps', () => {
     assert.ok(savings > 20000, `${appName} byte savings: ${savings} bytes`);
     assert.ok(subsetShims.length < defaultShims.length);
   }
+});
+
+test('appOrigins yields the API base origin and the Slate origin, exactly and deterministically', () => {
+  const origins = appOrigins({
+    apiBase: 'https://c2c-test-1001.development.catalystserverless.in/server/c2c_api',
+    slateDomain: 'c2c-app-4f3a.onslate.in',
+  });
+  assert.deepEqual(origins, ['https://c2c-app-4f3a.onslate.in', 'https://c2c-test-1001.development.catalystserverless.in']);
+  // A relative API base identifies no external function origin.
+  assert.deepEqual(appOrigins({ apiBase: '/server/c2c_api', slateDomain: 'c2c-app-4f3a.onslate.in' }), ['https://c2c-app-4f3a.onslate.in']);
+  // No inputs, no origins — the deploy writes no allowlist rather than guessing one.
+  assert.deepEqual(appOrigins({}), []);
+  // Malformed, wildcard and non-HTTP(S) values contribute nothing.
+  assert.deepEqual(
+    appOrigins({ apiBase: 'ftp://files.example.test/server/c2c_api', slateDomain: '*.onslate.in' }),
+    [],
+  );
+  assert.deepEqual(appOrigins({ apiBase: 'not a url', slateDomain: '' }), []);
+  // A full https slateDomain and a duplicated origin deduplicate and sort stably.
+  assert.deepEqual(
+    appOrigins({ apiBase: 'https://x.test:8443/server/c2c_api', slateDomain: 'https://x.test:8443/' }),
+    ['https://x.test:8443'],
+  );
+});
+
+test('the generated c2c-deploy.json stamps allowedOrigins only when origins are known', () => {
+  const deployJson: DeployFile = { path: 'functions/c2c-deploy.json', data: '{"mode":"dry-run","dc":null,"appTimeZone":""}\n' };
+  const withOrigins = functionDir([deployJson], {
+    mode: 'live',
+    origins: appOrigins({ apiBase: 'https://c2c-test-1001.development.catalystserverless.in/server/c2c_api', slateDomain: 'c2c-app-4f3a.onslate.in' }),
+  });
+  const config = JSON.parse(text(withOrigins, 'functions/c2c_api/c2c-deploy.json')) as { mode: string; allowedOrigins?: string[] };
+  assert.equal(config.mode, 'live');
+  assert.deepEqual(config.allowedOrigins, ['https://c2c-app-4f3a.onslate.in', 'https://c2c-test-1001.development.catalystserverless.in']);
+  const without = functionDir([deployJson], { mode: 'live' });
+  assert.equal('allowedOrigins' in (JSON.parse(text(without, 'functions/c2c_api/c2c-deploy.json')) as object), false);
 });
