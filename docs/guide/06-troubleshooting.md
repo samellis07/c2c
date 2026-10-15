@@ -24,8 +24,8 @@ The usual suspects:
   account that cannot see your organisation. Sign out, sign back in
   with the owning account.
 - **CLI not signed in** — you run the browser sign-in for the CLI.
-- **No free project slot** — 50/50 projects used (not yet proven:
-  plan for a cap of 50 (unverified) —
+- **No free project slot** — 50/50 projects used (documented:
+  cap of 50 [DOC](https://docs.catalyst.zoho.com/en/cli/v1/initialize-resources/initialize-new-project/) —
   [limits.md#projects-per-account](../../plugin/references/facts/limits.md#projects-per-account)).
   Delete an unused project in the console, or ask Catalyst support
   to raise the limit.

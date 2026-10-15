@@ -194,7 +194,7 @@ Recipe: POST /baas/v1/project/<project-id>/query. On HTTP 400, SELECT the key. S
 
 ### Projects per account
 
-Rule: Plan for 50 projects per account [UNVERIFIED]. c2c doctor counts projects with `catalyst project:list --org <org-id>` before import and stops when no slot remains. A second import of the same project_name returns `409 DUPLICATE_ENTRY`; append a suffix and retry. Import into an existing project is not supported; create a new one.
+Rule: Plan for 50 projects per account [DOC] (https://docs.catalyst.zoho.com/en/cli/v1/initialize-resources/initialize-new-project/ states "You can create upto 50 projects in your account"). c2c doctor counts projects with `catalyst project:list --org <org-id>` before import and stops when no slot remains. A second import of the same project_name returns `409 DUPLICATE_ENTRY`; append a suffix and retry. Import into an existing project is not supported; create a new one.
 
 Recipe: GET /baas/v1/project with headers Authorization, Accept, and CATALYST-ORG. Success is a list shorter than 50 before POST /baas/v1/project/import.
 
