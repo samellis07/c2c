@@ -808,6 +808,11 @@ function buildReport(app: App, report: Report, todos: UiTodo[]): UiReport {
   if (report.criteria?.trim() && criteriaHasTodo(reportCriteria(report.criteria))) {
     status = 'todo';
     todo = [todo, 'Filter not migrated: the report criteria could not be translated; the report returns no rows.'].filter(Boolean).join(' ');
+    // zoho.adminuserid is the application owner's email; the generated app
+    // is not configured with one, so the comparison is left to the developer.
+    if (/\bzoho\.adminuserid\b/i.test(report.criteria)) {
+      todo += ' It compares with zoho.adminuserid (the application owner email), which the migrated app does not know: replace it with the owner address, or with zoho.loginuserid if the report is meant for the signed-in user.';
+    }
   }
   for (const filter of report.filters) {
     if (filter.criteria?.trim() && criteriaHasTodo(reportCriteria(filter.criteria))) {
