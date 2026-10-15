@@ -42,32 +42,20 @@ div class="c2c-app"
       article aria-label="Onboarding walkthrough" class="c2c-record"
         h2
           "Onboarding walkthrough"
-        dl
-          div
-            dt
-              "Subject"
-            dd
-              "Onboarding walkthrough"
-          div
-            dt
-              "Direction"
-            dd
-              "Outbound"
-          div
-            dt
-              "Caller"
-            dd
-              "555-0100"
-          div
-            dt
-              "Started At"
-            dd
-              "2024-03-04 12:30"
-          div
-            dt
-              "Duration (min)"
-            dd
-              "25"
+        section
+          h3
+            "Overview"
+          dl
+            div
+              dt
+                "Subject"
+              dd
+                "Onboarding walkthrough"
+            div
+              dt
+                "Caller"
+              dd
+                "555-0100"
         p
           a aria-label="Edit record 1" class="c2c-row-open" href="#/form/Log_Call/edit/1"
             "Edit"

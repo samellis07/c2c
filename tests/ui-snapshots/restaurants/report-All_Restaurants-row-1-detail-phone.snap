@@ -61,27 +61,20 @@ div class="c2c-app"
       article aria-label="Osteria Verde" class="c2c-record"
         h2
           "Osteria Verde"
-        dl
-          div
-            dt
-              "Name"
-            dd
-              "Osteria Verde"
-          div
-            dt
-              "Cuisine"
-            dd
-              "Italian"
-          div
-            dt
-              "Rating"
-            dd
-              "4.5"
-          div
-            dt
-              "Website"
-            dd
-              "https://osteria.example.com"
+        section
+          h3
+            "Overview"
+          dl
+            div
+              dt
+                "Name"
+              dd
+                "Osteria Verde"
+            div
+              dt
+                "Cuisine"
+              dd
+                "Italian"
         p
           a aria-label="Edit record 1" class="c2c-row-open" href="#/form/Restaurant/edit/1"
             "Edit"
