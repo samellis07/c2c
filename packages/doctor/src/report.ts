@@ -4,7 +4,7 @@
  * same place bin/c2c writes its vendor-ok marker). Holds no emails, no tokens,
  * no URL paths.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DoctorFile } from './types.js';

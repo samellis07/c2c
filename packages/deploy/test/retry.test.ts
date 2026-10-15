@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { invalidTokenAnswer, invalidTokenOutput, readWithNewerToken, restWithRetry, retryDelayMs, retryableStatus, spawnWithRetry, TOKEN_NOT_RETRIED, TOKEN_RETRY_NOTE, TOKEN_STILL_EXPIRED, transientCatalystOutput, type RetryOptions, type SpawnedResult } from '../src/retry.js';
-import type { RestCall, RestFn, RestResult } from '../src/tables.js';
+import type { RestCall, RestFn } from '../src/tables.js';
 
 const COLUMN_500 = {
   status: 'failure',

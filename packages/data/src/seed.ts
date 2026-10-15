@@ -459,7 +459,7 @@ function distinctTargetIndexes(start: number, requested: number, len: number): n
   return indexes;
 }
 
-function displayColumn(name: string, cols: SeedColumn[], incoming: SeedColumn[]): number {
+function displayColumn(_name: string, cols: SeedColumn[], incoming: SeedColumn[]): number {
   const wanted = new Set(incoming.filter((col) => col.lookupField && col.lookupField.toLowerCase() !== 'id').map((col) => col.lookupField!));
   const named = cols.findIndex((col) => wanted.has(col.name));
   if (named >= 0) return named;

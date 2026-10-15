@@ -990,19 +990,19 @@ test('D-A2 reads claude plugin list: enabled passes, disabled fails, absent skip
   const claude = (payload: unknown, code = 0) => (cmd: string, args: string[]) =>
     cmd === 'claude' ? { code, stdout: JSON.stringify(payload), stderr: '' } : greenCatalyst(cmd, args);
   {
-    const { dir, env } = greenWorkspace();
+    const { env } = greenWorkspace();
     const { io, out } = fakeIo(env, claude([{ name: 'catalyst-by-zoho@official', enabled: true, version: '0.0.2' }]));
     assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 0, out());
     assert.match(out(), /PASS D-A2/);
   }
   {
-    const { dir, env } = greenWorkspace();
+    const { env } = greenWorkspace();
     const { io, out } = fakeIo(env, claude([{ name: 'catalyst-by-zoho@official', enabled: false }]));
     assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 1);
     assert.match(out(), /FAIL D-A2/);
   }
   {
-    const { dir, env } = greenWorkspace();
+    const { env } = greenWorkspace();
     const { io, out } = fakeIo(env, claude('not-json', 127));
     assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 0, out());
     assert.match(out(), /SKIP D-A2/);
@@ -1010,7 +1010,7 @@ test('D-A2 reads claude plugin list: enabled passes, disabled fails, absent skip
 });
 
 test('doctor output lists the deferred spec items', async () => {
-  const { dir, env } = greenWorkspace();
+  const { env } = greenWorkspace();
   const { io, out } = fakeIo(env, greenCatalyst);
   await doctorCli([], io, { hooks: NO_HOOKS });
   assert.match(out(), /deferred/i);
@@ -1123,7 +1123,7 @@ test('doctor --local --quiet: no output, no network checks, nothing persisted', 
 });
 
 test('doctor --json emits the persisted shape', async () => {
-  const { dir, env } = greenWorkspace();
+  const { env } = greenWorkspace();
   const { io, out } = fakeIo(env, greenCatalyst);
   const code = await doctorCli(['--json'], io, { hooks: NO_HOOKS });
   assert.equal(code, 0);
@@ -1293,7 +1293,7 @@ test('doctor: a CLI-store read that answers once then goes missing is an unknown
 });
 
 test('doctor: a CLI-store read that throws is an absent value, not a scope error', async () => {
-  const { dir, env } = greenWorkspace();
+  const { env } = greenWorkspace();
   const hooks: ScopeHooks = {
     cliDc: () => {
       throw new Error('store unreadable');
@@ -1308,7 +1308,7 @@ test('doctor: a CLI-store read that throws is an absent value, not a scope error
 });
 
 test('doctor: a spawn that resolves with no result is a failed command, not a crash', async () => {
-  const { dir, env } = greenWorkspace();
+  const { env } = greenWorkspace();
   const { io, out } = fakeIo(env, () => undefined as unknown as SpawnResult);
   const code = await doctorCli([], io, { hooks: NO_HOOKS });
   assert.equal(code, 1, out());
@@ -1317,7 +1317,7 @@ test('doctor: a spawn that resolves with no result is a failed command, not a cr
 });
 
 test('doctor: a spawn result with no output fields fails the named checks', async () => {
-  const { dir, env } = greenWorkspace();
+  const { env } = greenWorkspace();
   const { io, out } = fakeIo(env, () => ({ code: 0 }) as unknown as SpawnResult);
   const code = await doctorCli([], io, { hooks: NO_HOOKS });
   assert.equal(code, 1, out());

@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -606,12 +606,6 @@ function builtinApp() {
   return deriveIr(parse(DS_BUILTIN));
 }
 
-function builtinDsFile(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'c2c-users-ds-builtin-'));
-  const path = join(dir, 'widget.ds');
-  writeFileSync(path, DS_BUILTIN);
-  return path;
-}
 
 /** Backup rows whose PROFILE_NAME folds onto the built-ins four ways, plus one unmapped row. */
 function builtinBackupDir(): string {

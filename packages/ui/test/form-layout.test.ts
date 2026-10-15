@@ -696,7 +696,6 @@ test('the linked subform renders required marks, a + Add New control, and adds a
 
 test('required subform columns carry the * mark and the add control reads + Add New', async () => {
   const form = formNamed('Create_BOM');
-  const grid = fieldNamed(form, 'List_Of_Materials');
   const runtime = await loadRuntime();
   const doc = render(runtime.renderForm(form));
   const subform = doc.querySelector('.subform[data-field="List_Of_Materials"]');

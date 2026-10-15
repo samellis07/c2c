@@ -3304,7 +3304,7 @@ test('query arguments coerce by the normalised type, whatever spelling the signa
     app({
       profiles: [ADMIN],
       functions: cases.map((c, i) => fnOf(`Probe.p${i}`, `string Probe.p${i}(${c.type} v)`, 'return v;')),
-      apis: cases.map((c, i) =>
+      apis: cases.map((_c, i) =>
         apiBlock(`Api_P${i}`, `r = thisapp.Probe.p${i}(x)`, [{ key: 'scope', value: '"Admin only"' }], 'GET'),
       ),
     }),

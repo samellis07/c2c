@@ -25,7 +25,6 @@ import { LockedExportError } from '../../core/src/source.js';
 import { transitionOwnerProperties } from './blueprint-rules.js';
 import { isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleWorkflow, type App, type Form, type FunctionDef, type Property, type Workflow } from '../../core/src/ir.js';
 import { repoRoot } from '../../core/src/toolchain.js';
-import { declaredConnections } from './connections.js';
 import { FILL_LIMITS, fillLimitRefusal, goldenProblems, lintFill } from './fill-check.js';
 import {
   ACTION_CONDITION_GAP,
@@ -1782,7 +1781,7 @@ export async function fillTodosMain(args: string[]): Promise<number> {
   const reportAt = args.indexOf('--report');
   const report = reportAt >= 0;
   if (report) consumed.add(reportAt);
-  const positionals = args.filter((arg, index) => !consumed.has(index));
+  const positionals = args.filter((_arg, index) => !consumed.has(index));
   if (positionals.some((arg) => arg.startsWith('--')) || (emitDir !== undefined && acceptAt >= 0) || (report && (emitDir !== undefined || acceptAt >= 0))) {
     writeUsage();
     return 2;

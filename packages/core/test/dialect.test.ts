@@ -6,7 +6,6 @@ import {
   DIALECT_MARKERS,
   detectDialect,
   parseFile,
-  type App,
 } from '../src/index.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');

@@ -1196,7 +1196,6 @@ test('a report that omits a mandatory field is flagged per row, before any write
 });
 
 test('confirm refuses the same missing mandatory export before credentials or writes, and files the reports', async () => {
-  const app = appOf(PARTIAL);
   const dir = dirOf({ 'Vendor_Summary.json': '{"Vendor_Summary":[{"ID":"77","Vendor_Name":"Acme"}]}' });
   const fetched: string[] = [];
   const state = { fetched, tokens: 0 };

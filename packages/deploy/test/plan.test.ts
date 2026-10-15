@@ -15,7 +15,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { openZip, readZip } from '../src/zipfile.js';
+import { openZip } from '../src/zipfile.js';
 import { buildOfflinePlan, planCli, PLAN_STEP_TOOLS, resolveDc, type ProvisionStep } from '../src/offline-plan.js';
 import { ALL_REQUIRED_MCP_TOOLS, REQUIRED_MCP_TOOLS } from '../../doctor/src/required-tools.js';
 import { loadApp, type Io } from '../src/cli.js';

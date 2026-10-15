@@ -13,7 +13,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { App } from '../../core/src/ir.js';
 import { authPlan } from '../../auth/src/plan.js';
-import { generateSchema, type SchemaColumn, type SchemaPlan, type SchemaTable } from '../../schema/src/generator.js';
+import { type SchemaColumn, type SchemaPlan, type SchemaTable } from '../../schema/src/generator.js';
 import type { EditOp, FieldRename } from './edit.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from './guards.js';
 import { deployFiles, type DeployFile } from './plan.js';

@@ -22,7 +22,7 @@ function live(writeRules: Record<string, readonly WriteRuleColumn[]> = { Orders:
         calls.push({ op: 'insert', form, rows });
         return rows;
       },
-      async query(form, where) {
+      async query(form, _where) {
         calls.push({ op: 'query', form });
         return [{ ROWID: '9', ID: '9', Name: 'ok', c2c_source_id: 's9' }];
       },
