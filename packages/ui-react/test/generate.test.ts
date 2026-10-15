@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -307,6 +308,28 @@ test('a form with no fields generates a module that type-checks: no unused impor
   assert.match(empty, /<FormView form=\{form\} edit=\{edit\} \/>/);
   const formView = readFileSync(join(TEMPLATE_DIR, 'lib/c2c-ui/form/FormView.tsx'), 'utf8');
   assert.match(formView, /children\?: ReactNode/);
+});
+
+test('a generated React app type-checks with tsc --noEmit, including signature-pad SVG and G refs', () => {
+  const tscBin = join(TEMPLATE_DIR, 'node_modules/.bin/tsc');
+  assert.ok(existsSync(tscBin), 'the React template build dependencies are not installed; run `npm ci --prefix packages/ui-react/template`');
+  const out = mkdtempSync(join(tmpdir(), 'c2c-ui-react-tsc-'));
+  try {
+    writeReactApp(out, generateReactApp(appOf()));
+    symlinkSync(join(TEMPLATE_DIR, 'node_modules'), join(out, 'node_modules'), 'dir');
+    const clean = spawnSync(tscBin, ['-p', 'tsconfig.json', '--noEmit'], { cwd: out, encoding: 'utf8' });
+    assert.equal(clean.status, 0, `${clean.stdout}${clean.stderr}`);
+
+    const sigPath = join(out, 'lib/c2c-ui/arc/components/signature-pad/signature-pad.tsx');
+    const orig = readFileSync(sigPath, 'utf8');
+    assert.match(orig, /useRef<SVGSVGElement>\(null\)/);
+    assert.match(orig, /useRef<SVGGElement>\(null\)/);
+    writeFileSync(sigPath, orig.replace('useRef<SVGSVGElement>(null)', 'useRef<HTMLDivElement>(null)'));
+    const broken = spawnSync(tscBin, ['-p', 'tsconfig.json', '--noEmit'], { cwd: out, encoding: 'utf8' });
+    assert.notEqual(broken.status, 0, 'mismatched HTMLDivElement ref on <svg> must fail tsc');
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
 });
 
 test('empty Creator choices are dropped, and every choice control carries a name', () => {

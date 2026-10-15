@@ -275,8 +275,8 @@ export function SignaturePad({ signer, hint = "Sign here", defaultColor = "black
   const [saved, setSaved] = useState<Saved>(null);
   const [status, setStatus] = useState("");
 
-  const padRef = useRef<HTMLDivElement>(null);
-  const inkRef = useRef<HTMLDivElement>(null);
+  const padRef = useRef<SVGSVGElement>(null);
+  const inkRef = useRef<SVGGElement>(null);
   const liveRef = useRef<SVGPathElement>(null);
   const live = useRef<{ id: number; stroke: InkStroke; stamp: number } | null>(null);
   const replayFrame = useRef(0);
