@@ -81,3 +81,34 @@ test('every #anchor on a plugin-relative markdown link matches a heading', () =>
   }
   assert.deepEqual(broken, []);
 });
+
+// An installed plugin ships only plugin/, so a relative markdown link that
+// resolves outside it is dead for plugin users.
+const RELATIVE_LINK = /\]\((?!https?:|mailto:|#)([^)\s]+)\)/g;
+
+export function linksEscapingRoot(file, text, root) {
+  const escaping = [];
+  for (const match of text.matchAll(RELATIVE_LINK)) {
+    const target = match[1].split('#')[0];
+    if (!target) continue;
+    const resolved = path.resolve(path.dirname(file), target);
+    const rel = path.relative(root, resolved);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) escaping.push(target);
+  }
+  return escaping;
+}
+
+test('no plugin markdown link resolves outside the plugin root', () => {
+  const escaping = [];
+  for (const file of markdownFiles(plugin)) {
+    const rel = path.relative(repo, file);
+    for (const target of linksEscapingRoot(file, readFileSync(file, 'utf8'), plugin)) escaping.push(`${rel}: ${target}`);
+  }
+  assert.deepEqual(escaping, []);
+});
+
+test('the plugin-root link guard flags a link into the repo docs', () => {
+  const skill = path.join(plugin, 'skills', 'c2c-ui', 'SKILL.md');
+  assert.deepEqual(linksEscapingRoot(skill, 'See [repair](../../../docs/report-filters.md).', plugin), ['../../../docs/report-filters.md']);
+  assert.deepEqual(linksEscapingRoot(skill, 'See [repair](references/report-filters.md#repair-procedure) and [limits](../../references/limits.md).', plugin), []);
+});
