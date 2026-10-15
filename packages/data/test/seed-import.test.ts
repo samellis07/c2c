@@ -138,12 +138,28 @@ test('creator import conventions: dd-MMM-yyyy, comma multi-lookup, no file colum
 });
 
 test('creator import date-times retain seconds with a fixed seed', () => {
-  const app = appOf(`\tform Visit\n\t{\n\t\tWhen\n\t\t(\n\t\t\ttype = datetime\n\t\t)\n\t}`);
-  const first = generateCreatorImport(app, { rows: 8, seed: 'seconds' });
-  const second = generateCreatorImport(app, { rows: 8, seed: 'seconds' });
-  const values = parseCsv(first.files[0]!.csv).slice(1).map((row) => row[0]);
+  const app = appOf(`\tform Visit\n\t{\n\t\tWhen\n\t\t(\n\t\t\ttype = datetime\n\t\t)\n\t\tDescription\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t}`);
+  const first = generateCreatorImport(app, { rows: 8, seed: 'legacy-seed' });
+  const second = generateCreatorImport(app, { rows: 8, seed: 'legacy-seed' });
+  const rows = parseCsv(first.files[0]!.csv).slice(1);
+  // Minute and text are the shared-stream values from before seconds existed.
+  // Only the seconds suffix may differ; a later description shift means seconds
+  // consumed the stream again.
+  const legacyMinuteAndText = [
+    ['12-Mar-2025 22:53', 'Fixture row for import testing.'],
+    ['20-Jun-2026 18:15', 'Restocked after quarterly audit.'],
+    ['17-Apr-2026 00:15', 'Bulk rate applies above 50 units.'],
+    ['20-Jul-2025 00:50', 'Keeps 12 months in dry storage.'],
+    ['03-Jan-2025 15:54', 'Keeps 12 months in dry storage. (2)'],
+    ['07-May-2025 22:23', 'Bulk rate applies above 50 units. (2)'],
+    ['20-Oct-2025 16:53', 'Check tolerance before use.'],
+    ['27-Aug-2025 16:13', 'Fixture row for import testing. (2)'],
+  ];
+  const seconds = ['42', '07', '09', '57', '41', '36', '28', '11'];
   assert.deepEqual(first.files[0]!.csv, second.files[0]!.csv);
-  assert.ok(values.every((value) => /^\d{2}-[A-Z][a-z]{2}-\d{4} \d{2}:\d{2}:\d{2}$/.test(value)));
+  assert.deepEqual(rows.map(([when, description]) => [when!.slice(0, -3), description]), legacyMinuteAndText);
+  assert.deepEqual(rows.map(([when]) => when!.slice(-2)), seconds);
+  assert.ok(rows.every(([when], i) => when === `${legacyMinuteAndText[i]![0]}:${seconds[i]}`));
   assert.match(first.readme, /date-times `dd-MMM-yyyy HH:mm:ss`/);
 });
 
