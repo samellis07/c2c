@@ -196,7 +196,7 @@ interface Mounted {
 }
 
 /** Mount <ReportView> against a fake endpoint that applies the posted sort like the report endpoint. */
-async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: ReadonlySet<string>): Promise<Mounted> {
+async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: ReadonlySet<string>, rowId?: string): Promise<Mounted> {
   const { JSDOM } = await import('jsdom');
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true });
   const view = dom.window as unknown as Record<string, unknown> & Window;
@@ -248,6 +248,7 @@ async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: 
     post: async (endpoint: string, body: Record<string, unknown>) => {
       calls.push(body);
       posted.push({ endpoint, body });
+      if (endpoint.endsWith('/record')) return { ok: true, status: 200, body: { record: { ROWID: String(body.ROWID), Memo: 'Read me', Lines: [{ ROWID: '2', Material: 'Bolt', Quantity: 3 }] } } };
       if (endpoint.includes('/actions/')) return { ok: true, status: 200, body: { dryRun: true } };
       const ordered = order(rows, (body.sort ?? []) as { field: string; order?: string }[]);
       const page = typeof body.page === 'number' ? body.page : 0;
@@ -262,7 +263,7 @@ async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: 
   const env = { view, doc: view.document, spec, api };
   const flush = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
   await act(async () => {
-    root.render(React.createElement(EnvContext.Provider, { value: env }, React.createElement(ReportView, { report })));
+    root.render(React.createElement(EnvContext.Provider, { value: env }, React.createElement(ReportView, { report, ...(rowId ? { row: rowId } : {}) })));
   });
   await flush();
 
@@ -432,6 +433,26 @@ test('record controls have a real destination and custom row actions post the RO
   assert.equal(blankId.byRole('link', 'Open record 1'), null);
   assert.equal(blankId.byRole('link', 'Edit record'), null);
   assert.equal(blankId.container.querySelector('a.c2c-row-open'), null);
+});
+
+test('record detail draws configured sections and related rows from the authorized record read', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'record-detail');
+  const base = reactAppSpec(appOf()).reports.Orders!;
+  const report = {
+    ...base,
+    recordEndpoint: '/forms/Order/record',
+    detailBlocks: [
+      { title: 'Overview', fields: [{ field: 'Memo', label: 'Private Memo' }] },
+      { title: 'Items', relatedField: 'Lines', fields: [{ field: 'Material', label: 'Material Name' }, { field: 'Quantity', label: 'Qty' }] },
+    ],
+  };
+  const view = await mount(out, report, [], new Set(), '1');
+  assert.equal(view.posted[0]?.endpoint, '/forms/Order/record');
+  assert.deepEqual(view.posted[0]?.body, { ROWID: '1' });
+  assert.equal(view.container.querySelector('[data-detail-block="Overview"] dt')?.textContent, 'Private Memo');
+  assert.equal(view.container.querySelector('[data-detail-block="Overview"] dd')?.textContent, 'Read me');
+  assert.deepEqual([...view.container.querySelectorAll('[data-detail-block="Items"] thead th')].map((el) => el.textContent), ['Material Name', 'Qty']);
+  assert.deepEqual([...view.container.querySelectorAll('[data-detail-block="Items"] tbody td')].map((el) => el.textContent), ['Bolt', '3']);
 });
 
 test('non-list reports keep their visible pending-view stub', { skip: SKIP }, async (t) => {
