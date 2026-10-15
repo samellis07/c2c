@@ -283,12 +283,15 @@ export function functionIdFromList(body: unknown, name: string = API_FUNCTION): 
   return undefined;
 }
 
-/** data.configuration.environment.variables, string values only. Absent config reads as an empty set. */
+/** Accept only Catalyst's observed data.configuration.environment.variables object. */
 export function liveFunctionVariables(body: unknown): Record<string, string> {
-  const data = asRecord(asRecord(body)?.data) ?? asRecord(body) ?? {};
-  const variables = asRecord(asRecord(asRecord(data.configuration)?.environment)?.variables) ?? {};
+  const variables = asRecord(asRecord(asRecord(asRecord(asRecord(body)?.data)?.configuration)?.environment)?.variables);
+  if (!variables) throw new Error('live env read-back has an unknown shape; refusing a replace-only write');
   const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(variables)) if (typeof value === 'string') out[key] = value;
+  for (const [key, value] of Object.entries(variables)) {
+    if (typeof value !== 'string') throw new Error('live env read-back contains a non-string value; refusing a replace-only write');
+    out[key] = value;
+  }
   return out;
 }
 
@@ -310,6 +313,7 @@ export async function applyFunctionEnvSecrets(
   rest: RestFn,
   projectId: string,
   secrets: Readonly<Record<string, string>>,
+  requiredKeys: readonly string[] = ['C2C_DEPLOY_MODE'],
   opts: RetryOptions = {},
 ): Promise<string[]> {
   const names = Object.keys(secrets).sort();
@@ -319,7 +323,13 @@ export async function applyFunctionEnvSecrets(
   const id = functionIdFromList(list);
   if (!id) throw new Error(`function ${API_FUNCTION} is not in the project function list after its deploy`);
   const detail = await call(rest, { method: 'GET', path: `${prefix}/function/${id}` }, opts, `reading ${API_FUNCTION} configuration`);
-  const variables = { ...liveFunctionVariables(detail), ...secrets };
+  const live = liveFunctionVariables(detail);
+  if (requiredKeys.some((key) => !(key in live))) throw new Error('live env read-back did not match the deployed env_variables; refusing a replace-only write');
+  const variables = { ...live, ...secrets };
   await call(rest, { method: 'POST', path: `${prefix}/function/${id}/configuration`, body: { variables } }, opts, `setting ${API_FUNCTION} env vars`);
+  const verified = liveFunctionVariables(await call(rest, { method: 'GET', path: `${prefix}/function/${id}` }, opts, `verifying ${API_FUNCTION} env vars`));
+  if (Object.entries(variables).some(([key, value]) => verified[key] !== value)) {
+    throw new Error('live env read-back did not match the deployed env_variables after update; set the variables in the Catalyst console or MCP env tools');
+  }
   return names;
 }
