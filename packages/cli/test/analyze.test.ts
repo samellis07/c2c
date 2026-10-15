@@ -496,7 +496,7 @@ test(
   () => {
   const education = analyze(galleryDs('education-management', 'Education_Management.ds'));
   assertCountedOnce(education);
-  // count() on a record-typed function parameter now translates as record cardinality, removing three method:count and three client-condition-uses-server residuals on this corpus export. Counting the rows a record binding already holds removes one more.
+  // count() on a record-typed function parameter now translates as record cardinality, removing three method:count and three client-condition-uses-server residuals on this corpus export. The pinned count is 21 (measured on the corpus export).
   assert.equal(education.determinism.todoCount, 21);
   assert.equal(education.deluge.todoLocations.filter((item) => item.scope === 'app').length, 0);
   const registration = education.deluge.todoLocations.filter((item) => item.location.startsWith('workflow Create_record_scripts12:'));
