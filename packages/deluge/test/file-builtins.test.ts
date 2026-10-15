@@ -48,14 +48,39 @@ test('file tasks with no stored bytes, type, charset, or password stay named man
   }
 });
 
-test('file-content TODOs preserve the documented Creator vs invokeUrl distinction', () => {
+test('file-content TODOs pin the Creator upload-field source and its adapter limit', () => {
   const dispatch = readFileSync(join(repoRoot(), 'packages/deluge/src/dispatch.ts'), 'utf8');
-  assert.match(dispatch, /Zoho documents getFileContent\/getFileSize\/getFileType/);
-  assert.match(dispatch, /invokeUrl FILE/);
-  assert.match(dispatch, /Creator upload fields use the separate `content` attribute/);
-  assert.match(dispatch, /bytes, byte length and MIME type/);
-  assert.match(dispatch, /not present in the key/);
-  assert.match(dispatch, /guessing from a filename would not implement the documented API/);
+  assert.match(dispatch, /Creator upload fields/);
+  assert.match(dispatch, /`content` is the documented attribute/);
+  assert.match(dispatch, /https:\/\/www\.zoho\.com\/deluge\/help\/file-attributes\/content\.html/);
+  assert.match(dispatch, /Stratus object key/);
+  assert.match(dispatch, /no head or metadata read/);
+  assert.match(dispatch, /never retained on the stored value/);
+
+  const docs = JSON.parse(readFileSync(join(repoRoot(), 'packages/deluge/data/builtin-docs.json'), 'utf8')) as {
+    entries: { name: string; docUrl: string }[];
+  };
+  const urls = new Map(docs.entries.map((entry) => [entry.name, entry.docUrl]));
+  assert.equal(urls.get('content'), 'https://www.zoho.com/deluge/help/file-attributes/content.html');
+
+  // The adapter really cannot read size/type: FileStore only signs GET/PUT.
+  const files = readFileSync(join(repoRoot(), 'packages/shims/src/files.ts'), 'utf8');
+  const store = files.match(/export interface FileStore \{([^}]*)\}/);
+  assert.ok(store, 'FileStore interface not found');
+  assert.match(store[1], /signedUrl/);
+  assert.doesNotMatch(store[1], /\b(head|metadata|stat|size|type)\b/i);
+});
+
+test('file-content TODOs pin the invokeUrl FILE source and its body-only adapter', () => {
+  const dispatch = readFileSync(join(repoRoot(), 'packages/deluge/src/dispatch.ts'), 'utf8');
+  assert.match(dispatch, /invokeUrl FILE responses/);
+  assert.match(dispatch, /getFileContent\/getFileSize\/getFileType/);
+  assert.match(dispatch, /documented for the FILE value invokeUrl returns/);
+  for (const slug of ['get-file-content', 'get-file-size', 'get-file-type']) {
+    assert.match(dispatch, new RegExp(`https:\\/\\/www\\.zoho\\.com\\/deluge\\/help\\/file\\/${slug}\\.html|${slug}\\.html`));
+  }
+  assert.match(dispatch, /returns only the parsed HTTP body/);
+  assert.match(dispatch, /guessing from a filename would not implement the documented/);
 
   const docs = JSON.parse(readFileSync(join(repoRoot(), 'packages/deluge/data/builtin-docs.json'), 'utf8')) as {
     entries: { name: string; docUrl: string }[];
@@ -64,7 +89,12 @@ test('file-content TODOs preserve the documented Creator vs invokeUrl distinctio
   assert.equal(urls.get('getFileContent'), 'https://www.zoho.com/deluge/help/file/get-file-content.html');
   assert.equal(urls.get('getFileSize'), 'https://www.zoho.com/deluge/help/file/get-file-size.html');
   assert.equal(urls.get('getFileType'), 'https://www.zoho.com/deluge/help/file/get-file-type.html');
-  assert.equal(urls.get('content'), 'https://www.zoho.com/deluge/help/file-attributes/content.html');
+
+  // The adapter really returns only the body: no FILE value is produced.
+  const adapters = readFileSync(join(repoRoot(), 'packages/shims/src/zoho-adapters.ts'), 'utf8');
+  const response = adapters.match(/export function invokeurlResponse\(reply: RestReply\): unknown \{([\s\S]*?)\}/);
+  assert.ok(response, 'invokeurlResponse not found');
+  assert.match(response[1], /plain\(reply\.body\)/);
 });
 
 test('a shimmed file builtin body does not call shim.todo', () => {
