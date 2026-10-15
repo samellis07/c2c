@@ -2003,12 +2003,12 @@ ${flowCommit}${deferSuccess
       if (replyStoreError(res, err, { live: true, table: formName, wrote: true })) return;
       const denied = err && (err.code === "RECORD_ACCESS_DENIED" || err.name === "RecordAccessError");
       const message = denied && err && err.message ? err.message : "request failed";
-      send(res, denied ? 403 : 500, { dryRun: false, wrote: true, error: message, values: projectReadable(access, principal, formName, ctx.record, submitted) });
+      send(res, denied ? 403 : 500, { dryRun: false, wrote: true, error: message, values: projectReadable(access, principal, formName, ctx.record, submitted), ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });
       return;
     }
 `}    // Live replies never carry the runtime transcript: it holds record
     // values, table names and ops.
-    send(res, 200, { dryRun: false, wrote: true, values: projectReadable(access, principal, formName, ctx.record, submitted) });
+    send(res, 200, { dryRun: false, wrote: true, values: projectReadable(access, principal, formName, ctx.record, submitted), ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });
   } catch (err) {
     // The row write itself failed at the store (409/422/400 naming
     // the field, plus a structured log line); anything else stays a

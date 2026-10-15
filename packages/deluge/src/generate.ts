@@ -3926,15 +3926,15 @@ ${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' :
       const reportable = err && (err.code === "DELUGE_RUNTIME" || err.code === "DELUGE_CONVERSION" || err.code === "ZOHO_CONNECTION_REFUSED");
       const message = (denied || refused || reportable) && err && err.message ? err.message : "request failed";
       if (refused) {
-        send(res, 422, { dryRun: !live, wrote: true, refused: true, error: message, values: projectReadable(access, principal, formName, ctx.record, Object.keys(accepted)), ...debugTranscript });
+        send(res, 422, { dryRun: !live, wrote: true, refused: true, error: message, values: projectReadable(access, principal, formName, ctx.record, Object.keys(accepted)), ...(runtime.mail?.length ? { mail: runtime.mail } : {}), ...debugTranscript });
         return;
       }
-      send(res, denied ? 403 : 500, { dryRun: !live, wrote: true, error: message, values: projectReadable(access, principal, formName, ctx.record, Object.keys(accepted)), ...debugTranscript });
+      send(res, denied ? 403 : 500, { dryRun: !live, wrote: true, error: message, values: projectReadable(access, principal, formName, ctx.record, Object.keys(accepted)), ...(runtime.mail?.length ? { mail: runtime.mail } : {}), ...debugTranscript });
       return;
     }
-    send(res, 200, live ? { dryRun: false, wrote: true, values: projectReadable(access, principal, formName, ctx.record, Object.keys(accepted)), result: result ?? null } : { dryRun: true, result: result ?? null, transcript: runtime.transcript });`
+    send(res, 200, live ? { dryRun: false, wrote: true, values: projectReadable(access, principal, formName, ctx.record, Object.keys(accepted)), result: result ?? null, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) } : { dryRun: true, result: result ?? null, transcript: runtime.transcript, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`
     : `    const result = await handle(ctx);
-    send(res, 200, { dryRun: true, result: result ?? null, transcript: runtime.transcript });`;
+    send(res, 200, { dryRun: true, result: result ?? null, transcript: runtime.transcript, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`;
   const deleteRefusal = opts.body.includes('shim.validate.cancelDelete')
     ? `    if (err && err.code === "DELETE_REFUSED") {
       send(res, 422, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, refused: true, error: err.message, ${opts.systemWrite ? '...debugTranscript' : 'transcript: runtime.transcript'} });

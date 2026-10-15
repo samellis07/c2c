@@ -43,6 +43,7 @@ interface StyleRuntime {
   renderNav(model: UiModel): string;
   reportStateHtml(state: string, opts?: { formHref?: string }): string;
   submitNotice(result: { ok: boolean; dryRun: boolean; message?: string }): string;
+  mailNoticeText(item: { status?: string; reason?: string; logged?: boolean }): string;
   showToast(doc: Document, kind: string, text: string): void;
 }
 
@@ -124,6 +125,15 @@ test('base style: success and failure toasts use user-facing wording', async () 
   assert.equal(toasts.length, 2);
   assert.equal(toasts[0].getAttribute('data-kind'), 'success');
   assert.equal(toasts[1].getAttribute('data-kind'), 'failure');
+});
+
+test('base style: mail outcome note formats as a user-facing non-blocking notice', async () => {
+  const runtime = await loadRuntime();
+  assert.equal(runtime.mailNoticeText({ status: 'refused', reason: 'recipient not allowlisted' }), 'Mail refused: recipient not allowlisted');
+  assert.equal(runtime.mailNoticeText({ status: 'refused', reason: 'recipient not allowlisted', logged: false }), 'Mail refused: recipient not allowlisted (delivery log failed)');
+  assert.equal(runtime.mailNoticeText({ status: 'sent', reason: 'accepted by Catalyst Mail' }), 'Mail sent: accepted by Catalyst Mail');
+  assert.equal(runtime.mailNoticeText({ status: 'skipped', reason: 'mail disabled' }), 'Mail skipped: mail disabled');
+  assert.equal(runtime.mailNoticeText({ status: 'skipped', reason: 'mail disabled', logged: false }), 'Mail skipped: mail disabled');
 });
 
 test('base style: no preview copy reaches the page on a live deploy', async () => {

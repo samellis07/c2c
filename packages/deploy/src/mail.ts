@@ -457,13 +457,18 @@ async function logDelivery(req, message, outcome, config) {
     });
     return { logged: true };
   } catch (err) {
-    return { logged: false, logError: err && err.message ? err.message : String(err) };
+    const logError = err && err.message ? err.message : String(err);
+    console.error(\`c2c mail delivery log failed: \${logError}\`);
+    return { logged: false, logError };
   }
 }
 
 async function attempt(message, req, config) {
   const decision = decideMail(config, recipientsOf(message));
-  if (!decision.ok) return { performed: false, status: "refused", reason: decision.reason };
+  if (!decision.ok) {
+    const status = decision.reason === "mail disabled" ? "skipped" : "refused";
+    return { performed: false, status, reason: decision.reason };
+  }
   const from = senderOf(message);
   const verified = config && Array.isArray(config.verifiedSenders) ? config.verifiedSenders : [];
   if (!from || !verified.includes(from)) {

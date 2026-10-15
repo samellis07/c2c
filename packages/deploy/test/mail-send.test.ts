@@ -1141,10 +1141,12 @@ test('a live submit whose on-success sendmail is refused still answers 2xx; a re
   const inserts: Record<string, unknown>[] = [];
   const previousMode = process.env.C2C_DEPLOY_MODE;
   const previousZone = process.env.C2C_APP_TIMEZONE;
+  const previousMailFrom = process.env.C2C_MAIL_FROM;
   const previousStore = (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
   try {
     process.env.C2C_DEPLOY_MODE = 'live';
     process.env.C2C_APP_TIMEZONE = 'Asia/Kolkata';
+    process.env.C2C_MAIL_FROM = OWNER;
     (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = {
       async insert(_form: string, rows: Record<string, unknown>[]) {
         inserts.push(...rows);
@@ -1169,6 +1171,69 @@ test('a live submit whose on-success sendmail is refused still answers 2xx; a re
     assert.equal(calls.rows[0]?.table, MAIL_LOG_TABLE);
     assert.equal(calls.rows[0]?.row.status, 'refused');
     assert.match(String(calls.rows[0]?.row.reason), /allowlist/);
+    assert.deepEqual(refused.body.mail, [{ status: 'refused', reason: String(calls.rows[0]?.row.reason), logged: true }]);
+
+    // When logDelivery itself fails, the refusal note surfaces logged:false and
+    // the failure is logged to server log (console.error), never swallowed.
+    const loggedErrors: string[] = [];
+    const origError = console.error;
+    console.error = (...args: unknown[]) => {
+      loggedErrors.push(args.map(String).join(' '));
+    };
+    try {
+      mail.setMailSdk(() => ({
+        email: () => ({
+          sendMail: async () => ({ from_email: OWNER }),
+        }),
+        datastore: () => ({
+          table: () => ({
+            insertRow: async () => {
+              throw new Error('mail log table unavailable');
+            },
+          }),
+        }),
+      }));
+      const logFailed = await invoke(handler, req);
+      assert.equal(logFailed.status, 200, JSON.stringify(logFailed.body));
+      assert.equal(logFailed.body.wrote, true);
+      assert.deepEqual(logFailed.body.mail, [{ status: 'refused', reason: String(calls.rows[0]?.row.reason), logged: false }]);
+      assert.ok(loggedErrors.some((line) => line.includes('c2c mail delivery log failed: mail log table unavailable')));
+    } finally {
+      console.error = origError;
+    }
+
+    // When mail is allowlisted, the submit reply note carries status sent.
+    writeFileSync(join(out, 'functions/c2c_api/c2c-mail.json'), JSON.stringify({ ...VERIFIED, allowlist: [OWNER] }));
+    calls.sendMail = [];
+    calls.rows = [];
+    mail.setMailSdk(() => ({
+      email: () => ({
+        sendMail: async (cfg: Record<string, unknown>) => {
+          calls.sendMail.push(cfg);
+          return { from_email: cfg.from_email };
+        },
+      }),
+      datastore: () => ({
+        table: (table: string) => ({
+          insertRow: async (row: Record<string, unknown>) => {
+            calls.rows.push({ table, row });
+            return { ROWID: '1', ...row };
+          },
+        }),
+      }),
+    }));
+    const sent = await invoke(handler, req);
+    assert.equal(sent.status, 200, JSON.stringify(sent.body));
+    assert.equal(sent.body.wrote, true);
+    assert.equal(calls.sendMail.length, 1);
+    assert.deepEqual(sent.body.mail, [{ status: 'sent', reason: 'accepted by Catalyst Mail', logged: true }]);
+
+    // When mail is disabled, the submit reply note carries status skipped.
+    writeFileSync(join(out, 'functions/c2c_api/c2c-mail.json'), JSON.stringify({ ...VERIFIED, enabled: false }));
+    const skipped = await invoke(handler, req);
+    assert.equal(skipped.status, 200, JSON.stringify(skipped.body));
+    assert.equal(skipped.body.wrote, true);
+    assert.deepEqual(skipped.body.mail, [{ status: 'skipped', reason: 'mail disabled', logged: false }]);
 
     // A real store failure on the row write still reports an error.
     (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = {
@@ -1188,6 +1253,8 @@ test('a live submit whose on-success sendmail is refused still answers 2xx; a re
     else process.env.C2C_DEPLOY_MODE = previousMode;
     if (previousZone === undefined) delete process.env.C2C_APP_TIMEZONE;
     else process.env.C2C_APP_TIMEZONE = previousZone;
+    if (previousMailFrom === undefined) delete process.env.C2C_MAIL_FROM;
+    else process.env.C2C_MAIL_FROM = previousMailFrom;
     if (previousStore === undefined) delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
     else (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = previousStore;
     rmSync(out, { recursive: true, force: true });
