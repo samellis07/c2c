@@ -75,7 +75,7 @@ function census(cmd: string, bodies: Map<string, string>): Set<string> {
 }
 
 test('every command in ARGV_SPEC has a census', () => {
-  assert.ok(Object.keys(ROOTS).every((cmd) => ARGV_SPEC[cmd]));
+  assert.deepEqual(Object.keys(ARGV_SPEC).sort(), Object.keys(ROOTS).sort());
 });
 
 for (const cmd of Object.keys(ROOTS)) {
@@ -83,7 +83,6 @@ for (const cmd of Object.keys(ROOTS)) {
     const read = census(cmd, functionBodies());
     // precheck intentionally accepts only --json; requiring four flags would
     // reject its accurate one-flag census.
-    // precheck's implementation intentionally reads only --json.
     if (cmd !== 'precheck') assert.ok(read.size >= 4, `${cmd}: the census found the command's flags (${[...read].join(' ')})`);
     const spec = new Set(Object.keys(ARGV_SPEC[cmd].flags));
     const missing = [...read].filter((name) => !spec.has(name)).sort();

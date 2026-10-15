@@ -33,6 +33,21 @@ const SCOPE: Readonly<Record<string, Arity>> = {
   '--projects': 'value',
 };
 
+/**
+ * Commands gated on a green, current, same-scope doctor.json in c2c.ts and the
+ * flags required before doctorGateRefusal refuses with exit 5.
+ */
+export const DOCTOR_GATE_FLAGS: Readonly<Record<string, readonly string[]>> = {
+  provision: ['--confirm'],
+  deploy: ['--confirm'],
+  'migrate-data': ['--confirm'],
+  users: ['--confirm'],
+  smoke: ['--confirm'],
+  'sync-delta': ['--confirm'],
+  'rollback-export': ['--confirm'],
+  edit: ['--apply', '--confirm'],
+};
+
 export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
   deploy: {
     positional: 'required',
