@@ -40,6 +40,27 @@ test('decimal audit counts criteria and sort sites on exact-decimal columns and 
 \t\t\tTotal_price descending
 \t\t}
 \t}
+\tlist Big_Discounts
+\t{
+\t\tshow all rows from Add_Discount [(Total_price > 100 && Name != "") || Name == "y"]
+\t\t(
+\t\t\tName
+\t\t)
+\t}
+\tlist Named_Discounts
+\t{
+\t\tshow all rows from Add_Discount [Name == "x" && !(Total_price == 0)]
+\t\t(
+\t\t\tName
+\t\t)
+\t}
+\tlist Only_Names
+\t{
+\t\tshow all rows from Add_Discount [Name == "x"]
+\t\t(
+\t\t\tName
+\t\t)
+\t}
 }
 `),
   );
@@ -57,7 +78,7 @@ test('decimal audit counts criteria and sort sites on exact-decimal columns and 
     querySites: 2,
     queryCriteriaSites: 1,
     querySortSites: 1,
-    reportCriteriaSites: 0,
+    reportCriteriaSites: 2,
     reportSortSites: 1,
     unrouted: 0,
     arithmeticBypass: 0,

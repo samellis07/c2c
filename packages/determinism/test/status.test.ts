@@ -614,3 +614,44 @@ test('committed status doc is structurally canonical without gallery fixtures', 
   assert.equal(status.deterministicApps >= status.deterministicWithUiTodos.apps, true);
   assertNoQuotedIdentifiers(status);
 });
+
+test('parseStatusDoc rejects a doc without a json block or with a malformed payload', () => {
+  const good = {
+    totalApps: 1,
+    deterministicApps: 1,
+    todoTotal: 0,
+    kinds: [],
+    perAppConstructSets: [{ constructs: ['a'], items: 1 }],
+    deterministicWithUiTodos: { apps: 0, uiTodos: 0 },
+  };
+  const doc = (payload: unknown) => `# status\n\n\`\`\`json\n${JSON.stringify(payload)}\n\`\`\`\n`;
+  assert.deepEqual(parseStatusDoc(doc(good)), good);
+  assert.throws(() => parseStatusDoc('# status\nno block\n'), /no ```json block found/);
+  const broken: unknown[] = [
+    { ...good, totalApps: '1' },
+    { ...good, kinds: {} },
+    { ...good, perAppConstructSets: {} },
+    { ...good, perAppConstructSets: [null] },
+    { ...good, perAppConstructSets: [{ constructs: [1], items: 1 }] },
+    { ...good, perAppConstructSets: [{ constructs: ['a'], items: '1' }] },
+    { ...good, deterministicWithUiTodos: undefined },
+    { ...good, deterministicWithUiTodos: { apps: 0 } },
+  ];
+  for (const payload of broken) assert.throws(() => parseStatusDoc(doc(payload)), /is not a status payload/, JSON.stringify(payload));
+});
+
+test('determinism:status refuses --help, a --sites parent that does not exist, and a missing or empty gallery', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'c2c-status-main-'));
+  try {
+    const doc = join(tmp, 'doc.md');
+    const fixtures = join(root, 'fixtures/redistributable');
+    assert.equal(main(['--help']), 2);
+    assert.equal(main(['--dir', fixtures, '--out', doc, '--sites', join(tmp, 'absent', 'sites.json')]), 2);
+    assert.equal(main(['--dir', join(tmp, 'absent'), '--out', doc]), 1);
+    mkdirSync(join(tmp, 'empty'));
+    assert.equal(main(['--dir', join(tmp, 'empty'), '--out', doc]), 1);
+    assert.equal(existsSync(doc), false, 'no doc written on a refusal');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
