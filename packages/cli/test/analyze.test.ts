@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { deriveIr, parse, parseFile, parseProject, type App } from '../../core/src/index.js';
+import { deriveIr, parse, parseFile, parseFileOrProjectWithSidecars, type App } from '../../core/src/index.js';
 import { generate } from '../../deluge/src/index.js';
 import { analyze, analyzeAsJson, analyzeAsText, type AnalyzeReport } from '../src/analyze.js';
 
@@ -14,13 +15,25 @@ const fixtures = path.join(root, 'fixtures/redistributable');
 const goldenDir = path.join(root, 'packages/cli/test/golden');
 
 function load(target: string): App {
-  try {
-    return parseFile(target).ir;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EISDIR') throw error;
-    return parseProject(target).ir;
-  }
+  return parseFileOrProjectWithSidecars(target).ir;
 }
+
+test('c2c parse rejects a FIFO promptly', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'c2c-parse-fifo-'));
+  const fifo = path.join(dir, 'target.ds');
+  try {
+    execFileSync('mkfifo', [fifo]);
+    const result = spawnSync(process.execPath, [path.join(root, 'dist/cli/src/c2c.js'), 'parse', fifo], {
+      encoding: 'utf8',
+      timeout: 1900,
+    });
+    assert.equal(result.error, undefined);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /not a file/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 const cases = [
   { name: 'freight-forwarding', target: path.join(fixtures, 'freight-forwarding') },
