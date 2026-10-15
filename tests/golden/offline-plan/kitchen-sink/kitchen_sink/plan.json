@@ -1227,8 +1227,7 @@
       "CatalystbyZoho_Get_All_Buckets",
       "CatalystbyZoho_Head_Bucket",
       "CatalystbyZoho_List_All_Crons",
-      "CatalystbyZoho_List_All_Jobpools",
-      "CatalystbyZoho_Update_Authentication_Configuration"
+      "CatalystbyZoho_List_All_Jobpools"
     ]
   },
   "probes": [
