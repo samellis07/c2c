@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deriveIr, parse } from '../../core/src/index.js';
@@ -974,6 +974,9 @@ test('rollback-export reads offline row files and plans a live read only with --
   assert.equal(offline.fetched(), 0);
   assert.match(readFileSync(join(out, 'import', 'Vendor.csv'), 'utf8'), /^Acme,/m);
   assert.equal(readFileSync(join(out, 'IMPORT_ORDER.txt'), 'utf8'), '1. import/Vendor.csv\n2. import/Purchase_Order.csv\n');
+  // The count names every file written, the manifest included.
+  const written = readdirSync(out, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile()).length;
+  assert.match(offline.out(), new RegExp(`^wrote ${written} files to .* \\(${written - 1} export files and c2c-rollback-manifest\\.json\\)$`, 'm'));
 
   const plan = cli(store);
   assert.equal(await rollbackExportCli(['--ds', ws.ds, '--out', out, '--project', '1001', '--org', ORG, '--projects', ws.projects], plan.io), 0, plan.err());

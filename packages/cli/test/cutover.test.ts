@@ -239,6 +239,10 @@ test('cutover-checklist is deterministic and filled with the app facts', () => {
   assert.match(text, /Human: review c2c-proof.md/);
   // Missing external evidence stays explicitly open; local readiness is not a live cutover pass.
   assert.match(text, /\| Smoke result: not run \| Human check \| Run the smoke command below and save its report/);
+  // The smoke step names the page run and the --result-code report, never a --confirm --report as the pass evidence.
+  assert.match(text, /^- \[ \] Human: run `c2c smoke <app\.ds> --project 1001 --url [^`]+ --confirm`; it does not drive a browser — it names the app's #\/admin\/smoke page\./m);
+  assert.match(text, /^- \[ \] Human: run `c2c smoke <app\.ds> --project 1001 --url [^`]+ --result-code <code> --report <report\.json>`; record report path and result, and pass that report to cutover-checklist with `--smoke`\.$/m);
+  assert.doesNotMatch(text, /--confirm --report/);
   assert.match(text, /Human: open Purchase_Order in the app, submit a test record, then open its report/);
 });
 
@@ -271,7 +275,13 @@ test('proof report holds counts, checksums, the smoke slot and readiness with ma
   assert.equal(before.smoke.status, 'not run');
   assert.equal(typeof before.readiness.automatic, 'number');
   assert.ok(before.readiness.manual.includes('owner sign-off'));
-  assert.ok(before.readiness.manual.some((item) => item.startsWith('smoke: run c2c smoke')));
+  // A passing report comes from --result-code; --confirm --report only ever writes a blocked one.
+  assert.ok(
+    before.readiness.manual.includes(
+      'smoke: run c2c smoke --confirm, open the #/admin/smoke page it names signed in as the owner, then run c2c smoke --result-code <code> --report <file> and pass that file with --smoke',
+    ),
+    JSON.stringify(before.readiness.manual),
+  );
   const vendor = before.tables.find((table) => table.table === 'Vendor')!;
   assert.equal(vendor.sourceRows, 2);
   assert.match(vendor.sourceChecksum!, /^[0-9a-f]{64}$/);
@@ -330,6 +340,16 @@ test('proof reads the report c2c smoke --report writes', () => {
     JSON.stringify(blocked.readiness.manual),
   );
   assert.equal(blocked.readiness.manual.some((item) => item.includes('fix the failed steps')), false);
+
+  // The report `c2c smoke --confirm --report` writes is blocked on the smoke page: the item names the page and --result-code.
+  writeFileSync(smoke, JSON.stringify({ version: 'c2c-smoke-report/1', ok: false, session: 'app-user', blocker: 'smoke-page https://shop.example.test/#/admin/smoke' }));
+  const guided = proofReport(cutoverInput(ws.ds, ['--smoke', smoke]));
+  assert.deepEqual(
+    guided.readiness.manual.filter((item) => item.startsWith('smoke:')),
+    ['smoke: open https://shop.example.test/#/admin/smoke signed in as the owner, then run c2c smoke --result-code <code> --report <file> and pass that file with --smoke'],
+  );
+  writeFileSync(smoke, JSON.stringify({ version: 'c2c-smoke-report/1', ok: false, session: 'app-user', blocker: 'smoke-page' }));
+  assert.ok(proofReport(cutoverInput(ws.ds, ['--smoke', smoke])).readiness.manual.includes("smoke: open the app's #/admin/smoke page signed in as the owner, then run c2c smoke --result-code <code> --report <file> and pass that file with --smoke"));
 });
 
 test('a real rollback-export round trip ticks both rollback items', async () => {
