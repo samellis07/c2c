@@ -97,6 +97,15 @@ export type { BrowserSmokeResult, SmokeBrowser, SmokePage } from './browser.js';
 export { CONSOLE_SERVICES, formatPostDeploySteps, postDeploySteps, servicesTouched } from './post-deploy.js';
 export { formatHumanChecklist, humanChecklist } from './human-steps.js';
 export type { HumanChecklistInput } from './human-steps.js';
+export {
+  buildFunctionEnv,
+  extractConnectionSecrets,
+  isDerivableEnvKey,
+  readConnectionSecretKeys,
+  sanitizeEnvKey,
+  writeOrUpdateFunctionEnv,
+} from './function-env.js';
+export type { DeclaredConnectionSecret, FunctionEnvInput } from './function-env.js';
 export type { ConsoleService, PostDeployStep } from './post-deploy.js';
 export { applyAuthProvision, authProvisionPlan, errorCode, formatAuthProvision, hostOf, projectUsers, slateUrlFrom } from './auth.js';
 export type { AuthOpId, AuthOpResult, AuthOpStatus, AuthProvisionInput, AuthProvisionResult } from './auth.js';

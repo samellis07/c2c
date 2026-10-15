@@ -37,6 +37,7 @@ import { mailConfig } from './mail.js';
 import { functionSources } from './plan.js';
 import { readDeployConfig } from './provision-config.js';
 import { FIRST_USE_GATES, type FirstUseGate } from './first-use.js';
+import { buildFunctionEnv, extractConnectionSecrets, writeOrUpdateFunctionEnv } from './function-env.js';
 import { MCP_TOOL_PREFIX, REQUIRED_MCP_TOOLS } from '../../doctor/src/required-tools.js';
 
 /** Data centres the Catalyst MCP and CLI address (doctor D-B2/D-C5). No default. */
@@ -205,6 +206,7 @@ export interface OfflinePlan {
    * Omitted when empty, so a plan with no such construct keeps the same bytes.
    */
   manual?: WidgetManualItem[];
+  connectionSecretKeys?: string[];
 }
 
 export interface PlanFile {
@@ -1487,6 +1489,8 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
   const ui = buildUi(app, { schema });
   const signals = planSignals(app);
   const manual = widgetManualItems(app.widgets);
+  const connectionSecrets = extractConnectionSecrets(app);
+  const connectionSecretKeys = connectionSecrets.map((s) => s.envKey);
   const mailStep = opts.mail || signals.sendmail;
   const { budgets, ok } = buildBudgets(schema.tables, opts.source);
   const schedules = app.workflows
@@ -1561,14 +1565,23 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
       selectWidthUnverified: SELECT_WIDTH_UNVERIFIED,
     },
     ...(manual.length ? { manual } : {}),
+    ...(connectionSecretKeys.length ? { connectionSecretKeys } : {}),
   };
   const planJson = `${JSON.stringify(plan, null, 2)}\n`;
-  const provisionJson = `${JSON.stringify({ version: 1, app: plan.app, dc: plan.dc, steps }, null, 2)}\n`;
+  const provisionJson = `${JSON.stringify({ version: 1, app: plan.app, dc: plan.dc, steps, ...(connectionSecretKeys.length ? { connectionSecretKeys } : {}) }, null, 2)}\n`;
   const planMd = formatPlanMd(plan, { mail: opts.mail, sendmail: mailStep, integrations: signals.integrations, files: signals.files });
+  const fenv = buildFunctionEnv({
+    dc: opts.dc,
+    env: opts.production ? 'Production' : 'Development',
+    bucketName: signals.files.length ? bucketName(link) : undefined,
+    tables: schema.tables.map((t) => ({ name: t.name })),
+    connectionSecrets,
+  });
   const files: PlanFile[] = [
     { path: 'plan.md', data: planMd },
     { path: 'plan.json', data: planJson },
     { path: 'provision/plan.json', data: provisionJson },
+    { path: 'function-env.json', data: `${JSON.stringify(fenv, null, 2)}\n` },
     // Detail specs the cli steps execute; inputs.json is the file the customer fills.
     { path: 'provision/tables.json', data: `${JSON.stringify(tableCreatePlan(schema), null, 2)}\n` },
     { path: 'provision/inputs.json', data: `${JSON.stringify({ slateDomain: '', senderEmail: '', users: [], projectName: '' }, null, 2)}\n` },
@@ -1775,8 +1788,24 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
       ...(args.includes('--production') ? { production: true } : {}),
       ...(subsetShims ? { subsetShims: true } : {}),
     });
-    // inputs.json is customer-edited; a re-plan must not clobber it.
-    writePlanTree(out, files.filter((file) => file.path !== 'provision/inputs.json' || !statSync(join(out, 'provision', 'inputs.json'), { throwIfNoEntry: false })?.isFile()));
+    // inputs.json and function-env.json are customer-edited; a re-plan must not clobber them.
+    writePlanTree(
+      out,
+      files.filter(
+        (file) =>
+          file.path !== 'function-env.json' &&
+          (file.path !== 'provision/inputs.json' || !statSync(join(out, 'provision', 'inputs.json'), { throwIfNoEntry: false })?.isFile()),
+      ),
+    );
+    const fenvFile = files.find((f) => f.path === 'function-env.json');
+    const fenvInitial = fenvFile ? (JSON.parse(fenvFile.data) as Record<string, string>) : undefined;
+    writeOrUpdateFunctionEnv(out, {
+      dc: dc.dc,
+      env: args.includes('--production') ? 'Production' : 'Development',
+      projectId: configuredProject,
+      connectionSecrets: extractConnectionSecrets(app),
+      existingEnv: fenvInitial,
+    });
     io.stdout(`plan: ${out}/plan.md\n`);
     if (!plan.budgetsOk && !args.includes('--allow-budget-fail')) {
       const fails = plan.budgets.filter(b => b.status === 'fail');

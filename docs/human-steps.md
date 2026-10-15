@@ -21,6 +21,17 @@ The items, in order:
    Configuration → add the sender address; the service mails a verification
    code to that address and the user enters it. Shown only when the app sends
    mail.
+5. **Fill connection secret in function-env.json** — for declared connections
+   with third-party credentials (e.g. client secrets, API keys, auth tokens),
+   enter the secret value in `function-env.json` under `--out`. All derivable
+   keys (`PROJECT_ID`, `CATALYST_PROJECT_ID`, `DC`, `CATALYST_DC`, `ENV`,
+   `CATALYST_ENV`, `APP_URL`, `CATALYST_APP_URL`, bucket names
+   `C2C_STRATUS_BUCKET`, `STRATUS_BUCKET`, and table IDs `TABLE_ID`,
+   `TABLE_<NAME>_ID`) are autofilled by `c2c plan` and `c2c provision`.
+   Third-party secrets of declared connections are the only keys left for the
+   user. Those go into the checklist as at most ONE item naming the key(s), and
+   never into chat, logs, stdout, or files outside `function-env.json`. Shown
+   only when the app declares third-party connection secrets.
 
 Each item is conditional on the app, detected from the plan — never from a
 flag the user passes:
@@ -30,6 +41,9 @@ flag the user passes:
 - `sendsMail`: a generated server function calls the mail shim
   (`functionsSendMail` over the UI files, surfaced as
   `DeployBundle.sendsMail`; in a provision plan the `mail-sender` step).
+- `connectionSecretKeys`: third-party secret properties declared in the app's
+  `connections` blocks. An app without third-party connection secrets has zero
+  function-env human items.
 
 A run that already confirmed Slate started drops the first item: the deploy
 passes `slateStarted` once a Slate command completed (a fresh project refuses
@@ -37,6 +51,8 @@ the Slate deploy until the service is opened, so a completed Slate command
 proves it), and provision passes it once the `slate-enable` step is done or
 already existed. The remaining items keep contiguous numbering, so a re-run
 after Slate started lists three items for a mail app and two without mail.
+Even with all services active (Slate, mail, and connection secrets), total
+human steps remain <= 5.
 
 The checklist text lives in `packages/deploy/src/human-steps.ts`
 (`humanChecklist`, `formatHumanChecklist`) so `deploy`, `provision --status`
