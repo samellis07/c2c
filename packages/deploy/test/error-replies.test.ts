@@ -27,7 +27,7 @@ const FIXTURE_ORG = '10000000000';
 const FIXTURE_REGISTRY: ProjectRegistry = { org: FIXTURE_ORG, env: 'Development', projects: {}, dc: 'in' };
 
 /** Anything a caller must never see in an error reply. */
-const LEAK = /\bat\s+\S+\s+\(|\/srv\/|\/var\/|\/Users\/|node_modules|\.m?js:\d|zcql|oauthtoken|Bearer|tok_[0-9a-f]{8}|other@example\.test|"error_code"|INVALID_INPUT|transcript|stack/i;
+const LEAK = /\bat\s+\S+\s+\(|\/srv\/|\/var\/|\/Users\/|node_modules|\.m?js:\d|zcql|oauthtoken|Bearer|tok_[0-9a-f]{8}|other@example\.test|"error_code"|INVALID_INPUT|transcript|"stack"/i;
 /** Query keywords, as the store spells them. */
 const QUERY = /\bSELECT\b|\bWHERE\b|\bFROM\b/;
 /** Keys an error reply may carry: the {code,message} shape plus write and field signals. */
@@ -53,7 +53,7 @@ function guardFor(app: ReturnType<typeof deriveIr>): GuardOk {
 }
 
 /** Stub handlers that answer with internals, one per leak class. */
-const STUBS: Record<string, { status: number; body: Record<string, unknown> }> = {
+const STUBS: Record<string, { status: number; body: Record<string, unknown>; keep?: boolean }> = {
   'stack-trace': { status: 400, body: { error: 'Cannot read properties of undefined\n    at handle (/srv/app/functions/c2c_api/aio/x.mjs:12:5)' } },
   'file-path': { status: 403, body: { error: 'record access: policy file /var/task/functions/c2c_api/access.json is unreadable' } },
   'zcql-text': { status: 422, body: { error: "ZCQL syntax error: SELECT ROWID FROM Sample_Item WHERE Owner = 'other@example.test'" } },
@@ -63,7 +63,11 @@ const STUBS: Record<string, { status: number; body: Record<string, unknown> }> =
     status: 422,
     body: { refused: true, error: 'The record was not saved.', transcript: [{ op: 'fetch', form: 'Sample_Item', where: "Owner = 'other@example.test'", rows: [{ Item_Name: 'Other user row' }] }], stack: 'Error\n    at x' },
   },
-  'plain-alert': { status: 422, body: { refused: true, error: 'Please delete from the cart first, then select a size' } },
+  'catalyst-array-body': { status: 400, body: { error: '[{"code":"INVALID_INPUT","message":"Owner is invalid"}]' } },
+  'plain-alert': { status: 422, body: { refused: true, error: 'Please delete from the cart first, then select a size' }, keep: true },
+  'alert-says-stack': { status: 422, body: { refused: true, error: 'Please stack the pallets before shipping' }, keep: true },
+  'alert-says-request-failed': { status: 422, body: { refused: true, error: 'Your request failed validation' }, keep: true },
+  'alert-leading-bracket': { status: 422, body: { refused: true, error: '[Required] Name' }, keep: true },
 };
 
 test('every error reply of a generated app has the {code,message} shape and no internals', async () => {
@@ -151,7 +155,7 @@ test('every error reply of a generated app has the {code,message} shape and no i
     for (const [name, stub] of Object.entries(STUBS)) {
       const result = await call(`/stub/${name}`);
       assertShape(name, result, stub.status);
-      if (name === 'plain-alert') assert.equal(result.body.message, 'Please delete from the cart first, then select a size', 'ordinary alert text is kept');
+      if (stub.keep) assert.equal(result.body.message, stub.body.error, `ordinary alert text is kept: ${name}`);
       else if (name !== 'other-user-record') assert.equal(result.body.message, 'Request failed', name);
     }
     assertShape('thrown SDK error', await call('/stub/thrown'), 400);

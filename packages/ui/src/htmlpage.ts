@@ -1303,7 +1303,7 @@ ${opts.hasWrites ? '      adminUserId: principal.userId || "",\n' : ''}      ...
       send(res, 500, { dryRun: !live, error: "rendered markup failed the output attribute check" });
       return;
     }
-    send(res, 200, { dryRun: !live, html: rendered.html, notes: rendered.notes, transcript: runtime.transcript });
+    send(res, 200, { dryRun: !live, html: rendered.html, notes: rendered.notes, ...(live ? {} : { transcript: runtime.transcript }) });
   } catch (err) {
     const denied = err && err.code === "RECORD_ACCESS_DENIED";
     send(res, denied ? 403 : 500, { dryRun: !live, error: denied ? err.message : "render failed" });
