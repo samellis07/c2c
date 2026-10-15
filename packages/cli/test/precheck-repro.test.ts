@@ -41,82 +41,86 @@ const fixtureName = /^c2c-repro-\d+[a-z]?(-[\w-]+)?\.ds$/;
 
 /** Import blockers and warnings, cited by check id. */
 const BAD: Record<string, Expect> = {
-  [fx('1-bad')]: { findings: ['signature:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 592 },
-  [fx('2-bad')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'void-assign:blocker'], line: 592 },
-  [fx('3-bad')]: { findings: ['success-message:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 592 },
-  [fx('3-load')]: { findings: ['success-message:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('4-bad')]: { findings: ['signature:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 593 },
-  [fx('5')]: { findings: ['approver-on-success:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('5-criteria')]: { findings: ['approver-on-success:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('5-nocriteria')]: { findings: ['approver-on-success:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('6-bad')]: { findings: ['sendmail-sender:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 594 },
-  [fx('7c-mlookup-ms')]: { findings: ['criteria-multiselect:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 592 },
-  [fx('7-ms-eq')]: { findings: ['field-type:blocker', 'report-filter:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('7-ms-nofilter')]: { findings: ['field-type:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
+  [fx('1-bad')]: { findings: ['signature:blocker'], line: 592 },
+  [fx('2-bad')]: { findings: ['void-assign:blocker'], line: 592 },
+  [fx('3-bad')]: { findings: ['success-message:blocker'], line: 592 },
+  [fx('3-load')]: { findings: ['success-message:warning'] },
+  [fx('4-bad')]: { findings: ['signature:blocker'], line: 593 },
+  [fx('5')]: { findings: ['approver-on-success:warning'] },
+  [fx('5-criteria')]: { findings: ['approver-on-success:warning'] },
+  [fx('5-nocriteria')]: { findings: ['approver-on-success:warning'] },
+  [fx('6-bad')]: { findings: ['sendmail-sender:blocker'], line: 594 },
+  [fx('7c-mlookup-ms')]: { findings: ['criteria-multiselect:blocker'], line: 592 },
+  [fx('7-ms-eq')]: { findings: ['field-type:blocker', 'report-filter:warning'] },
+  [fx('7-ms-nofilter')]: { findings: ['field-type:blocker'] },
   // signature:blocker on the stale re-import, plus pivot-analytics warnings.
   // The tenant/unit lookups form a cycle, so the mandatory link is relaxed.
   [fx('9r-reimport')]: {
-    findings: ['lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'signature:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'],
+    findings: ['lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'signature:blocker', 'table-name-length-unverified:warning'],
     line: 4980,
   },
-  [fx('9-fa')]: { findings: ['custom-action:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 570 },
+  [fx('9-fa')]: { findings: ['custom-action:blocker'], line: 570 },
   // custom-action:blocker on every hand-grafted action; collection-to-scalar bindings warn.
-  [fx('10-each')]: { findings: ['custom-action:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 570 },
-  [fx('10-fixed')]: { findings: ['custom-action:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 570 },
-  [fx('10-int')]: { findings: ['custom-action:blocker', 'custom-action:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('10-noarg')]: { findings: ['custom-action:blocker', 'custom-action:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('10-nseach')]: { findings: ['custom-action:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 570 },
-  [fx('10-nsfixed')]: { findings: ['custom-action:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 570 },
-  [fx('10-nsint')]: { findings: ['custom-action:blocker', 'custom-action:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
+  [fx('10-each')]: { findings: ['custom-action:blocker'], line: 570 },
+  [fx('10-fixed')]: { findings: ['custom-action:blocker'], line: 570 },
+  [fx('10-int')]: { findings: ['custom-action:blocker', 'custom-action:warning'] },
+  [fx('10-noarg')]: { findings: ['custom-action:blocker', 'custom-action:warning'] },
+  [fx('10-nseach')]: { findings: ['custom-action:blocker'], line: 570 },
+  [fx('10-nsfixed')]: { findings: ['custom-action:blocker'], line: 570 },
+  [fx('10-nsint')]: { findings: ['custom-action:blocker', 'custom-action:warning'] },
   [fx('10-pm-bad')]: {
-    findings: ['custom-action:warning', 'lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'],
+    findings: ['custom-action:warning', 'lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'table-name-length-unverified:warning'],
   },
   // reserved-name:blocker when a workflow link name is Type.
-  [fx('11-all')]: { findings: ['reserved-name:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 608 },
-  [fx('11-wf')]: { findings: ['reserved-name:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 590 },
+  [fx('11-all')]: { findings: ['reserved-name:blocker'], line: 608 },
+  [fx('11-wf')]: { findings: ['reserved-name:blocker'], line: 590 },
   // insert-comment:blocker when a comment sits inside insert into [...].
-  [fx('12-block')]: { findings: ['insert-comment:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 608 },
-  [fx('12-line')]: { findings: ['insert-comment:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 608 },
+  [fx('12-block')]: { findings: ['insert-comment:blocker'], line: 608 },
+  [fx('12-line')]: { findings: ['insert-comment:blocker'], line: 608 },
   // legacy-getall:blocker for the doubled legacy traversal.
-  [fx('13-legacy')]: { findings: ['legacy-getall:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 608 },
+  [fx('13-legacy')]: { findings: ['legacy-getall:blocker'], line: 608 },
   // report-view:blocker when a lookup column view= names another form's report.
-  [fx('14-bad')]: { findings: ['report-view:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'], line: 616 },
+  [fx('14-bad')]: { findings: ['report-view:blocker'], line: 616 },
 };
 
 /** Creator imported these. Precheck must not block them. */
 const FIXED: Record<string, Expect> = {
-  [fx('1-fixed')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('2-fixed')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('3-fixed')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('4-fixed')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('6-fixed')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('7-cb-eq')]: { findings: ['report-filter:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('7b-mlookup')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('7c-slookup-ms')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
+  [fx('1-fixed')]: { findings: [] },
+  [fx('2-fixed')]: { findings: [] },
+  [fx('3-fixed')]: { findings: [] },
+  [fx('4-fixed')]: { findings: [] },
+  [fx('6-fixed')]: { findings: [] },
+  [fx('7-cb-eq')]: { findings: ['report-filter:warning'] },
+  [fx('7b-mlookup')]: { findings: [] },
+  [fx('7c-slookup-ms')]: { findings: [] },
   // signature and custom-action stay quiet on the base and matched-signature variants.
-  [fx('9-base')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('9-pm')]: { findings: ['lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('9-pm2')]: { findings: ['lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('10-base')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('10-nsfixed-noca')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
+  [fx('9-base')]: { findings: [] },
+  [fx('9-pm')]: {
+    findings: ['lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'table-name-length-unverified:warning'],
+  },
+  [fx('9-pm2')]: {
+    findings: ['lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'table-name-length-unverified:warning'],
+  },
+  [fx('10-base')]: { findings: [] },
+  [fx('10-nsfixed-noca')]: { findings: [] },
   // reserved-name stays quiet for a field Type, a report Type, and workflow Typex / type_wf.
-  [fx('11-field')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('11-fr')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('11-report')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('11-wfctl')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('11-wflower')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
+  [fx('11-field')]: { findings: [] },
+  [fx('11-fr')]: { findings: [] },
+  [fx('11-report')]: { findings: [] },
+  [fx('11-wfctl')]: { findings: [] },
+  [fx('11-wflower')]: { findings: [] },
   // insert-comment stays quiet when the insert brackets contain no comment.
-  [fx('12-none')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
+  [fx('12-none')]: { findings: [] },
   // legacy-getall stays quiet for the closest-that-saves form, the modern form, a for-each loop, and Creator's own re-export.
-  [fx('13-legacy2')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('13-loop')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('13-modern')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('13r-reimport')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('14-fixed')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
+  [fx('13-legacy2')]: { findings: [] },
+  [fx('13-loop')]: { findings: [] },
+  [fx('13-modern')]: { findings: [] },
+  [fx('13r-reimport')]: { findings: [] },
+  [fx('14-fixed')]: { findings: [] },
   // Runtime and data issues, not .ds defects: they import fine.
-  [fx('15')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('15b')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  [fx('16')]: { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
+  [fx('15')]: { findings: [] },
+  [fx('15b')]: { findings: [] },
+  [fx('16')]: { findings: [] },
 };
 
 /**
@@ -126,21 +130,27 @@ const FIXED: Record<string, Expect> = {
  * precheck must flag the signature drift it carries (signature:blocker).
  */
 const EXPORTED: Record<string, Expect> = {
-  'pm-export.ds': { findings: ['lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  'c9-export-pm.ds': { findings: ['lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  'c9-export-pm2-before.ds': { findings: ['lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
+  'pm-export.ds': {
+    findings: ['lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'table-name-length-unverified:warning'],
+  },
+  'c9-export-pm.ds': {
+    findings: ['lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'table-name-length-unverified:warning'],
+  },
+  'c9-export-pm2-before.ds': {
+    findings: ['lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'table-name-length-unverified:warning'],
+  },
   'c9-export-pm2-after.ds': {
-    findings: ['lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'signature:blocker', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'],
+    findings: ['lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'signature:blocker', 'table-name-length-unverified:warning'],
     line: 4980,
   },
-  'c10-export-base.ds': { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  'c10-export-noca.ds': { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
+  'c10-export-base.ds': { findings: [] },
+  'c10-export-noca.ds': { findings: [] },
   'c10-export-pm-bad.ds': {
-    findings: ['custom-action:warning', 'lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning', 'table-name-length-unverified:warning'],
+    findings: ['custom-action:warning', 'lookup-cycle:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'pivot-analytics:warning', 'table-name-length-unverified:warning'],
   },
-  'c11-export-fr.ds': { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  'c13-export-legacy2.ds': { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
-  'c13-export-modern.ds': { findings: ['table-name-length-unverified:warning', 'table-name-length-unverified:warning'] },
+  'c11-export-fr.ds': { findings: [] },
+  'c13-export-legacy2.ds': { findings: [] },
+  'c13-export-modern.ds': { findings: [] },
 };
 
 function run(name: string): PrecheckReport {
