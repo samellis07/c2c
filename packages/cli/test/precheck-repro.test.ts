@@ -6,7 +6,7 @@
  * $C2C_FIXTURES_DIR/regressions/INDEX.md is absent.
  */
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { decode, parseFile } from '../../core/src/index.js';
@@ -14,8 +14,18 @@ import { precheck, type PrecheckReport } from '../src/precheck.js';
 
 const fixtures = process.env.C2C_FIXTURES_DIR;
 const fixtureDir = fixtures ? path.join(fixtures, 'regressions') : '';
-const present =
-  !!fixtures && !!statSync(path.join(fixtureDir, 'INDEX.md'), { throwIfNoEntry: false })?.isFile();
+function indexAvailable(): boolean {
+  if (!fixtures) return false;
+  try {
+    readFileSync(path.join(fixtureDir, 'INDEX.md'));
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') return false;
+    throw error;
+  }
+}
+const present = indexAvailable();
 const skip = present ? false : 'C2C_FIXTURES_DIR/regressions/INDEX.md is not available; skipping import fixtures';
 
 interface Expect {

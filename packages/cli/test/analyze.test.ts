@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +14,12 @@ const fixtures = path.join(root, 'fixtures/redistributable');
 const goldenDir = path.join(root, 'packages/cli/test/golden');
 
 function load(target: string): App {
-  return target.endsWith('.ds') ? parseFile(target).ir : parseProject(target).ir;
+  try {
+    return parseFile(target).ir;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EISDIR') throw error;
+    return parseProject(target).ir;
+  }
 }
 
 const cases = [
@@ -54,6 +60,24 @@ for (const c of cases) {
     assert.equal(r.catalyst.cost, 'not estimated');
   });
 }
+
+test('a project directory named *.ds is parsed as a project, not a file', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'c2c-dsdir-'));
+  try {
+    const project = path.join(dir, 'project.ds');
+    mkdirSync(project);
+    writeFileSync(path.join(project, 'main.ds'), 'application "Dir_Project"\n{\n}\n');
+    const app = load(project);
+    assert.equal(app.name, 'Dir_Project');
+    assert.deepEqual(app.files, ['main.ds']);
+    assert.throws(
+      () => load(path.join(dir, 'missing.ds')),
+      (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 const TWO_DELUGE_UNITS = `application "TwoUnits"
 {

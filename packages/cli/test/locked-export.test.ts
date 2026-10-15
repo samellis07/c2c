@@ -13,7 +13,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -153,8 +153,15 @@ test('a real gallery .ds still passes precheck (no locked refusal)', () => {
   assert.ok(ok.status === 0 || ok.status === 1, `exit ${ok.status} stderr=${ok.stderr}`);
   assert.doesNotMatch(ok.stderr, /locked Marketplace install/);
   const gallery = process.env.C2C_FIXTURES_DIR;
-  const probe = gallery ? path.join(gallery, 'fixtures/c2c-test-batch/c2c-test-batch.ds') : '';
-  if (!gallery || !statSync(probe, { throwIfNoEntry: false })?.isFile()) return;
+  if (!gallery) return;
+  const probe = path.join(gallery, 'fixtures/c2c-test-batch/c2c-test-batch.ds');
+  try {
+    readFileSync(probe);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') return;
+    throw error;
+  }
   const g = run('precheck', probe);
   assert.ok(g.status === 0 || g.status === 1, `gallery exit ${g.status} stderr=${g.stderr}`);
   assert.doesNotMatch(g.stderr, /locked Marketplace install/);
