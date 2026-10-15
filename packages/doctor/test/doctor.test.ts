@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,6 +44,7 @@ import requiredTools from '../data/required-mcp-tools.json' with { type: 'json' 
 import { repoRoot } from '../../core/src/toolchain.js';
 import { ALL_REQUIRED_MCP_TOOLS, MCP_TOOLS_GUIDANCE, NEVER_CALL_MCP_TOOLS, REQUIRED_MCP_TOOLS } from '../src/required-tools.js';
 import { VERIFIED_MCP_TOOL_REGISTRY, isVerifiedMcpTool } from '../../deploy/src/mcp-registry.js';
+import { findVendorRoot } from '../src/checks.js';
 
 const ORG = '10000000000';
 const PROJECT = '10000000000013200';
@@ -1829,4 +1831,124 @@ test('D-F5 passes at the column cap and fails one over it, naming the table and 
 test('D-F5 passes a table at or under the stated default', () => {
   const result = f5TableBudgets([tableOf('Plain', limitValue('datastore.columns_per_table_default'))]);
   assert.equal(result.status, 'pass', result.detail);
+});
+
+// ---------- single-read file classification ----------
+
+/** A named pipe at `path`. Reading it with no writer would block, so a check that opens it blocking hangs the test. */
+function fifo(path: string): string {
+  execFileSync('mkfifo', [path]);
+  return path;
+}
+
+test('D-D1: an absent export, a directory or a FIFO fails as not a .ds export, never hangs', async () => {
+  const { dir, env } = greenWorkspace();
+  const scope = resolveScope({ cwd: dir, flags: {}, hooks: NO_HOOKS });
+  const d1 = async (appPath: string) => {
+    const { io } = fakeIo(env);
+    const result = await runDoctorChecks({ io, workspace: dir, scope, local: true, appPath, cliDc: () => undefined, cliOrg: () => undefined });
+    return result.checks.find((c) => c.id === 'D-D1');
+  };
+  const good = join(dir, 'Widget.ds');
+  writeFileSync(good, 'application "Widget"\n{\n\tsection S\n\t{\n\t\tform F\n\t\t{\n\t\t\tName\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)\n\t\t}\n\t}\n}\n');
+  const passed = await d1(good);
+  assert.equal(passed?.status, 'pass', JSON.stringify(passed));
+  assert.match(passed?.detail ?? '', /^export: Widget\.ds 0 KB, shape \w+, parses$/);
+  mkdirSync(join(dir, 'Folder.ds'));
+  for (const target of [join(dir, 'Absent.ds'), join(dir, 'Widget.ds', 'under-a-file.ds'), join(dir, 'Folder.ds'), fifo(join(dir, 'Pipe.ds'))]) {
+    const check = await d1(target);
+    assert.equal(check?.status, 'fail', `${target}: ${JSON.stringify(check)}`);
+    assert.match(check?.detail ?? '', /is empty or not a \.ds export$/);
+  }
+});
+
+test('D-D3: an absent --source-csv, a file or a FIFO is not a directory', async () => {
+  const { dir, env } = greenWorkspace();
+  const scope = resolveScope({ cwd: dir, flags: {}, hooks: NO_HOOKS });
+  const d3 = async (sourceCsv: string) => {
+    const { io } = fakeIo(env);
+    const result = await runDoctorChecks({ io, workspace: dir, scope, local: false, sourceCsv, cliDc: () => undefined, cliOrg: () => undefined });
+    return result.checks.find((c) => c.id === 'D-D3');
+  };
+  writeFileSync(join(dir, 'data.csv'), 'ID\n1\n');
+  for (const target of [join(dir, 'absent'), join(dir, 'data.csv'), join(dir, 'data.csv', 'under'), fifo(join(dir, 'pipe'))]) {
+    const check = await d3(target);
+    assert.equal(check?.status, 'fail', `${target}: ${JSON.stringify(check)}`);
+    assert.equal(check?.detail, `--source-csv ${target} is not a directory`);
+  }
+  // A real directory gets past the directory check to the counts.json finding.
+  mkdirSync(join(dir, 'empty'));
+  assert.equal((await d3(join(dir, 'empty')))?.detail, 'counts.json is missing');
+});
+
+test('doctor --record-mcp: an absent file, a directory or a FIFO is "no such evidence file", exit 2', async () => {
+  const { dir, env } = greenWorkspace();
+  mkdirSync(join(dir, 'evidence-dir'));
+  for (const target of [join(dir, 'absent.json'), join(dir, 'evidence-dir'), fifo(join(dir, 'evidence.pipe'))]) {
+    const { io, err } = fakeIo(env, greenCatalyst);
+    const code = await doctorCli(['--record-mcp', target, '--operator'], io, { hooks: NO_HOOKS });
+    assert.equal(code, 2, target);
+    assert.equal(err(), `c2c doctor: no such evidence file: ${target}\n`);
+  }
+  assert.equal(existsSync(doctorJsonPath(dir)), false);
+});
+
+test('gate: doctor.json absent or a symlink loop is not-run; a directory or a FIFO is invalid, never a hang', () => {
+  const absent = tmp();
+  assert.equal(evaluateGate({ workspace: absent, scope: SCOPE }).status, 'not-run');
+  const loop = tmp();
+  mkdirSync(join(doctorJsonPath(loop), '..'), { recursive: true });
+  symlinkSync(doctorJsonPath(loop), doctorJsonPath(loop));
+  assert.equal(evaluateGate({ workspace: loop, scope: SCOPE }).status, 'not-run');
+  const asDir = tmp();
+  mkdirSync(doctorJsonPath(asDir), { recursive: true });
+  assert.equal(evaluateGate({ workspace: asDir, scope: SCOPE }).status, 'invalid');
+  const asPipe = tmp();
+  mkdirSync(join(doctorJsonPath(asPipe), '..'), { recursive: true });
+  fifo(doctorJsonPath(asPipe));
+  assert.equal(evaluateGate({ workspace: asPipe, scope: SCOPE }).status, 'invalid');
+  assert.equal(doctorStamp({ workspace: asPipe }).status, 'not-run');
+});
+
+test('vendor: a manifest that is a directory or a FIFO is "no readable" manifest, never a hang', () => {
+  for (const make of [(p: string) => mkdirSync(p), (p: string) => fifo(p)]) {
+    const dir = vendorDir('manifest-missing');
+    make(join(dir, MANIFEST_NAME));
+    const verdict = verifyVendorDir(dir);
+    assert.equal(verdict.ok, false);
+    assert.equal(verdict.error, `no readable ${MANIFEST_NAME}`);
+  }
+});
+
+test('D-E3 vendor root: found by MANIFEST and VERSION of any kind; VERSION names the vendor when it is a file', () => {
+  const root = tmp();
+  const start = join(root, 'dist', 'doctor', 'src');
+  mkdirSync(start, { recursive: true });
+  assert.equal(findVendorRoot(start), undefined);
+  writeFileSync(join(root, MANIFEST_NAME), '');
+  assert.equal(findVendorRoot(start), undefined, 'MANIFEST without VERSION is not a root');
+  writeFileSync(join(root, 'VERSION'), '1.2.3\n');
+  assert.deepEqual(findVendorRoot(start), { dir: root, name: 'c2c 1.2.3' });
+  rmSync(join(root, 'VERSION'));
+  mkdirSync(join(root, 'VERSION'));
+  assert.deepEqual(findVendorRoot(start), { dir: root, name: 'c2c' });
+  rmSync(join(root, 'VERSION'), { recursive: true });
+  fifo(join(root, 'VERSION'));
+  assert.deepEqual(findVendorRoot(start), { dir: root, name: 'c2c' });
+  // A dangling VERSION symlink is absent, as existsSync saw it.
+  rmSync(join(root, 'VERSION'));
+  symlinkSync(join(root, 'nowhere'), join(root, 'VERSION'));
+  assert.equal(findVendorRoot(start), undefined);
+});
+
+test('D-A1: a SKILL.md that is a directory or a FIFO is not a skill, never a hang', async () => {
+  for (const make of [(p: string) => mkdirSync(p), (p: string) => fifo(p)]) {
+    const { env } = greenWorkspace();
+    const skill = join(env.C2C_CATALYST_SKILLS_DIR!, 'catalyst-by-zoho', 'SKILL.md');
+    rmSync(skill);
+    make(skill);
+    const { io, out } = fakeIo(env, greenCatalyst);
+    assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 1);
+    assert.match(out(), /FAIL D-A1/);
+  }
 });
