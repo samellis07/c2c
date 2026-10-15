@@ -334,6 +334,9 @@ test('pathological style values finish fast instead of backtracking', async () =
     ['comment openers under the cap', () => stripStyleComments(`${'/*'.repeat(3000)}a`)],
     ['unclosed call', () => cleanStyle(`width:${'a'.repeat(3000)}(${'b'.repeat(3000)}`)],
     ['unclosed call (print)', () => cleanPrintStyle(`width:${'a'.repeat(3000)}(${'b'.repeat(3000)}`)],
+    ['rgb digits under the cap', () => cleanStyle(`color:rgb(${'1'.repeat(8170)}!)`)],
+    ['rgb digits under the cap (print)', () => cleanPrintStyle(`color:rgb(${'1'.repeat(8170)}!)`)],
+    ['rgb digits under the cap in a snippet', () => runtimeSnippet(`<div style="color:rgb(${'1'.repeat(8170)}!)">x</div>`, doc)],
     ['unclosed call in a snippet', () => runtimeSnippet(`<div style="width:${'a'.repeat(3000)}(${'b'.repeat(3000)}">x</div>`, doc)],
   ];
   for (const [label, runCase] of cases) {
