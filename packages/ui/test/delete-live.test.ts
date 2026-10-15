@@ -238,7 +238,7 @@ test('the generated delete endpoint removes a permitted row in live mode', async
   }
 });
 
-test('delete success workflow failure is reported after the row has committed', async () => {
+async function postCommitDelete(moduleSource: string): Promise<{ status: number; body: Record<string, unknown>; rowExists: boolean }> {
   const built = buildUi(deriveIr(parse(SOURCE)));
   const dir = mkdtempSync(join(tmpdir(), 'c2c-delete-success-failure-'));
   const prevMode = process.env.C2C_DEPLOY_MODE;
@@ -253,12 +253,7 @@ test('delete success workflow failure is reported after the row has committed', 
     for (const file of built.files) {
       const full = join(dir, file.path);
       mkdirSync(dirname(full), { recursive: true });
-      writeFileSync(
-        full,
-        file === successModule
-          ? 'export async function handle() { throw new Error("workflow failed"); }\n'
-          : file.data,
-      );
+      writeFileSync(full, file === successModule ? moduleSource : file.data);
     }
 
     const require = createRequire(import.meta.url);
@@ -278,13 +273,34 @@ test('delete success workflow failure is reported after the row has committed', 
     };
     const id = String((await sdkApp.datastore().table('Item').insertRows([{ Name: 'committed', Owner: 'ada@example.test' }]))[0].ROWID);
     const result = await invoke(del.default, { ...staff, body: { ROWID: id } });
-    assert.equal(result.status, 500, JSON.stringify(result.body));
-    assert.equal(result.body.deleted, true, 'the response must distinguish post-commit failure from failed deletion');
-    assert.equal(result.body.error, 'request failed');
-    assert.ok(!(fakeSdk.state().tables.Item ?? []).some((row) => String(row.ROWID) === id), 'success workflow failure must not restore a deleted row');
+    const rowExists = (fakeSdk.state().tables.Item ?? []).some((row) => String(row.ROWID) === id);
+    return { ...result, rowExists };
   } finally {
     if (prevMode === undefined) delete process.env.C2C_DEPLOY_MODE;
     else process.env.C2C_DEPLOY_MODE = prevMode;
     rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('delete post-commit failures keep deleted:true and never restore the row', async () => {
+  for (const failure of [
+    {
+      name: 'generic',
+      status: 500,
+      error: 'request failed',
+      source: 'export async function handle() { throw new Error("workflow failed"); }\n',
+    },
+    {
+      name: 'access',
+      status: 403,
+      error: 'not allowed',
+      source: 'export async function handle() { const err = new Error("not allowed"); err.code = "RECORD_ACCESS_DENIED"; throw err; }\n',
+    },
+  ]) {
+    const result = await postCommitDelete(failure.source);
+    assert.equal(result.status, failure.status, `${failure.name}: ${JSON.stringify(result.body)}`);
+    assert.equal(result.body.deleted, true, `${failure.name}: the response must distinguish post-commit failure from failed deletion`);
+    assert.equal(result.body.error, failure.error, failure.name);
+    assert.equal(result.rowExists, false, `${failure.name}: a post-commit failure must not restore a deleted row`);
   }
 });
