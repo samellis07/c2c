@@ -70,6 +70,7 @@ import {
   htmlDecode,
   htmlEncode,
 } from './text.js';
+import { executeXpath, toXml, toXmlList } from './xml.js';
 import {
   bindRelativeCriteria,
   compareCells,
@@ -844,6 +845,11 @@ export interface Shim {
     rtrim(value: unknown): string | null;
     repeat(value: unknown, n: unknown): string | null;
     reverse(value: unknown): string | null;
+  };
+  xml: {
+    toXml(value: unknown, ...extra: unknown[]): string;
+    toXmlList(value: unknown, ...extra: unknown[]): string[];
+    executeXpath(value: unknown, xpath?: unknown, ...extra: unknown[]): string;
   };
   file: {
     /** Name of a Stratus key or `{ key, name }`. Null when the value is not a file. */
@@ -3476,6 +3482,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       repeat,
       reverse,
     },
+    xml: { toXml, toXmlList, executeXpath },
     file: { getFileName, actualname },
     isBlank(value) {
       if (value == null) return true;
