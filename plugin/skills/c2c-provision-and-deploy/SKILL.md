@@ -22,8 +22,9 @@ The end-of-run checklist and its read-back limits are documented in the [live-ru
 - **Customer steps.** Everything else is automated; the user takes only these, in order — list exactly these when you hand over:
   1. Slate start: in the Catalyst console open the project → Slate → Start Exploring
   2. Accept invite: accept the app invite mail
-  3. Sign in once: open the Slate app URL, confirm the Catalyst sign-in page loads, record `sign_in_page: true`, then sign in with the invited account when an invite applies. This page check does not prove a successful sign-in.
-  4. Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
+  3. Sign in once: sign in to the deployed app once
+  4. Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
+  5. Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
 - **Teardown boundary (C2C.md rule 15). A failed step never deletes the project. Teardown happens only on the user's explicit request or on a failure before the Slate "Start Exploring" step; once any human or console step has run, the project is kept — stop and report.
 
 ## Step 1 — The project (guided, the user)

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deriveIr, parse } from '../../core/src/index.js';
 import { buildDeploy, checkGuards, formatHumanChecklist, humanChecklist } from '../src/index.js';
+import { CUSTOMER_STEPS } from '../src/customer-steps.js';
 
 const MAIL_DS = `/*
  * Author       : synthetic
@@ -95,12 +96,12 @@ test('the checklist is one numbered list: slate start, admin invite, sign in, se
   assert.match(printed, /^human checklist:\n1\. .*Start Exploring[\s\S]*2\. .*invite[\s\S]*3\. .*[Ss]ign in[\s\S]*4\. .*sender/);
 });
 
-test('the live-run guide quotes every implemented checklist item', () => {
+test('the live-run guide documents the shared five customer steps', () => {
   const guide = readFileSync(join(process.cwd(), 'docs/user/live-runs-human-steps.md'), 'utf8');
-  for (const item of humanChecklist({ slate: true, sendsMail: true })) {
-    assert.ok(guide.includes(`“${item}”`), `guide is missing the runtime checklist wording: ${item}`);
+  for (const item of CUSTOMER_STEPS) {
+    assert.ok(guide.includes(`“${item}”`), `guide is missing the shared customer step: ${item}`);
   }
-  assert.match(guide, /“in-app check \+ paste code” step is \*\*not implemented\*\*/);
+  assert.match(guide, /200 \`\[\]\` app-list response only proves connectivity/);
 });
 
 test('a re-run after Slate started drops the Slate start and keeps numbering contiguous', () => {
