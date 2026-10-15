@@ -6,7 +6,7 @@ path or an email address into `doctor.json`. Every FAIL line carries the exact
 fix for the user to run; doctor runs no fix itself.
 
 ```
-c2c doctor [--app <file.ds>] [--dc <dc>] [--org <id>] [--project <id>] [--ui vanilla|react] [--json]
+c2c doctor [--app <file.ds|dir>] [--dc <dc>] [--org <id>] [--project <id>] [--ui vanilla|react] [--json]
 c2c doctor --mcp-begin [--json]    open a one-time request naming the MCP calls to make
 c2c doctor --mcp-observed -        record evidence from the observed call results (stdin), then run D-B*/D-V*
 c2c doctor --record-mcp <file> --operator   operator-only: merge a supplied evidence file

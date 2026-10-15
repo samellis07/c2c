@@ -2087,7 +2087,7 @@ function fifo(path: string): string {
   return path;
 }
 
-test('D-D1: an absent export, a directory or a FIFO fails as not a .ds export, never hangs', async () => {
+test('D-D1: an absent export, a FIFO or a directory without a .ds fails as not a .ds export, never hangs', async () => {
   const { dir, env } = greenWorkspace();
   const scope = resolveScope({ cwd: dir, flags: {}, hooks: NO_HOOKS });
   const d1 = async (appPath: string) => {
@@ -2101,11 +2101,48 @@ test('D-D1: an absent export, a directory or a FIFO fails as not a .ds export, n
   assert.equal(passed?.status, 'pass', JSON.stringify(passed));
   assert.match(passed?.detail ?? '', /^export: Widget\.ds 0 KB, shape \w+, parses$/);
   mkdirSync(join(dir, 'Folder.ds'));
-  for (const target of [join(dir, 'Absent.ds'), join(dir, 'Widget.ds', 'under-a-file.ds'), join(dir, 'Folder.ds'), fifo(join(dir, 'Pipe.ds'))]) {
+  for (const target of [join(dir, 'Absent.ds'), join(dir, 'Widget.ds', 'under-a-file.ds'), fifo(join(dir, 'Pipe.ds'))]) {
     const check = await d1(target);
     assert.equal(check?.status, 'fail', `${target}: ${JSON.stringify(check)}`);
     assert.match(check?.detail ?? '', /is empty or not a \.ds export$/);
   }
+  const emptyDir = await d1(join(dir, 'Folder.ds'));
+  assert.equal(emptyDir?.status, 'fail', JSON.stringify(emptyDir));
+  assert.match(emptyDir?.detail ?? '', /holds no \.ds export$/);
+});
+
+test('D-D1: an export directory resolves its single .ds, merges a multi-file export and refuses two exports', async () => {
+  const { dir, env } = greenWorkspace();
+  const scope = resolveScope({ cwd: dir, flags: {}, hooks: NO_HOOKS });
+  const d1 = async (appPath: string) => {
+    const { io } = fakeIo(env);
+    const result = await runDoctorChecks({ io, workspace: dir, scope, local: true, appPath, cliDc: () => undefined, cliOrg: () => undefined });
+    return result.checks.find((c) => c.id === 'D-D1');
+  };
+  const source = 'application "Widget"\n{\n\tsection S\n\t{\n\t\tform F\n\t\t{\n\t\t\tName\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)\n\t\t}\n\t}\n}\n';
+  // A directory holding exactly one .ds is that export.
+  const one = join(dir, 'one-app');
+  mkdirSync(one);
+  writeFileSync(join(one, 'Widget.ds'), source);
+  const single = await d1(one);
+  assert.equal(single?.status, 'pass', JSON.stringify(single));
+  assert.match(single?.detail ?? '', /^export: Widget\.ds 0 KB, shape \w+, parses$/);
+  // A multi-file export folder merges into one IR.
+  const multi = join(dir, 'multi-app');
+  mkdirSync(join(multi, 'forms'), { recursive: true });
+  writeFileSync(join(multi, 'app.ds'), 'application "Widget"\n{\n}\n');
+  writeFileSync(join(multi, 'forms', 'F.ds'), 'form F\n{\n\tName\n\t(\n\t\ttype = text\n\t)\n}\n');
+  const merged = await d1(multi);
+  assert.equal(merged?.status, 'pass', JSON.stringify(merged));
+  assert.match(merged?.detail ?? '', /^export: multi-app\/ 2 files, shape \w+, parses$/);
+  // Two monolithic exports in one folder are two apps — refuse, do not merge.
+  const two = join(dir, 'two-apps');
+  mkdirSync(two);
+  writeFileSync(join(two, 'Alpha.ds'), 'application "Alpha"\n{\n}\n');
+  writeFileSync(join(two, 'Beta.ds'), 'application "Beta"\n{\n}\n');
+  const ambiguous = await d1(two);
+  assert.equal(ambiguous?.status, 'fail', JSON.stringify(ambiguous));
+  assert.match(ambiguous?.detail ?? '', /holds 2 \.ds exports \(Alpha\.ds, Beta\.ds\)$/);
 });
 
 test('D-D3: an absent --source-csv, a file or a FIFO is not a directory', async () => {

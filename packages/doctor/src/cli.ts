@@ -30,6 +30,7 @@ import { formatAge, loadMcpEvidence, MCP_EVIDENCE_MAX_AGE_HOURS, writeMcpEvidenc
 import { cliStoreHooks, resolveScope, type ScopeHooks } from './scope.js';
 import { verifyVendorDir } from './vendor.js';
 import { readRegularFile } from './read-file.js';
+import { isDirectoryPath, listDsFiles } from '../../core/src/index.js';
 import { GATE_EXIT, carriedMcpRecord, doctorStamp, evaluateGate, gateRefusalMessage, type GateScope } from './gate.js';
 import type { CheckResult, DoctorFile, DoctorIo, SpawnResult } from './types.js';
 
@@ -42,7 +43,7 @@ export function flag(args: readonly string[], name: string): string | undefined 
 }
 
 const USAGE =
-  'usage: c2c doctor [--app <file.ds>] [--dc <dc>] [--org <id>] [--project <id>] [--config <file>] [--creator-dc <dc|host>] [--source-csv <dir>] [--ui vanilla|react] [--json] [--local] [--quiet]\n' +
+  'usage: c2c doctor [--app <file.ds|dir>] [--dc <dc>] [--org <id>] [--project <id>] [--config <file>] [--creator-dc <dc|host>] [--source-csv <dir>] [--ui vanilla|react] [--json] [--local] [--quiet]\n' +
   '       c2c doctor --mcp-begin [--json]\n' +
   '       c2c doctor --mcp-observed - [scope flags]\n' +
   '       c2c doctor --record-mcp <file> --operator   (operator-only)\n' +
@@ -189,9 +190,15 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
     io.stderr(`c2c doctor: ${err instanceof Error ? err.message : String(err)}\n`);
     return 2;
   }
-  // The app's own link name (the .ds `application` name or the file name) for scope.app.
+  // The app's own link name (the .ds `application` name or the file name) for
+  // scope.app. A directory target names its single .ds when there is one.
   if (!scope.app && parsed.app) {
-    scope.app = basename(parsed.app).replace(/\.ds$/i, '');
+    let named = parsed.app;
+    if (isDirectoryPath(named)) {
+      const ds = listDsFiles(named);
+      if (ds.length === 1) named = ds[0]!;
+    }
+    scope.app = basename(named).replace(/\.ds$/i, '');
   }
   const probeTarget: ProbeTarget = {
     ...(scope.org !== undefined ? { org: scope.org } : {}),

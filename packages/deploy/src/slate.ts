@@ -133,6 +133,33 @@ export async function waitForSlateApp(
   return false;
 }
 
+/** Waits between served-domain read-backs: the domain can lag the app listing after a deploy (~28 s in total). */
+export const SLATE_DOMAIN_WAITS_MS: readonly number[] = [4000, 8000, 16000];
+
+/**
+ * `readSlateAppUrl`, waiting while the answer is "listed but not served yet":
+ * the named app is in the list but no domain resolves. The domain can lag the
+ * build, so one read is not proof there is none. Bounded and fail-closed: an
+ * absent app or two same-name apps return at once (absence stays a note,
+ * ambiguity is a human's pick), and an app that never serves a domain comes
+ * back with readSlateAppUrl's note.
+ */
+export async function waitForSlateDomain(
+  rest: RestFn,
+  projectId: string,
+  appName: string,
+  opts: RetryOptions = {},
+  waits: readonly number[] = SLATE_DOMAIN_WAITS_MS,
+): Promise<SlateRead> {
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  let found = await readSlateAppUrl(rest, projectId, appName, opts);
+  for (let attempt = 0; attempt < waits.length && !found.url && found.listed && found.apps.length === 1; attempt += 1) {
+    await sleep(waits[attempt] as number);
+    found = await readSlateAppUrl(rest, projectId, appName, opts);
+  }
+  return found;
+}
+
 export interface SlateRead {
   /** The app list answered 2xx; `apps` is then the exact-name match set. */
   listed: boolean;

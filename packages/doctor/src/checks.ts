@@ -18,7 +18,7 @@
 import { constants, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync, type Dirent } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { parseBytes, parseFile, type App } from '../../core/src/index.js';
+import { isDirectoryPath, listDsFiles, parseBytes, parseFile, parseFileOrProject, parseProject, type App, type ParsedFile } from '../../core/src/index.js';
 import { nodeSatisfies, REACT_BUILD_NODE_RANGE } from '../../core/src/toolchain.js';
 import { generateSchema, limitValue, type SchemaTable } from '../../schema/src/index.js';
 import compat from '../data/compat.json' with { type: 'json' };
@@ -44,7 +44,7 @@ export interface DoctorContext {
   /** Workspace (c2c-out lives here). */
   workspace: string;
   scope: ResolvedScopeValues;
-  /** --app .ds path. */
+  /** --app .ds path, or a directory holding the export. */
   appPath?: string;
   /** --source-csv dir. */
   sourceCsv?: string;
@@ -470,30 +470,93 @@ function checkC5(ctx: DoctorContext): CheckResult {
 
 // ---------- D-D*: the Creator export and data source ----------
 
+/**
+ * The export a `--app` directory names: exactly one `.ds` resolves to that
+ * file; several `.ds` resolve to the multi-file export folder only when at
+ * most one of them is a monolithic export (shape A/B carries `application`).
+ * Two monolithic files are two separate exports in one folder — ambiguous, so
+ * the caller refuses instead of silently merging two apps.
+ */
+function exportDirTarget(dir: string): { kind: 'file'; path: string } | { kind: 'project' } | { kind: 'none' } | { kind: 'ambiguous'; exports: string[] } {
+  const ds = listDsFiles(dir);
+  if (ds.length === 0) return { kind: 'none' };
+  if (ds.length === 1) return { kind: 'file', path: ds[0]! };
+  const monolithic = ds.filter((path) => {
+    try {
+      const shape = parseFile(path).ir.shape;
+      return shape === 'A' || shape === 'B';
+    } catch {
+      return false;
+    }
+  });
+  if (monolithic.length > 1) return { kind: 'ambiguous', exports: monolithic.map((path) => basename(path)) };
+  return { kind: 'project' };
+}
+
 function checkD1(ctx: DoctorContext): { result: CheckResult; ir?: App } {
   const target = ctx.appPath;
   if (!target) return { result: skip('D-D1', 'no --app given; the Creator export was not checked') };
   const fix =
     'in Creator: app → Settings → Export (.ds); if the export is blank, run /c2c:analyze on any earlier export to find the broken component, fix it in Creator, export again';
-  // One open classifies and reads the export; the parse uses those bytes.
+  // One open classifies and reads the export; the parse uses those bytes. A
+  // directory is the exported app folder: one .ds in it, or the multi-file
+  // export layout, is the export; anything else refuses.
   const read = readRegularFile(target);
-  if (read.kind !== 'file' || read.bytes.length === 0 || read.bytes.every((b) => b <= 0x20)) {
-    return { result: fail('D-D1', `${basename(target)} is empty or not a .ds export`, fix) };
+  let filePath = target;
+  let bytes: Uint8Array;
+  let project: { files: ParsedFile[]; ir: App } | undefined;
+  if (read.kind === 'file') {
+    bytes = read.bytes;
+  } else {
+    if (!isDirectoryPath(target)) {
+      return { result: fail('D-D1', `${basename(target)} is empty or not a .ds export`, fix) };
+    }
+    const dir = exportDirTarget(target);
+    if (dir.kind === 'none') {
+      return { result: fail('D-D1', `${basename(target)}/ holds no .ds export`, fix) };
+    }
+    if (dir.kind === 'ambiguous') {
+      return {
+        result: fail('D-D1', `${basename(target)}/ holds ${dir.exports.length} .ds exports (${dir.exports.join(', ')})`, `${fix}; or pass --app <one of those files>`),
+      };
+    }
+    if (dir.kind === 'file') {
+      filePath = dir.path;
+      const inner = readRegularFile(filePath);
+      if (inner.kind !== 'file') return { result: fail('D-D1', `${basename(filePath)} is empty or not a .ds export`, fix) };
+      bytes = inner.bytes;
+    } else {
+      try {
+        project = parseProject(target);
+      } catch (err) {
+        return { result: fail('D-D1', `cannot parse ${basename(target)}/ (${err instanceof Error ? err.message : 'parse error'})`, fix) };
+      }
+      bytes = new Uint8Array(0);
+    }
   }
-  const bytes = read.bytes;
   let ir: App;
   let errors: number;
-  try {
-    const file = parseBytes(target, bytes);
-    ir = file.ir;
-    errors = file.cst.errors.length;
-  } catch (err) {
-    return { result: fail('D-D1', `cannot parse ${basename(target)} (${err instanceof Error ? err.message : 'parse error'})`, fix) };
+  if (project) {
+    ir = project.ir;
+    errors = project.files.reduce((count, file) => count + file.cst.errors.length, 0);
+  } else {
+    if (bytes.length === 0 || bytes.every((b) => b <= 0x20)) {
+      return { result: fail('D-D1', `${basename(filePath)} is empty or not a .ds export`, fix) };
+    }
+    try {
+      const file = parseBytes(filePath, bytes);
+      ir = file.ir;
+      errors = file.cst.errors.length;
+    } catch (err) {
+      return { result: fail('D-D1', `cannot parse ${basename(filePath)} (${err instanceof Error ? err.message : 'parse error'})`, fix) };
+    }
   }
+  const label = project ? `${basename(target)}/` : basename(filePath);
   if (!ir.name || ir.dialect === 'snippet' || errors > 0) {
-    return { result: fail('D-D1', `${basename(target)} is empty or not a .ds export`, fix) };
+    return { result: fail('D-D1', `${label.replace(/\/$/, '')} is empty or not a .ds export`, fix) };
   }
-  return { result: pass('D-D1', `export: ${basename(target)} ${Math.round(bytes.length / 1024)} KB, shape ${ir.shape}, parses`), ir };
+  const size = project ? `${project.files.length} files` : `${Math.round(bytes.length / 1024)} KB`;
+  return { result: pass('D-D1', `export: ${label} ${size}, shape ${ir.shape}, parses`), ir };
 }
 
 /**
@@ -612,7 +675,7 @@ function checkD3(ctx: DoctorContext): CheckResult {
   if (ctx.appPath) {
     let app: App | undefined;
     try {
-      app = parseFile(ctx.appPath).ir;
+      app = parseFileOrProject(ctx.appPath).ir;
     } catch {
       /* D-D1 reports the parse failure */
     }
