@@ -660,11 +660,11 @@ function renderElement(el, doc, parentReport, appModel) {
   }
   if (el.kind === 'embed') {
     const spec = el.embed || {};
-    const url = typeof spec.url === 'string' && /^https?:\/\//i.test(spec.url) ? spec.url : '';
+    const url = typeof spec.url === 'string' && /^https:\/\//i.test(spec.url) ? spec.url : '';
     if (!url) return kids;
     const embedWidth = /^[0-9]+$/.test(spec.width || '') ? ` width="${spec.width}"` : '';
     const embedHeight = /^[0-9]+$/.test(spec.height || '') ? ` height="${spec.height}"` : '';
-    return `<iframe class="embed" src="${escapeHtml(url)}"${embedWidth}${embedHeight} loading="lazy" referrerpolicy="no-referrer" title="${escapeHtml(el.name || el.tag)}"></iframe>${kids}`;
+    return `<iframe class="embed" src="${escapeHtml(url)}" sandbox=""${embedWidth}${embedHeight} loading="lazy" referrerpolicy="no-referrer" title="${escapeHtml(el.name || el.tag)}"></iframe>${kids}`;
   }
   if (el.kind === 'todo') {
     // A page TODO is a migration note for the developer, not app content: it

@@ -18,6 +18,7 @@
  * a handler writes at all.
  */
 const { existsSync, readFileSync } = require('node:fs');
+const { randomUUID } = require('node:crypto');
 const { join } = require('node:path');
 const { pathToFileURL } = require('node:url');
 
@@ -146,6 +147,13 @@ function errorReply(res, status, message, extra = {}, err) {
 
 function normalizeErrorBody(body, responseStatus) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+  if (responseStatus >= 500) {
+    const correlationId = randomUUID();
+    // Handler response bodies can contain runtime messages, stacks, query
+    // fragments, or record values. Keep them in the server log only.
+    console.error(`c2c_api: handler returned ${responseStatus} correlationId=${correlationId} body=${JSON.stringify(body)}`);
+    return { code: 'INTERNAL_ERROR', message: 'Internal server error', correlationId };
+  }
   const out = { ...body };
   const oldMessage = typeof out.message === 'string' ? out.message : typeof out.error === 'string' ? out.error : '';
   const status = Number.isInteger(out.status) ? out.status : responseStatus;
