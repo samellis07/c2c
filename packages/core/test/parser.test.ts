@@ -789,3 +789,58 @@ for (const fx of FIXTURES) {
     assert.ok(f.ir.workflows.every((w) => w.deluge === null || f.cst.source.slice(w.deluge.span.start, w.deluge.span.end) === w.deluge.text));
   });
 }
+
+test('a button on-click actions block with trailing Deluge splits into its handler and the trailing run', () => {
+  const src = [
+    'application "Demo"',
+    '{',
+    '\tforms',
+    '\t{',
+    '\t\tform Pick',
+    '\t\t{',
+    '\t\t\tMember',
+    '\t\t\t(',
+    '\t\t\t\ttype = number',
+    '\t\t\t)',
+    '\t\t}',
+    '\t}',
+    '\tworkflow',
+    '\t{',
+    '\t\tform',
+    '\t\t{',
+    '\t\t\tPick_Button as "Pick Button"',
+    '\t\t\t{',
+    '\t\t\t\ttype =  form',
+    '\t\t\t\tform = Pick',
+    '\t\t\t\tbutton = Go',
+    '\t\t\t\ton click',
+    '\t\t\t\t{',
+    '\t\t\t\t\tactions ',
+    '\t\t\t\t\t{',
+    '\t\t\t\t\ton click',
+    '\t\t\t\t\t(',
+    '\t\t\t\t\t\tx = input.Member;',
+    '\t\t\t\t\t)',
+    '\t\t\t\t\t\topenURL("#Script:page.close","new window");',
+    '\t\t\t\t\t}',
+    '\t\t\t\t}',
+    '\t\t\t}',
+    '\t\t}',
+    '\t}',
+    '}',
+    '',
+  ].join('\n');
+  assertRoundTrip(src);
+  const app = ir(src);
+  const entries = app.workflows.filter((w) => w.name === 'Pick_Button');
+  assert.deepEqual(
+    entries.map((w) => [w.event, w.deluge?.text.trim()]),
+    [
+      ['on click', 'x = input.Member;'],
+      ['on click', 'openURL("#Script:page.close","new window");'],
+    ],
+  );
+  // The handler header is structure, never part of a Deluge body.
+  assert.ok(entries.every((w) => !/\bon click\b/.test(w.deluge?.text ?? '')));
+  assert.ok(entries.every((w) => w.deluge === null || src.slice(w.deluge.span.start, w.deluge.span.end) === w.deluge.text));
+});

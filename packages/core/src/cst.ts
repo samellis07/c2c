@@ -369,8 +369,11 @@ function looksLikeDeluge(g: Group): boolean {
   return semi && code;
 }
 
-/** Record events that wrap an `actions { ... }` list: `on add { actions { ... } }`. */
-const RECORD_EVENT_HEADERS = new Set(['on add', 'on edit', 'on add or edit', 'on delete']);
+/**
+ * Events that wrap an `actions { ... }` list: the record events
+ * (`on add { actions { ... } }`) and a button's `on click`.
+ */
+const ACTIONS_EVENT_HEADERS = new Set(['on add', 'on edit', 'on add or edit', 'on delete', 'on click']);
 
 /** Recursively split structured bodies and mark raw ones. */
 function structureBody(items: Node[], inRecordEvent = false): Node[] {
@@ -385,7 +388,7 @@ function structureStatement(s: Statement, inRecordEvent = false): void {
   const h = headerLength(items);
   const words = headerWords(s).map(textOf);
   const header = words.join(' ').toLowerCase();
-  const inRecord = RECORD_EVENT_HEADERS.has(header);
+  const inRecord = ACTIONS_EVENT_HEADERS.has(header);
   for (let k = 0; k < items.length; k++) {
     const g = items[k];
     if (!isGroup(g)) continue;
