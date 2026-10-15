@@ -15,7 +15,7 @@ An app is deterministic when `c2c analyze` finds zero residual TODO items and no
 A residual TODO item is an untranslated Deluge hole or one generated UI stub
 (a field, report, page, or ZML item). Each UI stub is included in the residual,
 so an app with a stub is not deterministic.
-0 of the 13 deterministic apps still have UI TODO stubs (0 in total).
+0 of the 14 deterministic apps still have UI TODO stubs (0 in total).
 
 The builtin catalogue lists 27 TODO entries
 (`docs/deluge-builtins.json` `counts.todo`). That is not the corpus residual counted here: one
@@ -24,9 +24,9 @@ TODO item per untranslated construct occurrence.
 | | |
 |---|---:|
 | corpus apps | 67 |
-| deterministic apps | 13 (19.4%) |
-| residual TODO items | 345 |
-| distinct TODO kinds | 22 |
+| deterministic apps | 14 (20.9%) |
+| residual TODO items | 333 |
+| distinct TODO kinds | 21 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
 ## Top 20 TODO kinds
@@ -35,11 +35,10 @@ TODO item per untranslated construct occurrence.
 |---|---:|
 | `client-condition-uses-server` | 135 |
 | `Server-side Deluge snippet requires manual translation` | 108 |
-| `Static <style> CSS not carried over:(app identifier)` | 52 |
+| `Static <style> CSS not carried over:(app identifier)` | 44 |
 | `criteria-dynamic` | 8 |
 | `pushnotification` | 6 |
 | `Filter not migrated:(app identifier)` | 4 |
-| `Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)` | 4 |
 | `method:(app identifier)` | 4 |
 | `report-criteria` | 4 |
 | `task:(app identifier)` | 3 |
@@ -53,6 +52,7 @@ TODO item per untranslated construct occurrence.
 | `ZML <button> (app identifier) click action ExecuteFunction calling function button_functions.checkIn is not generated; wire the click to the function by hand (the snippet stays manual:(app identifier)` | 1 |
 | `ZML <button> (app identifier) click action ExecuteFunction calling function button_functions.checkOut is not generated; wire the click to the function by hand (the snippet stays manual:(app identifier)` | 1 |
 | `ZML <image> (app identifier) click action Function calling function Vote.downvote is not generated; wire the click to the function by hand (the snippet stays manual:(app identifier)` | 1 |
+| `ZML <image> (app identifier) click action Function calling function Vote.upvote is not generated; wire the click to the function by hand (the snippet stays manual:(app identifier)` | 1 |
 
 ## Sole-kind unblocks
 
@@ -61,15 +61,14 @@ clears the app. The count is apps, not items.
 
 | construct | apps |
 |---|---:|
-| `client-condition-uses-server` | 7 |
-| `Server-side Deluge snippet requires manual translation` | 5 |
-| `Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)` | 1 |
+| `client-condition-uses-server` | 8 |
+| `Server-side Deluge snippet requires manual translation` | 7 |
 
 ## Machine-readable
 
 ```json
 {
-  "deterministicApps": 13,
+  "deterministicApps": 14,
   "deterministicWithUiTodos": {
     "apps": 0,
     "uiTodos": 0
@@ -85,7 +84,7 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "Static <style> CSS not carried over:(app identifier)",
-      "count": 52
+      "count": 44
     },
     {
       "construct": "criteria-dynamic",
@@ -97,10 +96,6 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "Filter not migrated:(app identifier)",
-      "count": 4
-    },
-    {
-      "construct": "Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)",
       "count": 4
     },
     {
@@ -208,6 +203,12 @@ clears the app. The count is apps, not items.
       "constructs": [
         "client-condition-uses-server"
       ],
+      "items": 2
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server"
+      ],
       "items": 3
     },
     {
@@ -234,32 +235,6 @@ clears the app. The count is apps, not items.
         "Static <style> CSS not carried over:(app identifier)"
       ],
       "items": 7
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)",
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
-      ],
-      "items": 14
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)",
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
-      ],
-      "items": 22
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)",
-        "Static <style> CSS not carried over:(app identifier)"
-      ],
-      "items": 4
     },
     {
       "constructs": [
@@ -297,6 +272,13 @@ clears the app. The count is apps, not items.
         "client-condition-uses-server",
         "Server-side Deluge snippet requires manual translation"
       ],
+      "items": 3
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "Server-side Deluge snippet requires manual translation"
+      ],
       "items": 4
     },
     {
@@ -306,14 +288,6 @@ clears the app. The count is apps, not items.
         "Static <style> CSS not carried over:(app identifier)"
       ],
       "items": 3
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
-      ],
-      "items": 4
     },
     {
       "constructs": [
@@ -369,7 +343,23 @@ clears the app. The count is apps, not items.
         "Server-side Deluge snippet requires manual translation",
         "Static <style> CSS not carried over:(app identifier)"
       ],
+      "items": 13
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "Server-side Deluge snippet requires manual translation",
+        "Static <style> CSS not carried over:(app identifier)"
+      ],
       "items": 17
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "Server-side Deluge snippet requires manual translation",
+        "Static <style> CSS not carried over:(app identifier)"
+      ],
+      "items": 21
     },
     {
       "constructs": [
@@ -395,7 +385,7 @@ clears the app. The count is apps, not items.
         "Server-side Deluge snippet requires manual translation",
         "Static <style> CSS not carried over:(app identifier)"
       ],
-      "items": 8
+      "items": 7
     },
     {
       "constructs": [
@@ -439,12 +429,6 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
-        "Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)"
-      ],
-      "items": 1
-    },
-    {
-      "constructs": [
         "pushnotification",
         "task:(app identifier)"
       ],
@@ -475,10 +459,9 @@ clears the app. The count is apps, not items.
     {
       "constructs": [
         "report-conditional-format",
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
+        "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 4
+      "items": 3
     },
     {
       "constructs": [
@@ -508,6 +491,18 @@ clears the app. The count is apps, not items.
       "constructs": [
         "Server-side Deluge snippet requires manual translation"
       ],
+      "items": 2
+    },
+    {
+      "constructs": [
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 2
+    },
+    {
+      "constructs": [
+        "Server-side Deluge snippet requires manual translation"
+      ],
       "items": 4
     },
     {
@@ -529,21 +524,7 @@ clears the app. The count is apps, not items.
         "Server-side Deluge snippet requires manual translation",
         "Static <style> CSS not carried over:(app identifier)"
       ],
-      "items": 3
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
-      ],
       "items": 4
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
-      ],
-      "items": 5
     },
     {
       "constructs": [
@@ -567,7 +548,7 @@ clears the app. The count is apps, not items.
       "items": 11
     }
   ],
-  "todoTotal": 345,
+  "todoTotal": 333,
   "totalApps": 67
 }
 ```
