@@ -109,6 +109,12 @@ test('Sum on a local list or list expression uses shim.list.aggregate', async ()
       const fn = translate(fnSrc);
       assert.match(fn.server, /shim\.list\.aggregate\(/, fnSrc);
       assert.doesNotMatch(fn.server, /shim\.todo\(/, fnSrc);
+      if ((name === 'average' || name === 'median') && input.includes('null')) {
+        assert.ok(fn.todos.some((item) => item.construct === `call:${name}`), `${fnSrc} should be counted`);
+        await assert.rejects(evalOut(fnSrc), /expected numeric list members/);
+        await assert.rejects(evalOut(methodSrc), /expected numeric list members/);
+        continue;
+      }
       assert.deepEqual(await evalOut(fnSrc), await evalOut(methodSrc));
     }
   }

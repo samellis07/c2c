@@ -412,6 +412,22 @@ function decimalText(v: unknown): string {
  */
 export function numberList(value: unknown, fn: unknown): unknown[] {
   if (!Array.isArray(value)) throw new DelugeRuntimeError(`${String(fn)}: expected a number list`);
+  for (const item of value) {
+    // The number pages permit numeric values written in quotes, but do not
+    // describe nulls, blanks, or non-numeric text as list members.
+    if (item == null || (typeof item === 'string' && item.trim() === '')) {
+      throw new DelugeRuntimeError(`${String(fn)}: expected numeric list members`);
+    }
+    if (typeof item === 'string' && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(item.trim())) {
+      throw new DelugeRuntimeError(`${String(fn)}: expected numeric list members`);
+    }
+    if (typeof item === 'number' && !Number.isFinite(item)) {
+      throw new DelugeRuntimeError(`${String(fn)}: expected numeric list members`);
+    }
+    if (typeof item !== 'number' && typeof item !== 'bigint' && typeof item !== 'string' && !(item instanceof Decimal)) {
+      throw new DelugeRuntimeError(`${String(fn)}: expected numeric list members`);
+    }
+  }
   return value;
 }
 
