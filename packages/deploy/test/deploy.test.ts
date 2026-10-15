@@ -452,6 +452,16 @@ function assertGuard(input: Parameters<typeof checkGuards>[0]): string {
   assert.fail('guard allowed a bad target');
 }
 
+test('deploy refuses --mail-sender-verified before any spawn or fetch', async () => {
+  const ds = writeDs();
+  const cap = capture();
+  const code = await deployCli([...baseArgs(ds), '--mail', '--mail-from', 'sender@example.test', '--mail-sender-verified'], cap.io);
+  assert.equal(code, 1, `exit 1 with the refusal, got ${code}:\n${cap.stdout()}\n${cap.stderr()}`);
+  assert.match(cap.stderr(), /--mail-sender-verified is not taken.*pass --mail-from <address> only/);
+  assert.equal(cap.fetched.length, 0, 'refused before any network call');
+  assert.equal(cap.spawned.length, 0, 'refused before any spawn');
+});
+
 test('deploy without --confirm writes the plan and does not spawn', async () => {
   const ds = writeDs();
   const out = mkdtempSync(join(tmpdir(), 'c2c-out-'));
