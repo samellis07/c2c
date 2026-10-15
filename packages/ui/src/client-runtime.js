@@ -624,6 +624,49 @@ function styleAttr(el) {
   return parts.length ? ` style="${escapeHtml(parts.join(';'))}"` : '';
 }
 
+/** Host text from an https authority, with userinfo and a numeric port removed. */
+function embedHostAsWritten(rawUrl) {
+  const match = /^https:\/\/([^/?#]*)/i.exec(rawUrl);
+  if (!match) return '';
+  let authority = match[1];
+  const at = authority.lastIndexOf('@');
+  if (at !== -1) authority = authority.slice(at + 1);
+  if (authority.startsWith('[')) {
+    const end = authority.indexOf(']');
+    return end === -1 ? authority : authority.slice(0, end + 1);
+  }
+  const colon = authority.lastIndexOf(':');
+  if (colon !== -1 && /^[0-9]+$/.test(authority.slice(colon + 1))) return authority.slice(0, colon);
+  return authority;
+}
+
+function embedAuthorityHasUserinfo(rawUrl) {
+  const match = /^https:\/\/([^/?#]*)/i.exec(rawUrl);
+  return !!match && match[1].includes('@');
+}
+
+/**
+ * 'pdf' or 'map' only for a canonical https URL. The host text must already
+ * equal the parsed hostname, so uppercase, a trailing dot, and an IDN the
+ * parser rewrites are not link-outs. Map hosts match the provider list
+ * exactly (a suffix such as maps.google.com.evil.example does not).
+ */
+function embedLinkOutKind(rawUrl, parsed) {
+  const written = embedHostAsWritten(rawUrl);
+  if (written !== parsed.hostname || !written || written.endsWith('.')) return '';
+  if (written.split('.').some((label) => label.startsWith('xn--'))) return '';
+  const pdf = /\.pdf$/i.test(parsed.pathname);
+  const host = parsed.hostname;
+  const map =
+    host === 'maps.google.com' ||
+    (host === 'www.google.com' && /^\/maps(?:\/|$)/i.test(parsed.pathname)) ||
+    ((host === 'openstreetmap.org' || host === 'www.openstreetmap.org') &&
+      /^\/export\/embed\.html$/i.test(parsed.pathname));
+  if (pdf) return 'pdf';
+  if (map) return 'map';
+  return '';
+}
+
 function renderElement(el, doc, parentReport, appModel) {
   const childReport =
     el.kind === 'container' && typeof el.href === 'string' && el.href.startsWith('#/report/')
@@ -660,22 +703,20 @@ function renderElement(el, doc, parentReport, appModel) {
   }
   if (el.kind === 'embed') {
     const spec = el.embed || {};
-    const url = typeof spec.url === 'string' && /^https:\/\//i.test(spec.url) ? spec.url : '';
-    if (!url) return kids;
+    const url = typeof spec.url === 'string' ? spec.url : '';
     let parsed;
     try { parsed = new URL(url); } catch { return kids; }
+    // Credential URLs and non-HTTPS schemes (javascript:, data:, http:) are
+    // dropped. A frame or a link would send or display those credentials.
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || embedAuthorityHasUserinfo(url)) return kids;
     // Sandboxed browser PDF viewers and script-dependent map widgets often
-    // render blank. Link these recognized formats/providers out instead of
-    // granting them sandbox capabilities. Unknown HTTPS embeds stay locked.
-    const pdf = /\.pdf$/i.test(parsed.pathname);
-    const map =
-      (parsed.hostname === 'maps.google.com' ||
-        (parsed.hostname === 'www.google.com' && /^\/maps(?:\/|$)/i.test(parsed.pathname))) ||
-      ((parsed.hostname === 'openstreetmap.org' || parsed.hostname === 'www.openstreetmap.org') &&
-        /^\/export\/embed\.html$/i.test(parsed.pathname));
-    if (pdf || map) {
-      const label = el.name || (pdf ? 'Open PDF' : 'Open map');
-      return `<div class="embed"><a href="${escapeHtml(url)}" rel="noreferrer">${escapeHtml(label)}</a></div>${kids}`;
+    // render blank. Link canonical PDFs and exact map providers out instead
+    // of granting them sandbox capabilities. Unknown and non-canonical HTTPS
+    // embeds (lookalike, uppercase, trailing-dot, and IDN hosts) stay locked.
+    const kind = embedLinkOutKind(url, parsed);
+    if (kind) {
+      const label = el.name || (kind === 'pdf' ? 'Open PDF' : 'Open map');
+      return `<div class="embed"><a href="${escapeHtml(parsed.href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a></div>${kids}`;
     }
     const embedWidth = /^[0-9]+$/.test(spec.width || '') ? ` width="${spec.width}"` : '';
     const embedHeight = /^[0-9]+$/.test(spec.height || '') ? ` height="${spec.height}"` : '';
