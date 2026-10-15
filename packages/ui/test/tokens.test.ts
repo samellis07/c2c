@@ -94,6 +94,28 @@ test('tokens: light and dark text pairs meet WCAG AA (4.5:1)', () => {
   assert.deepEqual(fails, []);
 });
 
+test('tokens: every rule that paints a token text colour on a token fill meets AA in light and dark', () => {
+  const fails: string[] = [];
+  for (const rule of parseCss(BASE_CSS)) {
+    const decls = new Map<string, string>();
+    for (const part of rule.body.split(';')) {
+      const colon = part.indexOf(':');
+      if (colon > 0) decls.set(part.slice(0, colon).trim(), part.slice(colon + 1).trim());
+    }
+    const fill = /^var\(--c2c-([a-z-]+)\)$/.exec(decls.get('background') ?? decls.get('background-color') ?? '');
+    const ink = /^var\(--c2c-([a-z-]+)\)$/.exec(decls.get('color') ?? '');
+    if (!fill || !ink) continue;
+    for (const [name, set] of [['light', LIGHT], ['dark', DARK]] as const) {
+      const fg = set[ink[1] as keyof ColorTokens];
+      const bg = set[fill[1] as keyof ColorTokens];
+      if (!fg || !bg || !/^#[0-9a-f]{6}$/i.test(fg) || !/^#[0-9a-f]{6}$/i.test(bg)) continue;
+      const ratio = contrast(fg, bg);
+      if (ratio < 4.5) fails.push(`${name}: ${rule.selectors.join(',')} ${ink[1]} on ${fill[1]} = ${ratio.toFixed(2)}`);
+    }
+  }
+  assert.deepEqual(fails, []);
+});
+
 test('tokens: theme palettes keep menu text readable (AA 4.5:1, active entry 3:1 as bold UI text)', () => {
   const fails: string[] = [];
   for (const [id, theme] of Object.entries(THEME_TOKENS)) {
