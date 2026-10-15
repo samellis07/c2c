@@ -626,18 +626,19 @@ function styleAttr(el) {
 
 /**
  * Authority text from an https URL exactly as written: the run between '//'
- * and the first '/', '?', or '#'. The URL parser canonicalises percent
+ * and the first '/', '?', or '#'. URL schemes are case-insensitive, so the
+ * scheme match accepts 'HTTPS:' as written. The URL parser canonicalises percent
  * escapes, Unicode dot separators, and case in the host, so a link-out is
  * only allowed when this raw text is already a canonical lowercase ASCII
  * host: [a-z0-9.-] only, no '%', userinfo, port, or non-ASCII bytes.
  */
 function embedRawAuthority(rawUrl) {
-  const match = /^https:\/\/([^/?#]*)/.exec(rawUrl);
+  const match = /^https:\/\/([^/?#]*)/i.exec(rawUrl);
   return match ? match[1] : '';
 }
 
 function embedAuthorityHasUserinfo(rawUrl) {
-  const match = /^https:\/\/([^/?#]*)/.exec(rawUrl);
+  const match = /^https:\/\/([^/?#]*)/i.exec(rawUrl);
   return !!match && match[1].includes('@');
 }
 
