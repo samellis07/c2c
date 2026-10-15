@@ -149,6 +149,20 @@ export interface TranslateOptions {
    */
   alertEvent?: AlertEventClass;
   /**
+   * The unit has no client half: a schedule or a standalone function. The
+   * generator writes no browser module for either (a schedule's job module is
+   * server-only; a function's client module is never loaded by a UI target),
+   * so no client code, prefetch slot, or client-split todo
+   * (`client-condition-uses-server`, `client-loop-uses-server`) is produced.
+   * `info` is the run's debug log on the server: Creator shows it only to
+   * admins and developers, never to the end user.
+   * https://www.zoho.com/deluge/help/debug/info.html
+   * Any other client action (openUrl, ui, successMessage, reload, field
+   * choice tasks) has nowhere to run and is not emitted; todos inside its
+   * arguments stay counted.
+   */
+  serverOnly?: boolean;
+  /**
    * Deluge names the generated prefetch module binds without a replayed
    * assignment: a custom function's parameters (`var [params] = ctx.args`) and
    * `row` in a subform row event (`shim.subform.currentRow`). A prefetch slot
@@ -464,6 +478,8 @@ interface Scope {
   loopDepth: number;
   slot: number;
   alertEvent: AlertEventClass;
+  /** TranslateOptions.serverOnly: no client half. */
+  noClient: boolean;
   /** Raw source, for comment-tail lookup. */
   src: string;
   /**
@@ -555,6 +571,9 @@ function mergeFx(code: string, parts: Fx[], flags: Partial<Fx> = {}): Fx {
 }
 
 function clientExpr(value: Fx, scope: Scope, todoConstruct = 'client-condition-uses-server', allowClientCall = false): { code: string; todo: boolean; shim: boolean } {
+  // A server-only unit has no client to evaluate anything on: no slot, no
+  // replayed call, and no client-split todo.
+  if (scope.noClient) return { code: 'undefined', todo: false, shim: false };
   // A read-only app function is an event-time server call, not a prefetch
   // replay. Every `thisapp` call in the expression must resolve to a callee
   // the generator classified read-only; one writer keeps the counted todo.
@@ -2041,6 +2060,7 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     loopDepth: 0,
     slot: options.slotStart ?? 0,
     alertEvent: options.alertEvent ?? 'allowed',
+    noClient: options.serverOnly ?? false,
     src,
     commentTails: commentTails(src),
     schema: options.schema,
@@ -2058,6 +2078,7 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
   const prefetch = scope.deferred.length
     ? `if (ctx.rangeSlot) {\n${scope.deferred.join('\n')}\n}${eager.trim() ? ` else {\n${eager}\n}` : ''}`
     : eager;
+  if (scope.noClient) return { server: out.server, client: '', prefetch: '', usesElement: false, nextSlot: scope.slot, stats, todos };
   return { server: out.server, client: out.client, prefetch, usesElement: scope.elementSlots > 0, nextSlot: scope.slot, stats, todos };
 }
 
@@ -2175,8 +2196,12 @@ function statement(s: Stmt, scope: Scope, stats: TranslateStats, todos: TodoItem
     case 'continue':
       account(stats, todos, { todo: false, shim: false, constructs: [] }, s.span);
       return { server: `${s.kind};`, client: `${s.kind};` };
-    case 'info':
-      return clientPush('info', expr(s.value, scope), s.span, scope, stats, todos);
+    case 'info': {
+      if (!scope.noClient) return clientPush('info', expr(s.value, scope), s.span, scope, stats, todos);
+      const v = expr(s.value, scope);
+      account(stats, todos, { todo: v.todo, shim: true, constructs: v.constructs }, s.span);
+      return { server: `shim.log.info(ctx, ${v.code});`, client: '' };
+    }
     case 'alert': {
       // Live-tested on Creator: `alert` runs in on load, on validate, on
       // change / on user input, and on click (custom action / button) actions;
@@ -2199,10 +2224,12 @@ function statement(s: Stmt, scope: Scope, stats: TranslateStats, todos: TodoItem
     case 'successMessage':
       return clientPush('successMessage', expr(s.value, scope), s.span, scope, stats, todos);
     case 'reload':
+      if (scope.noClient) return serverOnlyAction([], s.span, stats, todos);
       account(stats, todos, { todo: false, shim: true, constructs: [] }, s.span);
       return { server: '', client: 'actions.push({ op: "reload" });' };
     case 'openUrl': {
       const args = s.args.map((a) => expr(a, scope));
+      if (scope.noClient) return serverOnlyAction(args, s.span, stats, todos);
       // A server read in the URL (`openUrl base + Form[criteria].ID`) is a prefetch slot, like a client condition.
       const clientArgs = args.map((a) => clientExpr(a, scope));
       const constructs = [...args.flatMap((a) => a.constructs), ...(clientArgs.some((c) => c.todo) ? ['client-condition-uses-server'] : [])];
@@ -2211,6 +2238,7 @@ function statement(s: Stmt, scope: Scope, stats: TranslateStats, todos: TodoItem
     }
     case 'ui': {
       const targets = s.targets.map((t) => targetLit(t, scope));
+      if (scope.noClient) return serverOnlyAction(targets, s.span, stats, todos);
       account(stats, todos, { todo: targets.some((t) => t.todo), shim: true, constructs: targets.flatMap((t) => t.constructs) }, s.span);
       return {
         server: '',
@@ -2289,11 +2317,23 @@ function cancelSubmitOut(s: Extract<Stmt, { kind: 'cancelSubmit' }>, alertText: 
 }
 
 function clientPush(op: string, value: Fx, span: { start: number; end: number }, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
+  if (scope.noClient) return serverOnlyAction([value], span, stats, todos);
   // A server read in the message (`info Form[criteria].Field`) is a prefetch slot, like a client condition.
   const message = clientExpr(value, scope);
   const constructs = message.todo ? [...value.constructs, 'client-condition-uses-server'] : value.constructs;
   account(stats, todos, { todo: value.todo || message.todo, shim: true, constructs }, span);
   return { server: '', client: `actions.push({ op: ${JSON.stringify(op)}, message: ${message.code} });` };
+}
+
+/**
+ * A client action in a unit with no client half (TranslateOptions.serverOnly).
+ * Nothing runs it, so nothing is emitted. Its arguments get no client
+ * projection, so there is no client-split todo; a todo inside an argument
+ * stays counted.
+ */
+function serverOnlyAction(parts: { todo: boolean; constructs: string[] }[], span: { start: number; end: number }, stats: TranslateStats, todos: TodoItem[]): Out {
+  account(stats, todos, { todo: parts.some((p) => p.todo), shim: true, constructs: parts.flatMap((p) => p.constructs) }, span);
+  return { server: '', client: '' };
 }
 
 function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
@@ -2511,7 +2551,7 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
   let clientTodo = false;
   let clientIter = '';
   let rangeSlot: { slot: string; from: string; to: string } | null = null;
-  if (body.client.trim() && (col.serverOnly || col.todo || col.appFunction || colRefused)) {
+  if (!scope.noClient && body.client.trim() && (col.serverOnly || col.todo || col.appFunction || colRefused)) {
     // A refused collection is the counted client-loop todo: no slot, no map,
     // and no replayed call — clientExpr must not even see it.
     const resolved = colRefused
@@ -3170,6 +3210,7 @@ function exprStmt(e: Expr, span: { start: number; end: number }, scope: Scope, s
   const choice = choiceTask(e, scope);
   if (choice) {
     const values = e.kind === 'call' ? e.args.map((a) => expr(a, scope)) : [];
+    if (scope.noClient) return serverOnlyAction(values, span, stats, todos);
     const clientArgs = values.map((v) => clientExpr(v, scope));
     const constructs = values.flatMap((v) => v.constructs);
     if (clientArgs.some((c) => c.todo)) constructs.push('client-condition-uses-server');
@@ -3270,6 +3311,7 @@ function colonStmt(e: Extract<Expr, { kind: 'colonCall' }>, span: { start: numbe
   const target = obj ? JSON.stringify(obj.root === 'input' || obj.root === 'row' ? obj.path : [obj.root, ...obj.path]) : expr(e.object, scope).code;
   const method = e.path.join('.');
   const ui = e.path[0] === 'ui';
+  if (ui && scope.noClient) return serverOnlyAction(args, span, stats, todos);
   // A server read in a `:ui` argument (`row.Items:ui.add(fetched_list)`) is a prefetch slot, like a client condition;
   // a read-only `thisapp` call there is an event-time client call.
   const clientArgs = ui ? args.map((a) => clientExpr(a, scope, 'client-condition-uses-server', true)) : [];
