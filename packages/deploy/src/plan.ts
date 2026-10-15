@@ -13,6 +13,7 @@ import { mailTemplateCatalog } from '../../ui/src/decorations/print-templates.js
 import { generateReactApp } from '../../ui-react/src/generate.js';
 import { API_FUNCTION, columnTypes, FUNCTION_DIR, functionDir, routeTable } from './function-dir.js';
 import { planSmoke } from './smoke.js';
+import { slateAppName } from './slate.js';
 import { confirmGuardLines, planScopeLines, type GuardOk } from './guards.js';
 import { catalystRc, catalystScopeArgs } from './scope.js';
 import {
@@ -106,7 +107,7 @@ export interface DeployBundle {
  * Order: install the function's pinned dependencies, deploy the function (its URL
  * gives the API base the client needs), then link and deploy the Slate client.
  */
-export function deployCommands(projectName: string, org: string, projectId: string, ui: DeployUi = 'react'): DeployCommand[] {
+export function deployCommands(slateName: string, org: string, projectId: string, ui: DeployUi = 'react'): DeployCommand[] {
   const scope = catalystScopeArgs(org, projectId);
   return [
     { id: 'install', command: 'npm', argv: ['install', '--omit=dev', '--no-audit', '--no-fund'], cwd: FUNCTION_DIR },
@@ -120,8 +121,8 @@ export function deployCommands(projectName: string, org: string, projectId: stri
           { id: 'ui-build' as const, command: 'npm' as const, argv: ['run', 'build'], cwd: 'web' },
         ]
       : []),
-    { id: 'slate-link', argv: [...scope, 'slate:link', '--name', projectName, '--framework', 'static', '--source', ui === 'react' ? './web/dist' : './slate', '-ni'] },
-    { id: 'slate', argv: [...scope, 'deploy', 'slate', projectName, '-ni'] },
+    { id: 'slate-link', argv: [...scope, 'slate:link', '--name', slateName, '--framework', 'static', '--source', ui === 'react' ? './web/dist' : './slate', '-ni'] },
+    { id: 'slate', argv: [...scope, 'deploy', 'slate', slateName, '-ni'] },
   ];
 }
 
@@ -313,6 +314,7 @@ export function buildDeploy(
   ui: DeployUi = 'react',
   asyncOnSuccess = false,
   subsetShims?: boolean,
+  slateName: string = slateAppName(guard.projectName),
 ): DeployBundle {
   const { files, mail, schema, sendsMail: mails, usesEvents } = deployFiles(
     app,
@@ -321,7 +323,7 @@ export function buildDeploy(
     { mode: confirm ? 'live' : 'dry-run', apiBase, functionEnv, mailTestRecipients, ...(source ? { source } : {}), ui, ...(asyncOnSuccess ? { asyncOnSuccess } : {}), ...(subsetShims !== undefined ? { subsetShims } : {}) },
     sender,
   );
-  const commands = deployCommands(guard.projectName, guard.org, guard.projectId, ui);
+  const commands = deployCommands(slateName, guard.org, guard.projectId, ui);
   const tableSteps = deployTableSteps(schema, mails, mail.enabled, usesEvents);
   const mailFindings = mailSenderPrecheck(app, mail);
   const widgetItems = widgetManualItems(app.widgets);

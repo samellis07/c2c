@@ -73,6 +73,66 @@ export function slateUrlOf(domain: string | undefined): string | undefined {
   }
 }
 
+/**
+ * Slate app names: [UNVERIFIED] the rule is Catalyst's own refusal text, "App
+ * name must be alphanumeric and cannot contain consecutive hyphens or hyphens
+ * at the beginning or end." No length limit is documented, so none is enforced.
+ */
+const SLATE_NAME = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
+
+/** Why `name` is not a valid Slate app name, or undefined. */
+export function slateNameProblem(name: string): string | undefined {
+  return SLATE_NAME.test(name) ? undefined : `${JSON.stringify(name)} is not a Slate app name — letters and digits, single hyphens between them, no hyphen at the start or end`;
+}
+
+/**
+ * The Slate app name a deploy uses for a project: every run of characters
+ * outside letters and digits becomes one hyphen, edge hyphens are dropped.
+ * Deterministic, and a name that is already valid is returned unchanged.
+ */
+export function slateAppName(projectName: string): string {
+  return projectName.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'app';
+}
+
+/** Waits between Slate list reads after a build: three waits, 14 s in total. */
+export const SLATE_LIST_WAITS_MS: readonly number[] = [2000, 4000, 8000];
+
+/**
+ * After a Slate build printed its App Url but the CLI exited non-zero, poll the
+ * app list until exactly one app named `appName` appears. The list can lag the
+ * build, so one read is not proof of absence. Fail-closed: true only when the
+ * app is listed and any domain it reports is the printed host.
+ */
+export async function waitForSlateApp(
+  rest: RestFn,
+  projectId: string,
+  appName: string,
+  printedUrl: string,
+  opts: RetryOptions = {},
+  waits: readonly number[] = SLATE_LIST_WAITS_MS,
+): Promise<boolean> {
+  const printed = slateUrlOf(printedUrl);
+  if (!printed) return false;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  for (let attempt = 0; attempt <= waits.length; attempt += 1) {
+    if (attempt > 0) await sleep(waits[attempt - 1] as number);
+    let listed: Awaited<ReturnType<typeof restWithRetry>>;
+    try {
+      listed = await restWithRetry(rest, { method: 'GET', path: `/slate/v1/project/${projectId}/app` }, opts);
+    } catch {
+      continue;
+    }
+    if (listed.result.status < 200 || listed.result.status >= 300) continue;
+    const matches = slateApps(listed.result.body).filter((item) => item.name === appName);
+    if (matches.length > 1) return false;
+    const app = matches[0];
+    if (!app) continue;
+    const domain = slateUrlOf(app.domain);
+    return domain === undefined || domain === printed;
+  }
+  return false;
+}
+
 export interface SlateRead {
   /** The app list answered 2xx; `apps` is then the exact-name match set. */
   listed: boolean;

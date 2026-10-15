@@ -122,6 +122,14 @@ Rule: [UNVERIFIED] bound outbound calls with the caller's own timeout below the 
 
 Rule: [UNVERIFIED] Circuits is unavailable in those data centres (invocation → `403`); express orchestration inside a Job or Advanced I/O function instead of emitting a circuit — see `projects.md` for the per-DC probing rule.
 
+### Keep reserved names out of env_variables
+
+Rule: [UNVERIFIED] a deploy whose `env_variables` carried `CATALYST_DC`, `CATALYST_ENV`, `CATALYST_PROJECT_ID`, `DC`, `ENV` and `PROJECT_ID` was refused with `HTTP Error: 400, environment_variables must not contain reserved keywords`, and passed once they were removed. No documented list exists. c2c refuses these names and `X_ZOHO_CATALYST_ORG_ID`; it assumes no other name is reserved.
+
+### Slate app names are letters, digits and single hyphens
+
+Rule: [UNVERIFIED] `slate:link --name` refuses `_` with `App name must be alphanumeric and cannot contain consecutive hyphens or hyphens at the beginning or end.` No length limit is documented.
+
 ### Set the org id in code before QuickML calls
 
 Rule: [UNVERIFIED] `X_ZOHO_CATALYST_ORG_ID` is a reserved env var — deploy refuses it inside `environment_variables` ("must not contain reserved keywords"); inside the generated function set `process.env.X_ZOHO_CATALYST_ORG_ID = '<org-id>'` before `quickML()` calls or they fail `ORGID_HEADER_UNAVAILABLE` / `X-ZOHO-CATALYST-ORGID HEADER IS MISSING`. Set it at runtime, never in config.

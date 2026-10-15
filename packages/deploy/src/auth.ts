@@ -147,9 +147,15 @@ export function alreadyDone(status: number, body: unknown): boolean {
   return /DUPLICATE_VALUE/i.test(text) || /already (enabled|exists|in use|added|present|registered|authorised|authorized)/i.test(text);
 }
 
+/**
+ * The "App Url" line slate:link / deploy slate print: "App Url: https://…" or,
+ * as zcatalyst-cli 1.27.2 prints it, "App Url(<app name>): https://…".
+ */
+export const APP_URL_LINE = /App Url(?:\([^)\r\n]*\))?:\s*(https:\/\/[^\s"'<>]+)/i;
+
 /** The Slate app URL printed by slate:link / deploy slate ("App Url: https://….onslate.in"). */
 export function slateUrlFrom(output: string): string | undefined {
-  const tagged = /App Url:\s*(https:\/\/[^\s"'<>]+)/i.exec(output);
+  const tagged = APP_URL_LINE.exec(output);
   if (tagged) return tagged[1];
   return /https:\/\/[a-z0-9][a-z0-9.-]*\.onslate\.[a-z.]+/i.exec(output)?.[0];
 }

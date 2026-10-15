@@ -9,7 +9,8 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readSlateAppUrl, slateApps, slateDeploymentDomain, slateUrlOf } from '../src/slate.js';
+import { readSlateAppUrl, SLATE_LIST_WAITS_MS, slateAppName, slateApps, slateDeploymentDomain, slateNameProblem, slateUrlOf, waitForSlateApp } from '../src/slate.js';
+import { slateUrlFrom } from '../src/auth.js';
 import type { RestCall, RestFn } from '../src/tables.js';
 
 const APP_ID = '3000000000000123';
@@ -156,4 +157,75 @@ test('the list call retries a transient 500 like every other read', async () => 
   const found = await readSlateAppUrl(rest, '1001', 'c2c-widget', { sleep: async () => {} });
   assert.equal(found.url, `https://${DOMAIN}`);
   assert.equal(calls.length, 2);
+});
+
+// Catalyst refused `c2c-library_system_application`: "App name must be
+// alphanumeric and cannot contain consecutive hyphens or hyphens at the
+// beginning or end."
+test('the derived Slate app name satisfies the Slate name rule and is stable', () => {
+  assert.equal(slateAppName('c2c-library_system_application'), 'c2c-library-system-application');
+  assert.equal(slateAppName('c2c-a__b--c_'), 'c2c-a-b-c');
+  assert.equal(slateAppName('_c2c-x'), 'c2c-x');
+  assert.equal(slateAppName('___'), 'app');
+  // An already valid name is unchanged, so existing deploys keep their app.
+  for (const valid of ['c2c-widget', 'c2c-library-app', 'App1']) assert.equal(slateAppName(valid), valid);
+  for (const raw of ['c2c-library_system_application', 'x__y', '-a-', 'a.b c']) {
+    const name = slateAppName(raw);
+    assert.equal(slateNameProblem(name), undefined, name);
+    assert.equal(slateAppName(name), name);
+  }
+});
+
+test('slateNameProblem refuses underscores, edge hyphens and doubled hyphens', () => {
+  for (const bad of ['c2c-library_system_application', '-app', 'app-', 'a--b', '', 'a b', 'a.b']) {
+    assert.match(slateNameProblem(bad) ?? '', /not a Slate app name/, bad);
+  }
+  for (const good of ['c2c-library-system-application', 'a', 'A1-b2']) assert.equal(slateNameProblem(good), undefined, good);
+});
+
+test('the App Url line is read in the "App Url(<name>):" form zcatalyst-cli prints', () => {
+  assert.equal(
+    slateUrlFrom('App Url(c2c-library-app): https://c2c-library-app-abc123.onslate.in\n'),
+    'https://c2c-library-app-abc123.onslate.in',
+  );
+});
+
+function listingRest(bodies: unknown[]): { rest: RestFn; calls: RestCall[] } {
+  const calls: RestCall[] = [];
+  const rest: RestFn = async (call) => {
+    calls.push(call);
+    const body = bodies[Math.min(calls.length - 1, bodies.length - 1)];
+    return { status: 200, body };
+  };
+  return { rest, calls };
+}
+
+const PRINTED = 'https://c2c-widget-abc123.onslate.in';
+const LISTED = { data: [{ id: '3000000000000123', name: 'c2c-widget', domain: 'c2c-widget-abc123.onslate.in' }] };
+
+test('waitForSlateApp polls a lagging app list until the printed app appears', async () => {
+  const waits: number[] = [];
+  const { rest, calls } = listingRest([{ data: [] }, { data: [] }, LISTED]);
+  assert.equal(await waitForSlateApp(rest, '1001', 'c2c-widget', PRINTED, { sleep: async (ms) => { waits.push(ms); } }), true);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(waits, [2000, 4000]);
+});
+
+test('waitForSlateApp is bounded and fail-closed when the app never appears', async () => {
+  const waits: number[] = [];
+  const { rest, calls } = listingRest([{ data: [] }]);
+  assert.equal(await waitForSlateApp(rest, '1001', 'c2c-widget', PRINTED, { sleep: async (ms) => { waits.push(ms); } }), false);
+  assert.equal(calls.length, SLATE_LIST_WAITS_MS.length + 1);
+  assert.deepEqual(waits, [...SLATE_LIST_WAITS_MS]);
+  assert.equal(waits.reduce((a, b) => a + b, 0), 14000);
+});
+
+test('waitForSlateApp refuses a listed app serving another domain, or two same-name apps', async () => {
+  const other = listingRest([{ data: [{ id: '1', name: 'c2c-widget', domain: 'someone-else.onslate.in' }] }]);
+  assert.equal(await waitForSlateApp(other.rest, '1001', 'c2c-widget', PRINTED, { sleep: async () => {} }), false);
+  const twice = listingRest([{ data: [{ id: '1', name: 'c2c-widget' }, { id: '2', name: 'c2c-widget' }] }]);
+  assert.equal(await waitForSlateApp(twice.rest, '1001', 'c2c-widget', PRINTED, { sleep: async () => {} }), false);
+  // Listed without a domain yet still counts: the build printed the URL.
+  const bare = listingRest([{ data: [{ id: '1', name: 'c2c-widget' }] }]);
+  assert.equal(await waitForSlateApp(bare.rest, '1001', 'c2c-widget', PRINTED, { sleep: async () => {} }), true);
 });

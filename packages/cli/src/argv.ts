@@ -93,6 +93,7 @@ export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
       '--out': 'value',
       '--resume': 'bool',
       '--slate-domain': 'value',
+      '--slate-name': 'value',
       '--source-backup': 'value',
       '--source-csv': 'value',
       '--source-json': 'value',

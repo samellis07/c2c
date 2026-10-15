@@ -4138,3 +4138,120 @@ test('the first-admin role is pinned: --admin-role accepts only App Administrato
   const ok = await deployCli([...baseArgs(ds), '--admin-email', 'owner@example.test', '--admin-role', 'App Administrator'], capture().io);
   assert.equal(ok, 0);
 });
+
+// Live deploy blockers: reserved env names, the Slate app name, and the
+// Slate list lagging a build that printed its App Url.
+
+function noNetwork(cap: ReturnType<typeof capture>): void {
+  assert.deepEqual(cap.spawned, [], 'no catalyst command may run');
+  assert.deepEqual(cap.restCalls, [], 'no REST call may run');
+  assert.deepEqual(cap.fetched, [], 'no fetch may run');
+}
+
+test('a --function-env file with a reserved name is refused before any network call', async () => {
+  const ds = writeDs();
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-fenv-reserved-'));
+  try {
+    for (const reserved of ['PROJECT_ID', 'CATALYST_ENV', 'DC']) {
+      const file = join(dir, `${reserved}.json`);
+      writeFileSync(file, JSON.stringify({ [reserved]: 'x', C2C_ZOHO_DC: 'in' }));
+      const cap = capture();
+      const code = await deployCli([...baseArgs(ds), '--out', join(dir, 'out'), '--confirm', '--function-env', file], cap.io);
+      assert.notEqual(code, 0);
+      assert.match(cap.stderr(), new RegExp(`c2c: function env: ${reserved} is a name Catalyst reserves`));
+      noNetwork(cap);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the deploy derives a valid Slate app name from a project name with underscores', () => {
+  const guard = checkGuards({ org: '10000000000', projectId: '4242', appLink: 'library_system_application', credentialPath: SECRET, registry: { ...registry, projects: {} } });
+  assert.equal(guard.projectName, 'c2c-library_system_application');
+  const { commands } = buildDeploy(deriveIr(parse(DS)), guard, false);
+  const link = commands.find((command) => command.id === 'slate-link')!;
+  assert.equal(link.argv[link.argv.indexOf('--name') + 1], 'c2c-library-system-application');
+  assert.deepEqual(commands.find((command) => command.id === 'slate')!.argv.slice(-2), ['c2c-library-system-application', '-ni']);
+});
+
+test('--slate-name overrides the Slate app name and is validated before any network call', async () => {
+  const ds = writeDs();
+  for (const bad of ['my_app', '-app', 'a--b']) {
+    const cap = capture();
+    const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--slate-name', bad], cap.io);
+    assert.notEqual(code, 0);
+    assert.match(cap.stderr(), /c2c: --slate-name: .* is not a Slate app name/);
+    noNetwork(cap);
+  }
+  const out = mkdtempSync(join(tmpdir(), 'c2c-slate-name-'));
+  try {
+    const cap = capture();
+    assert.equal(await deployCli([...baseArgs(ds), '--out', out, '--confirm', '--function-env', 'new', '--slate-name', 'c2c-library-app'], cap.io), 0, cap.stderr());
+    const link = cap.spawned.find((call) => call.args.includes('slate:link'))!;
+    assert.equal(link.args[link.args.indexOf('--name') + 1], 'c2c-library-app');
+    assert.ok(cap.spawned.some((call) => call.args.join(' ').endsWith('deploy slate c2c-library-app -ni')));
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+/** deploy slate prints "App Url(<name>): …" then exits 1; the app list names the app only after `listedAfter` reads. */
+function laggingSlateIo(listedAfter: number) {
+  const cap = capture();
+  const waits: number[] = [];
+  cap.io.sleep = async (ms) => {
+    waits.push(ms);
+  };
+  let built = false;
+  let reads = 0;
+  const inner = cap.io.rest!;
+  cap.io.rest = async (call) => {
+    if (call.method === 'GET' && call.path === '/slate/v1/project/1001/app') {
+      if (built) reads += 1;
+      return { status: 200, body: slateAppList(built && reads > listedAfter ? SLATE_DOMAIN : undefined) };
+    }
+    return inner(call);
+  };
+  cap.io.spawn = async (command, args, opts) => {
+    cap.spawned.push({ command, args, env: opts.env });
+    if (args.includes('project:list')) return { code: 0, stdout: FAITHFUL_PROJECT_LIST, stderr: '' };
+    if (args.includes('slate:link')) return { code: 0, stdout: 'Slate linked successfully\n', stderr: '' };
+    if (args.includes('slate') && !args.includes('--only')) {
+      built = true;
+      return { code: 1, stdout: `App Url(c2c-widget): https://${SLATE_DOMAIN}\n`, stderr: '✖ Error: could not read the app status' };
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  return { cap, waits };
+}
+
+test('a Slate build that printed its App Url succeeds once the lagging app list names it', async () => {
+  const ds = writeDs();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-slate-lag-'));
+  try {
+    const { cap, waits } = laggingSlateIo(1);
+    const code = await deployCli([...baseArgs(ds), '--out', out, '--confirm', '--function-env', 'new'], cap.io);
+    assert.equal(code, 0, cap.stdout().slice(-800) + cap.stderr());
+    assert.ok(waits.includes(2000), `the list read waited 2 s before it named the app: ${waits.join(',')}`);
+    const report = JSON.parse(readFileSync(join(out, DEPLOY_REPORT), 'utf8')) as { slate?: { appUrl?: string; notice?: string } };
+    assert.equal(report.slate?.appUrl, `https://${SLATE_DOMAIN}`);
+    assert.match(report.slate?.notice ?? '', /Slate app list names "c2c-widget"/);
+    assert.equal((JSON.parse(readFileSync(join(out, '.c2c-deploy-state.json'), 'utf8')) as { slateUrl?: string }).slateUrl, `https://${SLATE_DOMAIN}`);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('a Slate build whose app never appears in the list still fails, after a bounded wait', async () => {
+  const ds = writeDs();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-slate-never-'));
+  try {
+    const { cap, waits } = laggingSlateIo(Number.POSITIVE_INFINITY);
+    assert.equal(await deployCli([...baseArgs(ds), '--out', out, '--confirm', '--function-env', 'new'], cap.io), 1);
+    for (const ms of [2000, 4000, 8000]) assert.ok(waits.includes(ms), `missing the ${ms} ms wait: ${waits.join(',')}`);
+    assert.equal(waits.filter((ms) => ms >= 2000).length, 3, 'the poll is bounded to three waits');
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});

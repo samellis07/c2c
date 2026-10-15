@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { unquote, type App, type PropertyBlock } from '../../core/src/ir.js';
-import { API_FUNCTION } from './function-dir.js';
+import { API_FUNCTION, isReservedEnvKey } from './function-dir.js';
 import { restWithRetry, type RetryOptions } from './retry.js';
 import type { RestFn } from './tables.js';
 
@@ -14,7 +14,9 @@ export interface DeclaredConnectionSecret {
 
 export interface FunctionEnvInput {
   dc?: string;
+  /** Accepted for callers; never written — ENV and PROJECT_ID names are reserved (RESERVED_ENV_KEYS). */
   env?: string;
+  /** Accepted for callers; never written — see env. */
   projectId?: string;
   appUrl?: string;
   bucketName?: string;
@@ -96,25 +98,12 @@ export function buildFunctionEnv(input: FunctionEnvInput): Record<string, string
   const existing = input.existingEnv ?? {};
   const out: Record<string, string> = {};
 
-  // Derivable DC
-  const dc = input.dc ?? existing.DC ?? existing.CATALYST_DC ?? existing.C2C_ZOHO_DC;
-  if (dc) {
-    out.DC = dc;
-    out.CATALYST_DC = dc;
-    out.C2C_ZOHO_DC = dc;
-  }
-
-  // Derivable ENV
-  const env = input.env ?? existing.ENV ?? existing.CATALYST_ENV ?? 'Development';
-  out.ENV = env;
-  out.CATALYST_ENV = env;
-
-  // Derivable Project ID
-  const projectId = input.projectId ?? existing.PROJECT_ID ?? existing.CATALYST_PROJECT_ID;
-  if (projectId) {
-    out.PROJECT_ID = projectId;
-    out.CATALYST_PROJECT_ID = projectId;
-  }
+  // Derivable DC. Catalyst refuses DC/CATALYST_DC, ENV/CATALYST_ENV and
+  // PROJECT_ID/CATALYST_PROJECT_ID in env_variables (RESERVED_ENV_KEYS), so the
+  // file carries only c2c's own name; an older file's reserved names are read
+  // as inputs and dropped.
+  const dc = input.dc ?? existing.C2C_ZOHO_DC ?? existing.DC ?? existing.CATALYST_DC;
+  if (dc) out.C2C_ZOHO_DC = dc;
 
   // Derivable App URL
   const appUrl = input.appUrl ?? existing.APP_URL ?? existing.CATALYST_APP_URL;
@@ -179,9 +168,9 @@ export function buildFunctionEnv(input: FunctionEnvInput): Record<string, string
     }
   }
 
-  // Preserve any other existing keys
+  // Preserve any other existing keys, never a reserved one
   for (const [k, v] of Object.entries(existing)) {
-    if (out[k] === undefined) {
+    if (out[k] === undefined && !isReservedEnvKey(k)) {
       out[k] = v;
     }
   }
