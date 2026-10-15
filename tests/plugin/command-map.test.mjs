@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const plugin = path.join(repo, 'plugin');
 const groups = ['analyze/plan', 'provision/deploy', 'data/cutover', 'doctor/preflight', 'fill-todos', 'status/troubleshoot'];
-const humanSteps = ['Start Slate once', 'Accept the admin invite', 'Sign in once', 'Run the in-app check and paste its code', 'Verify the mail sender'];
+const humanSteps = ['Start Slate once', 'Accept the admin invite', 'Sign in once', 'Run the in-app check and paste its code', 'Verify the mail sender (only if your app sends mail)'];
 const expected = {
   'analyze/plan': { commands: ['commands/analyze.md', 'commands/plan.md'], skills: ['skills/c2c-analyze-and-precheck/SKILL.md', 'skills/c2c-migrate/SKILL.md', 'skills/c2c-edit/SKILL.md'], verbs: ['analyze', 'precheck', 'plan', 'edit'] },
   'provision/deploy': { commands: ['commands/migrate.md'], skills: ['skills/c2c-migrate/SKILL.md', 'skills/c2c-provision-and-deploy/SKILL.md', 'skills/c2c-auth-and-access/SKILL.md', 'skills/c2c-ui/SKILL.md', 'skills/c2c-integrations/SKILL.md'], verbs: ['provision', 'deploy', 'auth', 'users', 'ui', 'ui-react'] },
@@ -29,6 +29,7 @@ function parseMap(markdown) {
 }
 function paths(cell) { return [...cell.matchAll(/`([^`]+\.md)`/g)].map((m) => m[1]); }
 function words(cell) { return cell.replaceAll('`', '').split(',').map((s) => s.trim()).filter((s) => s && s !== 'none').map((s) => s.replace(/^c2c\s+/, '')); }
+function normalizedWhitespace(value) { return value.trim().replace(/\s+/g, ' '); }
 function validate(rows) {
   assert.ok(rows.length);
   const verbs = new Set([...readFileSync(path.join(repo, 'packages/cli/src/c2c.ts'), 'utf8').matchAll(/\bcmd\s*===\s*'([^']+)'/g)].map((m) => m[1]));
@@ -44,7 +45,7 @@ function validate(rows) {
     for (const p of [...paths(row.command), ...paths(row.skill)]) assert.ok(existsSync(path.join(plugin, p)), `missing ${p}`);
     for (const verb of words(row.verbs)) assert.ok(verbs.has(verb), `unknown c2c verb ${verb}`);
     for (const step of row.human.replaceAll('`', '').split(',').map((s) => s.trim()).filter((s) => s !== 'none')) {
-      assert.ok(humanSteps.some((allowed) => step.toLowerCase().includes(allowed.toLowerCase()) || allowed.toLowerCase().includes(step.toLowerCase())), `unapproved human step: ${step}`);
+      assert.ok(humanSteps.includes(normalizedWhitespace(step)), `unapproved human step: ${step}`);
     }
   }
   const namedCommands = new Set(rows.flatMap((r) => paths(r.command)));
@@ -75,5 +76,7 @@ test('validation rejects unknown verbs and human steps', () => {
   }, /unknown c2c verb/);
   const valid = parseMap(readFileSync(path.join(plugin, 'C2C.md'), 'utf8'));
   valid[0] = { ...valid[0], human: 'Click arbitrary button' };
+  assert.throws(() => validate(valid), /unapproved human step/);
+  valid[0] = { ...valid[0], human: 'Start Slate once then click Publish' };
   assert.throws(() => validate(valid), /unapproved human step/);
 });
