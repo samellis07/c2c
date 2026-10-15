@@ -167,3 +167,44 @@ test('a dependent record query marker fails closed like an unmigrated criteria',
     /record filter for Ticket could not be applied/,
   );
 });
+
+test('a field the form hides is refused on write, at every depth', () => {
+  const rules: AccessPolicy = {
+    roles: [],
+    profiles: { Staff: { Ticket: { write: true } } },
+  };
+  const principal = { profile: 'Staff', loginUser: 'a@example.test' };
+  const schema = {
+    fieldNames: ['Title', 'Internal', 'Lines'],
+    hiddenFields: ['Internal'],
+    fields: [
+      { name: 'Title' },
+      { name: 'Internal', hidden: true },
+      { name: 'Lines', kind: 'subform' as const, fields: [{ name: 'Qty' }, { name: 'Note', hidden: true }] },
+    ],
+  };
+  // The schema marks the field hidden independent of the profile grant.
+  assert.throws(
+    () => authorizeWrite(rules, principal, 'Ticket', { Internal: 'x' }, schema, 'insert'),
+    /Ticket\.Internal is hidden/,
+  );
+  assert.throws(
+    () => authorizeWrite(rules, principal, 'Ticket', { Internal: 'x' }, schema, 'update'),
+    /Ticket\.Internal is hidden/,
+  );
+  // A hidden subform column refuses in every row; a sibling column writes.
+  assert.throws(
+    () => authorizeWrite(rules, principal, 'Ticket', { Lines: [{ Qty: 1, Note: 'n' }] }, schema, 'insert'),
+    /Ticket\.Lines\[0\]\.Note is hidden/,
+  );
+  assert.deepEqual(authorizeWrite(rules, principal, 'Ticket', { Lines: [{ Qty: 1 }] }, schema, 'insert').values, {
+    Lines: [{ Qty: 1 }],
+  });
+  // The flat fieldNames depth refuses through hiddenFields.
+  assert.throws(
+    () => authorizeWrite(rules, principal, 'Ticket', { Internal: 'x' }, { fieldNames: schema.fieldNames, hiddenFields: schema.hiddenFields }, 'update'),
+    /Ticket\.Internal is hidden/,
+  );
+  // Writable fields are unchanged.
+  assert.deepEqual(authorizeWrite(rules, principal, 'Ticket', { Title: 't' }, schema, 'insert').values, { Title: 't' });
+});

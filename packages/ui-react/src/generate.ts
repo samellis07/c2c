@@ -90,6 +90,7 @@ function fieldSpec(field: UiField): FieldSpec {
     widget: field.widget,
     required: field.required,
     readonly: field.readonly,
+    ...(field.visibility !== undefined ? { visibility: field.visibility } : {}),
     generated: drawn,
   };
   // An empty choice is a list Creator fills from a script at run time; it is not an option.

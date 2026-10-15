@@ -25,6 +25,8 @@ export interface FieldSpec {
   widget: Widget;
   required: boolean;
   readonly: boolean;
+  /** Section visibility from the export, when set; false fields are never writable. */
+  visibility?: boolean;
   /** False when the generator has no control for this field yet; the field renders a visible placeholder. */
   generated: boolean;
   choices?: string[];

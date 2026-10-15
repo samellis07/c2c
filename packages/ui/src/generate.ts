@@ -1930,18 +1930,20 @@ ${requirePrincipal()}
 `;
 }
 
-function fieldNamesOf(fields: UiModel['forms'][number]['fields']): { names: string[]; readonlyNames: string[]; fields: WriteField[] } {
+function fieldNamesOf(fields: UiModel['forms'][number]['fields']): { names: string[]; readonlyNames: string[]; hiddenNames: string[]; fields: WriteField[] } {
   const names: string[] = [];
   const readonlyNames: string[] = [];
+  const hiddenNames: string[] = [];
   const walk = (list: UiModel['forms'][number]['fields']) => {
     for (const field of list) {
       names.push(field.name);
       if (field.readonly) readonlyNames.push(field.name);
+      if (field.visibility === false) hiddenNames.push(field.name);
       if (field.subfields?.length) walk(field.subfields);
     }
   };
   walk(fields);
-  return { names, readonlyNames, fields: fields.map(writeFieldOf) };
+  return { names, readonlyNames, hiddenNames, fields: fields.map(writeFieldOf) };
 }
 
 /**
@@ -1983,7 +1985,11 @@ function staticDisplayDefault(raw: string | undefined): string | undefined {
 }
 
 function writeFieldOf(field: UiModel['forms'][number]['fields'][number]): WriteField {
-  const node: WriteField = { name: field.name, ...(field.readonly ? { readOnly: true } : {}) };
+  const node: WriteField = {
+    name: field.name,
+    ...(field.readonly ? { readOnly: true } : {}),
+    ...(field.visibility === false ? { hidden: true } : {}),
+  };
   if (field.widget === 'lookup' || field.widget === 'lookup-multi') {
     node.kind = 'lookup';
   } else if (field.widget === 'file' || field.widget === 'image' || field.widget === 'audio' || field.widget === 'video' || field.widget === 'signature') {
@@ -2099,6 +2105,7 @@ export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.strin
 export const formName = ${JSON.stringify(form.name)};
 export const fieldNames = ${JSON.stringify(fields.names)};
 export const readonlyFields = ${JSON.stringify(fields.readonlyNames)};
+export const hiddenFields = ${JSON.stringify(fields.hiddenNames)};
 export const fields = ${JSON.stringify(fields.fields)};${ruleDenied.length ? `\nexport const fieldRuleDenied = ${JSON.stringify(ruleDenied)};` : ''}
 const validateAdd = ${JSON.stringify(validate.add)};
 const validateEdit = ${JSON.stringify(validate.edit)};
@@ -2166,7 +2173,7 @@ ${requirePrincipal()}
       send(res, 200, { dryRun: !live, view: true });
       return;
     }
-    const decision = authorizeWrite(access, principal, formName, record, { readonlyFields, fieldNames, fields${ruleDenied.length ? ', ruleDenied: fieldRuleDenied' : ''} }, requestRowId(req) ? "update" : "insert");
+    const decision = authorizeWrite(access, principal, formName, record, { readonlyFields, hiddenFields, fieldNames, fields${ruleDenied.length ? ', ruleDenied: fieldRuleDenied' : ''} }, requestRowId(req) ? "update" : "insert");
     const submitted = Object.keys(decision.values);
     if (!live) {
       send(res, 200, { dryRun: true, wrote: false, values: decision.values, transcript: [] });
@@ -2184,7 +2191,7 @@ ${requirePrincipal()}
       access,
       // writeLive -> datastore.update re-authorizes the screened values; the
       // schema lets a granted composite field carry its nested parts.
-      writeSchemas: { [formName]: { readonlyFields, fieldNames, fields } },
+      writeSchemas: { [formName]: { readonlyFields, hiddenFields, fieldNames, fields } },
     });
     const ctx = runtime.context({
       record: { ...decision.values },

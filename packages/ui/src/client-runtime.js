@@ -4900,9 +4900,37 @@ export function boot(appModel, doc) {
     if (nav) setCurrent(nav, hash);
     markPhoneCurrent(documentRef, hash);
   };
-  const bulkFieldsFor = (form) => (form && form.fields || []).filter((field) =>
-    field && field.status === 'generated' && !field.readonly && ['text', 'textarea', 'email', 'phone', 'number', 'decimal', 'percent', 'currency', 'date', 'datetime', 'time', 'decision', 'select', 'radio', 'url'].includes(field.widget),
-  );
+  /**
+   * Fields a blueprint stage hides or locks. A bulk edit posts without a
+   * per-row stage context, so a field any stage removes from the editable set
+   * is never offered.
+   */
+  const stageLimitedFields = (form) => {
+    const limited = new Set();
+    const specs = (form && Array.isArray(form.stageFields) && form.stageFields) || [];
+    for (const spec of specs) {
+      const stages = spec && typeof spec.stages === 'object' && spec.stages ? spec.stages : {};
+      for (const rules of Object.values(stages)) {
+        if (!rules || typeof rules !== 'object') continue;
+        for (const name of Array.isArray(rules.hidden) ? rules.hidden : []) limited.add(name);
+        for (const name of Array.isArray(rules.readonly) ? rules.readonly : []) limited.add(name);
+        if (!Array.isArray(rules.visible) && !Array.isArray(rules.updatable)) continue;
+        for (const field of (form && form.fields) || []) {
+          const name = field && field.name;
+          if (!name) continue;
+          if (Array.isArray(rules.visible) && !rules.visible.includes(name)) limited.add(name);
+          if (Array.isArray(rules.updatable) && !rules.updatable.includes(name)) limited.add(name);
+        }
+      }
+    }
+    return limited;
+  };
+  const bulkFieldsFor = (form) => {
+    const limited = stageLimitedFields(form);
+    return (form && form.fields || []).filter((field) =>
+      field && field.status === 'generated' && field.visibility !== false && !field.readonly && !limited.has(field.name) && ['text', 'textarea', 'email', 'phone', 'number', 'decimal', 'percent', 'currency', 'date', 'datetime', 'time', 'decision', 'select', 'radio', 'url'].includes(field.widget),
+    );
+  };
   const openBulkEdit = (section) => {
     const report = reportOf(section);
     const form = report && (appModel.forms || []).find((item) => item.name === report.form);

@@ -23,7 +23,7 @@ import { EmptyState } from '../arc/components/empty-state/empty-state';
 import { FilterToolbar } from '../arc/components/filter-toolbar/filter-toolbar';
 import { Pagination } from '../arc/components/pagination/pagination';
 import { SortableDataTable, type DataColumn, type SortState } from '../arc/components/sortable-data-table/sortable-data-table';
-import type { ReportSpec } from '../types';
+import type { FormSpec, ReportSpec } from '../types';
 import { useEnv } from '../runtime/env';
 import { Slot, useCustomization } from '../runtime/extend';
 import { hrefFor } from '../runtime/router';
@@ -137,6 +137,36 @@ export function ReportView({ report, row }: { report: ReportSpec; row?: string }
   return <ReportList report={report} />;
 }
 
+const BULK_WIDGETS = new Set(['text', 'textarea', 'email', 'phone', 'number', 'decimal', 'percent', 'currency', 'date', 'datetime', 'time', 'decision', 'select', 'radio', 'url']);
+
+/**
+ * Fields a blueprint stage hides or locks. A bulk edit posts without a
+ * per-row stage context, so a field any stage removes from the editable set
+ * is never offered.
+ */
+function stageLimitedFields(form: FormSpec): ReadonlySet<string> {
+  const limited = new Set<string>();
+  for (const spec of form.stageFields ?? []) {
+    for (const rules of Object.values(spec.stages ?? {})) {
+      for (const name of rules.hidden ?? []) limited.add(name);
+      for (const name of rules.readonly ?? []) limited.add(name);
+      if (!Array.isArray(rules.visible) && !Array.isArray(rules.updatable)) continue;
+      for (const field of form.fields) {
+        if (rules.visible?.includes(field.name) === false) limited.add(field.name);
+        if (rules.updatable?.includes(field.name) === false) limited.add(field.name);
+      }
+    }
+  }
+  return limited;
+}
+
+/** Bulk-edit candidates: generated scalar controls that are shown and writable at every stage. */
+function bulkEditableFields(form: FormSpec | undefined): FormSpec['fields'] {
+  if (!form) return [];
+  const limited = stageLimitedFields(form);
+  return form.fields.filter((field) => field.generated && field.visibility !== false && !field.readonly && !limited.has(field.name) && BULK_WIDGETS.has(field.widget));
+}
+
 /** A non-list view stays visibly pending until its renderer is implemented. */
 function ViewStub({ report }: { report: ReportSpec }) {
   const custom = useCustomization();
@@ -172,7 +202,7 @@ function ReportList({ report }: { report: ReportSpec }) {
   const [bulkValue, setBulkValue] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
   const bulkForm = report.form ? spec.forms[report.form] : undefined;
-  const bulkFields = (bulkForm?.fields ?? []).filter((field) => field.generated && !field.readonly && ['text', 'textarea', 'email', 'phone', 'number', 'decimal', 'percent', 'currency', 'date', 'datetime', 'time', 'decision', 'select', 'radio', 'url'].includes(field.widget));
+  const bulkFields = bulkEditableFields(bulkForm);
   const deny = useAccessDenied();
 
   const body = useMemo(() => buildQuery(report, { page, q, filter, sort }), [report, page, q, filter, sort]);
