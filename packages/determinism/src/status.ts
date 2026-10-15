@@ -391,7 +391,7 @@ function writeSitesFile(path: string, contents: string): void {
   }
   const destination = join(parent, basename(path));
   const existing = lstatSync(destination, { throwIfNoEntry: false });
-  if (existing && (!existing.isFile() || existing.nlink !== 1)) {
+  if (existing && !existing.isSymbolicLink() && (!existing.isFile() || existing.nlink !== 1)) {
     throw new Error(`determinism:status: --sites target must be a regular file with one link: ${destination}`);
   }
   const currentParent = statSync(parent);
