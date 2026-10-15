@@ -116,5 +116,5 @@ export type { DeltaApplyResult, DeltaCheckpoint, DeltaPlan, DeltaTable, Deletion
 export { dataParity, formatParity, storeRowsFromDir, verifyCli } from './parity.js';
 export type { DataParityReport, ParityTableReport } from './parity.js';
 export { DELTA_SOURCES, deltaSource, readDeltaCheckpoint, readStateFile, rollbackExportCli, stateFilePath, syncDeltaCli } from './delta-cli.js';
-export { parseStoreRows, readStoreRows, rollbackExport } from './rollback.js';
+export { parseStoreRows, readStoreRows, rollbackExport, ROLLBACK_MANIFEST_FILE, ROLLBACK_MANIFEST_VERSION } from './rollback.js';
 export type { RollbackExport, RollbackFile } from './rollback.js';
