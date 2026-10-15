@@ -43,6 +43,8 @@ export interface UiElement {
   text?: string;
   /** Why a server-snippet TODO stays counted, in a fixed order. */
   manualReasons?: SnippetReason[];
+  /** Stable source occurrence identifier for repeated click-action TODOs. */
+  siteId?: string;
   /** Developer-facing manual step for that TODO, with its location. */
   manualStep?: string;
   /** A `type="form data"` cell: `thisapp.<Report>.<Field>.<fn>()` plus the row criteria. */
@@ -569,16 +571,9 @@ export function droppedStyleReason(dropped: string[]): string {
 }
 
 function dedupeImageActions(actions: ZmlImageAction[]): ZmlImageAction[] {
-  const seen = new Set<string>();
-  const out: ZmlImageAction[] = [];
-  for (const a of actions) {
-    const k = `${a.element ?? 'image'}|${a.action}|${a.fn ?? ''}|${a.label ?? ''}`;
-    if (!seen.has(k)) {
-      seen.add(k);
-      out.push(a);
-    }
-  }
-  return out;
+  // Each markup occurrence is a separate wiring site, even when its action
+  // and label match another occurrence exactly.
+  return actions;
 }
 
 /**
@@ -596,6 +591,7 @@ function imageActionTodos(actions: ZmlImageAction[], why?: string): UiElement[] 
       tag: element,
       kind: 'todo' as const,
       ...(a.fn ? { name: a.fn } : a.label ? { name: a.label } : {}),
+      siteId: a.siteId,
       todo: `${what} click action ${a.action}${call} is not generated; wire the click to the function by hand${reason}`,
       children: [],
     };
@@ -759,7 +755,7 @@ export function elementFromZml(
       const lostCss = styleRules ? { droppedStyleRules: styleRules } : {};
       const actionItems = imageActionTodos(imageActions, compiled && !compiled.ok ? compiled.reason : undefined);
       if (compiled?.ok && compiled.staticOnly) {
-        return { tag, kind, ...(name ? { name } : {}), html: compiled.html ?? '', ...lostCss, ...(popups.length ? { popups } : {}), children: [...actionItems, ...children] };
+        return { tag, kind, ...(name ? { name } : {}), html: compiled.html ?? '', ...lostCss, ...(compiled.droppedTags?.length ? { droppedTags: compiled.droppedTags } : {}), ...(popups.length ? { popups } : {}), children: [...actionItems, ...children] };
       }
       if (compiled?.ok && compiled.file && compiled.src !== undefined) {
         env?.emit?.(compiled.file);
@@ -769,6 +765,7 @@ export function elementFromZml(
           ...(name ? { name } : {}),
           html: compiled.html ?? '',
           ...lostCss,
+          ...(compiled.droppedTags?.length ? { droppedTags: compiled.droppedTags } : {}),
           src: compiled.src,
           ...(popups.length ? { popups } : {}),
           children: [...actionItems, ...children],
