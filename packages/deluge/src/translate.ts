@@ -2808,6 +2808,36 @@ function assignPath(e: Expr): { root: string; segments: Array<{ key?: string; in
   return null;
 }
 
+/**
+ * True for a server-flagged scalar the client can evaluate as-is: every
+ * server part is a field read of a prefetched row whose loop the client
+ * really emits (`clientIterates`). A query, collection, map, row, side
+ * effect, app function or todo is never one, and neither is a read of a row
+ * whose client loop degrades to a counted todo: that loop's body never runs
+ * on the client, so the local would hold a value the client never computed.
+ */
+function rowScalarOnClient(value: Fx, scope: Scope): boolean {
+  const rows = value.reads.filter((name) => scope.clientData.has(name));
+  if (!rows.length) return false;
+  const iterated = rows.every((name) => {
+    const frame = [...scope.rowFrames].reverse().find((f) => f.name === name && !f.closed);
+    return !!frame && clientIterates(frame, scope, new Set());
+  });
+  return (
+    iterated &&
+    value.serverOnly &&
+    value.clientReady &&
+    !value.query &&
+    !value.list &&
+    !value.map &&
+    !value.row &&
+    !value.appFunction &&
+    !value.todo &&
+    !value.sideEffect &&
+    value.unboundReads.length === 0
+  );
+}
+
 function assignTo(target: Expr, value: Fx, span: { start: number; end: number }, scope: Scope, stats: TranslateStats, todos: TodoItem[], declType?: string, selfRef = false): Out {
   void declType;
   if (target.kind === 'name') {
@@ -2859,7 +2889,12 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     if (value.row) scope.row.add(name);
     if (value.date) scope.date.add(name);
     if (value.decimal) scope.decimal.add(name);
-    if (value.serverOnly) scope.serverOnly.add(name);
+    // A scalar computed only from the current client-iterated prefetched row
+    // (and client locals) has the same value on the client: the client loop
+    // walks the same snapshot rows. It is assigned on both sides, so a later
+    // condition (`if(total <= 0)`) reads a client local, not the server.
+    const clientScalar = rowScalarOnClient(value, scope);
+    if (value.serverOnly && !clientScalar) scope.serverOnly.add(name);
     // `reads` already names the previous binding when this assignment is a
     // server read of its own name. An arithmetic self-assign keeps the cycle.
     // Unbound names stay on the read list so a later walk can see them.
@@ -2881,7 +2916,7 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
       flow: scope.flowStack[scope.flowStack.length - 1]!,
     });
     account(stats, todos, value.query || value.serverOnly ? { ...value, shim: true } : value, span);
-    const where: Array<'server' | 'client'> = value.serverOnly ? ['server'] : ['server', 'client'];
+    const where: Array<'server' | 'client'> = value.serverOnly && !clientScalar ? ['server'] : ['server', 'client'];
     return declare(name, value.code, where, scope);
   }
   const path = aliasedPath(target, scope);

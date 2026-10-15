@@ -820,10 +820,12 @@ test('a nested for each whose collection is looked up by the outer row prefetche
   assert.match(prefetch, /slots\["c\d+"\]\[shim\.record\.get\(d_rec, "ID"\)\] = \(norm_c\d+_\d+ != null && res_c\d+_\d+\.has/);
 });
 
-test('a nested collection keyed by a client list batches, and a mutated list stays a todo', () => {
+test('a nested collection keyed by a client list batches, and a mutated list is checked on the client', () => {
   // `Orders[Day == day]` is one rows map over the client list. The condition
   // reads `seen`, and the body adds to `seen`, so that check is not the
-  // initial empty list replayed for every row. Neither loop binds a free name.
+  // initial empty list replayed for every row in the prefetch. `key` reads
+  // only the client-iterated row, so the client runs the check and the add
+  // itself over the same rows. Neither loop binds a free name.
   const t = translate(
     [
       'seen = List();',
@@ -840,10 +842,10 @@ test('a nested collection keyed by a client list batches, and a mutated list sta
   const client = stripComments(t.client);
   const prefetch = stripComments(t.prefetch);
   assert.equal(t.todos.some((item) => item.construct === 'client-loop-uses-server'), false);
-  assert.equal(t.todos.some((item) => item.construct === 'client-condition-uses-server'), true);
+  assert.equal(t.todos.some((item) => item.construct === 'client-condition-uses-server'), false);
   assert.match(prefetch, /shim\.datastore\.rowsMap\(ctx, "Orders", "Day"/);
   assert.doesNotMatch(prefetch, /list\.contains\(seen/);
-  assert.match(client, /client-condition-uses-server/);
+  assert.match(client, /var key = shim\.record\.get\(r, "Name"\);\n\s*if \(\(!shim\.list\.contains\(seen, key\)\)\) \{\n\s*shim\.list\.add\(seen, key\);/);
   assert.doesNotMatch(client, /\brecs\b/);
   assert.doesNotMatch(prefetch, /\brecs\b|\br\b/);
 });
