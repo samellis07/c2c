@@ -2906,4 +2906,3 @@ test('shape C endpoint refuses every origin when the deploy config lists none', 
     live.restore();
   }
 });
-
