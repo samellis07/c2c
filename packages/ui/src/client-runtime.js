@@ -1546,6 +1546,7 @@ export function parseRoute(hash) {
   if (!parts.length) return { name: 'home' };
   if (parts[0] === 'form' && parts[1]) return { name: 'form', id: parts[1], edit: parts[2] === 'edit' ? parts[3] : undefined };
   if (parts[0] === 'report' && parts[1]) return { name: 'report', id: parts[1], row: parts[2] === 'row' ? parts[3] : undefined };
+  if (parts[0] === 'record' && parts[1] && parts[2]) return { name: 'record', id: parts[1], row: parts[2] };
   if (parts[0] === 'page' && parts[1]) return { name: 'page', id: parts[1] };
   // Hidden admin route — never in the nav. `c2c smoke --in-browser` points a browser here.
   if (parts[0] === 'admin' && parts[1] === 'smoke') return { name: 'smoke', id: 'smoke' };
@@ -1570,6 +1571,10 @@ function gateEndpoint(appModel, route) {
     const form = (appModel.forms || []).find((item) => item.name === route.id);
     return form && form.submitEndpoint;
   }
+  if (route.name === 'record') {
+    const form = (appModel.forms || []).find((item) => item.name === route.id);
+    return form && form.recordEndpoint;
+  }
   if (route.name === 'report') {
     const report = (appModel.reports || []).find((item) => item.name === route.id);
     return report && report.queryEndpoint;
@@ -1586,6 +1591,10 @@ export function renderRoute(appModel, route, doc) {
   if (route.name === 'report') {
     const report = (appModel.reports || []).find((item) => item.name === route.id);
     return report ? renderReport(report) : `<p class="todo">Unknown report.</p>`;
+  }
+  if (route.name === 'record') {
+    const form = (appModel.forms || []).find((item) => item.name === route.id);
+    return form ? `<section class="record-summary" data-record-summary="${escapeHtml(form.name)}" data-record-id="${escapeHtml(route.row || '')}"><p>Loading record…</p></section>` : `<p class="todo">Unknown form.</p>`;
   }
   if (route.name === 'page') {
     const page = (appModel.pages || []).find((item) => item.name === route.id);
@@ -3945,6 +3954,7 @@ export function boot(appModel, doc) {
         if (filter) filter.addEventListener('change', () => loadLive(0));
       }
     }
+    if (route.name === 'record') loadRecordSummary(appModel, route, main, view);
   };
   const paint = () => {
     if (!main) return Promise.resolve();
@@ -4204,6 +4214,42 @@ export function boot(appModel, doc) {
         setReportChrome(section, false);
         if (stateEl) stateEl.innerHTML = reportStateHtml('error');
       });
+  }
+
+  /** Read the URL-named row through the existing authorizeRead endpoint. */
+  function loadRecordSummary(appModel, route, root, viewRef) {
+    const form = (appModel.forms || []).find((item) => item.name === route.id);
+    const section = root && root.querySelector('[data-record-summary]');
+    const rowId = typeof route.row === 'string' ? route.row : '';
+    const call = (viewRef && viewRef.fetch) || globalThis.fetch;
+    if (!form || !section || !rowId || !form.recordEndpoint || typeof call !== 'function') return;
+    const requestedHash = viewRef && viewRef.location ? viewRef.location.hash : '';
+    apiCall(call, viewRef, form.recordEndpoint, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ROWID: rowId }),
+    }).then(async (res) => {
+      if (viewRef && viewRef.location && viewRef.location.hash !== requestedHash) return;
+      if (!res || res.status === 403) { section.innerHTML = '<p data-access-status="403">This record is not available.</p>'; return; }
+      if (res.status === 404) { section.innerHTML = '<p data-record-empty="">No record is available.</p>'; return; }
+      if (!res.ok) throw new Error('record read failed');
+      const body = await readJson(res);
+      const row = body && body.record && typeof body.record === 'object' && !Array.isArray(body.record) ? body.record : null;
+      if (!row) { section.innerHTML = '<p data-record-empty="">No record is available.</p>'; return; }
+      const fields = (form.fields || []).filter((field) => field && typeof field.name === 'string' && Object.prototype.hasOwnProperty.call(row, field.name));
+      const rows = fields.map((field) => `<tr><th scope="row">${escapeHtml(field.label || field.name)}</th><td>${escapeHtml(summaryValue(row[field.name]))}</td></tr>`).join('');
+      section.innerHTML = `<table><tbody>${rows}</tbody></table>`;
+    }).catch(() => {
+      if (!viewRef || !viewRef.location || viewRef.location.hash === requestedHash) section.innerHTML = '<p data-record-error="">This record could not be loaded.</p>';
+    });
+  }
+
+  function summaryValue(value) {
+    if (value == null) return '';
+    if (typeof value === 'object') {
+      if (Array.isArray(value)) return value.map(summaryValue).filter(Boolean).join(', ');
+      if (typeof value.label === 'string') return value.label;
+      return Object.values(value).map(summaryValue).filter(Boolean).join(', ');
+    }
+    return String(value);
   }
 
   /**

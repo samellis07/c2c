@@ -12,6 +12,7 @@ export type * from './types';
 export { bootApp, navSections, deniedTargets, type RouteTable, type ScreenProps } from './boot';
 export { AppShell } from './shell/AppShell';
 export { FormView } from './form/FormView';
+export { RecordSummary } from './form/RecordSummary';
 export {
   Field,
   defaultWidget,

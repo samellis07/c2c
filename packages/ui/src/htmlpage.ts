@@ -1404,6 +1404,30 @@ const CLIENT_PROJECTION_TODOS: ReadonlySet<string> = new Set(['client-condition-
  */
 export const EXECUTE_FUNCTION_BUTTON = 'ZML ExecuteFunction button';
 
+/**
+ * Point the one known record-summary iframe shape at the generated route. The
+ * URL's row id is still untrusted: the route uses the form's record endpoint,
+ * which applies authorizeRead to that exact ROWID before returning fields.
+ */
+export function rewriteRecordSummaryFrames(template: string): string {
+  return String(template ?? '').replace(/<iframe\b((?:"[^"]*"|'[^']*'|[^>])*)>([\s\S]*?)<\/iframe\s*>/gi, (whole, attrs: string, inner: string) => {
+    const src = /\bsrc\s*=\s*(["'])([\s\S]*?)\1/i.exec(attrs);
+    if (!src) return whole;
+    const match = /^<%=\s*zoho\.appuri\s*%>record-summary\/([A-Za-z_]\w*)\/<%=([\s\S]+?)%>$/i.exec(src[2]);
+    if (!match) return whole;
+    const form = match[1];
+    const idExpr = match[2].trim();
+    const read = new RegExp(`^${form}\\s*\\[[\\s\\S]+\\]\\s*\\.\\s*ID$`, 'i').test(idExpr);
+    const param = /^input\.[A-Za-z_]\w*$/.test(idExpr);
+    if (!read && !param) return whole;
+    const routed = `#/record/${form}/<%=${idExpr}%>`;
+    const nextAttrs = attrs.slice(0, src.index) + `src=${src[1]}${routed}${src[1]}` + attrs.slice(src.index + src[0].length);
+    const anchorAttrs = nextAttrs.replace(/\bsrc\s*=/i, 'href=');
+    const label = inner.trim() || 'View record summary';
+    return `<a${anchorAttrs}>${label}</a>`;
+  });
+}
+
 /** True when the template holds a ZML button whose action calls a Deluge function. */
 function hasExecuteFunctionButton(template: string): boolean {
   for (const m of template.matchAll(/<button\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi)) {
@@ -1495,6 +1519,7 @@ export function compileHtmlpage(
 ): HtmlpageCompiled {
   const fail = (reason: string): HtmlpageCompiled => ({ ok: false, reason });
   const head = splitTemplate(decoded);
+  head.template = rewriteRecordSummaryFrames(head.template);
   head.template = convertZmlSnippetToHtml(head.template);
   head.template = rewriteEmbedIframes(head.template, app);
   if (hasExecuteFunctionButton(head.template)) return fail(EXECUTE_FUNCTION_BUTTON);

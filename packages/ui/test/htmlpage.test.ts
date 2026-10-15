@@ -14,7 +14,7 @@ import { JSDOM } from 'jsdom';
 import { deriveIr, parse, parseFile, type App } from '../../core/src/index.js';
 import { mockDatastore } from '../../shims/test/zcql-mock.js';
 import { buildUi, generateUi } from '../src/index.js';
-import { compileHtmlpage, convertZmlSnippetToHtml, islandReadOnly, renderAuditSource } from '../src/htmlpage.js';
+import { compileHtmlpage, convertZmlSnippetToHtml, islandReadOnly, renderAuditSource, rewriteRecordSummaryFrames } from '../src/htmlpage.js';
 import { renderedDocumentViolation, renderedHtmlElements } from '../../shims/src/rendered-guard.js';
 import { c2cUrlFunctionSource } from '../src/url-policy.js';
 import { uiSnippetFiles } from '../src/model.js';
@@ -2478,4 +2478,25 @@ test('a text remove whose operands mix a date-to-text and a datetime-to-text sta
   assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO]);
   assert.ok(model.todos[0]?.manualStep, 'the counted TODO carries a manual step');
   assert.deepEqual(uiSnippetFiles(model), []);
+});
+
+
+test('record-summary iframe maps only a recognized read or page parameter to the record route', () => {
+  const read = `<iframe title="Employee" src='<%=zoho.appuri%>record-summary/Add_Employee/<%=Add_Employee[Official_Email == zoho.loginuserid].ID%>'></iframe>`;
+  const param = `<iframe src='<%=zoho.appuri%>record-summary/Case/<%=input.caseID%>'></iframe>`;
+  assert.match(rewriteRecordSummaryFrames(read), /#\/record\/Add_Employee\/<%=Add_Employee\[Official_Email == zoho\.loginuserid\]\.ID%>/);
+  assert.match(rewriteRecordSummaryFrames(param), /#\/record\/Case\/<%=input\.caseID%>/);
+  const untrusted = `<iframe src='<%=zoho.appuri%>record-summary/Case/<%=input.otherValue + "/admin"%>'></iframe>`;
+  assert.equal(rewriteRecordSummaryFrames(untrusted), untrusted, 'arbitrary expressions remain counted');
+  const wrongForm = `<iframe src='<%=zoho.appuri%>record-summary/Case/<%=Other[ID > 0].ID%>'></iframe>`;
+  assert.equal(rewriteRecordSummaryFrames(wrongForm), wrongForm, 'a read of another form does not bind this route');
+});
+
+
+test('a record-summary frame generates a link to the authorized record route', () => {
+  const snippet = `htmlpage hp1()\ncontent\n<iframe src='<%=zoho.appuri%>record-summary/Orders/<%=Orders[Status == "Open"].ID%>'></iframe>`;
+  const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason);
+  assert.match(compiled.file?.source ?? '', /#\/record\/Orders/);
+  assert.match(compiled.file?.source ?? '', /shim\.datastore\.query/);
 });
