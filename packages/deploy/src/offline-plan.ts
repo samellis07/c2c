@@ -1479,7 +1479,7 @@ function mcpPlanSet(signals: PlanSignals, roles: number, portalUsers: number, ma
   return [...set].sort();
 }
 
-export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSource; mail: boolean; source?: readonly SourceTableData[]; newProject?: boolean; production?: boolean }): { files: PlanFile[]; plan: OfflinePlan } {
+export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSource; mail: boolean; source?: readonly SourceTableData[]; newProject?: boolean; production?: boolean; subsetShims?: boolean }): { files: PlanFile[]; plan: OfflinePlan } {
   const link = (app.name ?? '').trim() || 'app';
   const newProject = opts.newProject === true;
   const schema = generateSchema(app, opts.source ? { source: opts.source } : undefined);
@@ -1593,6 +1593,7 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
       mode: 'dry-run',
       columns: columnTypes(schema.tables),
       roleMap: principalRoleMap(auth),
+      ...(opts.subsetShims !== undefined ? { subsetShims: opts.subsetShims } : {}),
     });
     const prefix = `${FUNCTION_DIR}/`;
     files.push({
@@ -1764,6 +1765,7 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
       const configPath = flag(args, '--config') ?? join(process.cwd(), 'c2c-deploy.json');
       configuredProject = readDeployConfig(configPath).apps[appKey]?.project;
     }
+    const subsetShims = args.includes('--subset-shims') || io.env.C2C_SUBSET_SHIMS === '1';
     const { files, plan } = buildOfflinePlan(app, {
       dc: dc.dc,
       dcSource: dc.source,
@@ -1771,6 +1773,7 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
       ...(source ? { source } : {}),
       newProject: configuredProject === undefined,
       ...(args.includes('--production') ? { production: true } : {}),
+      ...(subsetShims ? { subsetShims: true } : {}),
     });
     // inputs.json is customer-edited; a re-plan must not clobber it.
     writePlanTree(out, files.filter((file) => file.path !== 'provision/inputs.json' || !statSync(join(out, 'provision', 'inputs.json'), { throwIfNoEntry: false })?.isFile()));
