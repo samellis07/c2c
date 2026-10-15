@@ -265,8 +265,10 @@ user must be added as an app user.
 
 Every generated function reply, including a store refusal from `replyStoreError`,
 includes `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`. The
-shared entry and the generated handlers apply these on every status so JSON
-responses are not MIME-sniffed or cached.
+shared entry sets both on the response before routing, so every status and
+every handler reply carries them, including handlers that write only
+`Content-Type` (HTML page endpoints). JSON responses are not MIME-sniffed or
+cached.
 
 Not yet verified: the exact header the Catalyst gateway
 accepts for `generateAuthToken()` tokens on an Advanced I/O call, and whether

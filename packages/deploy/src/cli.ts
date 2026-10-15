@@ -32,7 +32,7 @@ import { mailSenderEvidenceFor, mailSenderEvidenceVerified, observeMailSenders, 
 import { humanChecklist } from './human-steps.js';
 import { applyFunctionEnvSecrets, functionIdFromList, readConnectionSecretKeys } from './function-env.js';
 import { CONSOLE_SERVICES, formatPostDeploySteps, postDeploySteps, servicesTouched, type ConsoleService, type PostDeployStep } from './post-deploy.js';
-import { applyFunctionConnectSrc, SHELL_CONTENT_SECURITY_POLICY } from '../../ui/src/csp.js';
+import { applyFunctionConnectSrc, functionOriginFromApiBase, SHELL_CONTENT_SECURITY_POLICY } from '../../ui/src/csp.js';
 import { appTimeZone, authBridgeUrl, generateUi, slateConfigSource } from '../../ui/src/generate.js';
 import { emptyRegistry, type ProjectRegistry } from './registry.js';
 import { catalystRestCall, listCatalystProjects, readCliAccessToken } from './rest.js';
@@ -789,6 +789,14 @@ export function functionBaseFrom(output: string): string | undefined {
   return match?.[0];
 }
 
+function hostOf(url: string): string | undefined {
+  try {
+    return new URL(url).host;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Write connect-src for the function origin into a shell that already carries the CSP meta. */
 function rewriteShellConnectSrc(file: string, apiBase: string | undefined): void {
   if (!apiBase || !existsSync(file)) return;
@@ -934,6 +942,10 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     const apiBaseFlag = flag(rest, '--api-base');
     if (apiBaseFlag !== undefined && !/^(https:\/\/[^\s]+|\/server\/[A-Za-z0-9_-]+)$/.test(apiBaseFlag)) {
       throw new Error('--api-base must be an https URL or /server/<function>');
+    }
+    // The shell CSP adds only an Advanced I/O function origin to connect-src.
+    if (apiBaseFlag?.startsWith('https://') && !functionOriginFromApiBase(apiBaseFlag)) {
+      io.stdout(`warning: --api-base ${apiBaseFlag} is not an Advanced I/O function URL (https://<host>.catalystserverless.<dc>/server/...); the app's Content-Security-Policy keeps connect-src 'self', so browsers block every API call to it\n`);
     }
     const slateDomainFlag = flag(rest, '--slate-domain');
     if (slateDomainFlag !== undefined && !slateHost(slateDomainFlag)) throw new Error('--slate-domain must be a Slate app host — a bare hostname or the https App Url slate:link prints');
@@ -1460,12 +1472,18 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         }
         return await finish(result.code || 1);
       }
-      if (command.id === 'functions' && !apiBaseFlag) {
+      if (command.id === 'functions') {
         const found = functionBaseFrom(`${result.stdout}\n${result.stderr}`);
-        if (found) {
+        if (found && !apiBaseFlag) {
           apiBase = found;
           state.apiBase = found;
           io.stdout(`api base: ${found}\n`);
+        } else if (found && apiBaseFlag) {
+          const flagHost = hostOf(apiBaseFlag);
+          const fnHost = hostOf(found);
+          if (flagHost && fnHost && flagHost !== fnHost) {
+            io.stdout(`warning: --api-base host ${flagHost} is not the deployed function host ${fnHost}; the app calls ${flagHost}, and the Content-Security-Policy allows only that origin\n`);
+          }
         }
       }
       // Secret --function-env values were written to catalyst-config.json as
