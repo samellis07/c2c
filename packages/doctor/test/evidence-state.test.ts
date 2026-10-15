@@ -6,7 +6,7 @@
  * Offline: the observation is fake, the Catalyst CLI and REST are stubbed.
  */
 import assert from 'node:assert/strict';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, cpSync, existsSync, fchmodSync, fstatSync, ftruncateSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -287,18 +287,25 @@ test('evidence state: the signing key is 0600 outside the workspace; a weak or m
   assert.equal((await observe(env)).code, 0);
   const key = mcpStateKeyPath(env);
   assert.ok(!key.startsWith(dir));
-  // fs-race-allow: the test inspects the key it just created; nothing else writes it.
-  assert.equal(statSync(key).mode & 0o777, 0o600);
-  assert.equal(statSync(join(key, '..')).mode & 0o777, 0o700);
-  assert.doesNotMatch(readFileSync(mcpStatePath(dir), 'utf8'), new RegExp(readFileSync(key).toString('hex')));
-  assert.equal(loadMcpEvidence(dir, SCOPE, { env }).status, 'reused');
-  // A key another user can read is refused: nothing is reused.
-  chmodSync(key, 0o644);
-  assert.deepEqual(loadMcpEvidence(dir, SCOPE, { env }), { status: 'rejected', reason: 'the signing key is readable by other users' });
-  chmodSync(key, 0o600);
-  // A different key (another user or machine) does not verify the record.
-  writeFileSync(key, Buffer.alloc(32, 7));
-  assert.equal(loadMcpEvidence(dir, SCOPE, { env }).status, 'rejected');
+  // The test inspects the key it just created through one open descriptor:
+  // stat, read, chmod and write all go through the fd, never re-open the path.
+  const fd = openSync(key, 'r+');
+  try {
+    assert.equal(fstatSync(fd).mode & 0o777, 0o600);
+    assert.equal(statSync(join(key, '..')).mode & 0o777, 0o700);
+    assert.doesNotMatch(readFileSync(mcpStatePath(dir), 'utf8'), new RegExp(readFileSync(fd).toString('hex')));
+    assert.equal(loadMcpEvidence(dir, SCOPE, { env }).status, 'reused');
+    // A key another user can read is refused: nothing is reused.
+    fchmodSync(fd, 0o644);
+    assert.deepEqual(loadMcpEvidence(dir, SCOPE, { env }), { status: 'rejected', reason: 'the signing key is readable by other users' });
+    fchmodSync(fd, 0o600);
+    // A different key (another user or machine) does not verify the record.
+    ftruncateSync(fd, 0);
+    writeSync(fd, Buffer.alloc(32, 7), 0, 32, 0);
+    assert.equal(loadMcpEvidence(dir, SCOPE, { env }).status, 'rejected');
+  } finally {
+    closeSync(fd);
+  }
   // A key directory inside the workspace is never used: the evidence is not stored.
   const inner = workspace();
   const innerEnv = { ...inner.env, HOME: join(inner.dir, 'home') };
