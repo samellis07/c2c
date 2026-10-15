@@ -398,6 +398,16 @@ test('React and vanilla report the same static style rule TODO', () => {
   assert.equal(vanilla, 'Static <style> CSS not carried over: the page sanitizer drops 1 static style rule');
 });
 
+test('React retains identical ExecuteFunction button sites separately', () => {
+  const button = `<button action='ExecuteFunction' functionName='save' elementName='Save'>`;
+  const zml = `<zml><dsp id='snippet'><![CDATA[${button}${button}]]></dsp></zml>`;
+  const page = reactAppSpec(nitApp(zml)).pages?.Dashboard;
+  assert.ok(page);
+  const todos = leaves(page.elements).filter((element): element is Extract<PageElement, { kind: 'todo' }> => element.kind === 'todo' && element.reason.includes('ExecuteFunction'));
+  assert.equal(todos.length, 2);
+  assert.deepEqual(todos.map((todo) => todo.siteId), ['button-0', `button-${button.length}`]);
+});
+
 test('the React page spec keeps one TODO when a server-side snippet fails to compile', () => {
   const source = `htmlpage hp1()\ncontent\n<script>bad()</script>\n<%\nrow = insert into Orders [ Status : "open" ];\n%>`;
   const zml = `<zml><dsp id='snippet'><![CDATA[${source}]]></dsp></zml>`;
