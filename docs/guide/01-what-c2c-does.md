@@ -55,6 +55,9 @@ Each one is named in the report when your app uses it:
 
 - **Payments.** No payment gateway is generated. A payment
   workflow is counted, and saving a record does not take a payment.
+- **Native mobile apps and MDM.** No native iOS or Android app or
+  mobile device management (MDM) package is generated in this
+  version; the installable client is the Slate web app (PWA).
 - **Offline mode.** The web app does not keep your records on the
   device. While you are offline it says that data is unavailable
   ([what the web app generates](../../docs/ui.md)).
@@ -72,11 +75,12 @@ invited again
 ([Third-party JWT is the SSO route](../../plugin/references/facts/auth.md#third-party-jwt-is-the-sso-route);
 that facts entry has no evidence label).
 
-You get a web app. Creator's own iPhone and Android apps are not
-produced. Outgoing mail your app sends through Deluge `sendmail` is
-carried over (and the sender address is verified by you when the app
-sends mail; that checklist item appears only then), while inbound
-Form Email is not supported in this version.
+You get an installable web app (PWA); Creator's own iPhone and
+Android apps and MDM are not supported in this version (counted;
+on the roadmap). Outgoing mail your app sends through Deluge
+`sendmail` is carried over (and the sender address is verified by
+you when the app sends mail; that checklist item appears only then),
+while inbound Form Email is not supported in this version.
 
 Anything else the converter cannot translate is counted. The
 analysis text prints `todo items` with that count. A count of zero

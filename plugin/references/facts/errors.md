@@ -6,7 +6,7 @@ Match the first exact substring. Stop the step, apply the fix, then read the res
 
 ### `409 DUPLICATE_ENTRY` on project import
 
-Rule: On `409 DUPLICATE_ENTRY` the project name is already in use. Append a suffix to project_name and retry the greenfield import once. Import into an existing project is not supported; create a new one.
+Rule: On `409 DUPLICATE_ENTRY` the project name is already in use. Append a suffix to project_name (try `-2`, `-3` … `-5` suffixes, up to 5 names in all) and retry the greenfield import. Import into an existing project is not supported; create a new one.
 
 Cause: POST /baas/v1/project/import was sent with a project_name that already exists.
 
@@ -610,7 +610,7 @@ Cause: Pivots are Analytics objects, not Data Store reports.
 
 Fix: Leave pivots out of the migration. Remove them from the export you ask Creator to re-import. Do not create a Catalyst table for a pivot.
 
-Recipe: Re-export without the pivot. Success is an import that no longer fails on the pivot. The plan lists the pivot as out of scope.
+Recipe: Re-export without the pivot. Success is an import that no longer fails on the pivot. The plan lists the pivot as not supported in this version.
 
 ### Creator `You have reached your API call limit`
 
