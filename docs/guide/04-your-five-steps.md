@@ -18,7 +18,7 @@ is the in-app check from the verify flow, asked while verifying.
   - Stratus — in the Catalyst console open the project → Cloud Scale →
     Stratus → Start Exploring, then on **Create your First Bucket** create
     one bucket (any name). Done when it shows in the Stratus bucket list
-    (your app has file fields)
+    [UNVERIFIED] (your app has file fields)
   - SmartBrowz — in the Catalyst console open the project → SmartBrowz →
     Start Exploring (your app makes PDFs)
   - Slate — in the Catalyst console open the project → Slate → Start
