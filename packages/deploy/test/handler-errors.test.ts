@@ -148,11 +148,15 @@ async function loadSubmit(ds = DS, endpoint = 'submit'): Promise<Submitted> {
 interface FakeStore {
   inserted: { form: string; rows: Record<string, unknown>[] }[];
   updated: { form: string; rows: Record<string, unknown>[] }[];
+  queries: { form: string; where: string; columns: unknown }[];
+  loadedModifiedTime: string;
+  currentModifiedTime: string;
   failOnInsert: unknown;
 }
 
 function fakeStore(): FakeStore & { api: Record<string, unknown> } {
-  const store: FakeStore = { inserted: [], updated: [], failOnInsert: null };
+  const stamp = '2026-10-13 18:00:00:000';
+  const store: FakeStore = { inserted: [], updated: [], queries: [], loadedModifiedTime: stamp, currentModifiedTime: stamp, failOnInsert: null };
   const api = {
     insert: async (form: string, rows: Record<string, unknown>[]) => {
       store.inserted.push({ form, rows });
@@ -163,7 +167,11 @@ function fakeStore(): FakeStore & { api: Record<string, unknown> } {
       store.updated.push({ form, rows });
       return rows;
     },
-    query: async () => [{ ROWID: '10000000000000001', PO_Title: 'old' }],
+    query: async (form: string, where: string, _limit?: number, _offset?: number, _orderBy?: string, columns?: readonly string[]) => {
+      store.queries.push({ form, where, columns });
+      const staleCheck = /ROWID = '/.test(where) && Array.isArray(columns) && columns.length === 2 && columns.includes('MODIFIEDTIME');
+      return [{ ROWID: '10000000000000001', PO_Title: 'old', MODIFIEDTIME: staleCheck ? store.currentModifiedTime : store.loadedModifiedTime }];
+    },
     delete: async () => [],
   };
   return Object.assign(store, { api });
@@ -227,6 +235,33 @@ test('a duplicate SKU replies 409 naming the field, not 500 "request failed"', a
   assert.equal(line.field, 'SKU');
   assert.equal(typeof line.requestId, 'string');
   assert.doesNotMatch(res.logged[0]!, /PO-TITLE-9f3/, 'no record values in the log');
+});
+
+test('a concurrent edit is refused by the c2c stale-write check', async (t) => {
+  const sub = await loadSubmit();
+  t.after(() => rmSync(sub.dir, { recursive: true, force: true }));
+  const store = fakeStore();
+  store.currentModifiedTime = '2026-10-13 18:00:01:000';
+  const res = await invoke(sub.handler, { PO_Title: 'updated' }, store.api, { ROWID: '10000000000000001' });
+  assert.equal(res.status, 409, JSON.stringify(res.body));
+  assert.equal(res.body.code, 'C2C_STALE_WRITE');
+  assert.match(String(res.body.error), /c2c.*stale|changed.*read/i);
+  assert.equal(res.body.wrote, false);
+  assert.equal(store.updated.length, 0, 'the refused edit never reaches updateRows');
+  assert.ok(
+    store.queries.some((query) => /ROWID = '/.test(query.where) && Array.isArray(query.columns) && query.columns.includes('MODIFIEDTIME')),
+    'the update path re-reads ROWID/MODIFIEDTIME before writing',
+  );
+});
+
+test('an unchanged edit passes the stale-write check', async (t) => {
+  const sub = await loadSubmit();
+  t.after(() => rmSync(sub.dir, { recursive: true, force: true }));
+  const store = fakeStore();
+  const res = await invoke(sub.handler, { PO_Title: 'updated' }, store.api, { ROWID: '10000000000000001' });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.wrote, true);
+  assert.equal(store.updated.length, 1);
 });
 
 test('a missing mandatory field replies 422 (store 403)', async (t) => {

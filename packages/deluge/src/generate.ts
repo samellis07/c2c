@@ -3622,6 +3622,9 @@ function aioModule(opts: {
       'When functions/c2c-deploy.json mode is "live" and a datastore is injected, this handler validates, writes the row, then runs this script. Any other mode does not write. The script sees the inserted row, including ID (the stored ROWID) and system fields. If the script throws after the write, the row stays: a Deluge runtime or refused-connection error reports its text; any other failure replies 500 request failed.',
     );
     lines.push(
+      'A live edit captures Catalyst MODIFIEDTIME while preparing the row, then re-reads ROWID/MODIFIEDTIME once immediately before updateRows. A change is refused as c2c code C2C_STALE_WRITE (409). This is c2c\'s stale check and one extra bounded read; Data Store itself has no optimistic lock.',
+    );
+    lines.push(
       'Creator runs On Success after the record is submitted (https://help.zoho.com/portal/en/kb/creator/developer-guide/workflows/create-and-manage-on-success-action/articles/understand-on-success-action): "The actions that you define in the On success event will be executed when a new record is successfully submitted to the database or when an existing record is updated or deleted from the database." Whether Creator rolls that row back when On Success throws is unverified; this port leaves the row.',
     );
     if (opts.deferSuccess) {
@@ -3828,7 +3831,7 @@ ${runtimeSetup}
 ${opts.systemWrite && schema ? '  // API and import inserts never saw the Slate prefill. Absent\n  // fields fall back to their Creator initial values here, so validate\n  // scripts and the row write see the same record as the form path.\n  if (!ctx.rowId && ctx.writeOp !== "update") applyInitialValues(ctx.record, fields);\n' : ''}  try {
 ${successBody}
   } catch (err) {
-${refusal}${opts.systemWrite ? '    // The row write itself failed at the store. Map the refusal\n    // (409/422/400 naming the field) and log it; anything else stays a\n    // sanitized 500.\n    if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;\n' : ''}    const denied = err && err.code === "RECORD_ACCESS_DENIED";
+${refusal}${opts.systemWrite ? '    // The row write itself failed at the store. Map the refusal\n    // (409/422/400 naming the field) and log it; anything else stays a\n    // sanitized 500.\n    if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;\n    if (err && err.code === "C2C_STALE_WRITE") {\n      send(res, 409, { dryRun: !live, wrote: false, code: "C2C_STALE_WRITE", error: err.message });\n      return;\n    }\n' : ''}    const denied = err && err.code === "RECORD_ACCESS_DENIED";
     send(res, denied ? 403 : 500, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: denied ? err.message : "request failed", slots: null, ${opts.systemWrite ? '...debugTranscript' : 'transcript: runtime.transcript'} });
   }
 }

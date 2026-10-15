@@ -24,7 +24,7 @@ import { Decimal, decimal } from './decimal.js';
 import * as dates from './date.js';
 import { DelugeConversionError, toDecimal, toJSONCollection, toJSONList, toList, toListString, toLong, toMap, toNumber, type ConvertCtx } from './convert.js';
 import { bigintsToDigits, jsonReplacer } from './ids.js';
-import { DelugeRuntimeError, DeleteRefused, SubmitRefused, UncapturedDelugeError, UniqueRefused } from './errors.js';
+import { DelugeRuntimeError, DeleteRefused, StaleWriteError, SubmitRefused, UncapturedDelugeError, UniqueRefused } from './errors.js';
 import * as lists from './list.js';
 import { actualname, getFileName } from './file-values.js';
 import { abs, acos, acosh, asin, asinh, atan, atan2, atanh, cos, cosh, exp, frac, isEven, isNumber, isOdd, largest, log, log10, round, sin, sinh, smallest, sqrt, tan, tanh, NUMERIC } from './number.js';
@@ -267,7 +267,7 @@ export interface RuntimeOptions {
      * script `sort by` when the read has one, then ROWID
      * (`ORDER BY ROWID` when it does not). A short page ends the read.
      */
-    query?(form: string, zcqlWhere: string, limit: number, offset?: number, orderBy?: string): Promise<Record<string, unknown>[]>;
+    query?(form: string, zcqlWhere: string, limit: number, offset?: number, orderBy?: string, columns?: readonly string[] | '*'): Promise<Record<string, unknown>[]>;
     update?(form: string, rows: Record<string, unknown>[]): Promise<unknown>;
     /**
      * Catalyst `deleteRows`: at most {@link LIMITS.updateRowsPerCall} ROWIDs.
@@ -450,6 +450,8 @@ export interface ShimContext {
   approver?: { submitter: string | null };
 
   __c2cFlow?: string;
+  /** Catalyst MODIFIEDTIME captured by record.prepare for one generated edit row. */
+  __c2cModifiedTime?: { form: string; rowId: string; value: unknown };
   now: Date;
 }
 
@@ -2369,10 +2371,37 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     limit: number,
     offset: number,
     orderBy: string,
+    columns?: readonly string[] | '*',
   ): Promise<Record<string, unknown>[]> {
     const fn = options.datastore?.query;
     if (!fn) return Promise.reject(new Error(`no datastore query adapter for ${form}`));
-    return fn(form, where, limit, offset, orderBy);
+    return fn(form, where, limit, offset, orderBy, columns);
+  }
+
+  /**
+   * c2c's stale-write guard for generated form edits. Data Store has no
+   * optimistic lock: record.prepare captured MODIFIEDTIME, and this one
+   * bounded ROWID/MODIFIEDTIME read refuses the write when it changed. If
+   * MODIFIEDTIME is unavailable on both reads, there is no version token to
+   * compare and the guard is skipped; availability changing between reads
+   * fails closed.
+   */
+  async function assertRowsUnchanged(ctx: ShimContext, form: string, rowIds: readonly unknown[]): Promise<void> {
+    const expected = ctx.__c2cModifiedTime;
+    if (!expected || expected.form !== form || !options.datastore?.query) return;
+    const ids = rowIds.map(String);
+    if (!ids.includes(expected.rowId) || !/^\d+$/.test(expected.rowId)) return;
+    // The same quoted `ROWID = '<id>'` leaf every other runtime ROWID read emits.
+    const where = whereOf(form, { op: '==', field: 'ROWID', value: expected.rowId });
+    const got = await queryPage(form, where, 1, 0, 'ORDER BY ROWID', ['ROWID', 'MODIFIEDTIME']);
+    const current = got.find((row) => String(rowIdentity(row) ?? '') === expected.rowId);
+    if (!current) throw new StaleWriteError(form);
+    const currentModifiedTime = current.MODIFIEDTIME;
+    const expectedModifiedTime = expected.value;
+    if (currentModifiedTime == null && expectedModifiedTime == null) return;
+    if (currentModifiedTime == null || expectedModifiedTime == null || String(currentModifiedTime) !== String(expectedModifiedTime)) {
+      throw new StaleWriteError(form);
+    }
   }
 
   /**
@@ -2532,7 +2561,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     // attaches the same datastore a live edit uses, read it so the script sees
     // stored Added_User and Added_Time in both modes.
     if (!options.datastore?.query) return undefined;
-    const page = await queryPage(form, where, 1, 0, '');
+    const page = await queryPage(form, where, 1, 0, '', ['ROWID', 'MODIFIEDTIME', 'Added_User', 'Added_Time']);
     return page[0];
   }
 
@@ -2620,7 +2649,10 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         }
         if (hasId) {
           const stored = await loadStoredRow(ctx, formName, rowId);
-          if (stored) mergeStoredSystemFields(ctx.record, stored);
+          if (stored) {
+            ctx.__c2cModifiedTime = { form: formName, rowId: String(rowId), value: stored.MODIFIEDTIME };
+            mergeStoredSystemFields(ctx.record, stored);
+          }
           else if (options.datastore?.query) {
             throw new RecordAccessError(`record access: ${formName} row is not visible`);
           } else stripColumnKeys(ctx.record, 'both');
@@ -2984,6 +3016,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         });
         const plainStored = { ...stored };
         const counters = splitCounters(form, plainStored);
+        await assertRowsUnchanged(ctx, form, rows.map((row) => row.ROWID));
         const plain = rows.map((row) => {
           const out = { ...row };
           for (const field of Object.keys(counters)) delete out[field];
@@ -3846,6 +3879,7 @@ export type PageQuery = (
   limit: number,
   offset: number,
   orderBy: string,
+  columns?: readonly string[] | '*',
 ) => Promise<Record<string, unknown>[]>;
 
 function fieldName(field: unknown): string {

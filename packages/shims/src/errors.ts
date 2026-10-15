@@ -81,3 +81,12 @@ export class UniqueRefused extends Error {
     this.field = field;
   }
 }
+
+/** c2c's own stale-read refusal; Data Store does not provide a conflict code. */
+export class StaleWriteError extends Error {
+  readonly code: string = 'C2C_STALE_WRITE';
+  constructor(form: string) {
+    super(`c2c stale write: ${form} changed after it was read; reload and retry`);
+    this.name = 'StaleWriteError';
+  }
+}
