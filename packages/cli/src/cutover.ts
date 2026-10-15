@@ -9,8 +9,9 @@
  * from analyze plus every manual item by name. Checksums are sha256 over the
  * sorted per-record fingerprints (no field values).
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { App } from '../../core/src/index.js';
 import { authPlan } from '../../auth/src/index.js';
 import {
@@ -21,6 +22,8 @@ import {
   loadApp,
   parseDeltaCheckpoint,
   planGuard,
+  ROLLBACK_MANIFEST_FILE,
+  ROLLBACK_MANIFEST_VERSION,
   readStateFile,
   rowFingerprint,
   stateFilePath,
@@ -36,6 +39,15 @@ import { analyze } from './analyze.js';
 export const PROOF_JSON = 'c2c-proof.json';
 export const PROOF_MD = 'c2c-proof.md';
 export const CHECKLIST_MD = 'cutover-checklist.md';
+
+export interface RollbackEvidence {
+  status: 'valid' | 'invalid';
+  dir: string;
+  manifestFile?: string;
+  outsideWorkspace: boolean;
+  checksumMatch: boolean;
+  reason?: string;
+}
 
 export interface SmokeSlot {
   status: 'not run' | 'pass' | 'fail';
@@ -79,6 +91,7 @@ export interface CutoverInput {
   state?: { projectId?: string; slateUrl?: string };
   scope: { org: string; projectId: string; dc: string };
   smoke?: SmokeSlot;
+  rollback?: RollbackEvidence;
 }
 
 function fingerprints(app: App, loaded: CsvLoad): Map<string, Record<string, string>> {
@@ -197,6 +210,26 @@ export function cutoverChecklist(input: CutoverInput, proof: ProofReport): strin
   const slate = input.state?.slateUrl ?? '<app-url>';
   const totalRows = proof.tables.reduce((sum, table) => sum + (table.sourceRows ?? 0), 0);
   const pending = proof.tables.filter((table) => table.delta && (table.delta.new || table.delta.changed));
+  const rollback = input.rollback;
+  let rollbackBaselineLine: string;
+  let rollbackLocationLine: string;
+
+  if (rollback?.status === 'valid') {
+    rollbackBaselineLine = `- [x] \`c2c rollback-export --ds <app.ds> --out <rollback-dir> --project ${project} --confirm\` — the pre-cut-over baseline, taken before the freeze while the store is still stable. (automatic)`;
+  } else if (rollback) {
+    rollbackBaselineLine = `- [ ] \`c2c rollback-export --ds <app.ds> --out <rollback-dir> --project ${project} --confirm\` — the pre-cut-over baseline, taken before the freeze while the store is still stable. (open: ${rollback.reason ?? 'checksum mismatch'})`;
+  } else {
+    rollbackBaselineLine = `- [ ] \`c2c rollback-export --ds <app.ds> --out <rollback-dir> --project ${project} --confirm\` — the pre-cut-over baseline, taken before the freeze while the store is still stable.`;
+  }
+
+  if (rollback?.status === 'valid') {
+    rollbackLocationLine = '- [x] Keep the exported folder somewhere outside this workspace. (automatic)';
+  } else if (rollback) {
+    rollbackLocationLine = `- [ ] Keep the exported folder somewhere outside this workspace. (open: ${rollback.outsideWorkspace ? (rollback.reason ?? 'invalid manifest') : 'export is inside the workspace'})`;
+  } else {
+    rollbackLocationLine = '- [ ] Keep the exported folder somewhere outside this workspace.';
+  }
+
   const lines = [
     `# Cut-over checklist: ${name}`,
     '',
@@ -205,8 +238,8 @@ export function cutoverChecklist(input: CutoverInput, proof: ProofReport): strin
     '',
     '## 1. Rollback baseline',
     '',
-    `- [ ] \`c2c rollback-export --ds <app.ds> --out <rollback-dir> --project ${project} --confirm\` — the pre-cut-over baseline, taken before the freeze while the store is still stable.`,
-    '- [ ] Keep the exported folder somewhere outside this workspace.',
+    rollbackBaselineLine,
+    rollbackLocationLine,
     '',
     '## 2. Freeze Creator edits',
     '',
@@ -283,6 +316,169 @@ function readSmoke(path: string | undefined): SmokeSlot | undefined {
   return { status: parsed.status, ...(steps ? { steps } : {}) };
 }
 
+function realPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+function isPathOutsideWorkspace(target: string, dir: string): boolean {
+  const realDir = realPath(dir);
+
+  const envWs = process.env.C2C_WORKSPACE;
+  if (typeof envWs === 'string' && envWs.trim() !== '') {
+    const rel = relative(realPath(envWs), realDir);
+    if (!rel.startsWith('..') && !isAbsolute(rel)) {
+      return false;
+    }
+  }
+
+  const targetAbs = realPath(target);
+  const targetDir = existsSync(targetAbs) && statSync(targetAbs).isDirectory() ? targetAbs : dirname(targetAbs);
+  const relTarget = relative(targetDir, realDir);
+  if (!relTarget.startsWith('..') && !isAbsolute(relTarget)) {
+    return false;
+  }
+
+  return true;
+}
+
+/** `relPath` must stay inside `realDir`, after symlink resolution of the file itself. */
+function containedPath(realDir: string, relPath: unknown): { path?: string; reason?: string } {
+  if (typeof relPath !== 'string' || relPath === '' || isAbsolute(relPath)) {
+    return { reason: `manifest path ${String(relPath)} is not relative` };
+  }
+  const full = resolve(realDir, relPath);
+  const rel = relative(realDir, full);
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    return { reason: `manifest path ${relPath} escapes the export dir` };
+  }
+  const real = realPath(full);
+  const relReal = relative(realDir, real);
+  if (relReal === '' || relReal.startsWith('..') || isAbsolute(relReal)) {
+    return { reason: `manifest path ${relPath} resolves outside the export dir` };
+  }
+  return { path: real };
+}
+
+/**
+ * A valid manifest is the file `c2c rollback-export` writes: schema
+ * c2c-rollback-export/1, the app name, every exported table mapped to its
+ * file, and a sha256 for every listed file that matches the bytes on disk.
+ */
+function verifyManifest(dir: string, manifest: Record<string, unknown>, app: App): { ok: boolean; reason?: string } {
+  if (manifest.version !== ROLLBACK_MANIFEST_VERSION) {
+    return { ok: false, reason: `manifest version is not ${ROLLBACK_MANIFEST_VERSION}` };
+  }
+  if (manifest.app !== (app.name ?? '')) {
+    return { ok: false, reason: 'manifest app does not match this application' };
+  }
+  const files = manifest.files;
+  if (!files || typeof files !== 'object' || Array.isArray(files)) {
+    return { ok: false, reason: 'manifest carries no file checksums' };
+  }
+  const entries = Object.entries(files as Record<string, unknown>);
+  if (entries.length === 0) {
+    return { ok: false, reason: 'manifest lists no files' };
+  }
+  const tables = manifest.tables;
+  if (!tables || typeof tables !== 'object' || Array.isArray(tables)) {
+    return { ok: false, reason: 'manifest lists no tables' };
+  }
+  const expected = generateSchema(app)
+    .tables.filter((table) => !table.nosql && table.role !== 'system')
+    .map((table) => table.name)
+    .sort();
+  const listed = Object.keys(tables as Record<string, unknown>).sort();
+  if (listed.length !== expected.length || listed.some((name, index) => name !== expected[index])) {
+    return { ok: false, reason: 'manifest table inventory does not match the application' };
+  }
+  for (const [table, path] of Object.entries(tables as Record<string, unknown>)) {
+    if (typeof path !== 'string' || !(path in (files as Record<string, unknown>))) {
+      return { ok: false, reason: `manifest table ${table} names no exported file` };
+    }
+  }
+  const realDir = realPath(dir);
+  for (const [relPath, expectedSum] of entries) {
+    const contained = containedPath(realDir, relPath);
+    if (!contained.path) return { ok: false, reason: contained.reason };
+    if (!existsSync(contained.path) || !statSync(contained.path).isFile()) {
+      return { ok: false, reason: `missing file ${relPath}` };
+    }
+    const actual = createHash('sha256').update(readFileSync(contained.path)).digest('hex');
+    if (actual.toLowerCase() !== String(expectedSum).toLowerCase()) {
+      return { ok: false, reason: `checksum mismatch on ${relPath}` };
+    }
+  }
+  return { ok: true };
+}
+
+export function verifyRollbackEvidence(target: string, rollbackPath: string | undefined, app: App): RollbackEvidence | undefined {
+  if (!rollbackPath) return undefined;
+  const resolved = resolve(rollbackPath);
+  if (!existsSync(resolved)) {
+    return {
+      status: 'invalid',
+      dir: resolved,
+      outsideWorkspace: false,
+      checksumMatch: false,
+      reason: 'directory or file does not exist',
+    };
+  }
+
+  const stat = statSync(resolved);
+  const dir = stat.isFile() ? dirname(resolved) : resolved;
+  const manifestFile = stat.isFile() ? resolved : join(dir, ROLLBACK_MANIFEST_FILE);
+  const outsideWorkspace = isPathOutsideWorkspace(target, dir);
+
+  if (!existsSync(manifestFile)) {
+    return {
+      status: 'invalid',
+      dir,
+      outsideWorkspace,
+      checksumMatch: false,
+      reason: 'no manifest found',
+    };
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(readFileSync(manifestFile, 'utf8')) as Record<string, unknown>;
+  } catch {
+    return {
+      status: 'invalid',
+      dir,
+      manifestFile,
+      outsideWorkspace,
+      checksumMatch: false,
+      reason: 'invalid manifest JSON',
+    };
+  }
+
+  const manifestResult = verifyManifest(dir, parsed, app);
+  if (!manifestResult.ok) {
+    return {
+      status: 'invalid',
+      dir,
+      manifestFile,
+      outsideWorkspace,
+      checksumMatch: false,
+      reason: manifestResult.reason,
+    };
+  }
+
+  return {
+    status: outsideWorkspace ? 'valid' : 'invalid',
+    dir,
+    manifestFile,
+    outsideWorkspace,
+    checksumMatch: true,
+    ...(outsideWorkspace ? {} : { reason: 'export is inside the workspace' }),
+  };
+}
+
 export function cutoverInput(target: string, args: readonly string[]): CutoverInput {
   const app = loadApp(target);
   const guard = planGuard(target, args, app.name?.trim() || 'app');
@@ -294,6 +490,8 @@ export function cutoverInput(target: string, args: readonly string[]): CutoverIn
   const projectId = typeof state.projectId === 'string' ? state.projectId : undefined;
   const slateUrl = typeof state.slateUrl === 'string' ? state.slateUrl : undefined;
   const smoke = readSmoke(flag(args, '--smoke'));
+  const rollbackArg = flag(args, '--rollback-export') ?? flag(args, '--rollback') ?? flag(args, '--rollback-manifest');
+  const rollback = verifyRollbackEvidence(target, rollbackArg, app);
   return {
     app,
     ...(loaded ? { loaded, sourceKind: source!.kind } : {}),
@@ -301,13 +499,15 @@ export function cutoverInput(target: string, args: readonly string[]): CutoverIn
     state: { ...(projectId ? { projectId } : {}), ...(slateUrl ? { slateUrl } : {}) },
     scope: { org: guard.org, projectId: guard.projectId, dc: guard.dc },
     ...(smoke ? { smoke } : {}),
+    ...(rollback ? { rollback } : {}),
   };
 }
 
 export const CUTOVER_USAGE =
-  'usage: c2c cutover-checklist <file|dir> [--source-json <dir>|--source-csv <dir>|--source-backup <zip|dir>] [--since <state-file|dir>] [--smoke <file>] [--project <id>] [--dc <dc>] [--config <c2c-deploy.json>] [--out <dir>]\n' +
+  'usage: c2c cutover-checklist <file|dir> [--source-json <dir>|--source-csv <dir>|--source-backup <zip|dir>] [--since <state-file|dir>] [--smoke <file>] [--rollback-export <dir|file>] [--project <id>] [--dc <dc>] [--config <c2c-deploy.json>] [--out <dir>]\n' +
   '       c2c proof <file|dir> [same options]\n' +
   '       --smoke is the file c2c smoke --report <file> wrote (a {"status":"pass"} result also works).\n' +
+  '       --rollback-export is the directory or manifest file from c2c rollback-export.\n' +
   `       --out writes ${CHECKLIST_MD}, ${PROOF_JSON} and ${PROOF_MD}; otherwise the checklist (or the proof) is printed.\n`;
 
 export function cutoverCli(args: readonly string[], io: Pick<Io, 'stdout' | 'stderr'>, which: 'checklist' | 'proof'): number {

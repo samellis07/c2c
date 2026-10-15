@@ -114,5 +114,5 @@ export { editCli, opFromArgs } from './edit-cli.js';
 export { applyDelta, computeDelta, deletionRefusals, deltaTotals, formatDeltaPlan, MAX_DELETE_PERCENT, parseDeltaCheckpoint, rowFingerprint, tableChecksum, withDeletionsApplied } from './row-delta.js';
 export type { DeltaApplyResult, DeltaCheckpoint, DeltaPlan, DeltaTable, DeletionRefusal } from './row-delta.js';
 export { DELTA_SOURCES, deltaSource, readDeltaCheckpoint, readStateFile, rollbackExportCli, stateFilePath, syncDeltaCli } from './delta-cli.js';
-export { parseStoreRows, readStoreRows, rollbackExport } from './rollback.js';
+export { parseStoreRows, readStoreRows, rollbackExport, ROLLBACK_MANIFEST_FILE, ROLLBACK_MANIFEST_VERSION } from './rollback.js';
 export type { RollbackExport, RollbackFile } from './rollback.js';

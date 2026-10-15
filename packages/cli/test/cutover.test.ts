@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { computeDelta, readSourceJson, STATE_FILE } from '../../deploy/src/index.js';
+import { computeDelta, readSourceJson, rollbackExportCli, STATE_FILE, type Io } from '../../deploy/src/index.js';
 import { CHECKLIST_MD, PROOF_JSON, PROOF_MD, cutoverCli, cutoverInput, proofMarkdown, proofReport, type ProofReport } from '../src/cutover.js';
 
 const APP = `application "Shop"
@@ -48,7 +49,7 @@ Vendor as "Vendor"
 }
 `;
 
-function workspace(): { ds: string; source: string; state: string } {
+function workspace(): { dir: string; ds: string; source: string; state: string } {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-cutover-'));
   const ds = join(dir, 'shop.ds');
   writeFileSync(ds, APP);
@@ -61,13 +62,50 @@ function workspace(): { ds: string; source: string; state: string } {
   );
   const state = join(dir, 'deploy');
   mkdirSync(state);
-  return { ds, source, state };
+  return { dir, ds, source, state };
 }
 
 function capture() {
   let out = '';
   let err = '';
   return { io: { stdout: (t: string) => void (out += t), stderr: (t: string) => void (err += t) }, out: () => out, err: () => err };
+}
+
+/** Runs `c2c rollback-export --rows` into `out` and returns the manifest path. */
+async function realExport(ws: { ds: string }, out: string): Promise<string> {
+  const rows = mkdtempSync(join(tmpdir(), 'c2c-rows-'));
+  writeFileSync(
+    join(rows, 'Vendor.json'),
+    JSON.stringify([
+      { ROWID: '1', c2c_source_id: '11', Vendor_Name: 'Acme' },
+      { ROWID: '2', c2c_source_id: '12', Vendor_Name: 'Northwind' },
+    ]),
+  );
+  writeFileSync(join(rows, 'Purchase_Order.json'), JSON.stringify([{ ROWID: '3', c2c_source_id: '21', PO_Title: 'Restock', Vendor: '1' }]));
+  let err = '';
+  const io = {
+    stdout: () => {},
+    stderr: (t: string) => void (err += t),
+    env: {},
+    spawn: async () => assert.fail('no catalyst CLI spawn in a cutover test'),
+    fetch: async () => assert.fail('no fetch in an offline export'),
+  } as unknown as Io;
+  assert.equal(await rollbackExportCli(['--ds', ws.ds, '--out', out, '--rows', rows], io), 0, err);
+  return join(out, 'c2c-rollback-manifest.json');
+}
+
+/** Re-points one manifest files entry or drops tables, then rewrites the manifest. */
+function tamperManifest(manifestPath: string, edit: (manifest: Record<string, unknown>) => void): void {
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+  edit(manifest);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function checklist(ws: { ds: string; source: string; state: string }, rollbackDir: string): string {
+  const run = capture();
+  const code = cutoverCli([ws.ds, '--source-json', ws.source, '--since', ws.state, '--rollback-export', rollbackDir], run.io, 'checklist');
+  assert.equal(code, 0, run.err());
+  return run.out();
 }
 
 test('cutover-checklist is deterministic and filled with the app facts', () => {
@@ -158,4 +196,128 @@ test('proof reads the report c2c smoke --report writes', () => {
     JSON.stringify(blocked.readiness.manual),
   );
   assert.equal(blocked.readiness.manual.some((item) => item.includes('fix the failed steps')), false);
+});
+
+test('a real rollback-export round trip ticks both rollback items', async () => {
+  const ws = workspace();
+  const rollbackDir = mkdtempSync(join(tmpdir(), 'c2c-rollback-outside-'));
+  const manifestPath = await realExport(ws, rollbackDir);
+  assert.ok(existsSync(manifestPath), 'rollback-export must write c2c-rollback-manifest.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { version: string; app: string; tables: Record<string, string>; files: Record<string, string> };
+  assert.equal(manifest.version, 'c2c-rollback-export/1');
+  assert.equal(manifest.app, 'Shop');
+  assert.deepEqual(Object.keys(manifest.tables).sort(), ['Purchase_Order', 'Vendor']);
+  assert.equal(manifest.tables.Vendor, 'import/Vendor.csv');
+  assert.ok(Object.keys(manifest.files).length > 0);
+  for (const [path, sum] of Object.entries(manifest.files)) {
+    assert.equal(createHash('sha256').update(readFileSync(join(rollbackDir, path))).digest('hex'), sum, `checksum for ${path}`);
+  }
+
+  const text = checklist(ws, rollbackDir);
+  assert.match(text, /- \[x\] `c2c rollback-export .*\(automatic\)/);
+  assert.match(text, /- \[x\] Keep the exported folder somewhere outside this workspace\. \(automatic\)/);
+  // Human items remain open in the same checklist
+  assert.match(text, /- \[ \] Announce the cut-over window/);
+  assert.match(text, /- \[ \] Stop data entry in Creator/);
+});
+
+test('empty, partial and forged manifests keep the baseline open', async () => {
+  const ws = workspace();
+
+  // Empty files map.
+  let dir = mkdtempSync(join(tmpdir(), 'c2c-rollback-empty-'));
+  let manifestPath = await realExport(ws, dir);
+  tamperManifest(manifestPath, (manifest) => {
+    manifest.files = {};
+  });
+  assert.match(checklist(ws, dir), /- \[ \] `c2c rollback-export .*\(open: manifest lists no files\)/);
+
+  // Partial inventory: one table dropped.
+  dir = mkdtempSync(join(tmpdir(), 'c2c-rollback-partial-'));
+  manifestPath = await realExport(ws, dir);
+  tamperManifest(manifestPath, (manifest) => {
+    delete (manifest.tables as Record<string, string>).Purchase_Order;
+  });
+  assert.match(checklist(ws, dir), /- \[ \] `c2c rollback-export .*\(open: manifest table inventory does not match/);
+
+  // Forged version and app identity.
+  dir = mkdtempSync(join(tmpdir(), 'c2c-rollback-forged-'));
+  manifestPath = await realExport(ws, dir);
+  tamperManifest(manifestPath, (manifest) => {
+    manifest.version = 'c2c-rollback-manifest/1';
+  });
+  assert.match(checklist(ws, dir), /- \[ \] `c2c rollback-export .*\(open: manifest version is not c2c-rollback-export\/1\)/);
+  tamperManifest(manifestPath, (manifest) => {
+    manifest.version = 'c2c-rollback-export/1';
+    manifest.app = 'Other';
+  });
+  assert.match(checklist(ws, dir), /- \[ \] `c2c rollback-export .*\(open: manifest app does not match/);
+});
+
+test('checksum mismatch, path traversal and symlink escapes keep the baseline open', async () => {
+  const ws = workspace();
+
+  // A file changed after the export.
+  let dir = mkdtempSync(join(tmpdir(), 'c2c-rollback-mismatch-'));
+  await realExport(ws, dir);
+  writeFileSync(join(dir, 'import', 'Vendor.csv'), 'forged\n');
+  assert.match(checklist(ws, dir), /- \[ \] `c2c rollback-export .*\(open: checksum mismatch on import\/Vendor\.csv\)/);
+
+  // A manifest path that escapes the export dir.
+  dir = mkdtempSync(join(tmpdir(), 'c2c-rollback-traversal-'));
+  const manifestPath = await realExport(ws, dir);
+  tamperManifest(manifestPath, (manifest) => {
+    (manifest.files as Record<string, string>)['../outside.csv'] = createHash('sha256').update('x').digest('hex');
+  });
+  assert.match(checklist(ws, dir), /- \[ \] `c2c rollback-export .*\(open: manifest path \.\.\/outside\.csv escapes the export dir\)/);
+
+  // A manifest entry that resolves through a symlink to a file outside the dir.
+  dir = mkdtempSync(join(tmpdir(), 'c2c-rollback-filelink-'));
+  const secret = join(mkdtempSync(join(tmpdir(), 'c2c-secret-')), 'secret.csv');
+  writeFileSync(secret, 'secret\n');
+  const linkedManifest = await realExport(ws, dir);
+  symlinkSync(secret, join(dir, 'import', 'Linked.csv'));
+  tamperManifest(linkedManifest, (manifest) => {
+    (manifest.files as Record<string, string>)['import/Linked.csv'] = createHash('sha256').update('secret\n').digest('hex');
+  });
+  assert.match(checklist(ws, dir), /- \[ \] `c2c rollback-export .*\(open: manifest path import\/Linked\.csv resolves outside the export dir\)/);
+});
+
+test('a valid export inside the workspace ticks nothing, even through a symlink', async () => {
+  const ws = workspace();
+  const insideDir = join(ws.dir, 'rollback');
+  await realExport(ws, insideDir);
+
+  const text = checklist(ws, insideDir);
+  assert.match(text, /- \[ \] `c2c rollback-export .*\(open: export is inside the workspace\)/);
+  assert.match(text, /- \[ \] Keep the exported folder somewhere outside this workspace\. \(open: export is inside the workspace\)/);
+
+  // Reached through a symlink outside the workspace, the real dir still resolves inside.
+  const link = join(mkdtempSync(join(tmpdir(), 'c2c-rollback-link-')), 'link');
+  symlinkSync(insideDir, link, 'dir');
+  const linked = checklist(ws, link);
+  assert.match(linked, /- \[ \] `c2c rollback-export .*\(open: export is inside the workspace\)/);
+  assert.match(linked, /- \[ \] Keep the exported folder somewhere outside this workspace\. \(open: export is inside the workspace\)/);
+});
+
+test('proof file and cutover checklist are byte-identical across two runs with rollback evidence', async () => {
+  const ws = workspace();
+  const rollbackDir = mkdtempSync(join(tmpdir(), 'c2c-rollback-outside-'));
+  await realExport(ws, rollbackDir);
+
+  const out1 = mkdtempSync(join(tmpdir(), 'c2c-proof-run1-'));
+  const out2 = mkdtempSync(join(tmpdir(), 'c2c-proof-run2-'));
+  const run1 = capture();
+  const run2 = capture();
+
+  const args1 = [ws.ds, '--source-json', ws.source, '--since', ws.state, '--rollback-export', rollbackDir, '--out', out1];
+  const args2 = [ws.ds, '--source-json', ws.source, '--since', ws.state, '--rollback-export', rollbackDir, '--out', out2];
+
+  assert.equal(cutoverCli(args1, run1.io, 'checklist'), 0, run1.err());
+  assert.equal(cutoverCli(args2, run2.io, 'checklist'), 0, run2.err());
+  assert.equal(run1.out(), run2.out());
+
+  assert.equal(readFileSync(join(out1, CHECKLIST_MD), 'utf8'), readFileSync(join(out2, CHECKLIST_MD), 'utf8'));
+  assert.equal(readFileSync(join(out1, PROOF_JSON), 'utf8'), readFileSync(join(out2, PROOF_JSON), 'utf8'));
+  assert.equal(readFileSync(join(out1, PROOF_MD), 'utf8'), readFileSync(join(out2, PROOF_MD), 'utf8'));
 });

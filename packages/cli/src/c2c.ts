@@ -87,7 +87,7 @@
  *                                   Plans unless --confirm. --confirm upserts by source id and records the checkpoint.
  *                                   Deletions are reported; they are applied only with --apply-deletes, and only
  *                                   from a provably complete source. Same guards.
- *   c2c cutover-checklist <file|dir> [same source flags] [--since <state>] [--smoke <file>] [--out <dir>]
+ *   c2c cutover-checklist <file|dir> [same source flags] [--since <state>] [--smoke <file>] [--rollback-export <dir|file>] [--out <dir>]
  *                                   cut-over checklist filled with the app's facts; --out also writes c2c-proof.json/.md.
  *   c2c proof <file|dir> [same options]
  *                                   counts, checksums, smoke result and readiness (% automatic plus the manual items).
@@ -205,7 +205,7 @@ function usage(): never {
       '       c2c users invite --source-backup <zip|dir> --ds <file|dir> --project <id> --org <org> --confirm [--slate-domain <host>] [--role-ids <name=id,...>] [--state <file>]\n' +
       '       c2c sync-delta --source-json <dir> --ds <file|dir> --since <state-file|dir> [--project <id>] [--org <org>] [--confirm] [--apply-deletes] [--allow-mass-delete] [--max-delete-percent <pct>]\n' +
       '              (--source-csv <dir> and --source-backup <zip|dir> read the same reports)\n' +
-      '       c2c cutover-checklist <file|dir> [--source-json|--source-csv <dir>|--source-backup <zip|dir>] [--since <state-file|dir>] [--smoke <file>] [--out <dir>]\n' +
+      '       c2c cutover-checklist <file|dir> [--source-json|--source-csv <dir>|--source-backup <zip|dir>] [--since <state-file|dir>] [--smoke <file>] [--rollback-export <dir|file>] [--out <dir>]\n' +
       '       c2c proof <file|dir> [same options as cutover-checklist]\n' +
       '       c2c rollback-export --ds <file|dir> --out <dir> (--rows <dir> | --project <id> --org <org> --confirm)\n' +
       '       c2c deploy <file|dir> --project <id> --org <org> [--env Development] [--out <dir>] [--mail] [--confirm]\n' +

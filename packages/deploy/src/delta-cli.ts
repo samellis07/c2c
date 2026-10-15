@@ -180,7 +180,7 @@ export async function rollbackExportCli(args: readonly string[], io: Io): Promis
       rows = await readStoreRows({ dc: guard.dc, catalystBase: flag(args, '--catalyst-base') ?? catalystBaseFor(guard.dc), fetch: io.fetch, scope }, tables);
     }
     const result = rollbackExport(app, rows);
-    for (const file of result.files) {
+    for (const file of [...result.files, result.manifest]) {
       const path = join(out, file.path);
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, file.body);
