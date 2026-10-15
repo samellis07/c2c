@@ -136,4 +136,4 @@ Rule: [UNVERIFIED] generated handlers log errors with context (never secrets or 
 
 ## Deluge client alerts
 
-Rule: `alert(message)` is allowed in form workflows for Subform on add row and Subform on delete row events, across Created, Created-or-Edited, and Edited record states. Do not treat those events as unverified; the Creator alert reference lists them as supported: https://www.zoho.com/deluge/help/client-functions/alert.html
+Rule: [DOC] `alert(message)` is allowed in form workflows for Subform on add row and Subform on delete row events, across Created, Created-or-Edited, and Edited record states. Do not treat those events as unverified; the Creator alert reference lists them as supported: https://www.zoho.com/deluge/help/client-functions/alert.html
