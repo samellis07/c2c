@@ -16,7 +16,9 @@ is the in-app check from the verify flow, asked while verifying.
 - **What you see:** one line per service your app uses, always in the
   same form. Click **Start Exploring** once on each page it names:
   - Stratus — in the Catalyst console open the project → Cloud Scale →
-    Stratus → Start Exploring (your app has file fields)
+    Stratus → Start Exploring, then on **Create your First Bucket** create
+    one bucket (any name). Done when it shows in the Stratus bucket list
+    (your app has file fields)
   - SmartBrowz — in the Catalyst console open the project → SmartBrowz →
     Start Exploring (your app makes PDFs)
   - Slate — in the Catalyst console open the project → Slate → Start
