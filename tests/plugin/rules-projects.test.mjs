@@ -1,8 +1,9 @@
 /**
  * rules-projects: plugin/references/facts/projects.md is a shipped rules file —
  * unique headings, every rule carries a `Rule:` line or an exact recipe
- * (method + path), no provenance/status/evidence wording, no dates, no
- * hard-coded DC, and no hygiene failures.
+ * (method + path), no provenance fields, no internal bracket tags, no dates,
+ * no hard-coded DC, and no hygiene failures. Public evidence tags
+ * ([DOC], [CLI], [MCP-LISTED], [TESTED], [UNVERIFIED]) are allowed.
  */
 import assert from 'node:assert/strict';
 import { lstatSync, readFileSync } from 'node:fs';
@@ -15,6 +16,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const factsDir = path.join(repo, 'plugin', 'references', 'facts');
 const file = path.join(factsDir, 'projects.md');
 
+const PUBLIC_EVIDENCE = /\[(?:DOC|CLI|MCP-LISTED|TESTED|UNVERIFIED)\]/g;
 const EVIDENCE_LABEL = /\[[A-Z][A-Z0-9 -]{1,14}\]/;
 const FIELD_LABEL = /^\s*[-*]?\s*\*{0,2}(status|evidence|verified|source|date)\s*\*{0,2}\s*:/im;
 const ISO_DATE = /\b20\d\d-\d\d-\d\d\b/;
@@ -85,8 +87,16 @@ test('required project/IaC/Slate recipes are present', () => {
   }
 });
 
-test('no provenance, labels or dates in the shipped rules', () => {
-  const md = text();
+test('importing rule labels the platform assumption and the tested client behavior', () => {
+  const section = ruleSections(text()).find((item) => item.heading.includes('Importing'));
+  assert.ok(section, 'missing Importing rule');
+  assert.match(section.body, /^Rule: .*\[UNVERIFIED\]/m, 'the delete assumption needs [UNVERIFIED] on the Rule line');
+  assert.match(section.body, /\[TESTED\]/, 'tested client behavior needs [TESTED]');
+  assert.doesNotMatch(`${section.heading}\n${section.body}`, /cannot be deleted/);
+});
+
+test('no provenance fields, internal labels or dates in the shipped rules', () => {
+  const md = text().replace(PUBLIC_EVIDENCE, '');
   assert.equal(EVIDENCE_LABEL.test(md), false, md.match(EVIDENCE_LABEL)?.[0]);
   assert.equal(FIELD_LABEL.test(md), false, md.match(FIELD_LABEL)?.[0]);
   assert.equal(ISO_DATE.test(md), false, md.match(ISO_DATE)?.[0]);
