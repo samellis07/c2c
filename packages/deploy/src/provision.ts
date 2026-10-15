@@ -31,7 +31,7 @@ import { catalystRestCall, listCatalystProjects, readCliAccessToken, renewCliAcc
 import { catalystBaseFor, dcEndpoints } from './dc.js';
 import { catalystScopeArgs, scrubCatalystEnv } from './scope.js';
 import { isExactGrantList, isPerRowGrantMatch, PLAN_CLI_PATH, PLAN_EMITTED_CLI_PATHS, PLAN_STEP_TOOL, PLAN_STEP_TOOLS, STEP_KINDS, sha256, type ProvisionStep, type StepEndpoint } from './offline-plan.js';
-import { humanChecklist as checklist } from './human-steps.js';
+import { readConnectionSecretKeys, writeOrUpdateFunctionEnv } from './function-env.js';
 import { applyTablePlan, type RestCall, type RestFn, type RestResult, type TableCreateStep } from './tables.js';
 import { restWithRetry, spawnWithRetry, type ReRead, type RestRetry, type RetryOptions } from './retry.js';
 import { assertProtectedProject } from './guards.js';
@@ -51,6 +51,7 @@ export interface ProvisionPlanFile {
   app: string;
   dc?: string;
   steps: ProvisionStep[];
+  connectionSecretKeys?: string[];
 }
 
 export type StepStatus = 'pending' | 'applied' | 'done' | 'existing';
@@ -1380,6 +1381,7 @@ async function runImportStep(ctx: Ctx, args: Record<string, unknown>): Promise<{
     ctx.state.learned.projectId = result.projectId;
     rememberName(ctx.state.learned.byName, result.projectName, result.projectId);
     (ctx.state.learned.imports ??= {})[result.projectName] = { importId: result.importId, status: 'completed' };
+    updateFunctionEnvFromCtx(ctx);
     return {
       applied: true,
       // The import is polled to Completed and the minted project id is
@@ -1562,8 +1564,28 @@ function statusOf(state: ProvisionState, step: ProvisionStep): StepStatus {
   return stepStatus(state, step.id);
 }
 
+function updateFunctionEnvFromCtx(ctx: Ctx): void {
+  try {
+    const domain = slateDomainFor(ctx);
+    const appUrl = domain ? `https://${domain}` : undefined;
+    const projectId = ctx.scope.projectId ?? ctx.state.learned.projectId;
+    const secretKeys = ctx.plan.connectionSecretKeys;
+    writeOrUpdateFunctionEnv(ctx.out, {
+      dc: ctx.scope.dc ?? ctx.plan.dc,
+      projectId,
+      appUrl,
+      learnedByName: ctx.state.learned.byName,
+      ...(secretKeys?.length
+        ? { connectionSecrets: secretKeys.map((k) => ({ connectionName: '', propertyKey: '', envKey: k })) }
+        : {}),
+    });
+  } catch {
+    // best-effort update
+  }
+}
+
 /** What no step can do for you once every step is done. */
-function humanChecklist(plan: ProvisionPlanFile, state?: ProvisionState): string[] {
+function humanChecklist(plan: ProvisionPlanFile, state?: ProvisionState, out?: string): string[] {
   // The mail-sender step is the customer's only when this app sends mail.
   const mail = plan.steps.some((step) => step.id === 'mail-sender');
   // A slate-enable step already done or existing proves Slate was started,
@@ -1571,12 +1593,22 @@ function humanChecklist(plan: ProvisionPlanFile, state?: ProvisionState): string
   const slateStarted = state
     ? plan.steps.some((step) => step.id === 'slate-enable' && ['done', 'existing'].includes(statusOf(state, step)))
     : false;
-  return CUSTOMER_STEPS.filter(
+  const items = CUSTOMER_STEPS.filter(
     (step) => (mail || !step.startsWith('Verify mail sender:')) && (!slateStarted || !step.startsWith('Slate start:')),
   );
+  const secretKeys = out ? readConnectionSecretKeys(out, plan.connectionSecretKeys) : (plan.connectionSecretKeys ?? []);
+  if (secretKeys.length > 0) {
+    items.push(
+      secretKeys.length === 1
+        ? `Fill connection secret in function-env.json (${secretKeys[0]}): keep secret values out of chat and logs.`
+        : `Fill connection secrets in function-env.json (${secretKeys.join(', ')}): keep secret values out of chat and logs.`,
+    );
+  }
+  return items;
 }
 
 function printStatus(ctx: Ctx): number {
+  updateFunctionEnvFromCtx(ctx);
   const lines = [`provision ${ctx.plan.app}`, `scope: dc=${ctx.scope.dc ?? '?'} org=${ctx.scope.org ?? '?'} project=${ctx.scope.projectId ?? '(not created yet)'}`, ''];
   const steps = progressSteps(ctx);
   for (const step of steps) {
@@ -1588,7 +1620,7 @@ function printStatus(ctx: Ctx): number {
   lines.push('', `done: ${done}/${steps.length}`);
   if (done === steps.length && steps.length > 0) {
     lines.push('', 'human checklist:');
-    humanChecklist(ctx.plan, ctx.state).forEach((item, index) => lines.push(`${index + 1}. ${item}`));
+    humanChecklist(ctx.plan, ctx.state, ctx.out).forEach((item, index) => lines.push(`${index + 1}. ${item}`));
   }
   ctx.io.stdout(`${lines.join('\n')}\n`);
   return 0;
@@ -1614,7 +1646,8 @@ async function emitNext(ctx: Ctx): Promise<number> {
     const steps = progressSteps(ctx);
     const step = steps.find((item) => !['done', 'existing'].includes(statusOf(ctx.state, item)));
     if (!step) {
-      ctx.io.stdout(`${JSON.stringify({ done: true, app: ctx.plan.app, steps: steps.length, checklist: humanChecklist(ctx.plan, ctx.state) }, null, 2)}\n`);
+      updateFunctionEnvFromCtx(ctx);
+      ctx.io.stdout(`${JSON.stringify({ done: true, app: ctx.plan.app, steps: steps.length, checklist: humanChecklist(ctx.plan, ctx.state, ctx.out) }, null, 2)}\n`);
       return 0;
     }
     // A gate that already verifies open is never presented as console work:
@@ -1771,6 +1804,7 @@ async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> 
     // learned map before the read-back match resolves, so <id:Table> tokens
     // can bind what this run just listed. Person rows can't seed the map.
     learnIds(stripPersonFields(outcome.result), ctx.state.learned);
+    updateFunctionEnvFromCtx(ctx);
     const rel = storeResult(ctx.out, `${id}.run`, outcome.result);
     // A rerun that finds everything present must not erase the earlier
     // "we wrote" flag.
@@ -1929,6 +1963,7 @@ async function recordStep(ctx: Ctx, id: string, resultPath: string | undefined, 
     return 1;
   }
   learnIds(stripPersonFields(evidence), ctx.state.learned);
+  updateFunctionEnvFromCtx(ctx);
   if ((step.id === 'project' || step.id === 'import') && typeof step.args.name === 'string') {
     // An import may have created a suffixed name — look the name the run used
     // (or the customer's manual name) up, not just args.name.
@@ -1941,7 +1976,10 @@ async function recordStep(ctx: Ctx, id: string, resultPath: string | undefined, 
       ctx.io.stderr(`c2c provision: ${err instanceof Error ? err.message : String(err)}\n`);
       return 2;
     }
-    if (projectId) ctx.state.learned.projectId = projectId;
+    if (projectId) {
+      ctx.state.learned.projectId = projectId;
+      updateFunctionEnvFromCtx(ctx);
+    }
   }
   const applied = appliedFlag || prior?.applied === true;
   const rel = storeResult(ctx.out, id, evidence);
