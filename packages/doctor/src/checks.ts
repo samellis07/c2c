@@ -512,7 +512,7 @@ export function checkMailSender(app: App, workspace: string, projectId?: string)
     return [fail('D-M1', 'mail sender configuration could not be read', `fix ${path}: ${err instanceof Error ? err.message : 'invalid configuration'}`)];
   }
   if (!sender?.from) {
-    return [fail('D-M1', 'the app sends mail and no Catalyst Mail sender is set', 'set mail.from in c2c-deploy.json, verify it in Catalyst Mail, then run c2c deploy app.ds --confirm so the live read-back is recorded')];
+    return [fail('D-M1', 'the app sends mail and no Catalyst Mail sender is set', 'set mail.from in c2c-deploy.json, verify it in Catalyst Mail, then run c2c deploy app.ds --confirm --function-env function-env.json so the live read-back is recorded')];
   }
   let evidence: MailSenderEvidence | undefined = readMailSenderEvidence(workspace);
   if (evidence && projectId !== undefined && cliRenderedId(evidence.projectId ?? '') !== cliRenderedId(projectId)) evidence = undefined;
@@ -528,7 +528,7 @@ export function checkMailSender(app: App, workspace: string, projectId?: string)
   if (observed !== undefined) {
     return [
       {
-        ...fail('D-M1', `the app sends mail and the live read-back lists its sender as ${observed}`, 'verify mail.from in Catalyst Mail (console → Mail → Email Configuration), then re-run c2c deploy app.ds --confirm'),
+        ...fail('D-M1', `the app sends mail and the live read-back lists its sender as ${observed}`, 'verify mail.from in Catalyst Mail (console → Mail → Email Configuration), then re-run c2c deploy app.ds --confirm --function-env function-env.json'),
         screen: `mail sender ${maskEmail(sender.from)} read back as ${observed}`,
       },
     ];
@@ -539,7 +539,7 @@ export function checkMailSender(app: App, workspace: string, projectId?: string)
         ...warn(
           'D-M1',
           'the app sends mail and its sender verification is attested in c2c-deploy.json but no live read-back confirmed it',
-          'run c2c deploy app.ds --confirm; it reads the sender state back from Catalyst and records it',
+          'run c2c deploy app.ds --confirm --function-env function-env.json; it reads the sender state back from Catalyst and records it',
         ),
         screen: `mail sender ${maskEmail(sender.from)} is attested, not confirmed by a live read-back`,
       },
@@ -547,7 +547,7 @@ export function checkMailSender(app: App, workspace: string, projectId?: string)
   }
   return [
     {
-      ...fail('D-M1', 'the app sends mail and its sender is not marked verified', 'verify mail.from in Catalyst Mail, set mail.verified to true in c2c-deploy.json, then run c2c deploy app.ds --confirm so the live read-back is recorded'),
+      ...fail('D-M1', 'the app sends mail and its sender is not marked verified', 'verify mail.from in Catalyst Mail, set mail.verified to true in c2c-deploy.json, then run c2c deploy app.ds --confirm --function-env function-env.json so the live read-back is recorded'),
       screen: `mail sender ${maskEmail(sender.from)} is not marked verified`,
     },
   ];
