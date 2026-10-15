@@ -324,7 +324,7 @@ test('a dry run consumes the persisted read-back: evidence verifies, the bare at
       0,
     );
     assert.doesNotMatch(seen.out(), new RegExp(`precheck: blocker ${MAIL_SENDER_RULE}`));
-    assert.match(seen.out(), new RegExp(`mail from: ${OWNER.replace(/[.@]/g, '\\$&')} \\(verified\\)`));
+    assert.match(seen.out(), new RegExp(`mail from: ${OWNER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(verified\\)`));
 
     const attested = io();
     assert.equal(
