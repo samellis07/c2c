@@ -4652,6 +4652,7 @@ test('a criteria field that shares a name with a local compares the fetched form
 test('report criteria on the application owner stay counted: no owner address is bound at deploy', () => {
   assert.deepEqual(reportCriteria('Members.Email == zoho.adminuserid'), { op: 'todo', construct: 'criteria-dynamic' });
   assert.deepEqual(reportCriteria('Members.Email == zoho.loginuserid'), { op: '==', field: 'Members.Email', value: { __bind: 'loginUserId' } });
+});
 
 test('replaceAllIgnoreCase and replaceFirstIgnoreCase emit their shims in both forms', () => {
   const t = translate('a = s.replaceAllIgnoreCase("x", "y", true);\nb = replaceFirstIgnoreCase(s, "x", "y");\nc = s.REPLACEALLIGNORECASE("x", "y");');
