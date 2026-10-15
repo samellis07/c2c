@@ -452,36 +452,197 @@ export const ZOHO_TOKEN_RE = /\b[0-9]{3,}\.[0-9a-zA-Z]{8,}[0-9a-zA-Z._-]*/g;
  * after whitespace, `?`, `&`, `#`, `;`, `,`, `:`, a quote, `=`, `+`, or a markup /
  * bracket delimiter (`<`, `>`, `)`, `]`, `}`). The separator between key and value
  * is `=` or `:` (a header or a raw JSON pair), and the value may be wrapped in
- * quotes: `client_secret="…"`, `"refresh_token=…"`.
+ * quotes (with backslash-escaped quotes inside): `client_secret="…"`, `"refresh_token=…"`.
  */
 export const PARAM_SECRET_RE =
-  /((?:^|["'=+?&#\s;,:<>)\]}]))((?:[^=\s&"'<>)\]}:]*)(?:secret|token|password|passwd|pwd|credentials?|authorization|auth|api[-_]?key|session|cookie|private[-_]?key|signature|key|sig|code|pw|otp)(?:[^=\s&"'<>)\]}:]*))(["']?)(\s*[:=]\s*["']?)([^&\s"'<>)\]},]+)/gi;
+  /((?:^|["'=+?&#\s;,:<>)\]}]))((?:[^=\s&"'<>)\]}:]*)(?:secret|token|password|passwd|pwd|credentials?|authorization|auth|api[-_]?key|session|cookie|private[-_]?key|access[-_]?key|signature|key|sig|code|pw|otp|bearer|jwt)(?:[^=\s&"'<>)\]}:]*))(["']?)(\s*[:=]\s*)("(?:\\+["']|\\.|[^"\\])*"?|'(?:\\+["']|\\.|[^'\\])*'?|(?:\\+["']|[^&\s"'<>)\]},])+)/gi;
 /** Long hex, base64, or token-shaped credential runs. */
 export const HEX_B64_TOKEN_RE =
   /\b(?:[A-Za-z0-9+/]{16,}={1,2}|(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{16,}|(?=[A-Za-z0-9._-]*[0-9])(?=[A-Za-z0-9._-]*[A-Za-z])[A-Za-z0-9._-]{20,}|(?=[A-Za-z0-9._-]*[0-9])[A-Za-z0-9._-]*(?:token|secret|passwd|password|apikey|oauth)[A-Za-z0-9._-]*)/gi;
 /** Diagnostic codes a caller reads to act on a failure — not secrets. */
 export const SAFE_CODE_KEY_RE = /^(?:error|status|exit|http|reason)[-_]?code$/i;
+const SECRET_KEY_TOKEN_RE =
+  /secret|token|password|passwd|pwd|credentials?|authorization|auth|api[-_]?key|session|cookie|private[-_]?key|access[-_]?key|signature|key|sig|code|pw|otp|bearer|jwt/i;
+const PERCENT_HEX_RE = /%(?:25){0,4}([0-9a-fA-F]{2})/gi;
+const UNICODE_HEX_RE = /\\u([0-9a-fA-F]{4})/gi;
 
-export function redactString(value: string): string {
-  // The URL pass runs first: it consumes userinfo (`u:p@host`), the query and
-  // the fragment whole. Emailing first would split a URL at the '@' and leave
-  // its query secrets behind. The escaped forms of a URL are decoded before it
-  // — backslash and unicode escapes from JSON text, and the percent-encoded
-  // delimiters of a URL-shaped string — so an encoded URL in a raw-text body
-  // still matches.
-  return value
-    .replace(/\\\//g, '/')
-    .replace(/\\u002f/gi, '/')
-    .replace(/%(?:2f|3a|3f|3d|26|23|40)/gi, (hex) => String.fromCharCode(parseInt(hex.slice(1), 16)))
-    .replace(URL_RE, '<url>')
-    .replace(AUTH_RE, '<auth>')
-    .replace(PARAM_SECRET_RE, (full, sep: string, key: string, close: string, delim: string) =>
-      SAFE_CODE_KEY_RE.test(key) ? full : `${sep}${key}${close}${delim}<redacted>`,
-    )
+/**
+ * Bounded percent-decoder that tolerates malformed `%` sequences and folds
+ * repeated `%25` prefixes (such as `%2563`). When `wordOnly` is true, only
+ * identifier characters (`[A-Za-z0-9._~+-]`) are decoded so encoded quotes,
+ * whitespace, or `&` inside a value cannot split it before matching.
+ */
+function decodePercentBounded(input: string, wordOnly = false): string {
+  if (!input.includes('%')) return input;
+  let current = input.length > STDERR_KEEP ? input.slice(0, STDERR_KEEP) : input;
+  for (let pass = 0; pass < 3 && current.includes('%'); pass++) {
+    const next = current.replace(PERCENT_HEX_RE, (full, hex: string) => {
+      const code = parseInt(hex, 16);
+      if (wordOnly) {
+        const ch = String.fromCharCode(code);
+        return /[A-Za-z0-9._~+-]/.test(ch) ? ch : full;
+      }
+      if (code === 0x09 || code === 0x0a || code === 0x0d) return ' ';
+      if (code >= 0x20 && code <= 0x7e) return String.fromCharCode(code);
+      return full;
+    });
+    if (next === current) break;
+    current = next;
+  }
+  return current;
+}
+
+function decodeIdentifierEscapes(input: string): string {
+  return decodePercentBounded(
+    input.replace(UNICODE_HEX_RE, (full, hex: string) => {
+      const code = parseInt(hex, 16);
+      const ch = String.fromCharCode(code);
+      return /[A-Za-z0-9._~+-]/.test(ch) ? ch : full;
+    }),
+    true,
+  );
+}
+
+function isSecretKeyName(rawKey: string): boolean {
+  const decoded = decodePercentBounded(
+    rawKey.replace(UNICODE_HEX_RE, (_m, hex: string) => String.fromCharCode(parseInt(hex, 16))),
+  ).trim();
+  if (SAFE_CODE_KEY_RE.test(decoded)) return false;
+  return SECRET_KEY_TOKEN_RE.test(decoded);
+}
+
+function redactParamSecrets(input: string): string {
+  return input.replace(PARAM_SECRET_RE, (full, sep: string, key: string, close: string, delim: string, val: string) => {
+    if (SAFE_CODE_KEY_RE.test(decodePercentBounded(key))) return full;
+    if (val === '<redacted>' || val === '"<redacted>"' || val === "'<redacted>'") return full;
+    const quote = val.startsWith('"') && val.endsWith('"') ? '"' : val.startsWith("'") && val.endsWith("'") ? "'" : '';
+    return `${sep}${key}${close}${delim}${quote}<redacted>${quote}`;
+  });
+}
+
+function redactJsonNode(node: unknown, depth: number): { value: unknown; changed: boolean } {
+  if (typeof node === 'string') {
+    const redacted = redactStringInner(node, depth + 1);
+    return { value: redacted, changed: redacted !== node };
+  }
+  if (Array.isArray(node)) {
+    let changed = false;
+    const out = node.map((item) => {
+      const res = redactJsonNode(item, depth + 1);
+      if (res.changed) changed = true;
+      return res.value;
+    });
+    return { value: out, changed };
+  }
+  if (node && typeof node === 'object') {
+    let changed = false;
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+      const redactedKey = redactStringInner(key, depth + 1);
+      if (redactedKey !== key) changed = true;
+      if (isSecretKeyName(key)) {
+        if (child !== '<redacted>') changed = true;
+        out[redactedKey] = '<redacted>';
+      } else {
+        const res = redactJsonNode(child, depth + 1);
+        if (res.changed) changed = true;
+        out[redactedKey] = res.value;
+      }
+    }
+    return { value: out, changed };
+  }
+  return { value: node, changed: false };
+}
+
+/**
+ * Scan for balanced `{...}` or `[...]` JSON fragments and redact secret keys
+ * recursively via `JSON.parse` before falling back to key=value regexes.
+ */
+function redactJsonFragments(input: string, depth: number): string {
+  if (depth > 3 || (!input.includes('{') && !input.includes('['))) return input;
+  let out = '';
+  let cursor = 0;
+  let attempts = 0;
+  for (let i = 0; i < input.length; i++) {
+    const startChar = input[i];
+    if (startChar !== '{' && startChar !== '[') continue;
+    if (++attempts > 64) break;
+    const stack: string[] = [startChar === '{' ? '}' : ']'];
+    let inString = false;
+    let matchedEnd = -1;
+    for (let j = i + 1; j < input.length; j++) {
+      const ch = input[j];
+      if (inString) {
+        if (ch === '\\') {
+          j++;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+      } else if (ch === '{') {
+        stack.push('}');
+      } else if (ch === '[') {
+        stack.push(']');
+      } else if (ch === '}' || ch === ']') {
+        if (stack[stack.length - 1] !== ch) break;
+        stack.pop();
+        if (stack.length === 0) {
+          matchedEnd = j;
+          break;
+        }
+      }
+    }
+    if (matchedEnd !== -1) {
+      const candidate = input.slice(i, matchedEnd + 1);
+      try {
+        const parsed: unknown = JSON.parse(candidate);
+        if (parsed && typeof parsed === 'object') {
+          const redacted = redactJsonNode(parsed, depth);
+          out += input.slice(cursor, i) + (redacted.changed ? JSON.stringify(redacted.value) : candidate);
+          cursor = matchedEnd + 1;
+          i = matchedEnd;
+        }
+      } catch {
+        // Not valid JSON starting at `i`; continue scanning or fall back to regexes.
+      }
+    }
+  }
+  return cursor === 0 ? input : out + input.slice(cursor);
+}
+
+function redactStringInner(value: string, depth: number): string {
+  if (depth > 4) return value;
+  // 1. Parse any JSON or JSON fragment first and redact secret keys recursively.
+  // 2. Decode identifier escapes and URL scheme delimiters so URLs and encoded
+  //    key=value pairs match before full percent-decoding can split values on
+  //    encoded spaces, quotes, or `&`.
+  // 3. Decode remaining printable percent-encodings and run the JSON / URL /
+  //    auth / parameter / token passes on the decoded text.
+  const stage1 = redactParamSecrets(
+    decodeIdentifierEscapes(redactJsonFragments(value, depth))
+      .replace(/\\\//g, '/')
+      .replace(/\\u002f/gi, '/')
+      .replace(/%(?:25){0,4}(?:2f|3a)/gi, (hex) => String.fromCharCode(parseInt(hex.slice(-2), 16)))
+      .replace(URL_RE, '<url>')
+      .replace(AUTH_RE, '<auth>'),
+  );
+  const stage2 = decodePercentBounded(stage1, false);
+  return redactParamSecrets(
+    redactJsonFragments(stage2, depth)
+      .replace(URL_RE, '<url>')
+      .replace(AUTH_RE, '<auth>'),
+  )
     .replace(JWT_RE, '<token>')
     .replace(EMAIL_RE, '<email>')
     .replace(ZOHO_TOKEN_RE, '<token>')
     .replace(HEX_B64_TOKEN_RE, '<token>');
+}
+
+export function redactString(value: string): string {
+  return redactStringInner(value, 0);
 }
 
 /** True when a trimmed stderr line looks like an environment dump rather than an error message. */
