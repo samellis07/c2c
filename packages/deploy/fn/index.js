@@ -359,6 +359,10 @@ function matchRoute(method, path) {
 }
 
 module.exports = async function c2cApi(req, res) {
+  // Set before any handler runs: writeHead merges these, so every reply path,
+  // including handlers that write only Content-Type, is neither sniffed nor cached.
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-store');
   try {
     const path = routePath(req.url);
     const method = String(req.method || 'GET').toUpperCase();
