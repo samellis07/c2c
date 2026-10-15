@@ -13,6 +13,8 @@ Load `catalyst-functions` for handler signatures, `catalyst-config.json`, and Jo
 
 ZCQL query runtime rules are indexed in `plugin/references/facts/zcql.md`: [ZC-01], [ZC-02], [ZC-03], [ZC-04], [ZC-07], [ZC-09], [ZC-11].
 
+Catalyst platform limits and their evidence labels are indexed in `plugin/references/facts/limits.md` and `plugin/references/limits.md`. Treat `[UNVERIFIED]` values as planning assumptions; do not describe them as measured caps. A `[TESTED]` label must point to an existing public test or run record.
+
 ## What c2c generates
 
 | Creator | Catalyst | Status |

@@ -106,6 +106,7 @@ test('projects-per-account label agrees across facts, limits index, and doctor s
   const specLabel = dF1.match(/Cap 50 per account \[(DOC|TESTED|UNVERIFIED)\]/)?.[1];
   assert.ok(specLabel, 'D-F1 states no evidence label for the 50-project cap');
   assert.ok(dF1.includes('references/facts/limits.md'), 'D-F1 does not cite the facts entry');
+  assert.equal(specLabel, 'DOC', `D-F1 project cap must follow the published CLI docs, got [${specLabel}]`);
 
   assert.deepEqual(
     [factsLabel, indexRow[1], specLabel],
@@ -189,6 +190,63 @@ test('every 50-project cap mention is [DOC] with the CLI docs URL', () => {
   assert.deepEqual(scanProjectCapLabels('plugin/references/facts/projects.md', projects), []);
   assert.match(projects, /the account project cap is the Projects per account rule in `references\/facts\/limits\.md`/);
   assert.doesNotMatch(projects, /assume 50/);
+});
+
+test('every remaining TESTED facts claim points to a public run record or test', () => {
+  const allowedSources = [
+    /\(live run, 15 Oct 2026\)/,
+    /\[TESTED; (?:ZC-\d{2}|L-[A-Z0-9-]+)\]/,
+    /\[TESTED\][^\n]*\(tests\//,
+    /\[TESTED\][^\n]*public tests?: `?packages\//,
+    /\[TESTED\][^\n]*https:\/\/docs\.catalyst\.zoho\.com\//,
+  ];
+  const factsDir = path.join(repo, 'plugin/references/facts');
+  const authoritative = new Set(['datastore.md', 'functions.md', 'jobs-and-files.md']);
+  const failures = [];
+  for (const file of readdirSync(factsDir).filter((name) => name.endsWith('.md'))) {
+    // These labels were reviewed and made authoritative by the existing datastore,
+    // functions, and jobs-and-files audits on main; this change does not rewrite them.
+    if (authoritative.has(file)) continue;
+    const rel = path.join('plugin/references/facts', file);
+    const lines = readFileSync(path.join(factsDir, file), 'utf8').split('\n');
+    for (let index = 0; index < lines.length; index += 1) {
+      if (!lines[index].includes('[TESTED]')) continue;
+      if (!allowedSources.some((source) => source.test(lines[index]))) {
+        failures.push(`${rel}:${index + 1} TESTED claim lacks a public record pointer`);
+      }
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+test('sampled label downgrades record why no public test/run citation exists', () => {
+  const samples = [
+    ['plugin/references/facts/limits.md', 'Assume function memory', 'UNVERIFIED', 'No public test or run record establishes that a posted memory setting is ignored.'],
+    ['plugin/references/facts/limits.md', 'There is no limits endpoint', 'UNVERIFIED', 'The public repo contains no run record for guessed endpoint probes.'],
+    ['plugin/references/facts/limits.md', 'max_length of at most 255', 'UNVERIFIED', 'The public repo contains no live run record for REST truncation or ZCQL overflow.'],
+    ['plugin/references/facts/limits.md', 'At most 2 columns per table', 'UNVERIFIED', 'The public test covers c2c behavior, not the Catalyst refusal itself.'],
+    ['plugin/references/facts/limits.md', 'Do not send data_type decimal', 'UNVERIFIED', 'The public repo contains no live run record for rejected Catalyst types.'],
+    ['plugin/references/facts/limits.md', 'Round a double HALF_UP', 'UNVERIFIED', 'The public repo contains no live run record for the stored rounding examples.'],
+    ['plugin/references/facts/limits.md', 'Send dates only as', 'UNVERIFIED', 'The public repo contains no live run record for Catalyst date coercion.'],
+    ['plugin/references/facts/limits.md', 'Keep ROWID, CREATORID', 'UNVERIFIED', 'The public repo contains no live run record for ZCQL identifier JSON types.'],
+    ['plugin/references/facts/limits.md', 'No organisation table limit is published', 'UNVERIFIED', 'The public repo contains no auditable multi-project refusal record.'],
+    ['plugin/references/facts/limits.md', 'Send at most 200 rows per insert call', 'UNVERIFIED', 'The public repo contains no live run record for the insert batch boundary.'],
+    ['plugin/references/facts/limits.md', 'Do not use is_unique as a lock', 'UNVERIFIED', 'The public repo contains no live run record for parallel duplicate persistence.'],
+    ['plugin/references/facts/limits.md', 'One call is atomic', 'UNVERIFIED', 'The public repo contains no live run record supporting cross-call atomicity.'],
+    ['plugin/references/facts/limits.md', 'LIMIT offset is 1-based', 'UNVERIFIED', 'The public repo contains no live run record for offset coercion.'],
+    ['plugin/references/facts/limits.md', 'In LIKE, `*` matches any run', 'UNVERIFIED', 'A public repo c2c translation test does not establish Catalyst query semantics.'],
+    ['plugin/references/facts/limits.md', 'One ZCQL UPDATE or DELETE', 'UNVERIFIED', 'The public repo contains no live run record for the silent mutation limit.'],
+  ];
+  assert.equal(samples.length, 15);
+  for (const [file, text, label, reason] of samples) {
+    const contents = readFileSync(path.join(repo, file), 'utf8');
+    assert.ok(contents.includes(text), `${file} missing sampled claim ${text}`);
+    const claimLine = contents.split('\n').find((line) => line.includes(text));
+    assert.match(claimLine, /\[UNVERIFIED\]/, `${text} was not downgraded to [UNVERIFIED]`);
+    assert.doesNotMatch(claimLine, /\[TESTED\]/, `${text} still claims [TESTED]`);
+    assert.equal(label, 'UNVERIFIED');
+    assert.ok(/public (?:repo|test)/.test(reason), `${text} lacks the evidence check`);
+  }
 });
 
 test('project-cap scan rejects a different label, a missing label, and a missing URL', () => {

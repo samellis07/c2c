@@ -6,7 +6,7 @@ Operating rules for enabling auth, authorized domains, app users, roles, table p
 
 ### Enable hosted and embedded auth with the token; read back through MCP
 
-Rule: [TESTED] enabling authentication works with the CLI token; reading or updating the configuration does not.
+Rule: [UNVERIFIED] enabling authentication works with the CLI token; reading or updating the configuration does not.
 
 - `POST /baas/v1/project/<project-id>/authentication/enable?auth_type=hosted` then `?auth_type=embedded`, body `{"public_signup":false}` → `200`. Public signup stays off; enable it only as a deliberate step, never as a workaround.
 - `GET` and `PUT /baas/v1/project/<project-id>/authentication/configuration` with the token → `401 OAUTH_SCOPE_MISMATCH`. Read via MCP `Get_Authentication_Configurations`; write via a console step the user performs under Authentication (there is no verified MCP update tool).
@@ -15,7 +15,7 @@ Rule: [TESTED] enabling authentication works with the CLI token; reading or upda
 
 ### Add authorized domains with cors and iframe on at first create
 
-Rule: [TESTED] register the Slate origin and any app origin before browser-side sign-in or API calls, with `"cors":true,"iframe":true` on the first create — embedded sign-in renders inside a frame, and a domain created `iframe:false` stays that way.
+Rule: [UNVERIFIED] register the Slate origin and any app origin before browser-side sign-in or API calls, with `"cors":true,"iframe":true` on the first create — embedded sign-in renders inside a frame, and a domain created `iframe:false` stays that way.
 
 - `POST /baas/v1/project/<project-id>/cors-domain` body `{"domain":"<host>","cors":true,"iframe":true}` works with the token; the same POST on an existing domain → `409`.
 - `PUT /cors-domain` with the token → `401 OAUTH_SCOPE_MISMATCH` — an entry already created with `iframe:false` is corrected only by a console edit the user performs.
@@ -46,7 +46,7 @@ Rule: [UNVERIFIED] `public_signup` stays `false`. When the app needs gated self-
 
 ### Resolve role ids per project — they are not portable
 
-Rule: [TESTED] `App Administrator` and `App User` exist by default; every other role id is per-project.
+Rule: [UNVERIFIED] `App Administrator` and `App User` exist by default; every other role id is per-project.
 
 - `GET /baas/v1/project/<project-id>/role` with the token → `401 OAUTH_SCOPE_MISMATCH`; read roles via MCP `List_All_Roles` / `Get_Role`, an existing project user's `role_details`, or the console.
 - The IaC export's `Authentication` `roles` items are keyed by `role_name` and carry no role id, so deploy never reads a role id from an export.
@@ -56,7 +56,7 @@ Rule: [TESTED] `App Administrator` and `App User` exist by default; every other 
 
 ### Create custom roles in the template or the console — never with the token
 
-Rule: [TESTED] `POST /baas/v1/project/<project-id>/role` with the token → `401 AUTHENTICATION_FAILURE` and there is no MCP create-role tool.
+Rule: [UNVERIFIED] `POST /baas/v1/project/<project-id>/role` with the token → `401 AUTHENTICATION_FAILURE` and there is no MCP create-role tool.
 
 - Greenfield: declare roles in the template's `Authentication` component (`roles` items).
 - Existing project: the user creates the role in the console (Authentication → User Management → Roles → Add Role); read its `role_name` and id back afterwards.
@@ -64,7 +64,7 @@ Rule: [TESTED] `POST /baas/v1/project/<project-id>/role` with the token → `401
 
 ### Manage table permissions and scopes by role name
 
-Rule: [TESTED] `PUT /baas/v1/project/<project-id>/table/<table-id>/permission` and `PUT …/scopes` with the token → `401 OAUTH_SCOPE_MISMATCH`; the MCP routes write per-role grants and scope flags.
+Rule: [UNVERIFIED] `PUT /baas/v1/project/<project-id>/table/<table-id>/permission` and `PUT …/scopes` with the token → `401 OAUTH_SCOPE_MISMATCH`; the MCP routes write per-role grants and scope flags.
 
 - MCP `Update_Table_Permissions` takes a body keyed by role name (`{"App Administrator":["SELECT",...]}`) — custom roles are not reachable through it and ship via the template or console instead.
 - MCP `Update_Table_Scopes` toggles a table's scope flags.
@@ -73,7 +73,7 @@ Rule: [TESTED] `PUT /baas/v1/project/<project-id>/table/<table-id>/permission` a
 
 ### Add users as admin — self-service signup is off
 
-Rule: [TESTED] invite app users one by one; the invitee confirms from the invitation email.
+Rule: [UNVERIFIED] invite app users one by one; the invitee confirms from the invitation email.
 
 - `POST /baas/v1/project/<project-id>/project-user` body `{"user_details":{"email_id":"<invitee>","role_id":<id>},"platform_type":"web","redirect_url":"<url>"}` → `200` with `is_confirmed:false`; resolve `role_id` via the role read-back above.
 - Send only those fields (plus `first_name` / `last_name`); no `org_id`. `first_name` is never empty — an empty one is rejected `400 MISSING_PARAM` (and a nameless duplicate loses its `409 DUPLICATE_VALUE`); `c2c deploy` takes `--admin-name` or derives one from the email local part. With the token and public signup off, the send is unverified — any refusal or rejection falls back to the console Add User values block.
