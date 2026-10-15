@@ -166,20 +166,72 @@ const byText = (a: string, b: string) => compareEnUs(a, b);
 interface DelugeUnit {
   label: string;
   span: RawDeluge;
+  lineStarts: number[];
+}
+
+interface Ranged { start: number; end: number }
+
+/** A sorted interval index; queries visit only intervals that may overlap. */
+class IntervalIndex<T extends Ranged> {
+  private readonly entries: { value: T; start: number; end: number; prefixEnd: number }[];
+
+  constructor(values: readonly T[], range: (value: T) => Ranged) {
+    let prefixEnd = Number.NEGATIVE_INFINITY;
+    this.entries = values.map((value, order) => ({ value, order, ...range(value), prefixEnd: 0 }))
+      .sort((a, b) => a.start - b.start || a.order - b.order)
+      .map((entry) => {
+        prefixEnd = Math.max(prefixEnd, entry.end);
+        return { ...entry, prefixEnd };
+      });
+  }
+
+  containing(offset: number): T[] {
+    let lo = 0;
+    let hi = this.entries.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this.entries[mid]!.start <= offset) lo = mid + 1;
+      else hi = mid;
+    }
+    const out: { value: T; order: number }[] = [];
+    for (let i = lo - 1; i >= 0 && this.entries[i]!.prefixEnd > offset; i--) {
+      const entry = this.entries[i]!;
+      if (offset < entry.end) out.push(entry);
+    }
+    out.sort((a, b) => a.order - b.order);
+    return out.map((entry) => entry.value);
+  }
+}
+
+function lineStarts(text: string): number[] {
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) starts.push(i + 1);
+  return starts;
+}
+
+function lineAt(starts: readonly number[], offset: number): number {
+  let lo = 0;
+  let hi = starts.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (starts[mid]! <= offset) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
 
 function delugeUnits(app: App): DelugeUnit[] {
   const out: DelugeUnit[] = [];
   for (const w of app.workflows) {
     const base = `workflow ${w.name}`;
-    if (w.deluge?.text.trim()) out.push({ label: base, span: w.deluge });
+    if (w.deluge?.text.trim()) out.push({ label: base, span: w.deluge, lineStarts: lineStarts(w.deluge.text) });
     let phase = 0;
     for (const t of w.blueprint?.transitions ?? []) {
       for (const p of t.phases) {
         phase++;
         for (const d of p.deluge) {
           if (!d.text.trim()) continue;
-          out.push({ label: `${base} phase ${phase}`, span: d });
+          out.push({ label: `${base} phase ${phase}`, span: d, lineStarts: lineStarts(d.text) });
         }
       }
     }
@@ -187,16 +239,10 @@ function delugeUnits(app: App): DelugeUnit[] {
   for (const fn of app.functions) {
     for (const d of fn.deluge) {
       if (!d.text.trim()) continue;
-      out.push({ label: `function ${fn.name}`, span: d });
+      out.push({ label: `function ${fn.name}`, span: d, lineStarts: lineStarts(d.text) });
     }
   }
   return out;
-}
-
-function lineOf(text: string, offset: number): number {
-  let n = 1;
-  for (let i = 0; i < offset && i < text.length; i++) if (text.charCodeAt(i) === 10) n++;
-  return n;
 }
 
 /**
@@ -204,31 +250,32 @@ function lineOf(text: string, offset: number): number {
  * counted inside the script. A report criteria or named filter is one
  * application-level hole.
  */
-function placeTodo(app: App, units: readonly DelugeUnit[], todo: TodoItem): { scope: 'app' | 'unit'; location: string } {
-  let best: DelugeUnit | undefined;
-  let bestSize = Number.POSITIVE_INFINITY;
-  for (const unit of units) {
-    const span = unit.span.span;
-    const size = span.end - span.start;
-    if (size < bestSize && todo.start >= span.start && todo.start < span.end) {
-      best = unit;
-      bestSize = size;
-    }
-  }
+interface TodoIndexes {
+  units: IntervalIndex<DelugeUnit>;
+  reports: IntervalIndex<App['reports'][number]>;
+  workflows: IntervalIndex<App['workflows'][number]>;
+  functions: IntervalIndex<App['functions'][number]>;
+}
+
+function placeTodo(app: App, indexes: TodoIndexes, todo: TodoItem): { scope: 'app' | 'unit'; location: string } {
+  const containingUnits = indexes.units.containing(todo.start);
+  const best = containingUnits.reduce<DelugeUnit | undefined>((current, unit) => {
+    const size = unit.span.span.end - unit.span.span.start;
+    return !current || size < current.span.span.end - current.span.span.start ? unit : current;
+  }, undefined);
   if (best) {
-    return { scope: 'unit', location: `${best.label}:${lineOf(best.span.text, todo.start - best.span.span.start)}` };
+    return { scope: 'unit', location: `${best.label}:${lineAt(best.lineStarts, todo.start - best.span.span.start)}` };
   }
-  for (const report of app.reports) {
-    if (todo.start < report.span.start || todo.start >= report.span.end) continue;
+  for (const report of indexes.reports.containing(todo.start)) {
     const filter = report.filters.find((item) => todo.start >= item.span.start && todo.start < item.span.end);
     if (filter) return { scope: 'app', location: `report ${report.name} filter ${filter.label || filter.field || 'criteria'}` };
     return { scope: 'app', location: `report ${report.name}` };
   }
-  for (const workflow of app.workflows) {
-    if (todo.start >= workflow.span.start && todo.start < workflow.span.end) return { scope: 'unit', location: `workflow ${workflow.name}` };
+  for (const workflow of indexes.workflows.containing(todo.start)) {
+    return { scope: 'unit', location: `workflow ${workflow.name}` };
   }
-  for (const fn of app.functions) {
-    if (todo.start >= fn.span.start && todo.start < fn.span.end) return { scope: 'unit', location: `function ${fn.name}` };
+  for (const fn of indexes.functions.containing(todo.start)) {
+    return { scope: 'unit', location: `function ${fn.name}` };
   }
   return { scope: 'app', location: 'app' };
 }
@@ -253,7 +300,13 @@ function disambiguateLocations(located: readonly { scope: DelugeLocation['scope'
 }
 
 function locateTodos(app: App, units: readonly DelugeUnit[], todos: readonly TodoItem[]): DelugeLocation[] {
-  const located = dedupeTodos(todos).map((todo) => ({ ...placeTodo(app, units, todo), construct: todo.construct, start: todo.start, end: todo.end }));
+  const indexes: TodoIndexes = {
+    units: new IntervalIndex(units, (unit) => unit.span.span),
+    reports: new IntervalIndex(app.reports, (report) => report.span),
+    workflows: new IntervalIndex(app.workflows, (workflow) => workflow.span),
+    functions: new IntervalIndex(app.functions, (fn) => fn.span),
+  };
+  const located = dedupeTodos(todos).map((todo) => ({ ...placeTodo(app, indexes, todo), construct: todo.construct, start: todo.start, end: todo.end }));
   located.sort((a, b) => a.start - b.start || a.end - b.end || byText(a.construct, b.construct));
   const out = disambiguateLocations(located);
   out.sort((a, b) => byText(a.location, b.location) || byText(a.construct, b.construct) || byText(a.scope, b.scope));
