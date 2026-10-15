@@ -8,7 +8,7 @@ See also: https://docs.catalyst.zoho.com/en/cloud-scale/help/zcql/syntax-excepti
 
 ### Columns per table
 
-Rule: Plan for 250 columns per table [UNVERIFIED], the raised cap; the stated default is 100 columns per table [UNVERIFIED]. c2c plan warns when a table exceeds 100 columns because it relies on the raised cap (confirm with P-COLS). When a Creator form exceeds 250 columns, c2c plan splits overflow fields into 1:1 side tables keyed by the parent ROWID; it blocks a field group that cannot fit. c2c doctor refuses a live table over 250 columns before create. Do not plan a wider physical table in Development or Production.
+Rule: Plan for 250 columns per table [UNVERIFIED], the raised cap; the stated default is 100 columns per table [UNVERIFIED]. c2c plan warns when a table exceeds 100 columns because it relies on the raised cap (confirm with P-COLS). When a Creator form exceeds 250 columns, c2c plan splits overflow fields into 1:1 side tables keyed by the parent ROWID; it blocks a field group that cannot fit. c2c doctor D-F5 checks the generated table set against the same cap and default; it does not read live tables. Do not plan a wider physical table in Development or Production.
 
 Recipe: GET /baas/v1/project/<project-id>/table/<table-id>/column with the token headers. Success is a column array whose length plus the planned additions is at most 250. On a refusal while adding a column, stop and split.
 
