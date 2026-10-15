@@ -512,14 +512,35 @@ test(
       construct: 'Filter not migrated: dynamic or unsupported criteria need manual translation; the report returns no rows.',
       scope: 'ui',
     },
-    { location: 'page Crisis_View_Page.dspZml', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
+    {
+      location: 'page Crisis_View_Page.dspZml',
+      construct: 'Server-side Deluge snippet requires manual translation',
+      scope: 'ui',
+      manualReasons: ['caller-read', 'dynamic-url'],
+      manualStep:
+        "snippet ZML Snippet on page Crisis_View_Page: It reads records filtered by the signed-in user or by page parameters. Serve those reads from a server route that checks the caller's read grant for each form and field and passes the parameters as bound criteria values. It builds an iframe, embed, or link URL at render time. Rebuild it with a fixed allowlisted destination or a generated form or report route, and encode each dynamic part. Keep this TODO open until the rebuilt section is verified.",
+    },
   ]);
 
   const management = analyze(galleryDs('employee-management', 'Employee_Management.ds'));
   assertCountedOnce(management);
   assert.deepEqual(management.deluge.todoLocations, [
-    { location: 'page Dashboard.dsp', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
-    { location: 'page Employee_Profile.dsp', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
+    {
+      location: 'page Dashboard.dsp',
+      construct: 'Server-side Deluge snippet requires manual translation',
+      scope: 'ui',
+      manualReasons: ['sanitizer-loss', 'untranslated'],
+      manualStep:
+        'snippet HTML Snippet on page Dashboard: The sanitizer drops part of its static markup (<style>). Move its CSS and other dropped markup into the app stylesheet or supported components. The compiler stopped at a Deluge construct with no verified translation (island needs manual translation). Rebuild the section with supported components, or translate the construct by hand with a test. Keep this TODO open until the rebuilt section is verified.',
+    },
+    {
+      location: 'page Employee_Profile.dsp',
+      construct: 'Server-side Deluge snippet requires manual translation',
+      scope: 'ui',
+      manualReasons: ['caller-read', 'dynamic-url'],
+      manualStep:
+        'snippet HTML Snippet on page Employee_Profile: It reads records filtered by the signed-in user or by page parameters. Serve those reads from a server route that checks the caller\'s read grant for each form and field and passes the parameters as bound criteria values. It builds an iframe, embed, or link URL at render time. Rebuild it with a fixed allowlisted destination or a generated form or report route, and encode each dynamic part. Keep this TODO open until the rebuilt section is verified.',
+    },
   ]);
   },
 );
