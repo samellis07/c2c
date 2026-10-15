@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -199,6 +199,187 @@ test('refuses removing a field still used in Deluge or reports, naming each use'
   const app = library();
   refused(() => applyEdit(app, { op: 'removeField', form: 'Book', field: 'Title' }), /Book\.Title is still used in report "Book_Report" column.*Deluge in workflow "Overdue_email"/);
   refused(() => applyEdit(app, { op: 'removeField', form: 'Book', field: 'Rating' }), /still used in report "Book_Report" column/);
+});
+
+test('refuses removing a field used only in page ZML form data or a kanban display field', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-page-usages-'));
+  try {
+    const ds = join(dir, 'page_usages.ds');
+    writeFileSync(
+      ds,
+      `application "Page_Usage"
+{
+	section Section_1
+	{
+		form Book
+		{
+			Title
+			(
+				type = text
+			)
+			Kpi_Only
+			(
+				type = number
+			)
+			Lane_Only
+			(
+				type = picklist
+				values = {"A","B"}
+			)
+		}
+		kanban Book_By_Lane
+		{
+			show all rows from Book
+			(
+				Title
+			)
+			options
+			(
+				display field = Lane_Only
+			)
+		}
+		page DashBoard
+		{
+			Content="<zml><layout><text type='Form Data' value='thisapp.Book.Kpi_Only.count'/></layout></zml>"
+		}
+	}
+}
+`,
+    );
+    const app = parseFile(ds).ir;
+    refused(() => applyEdit(app, { op: 'removeField', form: 'Book', field: 'Kpi_Only' }), /Book\.Kpi_Only is still used in page "DashBoard" form data/);
+    refused(() => applyEdit(app, { op: 'removeField', form: 'Book', field: 'Lane_Only' }), /Book\.Lane_Only is still used in report "Book_By_Lane" options display field/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** Two forms that share a field name, a dashboard page, and kanbans with unquoted, double- and single-quoted display fields. */
+const PAGE_USAGES = `application "Page_Usage"
+{
+	section Section_1
+	{
+		form Order
+		{
+			Status
+			(
+				type = picklist
+				values = {"Open","Closed"}
+			)
+			Lane_U
+			(
+				type = picklist
+				values = {"A","B"}
+			)
+			Lane_Q
+			(
+				type = picklist
+				values = {"A","B"}
+			)
+			Lane_S
+			(
+				type = picklist
+				values = {"A","B"}
+			)
+		}
+		form Product
+		{
+			Status
+			(
+				type = picklist
+				values = {"Active","Retired"}
+			)
+		}
+		kanban Order_U
+		{
+			show all rows from Order
+			(
+				Status
+			)
+			options
+			(
+				display field = Lane_U
+			)
+		}
+		kanban Order_Q
+		{
+			show all rows from Order
+			(
+				Status
+			)
+			options
+			(
+				display field = "Lane_Q"
+			)
+		}
+		kanban Order_S
+		{
+			show all rows from Order
+			(
+				Status
+			)
+			options
+			(
+				display field = 'Lane_S'
+			)
+		}
+		page Dash
+		{
+			Content="<zml><layout><text type='Form Data' criteria='Status == &quot;Active&quot;' value='thisapp.Product.ID.count'/></layout></zml>"
+		}
+	}
+}
+`;
+
+function pageUsagesApp(content?: string): App {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-page-usages-'));
+  try {
+    const ds = join(dir, 'page_usages.ds');
+    writeFileSync(ds, content === undefined ? PAGE_USAGES : PAGE_USAGES.replace(/Content=".*"/, `Content="${content}"`));
+    return parseFile(ds).ir;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function displayField(app: App, report: string): string | undefined {
+  const options = app.reports.find((r) => r.name === report)?.blocks.find((b) => b.name.trim().toLowerCase() === 'options');
+  return options?.properties.find((p) => p.key.trim().toLowerCase().replace(/\s+/g, ' ') === 'display field')?.value.trim();
+}
+
+test('page form-data criteria blocks only the field on the form the cell reads', () => {
+  const app = pageUsagesApp();
+  assert.deepEqual(fieldUsages(app, 'Product', 'Status').map((u) => u.where), ['page "Dash" form data criteria']);
+  assert.deepEqual(fieldUsages(app, 'Order', 'Status').filter((u) => u.where.startsWith('page ')), []);
+  refused(() => applyEdit(app, { op: 'renameField', form: 'Product', from: 'Status', to: 'State' }), /Product\.Status is used in page "Dash" form data criteria/);
+  // A cell whose value cannot be resolved still blocks, fail closed.
+  const unresolved = pageUsagesApp("<zml><layout><text type='Form Data' criteria='Status == 1' value='thisapp.Gone.ID.count'/></layout></zml>");
+  assert.deepEqual(fieldUsages(unresolved, 'Order', 'Status').filter((u) => u.where.startsWith('page ')).map((u) => u.where), ['page "Dash" form data criteria']);
+});
+
+test('renaming a kanban display field rewrites it keeping the source quotes', () => {
+  let app = pageUsagesApp();
+  app = applyEdit(app, { op: 'renameField', form: 'Order', from: 'Lane_U', to: 'Lane_U2' }).app;
+  app = applyEdit(app, { op: 'renameField', form: 'Order', from: 'Lane_Q', to: 'Lane_Q2' }).app;
+  app = applyEdit(app, { op: 'renameField', form: 'Order', from: 'Lane_S', to: 'Lane_S2' }).app;
+  assert.equal(displayField(app, 'Order_U'), 'Lane_U2');
+  assert.equal(displayField(app, 'Order_Q'), '"Lane_Q2"');
+  assert.equal(displayField(app, 'Order_S'), "'Lane_S2'");
+  refused(() => applyEdit(app, { op: 'removeField', form: 'Order', field: 'Lane_S2' }), /Order\.Lane_S2 is still used in report "Order_S" options display field/);
+});
+
+const GALLERY = process.env.C2C_FIXTURES_DIR ? join(process.env.C2C_FIXTURES_DIR, 'gallery') : '';
+const ORDER_MANAGEMENT = GALLERY ? join(GALLERY, 'order-management/Order_Management.ds') : '';
+
+test('gallery order-management: page criteria are form-scoped and the kanban display field renames', { skip: ORDER_MANAGEMENT && existsSync(ORDER_MANAGEMENT) ? false : 'set C2C_FIXTURES_DIR to check the gallery fixtures' }, () => {
+  const app = parseFile(ORDER_MANAGEMENT).ir;
+  const pageHits = (form: string, field: string): string[] => fieldUsages(app, form, field).map((u) => u.where).filter((w) => w.startsWith('page '));
+  // Dashboard: two New_Order cells filter on Status, one Add_Product cell does.
+  assert.deepEqual(pageHits('New_Order', 'Status'), ['page "Dashboard" form data criteria', 'page "Dashboard" form data criteria']);
+  assert.deepEqual(pageHits('Add_Product', 'Status'), ['page "Dashboard" form data criteria']);
+  const renamed = applyEdit(app, { op: 'renameField', form: 'Add_Customer', from: 'Address', to: 'Address_T' }).app;
+  assert.equal(displayField(app, 'Customers_Location'), 'Address');
+  assert.equal(displayField(renamed, 'Customers_Location'), 'Address_T');
 });
 
 test('refuses renaming a field that Deluge reads; the report-only field is renamed', () => {

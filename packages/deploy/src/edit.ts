@@ -12,7 +12,8 @@
  */
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
-import type { App, Field, Form, Property, RawDeluge, Report, ReportColumn, ReportView, Role, Span } from '../../core/src/ir.js';
+import type { App, Field, Form, Page, Property, RawDeluge, Report, ReportColumn, ReportView, Role, Span } from '../../core/src/ir.js';
+import type { ZmlElement } from '../../core/src/zml.js';
 import { formLink } from '../../core/src/ir.js';
 import { derivedFieldColumns } from '../../schema/src/generator.js';
 import { fieldTypeRow, SOURCE_ID_COLUMN, SYSTEM_FIELD_COLUMNS, systemFieldColumn } from '../../schema/src/mapping.js';
@@ -199,6 +200,22 @@ function reportUsages(report: Report, field: string, out: FieldUsage[]): void {
   for (const format of report.conditionalFormats) {
     if (mentions(format.condition, field) || mentions(format.fields, field)) out.push({ where: `${where} conditional format "${format.name}"` });
   }
+  for (const block of report.blocks) {
+    if (block.name.trim().toLowerCase() !== 'options') continue;
+    for (const p of block.properties) {
+      if (p.key.trim().toLowerCase().replace(/\s+/g, ' ') !== 'display field') continue;
+      const value = unquote(p.value).trim();
+      if (value === field) {
+        out.push({
+          where: `${where} options display field`,
+          rewrite: (to) => {
+            const q = quoteOf(p.value);
+            p.value = `${q}${to}${q}`;
+          },
+        });
+      }
+    }
+  }
   viewUsages(report.views, field, where, out);
 }
 
@@ -223,6 +240,42 @@ function lastSegment(path: string, to: string): string {
   const parts = path.split('.');
   parts[parts.length - 1] = to;
   return parts.join('.');
+}
+
+/** The quote character wrapping a property value, if any. */
+function quoteOf(value: string): string {
+  const v = value.trim();
+  return v.length >= 2 && (v[0] === '"' || v[0] === "'") && v.endsWith(v[0]) ? v[0] : '';
+}
+
+/** A property value keeps the quotes the source wrote; strip one pair. */
+function unquote(value: string): string {
+  const v = value.trim();
+  return quoteOf(v) ? v.slice(1, -1) : v;
+}
+
+/**
+ * `type="form data"` cells in page ZML read `thisapp.<Form>.<Field>.<fn>()`,
+ * where the head is the form link name (or a report on the form) and the
+ * middle segment is the field. There is no rewrite: the page lives in the
+ * export, so a rename or removal that reaches it is refused.
+ */
+function pageZmlUsages(app: App, page: Page, formName: string, field: string, out: FieldUsage[]): void {
+  const where = `page "${page.name}"`;
+  const onThisForm = (head: string): boolean => head === formName || app.reports.some((r) => r.name === head && r.form === formName);
+  const walk = (el: ZmlElement): void => {
+    if ((el.attributes.type ?? '').toLowerCase() === 'form data') {
+      const expr = /^thisapp\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*(?:\(|$)/.exec((el.attributes.value ?? '').trim());
+      if (expr && expr[2] === field && onThisForm(expr[1]!)) out.push({ where: `${where} form data` });
+      // Criteria is evaluated against the cell's own form: consult it only when
+      // the value targets this form, or when the target cannot be resolved.
+      const head = expr?.[1];
+      const known = head !== undefined && (app.forms.some((f) => f.name === head) || app.reports.some((r) => r.name === head));
+      if ((!known || onThisForm(head!)) && mentions(el.attributes.criteria, field)) out.push({ where: `${where} form data criteria` });
+    }
+    el.children.forEach(walk);
+  };
+  page.zml.forEach(walk);
 }
 
 function mentionsPath(text: string | undefined, path: string): boolean {
@@ -281,10 +334,11 @@ function reportCrossText(app: App, report: Report, formName: string, field: stri
 
 /**
  * Every place the model refers to `form.field`: reports on its form and on
- * other forms through `Lookup.field` paths, lookups that display it, field
- * rules and workflow conditions on its form and others, profile permissions,
- * and Deluge. Script and criteria text has no rewrite: a rename or removal
- * that reaches it is refused.
+ * other forms through `Lookup.field` paths, `options` display fields, lookups
+ * that display it, field rules and workflow conditions on its form and others,
+ * profile permissions, page ZML `form data` cells, and Deluge. Script and
+ * criteria text and page ZML have no rewrite: a rename or removal that reaches
+ * them is refused.
  */
 export function fieldUsages(app: App, formName: string, field: string): FieldUsage[] {
   const out: FieldUsage[] = [];
@@ -351,6 +405,7 @@ export function fieldUsages(app: App, formName: string, field: string): FieldUsa
   for (const { where, raw } of delugeOf(app)) {
     if (mentions(raw.text, field)) out.push({ where: `Deluge in ${where}` });
   }
+  for (const page of app.pages) pageZmlUsages(app, page, formName, field, out);
   return out;
 }
 
