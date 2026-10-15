@@ -266,6 +266,12 @@ Rule: Assume function memory stays at the value GET /function/<function-id> retu
 
 Recipe: GET /baas/v1/project/<project-id>/function/<function-id>. Success is reading `configuration` memory and planning under it. Do not claim a raise from a POST that only returns 200.
 
+### Function env apply
+
+Rule: Treat the function env apply path — read the live variable map, merge the local env file, POST the full map to the configuration endpoint, then read back and compare every key/value — as exercised against stubs only, not against a live project [UNVERIFIED]. Whether `catalyst deploy` keeps or erases a key whose `env_variables` entry is an empty string is likewise unconfirmed [UNVERIFIED]. Plan for replace-only behaviour either way: every write carries the full merged map.
+
+Recipe: `c2c deploy <ds> --confirm --function-env <file>` runs the path itself: `GET /baas/v1/project/<project-id>/function/<function-id>` → `data.configuration.environment.variables`, `POST /baas/v1/project/<project-id>/function/<function-id>/configuration` with the merged map, then a second GET compared key-for-key; any mismatch refuses. Live confirmation comes from a first deploy's read-back, not a separate probe.
+
 ### Idle function sandbox
 
 Rule: Assume an idle function sandbox is gone after about 2 minutes [UNVERIFIED]. Do not keep migration state in process memory. c2c plan checks that state sits in the checkpoint file, Data Store, or Stratus.
