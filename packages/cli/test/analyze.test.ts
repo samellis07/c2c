@@ -345,7 +345,7 @@ test('app-level report criteria are listed once with scope app', () => {
       { location: 'report Gappy', construct: 'report-criteria', scope: 'app' },
       {
         location: 'report Gappy',
-        construct: 'Filter not migrated: the report criteria could not be translated; the report returns no rows.',
+        construct: 'Filter not migrated: dynamic or unsupported criteria need manual translation; the report returns no rows.',
         scope: 'ui',
       },
       {
@@ -406,7 +406,7 @@ test('relative report criteria compile while unsupported relative comparisons fa
       { location: 'report Unsupported', construct: 'report-criteria', scope: 'app' },
       {
         location: 'report Unsupported',
-        construct: 'Filter not migrated: the report criteria could not be translated; the report returns no rows.',
+        construct: 'Filter not migrated: dynamic or unsupported criteria need manual translation; the report returns no rows.',
         scope: 'ui',
       },
     ],
@@ -509,7 +509,7 @@ test(
     { location: 'report Open_Crisis_In_Our_Branch', construct: 'report-criteria', scope: 'app' },
     {
       location: 'report Open_Crisis_In_Our_Branch',
-      construct: 'Filter not migrated: the report criteria could not be translated; the report returns no rows.',
+      construct: 'Filter not migrated: dynamic or unsupported criteria need manual translation; the report returns no rows.',
       scope: 'ui',
     },
     { location: 'page Crisis_View_Page.dspZml', construct: 'Server-side Deluge snippet requires manual translation', scope: 'ui' },
