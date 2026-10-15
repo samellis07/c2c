@@ -25,7 +25,7 @@ The usual suspects:
   with the owning account.
 - **CLI not signed in** — you run the browser sign-in for the CLI.
 - **No free project slot** — 50/50 projects used (not yet proven:
-  observed cap of 50 projects per account —
+  plan for a cap of 50 (unverified) —
   [limits.md#projects-per-account](../../plugin/references/facts/limits.md#projects-per-account)).
   Delete an unused project in the console, or ask Catalyst support
   to raise the limit.
