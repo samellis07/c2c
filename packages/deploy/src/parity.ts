@@ -26,6 +26,7 @@
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { App } from '../../core/src/ir.js';
+import { coded } from '../../core/src/errors.js';
 import { canonRow, changedColumns, isEmptyCell, prepareColumns, type IntegrityRefusal } from '../../data/src/integrity.js';
 import { checksumHex, fnv1a64 } from '../../data/src/migrate.js';
 import { applyConstraintDecisions, fileColumnsOf, generateSchema } from '../../schema/src/generator.js';
@@ -361,7 +362,7 @@ const VERIFY_USAGE =
 export function verifyCli(args: readonly string[], io: Io): number {
   try {
     if (!args.includes('--data-parity')) {
-      io.stderr(VERIFY_USAGE);
+      io.stderr(coded('C2C-DEPLOY-021', VERIFY_USAGE));
       return 2;
     }
     // Literal flag reads: the argv census reconciles these against ARGV_SPEC.
@@ -371,13 +372,13 @@ export function verifyCli(args: readonly string[], io: Io): number {
     const ds = flag(args, '--ds');
     const rowsDir = flag(args, '--rows');
     if (source.length !== 1 || !ds || !rowsDir) {
-      io.stderr(VERIFY_USAGE);
+      io.stderr(coded('C2C-DEPLOY-021', VERIFY_USAGE));
       return 2;
     }
     const kind = source[0]!;
     const sourcePath = flag(args, kind === 'json' ? '--source-json' : kind === 'csv' ? '--source-csv' : '--source-backup');
     if (!sourcePath) {
-      io.stderr(VERIFY_USAGE);
+      io.stderr(coded('C2C-DEPLOY-021', VERIFY_USAGE));
       return 2;
     }
     const app = loadApp(ds);
@@ -396,10 +397,10 @@ export function verifyCli(args: readonly string[], io: Io): number {
     return report.ok ? 0 : 1;
   } catch (err) {
     if (err instanceof GuardError) {
-      io.stderr(`c2c verify: ${err.message}\n`);
+      io.stderr(coded('C2C-DEPLOY-034', `c2c verify: ${err.message}`));
       return 2;
     }
-    io.stderr(`c2c verify: ${err instanceof Error ? err.message : String(err)}\n`);
+    io.stderr(coded('C2C-DEPLOY-034', `c2c verify: ${err instanceof Error ? err.message : String(err)}`));
     return 1;
   }
 }

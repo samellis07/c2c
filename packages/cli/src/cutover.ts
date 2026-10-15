@@ -573,7 +573,7 @@ export function cutoverCli(args: readonly string[], io: Pick<Io, 'stdout' | 'std
     io.stdout(which === 'proof' ? proofMarkdown(proof) : cutoverChecklist(input, proof));
     return 0;
   } catch (err) {
-    io.stderr(`c2c: ${err instanceof Error ? err.message : `${which} failed`}\n`);
+    io.stderr(coded('C2C-CLI-020', `c2c: ${err instanceof Error ? err.message : `${which} failed`}`));
     return 1;
   }
 }

@@ -509,7 +509,7 @@ function main(argv: string[]): number {
     try {
       return verifyCli(restAll, defaultIo());
     } catch (err) {
-      process.stderr.write(`c2c: ${err instanceof Error ? err.message : 'verify failed'}\n`);
+      writeCliError('C2C-CLI-000', `c2c: ${err instanceof Error ? err.message : 'verify failed'}\n`);
       return 1;
     }
   }

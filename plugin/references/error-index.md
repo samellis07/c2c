@@ -72,6 +72,7 @@ and holds the specifics. Each row below gives the cause and the fix.
 | <a id="c2c-deploy-031"></a>`C2C-DEPLOY-031` | Plan budget failed | A measured budget is over its limit | See the named budget check |
 | <a id="c2c-deploy-032"></a>`C2C-DEPLOY-032` | Destructive edit needs confirm | The edit drops columns or tables | Pass `--confirm` with `--apply` |
 | <a id="c2c-deploy-033"></a>`C2C-DEPLOY-033` | Edit refused | The named edit is not allowed | Read the refusal reason |
+| <a id="c2c-deploy-034"></a>`C2C-DEPLOY-034` | Data parity verification failed | The source export and stored rows differ or could not be read | Check the named table and source/row files |
 | <a id="c2c-doctor-001"></a>`C2C-DOCTOR-001` | Doctor usage | Unknown flag or a missing/ill-typed value | Follow the printed usage |
 | <a id="c2c-doctor-002"></a>`C2C-DOCTOR-002` | Scope resolution failed | dc/org/project could not be resolved | Pass flags or set c2c-deploy.json |
 | <a id="c2c-doctor-003"></a>`C2C-DOCTOR-003` | Evidence stale | The MCP request expired before the evidence | Re-run `c2c doctor --mcp-begin` |
