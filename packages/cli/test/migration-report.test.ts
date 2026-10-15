@@ -35,9 +35,9 @@ function appWith(text: string): App {
   return { ...emptyApp('empty'), name: 'Report_App', workflows: [workflowWith(text)] };
 }
 
-/** One expression hole on a vector-covered builtin (getDay: 1 Creator case, passing). */
+/** One expression hole on a vector-covered method: an unknown receiver leaves `getDay` untranslated. */
 function coveredApp(): App {
-  return appWith('x = subBusinessDay(Calendar,0).getDay();');
+  return appWith('x = unknownCall().getDay();');
 }
 
 test('committed fixtures carry the deterministic flag', () => {
@@ -87,7 +87,7 @@ test('an applied lock fill disqualifies the deterministic flag', async () => {
     const lockPath = join(dir, 'c2c.lock.json');
     const lock = await acceptTodo({ app, taskId: task.id, fill: 'shim.input.get(ctx, "A")', lockPath });
     const withLock = buildMigrationReport([{ name: 'filled', ir: app, lock }], 'synthetic');
-    // Two TODO items (subBusinessDay call, getDay method) collapse into the one accepted hole.
+    // Two TODO items (unknownCall call, getDay method) collapse into the one accepted hole.
     assert.equal(withLock.apps[0]!.todoCount, 2);
     assert.ok(withLock.apps[0]!.todoKinds.some((kind) => kind.construct === 'method:getDay'));
     assert.equal(withLock.apps[0]!.fillLockEntries, 1);
