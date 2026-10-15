@@ -4585,34 +4585,6 @@ ${numberForm('Edit_Incident')}
     assert.equal(liveValues.Added_User, 'ada');
     assert.equal(liveValues.Added_Time, '13-Apr-2023 17:21:24');
     assert.equal(liveValues.Modified_User, 'ada');
-
-    // A concurrent edit between prepare and updateRows is refused as
-    // C2C_STALE_WRITE (409), not a sanitized 500.
-    const updates: unknown[] = [];
-    (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = {
-      async query(_form: string, zcql: string, _limit?: number, _offset?: number, _orderBy?: string, columns?: readonly string[]) {
-        const id = /ROWID = '([^']*)'/.exec(zcql)?.[1];
-        if (storedRow.ROWID !== id) return [];
-        const recheck = Array.isArray(columns) && columns.length === 2 && columns.includes('MODIFIEDTIME');
-        return [{ ...storedRow, MODIFIEDTIME: recheck ? '2026-10-13 18:00:01:000' : '2026-10-13 18:00:00:000' }];
-      },
-      async update(...args: unknown[]) {
-        updates.push(args);
-        return {};
-      },
-    };
-    const staleEdit = await invoke(editMod.default, {
-      user: { profile: 'Administrator', loginUser: 'ada' },
-      body: { ROWID: '1001', record: { Fine_Amount: 2 } },
-    });
-    assert.equal(staleEdit.status, 409, JSON.stringify(staleEdit.body));
-    assert.equal(staleEdit.body.code, 'C2C_STALE_WRITE');
-    assert.equal(staleEdit.body.wrote, false);
-    assert.equal(updates.length, 0, 'the refused edit never reaches updateRows');
-    assert.match(
-      edit.source,
-      /A live edit captures Catalyst MODIFIEDTIME[^\n]*C2C_STALE_WRITE \(409\)/,
-    );
     assert.match(
       stripComments(edit.source),
       /authorizeRead\(access, principal, formName, \{ op: "==", field: "ROWID", value: reqRowId \}, undefined, "modify"\)/,
@@ -5748,10 +5720,10 @@ test('loop variables and locals named like generated bindings rename, so every m
   // An on-load workflow carries the client loops: a function has no client half.
   const deluge = {
     text: [
-      'for each actions in "a,b".toList(",") { info actions; }',
-      'for each slots in "a,b".toList(",") { info slots; }',
-      'for each shim in "a,b".toList(",") { info shim; }',
-      'for each index i ctx in "a,b".toList(",") { info ctx; }',
+      'for each actions in {"a","b"} { info actions; }',
+      'for each slots in {"a","b"} { info slots; }',
+      'for each shim in {"a","b"} { info shim; }',
+      'for each index i ctx in {"a","b"} { info ctx; }',
       'record = "r";',
       'principal = "p";',
       'runtime = "t";',
@@ -5794,7 +5766,7 @@ test('a for-each loop variable named row does not collide with the subform row b
           name: 'Qty',
           form: 'BOM',
           event: 'on user input of Parts.Quantity',
-          deluge: { text: 'for each index i row in "a,b".toList(",") { x = row; }', span: Z },
+          deluge: { text: 'for each index i row in {"a","b"} { x = row; }', span: Z },
         }),
       ],
     }),

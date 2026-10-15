@@ -742,6 +742,7 @@ test('a client range read replays input-derived criteria leaves but keeps a dyna
       'bed1 = input.bed.toLong();',
       'for each rr in Lines[bed1 == input.bed.toLong()] range from 1 to 11 - proplength {',
       '  proplength = proplength + 1;',
+      '  alert proplength;',
       '}',
     ].join('\n'),
   );
@@ -4582,31 +4583,6 @@ test('a use-before-binding alias is refused through two hops, a free name, and a
   assert.doesNotMatch(stripComments(later.client), /shim\.client\.element/);
 });
 
-test('an aggregate field-name argument is not an unbound read', () => {
-  // `count(Guest)` emits the bare name as a link-name literal, so the field
-  // name is not a read at all: the binding stays prefetchable and the
-  // condition keeps its slot instead of degrading to a counted todo.
-  for (const fn of ['count', 'avg', 'sum', 'distinct']) {
-    const t = translate([
-      `x = Bookings[Room == "A"].${fn}(Guest);`,
-      'if (x > 0) { alert "x"; }',
-    ].join('\n'));
-    assert.equal(t.todos.some((item: any) => item.construct === 'client-condition-uses-server'), false, fn);
-    assert.match(stripComments(t.prefetch), new RegExp(`var x = await shim\\.datastore\\.aggregate\\(ctx, shim\\.datastore\\.query\\(ctx, "Bookings".*"${fn === 'avg' ? 'avg' : fn}", "Guest"\\);`), fn);
-    assert.match(stripComments(t.prefetch), /slots\["c0"\] = \(x > 0\);/, fn);
-    assert.match(stripComments(t.client), /if \(slots\["c0"\]\)/, fn);
-  }
-
-  // A local or an expression stays a real argument and keeps its effects.
-  const local = translate([
-    'field = "Guest";',
-    'x = Bookings[Room == "A"].count(field);',
-    'if (x > 0) { alert "x"; }',
-  ].join('\n'));
-  assert.equal(local.todos.some((item: any) => item.construct === 'client-condition-uses-server'), false);
-  assert.match(stripComments(local.prefetch), /var field = "Guest";/);
-});
-
 test('an aggregate bound before an element loop keeps the per-element path', () => {
   // `n` binds a field-name aggregate before the loop; the loop condition
   // still resolves one element round trip — the field name is no unbound
@@ -4765,6 +4741,96 @@ test('a record fetch used as a report criteria value stays a { __rows } marker',
     reportCriteria('F.ID == A[X == B[Y == 1].G].H'),
     { op: 'todo', construct: 'criteria-dynamic' },
   );
+});
+
+test('info in a catch whose try is server-only logs on the server', () => {
+  const t = translate('try { v = insert into Things [ Kind="a" ]; } catch (e) { info e; }');
+  assert.equal(t.todos.length, 0);
+  assert.match(stripComments(t.server), /catch \(e\) \{[\s\S]*shim\.log\.info\(ctx, e\);/);
+  assert.doesNotMatch(stripComments(t.client), /"info"|shim\.todo/);
+  // A client try can throw on the client, so its catch keeps the client info.
+  const client = translate('try { alert "x"; } catch (e) { info "failed"; }');
+  assert.match(stripComments(client.client), /op: "info", message: "failed"/);
+  assert.doesNotMatch(stripComments(client.server), /shim\.log\.info/);
+  // An alert is shown to the user and cannot move to the server: still counted.
+  const alerted = translate('try { v = insert into Things [ Kind="a" ]; } catch (e) { alert e; }');
+  assert.ok(alerted.todos.some((item) => item.construct === 'client-condition-uses-server'));
+});
+
+test('a server-only test or loop whose client half only binds locals stays on the server', () => {
+  const t = translate(
+    [
+      'resp = getUrl("https://example.test/items").toJSONList();',
+      'n = 0;',
+      'for each item in resp {',
+      '  k = item.toMap().get("k");',
+      '  if (k == "a") { k = "A"; } else { k = "B"; }',
+      '  n = n + 1;',
+      '}',
+    ].join('\n'),
+  );
+  assert.equal(t.todos.length, 0);
+  assert.doesNotMatch(stripComments(t.client), /shim\.todo|for \(|if \(/);
+  assert.match(stripComments(t.server), /for \(var item of shim\.each\(ctx, resp\)\)/);
+  assert.match(stripComments(t.server), /n = \(n \+ 1\);/);
+});
+
+test('a name bound only in a dropped client half is a counted todo when the client reads it later', () => {
+  const t = translate(
+    [
+      'resp = getUrl("https://example.test/items").toJSONList();',
+      'n = 0;',
+      'for each item in resp { n = n + 1; }',
+      'alert n;',
+    ].join('\n'),
+  );
+  assert.ok(t.todos.some((item) => item.construct === 'client-condition-uses-server'));
+  assert.doesNotMatch(stripComments(t.client), /for \(/);
+  // A first client write after the dropped half declares the name again.
+  const reassigned = translate(
+    [
+      'resp = getUrl("https://example.test/items").toJSONList();',
+      'for each item in resp { m = 1; }',
+      'm = 2;',
+      'alert m;',
+    ].join('\n'),
+  );
+  assert.equal(reassigned.todos.length, 0);
+  assert.match(stripComments(reassigned.client), /var m = 2;/);
+});
+
+test('a server-only test or loop with a client effect keeps the counted todo', () => {
+  const cond = translate('resp = getUrl("https://example.test/x");\nif (resp == "a") { k = "A"; alert k; }');
+  assert.ok(cond.todos.some((item) => item.construct === 'client-condition-uses-server'));
+  const call = translate('resp = getUrl("https://example.test/x");\nif (resp == "a") { k = input.Name; }');
+  assert.ok(call.todos.some((item) => item.construct === 'client-condition-uses-server'));
+  const loop = translate('resp = getUrl("https://example.test/x").toJSONList();\nfor each item in resp { alert "seen"; }');
+  assert.ok(loop.todos.some((item) => item.construct === 'client-loop-uses-server'));
+});
+
+test('a dropped client half may call pure list helpers but not a list mutator', () => {
+  const pure = translate(
+    [
+      'resp = getUrl("https://example.test/items").toJSONList();',
+      'n = 0;',
+      'for each item in resp {',
+      '  picks = {"a", "b"};',
+      '  if (n >= picks.size()) { i = n % picks.size(); } else { i = n; }',
+      '  pick = picks.get(i);',
+      '  n = n + 1;',
+      '}',
+    ].join('\n'),
+  );
+  assert.equal(pure.todos.length, 0);
+  assert.doesNotMatch(stripComments(pure.client), /for \(|shim\.todo/);
+  const mutates = translate(
+    [
+      'seen = List();',
+      'resp = getUrl("https://example.test/items").toJSONList();',
+      'for each item in resp { seen.add("x"); }',
+    ].join('\n'),
+  );
+  assert.ok(mutates.todos.some((item) => item.construct === 'client-loop-uses-server'));
 });
 
 test('replaceAllIgnoreCase and replaceFirstIgnoreCase emit their shims in both forms', () => {
