@@ -150,7 +150,7 @@ test('status comes from the migration report and merges bucketed kinds', () => {
     [
       { name: 'clean', ir: app('info "ok";') },
       { name: 'one', ir: app('shareTo x;\nalpha_list.frobnicate();') },
-      { name: 'two', ir: app('x = subBusinessDay(Calendar,0).getDay();') },
+      { name: 'two', ir: app('x = unknownCall().getDay();') },
     ],
     'unit',
   );
