@@ -111,10 +111,6 @@ test('no provenance fields, internal labels or dates in the shipped rules', () =
   assert.equal(ISO_DATE.test(md), false, md.match(ISO_DATE)?.[0]);
   assert.equal(HARDCODED_DC.test(md), false, `hard-coded DC: ${md.match(HARDCODED_DC)?.[0]}`);
 });
-  assert.equal(FIELD_LABEL.test(md), false, md.match(FIELD_LABEL)?.[0]);
-  assert.equal(ISO_DATE.test(md), false, md.match(ISO_DATE)?.[0]);
-  assert.equal(HARDCODED_DC.test(md), false, `hard-coded DC: ${md.match(HARDCODED_DC)?.[0]}`);
-});
 
 test('shipped rules pass the generic hygiene scan', () => {
   assert.deepEqual(scanText('rules.md', text()), []);
