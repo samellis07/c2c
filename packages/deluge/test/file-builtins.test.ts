@@ -53,7 +53,8 @@ test('file-content TODOs preserve the documented Creator vs invokeUrl distinctio
   assert.match(dispatch, /Zoho documents getFileContent\/getFileSize\/getFileType/);
   assert.match(dispatch, /invokeUrl FILE/);
   assert.match(dispatch, /Creator upload fields use the separate `content` attribute/);
-  assert.match(dispatch, /bytes, byte length and MIME type are not present in the key/);
+  assert.match(dispatch, /bytes, byte length and MIME type/);
+  assert.match(dispatch, /not present in the key/);
   assert.match(dispatch, /guessing from a filename would not implement the documented API/);
 
   const docs = JSON.parse(readFileSync(join(repoRoot(), 'packages/deluge/data/builtin-docs.json'), 'utf8')) as {
