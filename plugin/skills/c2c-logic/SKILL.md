@@ -40,7 +40,7 @@ ZCQL query runtime rules are indexed in `plugin/references/facts/zcql.md`: [ZC-0
    - Job functions deploy with the code (`catalyst deploy --only functions`).
    - **crons**: CLI token `POST /job_scheduling/cron` works once the pool exists [TESTED]; target type Function must be a **Job** function [DOC][TESTED]. Created disabled, enabled after verify. Read-back MCP `List_All_Crons`.
    - Generated Job code calls `closeWithSuccess()` / `closeWithFailure()` in `finally` (else it shows as a 15-min timeout or "In Progress" for hours [UNVERIFIED]).
-5. **Env values** the logic needs (API keys for invokeurl, etc.) go into `c2c-out/<app>/function-env.json`, filled by the user; `c2c deploy <ds> --function-env <file>` merges them (deploy otherwise **replaces** the function's env vars).
+5. **Env values** the logic needs (API keys for invokeurl, etc.) go into `~/.c2c/<app>-function-env.json`, outside the repository, and are filled by the user; `c2c deploy <ds> --function-env <file>` merges them (deploy otherwise **replaces** the function's env vars).
 
 ## Runtime rules the generated code must follow (check them in review)
 

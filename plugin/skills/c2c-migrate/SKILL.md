@@ -54,7 +54,7 @@ This is the routing layer and the order of work. Do not do a step from memory: l
 | After plan | "Review `c2c-out/<app>/plan.md`. Approve the plan?" plus every unique-field decision the budget forces |
 | Before each `--confirm` and each MCP write | "Run <step> on project <name> (<id>) in <dc>/Development? (yes/no)" |
 | Console steps | "Please do <exact clicks>. Tell me when done." |
-| Env values | "Fill `c2c-out/<app>/function-env.json` (opened for you); I will not read or print the values." |
+| Env values | "Fill `~/.c2c/<app>-function-env.json` (opened for you); I will not read or print the values." |
 | Before cutover | "Freeze Creator writes now?" and "Have you clicked Deploy to Production?" |
 
 ## Stop conditions (fail closed)
