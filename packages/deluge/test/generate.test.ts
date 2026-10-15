@@ -2748,8 +2748,8 @@ test('a writing or transitively writing thisapp callee keeps the manual conditio
   assert.match(stripComments(client.source), /shim\.todo\(ctx, "client-condition-uses-server"\)/);
 });
 
-test('a read-only thisapp call in a ui.add argument keeps the manual todo', () => {
-  const g = generate(
+test('a read-only thisapp call in a ui.add argument becomes an event-time client call', async () => {
+  const build = () =>
     app({
       forms: [plainForm('Orders', [plainField('Choice')])],
       profiles: [ADMIN],
@@ -2771,13 +2771,61 @@ test('a read-only thisapp call in a ui.add argument keeps the manual todo', () =
           deluge: { text: 'input.Choice:ui.add(thisapp.Choices());', span: Z },
         }),
       ],
-    }),
+    });
+  const g = generate(build());
+  assert.deepEqual(
+    generate(build()).files.map((f) => [f.path, f.source]),
+    g.files.map((f) => [f.path, f.source]),
+    'generated files are deterministic',
   );
-  assert.equal(g.files.some((f) => f.path.endsWith('-call.mjs')), false);
-  assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length, 1);
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
   const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs')!;
-  assert.match(stripComments(client.source), /shim\.todo\(ctx, "client-condition-uses-server"\)/);
-  assert.doesNotMatch(stripComments(client.source), /shim\.client\.call\(/);
+  const endpoint = g.files.find((f) => f.path === 'functions/custom/choices-call.mjs');
+  assert.ok(endpoint, 'the read-only callee gets its call endpoint');
+  assert.match(stripComments(client.source), /args: \[await shim\.client\.call\(ctx, "Choices", \[\]\)\]/);
+  assert.doesNotMatch(stripComments(client.source), /shim\.todo\(/);
+  check(client.source, 'client.mjs');
+
+  const clientMod = (await loadModule(client.source, 'ui-add-call-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string; args?: unknown[] }[]>>;
+  const okRuntime = createRuntime({
+    dryRun: true,
+    clientPrefetch: (path, nonce) => {
+      assert.equal(path, '/functions/choices/call');
+      return { ok: true, nonce, value: ['A', 'B'] };
+    },
+  });
+  const ok = await clientMod.clientActions!(okRuntime.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(ok, [{ op: 'ui', method: 'add', target: ['Choice'], args: [['A', 'B']] }]);
+  const blockedRuntime = createRuntime({
+    dryRun: true,
+    clientPrefetch: (_path, nonce) => ({ ok: false, nonce, error: 'denied' }),
+  });
+  const blocked = await clientMod.clientActions!(blockedRuntime.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(blocked.map((a) => a.op), ['info'], 'a failed call fails closed and adds no options');
+});
+
+test('a ui.add argument calling a writing callee or a server-bound local keeps the manual todo', () => {
+  const fns = [
+    { name: 'Choices', signature: 'list Choices(int n)', body: 'return {"A", "B"};' },
+    { name: 'Stamp', signature: 'list Stamp()', body: 'row = insert into Orders [ Choice = "x" ];\nreturn {"A"};' },
+  ].map((f) => ({ name: f.name, kind: 'deluge' as const, signature: f.signature, deluge: [{ text: f.body, span: Z }], properties: [], span: Z }));
+  for (const text of [
+    'input.Choice:ui.add(thisapp.Stamp());',
+    'n = Orders[Choice == "A"].count();\ninput.Choice:ui.add(thisapp.Choices(n));',
+  ]) {
+    const g = generate(
+      app({
+        forms: [plainForm('Orders', [plainField('Choice')])],
+        profiles: [ADMIN],
+        functions: fns,
+        workflows: [workflow({ name: 'load', form: 'Orders', event: 'on load', deluge: { text, span: Z } })],
+      }),
+    );
+    assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length, 1, text);
+    const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs')!;
+    assert.match(stripComments(client.source), /shim\.todo\(ctx, "client-condition-uses-server"\)/, text);
+    assert.doesNotMatch(stripComments(client.source), /shim\.client\.call\(/, text);
+  }
 });
 
 test('a read call endpoint authorizes each form it reads and rejects branded arguments', async () => {
