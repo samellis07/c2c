@@ -27,7 +27,7 @@
  * private names can never be committed; the doc and summary are unchanged.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, fsyncSync, lstatSync, openSync, readFileSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { compareEnUs } from '../../core/src/order.js';
 import { repoRoot } from '../../core/src/toolchain.js';
@@ -367,7 +367,54 @@ export function resolveSitesPath(path: string, root: string = repoRoot()): strin
       `determinism:status: --sites path must be outside the repo tree: ${path} (resolves inside ${hit ?? workTree})`,
     );
   }
-  return abs;
+  const parent = dirname(abs);
+  const realParent = tryRealpath(parent);
+  if (!realParent || !statSync(realParent)?.isDirectory()) {
+    throw new Error(`determinism:status: --sites parent must exist as a directory: ${parent}`);
+  }
+  const destination = join(realParent, basename(abs));
+  const existing = lstatSync(destination, { throwIfNoEntry: false });
+  if (existing && (!existing.isFile() || existing.nlink !== 1)) {
+    throw new Error(`determinism:status: --sites target must be a regular file with one link: ${destination}`);
+  }
+  return destination;
+}
+
+/** Atomically replace an outside-repo target without following a swapped link. */
+function writeSitesFile(path: string, contents: string): void {
+  const parent = dirname(path);
+  const parentBefore = statSync(parent);
+  if (!parentBefore.isDirectory() || tryRealpath(parent) !== parent) {
+    throw new Error(`determinism:status: --sites parent changed after validation: ${parent}`);
+  }
+  const destination = join(parent, basename(path));
+  const existing = lstatSync(destination, { throwIfNoEntry: false });
+  if (existing && (!existing.isFile() || existing.nlink !== 1)) {
+    throw new Error(`determinism:status: --sites target must be a regular file with one link: ${destination}`);
+  }
+  const currentParent = statSync(parent);
+  if (currentParent.dev !== parentBefore.dev || currentParent.ino !== parentBefore.ino) {
+    throw new Error(`determinism:status: --sites parent changed after validation: ${parent}`);
+  }
+  const temp = join(parent, `.${basename(path)}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`);
+  let fd: number | undefined;
+  try {
+    fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    writeFileSync(fd, contents, 'utf8');
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
+    if (tryRealpath(parent) !== parent) throw new Error(`determinism:status: --sites parent changed after validation: ${parent}`);
+    const afterWriteParent = statSync(parent);
+    if (afterWriteParent.dev !== parentBefore.dev || afterWriteParent.ino !== parentBefore.ino) {
+      throw new Error(`determinism:status: --sites parent changed after validation: ${parent}`);
+    }
+    renameSync(temp, destination);
+  } catch (error) {
+    if (fd !== undefined) closeSync(fd);
+    try { unlinkSync(temp); } catch { /* No temp file was created, or rename already consumed it. */ }
+    throw error;
+  }
 }
 
 export function renderStatusDoc(status: DeterminismStatus, builtinCataloguePath?: string): string {
@@ -515,7 +562,12 @@ export function main(argv: string[]): number {
   const out = take('--out') ?? join(repoRoot(), 'docs/determinism-status.md');
   writeFileSync(out, renderStatusDoc(status));
   if (sitesPath) {
-    writeFileSync(sitesPath, `${JSON.stringify(siteAttributionForDir(dir, 'gallery'), null, 2)}\n`);
+    try {
+      writeSitesFile(sitesPath, `${JSON.stringify(siteAttributionForDir(dir, 'gallery'), null, 2)}\n`);
+    } catch (error) {
+      process.stderr.write(`${(error as Error).message}\n`);
+      return 2;
+    }
     process.stderr.write(`determinism:status sites -> ${sitesPath}\n`);
   }
   process.stdout.write(
