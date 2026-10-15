@@ -17,6 +17,8 @@ import {
   concurrencyFor,
   docBlock,
   galleryTable,
+  inputsDigest,
+  isResourceError,
   readGalleryCache,
   runApp,
   runGallery,
@@ -858,5 +860,126 @@ test('gallery sweep: an app whose process fails on its own is reported once, not
     assert.equal(err.sweep.stats.retries, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Q4: a handler that never settles is a Timeout crash, also on the valid input', async () => {
+  const hang = 'export async function handle(ctx) {\n  await new Promise(() => {});\n}\n';
+  const q4 = await smokeApp(minimal, treeOf(hang), { iterations: 1 });
+  assert.equal(q4.report.ok, false);
+  assert.deepEqual(q4.report.crashByClass, { Timeout: 1 });
+  assert.equal(q4.report.handlersCrashOnValid, 1);
+  assert.equal(q4.details[0]!.outcome, 'crash');
+  assert.match(q4.details[0]!.signature, /^Timeout: handler did not settle in N ms/);
+});
+
+test('Q4: a client prefetch with no generated server prefetch gets seeded, stable slots', async () => {
+  // Without a server module for the path, every slot the client reads must still have a value.
+  const client = `export async function clientActions(ctx) {
+  const shim = ctx.shim;
+  const prefetched = await shim.client.prefetch(ctx, "/forms/Contact/missing");
+  if (!prefetched || prefetched.ok !== true) throw new TypeError("prefetch refused");
+  const slots = prefetched.slots;
+  if (!("Total" in slots) && slots.Total === undefined) throw new TypeError("slot missing");
+  if (slots.Total !== slots.Total) throw new TypeError("slot not stable");
+  return [];
+}
+`;
+  const path = 'client/handlers/contact/on-load.mjs';
+  const tree: GeneratedTree = { files: [{ path, data: client }], modules: [{ path, kind: 'client', text: client }] };
+  const q4 = await smokeApp(minimal, tree, { iterations: 8 });
+  assert.equal(q4.report.ok, true, JSON.stringify(q4.details));
+  assert.equal(q4.report.calls, 8);
+});
+
+test('Q4: a form-typed parameter gets a record, a record list when iterated, or null', async () => {
+  // Deluge types by position come from the verbatim signature; arity from the JS.
+  const custom = `/**
+ * Signature (verbatim): void tally(Contact one, Contact many, int n)
+ */
+export async function tally(ctx, one, many, n) {
+  const shim = ctx.shim;
+  if (one !== null && (typeof one !== "object" || Array.isArray(one))) throw new TypeError("one is not a record");
+  if (many !== null && !Array.isArray(many)) throw new TypeError("many is not a list");
+  for (const r of shim.each(ctx, many)) if (typeof r !== "object" || r === null) throw new TypeError("row is not a record");
+  return n;
+}
+`;
+  const q4 = await smokeApp(minimal, treeOf(custom, 'functions/custom/tally.mjs'), { iterations: 10 });
+  assert.equal(q4.report.ok, true, JSON.stringify(q4.details));
+  assert.equal(q4.report.calls, 10);
+});
+
+test('classify: the signature names the generated bucket, a dist module, or neither', () => {
+  const at = (frame: string) => Object.assign(new TypeError('x'), { stack: `TypeError: x\n    at node:internal/foo:1:1\n    at ${frame}` });
+  assert.match(classify(at('handle (file:///tmp/g/functions/c2c_api/aio/contact/on-load.mjs:3:9)'), '/tmp/g').signature, / @ generated:functions\/aio$/);
+  assert.match(classify(at('handle (/tmp/g/client/handlers/x.mjs:3:9)'), '/tmp/g').signature, / @ generated:client\/handlers$/);
+  assert.match(classify(at('get (/repo/dist/shims/src/date.js:3:9)'), '/tmp/g').signature, / @ shims\/src\/date$/);
+  assert.match(classify(at('/elsewhere/lib.js:3:9'), '/tmp/g').signature, / @ other$/);
+  assert.match(classify(Object.assign(new TypeError('x'), { stack: 'TypeError: x\n    at <anonymous>' }), '/tmp/g').signature, / @ unknown$/);
+  // Values in the message never reach the signature.
+  assert.equal(classify(new TypeError("Cannot read 'Secret' of row 42"), '/x').signature.includes('Secret'), false);
+});
+
+test('gallery sweep: a run that throws is an environment failure only when the machine ran short', async () => {
+  const dir = fixtureGallery();
+  try {
+    const calls: number[] = [];
+    const short = async (target: string, _n: number, attempt: number): Promise<AppResult> => {
+      if (!target.endsWith('d1-minimal.ds')) return ROW;
+      calls.push(attempt);
+      if (attempt === 0) throw Object.assign(new Error('spawn failed'), { code: 'EMFILE' });
+      return ROW;
+    };
+    const { rows, stats } = await sweepGallery(dir, 1, { run: short, load: QUIET });
+    assert.deepEqual(rows, [ROW, ROW]);
+    assert.deepEqual(calls, [0, 1], 'a resource error is retried');
+    assert.equal(stats.resourceErrors, 1);
+    assert.equal(stats.recovered, 1);
+
+    const thrown: number[] = [];
+    const wrong = async (target: string, _n: number, attempt: number): Promise<AppResult> => {
+      if (!target.endsWith('d1-minimal.ds')) return ROW;
+      thrown.push(attempt);
+      throw new TypeError('generator bug');
+    };
+    const swept = await sweepGallery(dir, 1, { run: wrong, load: QUIET });
+    assert.deepEqual(thrown, [0], 'an app error is never retried');
+    assert.deepEqual(swept.rows[0], { error: 'generator bug', kind: 'app', cause: 'error' });
+    assert.equal(swept.stats.failed, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('isResourceError: resource codes and messages, not app errors', () => {
+  assert.equal(isResourceError(Object.assign(new Error('x'), { code: 'EBUSY' })), true);
+  assert.equal(isResourceError(new Error('JavaScript heap out of memory')), true);
+  assert.equal(isResourceError('spawn EAGAIN'), true);
+  assert.equal(isResourceError(Object.assign(new Error('no such file'), { code: 'ENOENT' })), false);
+  assert.equal(isResourceError(new TypeError('Cannot read properties of undefined')), false);
+  assert.equal(isResourceError(null), false);
+});
+
+test('gallery inputs digest: a gate or shim source edit makes the cache stale; other files do not', () => {
+  const gallery = fixtureGallery();
+  const fake = mkdtempSync(join(tmpdir(), 'c2c-gallery-digest-'));
+  try {
+    for (const rel of ['packages/quality/src', 'packages/shims/src']) mkdirSync(join(fake, rel), { recursive: true });
+    writeFileSync(join(fake, 'packages/quality/src/gate.ts'), 'export const a = 1;\n');
+    writeFileSync(join(fake, 'packages/shims/src/date.ts'), 'export const b = 1;\n');
+    const base = inputsDigest(gallery, fake);
+    assert.match(base, /^[0-9a-f]{64}$/);
+    assert.equal(inputsDigest(gallery, fake), base, 'stable');
+    writeFileSync(join(fake, 'packages/quality/src/notes.md'), 'not source');
+    assert.equal(inputsDigest(gallery, fake), base, 'a non-.ts file is not an input');
+    writeFileSync(join(fake, 'packages/shims/src/date.ts'), 'export const b = 2;\n');
+    const edited = inputsDigest(gallery, fake);
+    assert.notEqual(edited, base, 'a shim edit is an input change');
+    copyFileSync(join(root, 'fixtures/dialects/d1-minimal.ds'), join(gallery, 'd3-minimal.ds'));
+    assert.notEqual(inputsDigest(gallery, fake), edited, 'a new gallery app is an input change');
+  } finally {
+    rmSync(gallery, { recursive: true, force: true });
+    rmSync(fake, { recursive: true, force: true });
   }
 });
