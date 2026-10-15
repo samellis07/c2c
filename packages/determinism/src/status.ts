@@ -20,12 +20,24 @@
  *
  * which reads the gallery from `--dir`, `C2C_FIXTURES_DIR/gallery`, or
  * `C2C_GALLERY_DIR`, in that order.
+ *
+ * `--sites <file>` additionally writes local-only per-app attribution — app
+ * name, TODO kind, construct path with line, and a normalised signature — for
+ * designers sizing patterns. The path must resolve outside the repo tree, so
+ * private names can never be committed; the doc and summary are unchanged.
  */
-import { readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { compareEnUs } from '../../core/src/order.js';
 import { repoRoot } from '../../core/src/toolchain.js';
-import { migrationReportForDir, type MigrationReport } from '../../cli/src/migration-report.js';
+import { analyze } from '../../cli/src/analyze.js';
+import {
+  listReportApps,
+  loadIr,
+  lockFor,
+  migrationReportForDir,
+  type MigrationReport,
+} from '../../cli/src/migration-report.js';
 
 export interface StatusKind {
   construct: string;
@@ -164,6 +176,85 @@ export function computeDeterminismStatus(dir: string): DeterminismStatus {
   return statusFromReport(migrationReportForDir(dir, 'gallery'));
 }
 
+/** One residual TODO hole attributed to a named app. Local-only: names are not anonymised. */
+export interface SiteTodo {
+  /** `unit` — inside a workflow or function script; `app` — application-level; `ui` — one generated UI stub. */
+  scope: 'app' | 'unit' | 'ui';
+  /**
+   * Construct path, with the script line when the hole sits in a Deluge unit:
+   * `workflow <name>:<line>`, `function <name>:<line>`, `report <name> [filter <name>]`,
+   * `field <name>`, `page <name>`, or `app`.
+   */
+  location: string;
+  /** Raw TODO kind, exactly as the translator reports it (may carry app identifiers). */
+  construct: string;
+  /** Normalised construct signature for clustering: `publicConstruct(construct)`. */
+  signature: string;
+}
+
+/** Per-app attribution written by `--sites`: which app, and where each residual hole lives. */
+export interface SiteAttributionApp {
+  app: string;
+  deterministic: boolean;
+  fillLockEntries: number;
+  todos: SiteTodo[];
+}
+
+export interface SiteAttribution {
+  schema: 'c2c-determinism-sites/1';
+  label: string;
+  apps: SiteAttributionApp[];
+}
+
+/**
+ * Per-app attribution for `--sites`. Runs the same `analyze` the migration
+ * report runs, but keeps the located TODO list (`deluge.todoLocations`) instead
+ * of aggregating it away. Output names apps and raw constructs — write it
+ * outside the repo tree only.
+ */
+export function siteAttributionForDir(dir: string, label: string): SiteAttribution {
+  const apps = listReportApps(dir).map((entry) => {
+    const lock = lockFor(entry.target);
+    const report = analyze(loadIr(entry.target), lock ? { lock } : undefined);
+    const todos = report.deluge.todoLocations.map((todo) => ({
+      scope: todo.scope,
+      location: todo.location,
+      construct: todo.construct,
+      signature: publicConstruct(todo.construct),
+    }));
+    return {
+      app: entry.name,
+      deterministic: report.determinism.deterministic,
+      fillLockEntries: report.determinism.fillLockEntries,
+      todos,
+    };
+  });
+  return { schema: 'c2c-determinism-sites/1', label, apps };
+}
+
+/**
+ * Resolve a `--sites` output path and refuse anything inside the repo tree:
+ * the attribution file names private apps and constructs, so it must never be
+ * committable.
+ */
+export function resolveSitesPath(path: string, root: string = repoRoot()): string {
+  const outside = (base: string, candidate: string): boolean => {
+    const rel = relative(base, candidate);
+    return rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+  };
+  const abs = resolve(path);
+  // Refuse lexically in-tree paths, and paths that land in the tree through a
+  // symlinked parent directory (the file itself need not exist yet).
+  const parent = dirname(abs);
+  const realInside =
+    statSync(parent, { throwIfNoEntry: false })?.isDirectory() &&
+    !outside(realpathSync(root), join(realpathSync(parent), basename(abs)));
+  if (!outside(root, abs) || realInside) {
+    throw new Error(`determinism:status: --sites path must be outside the repo tree: ${path}`);
+  }
+  return abs;
+}
+
 export function renderStatusDoc(status: DeterminismStatus, builtinCataloguePath?: string): string {
   const top = status.kinds.slice(0, 20);
   const todoCount = builtinTodoCount(builtinCataloguePath);
@@ -277,14 +368,24 @@ export function parseStatusDoc(text: string): DeterminismStatus {
   };
 }
 
-function main(argv: string[]): number {
+export function main(argv: string[]): number {
   const take = (name: string): string | undefined => {
     const i = argv.indexOf(name);
     return i >= 0 ? argv[i + 1] : undefined;
   };
   if (argv.some((arg) => arg === '--help' || arg === '-h')) {
-    process.stderr.write('usage: determinism:status [--dir <gallery-dir>] [--out <file>]\n');
+    process.stderr.write('usage: determinism:status [--dir <gallery-dir>] [--out <file>] [--sites <file>]\n');
     return 2;
+  }
+  let sitesPath: string | undefined;
+  const sitesArg = take('--sites');
+  if (sitesArg !== undefined) {
+    try {
+      sitesPath = resolveSitesPath(sitesArg);
+    } catch (error) {
+      process.stderr.write(`${(error as Error).message}\n`);
+      return 2;
+    }
   }
   const dir = resolveStatusDir(process.env, take('--dir'));
   if (!dir || !statSync(dir, { throwIfNoEntry: false })?.isDirectory()) {
@@ -298,6 +399,10 @@ function main(argv: string[]): number {
   }
   const out = take('--out') ?? join(repoRoot(), 'docs/determinism-status.md');
   writeFileSync(out, renderStatusDoc(status));
+  if (sitesPath) {
+    writeFileSync(sitesPath, `${JSON.stringify(siteAttributionForDir(dir, 'gallery'), null, 2)}\n`);
+    process.stderr.write(`determinism:status sites -> ${sitesPath}\n`);
+  }
   process.stdout.write(
     `determinism:status apps=${status.totalApps} deterministic=${status.deterministicApps} todos=${status.todoTotal} kinds=${status.kinds.length} construct-sets=${status.perAppConstructSets.length} ui-todo-apps=${status.deterministicWithUiTodos.apps} ui-todos=${status.deterministicWithUiTodos.uiTodos}\n`,
   );
