@@ -35,7 +35,7 @@ import { flag, loadApp, type Io } from './cli.js';
 import { loaderColumns, readSourceCsv, readSourceJson, type CsvLoad } from './csv.js';
 import { readSourceBackup } from './backup.js';
 import { GuardError } from './guards.js';
-import { parseStoreRows, type StoreRows } from './rollback.js';
+import { parseStoreRows, STORE_SYSTEM_COLUMNS, type StoreRows } from './rollback.js';
 import { DELTA_SOURCES } from './delta-cli.js';
 
 function rawJsonRecordCounts(dir: string): Map<string, number> {
@@ -97,8 +97,17 @@ function paritySchema(app: App, loaded: CsvLoad) {
     : applyConstraintDecisions(generateSchema(app), loaded.constraints ?? []);
 }
 
-function dataKeys(row: Record<string, unknown>): string[] {
-  return Object.keys(row).filter((key) => key !== 'ROWID' && key !== SOURCE_ID_COLUMN);
+/**
+ * Data columns of a row: everything SELECT * or the payload carries, minus the
+ * store's own bookkeeping keys (ROWID, c2c_source_id) and the Catalyst system
+ * columns (CREATORID, CREATEDTIME, MODIFIEDTIME) the loader never writes. A key
+ * the table's schema actually declares stays compared even when it shares a
+ * name with a system column.
+ */
+function dataKeys(row: Record<string, unknown>, schemaColumns?: ReadonlySet<string>): string[] {
+  return Object.keys(row).filter(
+    (key) => key !== 'ROWID' && key !== SOURCE_ID_COLUMN && (!STORE_SYSTEM_COLUMNS.has(key) || schemaColumns?.has(key) === true),
+  );
 }
 
 /**
@@ -169,6 +178,7 @@ export function dataParity(opts: { app: App; loaded: CsvLoad; stored: StoreRows;
   const tables: ParityTableReport[] = [];
   for (const table of loaded.tables) {
     const columns = columnsByTable[table.table];
+    const schemaColumns = new Set((columns ?? []).map((column) => column.name));
     const files = filesByTable[table.table];
     const foreignKeys = keysByTable.get(table.table) ?? [];
     // Stored rows keyed by source id; rows without one cannot be keyed.
@@ -214,7 +224,7 @@ export function dataParity(opts: { app: App; loaded: CsvLoad; stored: StoreRows;
         refusals.push({ table: table.table, column: refusal.column, sourceId: row.id, rule: refusal.rule });
       }
       const payload = { ...prepared.cells, [SOURCE_ID_COLUMN]: row.id };
-      const keys = dataKeys(payload);
+      const keys = dataKeys(payload, schemaColumns);
       canonById.set(row.id, { payload, keys, canon: canonRow(canonCells(payload, keys), keys, columns), fileCells });
     }
     const dupeSet = new Set(duplicateIds);
@@ -232,7 +242,7 @@ export function dataParity(opts: { app: App; loaded: CsvLoad; stored: StoreRows;
       // Boolean text, NULL for empty) is not a change. The compare covers the
       // union of sent and stored columns: a stored data cell the payload
       // never sent must read back as empty.
-      const storedKeys = dataKeys(stored).filter((key) => !fileColumns.has(key));
+      const storedKeys = dataKeys(stored, schemaColumns).filter((key) => !fileColumns.has(key));
       const unionKeys = [...new Set([...entry.keys, ...storedKeys])].sort();
       const unwritten = storedKeys.filter((key) => !Object.hasOwn(entry.payload, key) && !isEmptyCell(stored[key]));
       const changed =
@@ -256,12 +266,12 @@ export function dataParity(opts: { app: App; loaded: CsvLoad; stored: StoreRows;
     state = FNV_OFFSET;
     for (const id of [...canonById.keys()].sort()) state = fnv1a64(state, `${id}\x00${storedCanons.get(id) ?? '-'}`);
     for (const id of duplicateIds) {
-      const duplicateCanons = storedById.get(id)!.map((row) => canonRow(row, dataKeys(row), columns)).sort();
+      const duplicateCanons = storedById.get(id)!.map((row) => canonRow(row, dataKeys(row, schemaColumns), columns)).sort();
       state = fnv1a64(state, `${id}\x00duplicate:${duplicateCanons.join('\x01')}`);
     }
-    for (const id of extraIds) state = fnv1a64(state, `${id}\x00${storedById.get(id)!.map((row) => canonRow(row, dataKeys(row), columns)).join('\x01')}`);
+    for (const id of extraIds) state = fnv1a64(state, `${id}\x00${storedById.get(id)!.map((row) => canonRow(row, dataKeys(row, schemaColumns), columns)).join('\x01')}`);
     for (const row of (stored.get(table.table) ?? []).filter((item) => item[SOURCE_ID_COLUMN] === undefined || item[SOURCE_ID_COLUMN] === null || item[SOURCE_ID_COLUMN] === '')) {
-      state = fnv1a64(state, `unattributed\x00${canonRow(row, dataKeys(row), columns)}`);
+      state = fnv1a64(state, `unattributed\x00${canonRow(row, dataKeys(row, schemaColumns), columns)}`);
     }
     const storedChecksum = checksumHex(state);
     const storedCount = (stored.get(table.table) ?? []).length;

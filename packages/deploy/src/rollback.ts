@@ -28,7 +28,13 @@ import { exactId, parseJsonExact } from './json-exact.js';
 import type { CatalystScope, FetchLike } from '../../data/src/migrate.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const SYSTEM = new Set<string>([SOURCE_ID_COLUMN, 'ROWID', 'CREATORID', 'CREATEDTIME', 'MODIFIEDTIME', ...SYSTEM_FIELD_COLUMNS.map((column) => column.name)]);
+/**
+ * Bookkeeping columns shared by rollback and parity: the loader's source id,
+ * the row id, the columns Catalyst stamps on every `SELECT *` row, and the
+ * Creator system fields. Rollback never exports them. Parity ignores a stored
+ * key from this set unless the table schema declares that name.
+ */
+export const STORE_SYSTEM_COLUMNS = new Set<string>([SOURCE_ID_COLUMN, 'ROWID', 'CREATORID', 'CREATEDTIME', 'MODIFIEDTIME', ...SYSTEM_FIELD_COLUMNS.map((column) => column.name)]);
 /** ZCQL returns at most this many rows per SELECT. */
 export const ZCQL_PAGE = 300;
 
@@ -102,7 +108,7 @@ function compositeOf(column: SchemaColumn, fields: readonly Field[]): { field: F
 function headersOf(table: SchemaTable, fields: readonly Field[]): Header[] {
   const out: Header[] = [];
   for (const column of table.columns) {
-    if (SYSTEM.has(column.name) || column.shadowFor) continue;
+    if (STORE_SYSTEM_COLUMNS.has(column.name) || column.shadowFor) continue;
     if (cellKind(column) === 'file') continue;
     const composite = compositeOf(column, fields);
     out.push({ header: composite ? `${composite.field.name}.${composite.part}` : (column.field ?? column.name), column });

@@ -17,6 +17,7 @@ import type { App } from '../../core/src/ir.js';
 import { fileColumnsOf, generateSchema } from '../../schema/src/generator.js';
 import { migratedObjectKey } from '../../shims/src/files.js';
 import { dataParity, formatParity, readSourceJson, verifyCli, type CsvLoad, type Io } from '../src/index.js';
+import { STORE_SYSTEM_COLUMNS } from '../src/rollback.js';
 
 const APP = `application "Widget"
 {
@@ -92,9 +93,12 @@ function writeJsonExport(app: App, tables: Record<string, Record<string, unknown
 /**
  * What a faithful load leaves in the store: every loaded row plus ROWID and
  * c2c_source_id, lookup cells remapped to the parent's ROWID, file cells as
- * their migrated object key.
+ * their migrated object key. With `systemColumns`, every name in
+ * `STORE_SYSTEM_COLUMNS` is present, as a `SELECT *` dump would carry it:
+ * a schema-declared name is left empty (the source copy below overwrites it
+ * when the export sent one) and a Catalyst-only stamp is non-empty.
  */
-function fakeStore(app: App, loaded: CsvLoad, opts?: { rawFileCells?: boolean }): Map<string, Record<string, unknown>[]> {
+function fakeStore(app: App, loaded: CsvLoad, opts?: { rawFileCells?: boolean; systemColumns?: boolean }): Map<string, Record<string, unknown>[]> {
   const rowidOf = new Map<string, Map<string, string>>();
   let next = 10000000000000001n;
   for (const table of loaded.tables) {
@@ -102,15 +106,28 @@ function fakeStore(app: App, loaded: CsvLoad, opts?: { rawFileCells?: boolean })
     for (const row of table.rows) map.set(row.id, String(next++));
     rowidOf.set(table.table, map);
   }
-  const files = fileColumnsOf(generateSchema(app));
+  const schema = generateSchema(app);
+  const files = fileColumnsOf(schema);
+  const declaredByTable = new Map(schema.tables.map((table) => [table.name, new Set(table.columns.map((column) => column.name))]));
   const out = new Map<string, Record<string, unknown>[]>();
   for (const table of loaded.tables) {
     const keys = loaded.foreignKeys.filter((key) => key.table === table.table);
     const fileSet = new Set(files[table.table]?.columns ?? []);
+    const declared = declaredByTable.get(table.table);
     out.set(
       table.table,
       table.rows.map((row) => {
         const stored: Record<string, unknown> = { ROWID: rowidOf.get(table.table)!.get(row.id), c2c_source_id: row.id };
+        if (opts?.systemColumns) {
+          for (const name of STORE_SYSTEM_COLUMNS) {
+            if (name === 'ROWID' || name === 'c2c_source_id') continue;
+            if (declared?.has(name)) stored[name] = null;
+            else if (name === 'CREATORID') stored[name] = '42';
+            else if (name === 'CREATEDTIME') stored[name] = '2026-10-14 10:11:12:345';
+            else if (name === 'MODIFIEDTIME') stored[name] = '2026-10-15 08:09:10:111';
+            else stored[name] = 'stamp';
+          }
+        }
         for (const [column, value] of Object.entries(row.columns)) {
           const key = keys.find((item) => item.column === column);
           if (key && value !== undefined && value !== null && value !== '') {
@@ -187,6 +204,116 @@ test('identical store passes; a changed cell, a missing row and an extra row are
   assert.deepEqual(extraVendor.extraIds, ['999']);
   assert.ok(extraVendor.reasons.includes('Q6_COUNT_MISMATCH'));
   assert.ok(extra.reasons.includes('Q6_COUNT_MISMATCH'));
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('Catalyst system columns on stored rows are ignored; user-column drift still fails', () => {
+  const app = appOf(APP);
+  const dir = writeJsonExport(app, {
+    All_Vendors: [
+      { ID: '101', 'Vendor Name': 'Acme', Price: '2.50', Opened: '2026-10-05' },
+      { ID: '102', 'Vendor Name': 'Bolt', Price: '4.00', Opened: '2026-10-06' },
+    ],
+    All_Purchase_Orders: [{ ID: '201', 'PO Title': 'PO-1', Vendor: { ID: '101' } }],
+  });
+  const loaded = readSourceJson(dir, app, true);
+  // A real store dump (SELECT *) carries every store system column. This form
+  // does not declare CREATORID, so that stamp is not a user column.
+  const stored = fakeStore(app, loaded, { systemColumns: true });
+  for (const row of [...stored.values()].flat()) {
+    for (const name of STORE_SYSTEM_COLUMNS) assert.ok(Object.hasOwn(row, name), name);
+  }
+  const clean = dataParity({ app, loaded, stored });
+  assert.equal(clean.ok, true, JSON.stringify(clean.tables, null, 2));
+  for (const table of clean.tables) {
+    assert.equal(table.mismatch, false);
+    assert.equal(table.changedIds.length, 0);
+    assert.equal(table.sourceChecksum, table.storedChecksum);
+  }
+
+  // Changing only the Catalyst stamps is not drift.
+  const restamped = new Map<string, Record<string, unknown>[]>(
+    [...stored].map(([table, rows]) => [table, rows.map((row) => ({ ...row }))]),
+  );
+  restamped.get('Vendor')![0]!.CREATORID = '99';
+  restamped.get('Vendor')![0]!.CREATEDTIME = '2030-01-01 00:00:00:000';
+  restamped.get('Vendor')![0]!.MODIFIEDTIME = '2030-01-02 00:00:00:000';
+  const ignored = dataParity({ app, loaded, stored: restamped });
+  assert.equal(ignored.ok, true, JSON.stringify(ignored.tables, null, 2));
+
+  // Drift in a real user column is still reported under the system columns.
+  const drifted = new Map<string, Record<string, unknown>[]>(
+    [...stored].map(([table, rows]) => [table, rows.map((row) => ({ ...row }))]),
+  );
+  drifted.get('Vendor')![1]!.Price = '9.99';
+  const drift = dataParity({ app, loaded, stored: drifted });
+  assert.equal(drift.ok, false);
+  assert.deepEqual(drift.tables.find((table) => table.table === 'Vendor')!.changedIds, ['102']);
+
+  // Added_Time is in the shared system set and the schema always declares it,
+  // so a stored value the source did not send is still a change.
+  const shadowed = fakeStore(app, loaded, { systemColumns: true });
+  shadowed.get('Vendor')![0]!.Added_Time = '2020-01-01 00:00:00:000';
+  const shadow = dataParity({ app, loaded, stored: shadowed });
+  assert.equal(shadow.ok, false);
+  assert.deepEqual(shadow.tables.find((table) => table.table === 'Vendor')!.changedIds, ['101']);
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a schema column named like a Catalyst system column is still compared', () => {
+  // generateSchema keeps a field named CREATORID. isReservedColumnName does not
+  // list it (only priority, table, time, and ZCQL words). The edit API refuses
+  // that name for a new field; parity follows the generated schema.
+  const app = appOf(`application "Widget"
+{
+form Vendor
+{
+Vendor_Name
+(
+type = text
+displayname = "Vendor Name"
+)
+CREATORID
+(
+type = text
+displayname = "Creator Id"
+)
+}
+list All_Vendors
+{
+show all rows from Vendor
+(
+Vendor_Name as "Vendor Name"
+CREATORID as "Creator Id"
+)
+}
+}
+`);
+  const declared = generateSchema(app).tables.find((table) => table.name === 'Vendor')!.columns.map((column) => column.name);
+  assert.ok(declared.includes('CREATORID'));
+  const dir = writeJsonExport(app, {
+    All_Vendors: [{ ID: '101', 'Vendor Name': 'Acme', 'Creator Id': 'mine' }],
+  });
+  const loaded = readSourceJson(dir, app);
+  const stored = fakeStore(app, loaded, { systemColumns: true });
+  assert.equal(stored.get('Vendor')![0]!.CREATORID, 'mine');
+  const clean = dataParity({ app, loaded, stored });
+  assert.equal(clean.ok, true, JSON.stringify(clean.tables, null, 2));
+
+  const drifted = new Map<string, Record<string, unknown>[]>(
+    [...stored].map(([table, rows]) => [table, rows.map((row) => ({ ...row }))]),
+  );
+  drifted.get('Vendor')![0]!.CREATORID = 'other';
+  const drift = dataParity({ app, loaded, stored: drifted });
+  assert.equal(drift.ok, false);
+  assert.deepEqual(drift.tables.find((table) => table.table === 'Vendor')!.changedIds, ['101']);
+
+  const stamped = fakeStore(app, loaded, { systemColumns: true });
+  stamped.get('Vendor')![0]!.CREATEDTIME = '2030-01-01 00:00:00:000';
+  const ignored = dataParity({ app, loaded, stored: stamped });
+  assert.equal(ignored.ok, true, JSON.stringify(ignored.tables, null, 2));
 
   rmSync(dir, { recursive: true, force: true });
 });
