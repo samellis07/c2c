@@ -473,12 +473,26 @@ export const FILE_METHODS = new Set([
 
 /**
  * File methods with no equivalent on the stored key. Emitted as `file:<name>`.
- * Zoho documents getFileContent/getFileSize/getFileType for invokeUrl FILE
- * values, while Creator upload fields use the separate `content` attribute.
- * Creator file fields here are Stratus keys: bytes, byte length and MIME type
- * are not present in the key or retained by the invokeUrl response adapter.
- * Keep these as counted manual steps until a byte/metadata-aware file value is
- * available; guessing from a filename would not implement the documented API.
+ * Zoho documents two file-value sources, and the adapter supports neither's
+ * content/size/type surface:
+ *
+ * - Creator upload fields: `content` is the documented attribute
+ *   (https://www.zoho.com/deluge/help/file-attributes/content.html). Here the
+ *   field value is a Stratus object key (or `{ key }` before the write): the
+ *   bytes, byte length and MIME type live only on the Stratus object, and the
+ *   FileStore adapter exposes no head or metadata read — the content type the
+ *   client sends for the signed PUT is never retained on the stored value.
+ *
+ * - invokeUrl FILE responses: getFileContent/getFileSize/getFileType are
+ *   documented for the FILE value invokeUrl returns
+ *   (https://www.zoho.com/deluge/help/file/get-file-content.html,
+ *   get-file-size.html, get-file-type.html). The invokeUrl response adapter
+ *   returns only the parsed HTTP body, so there is no FILE value carrying
+ *   bytes, size or type to call these on.
+ *
+ * Keep all four as counted manual steps until a byte/metadata-aware file
+ * value exists; guessing from a filename would not implement the documented
+ * API.
  */
 export const FILE_MANUAL = new Set([
   'getFileSize',
