@@ -313,6 +313,7 @@ export const DATE_METHODS = new Set([
   'toStartOfMonth', 'eomonth', 'getDayOfYear', 'getWeekOfYear', 'daysBetween', 'monthsBetween', 'yearsBetween',
   'hour', 'minute', 'second', 'month', 'hoursBetween', 'nextWeekDay', 'previousWeekDay',
   'toDateTimeString', 'totalMonths', 'totalYears', 'unixEpoch',
+  'edate', 'subBusinessDay',
 ]);
 
 /** Text, number, and collection methods the long-tail shims implement (method or free). */
@@ -324,6 +325,7 @@ export const LONGTAIL_METHODS = new Set([
   ...['removeFirstOccurence', 'removeLastOccurence', 'getAlpha', 'getAlphaNumeric', 'subText', 'matches', 'encodeUrl', 'left', 'right', 'mid', 'ltrim', 'rtrim', 'repeat', 'reverse'],
   'find', 'subList', 'containsValue', 'deleteKey', 'deleteKeys', 'getKey', 'getLastKey', 'frac',
   'isEven', 'isOdd', 'isFile', 'containValue', 'notContains', 'deleteAll', 'sortKey', 'delete', 'duplicate',
+  'getFieldNames', 'getFieldValue',
 
 ]);
 

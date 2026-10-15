@@ -549,6 +549,8 @@ export interface Shim {
   };
   record: {
     bind(ctx: ShimContext, values: Record<string, unknown>, form?: string): RowMeta;
+    getFieldNames(value: unknown): string[];
+    getFieldValue(value: unknown, field: unknown): unknown;
     get(row: unknown, ...path: string[]): unknown;
     set(row: unknown, path: string[], value: unknown): unknown;
     /** Creator system columns (`Added_User`, `Added_Time`, and the same). */
@@ -724,6 +726,8 @@ export interface Shim {
     /** `toString()` with no pattern. A blank is empty text, not the literal "null". */
     text(value: unknown, ctx: ShimContext): string;
     addBusinessDay(value: unknown, n: number | bigint, ...args: unknown[]): dates.DelugeDate | null;
+    edate(value: unknown, n: number | bigint, ctx: ShimContext): dates.DelugeDate | null;
+    subBusinessDay(value: unknown, n: number | bigint, ...args: unknown[]): dates.DelugeDate | null;
     getDayOfWeek(value: unknown, ctx: ShimContext): number | null;
     toStartOfWeek(value: unknown, ctx: ShimContext): dates.DelugeDate | null;
     days360(a: unknown, b: unknown, ctx: ShimContext): number;
@@ -2052,6 +2056,53 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       const d = readDate(value);
       return d ? dates.addBusinessDays(d, exactDayCount(n)) : null;
     },
+    edate(value, n) {
+      const d = readDate(value);
+      if (!d) return null;
+      const months = exactDayCount(n);
+      if (!Number.isInteger(months)) throw new DelugeRuntimeError('edate: numberOfMonths must be an integer');
+      const shifted = dates.addMonths(d, months);
+      // Zoho documents that EDATE ignores the source time and returns a date:
+      // https://www.zoho.com/deluge/help/functions/datetime/edate.html
+      return new dates.DelugeDate(shifted.y, shifted.m, shifted.d);
+    },
+    subBusinessDay(value, n, ...args) {
+      const d = readDate(value);
+      if (!d) return null;
+      const count = exactDayCount(n);
+      if (count <= 0) return d;
+      // Generated method/free calls append ctx immediately after required
+      // arguments; only following list arguments are weekends and holidays.
+      const isContext = (candidate: unknown) => !!candidate && typeof candidate === 'object' && 'shim' in candidate && 'record' in candidate;
+      const weekends = isContext(args[0]) ? undefined : args[0];
+      const holidays = isContext(args[1]) ? undefined : args[1];
+      const dayNumbers: Record<string, number> = {
+        sunday: 1, monday: 2, tuesday: 3, wednesday: 4,
+        thursday: 5, friday: 6, saturday: 7,
+      };
+      const weekendDays = new Set<number>();
+      if (weekends === undefined || weekends === null) {
+        weekendDays.add(1);
+        weekendDays.add(7);
+      } else {
+        if (!Array.isArray(weekends)) throw new DelugeRuntimeError('weekends must be a list of weekday names');
+        for (const day of weekends) {
+          const number = typeof day === 'string' ? dayNumbers[day.toLowerCase()] : undefined;
+          if (!number) throw new DelugeRuntimeError(`Invalid weekend day: ${String(day)}`);
+          weekendDays.add(number);
+        }
+      }
+      const holidayDays = new Set<number>();
+      if (holidays !== undefined && holidays !== null) {
+        if (!Array.isArray(holidays)) throw new DelugeRuntimeError('holidays must be a list of dates');
+        for (const holiday of holidays) {
+          const date = readDate(holiday);
+          if (!date) continue;
+          holidayDays.add(date.epochDay());
+        }
+      }
+      return dates.subtractBusinessDays(d, count, weekendDays, holidayDays);
+    },
     getDayOfWeek(value) {
       const d = readDate(value);
       return d ? dates.weekdaySun1(d) : null;
@@ -2618,6 +2669,20 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     record: {
       bind(_ctx, values, form = '') {
         return { __row: true, form, values: { ...values } };
+      },
+      getFieldNames(value) {
+        const row = firstRecord(value);
+        const fields = row && typeof row === 'object' && '__row' in row ? (row as RowMeta).values : row;
+        if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return [];
+        return Object.keys(fields).sort();
+      },
+      getFieldValue(value, field) {
+        if (field == null) return null;
+        const row = firstRecord(value);
+        const fields = row && typeof row === 'object' && '__row' in row ? (row as RowMeta).values : row;
+        if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return null;
+        const key = String(field);
+        return Object.hasOwn(fields, key) ? (fields as Record<string, unknown>)[key] ?? null : null;
       },
       get(row, ...path) {
         // A record collection reads its first record; null or empty reads null

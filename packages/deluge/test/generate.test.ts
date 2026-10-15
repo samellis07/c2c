@@ -5870,7 +5870,7 @@ test('migration-report.json carries the deterministic flag, todoCount and fillLo
   const { acceptTodo, collectTasks, readLock } = await import('../src/fill-todos.js');
   type Flag = { deterministic: boolean; todoCount: number; fillLockEntries: number; untranslated: { construct: string; count: number }[] };
   const flagOf = (g: ReturnType<typeof generate>) => JSON.parse(g.files.find((f) => f.path === 'migration-report.json')!.source) as Flag;
-  const text = 'x = subBusinessDay(Calendar,0).getDay();';
+  const text = 'x = unknownCall().getDay();';
   const dirty = app({ workflows: [workflow({ name: 'On add', form: 'Orders', event: 'on success', deluge: { text, span: { start: 0, end: text.length } } })] });
   const clean = flagOf(generate(app({})));
   assert.deepEqual([clean.deterministic, clean.todoCount, clean.fillLockEntries], [true, 0, 0]);

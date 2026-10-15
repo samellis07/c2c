@@ -317,6 +317,31 @@ export function addBusinessDays(value: DelugeDate, n: number): DelugeDate {
   return addDays(value, calendar);
 }
 
+/**
+ * Subtract business days. Zoho's default weekend is Saturday/Sunday and the
+ * optional weekend and holiday collections are skipped by calendar date.
+ * A zero/negative count leaves the input unchanged. Source:
+ * https://www.zoho.com/deluge/help/functions/datetime/subbusinessday.html
+ */
+export function subtractBusinessDays(
+  value: DelugeDate,
+  n: number,
+  weekends: ReadonlySet<number> = new Set([1, 7]),
+  holidays: ReadonlySet<number> = new Set(),
+): DelugeDate {
+  if (n <= 0) return value;
+  if (!Number.isInteger(n) || n > 365) throw new DelugeRuntimeError('numberOfBusinessDays cannot be more than 365');
+  if (weekends.size >= 7) throw new DelugeRuntimeError('weekends must leave at least one business day');
+  let result = value;
+  let remaining = n;
+  while (remaining > 0) {
+    result = addDays(result, -1);
+    const day = result.epochDay();
+    if (!weekends.has(weekdaySun1(result)) && !holidays.has(day)) remaining--;
+  }
+  return result;
+}
+
 function dateOutOfRange(): DelugeRuntimeError {
   return new DelugeRuntimeError('date is out of range');
 }

@@ -4580,6 +4580,8 @@ function namedCall(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fal
     const rest = args.slice(1).map((a) => a.code).join(', ');
     return mergeFx(`shim.date.${name}(${args[0].code}${rest ? `, ${rest}` : ''}, ctx)`, args, { shim: true, date: returnsDate(name) });
   }
+  if (name === 'getFieldNames') return mergeFx('shim.record.getFieldNames(ctx.record)', args, { shim: true, list: true });
+  if (name === 'getFieldValue') return mergeFx(`shim.record.getFieldValue(ctx.record, ${args[0]?.code ?? 'null'})`, args, { shim: true });
   if (name === 'getJson') return mergeFx(`shim.list.getJson(${args[0]?.code ?? 'null'}, ${args[1]?.code ?? 'null'})`, args, { shim: true });
   if (TEXT_FUNCTIONS.has(name) && args.length) return mergeFx(`shim.string.${name}(${args.map((a) => a.code).join(', ')})`, args, { shim: true });
   if (name === 'find' && args.length >= 2) return mergeFx(`shim.list.indexOf(${args.map((a) => a.code).join(', ')})`, args, { shim: true });
@@ -4757,7 +4759,7 @@ function conversionCall(method: string, recv: Fx, args: Fx[]): Fx | null {
 }
 
 function returnsDate(method: string): boolean {
-  return method.startsWith('add') || method.startsWith('sub') || method.startsWith('toStart') || method === 'toDate' || method === 'toTime' || method === 'nextWeekDay' || method === 'previousWeekDay';
+  return method.startsWith('add') || method.startsWith('sub') || method.startsWith('toStart') || method === 'edate' || method === 'toDate' || method === 'toTime' || method === 'nextWeekDay' || method === 'previousWeekDay';
 }
 
 function directMethod(method: string, recv: Fx, args: Fx[]): Fx | null {
@@ -4765,6 +4767,9 @@ function directMethod(method: string, recv: Fx, args: Fx[]): Fx | null {
   const argList = a.join(', ');
   const call = (code: string, flags?: Partial<Fx>) => mergeFx(code, [recv, ...args], { shim: true, ...flags });
   const textish = !recv.list && !recv.map && !recv.query;
+
+  if (method === 'getFieldNames') return call(`shim.record.getFieldNames(${recv.code})`, { list: true });
+  if (method === 'getFieldValue') return call(`shim.record.getFieldValue(${recv.code}, ${a[0] ?? 'null'})`);
 
   // The stored file value is a Stratus object key (or `{ key }` before write),
   // not the bytes, the byte length, or a content type. Name reads use that
