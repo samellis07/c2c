@@ -1394,14 +1394,74 @@ test('subset shims: named import after an unrelated import is parsed independent
   }
 });
 
+test('subset shims: every import form of an individual shim keeps the module', () => {
+  const references = [
+    'import "../../c2c_api/vendor/shims/criteria.js";',
+    'import "../../c2c_api/vendor/shims/criteria";',
+    'import compileCriteria from "../../c2c_api/vendor/shims/criteria.js";',
+    'import * as criteria from "../../c2c_api/vendor/shims/criteria.js";',
+    'import { compileCriteria } from "../../c2c_api/vendor/shims/criteria.js";',
+    'export { compileCriteria } from "../../c2c_api/vendor/shims/criteria.js";',
+    'export * from "../../c2c_api/vendor/shims/criteria.js";',
+    'export * as criteria from "../../c2c_api/vendor/shims/criteria.js";',
+    'const criteria = import("../../c2c_api/vendor/shims/criteria.js");',
+    'import "../vendor/shims/criteria.js";',
+  ];
+
+  for (const data of references) {
+    const generated: DeployFile[] = [{ path: 'functions/aio/reference.mjs', data }];
+    const modules = computeShimModules(generated);
+    assert.ok(modules !== null, data);
+    assert.ok(modules.has('criteria.js'), data);
+    const files = functionDir(generated, { mode: 'dry-run', subsetShims: true });
+    assert.ok(
+      files.some((f) => f.path === 'functions/c2c_api/vendor/shims/criteria.js'),
+      data,
+    );
+  }
+});
+
+test('subset shims: a function reaching a shim only via a side-effect import loads', async () => {
+  const generated: DeployFile[] = [
+    {
+      path: 'functions/aio/needs-criteria.mjs',
+      data: 'import "../vendor/shims/criteria.js";\nexport const endpoint = { type: "advancedio", method: "POST", path: "/needs-criteria" };\n',
+    },
+  ];
+  const files = functionDir(generated, { mode: 'dry-run', subsetShims: true });
+  assert.ok(files.some((f) => f.path === 'functions/c2c_api/vendor/shims/criteria.js'));
+
+  const out = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), 'c2c-subset-side-effect-'));
+  try {
+    writeDeployTree(out, files);
+    const mod = (await import(pathToFileURL(join(out, 'functions/c2c_api/aio/needs-criteria.mjs')).href)) as { endpoint: { path: string } };
+    assert.equal(mod.endpoint.path, '/needs-criteria');
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('subset shims: named re-exports of the index resolve to their modules', () => {
+  const generated: DeployFile[] = [
+    { path: 'functions/aio/reexport.mjs', data: 'export { compileCriteria } from "creator-to-catalyst/shims";' },
+  ];
+  const modules = computeShimModules(generated);
+  assert.ok(modules !== null);
+  assert.ok(modules.has('criteria.js'));
+  const files = functionDir(generated, { mode: 'dry-run', subsetShims: true });
+  assert.ok(files.some((f) => f.path === 'functions/c2c_api/vendor/shims/criteria.js'));
+});
+
 test('subset shims: non-named references to the module fail closed', () => {
   const references = [
     'export * from "creator-to-catalyst/shims";',
-    'export { compileCriteria } from "creator-to-catalyst/shims";',
     'const shims = require("creator-to-catalyst/shims");',
     'const shims = import("creator-to-catalyst/shims");',
     'import * as shims from "creator-to-catalyst/shims";',
     'import "creator-to-catalyst/shims";',
+    'const shims = await import(name);',
+    'const shims = await import(`./vendor/shims/${name}.js`);',
+    'const shims = await import("../" + name);',
   ];
 
   for (const data of references) {
