@@ -432,7 +432,7 @@ Recipe: POST /bulk/write and poll until Completed. Success is Completed and the 
 
 ### `400` `Please access the Slate service in your project's console before deploying via the CLI.`
 
-Rule: `Please access the Slate service in your project's console before deploying via the CLI.` on the first Slate deploy means the Slate service was never opened in the project's console.
+Rule: `Please access the Slate service in your project's console before deploying via the CLI.` on the first Slate deploy means the Slate service was never opened in the project's console. The error body is `{"status":"failure","data":{"message":"Please access the Slate service in your project's console before deploying via the CLI.","error_code":"BAD_REQUEST"}}`. Read and list calls (MCP `List_All_Slate_Apps`, REST `GET /slate/v1/project/<project-id>/app`) return HTTP 200 with an empty list (`[]`) on an unactivated project and cannot detect activation state; detection relies on the CLI 400 message. Do not bypass the gate with an altered User-Agent: records are created but deployment builds fail and serve 404.
 
 Cause: `catalyst deploy slate` on a fresh imported project where "Start Exploring" for Slate was never clicked. Data Store and Functions deploys do not need it.
 
