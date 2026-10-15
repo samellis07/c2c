@@ -55,7 +55,7 @@ Reserved ZCQL words (`FROM`, `TO`, …) as column names are renamed with a mappi
 
 ### Steps
 
-1. `c2c plan exports/<app>.ds --out c2c-out/<app>` (or `c2c schema <ds> --report` and `c2c deploy <ds>` without `--confirm`).
+1. `c2c plan exports/<app>.ds --out c2c-out/<app>` (or `c2c schema <ds>` and `c2c deploy <ds>` without `--confirm`).
 2. Read `plan.md` → *Data Store* section with the user: tables, columns per table and type, unique columns, FKs, side tables, TODOs.
 3. Resolve every budget decision with the user; record in `decisions.json`; re-plan until budgets pass.
 
