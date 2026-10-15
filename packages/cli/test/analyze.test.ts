@@ -483,7 +483,8 @@ test(
   () => {
   const education = analyze(galleryDs('education-management', 'Education_Management.ds'));
   assertCountedOnce(education);
-  assert.equal(education.determinism.todoCount, 28);
+  // count() on a record-typed function parameter now translates as record cardinality, removing three method:count and three client-condition-uses-server residuals on this corpus export.
+  assert.equal(education.determinism.todoCount, 22);
   assert.equal(education.deluge.todoLocations.filter((item) => item.scope === 'app').length, 0);
   const registration = education.deluge.todoLocations.filter((item) => item.location.startsWith('workflow Create_record_scripts12:'));
   assert.equal(registration.length, 2);
