@@ -152,9 +152,17 @@ export interface UiReport {
   conditionalFormats?: { name: string; fields: string[]; criteria: unknown; format: string }[];
   customActions: UiAction[];
   detail: boolean;
+  /** Ordered Creator detail view blocks, including related subform rows. */
+  detailBlocks?: UiReportDetailBlock[];
   /** The report's `print template` selection resolved to its form's layout block. */
   printTemplate?: UiPrintTemplate;
   section?: string;
+}
+
+export interface UiReportDetailBlock {
+  title: string;
+  relatedField?: string;
+  fields: { field: string; label: string }[];
 }
 
 /**

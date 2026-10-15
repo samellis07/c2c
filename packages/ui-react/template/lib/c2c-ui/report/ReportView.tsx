@@ -515,16 +515,45 @@ function RecordDetail({ report, rowId }: { report: ReportSpec; rowId: string }) 
       ) : (
         <article className="c2c-record" aria-label={title === '–' ? `Record ${rowId}` : title}>
           <h2>{title === '–' ? `Record ${rowId}` : title}</h2>
-          <dl>
-            {report.columns
-              .filter((c) => !c.action)
-              .map((column) => (
-                <div key={column.field}>
-                  <dt>{column.label}</dt>
-                  <dd>{own?.cells?.[column.field]?.(detail.record[column.field], detail.record) ?? formatValue(detail.record[column.field])}</dd>
-                </div>
-              ))}
-          </dl>
+          {report.detailBlocks?.length ? report.detailBlocks.map((block, index) => {
+            const related = block.relatedField ? detail.record[block.relatedField] : undefined;
+            return (
+              <section key={`${block.title}:${index}`} data-detail-block={block.title}>
+                <h3>{block.title}</h3>
+                {Array.isArray(related) ? (
+                  <div className="table-wrap">
+                    <table>
+                      <thead><tr>{block.fields.map((field) => <th scope="col" key={field.field}>{field.label}</th>)}</tr></thead>
+                      <tbody>{related.map((item, rowIndex) => {
+                        const child = item && typeof item === 'object' ? item as Row : {};
+                        return <tr key={String(child.ROWID ?? rowIndex)}>{block.fields.map((field) => <td key={field.field}>{formatValue(child[field.field])}</td>)}</tr>;
+                      })}</tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <dl>
+                    {block.fields.map((field) => (
+                      <div key={field.field}>
+                        <dt>{field.label}</dt>
+                        <dd>{own?.cells?.[field.field]?.(detail.record[field.field], detail.record) ?? formatValue(detail.record[field.field])}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+              </section>
+            );
+          }) : (
+            <dl>
+              {report.columns
+                .filter((c) => !c.action)
+                .map((column) => (
+                  <div key={column.field}>
+                    <dt>{column.label}</dt>
+                    <dd>{own?.cells?.[column.field]?.(detail.record[column.field], detail.record) ?? formatValue(detail.record[column.field])}</dd>
+                  </div>
+                ))}
+            </dl>
+          )}
           {report.form && report.rowActions.edit ? (
             <p>
               <a className="c2c-row-open" href={hrefFor('form', report.form, 'edit', rowId)} aria-label={`Edit record ${rowId}`}>
