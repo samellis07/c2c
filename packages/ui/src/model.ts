@@ -12,7 +12,7 @@ import { unquote } from '../../core/src/ir.js';
 import type { BlueprintFieldSpec } from '../../deluge/src/blueprint-rules.js';
 import { blueprintFieldSpecs, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
 import type { Expr } from '../../deluge/src/ast.js';
-import { parse as parseDeluge } from '../../deluge/src/parser.js';
+import { parse as parseDeluge, parseExpression } from '../../deluge/src/parser.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { requiredCompositePart } from '../../schema/src/composite-parts.js';
 import { CURRENCY_CODES, fieldTypeRow, normalizeType, type FieldTypeRow } from '../../schema/src/mapping.js';
@@ -1023,6 +1023,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
     if (report.criteria && /\bzoho\.adminuserid\b/i.test(report.criteria)) {
       todo += ' It compares with zoho.adminuserid (the application owner email), which the migrated app does not know: replace it with the owner address, or with zoho.loginuserid if the report is meant for the signed-in user.';
     }
+    if (report.criteria) todo += criteriaReadGuidance(report.criteria);
   }
   for (const filter of report.filters) {
     if (filter.criteria?.trim() && criteriaHasTodo(reportCriteria(filter.criteria, app.functions))) {
@@ -1457,4 +1458,44 @@ export function formStatus(form: UiForm): 'generated' | 'todo' {
   const fields = flatFields(form.fields);
   if (!fields.length) return 'generated';
   return fields.every((field) => field.status === 'todo') ? 'todo' : 'generated';
+}
+
+/**
+ * Manual step for criteria leaves the report read never evaluates: a
+ * `thisapp.<fn>()` call and a field read from another form (`Form[...].Field`).
+ * Each is named once, in source order, so the developer knows which leaf to
+ * rewrite. Empty when the criteria holds neither.
+ */
+function criteriaReadGuidance(src: string): string {
+  const calls: string[] = [];
+  const fetches: string[] = [];
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item);
+      return;
+    }
+    const expr = node as Expr;
+    if (expr.kind === 'call' && expr.callee.kind === 'member') {
+      const path: string[] = [expr.callee.property];
+      let head: Expr = expr.callee.object;
+      while (head.kind === 'member') {
+        path.unshift(head.property);
+        head = head.object;
+      }
+      const name = path.join('.');
+      if (head.kind === 'name' && head.name === 'thisapp' && !calls.includes(name)) calls.push(name);
+    }
+    if (expr.kind === 'criteria' && expr.object.kind === 'name' && !fetches.includes(expr.object.name)) fetches.push(expr.object.name);
+    for (const [key, value] of Object.entries(node)) if (key !== 'span') visit(value);
+  };
+  visit(parseExpression(src, true));
+  let out = '';
+  if (calls.length) {
+    out += ` It compares with the result of app function ${calls.map((name) => `thisapp.${name}()`).join(', ')}, which the generated report read does not call: replace that comparison with the value or field condition the function returns, then regenerate.`;
+  }
+  if (fetches.length) {
+    out += ` It compares with a field fetched from ${fetches.map((name) => `${name}[...]`).join(', ')}, which the generated report read does not evaluate: replace that comparison with a fixed value or a condition on this form's own fields, then regenerate.`;
+  }
+  return out;
 }
