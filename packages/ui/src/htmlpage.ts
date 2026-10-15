@@ -28,7 +28,7 @@ import { reportCriteria } from '../../deluge/src/translate.js';
 import { criteriaHasRelative, criteriaHasTodo } from '../../shims/src/criteria.js';
 import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, sanitizeSnippet } from './pages.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
-import { c2cUrlFunctionSource } from './url-policy.js';
+import { c2cUrlFunctionSource, flatUrl } from './url-policy.js';
 
 export interface HtmlpageFile {
   path: string;
@@ -536,6 +536,50 @@ function componentAttributes(tag: string): Map<string, string> | null {
 interface EmbeddedComponent { kind: 'form' | 'report'; name: string }
 
 /**
+ * Named HTML entities a smuggled URL can hide behind. Numeric references ride
+ * on the second branch; anything else stays literal, the way the browser
+ * leaves unknown entities alone.
+ */
+const URL_ENTITY_NAMES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: '\u00a0',
+  colon: ':',
+  Tab: '\t',
+  NewLine: '\n',
+};
+
+/** Decode the character references the browser resolves before it parses a URL. */
+function decodeUrlEntities(raw: string): string {
+  return String(raw ?? '').replace(/&(#x[0-9a-fA-F]+|#\d+|[A-Za-z][A-Za-z0-9]*);/g, (whole, body: string) => {
+    if (body[0] === '#') {
+      const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+      return Number.isFinite(code) && code > 0 && code < 0x110000 ? String.fromCodePoint(code) : whole;
+    }
+    return URL_ENTITY_NAMES[body] ?? whole;
+  });
+}
+
+/**
+ * Raster image `data:` payloads, the only `data:` URLs a component attribute
+ * may carry. SVG and every other `data:` media type can run script; plain and
+ * entity/whitespace/case tricks are flattened first, the way the sanitizer
+ * and the browser read them (`flatUrl`).
+ */
+const SAFE_DATA_IMAGE = /^data:image\/(?:png|jpe?g|gif|webp)(?:;base64)?,/;
+
+/** True when an attribute value could run code as a URL, so the tag proves no embed target. */
+function hostileUrlValue(value: string): boolean {
+  const flat = flatUrl(decodeUrlEntities(value));
+  if (!flat) return false;
+  if (flat.startsWith('javascript:') || flat.startsWith('vbscript:')) return true;
+  return flat.startsWith('data:') && !SAFE_DATA_IMAGE.test(flat);
+}
+
+/**
  * Creator zc-component divs can name a generated form/report [UNVERIFIED]. Only a literal
  * link name without a params attribute is provable; other embeds stay TODOs.
  */
@@ -552,7 +596,7 @@ function embeddedComponents(template: string, app: App): { template: string; com
     const kind = linkKind === 'view' || linkKind === 'report' ? 'report' : linkKind;
     const name = linkEntry?.[1] ?? '';
     const known = SAFE_COMPONENT_NAME.test(name) && (kind === 'form' ? app.forms.some((form) => form.name === name) : kind === 'report' ? app.reports.some((report) => report.name === name) : false);
-    const hostile = [...attrs.keys()].some((key) => /^on/i.test(key)) || [...attrs.values()].some((value) => /(?:javascript:|data:text\/html)/i.test(value));
+    const hostile = [...attrs.keys()].some((key) => /^on/i.test(key)) || [...attrs.values()].some(hostileUrlValue);
     if (known && !hostile && ![...attrs.keys()].some((key) => ZC_PARAMS.test(key))) {
       const component = { kind: kind as 'form' | 'report', name };
       components.push(component);

@@ -278,15 +278,97 @@ test('direct navigation to a hidden section paints the denied state and fires no
 });
 
 
-test('a denied embedded report renders no rows or report query', { skip: SKIP }, async (t) => {
-  const ir = app();
+/**
+ * A visible page embedding the hidden report. The page's ZML names the
+ * report the caller cannot open; the spec carries the embed and the denial.
+ */
+const EMBED_SOURCE = `application "Desk"
+{
+\tsection Main
+\t{
+\t\tdisplayname = "Main"
+\t\tform Order
+\t\t{
+\t\t\tdisplayname = "Order"
+\t\t\tTitle
+\t\t\t(
+\t\t\t\ttype = text
+\t\t\t\tdisplayname = "Title"
+\t\t\t)
+\t\t}
+\t\tlist Orders
+\t\t{
+\t\t\tdisplayname = "Orders"
+\t\t\tshow all rows from Order
+\t\t\t(
+\t\t\t\tTitle
+\t\t\t)
+\t\t}
+\t}
+\tsection Secret
+\t{
+\t\tdisplayname = "Secret"
+\t\thide = true
+\t\tform Ledger
+\t\t{
+\t\t\tdisplayname = "Ledger"
+\t\t\tTotal
+\t\t\t(
+\t\t\t\ttype = decimal
+\t\t\t\tdisplayname = "Total"
+\t\t\t)
+\t\t}
+\t\tlist LedgerRows
+\t\t{
+\t\t\tdisplayname = "Ledger rows"
+\t\t\tshow all rows from Ledger
+\t\t\t(
+\t\t\t\tTotal
+\t\t\t)
+\t\t}
+\t}
+\tpages
+\t{
+\t\tpage Board
+\t\t{
+\t\t\tdisplayname = "Board"
+\t\t\tContent=${JSON.stringify("<zml><layout><row><column width='100%'><text type='Text' value='Board header'></text><report elementName='Embed' linkName='LedgerRows'/></column></row></layout></zml>")}
+\t\t}
+\t}
+}
+`;
+
+test('a page embedding a denied report renders the denial and fires no report query', { skip: SKIP }, async (t) => {
+  const ir = deriveIr(parse(EMBED_SOURCE));
+  const spec = reactAppSpec(ir);
+  assert.ok(
+    Object.values(spec.pages ?? {}).some((page) => page.elements.some((el) => el.kind === 'report' && el.report === 'LedgerRows')),
+    'the page spec embeds the hidden report',
+  );
+  assert.ok(spec.denied?.includes('LedgerRows'), 'the embedded report stays denied');
+  const { createElement } = createRequire(join(lib(), 'lib', 'loader.cjs'))('react') as {
+    createElement: (type: unknown, props?: unknown, ...children: unknown[]) => unknown;
+  };
+  const { PageView } = (await import(pathToFileURL(join(lib(), 'lib/c2c-ui/pages/PageView.js')).href)) as {
+    PageView: unknown;
+  };
   const m = await mount(t);
-  m.view.location.hash = '#/report/LedgerRows';
-  m.boot(reactAppSpec(ir), {});
+  // Open the visible page, like a menu click: the page draws, the embedded
+  // report it names is refused in place, before any rows request.
+  m.view.location.hash = '#/page/Board';
+  m.boot(spec, {
+    'page/Board': () => createElement(PageView, { page: spec.pages!.Board! }),
+    'report/LedgerRows': () => createElement('div', { 'data-mounted': 'yes' }, 'a screen'),
+  });
   await m.settle();
-  assert.equal(denied(m.main())?.getAttribute('data-access-status'), '403');
-  assert.equal(m.main().querySelector('[data-rows]'), null);
-  assert.deepEqual(m.calls, [], 'React denies the hidden report before any rows request');
+  const main = m.main();
+  assert.ok(main.querySelector('[data-page="Board"]'), 'the visible page rendered');
+  assert.match(main.querySelector('[data-page="Board"] h1')?.textContent ?? '', /Board/);
+  assert.equal(denied(main)?.getAttribute('data-access-status'), '403', 'the embedded report is denied');
+  assert.match(denied(main)?.textContent ?? '', /This page is not available\./);
+  assert.equal(main.querySelector('[data-report="LedgerRows"]'), null, 'the denied report drew no rows');
+  assert.equal(main.querySelector('[data-mounted]'), null, 'the denied report screen never mounted');
+  assert.deepEqual(m.calls, [], 'the embedded denial fired no report query');
 });
 
 test('a name shared by a hidden and a visible section stays reachable', { skip: SKIP }, async (t) => {

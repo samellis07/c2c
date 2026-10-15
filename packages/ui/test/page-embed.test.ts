@@ -290,6 +290,69 @@ test('component attributes with hostile syntax are never trusted as inline targe
   }
 });
 
+/**
+ * Every unsafe URL scheme stays a counted TODO, never a component marker:
+ * the guard flattens entity, case and whitespace tricks the way the browser
+ * parses them, and refuses every `data:` payload but raster images. Each tag
+ * below promoted its marker before the guard; each must not now.
+ */
+function hostileTag(tag: string, absent: RegExp): void {
+  const snippet = `htmlpage Outer1()\ncontent\n<%{ %>${tag}Loading<% }%>`;
+  const { model } = buildUi(componentApp(snippet));
+  const el = snippetOf(model, 'Outer');
+  assert.equal(el?.components, undefined, tag);
+  assert.ok(!/data-zml=\"component-(?:form|report):/.test(el?.html ?? ''), tag);
+  assert.ok(!absent.test(el?.html ?? ''), `${tag} -> ${el?.html ?? ''}`);
+}
+
+test('a vbscript: attribute is never trusted as an inline target', () => {
+  hostileTag(`<div elName='zc-component' formLinkName='Intake' href='vbscript:msgbox(1)'>`, /vbscript:/i);
+});
+
+test('a mixed-case vbscript: attribute is never trusted as an inline target', () => {
+  hostileTag(`<div elName='zc-component' formLinkName='Intake' href='VbScRiPt:msgbox(1)'>`, /vbscript:/i);
+});
+
+test('a data:image/svg payload is never trusted as an inline target', () => {
+  hostileTag(`<div elName='zc-component' formLinkName='Intake' src='data:image/svg+xml;base64,PHN2Zz48L3N2Zz4='>`, /data:image\/svg/i);
+});
+
+test('an uppercase data:image/svg payload is never trusted as an inline target', () => {
+  hostileTag(`<div elName='zc-component' formLinkName='Intake' src='DATA:IMAGE/SVG+XML;base64,PHN2Zz4='>`, /data:image\/svg/i);
+});
+
+test('a data:text/plain payload is never trusted as an inline target', () => {
+  hostileTag(`<div elName='zc-component' formLinkName='Intake' src='data:text/plain,hello'>`, /data:text\/plain/i);
+});
+
+test('a javascript: URL split by a tab is never trusted as an inline target', () => {
+  hostileTag(`<div elName='zc-component' formLinkName='Intake' href='java\tscript:alert(1)'>`, /javascript:/i);
+});
+
+test('a javascript: URL split by a newline is never trusted as an inline target', () => {
+  hostileTag(`<div elName='zc-component' formLinkName='Intake' href='java\nscript:alert(1)'>`, /javascript:/i);
+});
+
+test('an entity-encoded javascript: URL is never trusted as an inline target', () => {
+  hostileTag(`<div elName='zc-component' formLinkName='Intake' href='&#106;avascript:alert(1)'>`, /javascript:/i);
+});
+
+test('a javascript: URL with an entity-encoded colon is never trusted as an inline target', () => {
+  hostileTag(`<div elName='zc-component' formLinkName='Intake' href='javascript&#58;alert(1)'>`, /javascript:/i);
+});
+
+test('a javascript: URL with an entity-encoded tab is never trusted as an inline target', () => {
+  hostileTag(`<div elName='zc-component' formLinkName='Intake' href='jav&#x09;ascript:alert(1)'>`, /javascript:/i);
+});
+
+test('a raster image data: URL still proves its inline target', () => {
+  const snippet = `htmlpage Outer1()\ncontent\n<%{ %><div elName='zc-component' formLinkName='Intake' src='data:image/png;base64,iVBORw0KGgo='>Loading</div><% }%>`;
+  const { model } = buildUi(componentApp(snippet));
+  const el = snippetOf(model, 'Outer');
+  assert.deepEqual(el?.components, [{ kind: 'form', name: 'Intake' }]);
+  assert.match(el?.html ?? '', /data-zml=\"component-form:Intake\"/);
+});
+
 test('zc-component embeds with params or unknown targets remain counted TODOs', () => {
   const snippet = `htmlpage Outer1()
 content
