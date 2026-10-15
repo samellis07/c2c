@@ -191,4 +191,3 @@ test('datastore parity negative control rejects an unreferenced fact', () => {
   const unreferenced = findUnreferencedFacts(mockLedger, 'no citations here');
   assert.deepEqual(unreferenced, ['DS-99 Unreferenced sample fact']);
 });
-
