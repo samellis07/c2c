@@ -1603,6 +1603,16 @@ const LIST_MUTATORS = new Set([
   'update',
 ]);
 
+/**
+ * Every method that writes its receiver in place: the union of the list
+ * mutators above and the collection mutators the statement translator
+ * tracks, compared case-insensitively on the canonical builtin name.
+ */
+export function isCollectionMutator(method: string): boolean {
+  const name = canonicalBuiltin(method).toLowerCase();
+  return LIST_MUTATORS.has(name) || COLLECTION_MUTATORS.has(name);
+}
+
 function collectListMutations(e: Expr, into: Set<string>): void {
   walk(e, (n) => {
     if (n.kind !== 'call') return;

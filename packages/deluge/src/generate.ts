@@ -32,6 +32,7 @@ import { afterCommitModule, ASYNC_ON_SUCCESS_WARNING, assertAsyncSuccessDeferrab
 import { EVENT_SWEEPER_MODULE, JOB_LIVE_IMPORTS, jobLiveHelpers, planSchedules, schedulingConfig, sweeperModule, SWEEPER_MODULE, type SchedulePlan } from './schedules.js';
 import { emittedReadOnly, emittedThisappCalls, jsIdent, reportCriteria, translate, type AlertEventClass, type TodoItem, type TranslateOptions, type TranslateStats } from './translate.js';
 import { normType } from './types.js';
+import { mutatesParameters } from './param-mutation.js';
 import { withoutDecimalAudit } from './audit.js';
 import { resolveAppCalls } from './resolve-app-calls.js';
 
@@ -1839,7 +1840,8 @@ interface ClientCallCatalog {
  * the same emitted-call allowlist the per-element guard uses, with
  * `shim.thisapp.call` accepted only after its target reaches the read-only
  * fixed point. A function that never reaches the set keeps today's manual
- * `client-condition-uses-server` result.
+ * `client-condition-uses-server` result, and so does one that may mutate a
+ * list or map reachable from its parameters (`mutatesParameters`).
  */
 function clientCallFunctions(app: App): ClientCallCatalog {
   const bodies = new Map<string, string>();
@@ -1856,6 +1858,9 @@ function clientCallFunctions(app: App): ClientCallCatalog {
       .join('\n');
     const declaredEmpty = !fn.deluge.some((d) => d.text.trim());
     if (!server.trim() && !declaredEmpty) continue;
+    // A write into a parameter list or map is visible to the Deluge caller;
+    // a client call runs on deserialized copies and would hide it.
+    if (mutatesParameters(fn.deluge.map((d) => d.text), fnSignatureParams(fn.signature))) continue;
     const key = fn.name.toLowerCase();
     const reads = emittedReadForms(server);
     if (reads === null) continue;
