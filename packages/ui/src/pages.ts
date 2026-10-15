@@ -10,7 +10,15 @@
 import { createRequire } from 'node:module';
 import type { App } from '../../core/src/ir.js';
 import type { ZmlElement } from '../../core/src/zml.js';
-import { compileHtmlpage, decodeXmlEntities, EXECUTE_FUNCTION_BUTTON, type HtmlpageFile } from './htmlpage.js';
+import {
+  compileHtmlpage,
+  decodeXmlEntities,
+  EXECUTE_FUNCTION_BUTTON,
+  zmlExecuteFunctionButtons,
+  zmlImageActions,
+  type HtmlpageFile,
+  type ZmlImageAction,
+} from './htmlpage.js';
 import { serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
 import { safeUrl } from './url-policy.js';
 
@@ -42,6 +50,10 @@ export interface UiElement {
   criteria?: string;
   /** Allowlisted HTML. The runtime sanitizes again before inserting it. */
   html?: string;
+  /** Active or non-rendering snippet elements removed by the sanitizer. */
+  droppedTags?: string[];
+  /** Static CSS rules in `<style>` elements the sanitizer dropped from `html`; the page counts them as one TODO. */
+  droppedStyleRules?: number;
   /** Endpoint the runtime POSTs to for a server-rendered snippet (`data-snippet-src`). */
   src?: string;
   href?: string;
@@ -158,6 +170,7 @@ interface DomNode {
 }
 
 interface DomDocument {
+  documentElement: DomNode;
   body: DomNode;
   createElement(tag: string): DomNode;
   createTextNode(text: string): DomNode;
@@ -442,20 +455,33 @@ function cleanNode(node: DomNode, doc: DomDocument, dropped?: string[]): DomNode
   return out;
 }
 
-/**
- * Allowlist sanitizer. Parses with DOMParser and copies only safe nodes. A
- * refused style declaration is named in the element's `data-style-dropped`
- * and, when `dropped` is an array, pushed onto it.
- */
-export function sanitizeSnippet(raw: string, dropped?: string[]): string {
+const REPORTED_DROPPED_TAGS = new Set(['script', 'style', 'svg', 'template']);
+
+export function sanitizeSnippet(raw: string, dropped?: string[], droppedTags?: string[]): string {
   const win = domWindow();
   const parsed = new win.DOMParser().parseFromString(String(raw ?? ''), 'text/html');
   const sink = parsed.createElement('template');
   const content = sink.content;
   if (!content) return '';
+  // Walk source nodes before cleanNode removes the blocked subtrees. Keep a
+  // stable, unique report so repeated instances do not inflate page TODOs.
+  if (droppedTags) {
+    const visit = (node: DomNode) => {
+      if (node.nodeType === 1) {
+        const tag = (node.tagName || '').toLowerCase();
+        if (REPORTED_DROPPED_TAGS.has(tag)) droppedTags.push(tag);
+        for (const child of listOf(node.childNodes)) visit(child);
+      }
+    };
+    if (parsed.documentElement) visit(parsed.documentElement);
+  }
   for (const node of listOf(parsed.body.childNodes)) {
     const next = cleanNode(node, parsed, dropped);
     if (next) content.appendChild(next);
+  }
+  if (droppedTags) {
+    const unique = [...new Set(droppedTags)].sort();
+    droppedTags.splice(0, droppedTags.length, ...unique);
   }
   return sink.innerHTML;
 }
@@ -475,9 +501,105 @@ export function droppedStyles(html: string, sanitized = false): string[] {
   return dropped;
 }
 
+/**
+ * Top-level rules in a stylesheet: each `{}` block (an `@media` block counts
+ * once) and each `;`-terminated `@` statement such as `@import`. Leftover
+ * text after the last rule counts as one more, so non-empty CSS is never zero.
+ */
+function cssRuleCount(css: string): number {
+  const text = css.includes('/*') ? css.replace(/\/\*[\s\S]*?\*\//g, ' ') : css;
+  let depth = 0;
+  let count = 0;
+  let pending = false;
+  for (const ch of text) {
+    if (ch === '{') {
+      if (depth === 0) count++;
+      depth++;
+      pending = false;
+    } else if (ch === '}') {
+      if (depth > 0) depth--;
+    } else if (depth === 0 && ch === ';') {
+      if (pending) count++;
+      pending = false;
+    } else if (depth === 0 && ch.trim()) {
+      pending = true;
+    }
+  }
+  return count + (pending ? 1 : 0);
+}
+
+/**
+ * Static CSS rules inside the `<style>` elements of `raw`. The sanitizer drops
+ * every `<style>` element whole, so this is the CSS a page loses. Template
+ * islands inside the stylesheet are masked before counting.
+ */
+export function droppedStyleRules(raw: string): number {
+  if (!/<\s*style/i.test(String(raw ?? ''))) return 0;
+  const win = domWindow();
+  const parsed = new win.DOMParser().parseFromString(String(raw ?? ''), 'text/html');
+  let rules = 0;
+  const walk = (node: DomNode) => {
+    if (node.nodeType !== 1) return;
+    if ((node.tagName || '').toLowerCase() === 'style') {
+      rules += cssRuleCount((node.textContent ?? '').replace(/<%[\s\S]*?%>/g, 'x'));
+      return;
+    }
+    for (const child of listOf(node.childNodes)) walk(child);
+  };
+  walk(parsed.documentElement);
+  return rules;
+}
+
+/** The TODO reason and manual step for a page's dropped `<style>` CSS. */
+export function droppedStyleRulesTodo(page: string, rules: number): { reason: string; step: string } {
+  const what = `${rules} static style rule${rules === 1 ? '' : 's'}`;
+  return {
+    reason: `Static <style> CSS not carried over: the page sanitizer drops ${what}`,
+    step: `page ${page}: The sanitizer drops ${what} in <style> elements. Move them into the app stylesheet, scoped to this page, or restyle the page with supported components. Keep this TODO open until the restyled page is verified.`,
+  };
+}
+
+export function droppedTagReason(tag: string): string {
+  return `The <${tag}> element is removed from this page snippet by the sanitizer`;
+}
+
 /** The TODO reason for refused inline style declarations. */
 export function droppedStyleReason(dropped: string[]): string {
   return `Inline style declarations not carried over (unsafe or unsupported CSS): ${dropped.join(', ')}`;
+}
+
+function dedupeImageActions(actions: ZmlImageAction[]): ZmlImageAction[] {
+  const seen = new Set<string>();
+  const out: ZmlImageAction[] = [];
+  for (const a of actions) {
+    const k = `${a.element ?? 'image'}|${a.action}|${a.fn ?? ''}|${a.label ?? ''}`;
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(a);
+    }
+  }
+  return out;
+}
+
+/**
+ * One counted manual step per image or button click action the generated page drops.
+ * Generated pages have no client path that calls a Creator function, so the
+ * action is never rewired or relabelled here.
+ */
+function imageActionTodos(actions: ZmlImageAction[], why?: string): UiElement[] {
+  return actions.map((a) => {
+    const element = a.element ?? 'image';
+    const what = a.label ? `ZML <${element}> "${a.label}"` : `ZML <${element}>`;
+    const call = a.fn ? ` calling function ${a.fn}` : '';
+    const reason = why ? ` (the snippet stays manual: ${why})` : '';
+    return {
+      tag: element,
+      kind: 'todo' as const,
+      ...(a.fn ? { name: a.fn } : a.label ? { name: a.label } : {}),
+      todo: `${what} click action ${a.action}${call} is not generated; wire the click to the function by hand${reason}`,
+      children: [],
+    };
+  });
 }
 
 function attr(attributes: Record<string, string>, keys: string[]): string | undefined {
@@ -571,7 +693,10 @@ export function elementFromZml(
     const icon = attr(attributes, ['value']) ?? '';
     const tile = { ...style };
     if (width && tile.width === undefined) tile.width = width;
-    return { tag, kind: 'text', ...(icon ? { name: icon, icon } : {}), text: '', ...(Object.keys(tile).length ? { style: tile } : {}), children };
+    const action = (attr(attributes, ['action']) ?? '').trim();
+    const fn = (attr(attributes, ['functionName', 'function']) ?? '').trim();
+    const dropped = action ? imageActionTodos([{ action, ...(fn ? { fn } : {}), ...(icon ? { label: icon } : {}) }]) : [];
+    return { tag, kind: 'text', ...(icon ? { name: icon, icon } : {}), text: '', ...(Object.keys(tile).length ? { style: tile } : {}), children: [...children, ...dropped] };
   }
   if (key === 'pc' && (attr(attributes, ['action']) || '').replace(/\s+/g, '').toLowerCase() === 'openreport') {
     const target = namedAttr(attributes, ['componentLinkName', 'linkName', 'formLinkName']);
@@ -625,12 +750,16 @@ export function elementFromZml(
     const source = body ?? attr(attributes, ['value', 'content', 'html', 'text']) ?? '';
     const decoded = decodeXmlEntities(source);
     const popups = popupActions(decoded);
+    const imageActions = dedupeImageActions([...zmlImageActions(decoded), ...zmlExecuteFunctionButtons(decoded)]);
     // The attribute is XML-escaped, so `<% %>` islands show up as `&lt;%`.
     if (/^\s*htmlpage\b/i.test(decoded) || /<%/.test(decoded) || /<%/.test(source)) {
       const id = env ? `s${env.seq ? env.seq.n++ : 0}` : 's0';
       const compiled = env ? compileHtmlpage(env.app, env.page, name ?? tag, decoded, { id }) : null;
+      const styleRules = droppedStyleRules(decoded);
+      const lostCss = styleRules ? { droppedStyleRules: styleRules } : {};
+      const actionItems = imageActionTodos(imageActions, compiled && !compiled.ok ? compiled.reason : undefined);
       if (compiled?.ok && compiled.staticOnly) {
-        return { tag, kind, ...(name ? { name } : {}), html: compiled.html ?? '', ...(popups.length ? { popups } : {}), children };
+        return { tag, kind, ...(name ? { name } : {}), html: compiled.html ?? '', ...lostCss, ...(popups.length ? { popups } : {}), children: [...actionItems, ...children] };
       }
       if (compiled?.ok && compiled.file && compiled.src !== undefined) {
         env?.emit?.(compiled.file);
@@ -639,29 +768,54 @@ export function elementFromZml(
           kind,
           ...(name ? { name } : {}),
           html: compiled.html ?? '',
+          ...lostCss,
           src: compiled.src,
           ...(popups.length ? { popups } : {}),
-          children,
+          children: [...actionItems, ...children],
         };
       }
-      // A function-calling button names the step to hand-port: the click's Deluge call.
-      const reason = compiled?.reason === EXECUTE_FUNCTION_BUTTON
-        ? 'Server-side Deluge snippet with an ExecuteFunction button requires manual translation of the button\'s function call'
-        : 'Server-side Deluge snippet requires manual translation';
-      const where = `snippet ${name ?? tag}${env ? ` on page ${env.page}` : ''}`;
-      const guidance = serverSnippetGuidance(decoded, compiled?.reason, where);
-      const todo = {
+      // If the snippet was refused solely because of an ExecuteFunction button,
+      // the button is already counted by actionItems above; omit the redundant
+      // snippet-level TODO so the construct is counted exactly once.
+      const snippetTodos: UiElement[] = [];
+      if (compiled?.reason !== EXECUTE_FUNCTION_BUTTON) {
+        const where = `snippet ${name ?? tag}${env ? ` on page ${env.page}` : ''}`;
+        const guidance = serverSnippetGuidance(decoded, compiled?.reason, where);
+        snippetTodos.push({
+          tag,
+          kind: 'todo' as const,
+          ...(name ? { name } : {}),
+          todo: 'Server-side Deluge snippet requires manual translation',
+          manualReasons: guidance.reasons,
+          manualStep: guidance.step,
+          children: [],
+        });
+      }
+      return {
         tag,
-        kind: 'todo' as const,
+        kind,
         ...(name ? { name } : {}),
-        todo: reason,
-        manualReasons: guidance.reasons,
-        manualStep: guidance.step,
-        children: [],
+        html: '',
+        ...lostCss,
+        ...(popups.length ? { popups } : {}),
+        children: [...snippetTodos, ...actionItems, ...children],
       };
-      return { tag, kind, ...(name ? { name } : {}), html: '', ...(popups.length ? { popups } : {}), children: [todo, ...children] };
     }
-    return { tag, kind, ...(name ? { name } : {}), html: sanitizeSnippet(source), ...(popups.length ? { popups } : {}), children };
+    const droppedTags: string[] = [];
+    const html = sanitizeSnippet(source, undefined, droppedTags);
+    const styleRules = droppedStyleRules(source);
+    const lostCss = styleRules ? { droppedStyleRules: styleRules } : {};
+    const actionItems = imageActionTodos(imageActions);
+    return {
+      tag,
+      kind,
+      ...(name ? { name } : {}),
+      html,
+      ...lostCss,
+      ...(droppedTags.length ? { droppedTags } : {}),
+      ...(popups.length ? { popups } : {}),
+      children: [...actionItems, ...children],
+    };
   }
   if (kind === 'text' || kind === 'gauge' || kind === 'button' || kind === 'search') {
     if ((attr(attributes, ['type']) || '').toLowerCase() === 'form data') {
@@ -709,6 +863,8 @@ export function leaves(elements: UiElement[]): UiElement[] {
     // An `html` element may nest a manual TODO (a dropped server-side snippet);
     // every other non-container's children are parts of the element itself.
     if (el.kind === 'html') el.children.forEach(walk);
+    // An icon image keeps its dropped click action as a nested manual TODO.
+    else if (el.icon !== undefined || el.tag.toLowerCase() === 'image') el.children.filter((c) => c.kind === 'todo').forEach(walk);
   };
   elements.forEach(walk);
   return out;
