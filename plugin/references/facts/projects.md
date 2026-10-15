@@ -173,6 +173,7 @@ Rule: [TESTED] no API or CLI command opens a service on a project ("Start Explor
 - Data Store, Functions and Authentication calls usually work on a fresh project before any click, so the Cloud Scale probe normally answers open and no human step is printed.
 - An unrecognised probe answer (`401`, `5xx`, a failure envelope without the refusal text) is unverified, never open.
 - Project services are opt-in — the first console open of a service (Start Exploring) enables it for the project.
+- The customer's first step names only the services the app uses (Stratus, SmartBrowz, Slate — Cloud Scale normally answers open) and has not started, one sentence each, in one pattern: `<Service> — in the Catalyst console open the project → <page> → Start Exploring`, with `<page>` taken from the Console line column above. An app that uses none of them has no first step; the customer's steps stay five at most. [UNVERIFIED]
 
 ### Treat DevOps (APM, alerts, logs) as opt-in console observability
 

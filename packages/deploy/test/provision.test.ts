@@ -20,6 +20,7 @@ import { assertDeployRedirectUrl, IAC_DEPLOY_REDIRECT_URL, zipStore } from '../s
 import { type Io } from '../src/cli.js';
 import type { RestCall, RestResult } from '../src/tables.js';
 import { FIRST_USE_GATES, type FirstUseGateId } from '../src/first-use.js';
+import { CUSTOMER_STEPS } from '../src/customer-steps.js';
 
 const ORG = '10000000000';
 const PROJECT = '10000000000013200';
@@ -857,6 +858,41 @@ for (const id of ['slate', 'cloudscale', 'stratus', 'smartbrowz'] as const) {
     // --next probes the gate (closed), --record probes it (closed), --run's
     // gatesBefore probes it (closed), --record probes it (open).
     assert.equal(probes.length, 4);
+    rmSync(out, { recursive: true, force: true });
+  });
+}
+
+for (const gates of [['cloudscale'], ['cloudscale', 'stratus'], ['cloudscale', 'smartbrowz'], ['cloudscale', 'slate']] as FirstUseGateId[][]) {
+  test(`the all-done checklist never asks to start a service: ${gates.join('+')}`, async () => {
+    const out = mkdtempSync(join(tmpdir(), `c2c-prov-gate-done-${gates.length}-`));
+    mkdirSync(join(out, 'provision'), { recursive: true });
+    const steps: PlanStep[] = gates.map((id) => {
+      const gate = FIRST_USE_GATES[id];
+      return {
+        id: gate.stepId,
+        via: 'console',
+        command: gate.console,
+        args: { service: gate.service },
+        readBack: { via: 'cli', command: `c2c provision --record ${gate.stepId}`, args: { call: { method: 'GET', path: gate.probe } }, match: { gate: 'open' } },
+      };
+    });
+    writeFileSync(join(out, 'provision', 'plan.json'), `${JSON.stringify({ version: 1, app: 'widget', steps }, null, 2)}\n`);
+    const c = cap();
+    c.io.rest = guardedRest(async (call) => (call.method === 'GET' ? OPEN_SHAPES.cloudscale : { status: 500, body: {} }));
+    // --next verifies every open gate itself and answers done with the checklist.
+    assert.equal(await provisionCli(['--out', out, '--next', ...SCOPE], c.io), 0, c.err());
+    const done = lastJson(c.out()) as { done: boolean; checklist: string[] };
+    assert.equal(done.done, true);
+    // Every gate the app uses was verified open, so there is no step 1: the
+    // list starts at the invite, and no service is named — numbering is contiguous.
+    assert.deepEqual(done.checklist, CUSTOMER_STEPS.slice(1, 4));
+    const status = cap();
+    assert.equal(await provisionCli(['--out', out, '--status', ...SCOPE], status.io), 0);
+    assert.ok(
+      status.out().endsWith(`human checklist:\n${CUSTOMER_STEPS.slice(1, 4).map((step, i) => `${i + 1}. ${step}`).join('\n')}\n`),
+      status.out(),
+    );
+    assert.doesNotMatch(status.out().slice(status.out().indexOf('human checklist:')), /Start services|Start Exploring/);
     rmSync(out, { recursive: true, force: true });
   });
 }

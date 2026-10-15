@@ -325,3 +325,23 @@ Recipe: On `Throttle Limit Reached`, stop every automated sign-in and wait. Succ
 Rule: Do not call a limits or quota URL [TESTED]. c2c doctor counts projects, tables, columns, and users directly, and c2c plan applies the budgets in this file before the first create.
 
 Recipe: GET /baas/v1/project/<project-id>/limits, `/quota`, `/usage`, `/table/<table-id>/limits`, `/datastore/limits`, and GET /baas/v1/limits each return `404 INVALID_URL_PATTERN`. Success is not calling them.
+
+## Platform scope
+
+### First activation of Stratus, SmartBrowz and Slate
+
+Rule: Plan the first activation of Stratus, SmartBrowz and Slate as one guided console action per service the app uses, with no API, CLI or MCP path [UNVERIFIED]. c2c names each in the customer's first step in one pattern: `<Service> — in the Catalyst console open the project → <page> → Start Exploring` (Stratus: Cloud Scale → Stratus; SmartBrowz: SmartBrowz; Slate: Slate). A service the app does not use is never named, and the customer's steps stay five.
+
+Recipe: c2c runs the gate probe for each service the app uses before the first write (Stratus GET /baas/v1/project/<project-id>/bucket, SmartBrowz the browser-grid list, Slate GET /slate/v1/project/<project-id>/app). Success is a 200 answer; an "access the … service" refusal is closed and prints that service's sentence.
+
+### Inbound email
+
+Rule: Assume a generated app receives no inbound email [UNVERIFIED]; inbound email stays on the roadmap. c2c counts Creator Form Email as not supported in this version and generates no mail-receiving route. Outbound mail goes through Catalyst Mail from a verified sender.
+
+Recipe: Do not plan a mail-in route. Success is the migration report listing Form Email in its owner scope as not supported in this version (counted).
+
+### Payments
+
+Rule: Plan payments as a provider-hosted billing page plus a webhook into a function [UNVERIFIED]. c2c generates no gateway call and no card handling; a Creator payment workflow becomes a counted stub that throws.
+
+Recipe: Send the user to the provider's hosted billing page; receive the provider's webhook on an Advanced I/O route that verifies the signature, then writes the order row. Success is the order row read back after one test-mode payment. No card data passes through the app.

@@ -2,22 +2,33 @@
  * The per-project human steps, printed as ONE numbered checklist at the end of
  * a deploy or provision run. Every item is an inbox or console action no
  * CLI/API call can do for the user; each is conditional on the app — the
- * sender-email item appears only when the plan says the app sends mail, and
- * the Slate items only when the app ships a Slate web client. Locations are
+ * sender-email item appears only when the plan says the app sends mail, the
+ * start-services item names only the services the app uses (Stratus for file
+ * fields, SmartBrowz for PDF, Slate for a web client), and the sign-in item
+ * appears only when the app ships a Slate web client. Locations are
  * named in words; no screenshot or browser step is needed.
  */
+
+import { startServicesStep } from './customer-steps.js';
+import { activationServices, type ActivationServiceId } from './first-use.js';
 
 export interface HumanChecklistInput {
   /** The app ships a Slate web client (the plan carries a slate-enable step, or the deploy ran a slate target). */
   slate: boolean;
+  /** The app stores file fields in Stratus. */
+  files?: boolean;
+  /** The app renders PDF through SmartBrowz. */
+  pdf?: boolean;
+  /** Services the run already verified started (their gate answered open); the start item drops them. */
+  started?: readonly ActivationServiceId[];
   /** The app's generated functions send mail — detected from the plan, not a flag. */
   sendsMail: boolean;
   /** Configured Catalyst sender address, when provided. */
   mailFrom?: string | null;
   /**
    * The run already confirmed Slate started (a Slate command completed, or
-   * the slate-enable step is done). A re-run then drops the Slate start
-   * item; the rest keep contiguous numbering.
+   * the slate-enable step is done). A re-run then drops Slate from the
+   * start item; the rest keep contiguous numbering.
    */
   slateStarted?: boolean;
   /**
@@ -31,11 +42,11 @@ export interface HumanChecklistInput {
 /** The ordered items. Numbering is the formatter's job, so callers can store this list verbatim. */
 export function humanChecklist(input: HumanChecklistInput): string[] {
   const items: string[] = [];
-  if (input.slate && !input.slateStarted) {
-    items.push(
-      'Start Slate once: Catalyst console → the project → Slate → "Start Exploring". A fresh project refuses the first Slate deploy until the service is opened there once.',
-    );
-  }
+  const started = new Set<ActivationServiceId>([...(input.started ?? []), ...(input.slateStarted ? (['slate'] as const) : [])]);
+  const start = startServicesStep(
+    activationServices({ client: input.slate, files: input.files === true, pdf: input.pdf === true }).filter((id) => !started.has(id)),
+  );
+  if (start) items.push(start);
   items.push('Accept the admin invite: open the invite mail sent to the admin address and set the password.');
   if (input.slate) {
     items.push('Sign in to the app once at the Slate app URL — the first sign-in finishes activating the login.');

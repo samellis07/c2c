@@ -37,7 +37,7 @@ import { mailConfig } from './mail.js';
 import { deployCommands, functionSources } from './plan.js';
 import { planCustomerSteps } from './customer-steps.js';
 import { readDeployConfig } from './provision-config.js';
-import { FIRST_USE_GATES, type FirstUseGate } from './first-use.js';
+import { ACTIVATION_SERVICES, FIRST_USE_GATES, type FirstUseGate } from './first-use.js';
 import { buildFunctionEnv, extractConnectionSecrets, writeOrUpdateFunctionEnv } from './function-env.js';
 import { isVerifiedMcpTool } from './mcp-registry.js';
 import { MCP_TOOL_PREFIX, REQUIRED_MCP_TOOLS } from '../../doctor/src/required-tools.js';
@@ -1713,10 +1713,10 @@ function formatPlanMd(
   }
   lines.push('', '## Provision steps (provision/plan.json)', '');
   for (const step of plan.steps) lines.push(`- ${step.id} [${step.via}] ${stepRef(step)} → read back ${stepRef(step.readBack)}`);
-  // The list c2c provision prints once every step is done. Slate start is the
-  // slate-enable step above, so it is closed by then and not listed again.
+  // The list c2c provision prints once every step is done. Each service start
+  // is its <service>-enable step above, so it is closed by then and not listed.
   lines.push('', '## Human steps (after the last provision step; c2c provision prints the same list)', '');
-  planCustomerSteps(plan.steps, { slateStarted: true, connectionSecretKeys: plan.connectionSecretKeys ?? [] }).forEach((item, index) => lines.push(`${index + 1}. ${item}`));
+  planCustomerSteps(plan.steps, { started: ACTIVATION_SERVICES, connectionSecretKeys: plan.connectionSecretKeys ?? [] }).forEach((item, index) => lines.push(`${index + 1}. ${item}`));
   lines.push('', '## Required MCP tools (doctor D-B5)', '', `- base (${plan.mcpTools.base.length}): ${plan.mcpTools.base.join(', ')}`);
   lines.push(`- plan (${plan.mcpTools.plan.length}): ${plan.mcpTools.plan.length ? plan.mcpTools.plan.join(', ') : 'none beyond base'}`);
   lines.push('', '## Probes (scratch resources prefixed c2c_probe_, deleted afterwards)', '');

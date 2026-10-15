@@ -4,6 +4,7 @@ import { classifyGateProbe, FIRST_USE_GATE_LIST, gateConsoleLine, requiredGates 
 
 test('every gate is guided with one console line and a documented GET probe', () => {
   for (const gate of FIRST_USE_GATE_LIST) {
+    assert.ok(gate.console.startsWith(`Catalyst console → the project → ${gate.page} → Start Exploring (`), gate.id);
     assert.match(gate.console, /^Catalyst console → the project → .*Start Exploring \(<console>\/baas\/<org>\/project\/<project>\/Development#\//);
     assert.equal(gate.console.includes('\n'), false);
     assert.match(gate.probe, /\/project\/<project>\//);

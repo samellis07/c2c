@@ -11,16 +11,23 @@ app actually needs it, and they match the checklist items in
 [human-steps.ts](../../packages/deploy/src/human-steps.ts); step 4
 is the in-app check from the verify flow, asked while verifying.
 
-## 1. Start Slate once (only if your app has web screens)
+## 1. Start services (only for the services your app uses)
 
-- **What you see:** Catalyst console → your project → **Slate** →
-  a **"Start Exploring"** button. Click it once.
-- **Why:** on a brand-new project the first Slate deploy fails
-  until the service has been opened in the console once.
-- **How the AI verifies:** the next Slate deploy finishes and your
-  app address answers. (Other services normally answer open with no
-  click — Slate on a fresh project is the one that needs it; see
-  [facts/errors.md](../../plugin/references/facts/errors.md).)
+- **What you see:** one line per service your app uses, always in the
+  same form. Click **Start Exploring** once on each page it names:
+  - Stratus — in the Catalyst console open the project → Cloud Scale →
+    Stratus → Start Exploring (your app has file fields)
+  - SmartBrowz — in the Catalyst console open the project → SmartBrowz →
+    Start Exploring (your app makes PDFs)
+  - Slate — in the Catalyst console open the project → Slate → Start
+    Exploring (your app has web screens)
+- **Why:** turning a service on for the first time has no API, CLI or
+  MCP path; on a brand-new project the service refuses c2c until it
+  has been opened in the console once. An app that uses none of the
+  three has no step 1.
+- **How the AI verifies:** c2c reads each service back itself (the
+  gate probe) and continues only when it answers open; see
+  [facts/projects.md](../../plugin/references/facts/projects.md).
 
 ## 2. Accept the admin invite
 

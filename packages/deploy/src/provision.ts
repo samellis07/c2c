@@ -36,7 +36,7 @@ import { readConnectionSecretKeys, writeOrUpdateFunctionEnv } from './function-e
 import { applyTablePlan, type RestCall, type RestFn, type RestResult, type TableCreateStep } from './tables.js';
 import { restWithRetry, spawnWithRetry, type ReRead, type RestRetry, type RetryOptions } from './retry.js';
 import { assertProtectedProject } from './guards.js';
-import { checkGate, gateConsoleLine, gateForStep, type FirstUseGate, type GateCheck } from './first-use.js';
+import { ACTIVATION_SERVICES, checkGate, FIRST_USE_GATES, gateConsoleLine, gateForStep, type FirstUseGate, type GateCheck } from './first-use.js';
 import { iacImportBundle, runProjectImport, ImportEndedError, StuckImportError, type ImportFetch } from './iac-import.js';
 
 const USAGE =
@@ -1561,13 +1561,13 @@ function updateFunctionEnvFromCtx(ctx: Ctx): void {
 
 /** What no step can do for you once every step is done — the list plan.md names. */
 function humanChecklist(plan: ProvisionPlanFile, state?: ProvisionState, out?: string): string[] {
-  // A slate-enable step already done or existing proves Slate was started,
-  // so a re-run drops that first step; the rest keep their numbering.
-  const slateStarted = state
-    ? plan.steps.some((step) => step.id === 'slate-enable' && ['done', 'existing'].includes(statusOf(state, step)))
-    : false;
+  // A gate step already done or existing proves that service was started, so
+  // a re-run drops it from the first step; the rest keep their numbering.
+  const started = ACTIVATION_SERVICES.filter((id) =>
+    plan.steps.some((step) => step.id === FIRST_USE_GATES[id].stepId && state && ['done', 'existing'].includes(statusOf(state, step))),
+  );
   const connectionSecretKeys = out ? readConnectionSecretKeys(out, plan.connectionSecretKeys) : (plan.connectionSecretKeys ?? []);
-  return planCustomerSteps(plan.steps, { slateStarted, connectionSecretKeys });
+  return planCustomerSteps(plan.steps, { started, connectionSecretKeys });
 }
 
 function printStatus(ctx: Ctx): number {

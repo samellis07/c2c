@@ -20,6 +20,8 @@ Load `catalyst-authentication` (Connections section) and `catalyst-functions` (A
 | `sendmail` | Catalyst Mail from a verified sender | MCP `Create_Email_Configuration` (+ `Create_Domain`) [MCP-LISTED]; the **user** enters the 6-character verification code | MCP list of email configs → verified; P-MAIL (one real send) only with the user's OK | Generated. A gmail sender stayed "Domain Verification Pending" [TESTED]; public-domain sender behaviour **[UNVERIFIED]** |
 | Record templates / PDF | LiquidJS templates + SmartBrowz HTML→PDF → Stratus | Generated code; SmartBrowz stored templates are console-only | Render one PDF, check page size | Planned. `@page{size:A4}` ignored and `landscape` only as the string `"true"` [TESTED] |
 | Catalyst → Creator calls (dual run) | Queued client with 429 backoff | Generated code; run from the customer machine during migration | — | 429 at ~1 req/min from Catalyst egress [UNVERIFIED] ([L-CREATOR-EGRESS](../../references/limits.md#l-creator-egress-creator-api-from-catalyst) → queue): never on a hot path |
+| Form Email (inbound mail) | None: no mail-in route is generated | — | — | Not supported in this version (counted); inbound email stays on the roadmap [UNVERIFIED] ([L-INBOUND-MAIL](../../references/limits.md#l-inbound-mail-inbound-email) → refuse) |
+| Payments | Provider-hosted billing page plus a webhook into an Advanced I/O route that verifies the signature and writes the order row | Not generated: c2c emits a counted stub that throws; no gateway call, no card handling | Order row read back after one test-mode payment | Creator payment workflows become counted stubs [UNVERIFIED] ([L-PAYMENTS](../../references/limits.md#l-payments-payments) → map) |
 
 ## Steps
 
