@@ -4728,10 +4728,16 @@ test('report criteria on the application owner bind like the login user binds', 
 });
 
 test('a record fetch used as a report criteria value stays a { __rows } marker', () => {
+  // A multi-hop path walks raw row cells where a lookup is a stored id: it can
+  // only end in undefined, so the leaf is always empty and stays counted.
   assert.deepEqual(reportCriteria('Locations_list.ID == Add_Employee[Official_Email == zoho.loginuserid].Location.ID'), {
+    op: 'todo',
+    construct: 'criteria-dynamic',
+  });
+  assert.deepEqual(reportCriteria('Locations_list.ID == Add_Employee[Official_Email == zoho.loginuserid].Location'), {
     op: '==',
     field: 'Locations_list.ID',
-    value: { __rows: { form: 'Add_Employee', criteria: { op: '==', field: 'Official_Email', value: { __bind: 'loginUserId' } }, path: ['Location', 'ID'] } },
+    value: { __rows: { form: 'Add_Employee', criteria: { op: '==', field: 'Official_Email', value: { __bind: 'loginUserId' } }, path: ['Location'] } },
   });
   // A zero-arg thisapp function whose body is one record-fetch return inlines
   // as the same marker; a body that is anything else stays counted.
@@ -4749,6 +4755,16 @@ test('a record fetch used as a report criteria value stays a { __rows } marker',
   assert.deepEqual(reportCriteria('Branch.ID == thisapp.get_employee_branch()'), { op: 'todo', construct: 'criteria-dynamic' });
   // An inner criteria that does not translate keeps the whole leaf counted.
   assert.deepEqual(reportCriteria('F.ID == Add_Employee[X == thisapp.missing()].Y', fns), { op: 'todo', construct: 'criteria-dynamic' });
+  // A function body must be exactly one `return <expr>` statement: a trailing
+  // statement keeps the call counted rather than silently dropped.
+  const multi = [{ name: 'sneaky', deluge: [{ text: 'return Add_Employee[Email == zoho.loginuserid].Branch; info "y";' }] }];
+  assert.deepEqual(reportCriteria('Branch.ID == thisapp.sneaky()', multi), { op: 'todo', construct: 'criteria-dynamic' });
+  // A nested record fetch inside the inner criteria fails closed at runtime:
+  // the report is always empty, so the leaf stays counted.
+  assert.deepEqual(
+    reportCriteria('F.ID == A[X == B[Y == 1].G].H'),
+    { op: 'todo', construct: 'criteria-dynamic' },
+  );
 });
 
 test('replaceAllIgnoreCase and replaceFirstIgnoreCase emit their shims in both forms', () => {
