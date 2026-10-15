@@ -18,6 +18,7 @@ import { deriveIr, parse, parseProject, type App } from '../../core/src/index.js
 import { parseZml } from '../../core/src/zml.js';
 import { FIELD_TYPES } from '../../schema/src/mapping.js';
 import { LIMITS } from '../../shims/src/index.js';
+import { SHELL_CONTENT_SECURITY_POLICY } from '../src/csp.js';
 import { buildSlate, buildUi, elementsFromZml, generateUi, sanitizeSnippet, shortHashId, type UiModel } from '../src/index.js';
 import { leaves } from '../src/pages.js';
 
@@ -47,6 +48,23 @@ test('every mapped field type becomes a widget or an explicit TODO', () => {
       else assert.equal(ui.status, 'generated', token);
     }
   }
+});
+
+test('Slate shell carries a restrictive CSP and same-origin referrer policy', () => {
+  const index = String(generateUi(appOf('')).files.find((file) => file.path === 'slate/index.html')?.data);
+  const meta = new JSDOM(index).window.document;
+  const csp = meta.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') ?? '';
+  assert.equal(csp, SHELL_CONTENT_SECURITY_POLICY);
+  assert.match(csp, /default-src 'self'/);
+  assert.match(csp, /script-src 'self' https:\/\/static\.zohocdn\.com/);
+  assert.match(csp, /style-src 'self' 'unsafe-inline'/, 'runtime style attributes require the inline style allowance');
+  assert.doesNotMatch(csp, /script-src[^;]*unsafe-inline|script-src[^;]*unsafe-eval/);
+  assert.doesNotMatch(csp, /\*/);
+  assert.match(csp, /connect-src 'self'/);
+  assert.match(csp, /object-src 'none'/);
+  assert.match(csp, /base-uri 'self'/);
+  assert.equal(meta.querySelector('meta[name="referrer"]')?.getAttribute('content'), 'same-origin');
+  assert.match(index, /cannot enforce frame-ancestors/i);
 });
 
 test('validation rules and the lookup, subform, and upload widgets', () => {
@@ -1059,8 +1077,9 @@ test('an index.html edit changes sw.js and activate keeps foreign caches', () =>
   const sw1 = swOf(first);
   const sw2 = swOf(second);
   const index1 = indexOf(first);
-  // Meta http-equiv cache tags are not honoured for document caching; the shell must not carry any.
-  assert.doesNotMatch(index1, /http-equiv/i);
+  // Meta http-equiv cache tags are not honoured for document caching. The CSP meta is required and is not one of them.
+  assert.doesNotMatch(index1, /http-equiv\s*=\s*["']?(?:cache-control|expires|pragma)\b/i);
+  assert.match(index1, /http-equiv="Content-Security-Policy"/);
   assert.notEqual(sw1, sw2);
   assert.match(indexOf(second), /only-index/);
   const indexHash = createHash('sha256').update(indexOf(second)).digest('hex').slice(0, 10);
@@ -1133,8 +1152,9 @@ test('sw.js precaches with cache:reload and answers navigations network-first', 
   const built = buildSlate(bundle.files);
   const sw = String(built.find((file) => file.path === 'slate/sw.js')?.data);
   const index = String(built.find((file) => file.path === 'slate/index.html')?.data);
-  // The document cannot carry a working cache directive on Slate.
-  assert.doesNotMatch(index, /http-equiv/i);
+  // The document cannot carry a working cache directive on Slate. The CSP meta stays.
+  assert.doesNotMatch(index, /http-equiv\s*=\s*["']?(?:cache-control|expires|pragma)\b/i);
+  assert.match(index, /http-equiv="Content-Security-Policy"/);
 
   class FakeRequest {
     url: string;

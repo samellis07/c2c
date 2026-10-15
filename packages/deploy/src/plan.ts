@@ -8,6 +8,7 @@ import type { App } from '../../core/src/ir.js';
 import { widgetManualItems, type WidgetManualItem } from '../../core/src/parse.js';
 import { integrityColumns } from '../../data/src/integrity.js';
 import { columnRenamesOf, constraintDecisionNote, generateSchema, schemaAsJson, type ConstraintDecision, type SchemaColumn, type SchemaTable, type SourceTableData } from '../../schema/src/generator.js';
+import { applyFunctionConnectSrc } from '../../ui/src/csp.js';
 import { appTimeZone, authBridgeUrl, buildUi, slateConfigSource } from '../../ui/src/generate.js';
 import { mailTemplateCatalog } from '../../ui/src/decorations/print-templates.js';
 import { generateReactApp } from '../../ui-react/src/generate.js';
@@ -254,7 +255,12 @@ export function deployFiles(
   }
   const mail = mailConfig(mailEnabled, sender, opts.mailTestRecipients ?? []);
   const schema = generateSchema(app, opts.source ? { source: opts.source } : undefined);
-  const ui = buildUi(app, { dc: guard.dc, schema, ...(opts.asyncOnSuccess ? { asyncOnSuccess: true } : {}) });
+  const ui = buildUi(app, {
+    dc: guard.dc,
+    schema,
+    ...(opts.asyncOnSuccess ? { asyncOnSuccess: true } : {}),
+    ...(opts.apiBase ? { apiBase: opts.apiBase } : {}),
+  });
   const files: DeployFile[] = [];
   const scheduling = jobScheduling(ui.files);
   const usesJobs = scheduling !== undefined;
@@ -285,13 +291,17 @@ export function deployFiles(
     // api base, auth, smoke plan and project — the same values slate/c2c-config.js
     // carries for the vanilla target.
     for (const file of generateReactApp(app, { auth: true })) {
-      files.push({
-        path: `web/${file.path}`,
-        data:
-          file.path === 'public/c2c-config.js'
-            ? slateConfigSource({ apiBase: opts.apiBase, auth: true, authBridge: authBridgeUrl(opts.apiBase), appTimeZone: appTimeZone(app), smokePlan: smoke, smokeProject: guard.projectId })
-            : file.data,
-      });
+      // The manifest hashes the placeholder config and the default shell. Deploy
+      // rewrites both once the function URL is known; the manifest stays on the
+      // placeholder so a different API base does not look like a hand edit of
+      // every other generated file. connect-src is patched on index.html itself.
+      const data =
+        file.path === 'public/c2c-config.js'
+          ? slateConfigSource({ apiBase: opts.apiBase, auth: true, authBridge: authBridgeUrl(opts.apiBase), appTimeZone: appTimeZone(app), smokePlan: smoke, smokeProject: guard.projectId })
+          : file.path === 'index.html'
+            ? applyFunctionConnectSrc(String(file.data), opts.apiBase)
+            : file.data;
+      files.push({ path: `web/${file.path}`, data });
     }
   } else {
     for (const file of ui.files) {

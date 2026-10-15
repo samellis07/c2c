@@ -4085,7 +4085,7 @@ function accessLiteral(app: App): string {
 function callerGate(error: string): string {
   return `  const principal = principalFromRequest(req);
   if (!principal) {
-    res.writeHead(401, { "Content-Type": "application/json" });
+    res.writeHead(401, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
     res.end(JSON.stringify({ error: ${JSON.stringify(error)} }, jsonReplacer));
     return;
   }`;
@@ -4093,7 +4093,7 @@ function callerGate(error: string): string {
 
 function denyBody(fallback: string): string {
   return `    const denied = err && err.code === "RECORD_ACCESS_DENIED";
-    res.writeHead(denied ? 403 : 500, { "Content-Type": "application/json" });
+    res.writeHead(denied ? 403 : 500, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
     res.end(JSON.stringify({ error: denied ? err.message : ${JSON.stringify(fallback)}, slots: null }, jsonReplacer));`;
 }
 
@@ -5114,7 +5114,7 @@ export function aioLibraryModule(): string {
   return `import { jsonReplacer } from "creator-to-catalyst/shims";
 
 export function send(res, status, body) {
-  res.writeHead(status, { "Content-Type": "application/json" });
+  res.writeHead(status, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
   res.end(JSON.stringify(body, jsonReplacer));
 }
 
@@ -5246,7 +5246,7 @@ ${indent(bindArgs + opts.body)}
 
 export default async function handler(req, res) {
 ${gated ? `  if (isHidden(formName)) {
-    res.writeHead(403, { "Content-Type": "application/json" });
+    res.writeHead(403, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
     res.end(JSON.stringify({ dryRun: true, error: "hidden form" }, jsonReplacer));
     return;
   }
@@ -5261,7 +5261,7 @@ ${denyBody('prefetch failed')}
   const record = req?.body?.record ?? {};${usesRange ? `
   const rangeReq = rangeSlotRequest(req?.body);
   if (rangeReq.error) {
-    res.writeHead(400, { "Content-Type": "application/json" });
+    res.writeHead(400, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
     res.end(JSON.stringify({ error: rangeReq.error, slots: null }, jsonReplacer));
     return;
   }` : ''}
@@ -5275,11 +5275,11 @@ ${denyBody('prefetch failed')}
   try {
 ${gated && !writeGate ? '    authorizeRead(access, principal, formName, { op: "true" });\n' : ''}    const slots = await prefetch(ctx);${usesRange ? `
     if (rangeReq.slot && !Object.hasOwn(slots, rangeReq.slot)) {
-      res.writeHead(400, { "Content-Type": "application/json" });
+      res.writeHead(400, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
       res.end(JSON.stringify({ error: "prefetch range: unknown slot", slots: null }, jsonReplacer));
       return;
     }` : ''}
-    res.writeHead(200, { "Content-Type": "application/json" });
+    res.writeHead(200, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
     res.end(JSON.stringify({ dryRun: true, slots: ${usesRange ? 'rangeReq.slot ? { [rangeReq.slot]: slots[rangeReq.slot] } : ' : ''}slots, nonce: ctx.formNonce ?? null, transcript: runtime.transcript }, jsonReplacer));
   } catch (err) {
 ${denyBody('prefetch failed')}
@@ -5540,7 +5540,7 @@ export const machine = ${JSON.stringify(
   )};
 
 function send(res, status, body) {
-  res.writeHead(status, { "Content-Type": "application/json" });
+  res.writeHead(status, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
   res.end(JSON.stringify(body, jsonReplacer));
 }
 
@@ -5970,7 +5970,7 @@ export const readForms = ${JSON.stringify(readForms)};
 export const writeForms = ${JSON.stringify(writeForms)};
 
 function send(res, status, body) {
-  res.writeHead(status, { "Content-Type": "application/json" });
+  res.writeHead(status, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
   res.end(JSON.stringify(body, jsonReplacer));
 }
 
@@ -6158,7 +6158,7 @@ ${rowDecl ? `  const ${rowDecl} = ctx.row;\n` : ''}${indent(opts.body)}
       'routes.json has no path for it; only in-process dispatch can call it.',
     ])}${declaration}
 export default async function handler(req, res) {
-  res.writeHead(404, { "Content-Type": "application/json" });
+  res.writeHead(404, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
   res.end('{"error":"no such endpoint"}');
 }
 `;
@@ -6190,7 +6190,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 ${usesThis ? 'import { functions } from "../thisapp.mjs";\n' : ''}${endpointExport}${declaration}
 function send(res, status, body) {
-  res.writeHead(status, { "Content-Type": "application/json" });
+  res.writeHead(status, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
   res.end(JSON.stringify(body, jsonReplacer));
 }
 

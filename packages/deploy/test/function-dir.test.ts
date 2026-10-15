@@ -74,6 +74,12 @@ test('injectSelectColumnCap refuses a source with no selectColumns entry', () =>
   assert.throws(() => injectSelectColumnCap('export const LIMITS = {};'), /no selectColumns entry/);
 });
 
+test('the shared function entry sends no-store and nosniff headers', () => {
+  const entry = readFileSync(join(root, 'packages/deploy/fn/index.js'), 'utf8');
+  assert.match(entry, /'X-Content-Type-Options': 'nosniff'/);
+  assert.match(entry, /'Cache-Control': 'no-store'/);
+});
+
 function mockSdk() {
   const calls: [string, string, unknown][] = [];
   let id = 100;
