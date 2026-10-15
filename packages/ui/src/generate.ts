@@ -2048,6 +2048,17 @@ function recordStub(app: App, form: UiModel['forms'][number], path: string): str
   const subformConst = subformLinks.length
     ? `/** Inline subforms of this form, each a child table. The edit record carries them as lists in row order. */\nexport const subformTables = ${JSON.stringify({ [form.name]: subformLinks })};\n`
     : '';
+  const childFields = JSON.stringify(Object.fromEntries(subformLinks.map((link) => [link.field, app.forms.find((item) => item.name === form.name)?.fields.find((item) => item.name === link.field)?.subfields.map((field) => field.name) ?? []])));
+  const reportScopes = Object.fromEntries(app.reports.filter((report) => report.form === form.name).flatMap((report) => {
+    const criteria = reportCriteria(report.criteria?.trim() || 'true');
+    if (criteriaHasTodo(criteria) || criteriaHasRelative(criteria)) return [];
+    const profiles = app.profiles.filter((profile) =>
+      administratorProfiles(app).includes(profile.name) || profile.modules.some((module) =>
+        module.component === form.name && module.reports.some((permission) => permission.key === report.name && /(?:^|[^A-Za-z])view(?:[^A-Za-z]|$)/i.test(permission.value)),
+      ),
+    ).map((profile) => profile.name);
+    return [[report.name, { criteria, fields: report.columns.map((column) => column.field), profiles }]];
+  }));
   const queryName = subformLinks.length ? 'queried' : 'rows';
   const attachRows = subformLinks.length ? 'if (Array.isArray(queried)) await attachSubforms(datastore, subformTables, formName, queried);\n    ' : '';
   const bannerLines = [
@@ -2074,6 +2085,7 @@ function recordStub(app: App, form: UiModel['forms'][number], path: string): str
   return `${banner(bannerLines)}${policyPrelude('../../access-policy.json', false, shimImport)}
 export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(path)}, dryRun: true };
 export const formName = ${JSON.stringify(form.name)};
+const reportScopes = ${JSON.stringify(reportScopes)};
 
 ${subformConst}${stageConst}${deployHelpers('../../c2c-deploy.json', '../../c2c-store.mjs')}
 
@@ -2093,7 +2105,20 @@ ${requirePrincipal()}
     return;
   }
   try {
-    const scoped = authorizeRead(access, principal, formName, { op: "==", field: "ROWID", value: rowId });
+    const reportName = typeof body.REPORT === "string" ? body.REPORT.trim() : "";
+    if (reportName && !Object.hasOwn(reportScopes, reportName)) {
+      send(res, 400, { dryRun: !live, error: "unknown or unsupported report" });
+      return;
+    }
+    const reportScope = reportName ? reportScopes[reportName] : null;
+    if (reportScope && !reportScope.profiles.includes(principal.profile)) {
+      send(res, 403, { dryRun: !live, error: "report is not available" });
+      return;
+    }
+    const rowCriteria = { op: "==", field: "ROWID", value: rowId };
+    const criteria = reportScope ? { op: "and", args: [rowCriteria, reportScope.criteria] } : rowCriteria;
+    const scoped = authorizeRead(access, principal, formName, criteria);
+    const selectedFields = reportScope ? (scoped.fields ? reportScope.fields.filter((field) => scoped.fields.includes(field)) : reportScope.fields) : scoped.fields;
     if (!live) {
       send(res, 200, { dryRun: true, record: { ROWID: rowId } });
       return;
@@ -2105,10 +2130,16 @@ ${requirePrincipal()}
     }
     const where = compileCriteria(scoped.criteria);
     const ${queryName} = await datastore.query(formName, where === "true" ? "" : where, 1, 0, "ORDER BY ROWID");
-    ${attachRows}const row = Array.isArray(${queryName}) && ${queryName}[0] && typeof ${queryName}[0] === "object" ? projectFields(${queryName}[0], scoped.fields) : null;
+    ${attachRows}const row = Array.isArray(${queryName}) && ${queryName}[0] && typeof ${queryName}[0] === "object" ? projectFields(${queryName}[0], selectedFields) : null;
     if (!row) {
       send(res, 404, { dryRun: false, error: "no such row" });
       return;
+    }
+    for (const [field, declared] of Object.entries(${childFields})) {
+      const grant = access.profiles && access.profiles[principal.profile] && access.profiles[principal.profile][formName];
+      const nestedGrant = Array.isArray(grant && grant.fields) ? grant.fields.filter((name) => name.startsWith(field + ".")) : [];
+      const allowed = nestedGrant.length ? declared.filter((name) => nestedGrant.includes(field + "." + name)) : declared;
+      if (Array.isArray(row[field])) row[field] = row[field].map((child) => projectFields(child, allowed));
     }${stageApply}
   } catch (err) {
     fail(res, err, live);

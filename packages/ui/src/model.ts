@@ -143,6 +143,8 @@ export interface UiReport {
   titleField?: string;
   pageSize: number;
   queryEndpoint: string;
+  /** Scoped single-row endpoint used by this report's detail route. */
+  recordEndpoint?: string;
   editEndpoint?: string;
   /** Row record affordances — offered only when the report's form is generated. */
   rowActions?: { edit?: boolean; delete?: boolean };
@@ -867,6 +869,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[]): UiReport {
     ...(titleField ? { titleField } : {}),
     pageSize: LIMITS.zcqlRowsPerQuery,
     queryEndpoint: `/reports/${encodeURIComponent(report.name)}`,
+    ...(form ? { recordEndpoint: `/forms/${encodeURIComponent(form.name)}/record` } : {}),
     ...(view === 'spreadsheet' ? { editEndpoint: `/reports/${encodeURIComponent(report.name)}/rows` } : {}),
     ...(form ? { rowActions: { edit: true, delete: true } } : {}),
     ...(formats.length ? { conditionalFormats: formats } : {}),

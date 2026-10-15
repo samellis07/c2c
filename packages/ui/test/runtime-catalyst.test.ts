@@ -89,7 +89,7 @@ interface DomWindow {
   Event: typeof Event;
 }
 
-function setup(hash: string, options: { submitOk: boolean; rows?: unknown[] }) {
+function setup(hash: string, options: { submitOk: boolean; rows?: unknown[]; record?: Record<string, unknown> }) {
   const win = new JSDOM('<!doctype html><body><nav id="nav"></nav><main id="main"></main></body>', {
     url: `http://localhost/slate/index.html${hash}`,
   }).window as unknown as DomWindow;
@@ -98,7 +98,7 @@ function setup(hash: string, options: { submitOk: boolean; rows?: unknown[] }) {
     const body = JSON.parse(init.body) as Record<string, unknown>;
     calls.push({ url, body });
     if (body.op === 'query') return { ok: true, status: 200, json: async () => ({ rows: options.rows ?? [] }) };
-    if (url === '/forms/F/record') return { ok: true, status: 200, json: async () => ({ record: { Item_Name: '<unsafe>', Approved: true } }) };
+    if (url === '/forms/F/record') return { ok: true, status: 200, json: async () => ({ record: options.record ?? { Item_Name: '<unsafe>', Approved: true } }) };
     return { ok: options.submitOk, status: options.submitOk ? 200 : 500, json: async () => ({}) };
   }) as unknown as typeof fetch;
   return { win, doc: win.document, calls };
@@ -128,6 +128,40 @@ test('runtime renders checkbox groups as checkbox inputs and submits the checked
   const post = calls.find((c) => c.url === '/forms/F/submit');
   assert.ok(post, 'submit posted');
   assert.deepEqual((post.body.record as Record<string, unknown>).Is_Urgent, ['Yes']);
+});
+
+test('record summary renders only declared child subform fields', async () => {
+  const runtime = await loadRuntime();
+  const form = model.forms[0]!;
+  const subform = { name: 'Lines', label: 'Lines', widget: 'subform', subfields: [{ name: 'Description', label: 'Description' }], required: false, readonly: false, unique: false, status: 'generated', scan: false };
+  form.fields.push(subform as typeof form.fields[number]);
+  try {
+    const { doc } = setup('#/record/F/1', { submitOk: true, record: { Lines: [{ Description: 'Visible', CREATORID: 'secret-id', Hidden: 'secret-value' }] } });
+    await runtime.boot(model, doc);
+    await settle();
+    const content = doc.querySelector('[data-record-summary="F"]')?.textContent ?? '';
+    assert.match(content, /Visible/);
+    assert.doesNotMatch(content, /secret-id|secret-value|CREATORID|Hidden/);
+  } finally {
+    form.fields.pop();
+  }
+});
+
+test('Creator report summary uses the report route, scope token, and report columns', async () => {
+  const runtime = await loadRuntime();
+  const reportModel = { ...model, reports: [{
+    name: 'R', label: 'Report', form: 'F', recordEndpoint: '/forms/F/record', queryEndpoint: '/reports/R',
+    columns: [{ field: 'Item_Name', label: 'Item Name' }], detail: true,
+  }] } as UiModel;
+  assert.deepEqual(runtime.parseRoute('#/report/R/row/abc'), { name: 'report', id: 'R', row: 'abc' });
+  const { doc, calls } = setup('#/report/R/row/abc', { submitOk: true, record: { Item_Name: 'Visible', Approved: true } });
+  await runtime.boot(reportModel, doc);
+  await settle();
+  const summary = doc.querySelector('[data-record-summary="F"]');
+  assert.ok(summary);
+  assert.match(summary.textContent ?? '', /Visible/);
+  assert.doesNotMatch(summary.textContent ?? '', /Approved|Yes/);
+  assert.ok(calls.some((call) => call.url === '/forms/F/record' && call.body.REPORT === 'R'));
 });
 
 test('checkbox group with multiple choices checked submits all choices once', async () => {

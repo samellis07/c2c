@@ -124,8 +124,8 @@ function invoke(handler: (req: unknown, res: unknown) => unknown, req: unknown):
   return Promise.resolve(handler(req, res)).then(() => ({ status, body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {} }));
 }
 
-function emit(): { dir: string; files: Map<string, string | Buffer> } {
-  const built = buildUi(deriveIr(parse(SOURCE)));
+function emit(source = SOURCE): { dir: string; files: Map<string, string | Buffer> } {
+  const built = buildUi(deriveIr(parse(source)));
   const files = new Map(built.files.map((file) => [file.path, file.data]));
   const dir = mkdtempSync(join(tmpdir(), 'c2c-subform-'));
   writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
@@ -337,6 +337,50 @@ test('the live report read returns each row with its subform rows in order', asy
       { ROWID: '11', Item: 'Bolt' },
       { ROWID: '12', Item: 'Nut' },
     ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('record reads bind the named report grant, criteria, and column projection', async () => {
+  const source = SOURCE.replace('Order_All = {"View","Edit"}', 'Order_All = {"View","Edit"}\n\t\t\tOrder_Scoped = {"View"}').replace(/\n}\s*$/, `
+\tlist Order_Scoped
+\t{
+\t\tshow all rows from Order [Customer == "Bea"]
+\t\t(
+\t\t\tCustomer
+\t\t)
+\t}
+}
+`);
+  const { dir } = emit(source);
+  try {
+    const mod = await import(pathToFileURL(join(dir, 'functions/aio/order/record.mjs')).href);
+    const store = memoryDatastore();
+    store.tables.set('Order', [
+      { ROWID: '1', Customer: 'Bea', Added_Time: 'system-secret' },
+      { ROWID: '2', Customer: 'Alice', Added_Time: 'system-secret' },
+    ]);
+    const originalQuery = store.query.bind(store);
+    let criteria = '';
+    store.query = async (table, where, limit, offset = 0) => {
+      if (table === 'Order') {
+        criteria = where;
+        const rows = store.tables.get('Order')!.filter((row) => where.includes(`ROWID = '${row.ROWID}'`) && where.includes(`Customer = 'Bea'`) && row.Customer === 'Bea');
+        return rows.slice(offset, offset + limit).map((row) => ({ ...row }));
+      }
+      return originalQuery(table, where, limit, offset);
+    };
+    const visible = await withLive(store, () => invoke(mod.default, { ...staff, body: { ROWID: '1', REPORT: 'Order_Scoped' } }));
+    assert.equal(visible.status, 200, JSON.stringify(visible.body));
+    assert.deepEqual(visible.body.record, { Customer: 'Bea' });
+    assert.match(criteria, /Customer = 'Bea'/, 'the named report criteria is ANDed with the exact row id');
+    const outside = await withLive(store, () => invoke(mod.default, { ...staff, body: { ROWID: '2', REPORT: 'Order_Scoped' } }));
+    assert.equal(outside.status, 404, 'a row outside the named report criteria is not returned');
+    const unknown = await withLive(store, () => invoke(mod.default, { ...staff, body: { ROWID: '1', REPORT: 'No_Such_Report' } }));
+    assert.equal(unknown.status, 400, 'caller-supplied report names are looked up in the static map');
+    const denied = await withLive(store, () => invoke(mod.default, { user: { profile: 'Visitor' }, body: { ROWID: '1', REPORT: 'Order_Scoped' } }));
+    assert.equal(denied.status, 403, 'the named report is checked against the profile grant');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

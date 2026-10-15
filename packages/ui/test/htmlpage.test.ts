@@ -2490,6 +2490,32 @@ test('record-summary iframe maps only a recognized read or page parameter to the
   assert.equal(rewriteRecordSummaryFrames(untrusted), untrusted, 'arbitrary expressions remain counted');
   const wrongForm = `<iframe src='<%=zoho.appuri%>record-summary/Case/<%=Other[ID > 0].ID%>'></iframe>`;
   assert.equal(rewriteRecordSummaryFrames(wrongForm), wrongForm, 'a read of another form does not bind this route');
+  const concatenated = `<iframe src='<%=zoho.appuri%>record-summary/Case/<%=Case[Status == "Open"] + input.x + Case[Status == "x"].ID%>'></iframe>`;
+  assert.equal(rewriteRecordSummaryFrames(concatenated), concatenated, 'concatenated reads stay counted');
+  const unknownForm = `<iframe src='<%=zoho.appuri%>record-summary/Nope/<%=input.caseID%>'></iframe>`;
+  assert.equal(rewriteRecordSummaryFrames(unknownForm, appOf(ORDERS)), unknownForm, 'unknown app targets stay counted');
+});
+
+test('record-summary report link resolves to its scoped report detail route', () => {
+  const app = appOf(`${ORDERS}
+\tlist Employee_Profile1
+\t{
+\t\tshow all rows from Orders [Status == "open"]
+\t\t(
+\t\t\tName
+\t\t)
+\t}`);
+  const snippet = `<iframe src='<%=zoho.appuri%>record-summary/Employee_Profile1/<%=input.recordID%>'></iframe>`;
+  const rewritten = rewriteRecordSummaryFrames(snippet, app);
+  assert.match(rewritten, /#\/report\/Employee_Profile1\/row\/<%=input\.recordID%>/);
+  const unknown = `<iframe src='<%=zoho.appuri%>record-summary/No_Such_Report/<%=input.recordID%>'></iframe>`;
+  assert.equal(rewriteRecordSummaryFrames(unknown, app), unknown, 'unknown report names remain counted');
+
+  const record = generateUi(app).files.find((file) => file.path === 'functions/aio/orders/record.mjs')?.data;
+  assert.match(String(record), /reportScopes/);
+  assert.match(String(record), /REPORT/);
+  assert.match(String(record), /reportScope\.profiles\.includes\(principal\.profile\)/);
+  assert.match(String(record), /Status.*open/);
 });
 
 
