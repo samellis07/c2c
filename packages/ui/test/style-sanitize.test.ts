@@ -172,6 +172,134 @@ test('a page snippet that loses a style declaration is listed as a TODO', () => 
   assert.match(snippet?.html ?? '', /style="border: 1px solid rgb\(1, 2, 3\)"/);
 });
 
+function pageModel(snippets: string[]) {
+  const cells = snippets.map((html, i) => `<column width='50%'><dsp id='snippet_${i}'><![CDATA[${html}]]></dsp></column>`).join('');
+  const zml = `<zml><layout><row>${cells}</row></layout></zml>`;
+  const app: App = deriveIr(
+    parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${zml.replace(/"/g, '\\"')}"\n\t\t}\n\t}\n}\n`),
+  );
+  const model = buildModel(app);
+  const elements = model.pages[0]?.elements.flatMap(function all(el): typeof model.pages[0]['elements'] {
+    return [el, ...el.children.flatMap(all)];
+  }) ?? [];
+  return { model, html: elements.filter((el) => el.kind === 'html'), styleTodos: model.todos.filter((item) => item.name === 'Home.style'), scopedCss: model.pages[0]?.scopedCss ?? '' };
+}
+
+test('static <style> CSS is carried under the page scope and only rejected rules count', () => {
+  const { html, styleTodos, scopedCss } = pageModel([
+    '<style>.card { color: red; } /* a { } */ .title { font-weight: 700 }</style><div class="card">Hi</div>',
+    '<div><style>@media (max-width: 600px) { .card { color: blue } }</style><p>Ok</p></div>',
+  ]);
+  assert.equal(styleTodos.length, 0, JSON.stringify(styleTodos));
+  assert.match(scopedCss, /^\[data-page="Home"\] \.card\{color: red\}/);
+  assert.match(scopedCss, /\.title\{font-weight: 700\}/);
+  assert.match(scopedCss, /@media \(max-width: 600px\)\{\[data-page="Home"\] \.card\{color: blue\}\}/);
+  assert.equal(html.length, 2);
+  for (const el of html) {
+    assert.doesNotMatch(el.html ?? '', /<style/i);
+    assert.equal('droppedStyleRules' in el, false, 'the count stays off the generated element');
+  }
+});
+
+test('CSS tokenizer scopes selectors and refuses fetches, unsafe selectors, malformed declarations and at-rules once each', () => {
+  const result = carryStaticStyle('.x, .y:hover { color: red; width: 80% } @import "x"; .z{background:url(https://x)} </style><script>{', '[data-page="Home"]');
+  assert.equal(result.css, '[data-page="Home"] .x,[data-page="Home"] .y:hover{color: red;width: 80%}');
+  assert.equal(result.droppedRules, 3);
+  assert.deepEqual(carryStaticStyle('.x{color:red}', '[data-page="a"]'), { css: '[data-page="a"] .x{color:red}', droppedRules: 0 });
+  const responsive = carryStaticStyle('@media (min-width: 768px) { .x > .y { width: 20% } }', '[data-page="a"]');
+  assert.deepEqual(responsive, { css: '@media (min-width: 768px){[data-page="a"] .x > .y{width: 20%}}', droppedRules: 0 });
+  assert.equal(carryStaticStyle('@media (url(x)) {.x{color:red}}', '[data-page="a"]').droppedRules, 1);
+});
+
+test('@media inside @media is dropped, so deep nesting cannot recurse', () => {
+  const nested = carryStaticStyle('@media screen { @media print { .x { color: red } } .y { color: blue } }', '[data-page="a"]');
+  assert.equal(nested.droppedRules, 1);
+  assert.equal(nested.css, '@media screen{[data-page="a"] .y{color: blue}}');
+  const deep = '@media all{'.repeat(5000) + '}'.repeat(5000);
+  const start = performance.now();
+  const result = carryStaticStyle(deep, '[data-page="a"]');
+  const ms = performance.now() - start;
+  assert.ok(ms < 50, `5000 nested @media: ${ms.toFixed(1)}ms`);
+  assert.equal(result.css, '');
+  assert.equal(result.droppedRules, 1);
+});
+
+test('a stray top-level } drops one rule, not the rest of the sheet', () => {
+  const result = carryStaticStyle('}.a{color:red}.b{color:blue}', '[data-page="a"]');
+  assert.equal(result.droppedRules, 1);
+  assert.equal(result.css, '[data-page="a"] .a{color:red}\n[data-page="a"] .b{color:blue}');
+});
+
+test('the rendered <style> keeps child combinators', async () => {
+  const run = (await runtime()) as Runtime & { renderPage(page: unknown, doc: unknown): string };
+  const doc = new JSDOM('<!doctype html><html><body></body></html>').window.document;
+  const html = run.renderPage(
+    { name: 'Home', label: 'Home', elements: [], scopedCss: '[data-page="Home"] .b>.c{color:red}' },
+    doc,
+  );
+  assert.match(html, /<style>\[data-page="Home"\] \.b>\.c\{color:red\}<\/style>/);
+});
+
+test('dangerous <style> CSS is dropped whole and counted', () => {
+  const { html, styleTodos } = pageModel([
+    '<style>@import url(//example.test/x.css); .a { background: url(javascript:alert(1)) } .b { behavior: url(x.htc); width: expression(alert(1)) }</style><p>Hi</p>',
+  ]);
+  assert.equal(styleTodos.length, 1, JSON.stringify(styleTodos));
+  assert.match(styleTodos[0].reason, /drops 3 static style rules/);
+  assert.doesNotMatch(html[0]?.html ?? '', /import|url|expression|behavior|style/i);
+  assert.equal(html[0]?.html, '<p>Hi</p>');
+});
+
+test('a page without <style> CSS gets no style TODO', () => {
+  const { styleTodos } = pageModel(['<p style="color: red">Hi</p>', '<style>  /* only a comment */  </style><p>Ok</p>']);
+  assert.deepEqual(styleTodos, []);
+});
+
+test('style rule counting: top-level blocks and @ statements, comments and islands masked', () => {
+  assert.equal(droppedStyleRules('<p>no stylesheet</p>'), 0);
+  assert.equal(droppedStyleRules('<style></style>'), 0);
+  assert.equal(droppedStyleRules('<style>.a{color:red}</style>'), 1);
+  assert.equal(droppedStyleRules('<style>@import "x.css"; @charset "utf-8";</style>'), 2);
+  assert.equal(droppedStyleRules('<style>@media print { .a { x: 1 } .b { y: 2 } }</style>'), 1);
+  assert.equal(droppedStyleRules('<style>.a { color: <%=input.c%> } /* .b { } */</style>'), 1);
+  assert.equal(droppedStyleRules('<style>.a { color: red }</style><div><style>.b{}.c{}</style></div>'), 3);
+  assert.equal(droppedStyleRules('<style>color: red</style>'), 1, 'stray CSS text is still lost CSS');
+});
+
+test('a page snippet lists each removed script, style, SVG, and template tag once in sorted order', () => {
+  const zml = `<zml><dsp id='html_snippet'><![CDATA[<script>bad()</script><svg><script>nested()</script></svg><style></style><template><b>hidden</b></template>]]></dsp></zml>`;
+  const app: App = deriveIr(parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${zml.replace(/"/g, '\\"')}"\n\t\t}\n\t}\n}\n`));
+  const model = buildModel(app);
+  const todos = model.todos.filter((todo) => todo.area === 'zml' && /removed from this page snippet/.test(todo.reason));
+  assert.deepEqual(todos.map((todo) => todo.reason), [
+    'The <script> element is removed from this page snippet by the sanitizer',
+    'The <style> element is removed from this page snippet by the sanitizer',
+    'The <svg> element is removed from this page snippet by the sanitizer',
+    'The <template> element is removed from this page snippet by the sanitizer',
+  ]);
+});
+
+test('a page snippet with carried static <style> CSS suppresses the generic style TODO', () => {
+  const zml = `<zml><dsp id='html_snippet'><![CDATA[<script>bad()</script><style>.x{}</style>]]></dsp></zml>`;
+  const app: App = deriveIr(parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${zml.replace(/"/g, '\\"')}"\n\t\t}\n\t}\n}\n`));
+  const model = buildModel(app);
+  const styleTodos = model.todos.filter((t) => t.name === 'Home.style');
+  assert.equal(styleTodos.length, 0);
+  assert.match(model.pages[0]?.scopedCss ?? '', /\[data-page="Home"\] \.x\{\}/);
+  assert.equal(model.todos.filter((t) => t.reason === 'The <style> element is removed from this page snippet by the sanitizer').length, 0, 'no double count of <style>');
+  assert.equal(model.todos.filter((t) => t.reason.includes('<script>')).length, 1);
+});
+
+test('a snippet that fails server-side compilation keeps one compile TODO without sanitizer TODOs', () => {
+  const snippet = `htmlpage hp1()\ncontent\n<script>bad()</script>\n<%\nrow = insert into Orders [ Status : "open" ];\n%>`;
+  const zml = `<zml><dsp id='hp1'><![CDATA[${snippet}]]></dsp></zml>`;
+  const app: App = deriveIr(parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent=${JSON.stringify(zml)}\n\t\t}\n\t}\n}\n`));
+  const model = buildModel(app);
+  const pageTodos = model.todos.filter((todo) => todo.area === 'zml' && todo.name === 'Home.dsp');
+  assert.equal(pageTodos.length, 1, JSON.stringify(pageTodos));
+  assert.match(pageTodos[0]!.reason, /Server-side Deluge snippet requires manual translation/);
+});
+
 // ReDoS regression: the style scanners run in one pass where the old regexes
 // backtracked. The three sanitizer copies (browser runtime, page generator,
 // print templates) are tested against the regexes they replaced — same
