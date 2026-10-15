@@ -2063,14 +2063,27 @@ function headerKeyAt(line: string, i: number, key: string): boolean {
   return true;
 }
 
-function takeHeaderLine(h: Header, line: string): void {
+/** Optional work counter for parseHeader: one step per character the scanner examines. */
+export interface HeaderWork {
+  steps: number;
+}
+
+/** Scans one header line; returns the number of characters it examined. */
+function takeHeaderLine(h: Header, line: string): number {
   const n = line.length;
+  let steps = 0;
   let i = 0;
-  while (i < n && isHeaderSpace(line.charCodeAt(i))) i++;
+  while (i < n && isHeaderSpace(line.charCodeAt(i))) {
+    i++;
+    steps++;
+  }
   // One optional star, the same as `\*?` after the leading space.
   if (i < n && line.charCodeAt(i) === 42) {
     i++;
-    while (i < n && isHeaderSpace(line.charCodeAt(i))) i++;
+    while (i < n && isHeaderSpace(line.charCodeAt(i))) {
+      i++;
+      steps++;
+    }
   }
   let field: 'author' | 'generatedOn' | 'version' | undefined;
   let keyLen = 0;
@@ -2083,15 +2096,25 @@ function takeHeaderLine(h: Header, line: string): void {
   } else if (headerKeyAt(line, i, 'version')) {
     field = 'version';
     keyLen = 7;
-  } else return;
+  } else return steps + 1;
   let j = i + keyLen;
-  while (j < n && isHeaderSpace(line.charCodeAt(j))) j++;
-  if (j >= n || line.charCodeAt(j) !== 58) return;
+  while (j < n && isHeaderSpace(line.charCodeAt(j))) {
+    j++;
+    steps++;
+  }
+  if (j >= n || line.charCodeAt(j) !== 58) return steps + 1;
   j++;
-  while (j < n && isHeaderSpace(line.charCodeAt(j))) j++;
+  while (j < n && isHeaderSpace(line.charCodeAt(j))) {
+    j++;
+    steps++;
+  }
   let end = n;
-  while (end > j && isHeaderSpace(line.charCodeAt(end - 1))) end--;
+  while (end > j && isHeaderSpace(line.charCodeAt(end - 1))) {
+    end--;
+    steps++;
+  }
   h[field] = line.slice(j, end);
+  return steps + 1;
 }
 
 /**
@@ -2099,18 +2122,27 @@ function takeHeaderLine(h: Header, line: string): void {
  * The closer is found with indexOf inside a capped window, and each line is
  * scanned once. The old patterns overlapped whitespace runs with a following
  * lazy match, which is polynomial on a long line of spaces or stars.
+ * `work`, when given, accumulates the characters examined, so tests can assert
+ * linear growth without timing.
  */
-export function parseHeader(src: string): Header | undefined {
+export function parseHeader(src: string, work?: HeaderWork): Header | undefined {
   const end = Math.min(src.length, HEADER_CAP);
   const capped = end === src.length ? src : src.slice(0, end);
   let i = 0;
   while (i < capped.length && isHeaderSpace(capped.charCodeAt(i))) i++;
-  if (capped.charCodeAt(i) !== 47 || capped.charCodeAt(i + 1) !== 42) return undefined;
-  const closeAt = capped.indexOf('*/', i + 2);
-  if (closeAt < 0) return undefined;
-  const h: Header = {};
-  for (const line of capped.slice(i + 2, closeAt).split(/\r\n|\n|\r/)) takeHeaderLine(h, line);
-  return Object.keys(h).length ? h : undefined;
+  let steps = i + 1;
+  try {
+    if (capped.charCodeAt(i) !== 47 || capped.charCodeAt(i + 1) !== 42) return undefined;
+    const closeAt = capped.indexOf('*/', i + 2);
+    // indexOf and split each read the comment body once.
+    steps += 2 * ((closeAt < 0 ? capped.length : closeAt) - i);
+    if (closeAt < 0) return undefined;
+    const h: Header = {};
+    for (const line of capped.slice(i + 2, closeAt).split(/\r\n|\n|\r/)) steps += takeHeaderLine(h, line);
+    return Object.keys(h).length ? h : undefined;
+  } finally {
+    if (work) work.steps += steps;
+  }
 }
 
 const CREATOR_TOP = new Set([

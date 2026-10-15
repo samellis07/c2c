@@ -671,35 +671,39 @@ test('header parsing tolerates variants', () => {
 });
 
 test('header parsing stays linear on long whitespace and star lines', () => {
+  // Linearity is asserted on the scanner's step count, which is deterministic;
+  // wall-clock ratios of millisecond samples are noise on a loaded machine.
   const kib = 1024;
   const make = {
     spaces: (n: number) => ' '.repeat(n),
     stars: (n: number) => `/*${'*'.repeat(n)}`,
     starLine: (n: number) => `/*\n${'*'.repeat(n)}\n*/`,
+    // Spaces then a non-key character: the old `^\s*\*?\s*(Author|...)` line
+    // pattern backtracked quadratically here.
+    spaceLine: (n: number) => `/*\n${' '.repeat(n)}x\n*/`,
     authorSpaces: (n: number) => `/*\n * Author: ${' '.repeat(n)}\n*/`,
+    versionSpaces: (n: number) => `/*\n * Version${' '.repeat(n)}: 1${' '.repeat(n)}\n*/`,
   };
-  const perCall = (src: string): number => {
-    parseHeader(src);
-    const start = performance.now();
-    let calls = 0;
-    let elapsed = 0;
-    do {
-      parseHeader(src);
-      calls += 1;
-      elapsed = performance.now() - start;
-    } while (elapsed < 80);
-    return elapsed / calls;
+  const stepsOf = (src: string): number => {
+    const work = { steps: 0 };
+    parseHeader(src, work);
+    return work.steps;
   };
   for (const [name, build] of Object.entries(make)) {
-    const big = build(1024 * kib);
-    const started = performance.now();
-    parseHeader(big);
-    const once = performance.now() - started;
-    assert.ok(once < 100, `${name}: 1 MiB took ${once.toFixed(1)} ms`);
-    const small = perCall(build(256 * kib));
-    const large = perCall(big);
+    // A loose absolute bound: the old backtracking pattern took seconds at 64 KiB.
+    for (const size of [64 * kib, 1024 * kib]) {
+      const src = build(size);
+      const started = performance.now();
+      parseHeader(src);
+      const elapsed = performance.now() - started;
+      assert.ok(elapsed < 500, `${name}: ${size / kib} KiB took ${elapsed.toFixed(1)} ms`);
+    }
+    const small = stepsOf(build(256 * kib));
+    const large = stepsOf(build(1024 * kib));
+    assert.ok(small >= 256 * kib, `${name}: 256 KiB counted only ${small} steps`);
     const ratio = large / small;
-    assert.ok(ratio < 6, `${name}: 1 MiB / 256 KiB = ${ratio.toFixed(2)} (${large.toFixed(3)} ms / ${small.toFixed(3)} ms)`);
+    assert.ok(ratio <= 4.5, `${name}: 1 MiB / 256 KiB = ${ratio.toFixed(2)} steps (${large} / ${small}), expected linear (~4)`);
+    assert.ok(large < (1024 * kib) * 64, `${name}: ${large} steps for 1 MiB is far from linear`);
   }
 });
 
