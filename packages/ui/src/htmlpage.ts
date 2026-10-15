@@ -1263,6 +1263,51 @@ function commentClose(input: string, from: number): number {
   return -1;
 }
 
+/** A click action a ZML `<image>` declared that the generated markup does not run. */
+export interface ZmlImageAction {
+  action: string;
+  fn?: string;
+  label?: string;
+  element?: 'button';
+}
+
+/**
+ * Click actions on the ZML `<image>` elements of a snippet, in source order.
+ * The HTML parser reads `<image>` as `<img>` and the sanitizer keeps no
+ * `action`, so each one is listed for the caller to count as a manual step.
+ * Deluge islands are blanked first: their text is not markup.
+ */
+export function zmlImageActions(template: string): ZmlImageAction[] {
+  const chunks = splitChunks(template);
+  const markup = chunks ? chunks.map((c) => (c.kind === 'static' ? c.text : '')).join('') : template.replace(/<%[\s\S]*?(?:%>|$)/g, '');
+  const out: ZmlImageAction[] = [];
+  for (const m of markup.matchAll(/<image\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi)) {
+    const attrs = parseZmlAttributes(m[1] ?? '');
+    const action = (attrs.action ?? '').trim();
+    if (!action) continue;
+    const fn = (attrs.functionname ?? attrs.function ?? '').trim();
+    const label = ['elementname', 'name', 'id', 'value', 'src', 'alt'].map((k) => (attrs[k] ?? '').trim()).find(Boolean);
+    out.push({ action, ...(fn ? { fn } : {}), ...(label ? { label } : {}) });
+  }
+  return out;
+}
+
+/** ExecuteFunction buttons in literal snippet markup; islands are not markup. */
+export function zmlExecuteFunctionButtons(template: string): ZmlImageAction[] {
+  const chunks = splitChunks(template);
+  const markup = chunks ? chunks.map((c) => (c.kind === 'static' ? c.text : '')).join('') : template.replace(/<%[\s\S]*?(?:%>|$)/g, '');
+  const out: ZmlImageAction[] = [];
+  for (const m of markup.matchAll(/<button\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi)) {
+    const attrs = parseZmlAttributes(m[1] ?? '');
+    const action = (attrs.action ?? '').trim();
+    if (action.replace(/\s+/g, '').toLowerCase() !== 'executefunction') continue;
+    const fn = (attrs.functionname ?? attrs.function ?? '').trim();
+    const label = ['elementname', 'name', 'id', 'value', 'text', 'label'].map((k) => (attrs[k] ?? '').trim()).find(Boolean);
+    out.push({ action: 'ExecuteFunction', ...(fn ? { fn } : {}), ...(label ? { label } : {}), element: 'button' });
+  }
+  return out;
+}
+
 export function convertZmlSnippetToHtml(template: string): string {
   if (!/<\/?(panel|pr|pc|prefix|suffix|text|row|column|image)\b/i.test(template)) {
     return template;
@@ -1438,7 +1483,7 @@ export function rewriteRecordSummaryFrames(template: string, app?: App): string 
 }
 
 /** True when the template holds a ZML button whose action calls a Deluge function. */
-function hasExecuteFunctionButton(template: string): boolean {
+export function hasExecuteFunctionButton(template: string): boolean {
   for (const m of template.matchAll(/<button\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi)) {
     const action = parseZmlAttributes(m[1] ?? '').action ?? '';
     if (action.replace(/\s+/g, '').toLowerCase() === 'executefunction') return true;

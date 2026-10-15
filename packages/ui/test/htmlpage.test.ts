@@ -1729,7 +1729,7 @@ content
     assert.equal(compiled.reason, 'ZML ExecuteFunction button', inner);
     const { model } = buildUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
     assert.equal(model.todos.length, 1, inner);
-    assert.equal(model.todos[0].reason, specific, inner);
+    assert.match(model.todos[0].reason, /<button> "Go" click action ExecuteFunction calling function helpers\.mark is not generated/, inner);
     assert.equal(uiSnippetFiles(model).length, 0, inner);
   }
   // Without the button the same snippet compiles: the button alone is the blocker.
@@ -1737,6 +1737,25 @@ content
   // A button with another action is not an ExecuteFunction call and keeps today's result.
   const other = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', wrap(button('1', 'OpenUrl')));
   assert.notEqual(other.reason, 'ZML ExecuteFunction button');
+});
+
+test('a plain dsp snippet with a ZML ExecuteFunction button is counted, not sanitized away', () => {
+  const button = (action: string) =>
+    `<button text='Go' type='rounded' action='${action}' functionName='helpers.mark' parameters='7' successMsg='Done' />`;
+  // No htmlpage header and no island: the snippet used to reach the sanitizer,
+  // which dropped the function call without a TODO.
+  for (const action of ['ExecuteFunction', ' executeFunction ']) {
+    const snippet = `<div class='card'><p>Mark the order</p>${button(action)}</div>`;
+    const { model } = buildUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
+    assert.equal(model.todos.length, 1, action);
+    assert.match(model.todos[0].reason, /<button> "Go" click action ExecuteFunction calling function helpers\.mark is not generated/, action);
+    assert.equal(uiSnippetFiles(model).length, 0, action);
+  }
+  // Without the button, or with another action, the plain snippet keeps today's sanitized result.
+  for (const inner of ['', button('OpenUrl')]) {
+    const { model } = buildUi(appOf(`${ORDERS}\n${pageWithSnippet(`<div class='card'><p>Mark the order</p>${inner}</div>`)}`));
+    assert.equal(model.todos.length, 0, inner);
+  }
 });
 
 test('a for-each loop over a form query renders a row per record', async () => {
@@ -2311,7 +2330,10 @@ test('shape A golden: a query loop inside a <body> shell compiles to the pinned 
   const build = () => generateUi(appOf(`${ORDERS}\n${pageWithSnippet(SHAPE_A)}`));
   const first = build();
   const second = build();
-  assert.deepEqual(first.model.todos, []);
+  // The shell's `<style>` rule is dropped by the sanitizer: counted, never silent.
+  assert.deepEqual(first.model.todos.map((todo) => [todo.name, todo.reason]), [
+    ['Home.style', 'Static <style> CSS not carried over: the page sanitizer drops 1 static style rule'],
+  ]);
   const entry = uiSnippetFiles(first.model)[0];
   assert.equal(entry.path, 'functions/htmlpages/home-s0.mjs');
   const source = String(first.files.find((file) => file.path === entry.path)?.data ?? '');
@@ -2525,4 +2547,22 @@ test('a record-summary frame generates a link to the authorized record route', (
   assert.equal(compiled.ok, true, compiled.reason);
   assert.match(compiled.file?.source ?? '', /#\/record\/Orders/);
   assert.match(compiled.file?.source ?? '', /shim\.datastore\.query/);
+test('one page with a <style>, a <script>, an ExecuteFunction button and a ZML image yields exactly the expected 4 TODOs once each', () => {
+  const snippet = [
+    '<style>.highlight { color: red; }</style>',
+    '<script>alert("hello")</script>',
+    "<button text='Go' type='rounded' action='ExecuteFunction' functionName='helpers.mark' parameters='1' />",
+    "<image action='Function' functionName='notify_team' elementName='Bell' src='https://example.com/bell.png'>",
+  ].join('\n');
+  const { model } = buildUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
+  assert.equal(model.todos.length, 4);
+  assert.deepEqual(
+    model.todos.map((todo) => [todo.name, todo.reason]),
+    [
+      ['Home.image', 'ZML <image> "Bell" click action Function calling function notify_team is not generated; wire the click to the function by hand'],
+      ['Home.button', 'ZML <button> "Go" click action ExecuteFunction calling function helpers.mark is not generated; wire the click to the function by hand'],
+      ['Home.dsp', 'The <script> element is removed from this page snippet by the sanitizer'],
+      ['Home.style', 'Static <style> CSS not carried over: the page sanitizer drops 1 static style rule'],
+    ],
+  );
 });

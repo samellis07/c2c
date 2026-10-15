@@ -285,7 +285,7 @@ const NIT_ZML = [
   "</column></row></layout></zml>",
 ].join('');
 
-function nitApp(): App {
+function nitApp(zml = NIT_ZML): App {
   return deriveIr(parse(`application "Shop"
 {
 \tform Sales
@@ -317,7 +317,7 @@ function nitApp(): App {
 \t\tpage Dashboard
 \t\t{
 \t\t\tdisplayname = "Dashboard"
-\t\t\tContent="${NIT_ZML.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+\t\t\tContent="${zml.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
 \t\t}
 \t}
 }
@@ -375,6 +375,28 @@ test('a snippet popup keeps its trigger words: a link plus a TODO, never a silen
   assert.ok(reasons.some((reason) => /Sales List.*opened on its own/.test(reason)), 'the unguarded popup names its lost auto-open');
   assert.ok(page.todos.some((todo) => /opened on its own/.test(todo)), 'the lost triggers are listed with the page TODOs');
 });
+
+test('the React page spec lists distinct dropped snippet tags as page TODOs', () => {
+  const zml = `<zml><dsp id='snippet'><![CDATA[<script>bad()</script><svg><script>nested()</script></svg><style>.x{}</style><template><b>hidden</b></template>]]></dsp></zml>`;
+  const page = reactAppSpec(nitApp(zml)).pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  assert.deepEqual(page.todos, [
+    '<dsp>: The <script> element is removed from this page snippet by the sanitizer',
+    '<dsp>: The <style> element is removed from this page snippet by the sanitizer',
+    '<dsp>: The <svg> element is removed from this page snippet by the sanitizer',
+    '<dsp>: The <template> element is removed from this page snippet by the sanitizer',
+  ]);
+});
+
+test('the React page spec keeps one TODO when a server-side snippet fails to compile', () => {
+  const source = `htmlpage hp1()\ncontent\n<script>bad()</script>\n<%\nrow = insert into Orders [ Status : "open" ];\n%>`;
+  const zml = `<zml><dsp id='snippet'><![CDATA[${source}]]></dsp></zml>`;
+  const page = reactAppSpec(nitApp(zml)).pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  assert.equal(page.todos.length, 1, JSON.stringify(page.todos));
+  assert.match(page.todos[0]!, /server-side script; it is not generated yet/);
+});
+
 
 test('further values of a one-caption panel carry their own labels', () => {
   const page = reactAppSpec(nitApp()).pages?.Dashboard;

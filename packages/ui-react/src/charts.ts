@@ -403,8 +403,11 @@ function convert(ctx: Ctx, node: ZmlElement): PageElement[] {
     const html = (ui.html ?? '').trim();
     const out: PageElement[] = [];
     if (html || links.length) out.push({ kind: 'html', html, links });
+    // elementFromZml returns no dropped-tag metadata for an uncompiled
+    // server-side snippet, whose existing manual-translation TODO suffices.
+    for (const tag of ui.droppedTags ?? []) out.push({ kind: 'todo', tag: node.tag, reason: `The <${tag}> element is removed from this page snippet by the sanitizer` });
     for (const reason of triggers) out.push({ kind: 'todo', tag: node.tag, reason });
-    if (raw && !html) out.push({ kind: 'todo', tag: node.tag, reason: 'the HTML snippet is built by a server-side script; it is not generated yet' });
+    if (raw && !html && !ui.droppedTags?.length) out.push({ kind: 'todo', tag: node.tag, reason: 'the HTML snippet is built by a server-side script; it is not generated yet' });
     return [...out, ...kids()];
   }
   if (ui.kind === 'chart') {

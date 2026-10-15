@@ -16,7 +16,16 @@ import { requiredCompositePart } from '../../schema/src/composite-parts.js';
 import { CURRENCY_CODES, fieldTypeRow, normalizeType, type FieldTypeRow } from '../../schema/src/mapping.js';
 import { criteriaHasTodo, sealRelativeCriteria } from '../../shims/src/criteria.js';
 import { LIMITS } from '../../shims/src/index.js';
-import { droppedStyleReason, droppedStyles, elementsFromZml, leaves, type UiElement, type ZmlEnv } from './pages.js';
+import {
+  droppedStyleReason,
+  droppedStyleRulesTodo,
+  droppedStyles,
+  droppedTagReason,
+  elementsFromZml,
+  leaves,
+  type UiElement,
+  type ZmlEnv,
+} from './pages.js';
 import type { HtmlpageFile } from './htmlpage.js';
 import type { SnippetReason } from './snippet-guidance.js';
 
@@ -986,6 +995,12 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
       : [];
   const pageLeaves = leaves(elements);
   const todoLeaves = pageLeaves.filter((el) => el.kind === 'todo');
+  // Dropped `<style>` CSS is one counted manual step per page; the count stays off the generated element.
+  let styleRules = 0;
+  for (const el of pageLeaves) {
+    styleRules += el.droppedStyleRules ?? 0;
+    delete el.droppedStyleRules;
+  }
   for (const el of todoLeaves) {
     todos.push({
       area: 'zml',
@@ -995,9 +1010,23 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
       ...(el.manualStep ? { manualStep: el.manualStep } : {}),
     });
   }
+  const seenDroppedTags = new Set<string>();
   for (const el of pageLeaves) {
+    if (el.kind === 'html') {
+      for (const tag of el.droppedTags ?? []) {
+        if (tag === 'style' && styleRules > 0) continue;
+        const key = `${el.tag}|${tag}`;
+        if (seenDroppedTags.has(key)) continue;
+        seenDroppedTags.add(key);
+        todos.push({ area: 'zml', name: `${page.name}.${el.tag}`, reason: droppedTagReason(tag) });
+      }
+    }
     const dropped = el.kind === 'html' && el.html ? droppedStyles(el.html, true) : [];
     if (dropped.length) todos.push({ area: 'zml', name: `${page.name}.${el.tag}`, reason: droppedStyleReason(dropped) });
+  }
+  if (styleRules) {
+    const lost = droppedStyleRulesTodo(page.name, styleRules);
+    todos.push({ area: 'zml', name: `${page.name}.style`, reason: lost.reason, manualReasons: ['sanitizer-loss'], manualStep: lost.step });
   }
   const status = pageLeaves.length > 0 && todoLeaves.length === pageLeaves.length ? 'todo' : todoLeaves.length > 0 ? 'partial' : 'generated';
   return {
