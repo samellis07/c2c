@@ -4605,3 +4605,36 @@ test('apig:enable re-runs on a transient CLI failure and stops on success', asyn
   assert.equal(attempts, 2);
   rmSync(out, { recursive: true, force: true });
 });
+
+test("app-users refuses a '+' email before any request", async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-plus-'));
+  writeUsersPlan(out, 'person+tag@example.test');
+  const run = cap(emptySandbox());
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'app-users', ...SCOPE], run.io), 1);
+  assert.match(run.err(), /Email Id cannot contain '\+' character/);
+  assert.ok(!run.err().includes('person+tag'), 'the address is never printed');
+  assert.equal(run.restCalls.filter((call) => call.startsWith('POST') || call.includes('project-user')).length, 0);
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('inputs.json role_id must be a quoted string; a 17-digit string reaches the invite body unchanged', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-roleid-'));
+  writeUsersPlan(out, 'person@example.test');
+  // A JSON number this large is rounded by the parse — refused, never sent.
+  writeFileSync(join(out, 'provision', 'inputs.json'), '{"slateDomain":"app.example.test","users":[{"email_id":"person@example.test","role_id":10000000000000005}]}');
+  const bad = cap(emptySandbox());
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'app-users', ...SCOPE], bad.io), 2);
+  assert.match(bad.err(), /role_id must be a quoted decimal string/);
+  assert.equal(bad.restCalls.filter((call) => call.startsWith('POST')).length, 0);
+
+  writeFileSync(join(out, 'provision', 'inputs.json'), '{"slateDomain":"app.example.test","users":[{"email_id":"person@example.test","role_id":"10000000000000005"}]}');
+  const bodies: unknown[] = [];
+  const good = cap();
+  good.io.rest = guardedRest(async (call) => {
+    if (call.method === 'POST') bodies.push(call.body);
+    return call.method === 'GET' ? { status: 200, body: { data: { users: [] } } } : { status: 200, body: { data: { user_id: '7001' } } };
+  });
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'app-users', ...SCOPE], good.io), 0, good.err());
+  assert.deepEqual(bodies.map((body) => (body as { user_details: { role_id: unknown } }).user_details.role_id), ['10000000000000005']);
+  rmSync(out, { recursive: true, force: true });
+});

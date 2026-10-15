@@ -15,7 +15,11 @@ import { deriveIr, parse } from '../../core/src/index.js';
 import {
   DEPLOY_REPORT,
   formatInviteResult,
+  idString,
   inviteUsers,
+  parseJsonExact,
+  plusAddressIds,
+  roleIdFromUsers,
   parseSocialList,
   readBackupUsers,
   readUsersState,
@@ -428,7 +432,9 @@ test('missing role id or redirect url is a pending console step, never a widened
   });
   assert.equal(res.ok, false);
   assert.equal(res.rows[0]?.status, 'pending');
-  assert.match(res.consoleSteps.join('\n'), /--role-ids Staff=<id>/);
+  assert.match(res.consoleSteps.join('\n'), /--role-ids 'Staff=<id>'/);
+  assert.match(res.consoleSteps.join('\n'), /OAUTH_SCOPE_MISMATCH/);
+  assert.match(res.consoleSteps.join('\n'), /CatalystbyZoho_List_All_Roles/);
 
   res = await inviteUsers(fakeRest().rest, {
     projectId: PROJECT,
@@ -957,4 +963,94 @@ test('a write that landed under a 5xx is not re-sent — the re-read verifies it
   assert.equal(posts, 1);
   assert.equal(result.rows[0]?.status, 'invited');
   assert.equal(result.invited[0]?.userId, '42');
+});
+
+/** backupDir() with one row's identity swapped — synthetic identities only. */
+function backupWith(from: string, to: string): string {
+  const dir = backupDir();
+  const csv = join(dir, 'data', 'data_1', 'appUsers.csv');
+  writeFileSync(csv, readFileSync(csv, 'utf8').replace(`"${from}"`, `"${to}"`));
+  return dir;
+}
+
+test("users plan and invite refuse a planned '+' address before any file or request, naming the user by id", async () => {
+  const backup = backupWith('user-002', 'user+tag-002');
+  const ds = dsFile();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-users-plus-'));
+  let { io, err, out: stdout } = makeIo();
+  assert.equal(await usersCli(['plan', '--source-backup', backup, '--ds', ds, '--out', out, '--salt', 's'], io), 2);
+  assert.match(err(), /^c2c: users usr_[0-9a-f]{16}: the email contains '\+'/);
+  assert.match(err(), /Email Id cannot contain '\+' character/);
+  assert.ok(!err().includes('user+tag'), 'the identity is never printed');
+  assert.ok(!stdout().includes('user+tag'));
+  assert.deepEqual(readdirSync(out), [], 'nothing is written');
+
+  const { rest, calls } = fakeRest();
+  ({ io, err } = makeIo({ rest }));
+  const code = await usersCli(
+    ['invite', '--source-backup', backup, '--ds', ds, '--salt', 's', '--org', ORG, '--project', PROJECT, '--dc', 'in', '--slate-domain', SLATE, '--role-ids', 'Staff=1,Customers=2,App User=3,App Administrator=4', '--state', join(out, 'state.json'), '--confirm'],
+    io,
+  );
+  assert.equal(code, 2);
+  assert.equal(calls.length, 0, 'no request is sent');
+  assert.match(err(), /Catalyst Add User rejects a '\+'/);
+});
+
+test("a '+' on a user the plan skips (inactive) does not block the plan", async () => {
+  const backup = backupWith('user-004', 'user+tag-004');
+  const { io } = makeIo();
+  assert.equal(await usersCli(['plan', '--source-backup', backup, '--ds', dsFile(), '--salt', 's'], io), 0);
+  assert.deepEqual(plusAddressIds([{ id: 'usr_b', identity: 'a+b' }, { id: 'usr_a', identity: 'a+c' }, { id: 'usr_c', identity: 'plain' }]), ['usr_a', 'usr_b']);
+});
+
+test("inviteUsers never POSTs a '+' address; the other users still run", async () => {
+  const users = readBackupUsers(backupWith('user-002', 'user+tag-002'));
+  const all = targets(users, 's').filter((t) => t.role === 'Staff' || t.role === 'Customers');
+  assert.equal(all.length, 2);
+  const { rest, calls } = fakeRest();
+  const res = await inviteUsers(rest, { projectId: PROJECT, targets: all, prior: [], roleIds: { Staff: '1', Customers: '2' }, redirectUrl: `https://${SLATE}` });
+  assert.equal(res.ok, false);
+  const posts = calls.filter((call) => call.method === 'POST');
+  assert.equal(posts.length, 1);
+  assert.ok(!JSON.stringify(posts).includes('+'));
+  const plusRow = res.rows.find((row) => row.role === 'Customers');
+  assert.equal(plusRow?.status, 'failed');
+  assert.match(plusRow?.detail ?? '', /Email Id cannot contain/);
+  assert.ok(!formatInviteResult(res).includes('user+tag'));
+});
+
+test('17-digit role ids round-trip exactly: --role-ids reaches the POST body unchanged', async () => {
+  const backup = backupDir();
+  const ds = dsFile();
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-users-ids-'));
+  const { rest, calls } = fakeRest();
+  const { io } = makeIo({ rest });
+  const code = await usersCli(
+    ['invite', '--source-backup', backup, '--ds', ds, '--salt', 's', '--org', ORG, '--project', PROJECT, '--dc', 'in', '--slate-domain', SLATE,
+      '--role-ids', 'App Administrator=10000000000000005,Staff=10000000000000003,Customers=3002,App User=3003', '--state', join(dir, 'state.json'), '--confirm'],
+    io,
+  );
+  assert.equal(code, 0);
+  const roleIds = calls
+    .filter((call) => call.method === 'POST')
+    .map((call) => (call.body as { user_details: { role_id: unknown } }).user_details.role_id);
+  assert.ok(roleIds.includes('10000000000000005'));
+  assert.ok(roleIds.includes('10000000000000003'));
+  for (const id of roleIds) assert.equal(typeof id, 'string');
+});
+
+test('role ids parsed from MCP/REST text stay exact strings; a rounded JSON number is refused', () => {
+  // The two ids collapse to one double — the reason ids are never numbers.
+  assert.equal(Number('10000000000000005'), Number('10000000000000003'));
+  const text = '[{"role_details":{"role_name":"App Administrator","role_id":10000000000000005}},{"role_details":{"role_name":"App User","role_id":"10000000000000003"}}]';
+  const exact = parseJsonExact(text) as Record<string, unknown>[];
+  assert.equal(roleIdFromUsers(exact, 'App Administrator'), '10000000000000005');
+  assert.equal(roleIdFromUsers(exact, 'App User'), '10000000000000003');
+  // Mutation case: plain JSON.parse rounds the number; the id is refused, not sent wrong.
+  const rounded = JSON.parse(text) as Record<string, unknown>[];
+  assert.equal(roleIdFromUsers(rounded, 'App Administrator'), undefined);
+  assert.equal(roleIdFromUsers(rounded, 'App User'), '10000000000000003');
+  assert.equal(idString(10000000000000005), undefined);
+  assert.equal(idString('10000000000000005'), '10000000000000005');
+  assert.equal(idString(3001), '3001');
 });

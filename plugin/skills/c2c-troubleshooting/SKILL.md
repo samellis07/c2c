@@ -58,6 +58,8 @@ For a fact-backed error, open its exact entry in the [errors facts ledger](../..
 | `cron_url_details cannot be null` | [Open fact](../../references/facts/errors.md#cron_url_details-cannot-be-null) |
 | `403 VERIFICATION_NEEDED` on mail send | [Open fact](../../references/facts/errors.md#403-verification_needed-on-mail-send) |
 | `403 PUBLIC_SIGNUP_ERROR` | [Open fact](../../references/facts/errors.md#403-public_signup_error) |
+| `400 INVALID_INPUT` / `Email Id cannot contain '+' character` | [Open fact](../../references/facts/errors.md#400-invalid_input--email-id-cannot-contain--character) |
+| `users invite`: role has no id (GET /role refused) | [Open fact](../../references/facts/errors.md#role-id-unknown-for-c2c-users-invite) |
 | `401` `{"error":"sign in required"}` | [Open fact](../../references/facts/errors.md#401-errorsign-in-required) |
 | `401 NO_ACCESS` on a function URL | [Open fact](../../references/facts/errors.md#401-no_access-on-a-function-url) |
 | CORS preflight has no allow-origin | [Open fact](../../references/facts/errors.md#cors-preflight-has-no-allow-origin) |

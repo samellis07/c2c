@@ -190,13 +190,26 @@ export function userEmail(user: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+/**
+ * An id field as its exact string. Catalyst ids are 17 digits, past
+ * Number.MAX_SAFE_INTEGER: a JSON number that large was already rounded by
+ * whoever parsed it (two ids that differ in the last digit read back as the
+ * same number), so
+ * it is refused rather than sent. Strings pass unchanged.
+ */
+export function idString(value: unknown): string | undefined {
+  if (typeof value === 'string' && value !== '') return value;
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+  return undefined;
+}
+
 /** Reuse a role id already present on a project user (GET /role is refused). */
 export function roleIdFromUsers(users: readonly Record<string, unknown>[], roleName: string): string | undefined {
   for (const user of users) {
     const details = (user.role_details ?? user.roleDetails ?? {}) as Record<string, unknown>;
     const name = details.role_name ?? details.roleName ?? user.role_name;
-    const id = details.role_id ?? details.roleId ?? details.id;
-    if (name === roleName && (typeof id === 'string' || typeof id === 'number')) return String(id);
+    const id = idString(details.role_id ?? details.roleId ?? details.id);
+    if (name === roleName && id) return id;
   }
   return undefined;
 }
@@ -210,16 +223,16 @@ function roleIdFromRoleList(body: unknown, roleName: string): string | undefined
     if (!row || typeof row !== 'object') continue;
     const role = row as Record<string, unknown>;
     const name = role.role_name ?? role.roleName ?? role.name;
-    const id = role.role_id ?? role.roleId ?? role.id;
-    if (name === roleName && (typeof id === 'string' || typeof id === 'number')) return String(id);
+    const id = idString(role.role_id ?? role.roleId ?? role.id);
+    if (name === roleName && id) return id;
   }
   return undefined;
 }
 
 function userIdFromRecord(record: Record<string, unknown>): string | undefined {
   for (const key of ['user_id', 'userId', 'id']) {
-    const value = record[key];
-    if (typeof value === 'string' || typeof value === 'number') return String(value);
+    const value = idString(record[key]);
+    if (value) return value;
   }
   return undefined;
 }

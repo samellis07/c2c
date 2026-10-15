@@ -433,6 +433,13 @@ function readProvisionInputs(out: string): ProvisionInputs {
   if (!isRecord(parsed)) throw new Error('provision/inputs.json must be a JSON object');
   if (parsed.users !== undefined && !Array.isArray(parsed.users)) throw new Error('provision/inputs.json: users must be a list');
   if (parsed.projectName !== undefined && typeof parsed.projectName !== 'string') throw new Error('provision/inputs.json: projectName must be a string');
+  // A 17-digit role id written as a JSON number was rounded by the parse
+  // above; only a quoted decimal string reaches the invite body unchanged.
+  for (const user of (parsed.users ?? []) as unknown[]) {
+    if (isRecord(user) && user.role_id !== undefined && !(typeof user.role_id === 'string' && /^[0-9]+$/.test(user.role_id))) {
+      throw new Error('provision/inputs.json: role_id must be a quoted decimal string, never a JSON number — a 17-digit number is rounded');
+    }
+  }
   // slateDomain lands verbatim in the cors-domain body and redirect_url —
   // the file is user input, so it answers to the same host rule as --domain.
   // The generated "" placeholder is still unfilled; anything else must parse.
@@ -1399,6 +1406,11 @@ async function executeCliStep(ctx: Ctx, step: ProvisionStep, args: Record<string
     // mailed link lands on a page that does not exist.
     const domain = slateDomainFor(ctx);
     if (!domain) throw new Error('the invite needs redirect_url — set "slateDomain" in provision/inputs.json or pass --domain <slate-host>');
+    // Catalyst Add User rejects a '+' in the email — refuse before any request.
+    const plus = users.filter((user) => typeof user.email_id === 'string' && user.email_id.includes('+')).length;
+    if (plus) {
+      throw new Error(`provision/inputs.json: ${plus} user email(s) contain '+' — Catalyst Add User rejects it (Email Id cannot contain '+' character, INVALID_INPUT); use the plain address`);
+    }
     const userPath = materialiseCliPath(PLAN_CLI_PATH.projectUser, projectId);
     const listed = (await rest({ method: 'GET', path: userPath })).result;
     const existing = new Set<string>();
@@ -1416,7 +1428,7 @@ async function executeCliStep(ctx: Ctx, step: ProvisionStep, args: Record<string
       if (existing.has(user.email_id)) continue;
       const roleId = user.role_id ?? (user.role ? ownDecimalId(ctx.state.learned.byName, user.role) : undefined);
       if (!roleId) {
-        throw new Error(`role id for ${user.role ?? redactString(String(user.email_id))} is unknown — record the roles read-back first or set role_id in provision/inputs.json`);
+        throw new Error(`role id for ${user.role ?? redactString(String(user.email_id))} is unknown — GET /role is refused for this token (401 OAUTH_SCOPE_MISMATCH); record the roles read-back first, or read role_id with the MCP CatalystbyZoho_List_All_Roles tool (a string — copy it as is) or the console and set it as a quoted string in provision/inputs.json`);
       }
       const body: Record<string, unknown> = {
         user_details: { email_id: user.email_id, role_id: roleId, ...(user.first_name ? { first_name: user.first_name } : {}), ...(user.last_name ? { last_name: user.last_name } : {}) },

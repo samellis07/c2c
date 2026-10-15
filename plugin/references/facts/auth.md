@@ -52,6 +52,7 @@ Rule: [TESTED] `App Administrator` and `App User` exist by default; every other 
 - The IaC export's `Authentication` `roles` items are keyed by `role_name` and carry no role id, so deploy never reads a role id from an export.
 - Fresh project with the token (no app users yet, `GET /role` refused): the first admin is a console Add User step — Role = App Administrator (picked by name, no id needed), Platform = Web, Component = Slate + the app, Deployment = default, Redirect URL = the Slate app URL. `c2c deploy` prints these values as one block.
 - Never ship a role id in generated files — resolve it by name at apply time.
+- [TESTED] (live run, 15 Oct 2026) MCP `List_All_Roles` returns `role_id` as an exact string (17 digits). Keep it a string end to end: parsed as a JSON number it is rounded (two ids that differ in the last digit read back as the same number). `c2c users invite --role-ids 'App Administrator=<id>'` sends the id unchanged.
 
 ### Create custom roles in the template or the console — never with the token
 
@@ -77,6 +78,7 @@ Rule: [TESTED] invite app users one by one; the invitee confirms from the invita
 - `POST /baas/v1/project/<project-id>/project-user` body `{"user_details":{"email_id":"<invitee>","role_id":<id>},"platform_type":"web","redirect_url":"<url>"}` → `200` with `is_confirmed:false`; resolve `role_id` via the role read-back above.
 - Send only those fields (plus `first_name` / `last_name`); no `org_id`. `first_name` is never empty — an empty one is rejected `400 MISSING_PARAM` (and a nameless duplicate loses its `409 DUPLICATE_VALUE`); `c2c deploy` takes `--admin-name` or derives one from the email local part. With the token and public signup off, the send is unverified — any refusal or rejection falls back to the console Add User values block.
 - The Slate host is a prerequisite of inviting — never send an invite before it exists. Always send `redirect_url` as the deployed Slate app URL — an invite without it lands the invitee on an unhosted `/app/` path that answers `404` and the confirmation never completes.
+- [TESTED] (live run, 15 Oct 2026) an email with `+` is rejected `400 INVALID_INPUT` `Email Id cannot contain '+' character`. Invite the plain address; `c2c users plan`/`invite` refuse a `+` address before any request.
 - `GET /project-user` lists users (token works); `DELETE /project-user/<id>` → `200`.
 - Self-service `POST /project-user/signup` with signup disabled → `403 PUBLIC_SIGNUP_ERROR` — that is the expected signal to use the admin add instead, not a reason to open signup.
 - `POST /project-user` rejects an empty body with `500 INTERNAL_SERVER_ERROR` rather than `401 OAUTH_SCOPE_MISMATCH` — the admin invite path is scope-reachable with the token; prove a real body on a throwaway address before relying on it.
