@@ -4,8 +4,20 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { deriveIr, parse } from '../../core/src/index.js';
 import { computeDelta, readSourceJson, rollbackExportCli, STATE_FILE, type Io } from '../../deploy/src/index.js';
-import { CHECKLIST_MD, PROOF_JSON, PROOF_MD, cutoverCli, cutoverInput, proofMarkdown, proofReport, type ProofReport } from '../src/cutover.js';
+import {
+  CHECKLIST_MD,
+  PROOF_JSON,
+  PROOF_MD,
+  cutoverChecklist,
+  cutoverCli,
+  cutoverInput,
+  proofMarkdown,
+  proofReport,
+  type CutoverInput,
+  type ProofReport,
+} from '../src/cutover.js';
 
 const APP = `application "Shop"
 {
@@ -108,6 +120,95 @@ function checklist(ws: { ds: string; source: string; state: string }, rollbackDi
   return run.out();
 }
 
+function markdownCells(row: string): string[] {
+  const cells: string[] = [];
+  let cell = '';
+  let slashes = 0;
+  for (const char of row.trim().slice(1, -1)) {
+    if (char === '|' && slashes % 2 === 0) {
+      cells.push(cell.trim());
+      cell = '';
+      slashes = 0;
+      continue;
+    }
+    cell += char;
+    slashes = char === '\\' ? slashes + 1 : 0;
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+test('cutover-checklist escapes supplied smoke lines in the evidence ledger', () => {
+  const ws = workspace();
+  const smoke = join(ws.state, 'smoke-report.json');
+  writeFileSync(
+    smoke,
+    JSON.stringify({
+      version: 'c2c-smoke-report/1',
+      ok: true,
+      session: 'app-user',
+      lines: ['status | detail C:\\path `code`\nnext | segment'],
+    }),
+  );
+  const input = cutoverInput(ws.ds, ['--smoke', smoke]);
+  const row = cutoverChecklist(input, proofReport(input))
+    .split('\n')
+    .find((line) => line.startsWith('| Smoke result:'))!;
+  assert.equal(markdownCells(row).length, 3, row);
+  assert.ok(row.includes('status \\| detail'), row);
+  assert.ok(row.includes('next \\| segment'), row);
+  assert.ok(row.includes('\\`code\\`'), row);
+});
+
+test('proof and checklist neutralize HTML and Markdown injection in supplied values', () => {
+  const hostile = '<script>alert(1)</script> [x](javascript:alert(1)) ![](http://x) a|b `c`';
+  const proof: ProofReport = {
+    schema: 'c2c-proof/1',
+    app: 'Shop',
+    checksum: 'sha256 of sorted record fingerprints',
+    tables: [
+      {
+        table: hostile,
+        form: 'F',
+        sourceRows: 1,
+        sourceChecksum: 'a'.repeat(64),
+        checkpointRows: 1,
+        checkpointChecksum: 'b'.repeat(64),
+        match: false,
+      },
+    ],
+    smoke: { status: 'fail', blocker: hostile, lines: [hostile] },
+    readiness: { automatic: 50, band: 'mid', manual: [`smoke: ${hostile}`] },
+  };
+  const md = proofMarkdown(proof);
+  assert.ok(!md.includes('<script>'), md);
+  assert.ok(md.includes('&lt;script&gt;alert(1)&lt;/script&gt;'), md);
+  assert.ok(!md.includes('[x](javascript:'), md);
+  assert.ok(md.includes('\\[x\\]'), md);
+  assert.ok(!md.includes('![](http://x)'), md);
+  assert.ok(md.includes('!\\[\\]'), md);
+  // The checksum rows escape the table name too: the pipe cannot split or start a row.
+  const checksumLine = md.split('\n').find((line) => line.includes(': export '))!;
+  assert.ok(checksumLine.startsWith('- '), checksumLine);
+  assert.ok(checksumLine.includes('a\\|b'), checksumLine);
+  assert.ok(checksumLine.includes('&lt;script&gt;'), checksumLine);
+  // The evidence table cell keeps the hostile line inert inside exactly 3 cells.
+  const ws = workspace();
+  const smoke = join(ws.state, 'smoke-report.json');
+  writeFileSync(smoke, JSON.stringify({ version: 'c2c-smoke-report/1', ok: false, session: 'owner', lines: [hostile] }));
+  const input = cutoverInput(ws.ds, ['--smoke', smoke]);
+  const row = cutoverChecklist(input, proofReport(input))
+    .split('\n')
+    .find((line) => line.startsWith('| Smoke result:'))!;
+  assert.equal(markdownCells(row).length, 3, row);
+  assert.ok(!row.includes('<script>'), row);
+  assert.ok(row.includes('&lt;script&gt;'), row);
+  assert.ok(!row.includes('[x](javascript:'), row);
+  assert.ok(row.includes('\\[x\\]'), row);
+  assert.ok(!row.includes('![](http://x)'), row);
+  assert.ok(row.includes('!\\[\\]'), row);
+});
+
 test('cutover-checklist is deterministic and filled with the app facts', () => {
   const ws = workspace();
   const args = [ws.ds, '--source-json', ws.source, '--since', ws.state, '--project', '1001', '--dc', 'eu'];
@@ -121,14 +222,24 @@ test('cutover-checklist is deterministic and filled with the app facts', () => {
     assert.match(text, new RegExp(`^## \\d+\\. ${heading}$`, 'm'));
   }
   // The rollback export is taken before the freeze as the pre-cut-over baseline.
+  const steps = text.slice(text.indexOf('## 1. Rollback baseline'));
   const order = ['Rollback baseline', 'Freeze Creator edits', 'Redirect', 'Rollback ready', 'Owner sign-off'].map((heading) =>
-    text.indexOf(` ${heading}`),
+    steps.indexOf(` ${heading}`),
   );
   for (let i = 1; i < order.length; i++) assert.ok(order[i]! > order[i - 1]!, `${order} should ascend`);
   assert.match(text, /## 1\. Rollback baseline\n\n- \[ \] `c2c rollback-export /);
   assert.match(text, /^Project 1001, data centre eu\. 2 form\(s\), 2 table\(s\), 3 record\(s\) in the export\.$/m);
   assert.match(text, /^  - Purchase_Order: 1 new, 0 changed at the last plan$/m);
-  assert.match(text, /Open Purchase_Order, add a record/);
+  assert.match(text, /Human: open Purchase_Order in the app, submit a test record, then open its report/);
+  assert.match(text, /^\| Check \| Type \| Evidence to record \|$/m);
+  assert.match(text, /^\| Source app parses.*\| Verified from local inputs \| c2c-proof.json:/m);
+  assert.match(text, /does not query Catalyst, Creator, users, DNS or links/);
+  assert.match(text, /Human: in Zoho Creator, open the app permissions/);
+  assert.match(text, /After reviewing and approving the plan, run the same command with `--confirm`/);
+  assert.match(text, /Human: review c2c-proof.md/);
+  // Missing external evidence stays explicitly open; local readiness is not a live cutover pass.
+  assert.match(text, /\| Smoke result: not run \| Human check \| Run the smoke command below and save its report/);
+  assert.match(text, /Human: open Purchase_Order in the app, submit a test record, then open its report/);
 });
 
 test('an unreadable target reports the loader error instead of a missing-target error', (t) => {
@@ -180,7 +291,8 @@ test('proof report holds counts, checksums, the smoke slot and readiness with ma
   assert.equal(proof.tables.find((table) => table.table === 'Vendor')!.checkpointChecksum, vendor.sourceChecksum);
   assert.equal(proof.readiness.manual.some((item) => item.startsWith('smoke:')), false);
   assert.match(readFileSync(join(out, PROOF_MD), 'utf8'), /^\| Vendor \| Vendor \| 2 \| 2 \| yes \| 0 \| 0 \| 0 \|$/m);
-  assert.match(readFileSync(join(out, CHECKLIST_MD), 'utf8'), /redirect is https:\/\/shop\.example\.test/);
+  assert.match(readFileSync(join(out, CHECKLIST_MD), 'utf8'), /invitation redirect to https:\/\/shop\.example\.test/);
+  assert.match(readFileSync(join(out, CHECKLIST_MD), 'utf8'), /Input report: .*smoke\.json/);
 });
 
 test('proof reads the report c2c smoke --report writes', () => {
@@ -242,8 +354,8 @@ test('a real rollback-export round trip ticks both rollback items', async () => 
   assert.match(viaFile, /- \[x\] `c2c rollback-export .*\(automatic\)/);
   assert.match(viaFile, /- \[x\] Keep the exported folder somewhere outside this workspace\. \(automatic\)/);
   // Human items remain open in the same checklist
-  assert.match(text, /- \[ \] Announce the cut-over window/);
-  assert.match(text, /- \[ \] Stop data entry in Creator/);
+  assert.match(text, /- \[ \] Human: notify Shop users of the cut-over window/);
+  assert.match(text, /- \[ \] Human: in Zoho Creator, open the app permissions/);
 });
 
 test('empty, partial and forged manifests keep the baseline open', async () => {
@@ -360,4 +472,133 @@ test('proof file and cutover checklist are byte-identical across two runs with r
   assert.equal(readFileSync(join(out1, CHECKLIST_MD), 'utf8'), readFileSync(join(out2, CHECKLIST_MD), 'utf8'));
   assert.equal(readFileSync(join(out1, PROOF_JSON), 'utf8'), readFileSync(join(out2, PROOF_JSON), 'utf8'));
   assert.equal(readFileSync(join(out1, PROOF_MD), 'utf8'), readFileSync(join(out2, PROOF_MD), 'utf8'));
+});
+
+// Each token is a whole untrusted field. The tail is what mdText must emit for
+// `<script>`, `[x](javascript:...)`, a pipe, and a newline plus `# heading`.
+// Dropping mdText on any one field leaves that field's raw tail in the output.
+const HOSTILE_TAIL = '<script>alert(1)</script> [x](javascript:alert(1)) |\n# heading';
+const ESCAPED_TAIL = '&lt;script&gt;alert(1)&lt;/script&gt; \\[x\\](javascript:alert(1)) \\| # heading';
+
+function hostile(field: string): string {
+  return `${field} ${HOSTILE_TAIL}`;
+}
+
+function assertFieldEscaped(md: string, field: string): void {
+  assert.ok(md.includes(`${field} ${ESCAPED_TAIL}`), `${field} bypassed mdText`);
+  assert.ok(!md.includes(`${field} <script>`), `${field} leaked a script tag`);
+  assert.equal(md.includes('[x](javascript:'), false, `${field} left an active link`);
+  assert.equal(
+    md.split('\n').some((line) => /^ {0,3}# heading\b/.test(line)),
+    false,
+    `${field} injected a heading`,
+  );
+  assert.equal(/(?<!\\)\]\(javascript:/.test(md), false, `${field} opened a javascript link`);
+}
+
+test('proof and checklist escape every untrusted field', () => {
+  const app = deriveIr(parse(APP));
+  app.name = hostile('check.app');
+  app.forms[0]!.displayName = hostile('check.formDisplay');
+  app.forms[1]!.name = hostile('check.formName');
+  app.profiles.push({
+    name: hostile('check.role'),
+    type: 'Users_Permissions',
+    properties: [],
+    modules: [],
+    span: app.forms[0]!.span,
+  });
+  const proof: ProofReport = {
+    schema: 'c2c-proof/1',
+    app: hostile('proof.app'),
+    checksum: hostile('proof.checksum') as ProofReport['checksum'],
+    source: hostile('proof.source'),
+    checkpointSince: hostile('proof.checkpointSince'),
+    tables: [
+      {
+        table: hostile('proof.table'),
+        form: hostile('proof.form'),
+        sourceRows: 1,
+        sourceChecksum: hostile('proof.sourceChecksum'),
+        checkpointRows: 1,
+        checkpointChecksum: hostile('proof.checkpointChecksum'),
+        match: false,
+        delta: { new: 1, changed: 2, deleted: 3, missing: false },
+      },
+    ],
+    smoke: {
+      status: hostile('proof.status') as ProofReport['smoke']['status'],
+      session: hostile('proof.session'),
+      blocker: hostile('proof.blocker'),
+      lines: [hostile('proof.line')],
+    },
+    readiness: { automatic: 50, band: hostile('proof.band'), manual: [hostile('proof.manual')] },
+  };
+  const proofMd = proofMarkdown(proof);
+  for (const field of [
+    'proof.app',
+    'proof.checksum',
+    'proof.source',
+    'proof.checkpointSince',
+    'proof.status',
+    'proof.session',
+    'proof.blocker',
+    'proof.line',
+    'proof.table',
+    'proof.form',
+    'proof.sourceChecksum',
+    'proof.checkpointChecksum',
+    'proof.band',
+    'proof.manual',
+  ]) {
+    assertFieldEscaped(proofMd, field);
+  }
+  assert.equal(proofMd.includes('<script>'), false);
+  const proofRow = proofMd.split('\n').find((line) => line.startsWith('|') && line.includes('proof.table'));
+  assert.ok(proofRow, proofMd);
+  assert.equal(markdownCells(proofRow!).length, 8, proofRow);
+
+  const input: CutoverInput = {
+    app,
+    sourceKind: hostile('check.source'),
+    state: { projectId: hostile('check.project'), slateUrl: hostile('check.url') },
+    scope: { org: '1', projectId: 'fallback', dc: hostile('check.dc') },
+    smoke: proof.smoke,
+    smokeSource: hostile('check.smokeSource'),
+    rollback: { status: 'invalid', dir: '/tmp/rollback', outsideWorkspace: true, checksumMatch: false, reason: hostile('check.rollbackReason') },
+  };
+  const checklist = cutoverChecklist(input, proof);
+  for (const field of [
+    'check.app',
+    'check.formDisplay',
+    'check.formName',
+    'check.role',
+    'check.project',
+    'check.dc',
+    'check.url',
+    'check.source',
+    'check.smokeSource',
+    'check.rollbackReason',
+    'proof.status',
+    'proof.session',
+    'proof.line',
+    'proof.table',
+    'proof.band',
+  ]) {
+    assertFieldEscaped(checklist, field);
+  }
+  assert.equal(checklist.includes('<script>'), false);
+  const smokeRow = checklist.split('\n').find((line) => line.startsWith('| Smoke result:'));
+  assert.ok(smokeRow, checklist);
+  assert.equal(markdownCells(smokeRow!).length, 3, smokeRow);
+  // The slate value is escaped text, not a Markdown link.
+  assert.equal(/\[[^\]]*\]\(https?:/.test(checklist), false);
+
+  const blockedSmoke: ProofReport = {
+    ...proof,
+    smoke: { status: 'fail', blocker: hostile('proof.blocker') },
+  };
+  const blockedList = cutoverChecklist({ ...input, smoke: blockedSmoke.smoke }, blockedSmoke);
+  assertFieldEscaped(blockedList, 'proof.blocker');
+  assert.equal(blockedList.includes('<script>'), false);
 });
