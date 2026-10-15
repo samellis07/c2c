@@ -30,10 +30,13 @@ never silently dropped ([no-silent-drop rule](../../docs/no-silent-drop.md),
 rule 8 in [the c2c rules](../../plugin/C2C.md)):
 
 - **Not supported in this version (counted):** payments, offline
-  mode, Form Email, the C8 Deluge dialect, Cliq bots, and native
-  mobile apps / MDM. The migration report uses that phrase for
-  these, and they still appear in the report's feature counts and
-  TODOs.
+  mode, Form Email, the C8 Deluge dialect, and Cliq bots. The
+  migration report uses that phrase for these, and they still
+  appear in the report's feature counts and TODOs.
+- **Not supported in this version (counted; on the roadmap):**
+  native mobile apps / MDM. The migration report uses that phrase
+  for them, and they still appear in the report's feature counts
+  and TODOs.
 - **Not applicable (out of scope):** marketplace publishing, the Zia
   AI builder, and on-prem Data Bridge. They do not count as gaps or
   TODOs and do not reduce the readiness score.

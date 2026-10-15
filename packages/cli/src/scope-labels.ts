@@ -14,7 +14,7 @@ export const OWNER_SCOPE = [
   { feature: 'Form Email', label: 'not supported in this version (counted)' },
   { feature: 'C8 dialect', label: 'not supported in this version (counted)' },
   { feature: 'Cliq bots', label: 'not supported in this version (counted)' },
-  { feature: 'Native mobile / MDM', label: 'not supported in this version (counted)' },
+  { feature: 'Native mobile / MDM', label: 'not supported in this version (counted; on the roadmap)' },
   { feature: 'Marketplace publishing', label: 'not applicable (out of scope)' },
   { feature: 'Zia AI builder', label: 'not applicable (out of scope)' },
   { feature: 'On-prem Data Bridge', label: 'not applicable (out of scope)' },
