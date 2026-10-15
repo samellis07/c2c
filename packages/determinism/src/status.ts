@@ -26,8 +26,9 @@
  * designers sizing patterns. The path must resolve outside the repo tree, so
  * private names can never be committed; the doc and summary are unchanged.
  */
-import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { compareEnUs } from '../../core/src/order.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { analyze } from '../../cli/src/analyze.js';
@@ -237,20 +238,134 @@ export function siteAttributionForDir(dir: string, label: string): SiteAttributi
  * the attribution file names private apps and constructs, so it must never be
  * committable.
  */
-export function resolveSitesPath(path: string, root: string = repoRoot()): string {
-  const outside = (base: string, candidate: string): boolean => {
-    const rel = relative(base, candidate);
-    return rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+function tryRealpath(path: string): string | undefined {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Canonical destination for a `--sites` path. The output file itself is
+ * followed when it exists — a symlinked file must not smuggle an in-repo
+ * target past the guard, including a dangling link — and otherwise the
+ * nearest existing parent is resolved, so a symlinked parent directory
+ * compares by target. The remainder is appended lexically.
+ */
+function canonicalSitesCandidate(abs: string): string {
+  let cur = abs;
+  for (let hops = 0; hops < 40; hops++) {
+    const entry = lstatSync(cur, { throwIfNoEntry: false });
+    if (!entry) break;
+    if (!entry.isSymbolicLink()) break;
+    cur = resolve(dirname(cur), readlinkSync(cur));
+  }
+  const direct = tryRealpath(cur);
+  if (direct) return direct;
+  const rest: string[] = [];
+  let node = cur;
+  for (;;) {
+    const parent = dirname(node);
+    if (parent === node) {
+      const base = tryRealpath(node) ?? node;
+      return rest.length ? join(base, ...rest.reverse()) : base;
+    }
+    rest.push(basename(node));
+    node = parent;
+    if (statSync(node, { throwIfNoEntry: false })) {
+      const base = tryRealpath(node) ?? node;
+      return join(base, ...rest.reverse());
+    }
+  }
+}
+
+/**
+ * Every checkout the `--sites` output must avoid: the current root, all
+ * worktrees of this repository (`git worktree list` covers the main
+ * checkout), and the common dir's main worktree in case the list missed it.
+ * A checkout that vanishes between calls is compared lexically.
+ */
+function sitesProtectedRoots(root: string): string[] {
+  const roots = new Map<string, string>();
+  const add = (candidate: string): void => {
+    const real = tryRealpath(candidate) ?? resolve(candidate);
+    if (!roots.has(real)) roots.set(real, candidate);
   };
+  add(root);
+  try {
+    const out = execFileSync('git', ['-C', root, 'worktree', 'list', '--porcelain'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    for (const line of out.split('\n')) {
+      if (line.startsWith('worktree ')) add(line.slice('worktree '.length).trim());
+    }
+  } catch {
+    // Not a git checkout, or git is unavailable: fall back to the root plus
+    // the work-tree walk below.
+  }
+  try {
+    let common = execFileSync('git', ['-C', root, 'rev-parse', '--git-common-dir'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (!isAbsolute(common)) common = resolve(root, common);
+    add(basename(common) === '.git' ? dirname(common) : common);
+  } catch {
+    // Ignore: the worktree list above is the primary source.
+  }
+  return [...roots.keys()];
+}
+
+/**
+ * Whether the volume holding `dir` ignores filename case (opt-in probe: an
+ * alias that differs only by case resolves to the same file). Exact-case
+ * volumes compare exactly, so a same-spelling-different-case path elsewhere
+ * stays a different path.
+ */
+function volumeIgnoresCase(dir: string): boolean {
+  const base = statSync(dir, { throwIfNoEntry: false });
+  if (!base?.isDirectory()) return false;
+  for (const alias of [dir.toUpperCase(), dir.toLowerCase()]) {
+    if (alias === dir) continue;
+    const other = statSync(alias, { throwIfNoEntry: false });
+    if (other && other.dev === base.dev && other.ino === base.ino) return true;
+  }
+  return false;
+}
+
+/** Nearest self-or-ancestor directory holding a `.git` entry: any git work tree. */
+function enclosingGitWorkTree(start: string): string | undefined {
+  let node = start;
+  for (;;) {
+    if (existsSync(join(node, '.git'))) return node;
+    const parent = dirname(node);
+    if (parent === node) return undefined;
+    node = parent;
+  }
+}
+
+export function resolveSitesPath(path: string, root: string = repoRoot()): string {
   const abs = resolve(path);
-  // Refuse lexically in-tree paths, and paths that land in the tree through a
-  // symlinked parent directory (the file itself need not exist yet).
-  const parent = dirname(abs);
-  const realInside =
-    statSync(parent, { throwIfNoEntry: false })?.isDirectory() &&
-    !outside(realpathSync(root), join(realpathSync(parent), basename(abs)));
-  if (!outside(root, abs) || realInside) {
-    throw new Error(`determinism:status: --sites path must be outside the repo tree: ${path}`);
+  const candidate = canonicalSitesCandidate(abs);
+  const protectedRoots = sitesProtectedRoots(root);
+  const ignoreCase =
+    protectedRoots.some((protectedRoot) => volumeIgnoresCase(protectedRoot)) || volumeIgnoresCase(dirname(candidate));
+  const fold = (value: string): string => (ignoreCase ? value.toLowerCase() : value);
+  const folded = fold(candidate);
+  const inside = (base: string): boolean => {
+    const foldedBase = fold(base);
+    return folded === foldedBase || folded.startsWith(foldedBase + sep);
+  };
+  const hit = protectedRoots.find((protectedRoot) => inside(protectedRoot));
+  // Belt and braces: refuse any git work tree at all, not just this
+  // repository's checkouts, so a nested or foreign repo is never committable.
+  const workTree = hit ? undefined : enclosingGitWorkTree(candidate);
+  if (hit ?? workTree) {
+    throw new Error(
+      `determinism:status: --sites path must be outside the repo tree: ${path} (resolves inside ${hit ?? workTree})`,
+    );
   }
   return abs;
 }

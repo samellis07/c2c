@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { emptyApp, type App, type Workflow } from '../../core/src/ir.js';
@@ -299,6 +300,52 @@ test('resolveSitesPath refuses in-repo paths and accepts outside paths', () => {
   assert.equal(resolveSitesPath(join(dir, 'sites.json')), join(dir, 'sites.json'));
   // A path that escapes the root through .. is outside, not inside.
   assert.equal(resolveSitesPath(join(root, '..', 'outside-sites.json')), join(root, '..', 'outside-sites.json'));
+});
+
+test('resolveSitesPath refuses every worktree, aliases, and symlink escapes', () => {
+  const git = (args: string[]): string =>
+    execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  // The main checkout is a different worktree of this repository.
+  const commonArg = git(['rev-parse', '--git-common-dir']);
+  const common = commonArg.startsWith('/') ? commonArg : join(root, commonArg);
+  const mainWorktree = common.endsWith('.git') ? dirname(common) : common;
+  assert.throws(() => resolveSitesPath(join(mainWorktree, 'sites.json')), /outside the repo tree/);
+  // Any other registered worktree of this repository, when one exists.
+  const sibling = git(['worktree', 'list', '--porcelain'])
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice('worktree '.length))
+    .find((worktree) => worktree !== root && worktree !== mainWorktree);
+  if (sibling) assert.throws(() => resolveSitesPath(join(sibling, 'sites.json')), /outside the repo tree/);
+  // Case-folded checkout path: the same directory on case-insensitive volumes.
+  const upper = root.toUpperCase();
+  if (upper !== root && existsSync(upper)) {
+    assert.throws(() => resolveSitesPath(join(upper, 'sites.json')), /outside the repo tree/);
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-sites-'));
+  // A symlinked output file whose target sits inside the repo.
+  const linkFile = join(dir, 'link-sites.json');
+  symlinkSync(join(root, 'package.json'), linkFile);
+  assert.throws(() => resolveSitesPath(linkFile), /outside the repo tree/);
+  // A dangling link pointing inside the repo is refused the same way.
+  const dangling = join(dir, 'dangling-sites.json');
+  symlinkSync(join(root, 'no-such-dir', 'sites.json'), dangling);
+  assert.throws(() => resolveSitesPath(dangling), /outside the repo tree/);
+  // A symlinked parent directory into the repo.
+  const linkDir = join(dir, 'linkroot');
+  symlinkSync(root, linkDir);
+  assert.throws(() => resolveSitesPath(join(linkDir, 'sites.json')), /outside the repo tree/);
+  // Relative paths resolved from a repo subdirectory, including a .. escape.
+  const previousCwd = process.cwd();
+  process.chdir(join(root, 'docs'));
+  try {
+    assert.throws(() => resolveSitesPath('rel-sites.json'), /outside the repo tree/);
+    assert.throws(() => resolveSitesPath(join('..', 'sites.json')), /outside the repo tree/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+  // Outside every repo: accepted.
+  assert.equal(resolveSitesPath(join(dir, 'sites.json')), join(dir, 'sites.json'));
 });
 
 test('--sites writes per-app attribution; the rendered doc is byte-identical without it', () => {
