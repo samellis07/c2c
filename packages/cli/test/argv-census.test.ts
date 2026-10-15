@@ -17,6 +17,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { ARGV_SPEC, argvProblems, argvShapeProblems } from '../src/argv.js';
+import { DELTA_SOURCES } from '../../deploy/src/delta-cli.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -31,6 +32,10 @@ const ROOTS: Record<string, string[]> = {
   precheck: ['precheck'],
   status: ['statusCli'],
   verify: ['verifyCli'],
+  'rollback-export': ['doctorGateForArgs', 'rollbackExportCli'],
+  'cutover-checklist': ['cutoverCli'],
+  proof: ['cutoverCli'],
+  'iac-drift': [],
 };
 
 const READ = /(?:\b(?:flag|valueOf)\(\s*(?:[\w.]+,\s*)?|\b(?:args|rest|restAll)\.(?:includes|indexOf)\(|\b(?:args|rest)\[\w+(?: \+ 1)?\] [!=]== )'(--[a-z][a-z0-9-]*)'/g;
@@ -51,7 +56,8 @@ function functionBodies(): Map<string, string> {
 
 function dispatchBlock(cmd: string): string {
   const text = readFileSync(path.join(repo, 'packages', 'cli', 'src', 'c2c.ts'), 'utf8');
-  const start = text.indexOf(`  if (cmd === '${cmd}') {`);
+  // A branch may serve several commands: `if (cmd === 'a' || cmd === 'b') {`.
+  const start = text.search(new RegExp(`^  if \\((?:cmd === '[^']+' \\|\\| )*cmd === '${cmd}'(?: \\|\\| cmd === '[^']+')*\\) \\{`, 'm'));
   assert.ok(start >= 0, `c2c.ts dispatches ${cmd}`);
   const end = text.indexOf('\n  }\n', start);
   return text.slice(start, end);
@@ -73,6 +79,8 @@ function census(cmd: string, bodies: Map<string, string>): Set<string> {
     seen.add(name);
     scan(bodies.get(name) as string);
   }
+  // deltaSource reads `--source-${kind}` for each DELTA_SOURCES kind.
+  if (seen.has('deltaSource')) for (const kind of Object.keys(DELTA_SOURCES)) flags.add(`--source-${kind}`);
   return flags;
 }
 
@@ -83,9 +91,9 @@ test('every command in ARGV_SPEC has a census', () => {
 for (const cmd of Object.keys(ROOTS)) {
   test(`${cmd}: ARGV_SPEC lists exactly the flags the implementation reads`, () => {
     const read = census(cmd, functionBodies());
-    // precheck intentionally accepts only --json; requiring four flags would
-    // reject its accurate one-flag census.
-    if (cmd !== 'precheck') assert.ok(read.size >= 4, `${cmd}: the census found the command's flags (${[...read].join(' ')})`);
+    // precheck intentionally accepts only --json and iac-drift no flag at all;
+    // requiring four flags would reject their accurate census.
+    if (cmd !== 'precheck' && cmd !== 'iac-drift') assert.ok(read.size >= 4, `${cmd}: the census found the command's flags (${[...read].join(' ')})`);
     const spec = new Set(Object.keys(ARGV_SPEC[cmd].flags));
     const missing = [...read].filter((name) => !spec.has(name)).sort();
     const unread = [...spec].filter((name) => !read.has(name)).sort();
@@ -158,4 +166,24 @@ test('migrate-data: --source-csv and --seed each need their own inputs', () => {
   assert.deepEqual(argvProblems('migrate-data', ['--seed', 'seed.json']), ['migrate-data --seed needs the seed file and --ds or --app']);
   assert.deepEqual(argvProblems('migrate-data', ['--seed', 'seed.json', '--ds', 'app.ds']), []);
   assert.deepEqual(argvProblems('migrate-data', ['--source-csv', 'data', '--ds', 'app.ds', '--seed', 'seed.json']), ['c2c: pass either --seed or --source-csv, not both']);
+});
+
+test('cutover-checklist, proof, rollback-export and iac-drift refuse a flag they do not read', () => {
+  for (const cmd of ['cutover-checklist', 'proof']) {
+    assert.deepEqual(argvShapeProblems(cmd, ['app.ds', '--source-json', 'export', '--since', 'state', '--smoke', 'smoke.json', '--rollback-export', 'rollback', '--project', '<project-id>', '--dc', 'us', '--config', 'c2c-deploy.json', '--out', 'out']), []);
+    assert.deepEqual(argvShapeProblems(cmd, ['app.ds', '--rollback-dir', 'rollback']), ['unknown flag --rollback-dir', 'unexpected argument rollback']);
+    assert.deepEqual(argvShapeProblems(cmd, ['app.ds', '--smoke']), ['--smoke needs a value']);
+  }
+  assert.deepEqual(argvShapeProblems('rollback-export', ['--ds', 'app.ds', '--out', 'out', '--rows', 'rows']), []);
+  assert.deepEqual(argvShapeProblems('rollback-export', ['--ds', 'app.ds', '--out', 'out', '--project', '<project-id>', '--org', '<org-id>', '--confirm']), []);
+  assert.deepEqual(argvShapeProblems('rollback-export', ['--ds', 'app.ds', '--out', 'out', '--rows', 'rows', '--bogus']), ['unknown flag --bogus']);
+  assert.deepEqual(argvShapeProblems('iac-drift', ['a.json', 'b.json']), []);
+  assert.deepEqual(argvShapeProblems('iac-drift', ['a.json', 'b.json', '--json']), ['unknown flag --json']);
+  assert.deepEqual(argvShapeProblems('iac-drift', ['a.json']), ['two template files are required']);
+  assert.deepEqual(argvShapeProblems('iac-drift', ['a.json', 'b.json', 'c.json']), ['unexpected argument c.json']);
+});
+
+test('deploy: --backfill-shadows --confirm does not need --function-env; a plain --confirm still does', () => {
+  assert.deepEqual(argvProblems('deploy', ['app.ds', '--backfill-shadows', '--confirm']), []);
+  assert.match(argvProblems('deploy', ['app.ds', '--confirm']).join('\n'), /^--confirm needs --function-env <file> /);
 });

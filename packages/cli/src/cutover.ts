@@ -105,6 +105,9 @@ function fingerprints(app: App, loaded: CsvLoad): Map<string, Record<string, str
   );
 }
 
+/** Where a passing smoke report comes from: `--confirm --report` only ever writes a blocked one. */
+const SMOKE_PASS_HINT = 'run c2c smoke --result-code <code> --report <file> and pass that file with --smoke';
+
 export function proofReport(input: CutoverInput): ProofReport {
   const schema = generateSchema(input.app);
   const report = analyze(input.app);
@@ -150,10 +153,12 @@ export function proofReport(input: CutoverInput): ProofReport {
   if (smoke.status !== 'pass') {
     manual.push(
       smoke.status === 'fail'
-        ? smoke.blocker
-          ? `smoke: the run was blocked — ${smoke.blocker}; resolve it and run c2c smoke again`
-          : 'smoke: fix the failed steps and run c2c smoke again'
-        : 'smoke: run c2c smoke --confirm --report <file> and pass it with --smoke',
+        ? smoke.blocker === 'smoke-page' || smoke.blocker?.startsWith('smoke-page ')
+          ? `smoke: open ${smoke.blocker.slice('smoke-page '.length) || "the app's #/admin/smoke page"} signed in as the owner, then ${SMOKE_PASS_HINT}`
+          : smoke.blocker
+            ? `smoke: the run was blocked — ${smoke.blocker}; resolve it and run c2c smoke again`
+            : 'smoke: fix the failed steps and run c2c smoke again'
+        : `smoke: run c2c smoke --confirm, open the #/admin/smoke page it names signed in as the owner, then ${SMOKE_PASS_HINT}`,
     );
   }
   manual.push('sign-in: invite users and confirm each role signs in');
@@ -333,7 +338,8 @@ export function cutoverChecklist(input: CutoverInput, proof: ProofReport): strin
     '',
     '## 4. Smoke',
     '',
-    `- [ ] Human: run ${mdInlineCode(`c2c smoke <app.ds> --project ${project} --url ${slate} --confirm --report <report.json>`)}; record report path and result. This command does not drive a browser.`,
+    `- [ ] Human: run ${mdInlineCode(`c2c smoke <app.ds> --project ${project} --url ${slate} --confirm`)}; it does not drive a browser — it names the app's #/admin/smoke page. Open that page signed in as the owner and copy the result code it shows.`,
+    `- [ ] Human: run ${mdInlineCode(`c2c smoke <app.ds> --project ${project} --url ${slate} --result-code <code> --report <report.json>`)}; record report path and result, and pass that report to cutover-checklist with \`--smoke\`.`,
     ...app.forms.map((form) => `- [ ] Human: open ${mdText(form.displayName ?? form.name)} in the app, submit a test record, then open its report and confirm that same record appears. Record form, report, and pass/fail; remove test data only with explicit approval.`),
     '',
     '## 5. Sign-in',
@@ -612,7 +618,7 @@ export function cutoverInput(target: string, args: readonly string[]): CutoverIn
 export const CUTOVER_USAGE =
   'usage: c2c cutover-checklist <file|dir> [--source-json <dir>|--source-csv <dir>|--source-backup <zip|dir>] [--since <state-file|dir>] [--smoke <file>] [--rollback-export <dir|file>] [--project <id>] [--dc <dc>] [--config <c2c-deploy.json>] [--out <dir>]\n' +
   '       c2c proof <file|dir> [same options]\n' +
-  '       --smoke is the file c2c smoke --report <file> wrote (a {"status":"pass"} result also works).\n' +
+  '       --smoke is the file c2c smoke --result-code <code> --report <file> wrote (a {"status":"pass"} result also works).\n' +
   '       --rollback-export is the directory or manifest file from c2c rollback-export.\n' +
   `       --out writes ${CHECKLIST_MD}, ${PROOF_JSON} and ${PROOF_MD}; otherwise the checklist (or the proof) is printed.\n`;
 

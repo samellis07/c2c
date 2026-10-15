@@ -188,7 +188,7 @@ export async function rollbackExportCli(args: readonly string[], io: Io): Promis
     for (const count of result.counts) io.stdout(`${count.form}: rows ${count.rows}\n`);
     io.stdout(`import order: ${result.order.join(', ')}\n`);
     for (const line of result.warnings) io.stdout(`note: ${line}\n`);
-    io.stdout(`wrote ${result.files.length} files to ${out}\n`);
+    io.stdout(`wrote ${result.files.length + 1} files to ${out} (${result.files.length} export files and ${result.manifest.path})\n`);
     return 0;
   } catch (err) {
     return fail(io, err);

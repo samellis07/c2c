@@ -57,21 +57,21 @@
  *                    --owner <name> --app <link> --report <Report:Table> --checkpoint <file>
  *                                   cursor read, batches of at most 200, checkpoint of cursors and ids.
  *                                   Creator rehearsal. Live writes are refused. This command does not POST.
- *   c2c migrate-data --seed <file> --ds <file|dir> [--app <link>] --project <id> --org <org> [--confirm]
+ *   c2c migrate-data --seed <file> --ds <file|dir> [--app <link>] [--project <id-or-name>] [--org <id>] [--confirm]
  *                                   [--login-user <email>]
  *                                   seed-file writes. Plans unless --confirm. --confirm requires --ds.
  *                                   --app defaults to the application name in --ds.
  *                                   Same project guards as deploy.
  *                                   --ds enables lookup remap from the app schema; synthetic
  *                                   seed.json files are converted in code (docs/seed-schema.md).
- *   c2c migrate-data --source-json <dir> --ds <file> --project <id> --org <org> [--confirm] [--allow-empty]
+ *   c2c migrate-data --source-json <dir> --ds <file|dir> [--project <id-or-name>] [--org <id>] [--confirm] [--allow-empty]
  *                                   Creator JSON report export. Record ID is the source id. A lookup object
  *                                   is remapped by its record ID. Counts come from the export. Same guards.
- *   c2c migrate-data --source-csv <dir> --ds <file> --project <id> --org <org> [--confirm] [--allow-empty]
+ *   c2c migrate-data --source-csv <dir> --ds <file|dir> [--project <id-or-name>] [--org <id>] [--confirm] [--allow-empty]
  *                                   Creator CSV report export. counts.json is optional. Without an ID column
  *                                   the source id is derived and the plan says to prefer the JSON export.
  *                                   A lookup cell may be the display value. Same guards.
- *   c2c migrate-data --source-backup <zip|dir> --ds <file> --project <id> --org <org> [--confirm] [--allow-empty]
+ *   c2c migrate-data --source-backup <zip|dir> --ds <file|dir> [--project <id-or-name>] [--org <id>] [--confirm] [--allow-empty]
  *                                   Creator application backup ("Schema + Data + Include Files"). Every field,
  *                                   lookup record ids, and subform rows. Counts come from the backup. Same guards.
  *   c2c users plan --source-backup <zip|dir> --ds <file|dir> [--out <dir>] [--state <file>] [--salt <s>] [--social <a,b>] [--json]
@@ -87,13 +87,13 @@
  *                                   Plans unless --confirm. --confirm upserts by source id and records the checkpoint.
  *                                   Deletions are reported; they are applied only with --apply-deletes, and only
  *                                   from a provably complete source. Same guards.
- *   c2c cutover-checklist <file|dir> [same source flags] [--since <state>] [--smoke <file>] [--rollback-export <dir|file>] [--out <dir>]
+ *   c2c cutover-checklist <file|dir> [same source flags] [--since <state>] [--smoke <file>] [--rollback-export <dir|file>] [--project <id>] [--dc <dc>] [--config <file>] [--out <dir>]
  *                                   cut-over checklist filled with the app's facts; --out also writes c2c-proof.json/.md.
  *   c2c proof <file|dir> [same options]
  *                                   counts, checksums, smoke result and readiness (% automatic plus the manual items).
- *   c2c rollback-export --ds <file|dir> --out <dir> (--rows <dir> | --project <id> --org <org> --confirm)
+ *   c2c rollback-export --ds <file|dir> --out <dir> (--rows <dir> | [--project <id>] [--org <id>] [--confirm])
  *                                   Data Store rows as CSV files for Creator's report import, ids in a side file.
- *   c2c deploy <file|dir> --project <id> --org <org> [--confirm] [--out <dir>] [--mail] [--ui vanilla|react] [--async-on-success [--triggers-wired]]
+ *   c2c deploy <file|dir> [--project <id>] [--org <id>] [--confirm] [--out <dir>] [--mail] [--ui vanilla|react] [--async-on-success [--triggers-wired]]
  *                                   Catalyst app dir and a full plan. Development only. CLI deploy runs only with --confirm.
  *                                   react is the default (web/ built to web/dist); --ui vanilla keeps the previous target as the fallback.
  *   c2c plan <file|dir> --out <dir> [--dc <dc>] [--mail]
@@ -109,7 +109,7 @@
  *                                   add-report-column, add-role) and its plan diff. Dry run unless --apply;
  *                                   --apply records it in the edits log that plan and deploy replay.
  *                                   A rename stays a column rename. A drop needs --confirm.
- *   c2c deploy <file|dir> --project <id> --org <org> --backfill-shadows [--confirm]
+ *   c2c deploy <file|dir> --backfill-shadows [--confirm] [--project <id>] [--org <id>]
  *                                   fill NULL <Field>__n shadows from the exact varchar (rows that predate the column).
  *   c2c smoke <file|dir> --project <id> --org <org> [--url <fn-base>] [--confirm] [--auth-token <token> | --session-cookie <name=value>]
  *                                   dry-run plan of the generated routes (submit, read-back, report, cleanup); calls only with --confirm.
@@ -199,19 +199,21 @@ const USAGE =
       '              (when some tables are blocked, seed.json and the CSVs for unblocked tables are still written; blocked tables get no CSV, junction rows or fixture files)\n' +
       '       c2c migrate-data --dry-run --dc <dc> --creator-base <url> --catalyst-base <url> --owner <name> --app <link> --report <Report:Table> --checkpoint <file>\n' +
       '       c2c migrate-data --seed <file> --ds <file|dir> [--app <link>] [--project <id-or-name>] [--org <id>] [--confirm] [--checkpoint <file>] [--login-user <email>]\n' +
-      '       c2c migrate-data --source-json <dir> --ds <file> --project <id> --org <org> [--app <link>] [--confirm] [--allow-empty]\n' +
-      '       c2c migrate-data --source-csv <dir> --ds <file> --project <id> --org <org> [--app <link>] [--confirm] [--allow-empty]\n' +
-      '       c2c migrate-data --source-backup <zip|dir> --ds <file> --project <id> --org <org> [--app <link>] [--confirm] [--allow-empty]\n' +
+      '       c2c migrate-data --source-json <dir> --ds <file|dir> [--project <id-or-name>] [--org <id>] [--app <link>] [--confirm] [--allow-empty] [--checkpoint <file>]\n' +
+      '       c2c migrate-data --source-csv <dir> --ds <file|dir> [--project <id-or-name>] [--org <id>] [--app <link>] [--confirm] [--allow-empty] [--checkpoint <file>]\n' +
+      '       c2c migrate-data --source-backup <zip|dir> --ds <file|dir> [--project <id-or-name>] [--org <id>] [--app <link>] [--confirm] [--allow-empty] [--checkpoint <file>]\n' +
       '       c2c users plan --source-backup <zip|dir> --ds <file|dir> [--out <dir>] [--state <file>] [--salt <s>] [--social <a,b>] [--json]\n' +
       '       c2c users invite --source-backup <zip|dir> --ds <file|dir> --project <id> --org <org> --confirm [--slate-domain <host>] [--role-ids <name=id,...>] [--state <file>]\n' +
       '       c2c sync-delta --source-json <dir> --ds <file|dir> --since <state-file|dir> [--project <id>] [--org <org>] [--confirm] [--apply-deletes] [--allow-mass-delete] [--max-delete-percent <pct>]\n' +
       '              (--source-csv <dir> and --source-backup <zip|dir> read the same reports)\n' +
-      '       c2c cutover-checklist <file|dir> [--source-json|--source-csv <dir>|--source-backup <zip|dir>] [--since <state-file|dir>] [--smoke <file>] [--rollback-export <dir|file>] [--out <dir>]\n' +
+      '       c2c cutover-checklist <file|dir> [--source-json|--source-csv <dir>|--source-backup <zip|dir>] [--since <state-file|dir>] [--smoke <file>] [--rollback-export <dir|file>] [--project <id>] [--dc <dc>] [--config <c2c-deploy.json>] [--out <dir>]\n' +
       '       c2c proof <file|dir> [same options as cutover-checklist]\n' +
-      '       c2c rollback-export --ds <file|dir> --out <dir> (--rows <dir> | --project <id> --org <org> --confirm)\n' +
+      '       c2c rollback-export --ds <file|dir> --out <dir> --rows <dir>\n' +
+      '       c2c rollback-export --ds <file|dir> --out <dir> [--project <id-or-name>] [--org <id>] [--app <link>] [--confirm] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
+      '              (without --rows: plans the tables to read; --confirm reads the rows from the project)\n' +
       '       c2c verify --data-parity --ds <file|dir> (--source-json <dir> | --source-csv <dir> | --source-backup <zip|dir>) --rows <dir> [--json]\n' +
-      '       c2c deploy <file|dir> --project <id> --org <org> [--env Development] [--out <dir>] [--mail] [--confirm]\n' +
-      '       c2c deploy <file|dir> --project <id> --org <org> --backfill-shadows [--confirm]\n' +
+      '       c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address> --mail-sender-verified]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--subset-shims] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>]\n' +
+      '       c2c deploy <file|dir> --backfill-shadows [--confirm] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
       '       c2c plan <file|dir> --out <dir> [--dc <dc>] [--mail] [--allow-budget-fail]\n' +
       '       c2c provision --out <dir> [--status|--next|--confirm --run <id>|--record <id> [--result <file>] [--applied]]\n' +
       '       c2c edit <file|dir> <op> ... [--dc <dc>] [--edits <file>] [--out <dir>] [--json] [--apply] [--confirm]\n' +

@@ -1,6 +1,7 @@
 /**
  * The argument contract of the live c2c commands (deploy, provision, smoke,
- * migrate-data, seed, doctor): the flags each one accepts and whether a flag
+ * migrate-data, seed, doctor, rollback-export, cutover-checklist, proof,
+ * iac-drift, ...): the flags each one accepts and whether a flag
  * takes a value. c2c.ts refuses an unknown flag or a value flag without its
  * value with exit 2 before dispatch, so a renamed or dropped flag is an error,
  * never silently ignored.
@@ -14,8 +15,8 @@ import { provisionArgsProblem, readFunctionEnv, seedMigrateArgsProblem, smokeArg
 type Arity = 'value' | 'bool';
 
 interface CommandSpec {
-  /** How many leading positionals the command takes (the app source). */
-  positional: 'none' | 'optional' | 'required';
+  /** How many leading positionals the command takes (the app source; iac-drift's two templates). */
+  positional: 'none' | 'optional' | 'required' | 'pair';
   flags: Readonly<Record<string, Arity>>;
 }
 
@@ -46,6 +47,25 @@ export const DOCTOR_GATE_FLAGS: Readonly<Record<string, readonly string[]>> = {
   'sync-delta': ['--confirm'],
   'rollback-export': ['--confirm'],
   edit: ['--apply', '--confirm'],
+};
+
+/** cutover-checklist and proof read the same options. */
+const CUTOVER_FLAGS: Readonly<Record<string, Arity>> = {
+  '--config': 'value',
+  '--dc': 'value',
+  '--org': 'value',
+  '--project': 'value',
+  '--projects': 'value',
+  '--allow-empty': 'bool',
+  '--out': 'value',
+  '--rollback': 'value',
+  '--rollback-export': 'value',
+  '--rollback-manifest': 'value',
+  '--since': 'value',
+  '--smoke': 'value',
+  '--source-backup': 'value',
+  '--source-csv': 'value',
+  '--source-json': 'value',
 };
 
 export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
@@ -202,6 +222,21 @@ export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
       '--json': 'bool',
     },
   },
+  'rollback-export': {
+    positional: 'none',
+    flags: {
+      ...SCOPE,
+      '--catalyst-base': 'value',
+      '--confirm': 'bool',
+      '--ds': 'value',
+      '--env': 'value',
+      '--out': 'value',
+      '--rows': 'value',
+    },
+  },
+  'cutover-checklist': { positional: 'required', flags: CUTOVER_FLAGS },
+  proof: { positional: 'required', flags: CUTOVER_FLAGS },
+  'iac-drift': { positional: 'pair', flags: {} },
 };
 
 /**
@@ -231,8 +266,10 @@ export function argvShapeProblems(cmd: string, args: readonly string[]): string[
     }
   }
   if (spec.positional === 'none' && positionals.length) problems.push(`unexpected argument ${positionals[0]}`);
-  if (spec.positional !== 'none' && positionals.length > 1) problems.push(`unexpected argument ${positionals[1]}`);
+  const most = spec.positional === 'pair' ? 2 : 1;
+  if (spec.positional !== 'none' && positionals.length > most) problems.push(`unexpected argument ${positionals[most]}`);
   if (spec.positional === 'required' && (!positionals.length || args[0] !== positionals[0])) problems.push('the app source must come first');
+  if (spec.positional === 'pair' && positionals.length < 2) problems.push('two template files are required');
   return problems;
 }
 
@@ -261,7 +298,8 @@ export function argvProblems(cmd: string, args: readonly string[]): string[] {
   const rest = args[0] !== undefined && !args[0].startsWith('--') ? args.slice(1) : args;
   const trimmed = (text: string | undefined) => text?.trim().split('\n')[0];
   try {
-    if (cmd === 'deploy') readFunctionEnv(valueOf(rest, '--function-env'), rest.includes('--confirm'));
+    // --backfill-shadows returns before deploy reads the function env.
+    if (cmd === 'deploy' && !rest.includes('--backfill-shadows')) readFunctionEnv(valueOf(rest, '--function-env'), rest.includes('--confirm'));
   } catch (err) {
     problems.push(err instanceof Error ? err.message : String(err));
   }

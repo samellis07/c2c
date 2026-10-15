@@ -72,3 +72,27 @@ test('cli without arguments prints usage and exits 2', () => {
   assert.match(result.stderr, /usage: c2c parse/);
   assert.match(result.stderr, /\(when some tables are blocked, seed\.json and the CSVs for unblocked tables are still written; blocked tables get no CSV, junction rows or fixture files\)/);
 });
+
+test('cutover-checklist, proof, rollback-export and iac-drift refuse an unknown flag with exit 2 before running', () => {
+  const cases: [string[], string][] = [
+    [['cutover-checklist', fixture, '--rollback-dir', 'rollback'], 'c2c cutover-checklist: unknown flag --rollback-dir'],
+    [['proof', fixture, '--rollback-dir', 'rollback'], 'c2c proof: unknown flag --rollback-dir'],
+    [['rollback-export', '--ds', fixture, '--out', 'out', '--rows', 'rows', '--bogus'], 'c2c rollback-export: unknown flag --bogus'],
+    [['iac-drift', 'a.json', 'b.json', '--json'], 'c2c iac-drift: unknown flag --json'],
+  ];
+  for (const [args, message] of cases) {
+    const result = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+    assert.equal(result.status, 2, args.join(' '));
+    assert.equal(result.stderr.trim(), message);
+    assert.equal(result.stdout, '');
+  }
+});
+
+test('--help prints the command usage and exits 0 wherever it appears', () => {
+  for (const args of [['iac-drift', '--help'], ['iac-drift', 'a.json', '--help'], ['deploy', '--help'], ['deploy', fixture, '--backfill-shadows', '--help']]) {
+    const result = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+    assert.equal(result.status, 0, args.join(' '));
+    assert.match(result.stdout, new RegExp(`c2c ${args[0]} `));
+    assert.equal(result.stderr, '');
+  }
+});
