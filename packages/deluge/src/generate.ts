@@ -537,7 +537,12 @@ function emitFormHandler(
       });
     }
   }
-  const serverBody = serverParts.join('\n');
+  // A merged route can contain several independently failing scripts. Keep
+  // their boundaries so the event replay ledger can resume after a completed
+  // script without repeating its side effects.
+  const serverBody = group.length > 1 && serverParts.length > 1
+    ? serverParts.map((part, i) => `await shim.__c2cScript(${i}, async () => {\n${indent(part)}\n});`).join('\n')
+    : serverParts.join('\n');
   if (serverBody.trim()) {
     const systemWrite =
       writeKinds.size === 0 ? null : writeKinds.size === 1 ? [...writeKinds][0]! : 'add-or-edit';
@@ -3858,6 +3863,7 @@ ${opts.recordEvents ? `export const recordEvents = ${JSON.stringify(opts.recordE
 ` : ''}${schemaExports}
 ${subformRowHelper}${liveHelpersBlock}export async function handle(ctx) {
   const shim = ctx.shim;
+  if (!shim.__c2cScript) shim.__c2cScript = async (_index, run) => run();
 ${indent(opts.body)}
 }
 

@@ -314,9 +314,7 @@ test('blocker 2: replaying the same envelope twice runs its side effect once', a
   }
 });
 
-test('blocker 2: replay after a mid-module failure re-runs the whole merged module', async () => {
-  // Same form event -> one module: the completion ledger fences per module,
-  // so a failure in the second script replays the first script too.
+test('blocker 2: replay after a mid-module failure resumes at the failed script', async () => {
   const g = generate(twoModuleApp(), { asyncOnSuccess: true });
   const { datastore, tables } = mockDatastore({ Orders: ['ROWID'], Jobs: ['ROWID'], First_Log: ['ROWID'], Second_Log: ['ROWID'] });
   const [row] = await datastore.insert('Jobs', [{ Title: 'job-1' }]);
@@ -343,8 +341,28 @@ test('blocker 2: replay after a mid-module failure re-runs the whole merged modu
     const result = await sweeper.sweep!({});
     assert.equal(result.resolved, 1, 'the sweep replay resolved the failure marker');
     assert.equal(marker.State, 'resolved');
-    assert.equal((tables.get('First_Log') ?? []).length, 2, 'the merged module replayed script A');
+    assert.equal((tables.get('First_Log') ?? []).length, 1, 'completed script A is not repeated on replay');
     assert.equal((tables.get('Second_Log') ?? []).length, 1, 'script B ran on replay');
+  } finally {
+    delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('form event cancellation stops later scripts in the merged module', async () => {
+  const a = app({ workflows: [
+    workflow({ name: 'Jobs A', form: 'Jobs', event: 'on success', deluge: { text: 'cancel submit "stop";', span: Z } }),
+    workflow({ name: 'Jobs B', form: 'Jobs', event: 'on success', deluge: { text: 'insert into Second_Log[Note = "B"];', span: Z } }),
+  ] });
+  const g = generate(a, { asyncOnSuccess: false });
+  const { datastore, tables } = mockDatastore({ Jobs: ['ROWID'], Second_Log: ['ROWID'] });
+  const [row] = await datastore.insert('Jobs', [{ Title: 'job-1' }]);
+  (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = datastore;
+  const { root, load } = await materialize(g, { mode: 'live', appTimeZone: 'UTC' });
+  try {
+    const handler = await load('functions/aio/jobs/on-success.mjs');
+    await assert.rejects(handler.handle!({ shim: { validate: { cancelSubmit: () => { throw Object.assign(new Error('stop'), { code: 'SUBMIT_REFUSED' }); } } }, rowId: String(row!.ROWID) }));
+    assert.equal((tables.get('Second_Log') ?? []).length, 0, 'later script did not run after cancel submit');
   } finally {
     delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
     rmSync(root, { recursive: true, force: true });

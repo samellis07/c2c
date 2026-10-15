@@ -247,6 +247,12 @@ export async function markProcessed(datastore, key, spec) {
   return { key, spec, inserted: true };
 }
 
+export async function updateFailureEnvelope(datastore, key, envelope) {
+  const rows = await datastore.query(DEAD_LETTER_TABLE, \`Event_Key = '\${quote(clip(key, 255))}'\`, 1, 0, "ORDER BY ROWID");
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (row && typeof row === "object") await datastore.update(DEAD_LETTER_TABLE, [{ ROWID: row.ROWID, Envelope: clip(JSON.stringify(envelope), 16000) }]);
+}
+
 export async function recordFailure(datastore, marker) {
   const key = clip(marker.key, 255);
   const now = new Date().toISOString();
@@ -317,13 +323,13 @@ export function afterCommitModule(opts: { app: App; banner: (lines: string[]) =>
     'id, event time) — never record data — and each replay reloads the row from',
     'the store. A redelivered event that already ran a module skips it via the',
     `per-module completion ledger (${PROCESSED_TABLE}). Delivery is at-least-once`,
-    'per module: effects within a failed module, or a module interrupted before',
-    'its ledger write, can repeat on replay.',
+    'per script within a merged module: completed scripts are skipped on replay;',
+    'effects within a failing script can repeat.',
     'The event payload shape is the documented envelope {data{row,table_details},',
     'action,event_time}; fields not present are tolerated as empty.',
     'This file is not an HTTP route. No client can call it.',
   ])}${JOB_LIVE_IMPORTS}import { createRuntime } from "creator-to-catalyst/shims";
-import { isProcessed, markProcessed, markerKey, recordFailure, DEAD_LETTER_TABLE } from "../c2c-deadletter.mjs";
+import { isProcessed, markProcessed, updateFailureEnvelope, markerKey, recordFailure, DEAD_LETTER_TABLE } from "../c2c-deadletter.mjs";
 
 export const endpoint = { type: "event" };
 export const deadLetterTable = DEAD_LETTER_TABLE;
@@ -452,7 +458,26 @@ export async function handle(ctx, env, opts) {
   for (const spec of specsFor(env && env.form, env && env.action)) {
     if (store && key && (await isProcessed(store, key, spec))) continue;
     const mod = await import(spec);
-    if (mod && typeof mod.handle === "function") await mod.handle(ctx);
+    if (mod && typeof mod.handle === "function") {
+      ctx.shim.__c2cScript = async (index, run) => {
+        const progress = Number(env && env.progress && env.progress[spec]) || 0;
+        if (index < progress) return;
+        await run();
+        if (!env.progress) env.progress = {};
+        env.progress[spec] = index + 1;
+        if (store && key) await updateFailureEnvelope(store, key, env);
+      };
+      try {
+        await mod.handle(ctx);
+      } catch (err) {
+        if (err && err.code === "SUBMIT_REFUSED") {
+          // A cancellation is terminal for this form event: subsequent scripts
+          // must not run after the submit has been refused.
+          return { cancelled: true, spec };
+        }
+        throw err;
+      }
+    }
     if (store && key) await markProcessed(store, key, spec);
   }
 }
@@ -471,7 +496,7 @@ export async function replay(envelope, opts) {
     appTimeZone${opts.runtimeOptions ?? ''},
     datastore, ...(datastore.now ? { now: datastore.now } : {}),
   });
-  const env = envelope && typeof envelope === "object" ? envelope : {};
+  const env = envelope && typeof envelope === "object" ? { ...envelope } : {};
   const key = env.key ? String(env.key) : markerKey({ form: env.form, action: env.action, recordId: env.rowId, eventTime: env.eventTime });
   const record = await loadRow(datastore, env.form, env.table, env.rowId ? String(env.rowId) : "");
   const ctx = runtime.context({ record, old: record, rowId: env.rowId ? String(env.rowId) : "", appTimeZone });
@@ -479,7 +504,7 @@ export async function replay(envelope, opts) {
   // system-stamp guard must not re-stamp and a script throw is a post-write
   // failure, the same as in the synchronous endpoint.
   ctx.persisted = true;
-  return handle(ctx, { form: env.form, action: env.action, key }, { datastore });
+  return handle(ctx, { form: env.form, action: env.action, key, progress: env.progress || {} }, { datastore });
 }
 
 export default async function listener(event, context) {

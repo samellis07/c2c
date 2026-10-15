@@ -149,3 +149,7 @@ Rule: [UNVERIFIED] generated handlers log errors with context (never secrets or 
 ## Deluge client alerts
 
 Rule: [DOC] `alert(message)` is allowed in form workflows for Subform on add row and Subform on delete row events, across Created, Created-or-Edited, and Edited record states. Do not treat those events as unverified; the Creator alert reference lists them as supported: https://www.zoho.com/deluge/help/client-functions/alert.html
+
+### Same-event form workflow ordering and cancellation
+
+Rule: [UNVERIFIED] Creator's export order is assumed to be the execution order when multiple workflows share one form event. Whether a `cancel submit` in one workflow suppresses later workflows is not established by the cited On Success documentation; the generated merged handler stops after cancellation as the safe behavior. Source pointer: [On Success action](https://help.zoho.com/portal/en/kb/creator/developer-guide/workflows/create-and-manage-on-success-action/articles/understand-on-success-action) describes when the event runs but does not specify order among workflows or cancellation propagation.
