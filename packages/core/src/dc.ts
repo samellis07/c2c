@@ -75,7 +75,7 @@ export class UnknownDcError extends Error {
 export function normalizeDc(value: string): Dc | undefined {
   const key = value.trim().toLowerCase();
   if (Object.prototype.hasOwnProperty.call(DC_ENDPOINTS, key)) return key as Dc;
-  return DC_ALIASES[key];
+  return Object.prototype.hasOwnProperty.call(DC_ALIASES, key) ? DC_ALIASES[key] : undefined;
 }
 
 /** Canonical key for a DC spelling. Throws {@link UnknownDcError} listing the valid ones. */
