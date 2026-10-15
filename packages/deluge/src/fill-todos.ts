@@ -17,7 +17,7 @@
  * ordered with compareEnUs, never localeCompare.
  */
 import { createHash } from 'node:crypto';
-import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compareEnUs } from '../../core/src/order.js';
 import { parseFileOrProjectWithSidecars } from '../../core/src/parse.js';
@@ -1512,8 +1512,8 @@ export function emitTodoFiles(app: App, dir: string): FillTask[] {
   return tasks;
 }
 
-interface LockFileFs {
-  openSync: (path: string, flags: 'r') => number;
+export interface LockFileFs {
+  openSync: (path: string, flags: number) => number;
   fstatSync: (fd: number) => { isFile(): boolean };
   readFileSync: (fd: number, encoding: 'utf8') => string;
   closeSync: (fd: number) => void;
@@ -1533,21 +1533,25 @@ function errnoCode(err: unknown): string | undefined {
   return typeof code === 'string' ? code : undefined;
 }
 
+const LOCK_OPEN_FLAGS = constants.O_RDONLY | constants.O_NONBLOCK;
+
 /**
- * Open the lock once, then fstat and read that descriptor. A path check
- * before the read would race a replacement. ENOENT, and EISDIR when a
- * platform refuses to open a directory, is an absent lock.
+ * Open the lock once with O_NONBLOCK (a FIFO cannot block the open), then
+ * fstat and read that descriptor. A path check before the read would race a
+ * replacement. An open error whose code is in `absent`, or a descriptor that
+ * is not a regular file, is an absent lock.
  */
-export function readLock(path: string, fsImpl: LockFileFs = nodeLockFileFs): FillLock {
+function readLockFd(path: string, fsImpl: LockFileFs, absent: readonly string[]): FillLock | undefined {
   let fd: number;
   try {
-    fd = fsImpl.openSync(path, 'r');
+    fd = fsImpl.openSync(path, LOCK_OPEN_FLAGS);
   } catch (err) {
-    if (errnoCode(err) === 'ENOENT' || errnoCode(err) === 'EISDIR') return { version: 1, entries: {} };
+    const code = errnoCode(err);
+    if (code !== undefined && absent.includes(code)) return undefined;
     throw err;
   }
   try {
-    if (!fsImpl.fstatSync(fd).isFile()) return { version: 1, entries: {} };
+    if (!fsImpl.fstatSync(fd).isFile()) return undefined;
     let parsed: Partial<FillLock>;
     try {
       parsed = JSON.parse(fsImpl.readFileSync(fd, 'utf8')) as Partial<FillLock>;
@@ -1561,6 +1565,22 @@ export function readLock(path: string, fsImpl: LockFileFs = nodeLockFileFs): Fil
   } finally {
     fsImpl.closeSync(fd);
   }
+}
+
+/**
+ * The lock at `path`, read once. ENOENT, ENOTDIR (a path under a file) and
+ * EISDIR, or a target that is not a regular file, is `undefined`: no lock.
+ */
+export function readLockIfPresent(path: string, fsImpl: LockFileFs = nodeLockFileFs): FillLock | undefined {
+  return readLockFd(path, fsImpl, ['ENOENT', 'ENOTDIR', 'EISDIR']);
+}
+
+/**
+ * The lock at `path`, or an empty lock when it is absent (ENOENT, EISDIR, or
+ * not a regular file). ENOTDIR is still thrown.
+ */
+export function readLock(path: string, fsImpl: LockFileFs = nodeLockFileFs): FillLock {
+  return readLockFd(path, fsImpl, ['ENOENT', 'EISDIR']) ?? { version: 1, entries: {} };
 }
 
 export function writeLock(path: string, lock: FillLock): void {

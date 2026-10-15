@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { closeSync, fstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -11,6 +11,8 @@ import { acceptTodo, collectTasks } from '../../deluge/src/index.js';
 import {
   buildMigrationReport,
   listReportApps,
+  loadIr,
+  lockFor,
   migrationReportAsText,
   migrationReportForDir,
 } from '../src/migration-report.js';
@@ -126,4 +128,107 @@ test('c2c migration-report and analyze --json print the flag from the CLI', () =
   assert.equal((JSON.parse(analyzed.stdout) as { determinism: { deterministic: boolean } }).determinism.deterministic, true);
   const notDir = spawnSync(process.execPath, [cli, 'migration-report', join(fixtures, 'missing')], { encoding: 'utf8' });
   assert.equal(notDir.status, 2);
+});
+
+// The stat-based listing, kept as the oracle the Dirent listing must match.
+function statListReportApps(dir: string): { name: string; target: string }[] {
+  const out: { name: string; target: string }[] = [];
+  for (const name of readdirSync(dir).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
+    if (name.startsWith('.')) continue;
+    const target = join(dir, name);
+    const st = statSync(target, { throwIfNoEntry: false });
+    if (!st) continue;
+    if (st.isDirectory()) {
+      if (readdirSync(target).some((entry) => entry.endsWith('.ds'))) out.push({ name, target });
+    } else if (name.toLowerCase().endsWith('.ds')) {
+      out.push({ name, target });
+    }
+  }
+  return out;
+}
+
+function withAppsDir(fn: (dir: string, ds: string) => void): void {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-mig-fs-'));
+  try {
+    fn(dir, readFileSync(join(root, 'fixtures/dialects/d1-minimal.ds'), 'utf8'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('listReportApps reads Dirent kinds and matches the stat listing for directory, link, dangling and FIFO entries', () => {
+  withAppsDir((dir, ds) => {
+    mkdirSync(join(dir, 'app-a'));
+    writeFileSync(join(dir, 'app-a', 'a.ds'), ds);
+    mkdirSync(join(dir, 'empty'));
+    writeFileSync(join(dir, 'b.ds'), ds);
+    writeFileSync(join(dir, 'notes.txt'), 'x');
+    mkdirSync(join(dir, '.hidden'));
+    writeFileSync(join(dir, '.hidden', 'h.ds'), ds);
+    symlinkSync(join(dir, 'app-a'), join(dir, 'linked-app'));
+    symlinkSync(join(dir, 'b.ds'), join(dir, 'linked.ds'));
+    symlinkSync(join(dir, 'gone.ds'), join(dir, 'dangling.ds'));
+    execFileSync('mkfifo', [join(dir, 'pipe.ds')]);
+    const got = listReportApps(dir);
+    assert.deepEqual(got, statListReportApps(dir));
+    assert.deepEqual(got.map((app) => app.name), ['app-a', 'b.ds', 'linked-app', 'linked.ds', 'pipe.ds']);
+    assert.throws(() => listReportApps(join(dir, 'missing')), { code: 'ENOENT' });
+    assert.throws(() => listReportApps(join(dir, 'b.ds')), { code: 'ENOTDIR' });
+  });
+});
+
+test('lockFor opens c2c.lock.json once; absent target, file target, directory lock and FIFO lock are no lock', () => {
+  withAppsDir((dir, ds) => {
+    const app = join(dir, 'app');
+    mkdirSync(app);
+    writeFileSync(join(app, 'c2c.lock.json'), '{"version":1,"entries":{"a":{"id":"a"}}}\n');
+    writeFileSync(join(dir, 'one.ds'), ds);
+    mkdirSync(join(dir, 'dir-lock', 'c2c.lock.json'), { recursive: true });
+    mkdirSync(join(dir, 'fifo-lock'));
+    execFileSync('mkfifo', [join(dir, 'fifo-lock', 'c2c.lock.json')]);
+    const calls: string[] = [];
+    const fsImpl = {
+      openSync(p: string, flags: number) {
+        calls.push(`open:${p.slice(dir.length + 1)}`);
+        return openSync(p, flags);
+      },
+      fstatSync(fd: number) {
+        calls.push('fstat');
+        return fstatSync(fd);
+      },
+      readFileSync(fd: number, encoding: 'utf8') {
+        calls.push('read-fd');
+        return readFileSync(fd, encoding);
+      },
+      closeSync(fd: number) {
+        calls.push('close');
+        closeSync(fd);
+      },
+    };
+    assert.deepEqual(lockFor(app, fsImpl), { version: 1, entries: { a: { id: 'a' } } });
+    assert.deepEqual(calls, ['open:app/c2c.lock.json', 'fstat', 'read-fd', 'close']);
+    calls.length = 0;
+    assert.equal(lockFor(join(dir, 'no-such-app'), fsImpl), undefined);
+    assert.deepEqual(calls, ['open:no-such-app/c2c.lock.json']);
+    calls.length = 0;
+    assert.equal(lockFor(join(dir, 'one.ds'), fsImpl), undefined);
+    assert.deepEqual(calls, ['open:one.ds/c2c.lock.json']);
+    assert.equal(lockFor(join(dir, 'dir-lock')), undefined);
+    assert.equal(lockFor(join(dir, 'fifo-lock')), undefined);
+    writeFileSync(join(app, 'c2c.lock.json'), '{');
+    assert.throws(() => lockFor(app), { name: 'FillTodoError', message: 'lock file is not valid JSON' });
+  });
+});
+
+test('loadIr classifies the opened target: project, file, absent (ENOENT) and FIFO (NotFileError)', () => {
+  withAppsDir((dir, ds) => {
+    mkdirSync(join(dir, 'proj'));
+    writeFileSync(join(dir, 'proj', 'a.ds'), ds);
+    writeFileSync(join(dir, 'one.ds'), ds);
+    execFileSync('mkfifo', [join(dir, 'pipe.ds')]);
+    assert.deepEqual(loadIr(join(dir, 'proj')).files, ['a.ds']);
+    assert.equal(loadIr(join(dir, 'one.ds')).files, undefined);
+    assert.throws(() => loadIr(join(dir, 'missing')), { code: 'ENOENT' });
+    assert.throws(() => loadIr(join(dir, 'pipe.ds')), { name: 'NotFileError' });
+  });
 });

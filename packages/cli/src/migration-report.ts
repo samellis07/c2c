@@ -12,11 +12,11 @@
  * or file names; do not commit this report when it names private exports.
  */
 
-import { readdirSync, statSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { listDsFiles, parseFileWithSidecars, parseProject, type App } from '../../core/src/index.js';
+import { listDsFiles, parseFileOrProjectWithSidecars, type App } from '../../core/src/index.js';
 import { compareEnUs } from '../../core/src/order.js';
-import { readLock, type FillLock } from '../../deluge/src/index.js';
+import { readLockIfPresent, type FillLock, type LockFileFs } from '../../deluge/src/index.js';
 import { analyze, type TodoKind } from './analyze.js';
 import { MATRIX_SNAPSHOT, type MatrixSnapshot } from './feature-matrix.js';
 
@@ -58,16 +58,45 @@ export interface MigrationReport {
   };
 }
 
+function errnoCode(err: unknown): string | undefined {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/**
+ * What a symlink resolves to, from one O_NONBLOCK open and an fstat of that
+ * descriptor. A dangling link is `undefined`. A socket cannot be opened but
+ * exists, so it is `other`.
+ */
+function linkTargetKind(path: string): 'directory' | 'other' | undefined {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch (err) {
+    const code = errnoCode(err);
+    if (code === 'ENOENT' || code === 'ENOTDIR') return undefined;
+    if (code === 'ENXIO' || code === 'EOPNOTSUPP') return 'other';
+    throw err;
+  }
+  try {
+    return fstatSync(fd).isDirectory() ? 'directory' : 'other';
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** Apps under a directory: each sub-folder with .ds files, or each .ds file. Sorted by name. */
 export function listReportApps(dir: string): { name: string; target: string }[] {
-  const names = readdirSync(dir).sort((a, b) => compareEnUs(a, b));
+  const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => compareEnUs(a.name, b.name));
   const out: { name: string; target: string }[] = [];
-  for (const name of names) {
+  for (const ent of entries) {
+    const name = ent.name;
     if (name.startsWith('.')) continue;
     const target = join(dir, name);
-    const st = statSync(target, { throwIfNoEntry: false });
-    if (!st) continue;
-    if (st.isDirectory()) {
+    // The entry kind comes from the directory read; only a symlink is resolved.
+    const kind = ent.isSymbolicLink() ? linkTargetKind(target) : ent.isDirectory() ? 'directory' : 'other';
+    if (!kind) continue;
+    if (kind === 'directory') {
       if (listDsFiles(target).length) out.push({ name, target });
     } else if (name.toLowerCase().endsWith('.ds')) {
       out.push({ name: basename(name), target });
@@ -76,17 +105,18 @@ export function listReportApps(dir: string): { name: string; target: string }[] 
   return out;
 }
 
-export function lockFor(target: string): FillLock | undefined {
-  const st = statSync(target, { throwIfNoEntry: false });
-  if (!st?.isDirectory()) return undefined;
-  const candidate = join(target, 'c2c.lock.json');
-  if (!statSync(candidate, { throwIfNoEntry: false })?.isFile()) return undefined;
-  return readLock(candidate);
+/**
+ * The app's c2c.lock.json, opened once. The read decides: a missing target
+ * (ENOENT), a file target (ENOTDIR) or a lock that is not a regular file is
+ * no lock.
+ */
+export function lockFor(target: string, fsImpl?: LockFileFs): FillLock | undefined {
+  return readLockIfPresent(join(target, 'c2c.lock.json'), fsImpl);
 }
 
+/** A project directory or one `.ds` file with its widget sidecars, classified by the opened target. */
 export function loadIr(target: string): App {
-  const st = statSync(target);
-  return st.isDirectory() ? parseProject(target).ir : parseFileWithSidecars(target).ir;
+  return parseFileOrProjectWithSidecars(target).ir;
 }
 
 const byKind = (a: TodoKind, b: TodoKind) => b.count - a.count || compareEnUs(a.construct, b.construct);

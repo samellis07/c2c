@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { closeSync, existsSync, fstatSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test as nodeTest, type TestContext } from 'node:test';
@@ -23,6 +23,7 @@ import {
   fillLimitRefusal,
   loadApp,
   readLock,
+  readLockIfPresent,
   reportLock,
   shimAllowlist,
   vectorCoverage,
@@ -1320,6 +1321,99 @@ test('readLock still rejects malformed JSON and a wrong version', () => {
   try {
     assert.throws(() => readLock(malformed), { name: 'FillTodoError', message: 'lock file is not valid JSON' });
     assert.throws(() => readLock(wrongVersion), { name: 'FillTodoError', message: 'c2c.lock.json is not version 1' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function recordingLockFs(calls: string[]) {
+  return {
+    openSync(path: string, flags: number) {
+      calls.push(`open:${flags === (constants.O_RDONLY | constants.O_NONBLOCK) ? 'nonblock' : flags}`);
+      return openSync(path, flags);
+    },
+    fstatSync(fd: number) {
+      calls.push('fstat');
+      return fstatSync(fd);
+    },
+    readFileSync(fd: number, encoding: 'utf8') {
+      calls.push('read-fd');
+      return readFileSync(fd, encoding);
+    },
+    closeSync(fd: number) {
+      calls.push('close');
+      closeSync(fd);
+    },
+  };
+}
+
+test('readLockIfPresent opens the lock once and reports present, absent, directory, under-a-file and FIFO', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-lock-present-'));
+  const lockPath = join(dir, 'c2c.lock.json');
+  writeFileSync(lockPath, '{"version":1,"entries":{"a":{"id":"a"}}}\n');
+  const fifo = join(dir, 'fifo.json');
+  spawnSync('mkfifo', [fifo]);
+  const calls: string[] = [];
+  const fsImpl = recordingLockFs(calls);
+  try {
+    assert.deepEqual(readLockIfPresent(lockPath, fsImpl), { version: 1, entries: { a: { id: 'a' } } });
+    assert.deepEqual(calls, ['open:nonblock', 'fstat', 'read-fd', 'close']);
+
+    calls.length = 0;
+    assert.equal(readLockIfPresent(join(dir, 'missing.json'), fsImpl), undefined);
+    assert.deepEqual(calls, ['open:nonblock']);
+
+    calls.length = 0;
+    assert.equal(readLockIfPresent(join(lockPath, 'c2c.lock.json'), fsImpl), undefined);
+    assert.deepEqual(calls, ['open:nonblock']);
+
+    calls.length = 0;
+    assert.equal(readLockIfPresent(dir, fsImpl), undefined);
+    assert.deepEqual(calls, ['open:nonblock', 'fstat', 'close']);
+
+    // A FIFO opens without blocking and is not a regular file: no lock, no read.
+    calls.length = 0;
+    assert.equal(readLockIfPresent(fifo, fsImpl), undefined);
+    assert.deepEqual(calls, ['open:nonblock', 'fstat', 'close']);
+
+    assert.equal(readLockIfPresent(join(dir, 'missing.json')), undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('readLockIfPresent throws open errors other than ENOENT, ENOTDIR and EISDIR, and still rejects bad JSON', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-lock-present-err-'));
+  const bad = join(dir, 'bad.json');
+  writeFileSync(bad, '{');
+  try {
+    const denied = {
+      ...recordingLockFs([]),
+      openSync(): number {
+        const err = new Error('denied') as NodeJS.ErrnoException;
+        err.code = 'EACCES';
+        throw err;
+      },
+    };
+    assert.throws(() => readLockIfPresent(join(dir, 'x.json'), denied), { code: 'EACCES' });
+    assert.throws(() => readLockIfPresent(bad), { name: 'FillTodoError', message: 'lock file is not valid JSON' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('readLock keeps its empty lock for absent and directory paths, gains FIFO, and still throws ENOTDIR', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-lock-read-'));
+  const file = join(dir, 'c2c.lock.json');
+  writeFileSync(file, '{"version":1,"entries":{}}\n');
+  const fifo = join(dir, 'fifo.json');
+  spawnSync('mkfifo', [fifo]);
+  mkdirSync(join(dir, 'sub'));
+  try {
+    assert.deepEqual(readLock(join(dir, 'missing.json')), { version: 1, entries: {} });
+    assert.deepEqual(readLock(join(dir, 'sub')), { version: 1, entries: {} });
+    assert.deepEqual(readLock(fifo), { version: 1, entries: {} });
+    assert.throws(() => readLock(join(file, 'c2c.lock.json')), { code: 'ENOTDIR' });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
