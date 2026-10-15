@@ -557,7 +557,7 @@ function embeddedComponents(template: string, app: App): { template: string; com
       components.push(component);
       return tag.replace(/>$/, ` data-zml="component-${component.kind}:${component.name}">`);
     }
-    todos.push(link ? `${kind || link[1].toLowerCase()} "${name}"` : 'component');
+    todos.push(linkEntry ? `${kind || linkEntry[0].replace(/linkname$/i, '').toLowerCase()} "${name}"` : 'component');
     return tag;
   });
   return { template: rewritten, components, todos };
