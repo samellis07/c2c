@@ -20,26 +20,48 @@ For the surrounding plan, apply, and read-back workflow, see the
 
 ## Per-project conditions
 
-Which steps a given run prints is decided by the plan, never by a flag the
-user passes:
+Which steps a given run emits is decided by the plan and run state, never by a
+flag the user passes:
 
-- **Slate start** is dropped once Slate is recorded as started — a provision
-  `slate-enable` step already `done` or `existing`, or a deploy that already
-  completed a Slate command (`slateStarted`). A fresh project refuses the
-  first Slate deploy until the service is opened in the console once; a
-  `200 []` app-list response only proves connectivity — the deploy `400` is
-  the activation signal. The remaining steps keep contiguous numbering.
-- **Verify mail sender** is included only when the app sends mail — a
-  provision plan carrying a `mail-sender` step, or a deploy whose generated
-  functions call the mail shim (`DeployBundle.sendsMail`).
-- `c2c provision` prints the five steps above filtered by those two
-  conditions. `c2c deploy` prints its per-project checklist from
+- **`c2c deploy` stdout** prints `human checklist:` from
+  [`customer-steps.ts`](../../packages/deploy/src/customer-steps.ts)
+  (`formatCustomerSteps(!slate || slateStarted ? 1 : 0)`). On a Slate app
+  before a Slate command completes (`slate && !slateStarted`), it prints all
+  five `CUSTOMER_STEPS` lines numbered `1..5`. When the app has no Slate
+  service (`!slate`) or a Slate command completed (`slateStarted`),
+  `formatCustomerSteps(1)` drops step 1 (**Slate start**) and prints steps
+  `2..5` with their original numbers (`2..5`); **Accept invite**, **Sign in
+  once**, **Run the in-app check and paste its code**, and **Verify mail
+  sender** (with its parenthetical `(only when the app sends mail)` condition)
+  are always printed. A fresh project refuses the first Slate deploy
+  until the service is opened in the console once; a
+  `200 []` app-list response only proves connectivity — the deploy `400`
+  is the activation signal.
+- **`c2c provision`** (`--status` and `--next` once all steps finish) filters
+  `CUSTOMER_STEPS`: it drops **Slate start** once a `slate-enable` step is
+  recorded as `done` or `existing`, and drops **Verify mail sender** when the
+  plan has no `mail-sender` step. `--status` numbers the remaining steps
+  contiguously (`1..N`), and `--next` emits them in its JSON `checklist` array.
+- **`.c2c-deploy-report.json` (`humanChecklist` field)** is populated by
   [`human-steps.ts`](../../packages/deploy/src/human-steps.ts)
-  (`humanChecklist`): Slate start only for Slate apps not yet started, the
-  admin invite always, sign-in only for Slate apps, and sender verification
-  only when the app sends mail. The deploy checklist does not print the
-  in-app check — that step belongs to the verify flow, which asks for it in
-  chat.
+  (`humanChecklist({ slate, sendsMail, slateStarted })`): **Start Slate once**
+  only when `slate && !slateStarted`, **Accept the admin invite** always,
+  **Sign in to the app once at the Slate app URL** only when `slate`, and
+  **Verify the sender email (the app sends mail)** only when generated
+  functions send mail (`DeployBundle.sendsMail`). It does not include the
+  in-app check step, and `formatHumanChecklist` numbers its remaining items
+  contiguously (`1..N`).
+
+| Surface | Condition | Emitted steps |
+|---|---|---|
+| `c2c deploy` stdout (`formatCustomerSteps`) | `slate && !slateStarted` | `1. Slate start`, `2. Accept invite`, `3. Sign in once`, `4. Run the in-app check and paste its code`, `5. Verify mail sender` |
+| `c2c deploy` stdout (`formatCustomerSteps`) | `!slate \|\| slateStarted` | `2. Accept invite`, `3. Sign in once`, `4. Run the in-app check and paste its code`, `5. Verify mail sender` |
+| `c2c provision --status` (`CUSTOMER_STEPS` filter) | no `done`/`existing` `slate-enable`, `mail-sender` in plan | `1. Slate start`, `2. Accept invite`, `3. Sign in once`, `4. Run the in-app check and paste its code`, `5. Verify mail sender` |
+| `c2c provision --status` (`CUSTOMER_STEPS` filter) | `slate-enable` `done` or `existing`, `mail-sender` in plan | `1. Accept invite`, `2. Sign in once`, `3. Run the in-app check and paste its code`, `4. Verify mail sender` |
+| `c2c provision --status` (`CUSTOMER_STEPS` filter) | `slate-enable` `done` or `existing`, no `mail-sender` in plan | `1. Accept invite`, `2. Sign in once`, `3. Run the in-app check and paste its code` |
+| `.c2c-deploy-report.json` `humanChecklist` (`humanChecklist`) | `slate && !slateStarted && sendsMail` | `1. Start Slate once`, `2. Accept the admin invite`, `3. Sign in to the app once at the Slate app URL`, `4. Verify the sender email (the app sends mail)` |
+| `.c2c-deploy-report.json` `humanChecklist` (`humanChecklist`) | `slate && slateStarted && !sendsMail` | `1. Accept the admin invite`, `2. Sign in to the app once at the Slate app URL` |
+| `.c2c-deploy-report.json` `humanChecklist` (`humanChecklist`) | `!slate && !sendsMail` | `1. Accept the admin invite` |
 
 ## What the customer does and what c2c verifies
 

@@ -212,7 +212,7 @@ Recipe: GET /baas/v1/project/<project-id>/project-user with X-CATALYST-Environme
 
 ### Development API calls
 
-Rule: Plan for 200000 API calls per application in Development [UNVERIFIED] (not currently listed in the limits registry). c2c plan estimates calls from the mover's per-batch and per-slice work and warns when the estimate is at or above 200000. Prefer bulk write for a large table.
+Rule: Plan for 200000 API calls per application in Development [UNVERIFIED]. c2c plan estimates calls from the mover's per-batch and per-slice work and warns when the estimate is at or above 200000. The mover does not pace writes or retry using Retry-After. Prefer bulk write for a large table.
 
 Recipe: Estimate calls before migrate-data --confirm. The estimate warns at or above 200000; use POST /bulk/write for a large table.
 

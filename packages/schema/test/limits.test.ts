@@ -208,9 +208,10 @@ test('an under-cap form is not split and its schema JSON has no extension keys',
   assert.match(report, /verified: false/);
   assert.match(report, /## Throttles/);
   // Limit rows carry only the public fields: no internal reference fields.
-  const allowed = new Set(['id', 'value', 'unit', 'verified', 'action', 'whenExceeded']);
+  const allowed = new Set(['id', 'label', 'value', 'unit', 'verified', 'action', 'whenExceeded']);
   for (const row of CATALYST_LIMITS) {
     assert.deepEqual(Object.keys(row).filter((key) => !allowed.has(key)), [], row.id);
+    assert.ok(row.label.trim().length > 0, row.id);
   }
 });
 

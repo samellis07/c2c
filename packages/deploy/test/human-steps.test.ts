@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deriveIr, parse } from '../../core/src/index.js';
 import { buildDeploy, checkGuards, formatHumanChecklist, humanChecklist } from '../src/index.js';
-import { CUSTOMER_STEPS } from '../src/customer-steps.js';
+import { CUSTOMER_STEPS, formatCustomerSteps } from '../src/customer-steps.js';
 
 const MAIL_DS = `/*
  * Author       : synthetic
@@ -114,8 +114,37 @@ test('the live-run guide states the per-project conditions exactly as the code a
   assert.match(guide, /`done` or `existing`/);
   assert.match(guide, /sendsMail|sends mail/);
   assert.match(guide, /slateStarted/);
-  // The deploy checklist never prints the in-app check; the guide must say so.
-  assert.match(guide, /does not print the\s+in-app check|does not print the in-app check/);
+
+  // `c2c deploy` stdout is formatCustomerSteps, not humanChecklist: derive the
+  // emitted lines from the code and pin the guide's table to them.
+  const emitted = (done: number) =>
+    [...formatCustomerSteps(done).matchAll(/^ {2}(\d+)\. ([^:(\n]+)/gm)].map((m) => `${m[1]}. ${m[2]!.trim()}`);
+  const freshDeploy = emitted(0); // slate && !slateStarted: all five steps, 1..5
+  const rerunDeploy = emitted(1); // !slate || slateStarted: step 1 dropped, 2..5
+  assert.equal(freshDeploy.length, 5);
+  assert.equal(rerunDeploy.length, 4);
+  assert.deepEqual(rerunDeploy.map((line) => line[0]), ['2', '3', '4', '5'], 'deploy keeps the original step numbers');
+  for (const line of [...freshDeploy, ...rerunDeploy]) {
+    assert.ok(guide.includes(`\`${line}\``), `guide must list the deploy-emitted step "${line}"`);
+  }
+  // Deploy stdout always prints the in-app check and the mail step (the mail
+  // step carries its own parenthetical condition); the guide must say so.
+  assert.ok(freshDeploy.some((line) => line.includes('Run the in-app check and paste its code')));
+  assert.ok(rerunDeploy.some((line) => line.includes('Run the in-app check and paste its code')));
+  assert.match(guide, /in-app check[\s\S]{0,200}always printed|always printed[\s\S]{0,200}in-app check/);
+
+  // The report JSON's humanChecklist field is the other list: derive its
+  // labels from humanChecklist() and check the guide quotes them — and that
+  // it says the field does not include the in-app check step.
+  const reportLabels = humanChecklist({ slate: true, sendsMail: true }).map((item) => item.split(/: | — /)[0]!);
+  assert.deepEqual(reportLabels, [
+    'Start Slate once',
+    'Accept the admin invite',
+    'Sign in to the app once at the Slate app URL',
+    'Verify the sender email (the app sends mail)',
+  ]);
+  for (const label of reportLabels) assert.ok(guide.includes(label), `guide must quote the report label "${label}"`);
+  assert.match(guide, /does not include the\s+in-app check step/);
 });
 
 test('the live-run guide keeps the exact Slate activation evidence', () => {
