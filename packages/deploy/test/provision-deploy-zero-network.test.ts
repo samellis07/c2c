@@ -1,7 +1,7 @@
 /** Dry-run commands must remain offline even if code bypasses the injected Io. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync, symlinkSync, chmodSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync, symlinkSync, chmodSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
@@ -87,22 +87,48 @@ test('allowExec matches the resolved executable and refuses shell injection mode
       if (gitPath) assert.equal(cp.spawnSync(gitPath, ['--version']).status, 0);
       assert.throws(() => cp.execSync('git --version; curl http://127.0.0.1/'), /unexpected network attempt: node:child_process.execSync/);
       assert.throws(() => cp.spawnSync('git', ['--version'], { shell: true }), /unexpected network attempt: node:child_process.spawnSync/);
-      assert.throws(() => cp.spawnSync('curl', ['--version'], { env: { PATH: join(out, 'empty-path') } }), /unexpected network attempt: node:child_process.spawnSync/);
+      assert.ok(gitPath, 'git must be on PATH so the allowlist contains a real git');
+      const canonicalGit = realpathSync(gitPath);
 
-      // The child's cwd controls relative executable lookup; it must not be
-      // checked against the parent cwd and then executed from this directory.
+      // The refusal must name the git resolved from the child PATH. A parent-PATH
+      // lookup finds the allowlisted git and would run it instead of throwing.
+      const plantedPath = join(out, 'planted-path');
+      mkdirSync(plantedPath);
+      const pathMarker = join(out, 'path-marker');
+      writeFileSync(join(plantedPath, 'git'), '#!/bin/sh\nprintf planted > "$C2C_GUARD_MARKER"\n');
+      chmodSync(join(plantedPath, 'git'), 0o755);
+      const refusedResolved = (fragment: RegExp) => (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        assert.match(message, /unexpected network attempt: node:child_process\.spawnSync \(/);
+        assert.match(message, fragment);
+        return true;
+      };
+      assert.throws(() => cp.spawnSync('git', ['--version'], {
+        env: { PATH: plantedPath, C2C_GUARD_MARKER: pathMarker },
+      }), refusedResolved(/\/planted-path\/git\)/));
+      assert.equal(existsSync(pathMarker), false);
+
+      // Parent cwd holds an allowlisted ./git. Child cwd holds a different ./git.
+      // Ignoring options.cwd resolves the parent binary and the call succeeds.
+      const parentCwd = join(out, 'parent-cwd');
       const childCwd = join(out, 'child-cwd');
+      mkdirSync(parentCwd);
       mkdirSync(childCwd);
-      const relative = join(childCwd, 'git');
-      const payload = join(out, 'payload');
-      writeFileSync(payload, '#!/bin/sh\nprintf called > "$C2C_GUARD_MARKER"\n');
-      chmodSync(payload, 0o755);
-      symlinkSync(payload, relative);
-      const marker = join(out, 'marker');
-      assert.throws(() => cp.spawnSync('./git', ['--version'], {
-        cwd: childCwd,
-        env: { PATH: process.env.PATH, C2C_GUARD_MARKER: marker },
-      }), /unexpected network attempt: node:child_process.spawnSync/);
+      symlinkSync(canonicalGit, join(parentCwd, 'git'));
+      const cwdMarker = join(out, 'cwd-marker');
+      writeFileSync(join(childCwd, 'git'), '#!/bin/sh\nprintf planted > "$C2C_GUARD_MARKER"\n');
+      chmodSync(join(childCwd, 'git'), 0o755);
+      const previousCwd = process.cwd();
+      process.chdir(parentCwd);
+      try {
+        assert.throws(() => cp.spawnSync('./git', ['--version'], {
+          cwd: childCwd,
+          env: { PATH: process.env.PATH, C2C_GUARD_MARKER: cwdMarker },
+        }), refusedResolved(/\/child-cwd\/git\)/));
+        assert.equal(existsSync(cwdMarker), false);
+      } finally {
+        process.chdir(previousCwd);
+      }
 
     } finally {
       trap.restore();
