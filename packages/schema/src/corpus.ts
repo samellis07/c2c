@@ -1,5 +1,5 @@
 import { readdirSync, statSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { listDsFiles, parseFile, parseProject, type App } from '../../core/src/index.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { generateSchema, type FieldOutcome, type SchemaPlan } from './generator.js';
@@ -22,7 +22,7 @@ export function loadCorpusApps(dir: string): CorpusApp[] {
       if (!listDsFiles(path).length) continue;
       apps.push({ link: name, ir: parseProject(path).ir });
     } else if (st.isFile() && name.toLowerCase().endsWith('.ds')) {
-      apps.push({ link: basename(name, '.ds'), ir: parseFile(path).ir });
+      apps.push({ link: name.slice(0, -'.ds'.length), ir: parseFile(path).ir });
     }
   }
   return apps;
