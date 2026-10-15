@@ -28,5 +28,5 @@ body:
     attributes:
       label: Scope check
       options:
-        - label: This is not a request for native mobile output (out of scope — see README)
+        - label: This is not a request for native mobile / MDM output (not supported in this version — counted; on the roadmap)
           required: true
