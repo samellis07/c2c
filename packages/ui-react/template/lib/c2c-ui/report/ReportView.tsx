@@ -488,7 +488,7 @@ function RecordDetail({ report, rowId }: { report: ReportSpec; rowId: string }) 
         if (!live) return;
         if (reply.ok && reply.body?.record && typeof reply.body.record === 'object') setDetail({ state: 'ready', record: reply.body.record });
         else if (reply.status === 403) deny();
-        else setDetail({ state: 'error', status: reply.ok ? 404 : reply.status });
+        else setDetail({ state: 'error', status: reply.status === 404 || reply.ok ? 404 : reply.status });
       },
       () => live && setDetail({ state: 'error', status: 0 }),
     );

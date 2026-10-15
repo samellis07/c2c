@@ -553,7 +553,7 @@ async function loadViewsRuntime(): Promise<ViewsRuntime> {
   return (await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)) as ViewsRuntime;
 }
 
-async function bootDecorated(name: string, rows: Record<string, unknown>[], kind: 'report' | 'page' = 'report', recordId?: string) {
+async function bootDecorated(name: string, rows: Record<string, unknown>[], kind: 'report' | 'page' = 'report', recordId?: string, recordReply?: () => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>) {
   (globalThis as { CSS?: unknown }).CSS ??= { escape: (value: string) => value };
   const runtime = await loadViewsRuntime();
   const model = decoratedViews();
@@ -568,6 +568,7 @@ async function bootDecorated(name: string, rows: Record<string, unknown>[], kind
     const payload = body.ROWID != null
       ? { record: matched ?? { ROWID: String(body.ROWID), Product: 'Off page record' } }
       : { rows: body.op === 'query' ? rows : [] };
+    if (body.ROWID != null && recordReply) return recordReply();
     return { ok: true, status: 200, json: async () => payload };
   }) as unknown as typeof fetch;
   runtime.installReportViews(model, win.document);
@@ -633,6 +634,30 @@ test('vanilla detail loads an off-page row from the authorized record endpoint',
   assert.equal(recordReads[0]?.url.endsWith(form.recordEndpoint), true);
   assert.deepEqual(recordReads[0]?.body, { ROWID: '907' });
   assert.match(doc.body.textContent ?? '', /Off page record/);
+});
+
+test('vanilla detail shows denied and missing record errors and clears loading', async () => {
+  for (const [status, message] of [[403, "You can't open this record."], [404, "You can't open this record."]] as const) {
+    const { doc } = await bootDecorated('Active_BOM', [], 'report', '907', async () => ({ ok: false, status, json: async () => ({}) }));
+    const section = doc.querySelector('section[data-detail]');
+    assert.equal(section?.hasAttribute('data-detail-loading'), false, `${status} clears loading`);
+    assert.equal(section?.querySelector('[data-detail-error]')?.textContent, message);
+  }
+});
+
+test('vanilla detail retries a network failure and renders the record after recovery', async () => {
+  let attempt = 0;
+  const { doc } = await bootDecorated('Active_BOM', [], 'report', '907', async () => {
+    attempt++;
+    if (attempt === 1) throw new Error('network unavailable');
+    return { ok: true, status: 200, json: async () => ({ record: { ROWID: '907', Product: 'Recovered record' } }) };
+  });
+  const section = doc.querySelector('section[data-detail]');
+  assert.equal(section?.hasAttribute('data-detail-loading'), false);
+  assert.match(section?.querySelector('[data-detail-error]')?.textContent ?? '', /Unable to load this record/);
+  (section?.querySelector('[data-detail-retry]') as Element).dispatchEvent(new (doc.defaultView as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent('click', { bubbles: true }));
+  await until(() => (doc.body.textContent ?? '').includes('Recovered record'));
+  assert.equal(attempt, 2);
 });
 
 test('Stock Details groups by Warehouse Code in first-seen order and sorts by Product Name', async () => {
