@@ -33,7 +33,7 @@ rule 8 in [the c2c rules](../../plugin/C2C.md)):
   mode, Form Email, the C8 Deluge dialect, and Cliq bots. The
   migration report uses that phrase for these, and they still
   appear in the report's feature counts and TODOs.
-- **Not supported in this version (counted; on the roadmap):**
+- **not supported in this version (counted; on the roadmap):**
   native mobile apps / MDM. The migration report uses that phrase
   for them, and they still appear in the report's feature counts
   and TODOs.
