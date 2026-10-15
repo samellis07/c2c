@@ -4,8 +4,8 @@
   "dispatch": "packages/deluge/src/dispatch.ts",
   "counts": {
     "supported": 38,
-    "shimmed": 624,
-    "todo": 56,
+    "shimmed": 627,
+    "todo": 53,
     "total": 718
   },
   "entries": [
@@ -9313,8 +9313,8 @@
       ],
       "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/xml-manipulation/executexpath.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
+      "status": "shimmed",
+      "mapsTo": "shim.xml.executeXpath",
       "snippet": "x = executeXpath();"
     },
     {
@@ -9326,8 +9326,8 @@
       ],
       "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/functions/xml/toxml.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
+      "status": "shimmed",
+      "mapsTo": "shim.xml.toXml",
       "snippet": "x = \"abc\".toXml();"
     },
     {
@@ -9339,8 +9339,8 @@
       ],
       "arity": 0,
       "docUrl": "https://www.zoho.com/deluge/help/functions/xml/toxmllist.html",
-      "status": "todo",
-      "mapsTo": "shim.todo",
+      "status": "shimmed",
+      "mapsTo": "shim.xml.toXmlList",
       "snippet": "x = \"abc\".toXmlList();"
     }
   ]
