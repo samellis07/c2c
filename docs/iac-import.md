@@ -27,7 +27,9 @@ to re-run to retry the confirm. The re-run reads that import, finds it
 `Staged`, and re-issues its deploy confirm instead of posting a new one — no
 second import and no `-2` name. A duplicate name (`409 DUPLICATE_ENTRY`) moves
 to the documented `-2` suffix; an import that never leaves the live states
-keeps its name blocked — a stuck import cannot be deleted — and the next run
+is assumed to keep its name blocked — a stuck import is assumed to be
+undeletable [UNVERIFIED] (rule:
+[facts/projects.md](../plugin/references/facts/projects.md)) — and the next run
 re-polls it once before trying the next name.
 
 ## Access-token expiry
