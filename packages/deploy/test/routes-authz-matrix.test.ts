@@ -455,7 +455,8 @@ async function matrix(c: AppCase, granted: string, seen: Set<string>, partial?: 
         if (family.reset) await h.reseed();
         const ok = await h.send(call, `${c.label}-admin`);
         if (call.granted) {
-          const error = String((JSON.parse(ok.text) as { error?: unknown }).error ?? '');
+          const body = JSON.parse(ok.text) as { error?: unknown; message?: unknown };
+          const error = String(body.message ?? body.error ?? '');
           if (ok.status !== call.granted.status || !call.granted.error.test(error)) failures.push(`${label}: granted role got ${ok.status} ${ok.text}`);
         } else if (ok.status < 200 || ok.status >= 300) failures.push(`${label}: granted role got ${ok.status} ${ok.text}`);
       }
