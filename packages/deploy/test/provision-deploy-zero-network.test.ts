@@ -1,7 +1,7 @@
 /** Dry-run commands must remain offline even if code bypasses the injected Io. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync, symlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync, symlinkSync, chmodSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
@@ -87,10 +87,64 @@ test('allowExec matches the resolved executable and refuses shell injection mode
       if (gitPath) assert.equal(cp.spawnSync(gitPath, ['--version']).status, 0);
       assert.throws(() => cp.execSync('git --version; curl http://127.0.0.1/'), /unexpected network attempt: node:child_process.execSync/);
       assert.throws(() => cp.spawnSync('git', ['--version'], { shell: true }), /unexpected network attempt: node:child_process.spawnSync/);
+      assert.throws(() => cp.spawnSync('curl', ['--version'], { env: { PATH: join(out, 'empty-path') } }), /unexpected network attempt: node:child_process.spawnSync/);
+
+      // The child's cwd controls relative executable lookup; it must not be
+      // checked against the parent cwd and then executed from this directory.
+      const childCwd = join(out, 'child-cwd');
+      mkdirSync(childCwd);
+      const relative = join(childCwd, 'git');
+      const payload = join(out, 'payload');
+      writeFileSync(payload, '#!/bin/sh\nprintf called > "$C2C_GUARD_MARKER"\n');
+      chmodSync(payload, 0o755);
+      symlinkSync(payload, relative);
+      const marker = join(out, 'marker');
+      assert.throws(() => cp.spawnSync('./git', ['--version'], {
+        cwd: childCwd,
+        env: { PATH: process.env.PATH, C2C_GUARD_MARKER: marker },
+      }), /unexpected network attempt: node:child_process.spawnSync/);
+
     } finally {
       trap.restore();
     }
   } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+
+test('allowExec pins the checked executable when its symlink changes before spawn', () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-exec-swap-'));
+  const swap = join(out, 'command');
+  const safe = join(out, 'safe');
+  const evil = join(out, 'evil');
+  const marker = join(out, 'result');
+  const cp = require('node:child_process') as typeof import('node:child_process');
+  const nativeSpawnSync = cp.spawnSync;
+  try {
+    writeFileSync(safe, '#!/bin/sh\nprintf safe > "$C2C_GUARD_MARKER"\n');
+    writeFileSync(evil, '#!/bin/sh\nprintf evil > "$C2C_GUARD_MARKER"\n');
+    chmodSync(safe, 0o755);
+    chmodSync(evil, 0o755);
+    symlinkSync(safe, swap);
+
+    // Install a shim below the trap. It changes the original symlink after
+    // guard validation but before Node receives the command.
+    (cp as unknown as { spawnSync: typeof cp.spawnSync }).spawnSync = ((command: Parameters<typeof cp.spawnSync>[0], ...args: unknown[]) => {
+      rmSync(swap);
+      symlinkSync(evil, swap);
+      return nativeSpawnSync(command, ...args as Parameters<typeof nativeSpawnSync> extends [unknown, ...infer Rest] ? Rest : never);
+    }) as typeof cp.spawnSync;
+    const trap = trapNetwork({ allowExec: [safe] });
+    try {
+      const result = cp.spawnSync(swap, [], { env: { ...process.env, C2C_GUARD_MARKER: marker } });
+      assert.equal(result.status, 0);
+      assert.equal(readFileSync(marker, 'utf8'), 'safe');
+    } finally {
+      trap.restore();
+    }
+  } finally {
+    (cp as unknown as { spawnSync: typeof cp.spawnSync }).spawnSync = nativeSpawnSync;
     rmSync(out, { recursive: true, force: true });
   }
 });
