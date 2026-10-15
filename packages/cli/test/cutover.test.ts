@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -129,6 +129,28 @@ test('cutover-checklist is deterministic and filled with the app facts', () => {
   assert.match(text, /^Project 1001, data centre eu\. 2 form\(s\), 2 table\(s\), 3 record\(s\) in the export\.$/m);
   assert.match(text, /^  - Purchase_Order: 1 new, 0 changed at the last plan$/m);
   assert.match(text, /Open Purchase_Order, add a record/);
+});
+
+test('an unreadable target reports the loader error instead of a missing-target error', (t) => {
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    t.skip('mode-000 permissions are bypassed when running as root');
+    return;
+  }
+  const ws = workspace();
+  chmodSync(ws.ds, 0);
+  t.after(() => chmodSync(ws.ds, 0o600));
+  const run = capture();
+  const code = cutoverCli([ws.ds], run.io, 'checklist');
+  assert.equal(code, 1);
+  assert.match(run.err(), /^c2c: .*EACCES|^c2c: .*permission denied/i);
+  assert.doesNotMatch(run.err(), /no such file or directory/);
+});
+
+test('a missing cutover target keeps the specific missing-file error', () => {
+  const run = capture();
+  const code = cutoverCli(['/path/that/does/not/exist.ds'], run.io, 'checklist');
+  assert.equal(code, 3);
+  assert.match(run.err(), /^c2c: no such file or directory:/);
 });
 
 test('proof report holds counts, checksums, the smoke slot and readiness with manual items', () => {

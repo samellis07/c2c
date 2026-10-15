@@ -554,19 +554,26 @@ export function cutoverCli(args: readonly string[], io: Pick<Io, 'stdout' | 'std
       io.stderr(`c2c: no such file or directory: ${target}\n`);
       return 3;
     }
-    if (code !== 'EISDIR') throw err;
+    // Let the regular loader produce its established error for an existing
+    // target the preflight could not read. EISDIR is expected for directory
+    // inputs; other errors are likewise re-raised by the loader itself.
   }
-  const input = cutoverInput(target, rest);
-  const proof = proofReport(input);
-  const out = flag(rest, '--out');
-  if (out) {
-    mkdirSync(out, { recursive: true });
-    writeFileSync(join(out, CHECKLIST_MD), cutoverChecklist(input, proof));
-    writeFileSync(join(out, PROOF_JSON), `${JSON.stringify(proof, null, 2)}\n`);
-    writeFileSync(join(out, PROOF_MD), proofMarkdown(proof));
-    io.stdout(`wrote ${CHECKLIST_MD}, ${PROOF_JSON}, ${PROOF_MD}\nreadiness: ${proof.readiness.automatic}% automatic, ${proof.readiness.manual.length} manual item(s)\n`);
+  try {
+    const input = cutoverInput(target, rest);
+    const proof = proofReport(input);
+    const out = flag(rest, '--out');
+    if (out) {
+      mkdirSync(out, { recursive: true });
+      writeFileSync(join(out, CHECKLIST_MD), cutoverChecklist(input, proof));
+      writeFileSync(join(out, PROOF_JSON), `${JSON.stringify(proof, null, 2)}\n`);
+      writeFileSync(join(out, PROOF_MD), proofMarkdown(proof));
+      io.stdout(`wrote ${CHECKLIST_MD}, ${PROOF_JSON}, ${PROOF_MD}\nreadiness: ${proof.readiness.automatic}% automatic, ${proof.readiness.manual.length} manual item(s)\n`);
+      return 0;
+    }
+    io.stdout(which === 'proof' ? proofMarkdown(proof) : cutoverChecklist(input, proof));
     return 0;
+  } catch (err) {
+    io.stderr(`c2c: ${err instanceof Error ? err.message : `${which} failed`}\n`);
+    return 1;
   }
-  io.stdout(which === 'proof' ? proofMarkdown(proof) : cutoverChecklist(input, proof));
-  return 0;
 }
