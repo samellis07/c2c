@@ -27,6 +27,7 @@ body:
     id: scope
     attributes:
       label: Scope check
+      description: Native mobile / MDM output is not supported in this version (counted; on the roadmap — the installable client is the Slate PWA). Permanently out of scope are only marketplace publishing, the Zia AI builder, and on-prem Data Bridge.
       options:
-        - label: This is not a request for native mobile / MDM output (not supported in this version (counted; on the roadmap))
+        - label: This is not a request for marketplace publishing, the Zia AI builder, or on-prem Data Bridge (not applicable — out of scope)
           required: true

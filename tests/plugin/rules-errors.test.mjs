@@ -120,6 +120,14 @@ test('email and bare encrypted are invalid column types, not a unique-column ref
   assert.doesNotMatch(textUnique.body, /email and encrypted unique columns/);
 });
 
+test('409 DUPLICATE_ENTRY rule specifies up to 5 names in all, not a single retry', () => {
+  const rules = ruleBodies(load());
+  const dup = rules.find((rule) => rule.title === '`409 DUPLICATE_ENTRY` on project import');
+  assert.ok(dup, 'missing 409 DUPLICATE_ENTRY rule');
+  assert.match(dup.body, /up to 5 names in all/);
+  assert.doesNotMatch(dup.body, /retry the greenfield import once/);
+});
+
 test('shipped rules pass the generic hygiene scan', () => {
   assert.deepEqual(scanText('rules.md', load()), []);
 });

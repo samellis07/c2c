@@ -3535,9 +3535,10 @@ test('payments stay not-supported and are not translated', () => {
   );
   const stub = g.files.find((f) => f.path.startsWith('not-supported/payments-'));
   assert.ok(stub);
-  assert.match(stub.source, /Payment workflows are not supported in this version \(counted; on the roadmap\)/);
+  assert.match(stub.source, /payments are not supported in this version \(counted\)/);
+  assert.doesNotMatch(stub.source, /out of scope/i);
   assert.match(stripComments(stub.source), /not-supported/);
-  assert.doesNotMatch(stub.source, /payments are not supported in this version \(counted\)/);
+  assert.doesNotMatch(stub.source, /on the roadmap/);
   assert.doesNotMatch(stub.source, /payment workflows are out of scope/);
   assert.doesNotMatch(stripComments(stub.source), /charge = 1/);
   assert.equal(g.stats.statements, 0);
