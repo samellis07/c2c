@@ -13,6 +13,11 @@ import { fileURLToPath } from 'node:url';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DOCS = ['plugin/README.md', 'docs/guide/02-before-you-start.md'];
 
+function shellSyntaxFailure(source) {
+  const run = spawnSync('bash', ['-n'], { input: source, encoding: 'utf8' });
+  return run.status === 0 ? null : `bash -n exited ${run.status}: ${run.stderr.trim()}`;
+}
+
 function* shellBlocks(file) {
   const lines = readFileSync(file, 'utf8').split('\n');
   let open = null;
@@ -35,11 +40,13 @@ for (const doc of DOCS) {
     const file = path.join(repo, doc);
     const failures = [];
     for (const block of shellBlocks(file)) {
-      const run = spawnSync('bash', ['-n'], { input: block.source, encoding: 'utf8' });
-      if (run.status !== 0) {
-        failures.push(`${doc}:${block.line} bash -n exited ${run.status}: ${run.stderr.trim()}`);
-      }
+      const failure = shellSyntaxFailure(block.source);
+      if (failure) failures.push(`${doc}:${block.line} ${failure}`);
     }
     assert.deepEqual(failures, []);
   });
 }
+
+test('a malformed shell block is reported as a failure', () => {
+  assert.match(shellSyntaxFailure("printf '%s\\n' 'unterminated"), /^bash -n exited/);
+});

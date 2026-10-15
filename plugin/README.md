@@ -37,8 +37,6 @@ node scripts/vendor-plugin.mjs
   ```
   Then ask the agent to run the c2c doctor.
 
-If your build ships `plugin/bin/c2c install-host <host>`, run that instead — it performs these steps for you; the commands above are the manual fallback.
-
 Installing never edits your MCP configuration; paste the snippet for your host yourself (see `templates/mcp-snippets.md`).
 
 ## Flow
