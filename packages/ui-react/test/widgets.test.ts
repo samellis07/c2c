@@ -111,7 +111,13 @@ function bundle(): Promise<Bundle> {
     };
     const [react, client, dom, fields, formview, env, extend] = await Promise.all([load('react'), load('client'), load('dom'), load('fields'), load('formview'), load('env'), load('extend')]);
     const assets = join(out, 'assets');
-    const css = existsSync(assets) ? readdirSync(assets).filter((name) => name.endsWith('.css')).map((name) => readFileSync(join(assets, name), 'utf8')).join('\n') : '';
+    let assetNames: string[] = [];
+    try {
+      assetNames = readdirSync(assets);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+    const css = assetNames.filter((name) => name.endsWith('.css')).map((name) => readFileSync(join(assets, name), 'utf8')).join('\n');
     return { css, react, client, dom, fields, formview, env, extend };
   })();
   return bundled;

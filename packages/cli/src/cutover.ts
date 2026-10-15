@@ -10,7 +10,7 @@
  * sorted per-record fingerprints (no field values).
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, opendirSync, openSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { App } from '../../core/src/index.js';
 import { authPlan } from '../../auth/src/index.js';
@@ -324,6 +324,15 @@ function realPath(path: string): string {
   }
 }
 
+function isDirectory(path: string): boolean {
+  try {
+    opendirSync(path).closeSync();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isPathOutsideWorkspace(target: string, dir: string): boolean {
   const realDir = realPath(dir);
 
@@ -336,7 +345,7 @@ function isPathOutsideWorkspace(target: string, dir: string): boolean {
   }
 
   const targetAbs = realPath(target);
-  const targetDir = existsSync(targetAbs) && statSync(targetAbs).isDirectory() ? targetAbs : dirname(targetAbs);
+  const targetDir = isDirectory(targetAbs) ? targetAbs : dirname(targetAbs);
   const relTarget = relative(targetDir, realDir);
   if (!relTarget.startsWith('..') && !isAbsolute(relTarget)) {
     return false;
@@ -404,10 +413,17 @@ function verifyManifest(dir: string, manifest: Record<string, unknown>, app: App
   for (const [relPath, expectedSum] of entries) {
     const contained = containedPath(realDir, relPath);
     if (!contained.path) return { ok: false, reason: contained.reason };
-    if (!existsSync(contained.path) || !statSync(contained.path).isFile()) {
-      return { ok: false, reason: `missing file ${relPath}` };
+    let content: Buffer;
+    try {
+      content = readFileSync(contained.path);
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') {
+        return { ok: false, reason: `missing file ${relPath}` };
+      }
+      throw err;
     }
-    const actual = createHash('sha256').update(readFileSync(contained.path)).digest('hex');
+    const actual = createHash('sha256').update(content).digest('hex');
     if (actual.toLowerCase() !== String(expectedSum).toLowerCase()) {
       return { ok: false, reason: `checksum mismatch on ${relPath}` };
     }
@@ -418,34 +434,48 @@ function verifyManifest(dir: string, manifest: Record<string, unknown>, app: App
 export function verifyRollbackEvidence(target: string, rollbackPath: string | undefined, app: App): RollbackEvidence | undefined {
   if (!rollbackPath) return undefined;
   const resolved = resolve(rollbackPath);
-  if (!existsSync(resolved)) {
-    return {
-      status: 'invalid',
-      dir: resolved,
-      outsideWorkspace: false,
-      checksumMatch: false,
-      reason: 'directory or file does not exist',
-    };
+  let dir = dirname(resolved);
+  let manifestFile = resolved;
+  let rawManifest: string;
+  try {
+    rawManifest = readFileSync(resolved, 'utf8');
+  } catch (err) {
+    const code = (err as { code?: unknown } | null)?.code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return {
+        status: 'invalid',
+        dir: resolved,
+        outsideWorkspace: false,
+        checksumMatch: false,
+        reason: 'directory or file does not exist',
+      };
+    }
+    if (code !== 'EISDIR') throw err;
+    dir = resolved;
+    manifestFile = join(dir, ROLLBACK_MANIFEST_FILE);
+    const outsideWorkspace = isPathOutsideWorkspace(target, dir);
+    try {
+      rawManifest = readFileSync(manifestFile, 'utf8');
+    } catch (manifestErr) {
+      const manifestCode = (manifestErr as { code?: unknown } | null)?.code;
+      if (manifestCode === 'ENOENT' || manifestCode === 'ENOTDIR' || manifestCode === 'EISDIR') {
+        return {
+          status: 'invalid',
+          dir,
+          outsideWorkspace,
+          checksumMatch: false,
+          reason: 'no manifest found',
+        };
+      }
+      throw manifestErr;
+    }
   }
 
-  const stat = statSync(resolved);
-  const dir = stat.isFile() ? dirname(resolved) : resolved;
-  const manifestFile = stat.isFile() ? resolved : join(dir, ROLLBACK_MANIFEST_FILE);
   const outsideWorkspace = isPathOutsideWorkspace(target, dir);
-
-  if (!existsSync(manifestFile)) {
-    return {
-      status: 'invalid',
-      dir,
-      outsideWorkspace,
-      checksumMatch: false,
-      reason: 'no manifest found',
-    };
-  }
 
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(readFileSync(manifestFile, 'utf8')) as Record<string, unknown>;
+    parsed = JSON.parse(rawManifest) as Record<string, unknown>;
   } catch {
     return {
       status: 'invalid',
@@ -516,9 +546,15 @@ export function cutoverCli(args: readonly string[], io: Pick<Io, 'stdout' | 'std
     io.stderr(CUTOVER_USAGE);
     return 2;
   }
-  if (!existsSync(target)) {
-    io.stderr(`c2c: no such file or directory: ${target}\n`);
-    return 3;
+  try {
+    closeSync(openSync(target, 'r'));
+  } catch (err) {
+    const code = (err as { code?: unknown } | null)?.code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      io.stderr(`c2c: no such file or directory: ${target}\n`);
+      return 3;
+    }
+    if (code !== 'EISDIR') throw err;
   }
   const input = cutoverInput(target, rest);
   const proof = proofReport(input);

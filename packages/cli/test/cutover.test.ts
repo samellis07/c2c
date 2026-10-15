@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -202,7 +202,6 @@ test('a real rollback-export round trip ticks both rollback items', async () => 
   const ws = workspace();
   const rollbackDir = mkdtempSync(join(tmpdir(), 'c2c-rollback-outside-'));
   const manifestPath = await realExport(ws, rollbackDir);
-  assert.ok(existsSync(manifestPath), 'rollback-export must write c2c-rollback-manifest.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { version: string; app: string; tables: Record<string, string>; files: Record<string, string> };
   assert.equal(manifest.version, 'c2c-rollback-export/1');
   assert.equal(manifest.app, 'Shop');
@@ -216,6 +215,10 @@ test('a real rollback-export round trip ticks both rollback items', async () => 
   const text = checklist(ws, rollbackDir);
   assert.match(text, /- \[x\] `c2c rollback-export .*\(automatic\)/);
   assert.match(text, /- \[x\] Keep the exported folder somewhere outside this workspace\. \(automatic\)/);
+  // Passing the manifest file directly also ticks both rollback items.
+  const viaFile = checklist(ws, manifestPath);
+  assert.match(viaFile, /- \[x\] `c2c rollback-export .*\(automatic\)/);
+  assert.match(viaFile, /- \[x\] Keep the exported folder somewhere outside this workspace\. \(automatic\)/);
   // Human items remain open in the same checklist
   assert.match(text, /- \[ \] Announce the cut-over window/);
   assert.match(text, /- \[ \] Stop data entry in Creator/);
@@ -254,7 +257,7 @@ test('empty, partial and forged manifests keep the baseline open', async () => {
   assert.match(checklist(ws, dir), /- \[ \] `c2c rollback-export .*\(open: manifest app does not match/);
 });
 
-test('checksum mismatch, path traversal and symlink escapes keep the baseline open', async () => {
+test('checksum mismatch, missing files, path traversal and symlink escapes keep the baseline open', async () => {
   const ws = workspace();
 
   // A file changed after the export.
@@ -262,6 +265,21 @@ test('checksum mismatch, path traversal and symlink escapes keep the baseline op
   await realExport(ws, dir);
   writeFileSync(join(dir, 'import', 'Vendor.csv'), 'forged\n');
   assert.match(checklist(ws, dir), /- \[ \] `c2c rollback-export .*\(open: checksum mismatch on import\/Vendor\.csv\)/);
+
+  // A file listed in the manifest is missing from disk.
+  dir = mkdtempSync(join(tmpdir(), 'c2c-rollback-missing-file-'));
+  await realExport(ws, dir);
+  rmSync(join(dir, 'import', 'Vendor.csv'));
+  assert.match(checklist(ws, dir), /- \[ \] `c2c rollback-export .*\(open: missing file import\/Vendor\.csv\)/);
+
+  // A file listed in the manifest was replaced with a directory (EISDIR).
+  mkdirSync(join(dir, 'import', 'Vendor.csv'));
+  assert.match(checklist(ws, dir), /- \[ \] `c2c rollback-export .*\(open: missing file import\/Vendor\.csv\)/);
+
+  // Missing rollback directory or missing manifest file.
+  assert.match(checklist(ws, join(dir, 'does-not-exist')), /- \[ \] `c2c rollback-export .*\(open: directory or file does not exist\)/);
+  const emptyRollbackDir = mkdtempSync(join(tmpdir(), 'c2c-rollback-no-manifest-'));
+  assert.match(checklist(ws, emptyRollbackDir), /- \[ \] `c2c rollback-export .*\(open: no manifest found\)/);
 
   // A manifest path that escapes the export dir.
   dir = mkdtempSync(join(tmpdir(), 'c2c-rollback-traversal-'));

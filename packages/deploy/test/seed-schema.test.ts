@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deriveIr, parse, parseFile } from '../../core/src/index.js';
@@ -447,14 +447,24 @@ test('migrate-data --seed with file columns verifies the Stratus first-use gate 
 const FIXTURES = process.env.C2C_FIXTURES_DIR;
 const CORPUS_SEED = FIXTURES ? join(FIXTURES, 'synthetic/s01-purchase-orders/L3/seed.json') : '';
 const CORPUS_DS = FIXTURES ? join(FIXTURES, 'synthetic/s01-purchase-orders/L3/c2c-syn-po-l3.ds') : '';
-const hasCorpus = Boolean(FIXTURES && existsSync(CORPUS_SEED) && existsSync(CORPUS_DS));
+let corpusSeedText: string | undefined;
+let corpusApp: ReturnType<typeof parseFile>['ir'] | undefined;
+if (CORPUS_SEED && CORPUS_DS) {
+  try {
+    corpusSeedText = readFileSync(CORPUS_SEED, 'utf8');
+    corpusApp = parseFile(CORPUS_DS).ir;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+}
+const hasCorpus = Boolean(corpusSeedText !== undefined && corpusApp !== undefined);
 
 test('a synthetic seed.json round-trips with lookups remapped to ROWIDs', { skip: hasCorpus ? undefined : 'C2C_FIXTURES_DIR corpus missing' }, async () => {
-  const app = parseFile(CORPUS_DS).ir;
+  const app = corpusApp!;
   const keys = foreignKeysForApp(app);
   assert.ok(keys.some((key) => key.table === 'Purchase_Order' && key.column === 'Vendor' && key.parent === 'Vendor'));
   assert.ok(keys.some((key) => key.table === 'Department' && key.column === 'Cost_Center' && key.parent === 'Cost_Center'));
-  const tables = parseSeed(readFileSync(CORPUS_SEED, 'utf8'), { today: '2026-01-15', loginUser: 'tester@example.com' });
+  const tables = parseSeed(corpusSeedText!, { today: '2026-01-15', loginUser: 'tester@example.com' });
   const calls: string[] = [];
   const { fetch, stored } = storeFetch(calls);
   const result = await migrateSeed({
