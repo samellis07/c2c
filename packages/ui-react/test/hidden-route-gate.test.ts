@@ -311,6 +311,11 @@ test('a denied embedded report renders no rows or report query', { skip: SKIP },
 	}
 }`;
   const ir = app(source);
+  const { JSDOM } = await import('jsdom');
+  const dom = new JSDOM('<!doctype html><html></html>');
+  const priorDocument = globalThis.document;
+  Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true });
+  t.after(() => { Object.defineProperty(globalThis, 'document', { value: priorDocument, configurable: true }); dom.window.close(); });
   const { model } = buildUi(ir);
   const page = pageSpecs(ir, model).Outer;
   assert.ok(page.todos.some((todo) => /server-side script/.test(todo)), page.todos.join('\n'));

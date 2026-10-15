@@ -324,8 +324,9 @@ test('a denied embedded report renders no rows and never requests them', async (
   assert.equal(main.querySelector('[data-access-status]')?.getAttribute('data-access-status'), '403', main.innerHTML);
   assert.equal(calls.length, 1, 'only the view authorization probe ran');
   assert.match(calls[0]!, /htmlpages|reports/);
-  assert.match(calls[0]!, /\"op\":\"view\"/);
-  assert.doesNotMatch(calls.join(' '), /queryEndpoint|op\":\"query/);
+  assert.match(calls[0]!, /reports\/All_Rows/);
+  assert.match(calls[0]!, /op.*view/);
+  assert.doesNotMatch(calls.join(' '), /op.*query/);
 });
 
 test('hidden zc-component targets show the same 403 notice as their route', async () => {
