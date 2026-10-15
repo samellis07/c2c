@@ -2702,114 +2702,104 @@ test('subYear on a date string translates and evaluates', async () => {
   const got2 = (await body(t2.server)(runtime.shim, runtime.context({ record: {} }))) as any;
   assert.equal(got2.y, 2018);
 });
-test('acos translates to Math.acos and evaluates correctly', { todo: 'wrong translation: translates to shim.todo instead of Math.acos' }, async () => {
+test('acos translates to shim.math.acos and evaluates correctly', async () => {
   const t = translate('x = acos(1); y = acos(-1); z = acos(0);');
-  assert.match(t.server, /Math\.acos\(1\)/);
-  assert.match(t.server, /Math\.acos\(\(-1\)\)/);
-  assert.match(t.server, /Math\.acos\(0\)/);
+  assert.match(t.server, /shim\.math\.acos\(1\)/);
+  assert.match(t.server, /shim\.math\.acos\(\(-1\)\)/);
+  assert.match(t.server, /shim\.math\.acos\(0\)/);
   const runtime = createRuntime({ dryRun: true });
   const ctx = runtime.context({ record: {} });
-  const ideal = t.server.replaceAll('await shim.todo(ctx, "call:acos")', 'Math.acos');
-  const run = new Function('shim', 'ctx', `return (async () => {\n${ideal}\nreturn [x, y, z];\n})();`);
+  const run = new Function('shim', 'ctx', `return (async () => {\n${t.server}\nreturn [x, y, z];\n})();`);
   const [x, y, z] = await run(runtime.shim, ctx) as number[];
   assert.equal(x, Math.acos(1));
   assert.equal(y, Math.acos(-1));
   assert.equal(z, Math.acos(0));
 });
 
-test('acosh translates to Math.acosh and evaluates correctly', { todo: 'wrong translation: translates to shim.todo instead of Math.acosh' }, async () => {
+test('acosh translates to shim.math.acosh and evaluates correctly', async () => {
   const t = translate('x = acosh(1); y = acosh(2);');
-  assert.match(t.server, /Math\.acosh\(1\)/);
-  assert.match(t.server, /Math\.acosh\(2\)/);
+  assert.match(t.server, /shim\.math\.acosh\(1\)/);
+  assert.match(t.server, /shim\.math\.acosh\(2\)/);
   const runtime = createRuntime({ dryRun: true });
   const ctx = runtime.context({ record: {} });
-  const ideal = t.server.replaceAll('await shim.todo(ctx, "call:acosh")', 'Math.acosh');
-  const run = new Function('shim', 'ctx', `return (async () => {\n${ideal}\nreturn [x, y];\n})();`);
+  const run = new Function('shim', 'ctx', `return (async () => {\n${t.server}\nreturn [x, y];\n})();`);
   const [x, y] = await run(runtime.shim, ctx) as number[];
   assert.equal(x, Math.acosh(1));
   assert.equal(y, Math.acosh(2));
 });
 
-test('asinh translates to Math.asinh and evaluates correctly', { todo: 'wrong translation: translates to shim.todo instead of Math.asinh' }, async () => {
+test('asinh translates to shim.math.asinh and evaluates correctly', async () => {
   const t = translate('x = asinh(0); y = asinh(-1);');
-  assert.match(t.server, /Math\.asinh\(0\)/);
-  assert.match(t.server, /Math\.asinh\(\(-1\)\)/);
+  assert.match(t.server, /shim\.math\.asinh\(0\)/);
+  assert.match(t.server, /shim\.math\.asinh\(\(-1\)\)/);
   const runtime = createRuntime({ dryRun: true });
   const ctx = runtime.context({ record: {} });
-  const ideal = t.server.replaceAll('await shim.todo(ctx, "call:asinh")', 'Math.asinh');
-  const run = new Function('shim', 'ctx', `return (async () => {\n${ideal}\nreturn [x, y];\n})();`);
+  const run = new Function('shim', 'ctx', `return (async () => {\n${t.server}\nreturn [x, y];\n})();`);
   const [x, y] = await run(runtime.shim, ctx) as number[];
   assert.equal(x, Math.asinh(0));
   assert.equal(y, Math.asinh(-1));
 });
 
-test('atan translates to Math.atan and evaluates correctly', { todo: 'wrong translation: translates to shim.todo instead of Math.atan' }, async () => {
+test('atan translates to shim.math.atan and evaluates correctly', async () => {
   const t = translate('x = atan(0); y = atan(1); z = atan(-1);');
-  assert.match(t.server, /Math\.atan\(0\)/);
-  assert.match(t.server, /Math\.atan\(1\)/);
-  assert.match(t.server, /Math\.atan\(\(-1\)\)/);
+  assert.match(t.server, /shim\.math\.atan\(0\)/);
+  assert.match(t.server, /shim\.math\.atan\(1\)/);
+  assert.match(t.server, /shim\.math\.atan\(\(-1\)\)/);
   const runtime = createRuntime({ dryRun: true });
   const ctx = runtime.context({ record: {} });
-  const ideal = t.server.replaceAll('await shim.todo(ctx, "call:atan")', 'Math.atan');
-  const run = new Function('shim', 'ctx', `return (async () => {\n${ideal}\nreturn [x, y, z];\n})();`);
+  const run = new Function('shim', 'ctx', `return (async () => {\n${t.server}\nreturn [x, y, z];\n})();`);
   const [x, y, z] = await run(runtime.shim, ctx) as number[];
   assert.equal(x, Math.atan(0));
   assert.equal(y, Math.atan(1));
   assert.equal(z, Math.atan(-1));
 });
 
-test('atan2 translates to Math.atan2 and evaluates correctly', { todo: 'wrong translation: translates to shim.todo instead of Math.atan2' }, async () => {
+test('atan2 translates to shim.math.atan2 and evaluates correctly', async () => {
   const t = translate('x = atan2(0, 1); y = atan2(1, 0); z = atan2(-1, -1);');
-  assert.match(t.server, /Math\.atan2\(0, 1\)/);
-  assert.match(t.server, /Math\.atan2\(1, 0\)/);
-  assert.match(t.server, /Math\.atan2\(\(-1\), \(-1\)\)/);
+  assert.match(t.server, /shim\.math\.atan2\(0, 1\)/);
+  assert.match(t.server, /shim\.math\.atan2\(1, 0\)/);
+  assert.match(t.server, /shim\.math\.atan2\(\(-1\), \(-1\)\)/);
   const runtime = createRuntime({ dryRun: true });
   const ctx = runtime.context({ record: {} });
-  // For atan2, the translation generated might be `await shim.todo(ctx, "call:atan2")` which loses arguments.
-  // The test will fail at assert.match anyway. To show ideal execution, we replace the whole block.
-  const ideal = 'var x = Math.atan2(0, 1);\nvar y = Math.atan2(1, 0);\nvar z = Math.atan2(-1, -1);';
-  const run = new Function('shim', 'ctx', `return (async () => {\n${ideal}\nreturn [x, y, z];\n})();`);
+  const run = new Function('shim', 'ctx', `return (async () => {\n${t.server}\nreturn [x, y, z];\n})();`);
   const [x, y, z] = await run(runtime.shim, ctx) as number[];
   assert.equal(x, Math.atan2(0, 1));
   assert.equal(y, Math.atan2(1, 0));
   assert.equal(z, Math.atan2(-1, -1));
 });
 
-test('atanh translates to Math.atanh and evaluates correctly', { todo: 'wrong translation: translates to shim.todo instead of Math.atanh' }, async () => {
+test('atanh translates to shim.math.atanh and evaluates correctly', async () => {
   const t = translate('x = atanh(0); y = atanh(0.5);');
-  assert.match(t.server, /Math\.atanh\(0\)/);
-  assert.match(t.server, /Math\.atanh\(shim\.decimal\.from\("0\.5"\)\)/);
+  assert.match(t.server, /shim\.math\.atanh\(0\)/);
+  assert.match(t.server, /shim\.math\.atanh\(shim\.decimal\.from\("0\.5"\)\)/);
   const runtime = createRuntime({ dryRun: true });
   const ctx = runtime.context({ record: {} });
-  const ideal = 'var x = Math.atanh(0);\nvar y = Math.atanh(0.5);';
-  const run = new Function('shim', 'ctx', `return (async () => {\n${ideal}\nreturn [x, y];\n})();`);
+  const run = new Function('shim', 'ctx', `return (async () => {\n${t.server}\nreturn [x, y];\n})();`);
   const [x, y] = await run(runtime.shim, ctx) as number[];
   assert.equal(x, Math.atanh(0));
   assert.equal(y, Math.atanh(0.5));
 });
 
-test('cosh translates to Math.cosh and evaluates correctly', { todo: 'wrong translation: translates to shim.todo instead of Math.cosh' }, async () => {
+test('cosh translates to shim.math.cosh and evaluates correctly', async () => {
   const t = translate('x = cosh(0); y = cosh(-1);');
-  assert.match(t.server, /Math\.cosh\(0\)/);
-  assert.match(t.server, /Math\.cosh\(\(-1\)\)/);
+  assert.match(t.server, /shim\.math\.cosh\(0\)/);
+  assert.match(t.server, /shim\.math\.cosh\(\(-1\)\)/);
   const runtime = createRuntime({ dryRun: true });
   const ctx = runtime.context({ record: {} });
-  const ideal = t.server.replaceAll('await shim.todo(ctx, "call:cosh")', 'Math.cosh');
-  const run = new Function('shim', 'ctx', `return (async () => {\n${ideal}\nreturn [x, y];\n})();`);
+  const run = new Function('shim', 'ctx', `return (async () => {\n${t.server}\nreturn [x, y];\n})();`);
   const [x, y] = await run(runtime.shim, ctx) as number[];
   assert.equal(x, Math.cosh(0));
   assert.equal(y, Math.cosh(-1));
 });
 
-test('log10 translates to Math.log10 and evaluates correctly', { todo: 'wrong translation: translates to shim.todo instead of Math.log10' }, async () => {
+test('log10 translates to shim.math.log10 and evaluates correctly', async () => {
   const t = translate('x = log10(1); y = log10(10); z = log10(100);');
-  assert.match(t.server, /Math\.log10\(1\)/);
-  assert.match(t.server, /Math\.log10\(10\)/);
-  assert.match(t.server, /Math\.log10\(100\)/);
+  assert.match(t.server, /shim\.math\.log10\(1\)/);
+  assert.match(t.server, /shim\.math\.log10\(10\)/);
+  assert.match(t.server, /shim\.math\.log10\(100\)/);
   const runtime = createRuntime({ dryRun: true });
   const ctx = runtime.context({ record: {} });
-  const ideal = t.server.replaceAll('await shim.todo(ctx, "call:log10")', 'Math.log10');
-  const run = new Function('shim', 'ctx', `return (async () => {\n${ideal}\nreturn [x, y, z];\n})();`);
+  const run = new Function('shim', 'ctx', `return (async () => {\n${t.server}\nreturn [x, y, z];\n})();`);
   const [x, y, z] = await run(runtime.shim, ctx) as number[];
   assert.equal(x, Math.log10(1));
   assert.equal(y, Math.log10(10));
@@ -2839,27 +2829,25 @@ test('sqrt(x) + 1 evaluates through the translator for small bigint perfect squa
   assert.equal(y, 94906267 + 1);
 });
 
-test('sinh translates to Math.sinh and evaluates correctly', { todo: 'wrong translation: translates to shim.todo instead of Math.sinh' }, async () => {
+test('sinh translates to shim.math.sinh and evaluates correctly', async () => {
   const t = translate('x = sinh(0); y = sinh(-1);');
-  assert.match(t.server, /Math\.sinh\(0\)/);
-  assert.match(t.server, /Math\.sinh\(\(-1\)\)/);
+  assert.match(t.server, /shim\.math\.sinh\(0\)/);
+  assert.match(t.server, /shim\.math\.sinh\(\(-1\)\)/);
   const runtime = createRuntime({ dryRun: true });
   const ctx = runtime.context({ record: {} });
-  const ideal = t.server.replaceAll('await shim.todo(ctx, "call:sinh")', 'Math.sinh');
-  const run = new Function('shim', 'ctx', `return (async () => {\n${ideal}\nreturn [x, y];\n})();`);
+  const run = new Function('shim', 'ctx', `return (async () => {\n${t.server}\nreturn [x, y];\n})();`);
   const [x, y] = await run(runtime.shim, ctx) as number[];
   assert.equal(x, Math.sinh(0));
   assert.equal(y, Math.sinh(-1));
 });
 
-test('tanh translates to Math.tanh and evaluates correctly', { todo: 'wrong translation: translates to shim.todo instead of Math.tanh' }, async () => {
+test('tanh translates to shim.math.tanh and evaluates correctly', async () => {
   const t = translate('x = tanh(0); y = tanh(-1);');
-  assert.match(t.server, /Math\.tanh\(0\)/);
-  assert.match(t.server, /Math\.tanh\(\(-1\)\)/);
+  assert.match(t.server, /shim\.math\.tanh\(0\)/);
+  assert.match(t.server, /shim\.math\.tanh\(\(-1\)\)/);
   const runtime = createRuntime({ dryRun: true });
   const ctx = runtime.context({ record: {} });
-  const ideal = t.server.replaceAll('await shim.todo(ctx, "call:tanh")', 'Math.tanh');
-  const run = new Function('shim', 'ctx', `return (async () => {\n${ideal}\nreturn [x, y];\n})();`);
+  const run = new Function('shim', 'ctx', `return (async () => {\n${t.server}\nreturn [x, y];\n})();`);
   const [x, y] = await run(runtime.shim, ctx) as number[];
   assert.equal(x, Math.tanh(0));
   assert.equal(y, Math.tanh(-1));
