@@ -48,8 +48,8 @@ Rule: always send the array form. A plain JSON object is rejected with
 Rule: the 250-column hard cap and 100-column default are [UNVERIFIED].
 `c2c plan` warns above 100. When a Creator form exceeds 250, plan splits
 overflow fields into 1:1 side tables keyed by the parent ROWID and blocks an
-unsplittable field group. `c2c doctor` refuses a live table over 250 before
-create.
+unsplittable field group. `c2c doctor` D-F5 checks the generated table set
+against the same cap and default; it does not read live tables.
 Assume at most 130 text-type (varchar plus text) columns per table;
 `c2c plan` warns past that count and moves overflow text to Stratus
 before any write.

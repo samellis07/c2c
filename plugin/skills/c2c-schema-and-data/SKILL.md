@@ -38,7 +38,7 @@ Reserved ZCQL words (`FROM`, `TO`, …) as column names are renamed with a mappi
 ### Budgets (the plan fails closed)
 
 `c2c plan` checks every table against [the limits table](../../references/limits.md); each budget below names its limit id, the c2c behaviour, and the row.
-- [L-COLUMNS](../../references/limits.md#l-columns-columns-per-table-development): raised cap 250 columns per table [UNVERIFIED], warn above the 100-column default [UNVERIFIED] → plan splits Creator form overflow into 1:1 side tables (or blocks an unsplittable group); doctor refuses a live table over the cap;
+- [L-COLUMNS](../../references/limits.md#l-columns-columns-per-table-development): raised cap 250 columns per table [UNVERIFIED], warn above the 100-column default [UNVERIFIED] → plan splits Creator form overflow into 1:1 side tables (or blocks an unsplittable group); doctor D-F5 checks the generated table set against the cap (it does not read live tables);
 - [L-UNIQUE-VARCHAR](../../references/limits.md#l-unique-varchar-unique-varchar-columns-per-table): unique varchar ≤ 2 [TESTED] → refuse; the user picks which fields keep DB uniqueness; the rest are enforced by the handler and the loader;
 - [L-FOREIGN-KEYS](../../references/limits.md#l-foreign-keys-foreign-keys-per-table): FKs ≤ 15 per table [UNVERIFIED] → warn; extra lookups as plain `bigint` ROWID;
 - [L-TEXT-COLUMNS](../../references/limits.md#l-text-columns-text-type-columns-per-table): text-type columns ≤ 130 per table [UNVERIFIED] → warn;

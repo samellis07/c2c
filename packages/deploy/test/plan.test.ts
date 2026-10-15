@@ -521,7 +521,8 @@ test('doctor, plan and the limits facts agree at the 250-column hard cap', () =>
   assert.equal(Number(documentedDefault), columnsDefault, 'facts ledger default must match the code');
   assert.match(columnsRule, /c2c plan warns when a table exceeds/);
   assert.match(columnsRule, /c2c plan splits overflow fields/);
-  assert.match(columnsRule, /c2c doctor refuses a live table over/);
+  assert.match(columnsRule, /c2c doctor D-F5 checks the generated table set/);
+  assert.match(columnsRule, /does not read live tables/);
 
   const overhead = wideColumnCount(1) - 1;
   const atCapApp = wideApp(cap - overhead);
