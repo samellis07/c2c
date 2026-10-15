@@ -76,8 +76,16 @@ export async function readBucketList(rest: RestFn, projectId: string, name: stri
     if (!Array.isArray(data)) {
       return { status: 'unverifiable', detail: `the REST bucket list did not return a data list; bucket ${name} could not be verified` };
     }
-    if (data.some((row) => typeof row === 'object' && row !== null && (row as { bucket_name?: unknown }).bucket_name === name)) {
-      return { status: 'found' };
+    for (let index = 0; index < data.length; index++) {
+      const row: unknown = data[index];
+      if (typeof row !== 'object' || row === null || Array.isArray(row)) {
+        return { status: 'unverifiable', detail: `the REST bucket list returned a malformed row at index ${index}; bucket ${name} could not be verified` };
+      }
+      const bucketName = (row as { bucket_name?: unknown }).bucket_name;
+      if (typeof bucketName !== 'string' || bucketName.trim() === '') {
+        return { status: 'unverifiable', detail: `the REST bucket list row at index ${index} has no usable bucket_name; bucket ${name} could not be verified` };
+      }
+      if (bucketName === name) return { status: 'found' };
     }
     const tokenKey = PAGE_TOKEN_KEYS.find((key) => typeof record?.[key] === 'string' && record[key] !== '');
     if (tokenKey === undefined) {
