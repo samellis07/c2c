@@ -709,7 +709,7 @@ function fieldControl(field, id, describedBy) {
       .join('');
     // The trailing ops column holds each row's delete button — Creator's
     // grid rows carry a remove affordance.
-    return `<div class="subform" data-field="${name}"><table><thead><tr>${heads}<th scope="col" data-row-ops><span class="sr-only">Remove row</span></th></tr></thead><tbody></tbody></table><button id="${id}-add" type="button" data-add-row="${name}">+ Add New</button></div>`;
+    return `<div class="subform" data-field="${name}"><table><thead><tr>${heads}<th scope="col" data-row-ops><span class="sr-only">Remove row</span></th></tr></thead><tbody></tbody></table><button id="${id}-add" type="button" data-add-row="${name}"${described}>+ Add New</button></div>`;
   }
   if (field.widget === 'name' || field.widget === 'address') {
     return `<fieldset><legend>${escapeHtml(field.label)}${field.required ? '<span class="req" aria-hidden="true"> *</span>' : ''}</legend>${(field.subfields || []).map((sub) => fieldBlock(sub, `${id}-`)).join('')}<p class="error" data-error-for="${name}"></p></fieldset>`;
@@ -757,7 +757,9 @@ function fieldBlock(field, prefix) {
   // Why a field is not generated is a migration note for the developer: it
   // stays in the migration report and goes to the console, never the form.
   if (field.status === 'todo' && field.widget !== 'section' && field.widget !== 'notes') console.info(`[c2c] field "${field.name}" is not generated: ${field.todo || field.widget}`);
-  const errors = `<p class="error" data-error-for="${escapeHtml(field.name)}"></p>`;
+  // The error slot is the control's description, so a shown error is read with the control.
+  const errorId = `${id}-error`;
+  const errors = `<p class="error" id="${errorId}" data-error-for="${escapeHtml(field.name)}"></p>`;
   // A Section pseudo-field with no display name draws no heading at all.
   if (field.widget === 'section') return field.titled === false ? '' : `<h2 data-span="all">${escapeHtml(field.label)}</h2>`;
   // A notes block shows its stored instruction markup, never the field's link name.
@@ -770,16 +772,20 @@ function fieldBlock(field, prefix) {
   }
   const wide = field.widget === 'subform' || field.widget === 'textarea' || field.widget === 'richtext' ? ' data-span="all"' : '';
   // Name and address parts carry their own labels; the fieldset legend names the group.
+  // A radio or checkbox list is one group named by the field label, not only its first choice.
+  const group = (field.matrixId === 'checkbox-multi' || field.widget === 'radio') && field.choices && field.choices.length;
+  const labelId = group ? ` id="${id}-label"` : '';
+  const groupAttrs = group ? ` role="group" aria-labelledby="${id}-label"` : '';
   const label = field.widget === 'name' || field.widget === 'address'
     ? ''
-    : `<label for="${groupLabelFor(field, id)}">${escapeHtml(field.label)}${field.required ? '<span class="req" aria-hidden="true"> *</span>' : ''}</label>`;
-  return `<div class="field"${wide} data-field="${escapeHtml(field.name)}" data-widget="${escapeHtml(field.widget)}">${label}${fieldControl(field, id)}${errors}</div>`;
+    : `<label${labelId} for="${groupLabelFor(field, id)}">${escapeHtml(field.label)}${field.required ? '<span class="req" aria-hidden="true"> *</span>' : ''}</label>`;
+  return `<div class="field"${wide}${groupAttrs} data-field="${escapeHtml(field.name)}" data-widget="${escapeHtml(field.widget)}">${label}${fieldControl(field, id, errorId)}${errors}</div>`;
 }
 
 export function renderForm(form) {
   const layout = form && (form.layout === 'two' || form.layout === 'three') ? form.layout : 'one';
   const fields = (form.fields || []).map((field) => fieldBlock(field)).join('');
-  return `<section class="card" data-form-card><h1>${escapeHtml(form.label || form.name)}</h1><form data-form="${escapeHtml(form.name)}" data-layout="${layout}" data-submit="${escapeHtml(form.submitEndpoint || '')}" novalidate><div class="form-grid">${fields}</div><p data-banner></p><button type="submit">Submit</button></form></section>`;
+  return `<section class="card" data-form-card><h1>${escapeHtml(form.label || form.name)}</h1><form data-form="${escapeHtml(form.name)}" data-layout="${layout}" data-submit="${escapeHtml(form.submitEndpoint || '')}" novalidate><div class="form-grid">${fields}</div><p data-banner role="status"></p><button type="submit">Submit</button></form></section>`;
 }
 
 const BOARD_VIEWS = new Set(['kanban', 'calendar', 'timeline']);
@@ -5798,10 +5804,19 @@ function readValues(formEl) {
 }
 
 function showErrors(formEl, form, errors) {
+  let first = null;
   for (const field of form.fields || []) {
     const slot = formEl.querySelector(`[data-error-for="${CSS.escape(field.name)}"]`);
     if (slot) slot.textContent = errors[field.name] || '';
+    const block = slot && slot.closest ? slot.closest('[data-field]') : null;
+    const controls = block ? block.querySelectorAll('input:not([type="hidden"]), select, textarea, button[data-add-row]') : [];
+    for (const control of controls) {
+      if (errors[field.name]) control.setAttribute('aria-invalid', 'true');
+      else control.removeAttribute('aria-invalid');
+    }
+    if (errors[field.name] && !first && controls.length) first = controls[0];
   }
+  return first;
 }
 
 // ---- hidden admin smoke page (#/admin/smoke) ----------------------------------
@@ -7527,7 +7542,11 @@ export function boot(appModel, doc) {
           if (field && tr) {
             run('deleterow', undefined, { field, index: Math.max(0, index) })
               .catch(() => {})
-              .finally(() => tr.remove());
+              .finally(() => {
+                const body = tr.parentElement;
+                tr.remove();
+                if (typeof formLayoutNameRows === 'function') formLayoutNameRows(body);
+              });
           }
         }
       });
@@ -7554,8 +7573,12 @@ export function boot(appModel, doc) {
       for (const old of formEl.querySelectorAll('p[data-mail-notice]')) old.remove();
       const values = readValues(formEl);
       const errors = validateForm(form, values);
-      showErrors(formEl, form, errors);
-      if (Object.keys(errors).length) return;
+      const firstInvalid = showErrors(formEl, form, errors);
+      if (Object.keys(errors).length) {
+        // Move to the first invalid control; its description reads the error out.
+        if (firstInvalid && typeof firstInvalid.focus === 'function') firstInvalid.focus();
+        return;
+      }
       const notes = await run('validate');
       if (notes.includes('cancel')) return;
       const online = viewRef && viewRef.navigator ? viewRef.navigator.onLine : typeof navigator === 'undefined' || navigator.onLine;
