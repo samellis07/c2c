@@ -21,6 +21,8 @@ export type {
 export { DomUnavailableError, elementsFromZml, sanitizeSnippet } from './pages.js';
 export type { UiElement } from './pages.js';
 export { compileHtmlpage, decodeXmlEntities } from './htmlpage.js';
+export { SNIPPET_REASONS, serverSnippetGuidance } from './snippet-guidance.js';
+export type { SnippetGuidance, SnippetReason } from './snippet-guidance.js';
 export type { HtmlpageCompiled, HtmlpageFile } from './htmlpage.js';
 export { appIconPng, pwaFiles, pwaManifest, pwaRegisterScript, pwaServiceWorkerSource, slateRedirects } from './pwa.js';
 export type { PwaSpec } from './pwa.js';

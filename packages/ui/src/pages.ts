@@ -11,6 +11,7 @@ import { createRequire } from 'node:module';
 import type { App } from '../../core/src/ir.js';
 import type { ZmlElement } from '../../core/src/zml.js';
 import { compileHtmlpage, decodeXmlEntities, EXECUTE_FUNCTION_BUTTON, type HtmlpageFile } from './htmlpage.js';
+import { serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
 import { safeUrl } from './url-policy.js';
 
 const require = createRequire(import.meta.url);
@@ -32,6 +33,10 @@ export interface UiElement {
   kind: 'container' | 'report' | 'chart' | 'form' | 'button' | 'text' | 'search' | 'gauge' | 'html' | 'todo' | 'kpi' | 'embed';
   name?: string;
   text?: string;
+  /** Why a server-snippet TODO stays counted, in a fixed order. */
+  manualReasons?: SnippetReason[];
+  /** Developer-facing manual step for that TODO, with its location. */
+  manualStep?: string;
   /** A `type="form data"` cell: `thisapp.<Report>.<Field>.<fn>()` plus the row criteria. */
   kpi?: { report?: string; form?: string; field?: string; fn?: string; expression?: string };
   criteria?: string;
@@ -513,7 +518,17 @@ export function elementFromZml(
       const reason = compiled?.reason === EXECUTE_FUNCTION_BUTTON
         ? 'Server-side Deluge snippet with an ExecuteFunction button requires manual translation of the button\'s function call'
         : 'Server-side Deluge snippet requires manual translation';
-      const todo = { tag, kind: 'todo' as const, ...(name ? { name } : {}), todo: reason, children: [] };
+      const where = `snippet ${name ?? tag}${env ? ` on page ${env.page}` : ''}`;
+      const guidance = serverSnippetGuidance(decoded, compiled?.reason, where);
+      const todo = {
+        tag,
+        kind: 'todo' as const,
+        ...(name ? { name } : {}),
+        todo: reason,
+        manualReasons: guidance.reasons,
+        manualStep: guidance.step,
+        children: [],
+      };
       return { tag, kind, ...(name ? { name } : {}), html: '', ...(popups.length ? { popups } : {}), children: [todo, ...children] };
     }
     return { tag, kind, ...(name ? { name } : {}), html: sanitizeSnippet(source), ...(popups.length ? { popups } : {}), children };
