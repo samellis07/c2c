@@ -1,4 +1,4 @@
-import { closeSync, constants, fstatSync, openSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { parseCst, print, type Document, type Statement } from './cst.js';
 import type { Dialect } from './dialect.js';
@@ -87,7 +87,7 @@ export function listDsFiles(dir: string): string[] {
     for (const name of readdirSync(d).sort()) {
       if (name === 'node_modules' || name === '.git') continue;
       const p = join(d, name);
-      const st = statSync(p, { throwIfNoEntry: false });
+      const st = lstatSync(p, { throwIfNoEntry: false });
       if (!st) continue;
       if (st.isDirectory()) walk(p);
       else if (st.isFile() && name.toLowerCase().endsWith('.ds') && !name.toLowerCase().endsWith('.exported.ds')) out.push(p);
@@ -149,7 +149,7 @@ function packageFlags(dir: string): { html: boolean; json: boolean; names: strin
     for (const name of entries) {
       if (name === 'node_modules' || name === '.git') continue;
       const p = join(d, name);
-      const st = statSync(p, { throwIfNoEntry: false });
+      const st = lstatSync(p, { throwIfNoEntry: false });
       if (!st) continue;
       if (st.isDirectory()) {
         walk(p);
@@ -170,7 +170,7 @@ function packageFlags(dir: string): { html: boolean; json: boolean; names: strin
 
 /**
  * Widget packages next to the `.ds` export: each directory
- * `sidecars/widgets/<name>/`. A package is not a `.ds` file, so `listDsFiles`
+ * `sidecars/widgets/<name>/`. Symlinks are not followed. A package is not a `.ds` file, so `listDsFiles`
  * does not return it. The directory name is always kept. A manifest name is
  * kept as well when it differs.
  */
@@ -187,7 +187,7 @@ export function listWidgetSidecars(dir: string): WidgetSidecar[] {
       for (const name of names) {
         if (name.startsWith('.')) continue;
         const p = join(d, name);
-        const st = statSync(p, { throwIfNoEntry: false });
+        const st = lstatSync(p, { throwIfNoEntry: false });
         if (!st?.isDirectory()) continue;
         const flags = packageFlags(p);
         const path = [...rel, name].join('/');
@@ -200,7 +200,7 @@ export function listWidgetSidecars(dir: string): WidgetSidecar[] {
     for (const name of names) {
       if (name === 'node_modules' || name === '.git' || name.startsWith('.')) continue;
       const p = join(d, name);
-      const st = statSync(p, { throwIfNoEntry: false });
+      const st = lstatSync(p, { throwIfNoEntry: false });
       if (!st?.isDirectory()) continue;
       walk(p, [...rel, name]);
     }
