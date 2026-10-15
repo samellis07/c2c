@@ -1208,6 +1208,7 @@ test('confirm refuses the same missing mandatory export before credentials or wr
   assert.equal(fetched.length, 0, 'no row write ran');
   assert.equal(state.tokens, 0, 'no token was minted');
   assert.match(err(), /refused: 1 mandatory value\(s\) missing; nothing was written/);
+  assert.match(err(), /Vendor\.Created_Date is store-mandatory; fix the source or re-provision the column without the constraint/);
   assert.match(err(), /Vendor\.Created_Date 77 refused mandatory-missing/);
   const loader = JSON.parse(readFileSync(join(dir, 'c2c-load-report.json'), 'utf8')) as { kind: string; integrity: { refusedByRule: { rule: string }[] } };
   assert.equal(loader.kind, 'loader-integrity');
@@ -1221,6 +1222,33 @@ test('confirm refuses the same missing mandatory export before credentials or wr
   assert.match(md, /# c2c data fidelity/);
   assert.match(md, /refused: refused 1 missing mandatory value\(s\)/);
   assert.equal(md.includes('Acme'), false, 'no cell values in the report');
+});
+
+test('confirm reports a missing mandatory value and an over-length value together, before any write', async () => {
+  const over = 'a'.repeat(256);
+  const dir = dirOf({ 'Vendor_Summary.json': `{"Vendor_Summary":[{"ID":"77","Vendor_Name":"${over}"}]}` });
+  const fetched: string[] = [];
+  const state = { fetched, tokens: 0 };
+  const { io, err } = cliIo(state);
+  const code = await sourceCsvCli(
+    ['--source-json', dir, '--ds', dsFile(PARTIAL), '--app', 'Widget', '--project', '1001', '--org', '10000000000', '--projects', projectsFile(), '--confirm'],
+    io,
+  );
+  assert.equal(code, 1);
+  assert.equal(fetched.length, 0, 'no row write ran');
+  assert.equal(state.tokens, 0, 'no token was minted');
+  assert.match(err(), /refused: 1 missing mandatory value\(s\) and 1 over-length value\(s\); nothing was written/);
+  assert.match(err(), /Vendor\.Created_Date 77 refused mandatory-missing/);
+  assert.match(err(), /Vendor\.Vendor_Name 77 refused text-length/);
+  const loader = JSON.parse(readFileSync(join(dir, 'c2c-load-report.json'), 'utf8')) as { integrity: { refusedByRule: { rule: string; count: number }[] } };
+  assert.deepEqual(
+    loader.integrity.refusedByRule.map((item) => item.rule),
+    ['text-length', 'mandatory-missing'],
+  );
+  const fidelity = JSON.parse(readFileSync(join(dir, 'c2c-fidelity.json'), 'utf8')) as { ok: boolean; error?: string };
+  assert.equal(fidelity.ok, false);
+  assert.match(String(fidelity.error), /refused 1 missing mandatory value\(s\) and 1 over-length value\(s\) before any write/);
+  assert.ok(!err().includes(over), 'the value never reaches stderr');
 });
 
 test('a confirmed load replays the provisioned demotion: a column the store relaxed accepts the missing export', async () => {
