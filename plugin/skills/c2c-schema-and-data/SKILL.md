@@ -1,6 +1,6 @@
 ---
 name: c2c-schema-and-data
-description: "Creator forms to Catalyst Data Store tables and Creator records to Catalyst rows with c2c: field-type mapping, per-table limit budgets (100 columns in Dev, 2 unique varchar, 15 FK, 4 JOINs), subforms to child tables, lookups to FK + ROWID remap, 19-digit IDs as strings, initial values, files to Stratus, and the data load (/row batches of 200, bulk write, checkpoints, counts). Use for 'tables', 'schema', 'columns', 'migrate data', 'import records', 'c2c migrate-data', 'unique varchar', 'MANDATORY_MISSING', 'c2c_source_id', 'files to Stratus'."
+description: "Creator forms to Catalyst Data Store tables and Creator records to Catalyst rows with c2c: field-type mapping, per-table limit budgets (250-column hard cap, warn above 100-column default, 2 unique varchar, 15 FK, 4 JOINs), subforms to child tables, lookups to FK + ROWID remap, 19-digit IDs as strings, initial values, files to Stratus, and the data load (/row batches of 200, bulk write, checkpoints, counts). Use for 'tables', 'schema', 'columns', 'migrate data', 'import records', 'c2c migrate-data', 'unique varchar', 'MANDATORY_MISSING', 'c2c_source_id', 'files to Stratus'."
 metadata:
   version: "0.2.0"
 ---
@@ -38,7 +38,7 @@ Reserved ZCQL words (`FROM`, `TO`, …) as column names are renamed with a mappi
 ### Budgets (the plan fails closed)
 
 `c2c plan` checks every table against [the limits table](../../references/limits.md); each budget below names its limit id, the c2c behaviour, and the row.
-- [L-COLUMNS](../../references/limits.md#l-columns-columns-per-table-development): columns ≤ 100 per table in Development [DOC] → refuse, else split into 1:1 side tables (splitter);
+- [L-COLUMNS](../../references/limits.md#l-columns-columns-per-table-development): hard cap 250 columns per table [UNVERIFIED], warn above the 100-column default [UNVERIFIED] → refuse above the cap and split into 1:1 side tables (splitter);
 - [L-UNIQUE-VARCHAR](../../references/limits.md#l-unique-varchar-unique-varchar-columns-per-table): unique varchar ≤ 2 [TESTED] → refuse; the user picks which fields keep DB uniqueness; the rest are enforced by the handler and the loader;
 - [L-FOREIGN-KEYS](../../references/limits.md#l-foreign-keys-foreign-keys-per-table): FKs ≤ 15 per table [UNVERIFIED] → warn; extra lookups as plain `bigint` ROWID;
 - [L-TEXT-COLUMNS](../../references/limits.md#l-text-columns-text-type-columns-per-table): text-type columns ≤ 130 per table [UNVERIFIED] → warn;
