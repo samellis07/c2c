@@ -14,6 +14,12 @@ import { test } from 'node:test';
 import { deriveIr, parse } from '../../core/src/index.js';
 import { buildUi } from '../src/index.js';
 
+/**
+ * These tests drive the enabled (cutover) endpoint: a generated app answers
+ * POST /admin/smoke only when C2C_SMOKE_ENABLED=1.
+ */
+process.env.C2C_SMOKE_ENABLED ??= '1';
+
 const SOURCE = `application "Widget"
 {
 \tshare_settings

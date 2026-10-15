@@ -38,6 +38,13 @@ const registry: ProjectRegistry = {
 };
 
 /**
+ * These suites drive the enabled (cutover) endpoint: a generated app answers
+ * POST /admin/smoke only when C2C_SMOKE_ENABLED=1. The gate test below
+ * toggles the flag itself and restores it.
+ */
+process.env.C2C_SMOKE_ENABLED ??= '1';
+
+/**
  * Two forms: a required lookup parent, a required text (the run marker), a
  * dropdown (the update target: second choice), an optional file field and a
  * required subform, plus a number field the arithmetic check writes and reads back.
@@ -312,6 +319,60 @@ function dsFile(ds: string): string {
 function calls(requests: Harness['requests'], method: string, path: string): { method: string; path: string; body: unknown }[] {
   return requests.filter((req) => req.method === method && req.path === path);
 }
+
+test('POST /admin/smoke answers only when C2C_SMOKE_ENABLED=1', async () => {
+  const h = await harness(L2_DS);
+  const saved = process.env.C2C_SMOKE_ENABLED;
+  try {
+    const call = async (body: unknown, cookie?: string) => {
+      const res = await fetch(`http://127.0.0.1:${h.port}/server/c2c_api/admin/smoke`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+        body: JSON.stringify(body),
+      });
+      let parsed: unknown = {};
+      try {
+        parsed = await res.json();
+      } catch {
+        /* non-JSON */
+      }
+      return { status: res.status, body: parsed as Record<string, unknown> };
+    };
+    const marked = (op: string) =>
+      op === 'arith'
+        ? { op, form: 'Item', rowId: '1', marker: { field: 'Item_Name', tag: 'c2c smoke x' }, field: 'Qty' }
+        : op === 'update'
+          ? { op, form: 'Item', rowId: '1', marker: { field: 'Item_Name', tag: 'c2c smoke x' }, fields: { Status: 'Closed' } }
+          : { op, form: 'Item', rowId: '1', marker: { field: 'Item_Name', tag: 'c2c smoke x' } };
+
+    // Flag unset: the endpoint is absent — 404 for every op, even as
+    // Administrator, with the same body an unknown route gets (no record
+    // data, no session material, no dry-run flag).
+    delete process.env.C2C_SMOKE_ENABLED;
+    for (const op of ['status', 'update', 'arith', 'delete']) {
+      assert.equal((await call(op === 'status' ? { op } : marked(op), 'c2c-harness-session=admin')).status, 404, op);
+    }
+    assert.deepEqual((await call({ op: 'status' }, 'c2c-harness-session=admin')).body, { code: 'NOT_FOUND', message: 'no such endpoint' });
+    // Fail closed: anything but exactly '1' stays dark.
+    for (const value of ['0', 'true', 'yes', '']) {
+      process.env.C2C_SMOKE_ENABLED = value;
+      assert.equal((await call({ op: 'status' }, 'c2c-harness-session=admin')).status, 404, `flag=${JSON.stringify(value)}`);
+    }
+
+    // Flag set: current behaviour — the admin status shape answers, and the
+    // auth gates still apply.
+    process.env.C2C_SMOKE_ENABLED = '1';
+    const status = await call({ op: 'status' }, 'c2c-harness-session=admin');
+    assert.equal(status.status, 200, JSON.stringify(status.body));
+    assert.equal(status.body.ok, true);
+    assert.equal((await call({ op: 'status' })).status, 401);
+    assert.equal((await call({ op: 'status' }, 'c2c-harness-session=reader')).status, 403);
+  } finally {
+    if (saved === undefined) delete process.env.C2C_SMOKE_ENABLED;
+    else process.env.C2C_SMOKE_ENABLED = saved;
+    await h.close();
+  }
+});
 
 test('contract run: upload, submit, read-back extras, update, marked cleanup', async () => {
   const dir = dsFile(L2_DS);
