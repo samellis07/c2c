@@ -18,7 +18,8 @@ export type Route =
   | { name: 'missing'; id: string };
 
 export function parseRoute(hash: string): Route | undefined {
-  const raw = String(hash || '').replace(/^#/, '');
+  const [pathPart] = String(hash || '').split('?');
+  const raw = pathPart.replace(/^#/, '');
   if (raw !== '' && !raw.startsWith('/')) return undefined;
   const parts = raw
     .split('/')

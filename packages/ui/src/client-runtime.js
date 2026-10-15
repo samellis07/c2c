@@ -1531,7 +1531,8 @@ export function renderReportRows(report, rows) {
 }
 
 export function parseRoute(hash) {
-  const parts = String(hash || '')
+  const [pathPart] = String(hash || '').split('?');
+  const parts = pathPart
     .replace(/^#/, '')
     .split('/')
     .filter(Boolean)
