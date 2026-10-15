@@ -383,9 +383,9 @@ test('the React page spec lists distinct dropped snippet tags as page TODOs', ()
   assert.ok(page, 'the page is in the spec');
   assert.deepEqual(page.todos, [
     '<dsp>: The <script> element is removed from this page snippet by the sanitizer',
-    '<dsp>: Static <style> CSS not carried over: the page sanitizer drops 1 static style rule',
     '<dsp>: The <svg> element is removed from this page snippet by the sanitizer',
     '<dsp>: The <template> element is removed from this page snippet by the sanitizer',
+    '<dsp>: Static <style> CSS not carried over: the page sanitizer drops 1 static style rule',
   ]);
 });
 
