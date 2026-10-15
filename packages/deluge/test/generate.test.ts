@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import vm from 'node:vm';
 import { test } from 'node:test';
-import { deriveIr, emptyApp, headerWords, isGroup, parse, parseProject, sig, walkStatements, type App, type BlueprintTransition, type FunctionDef, type Property, type PropertyBlock, type Workflow } from '../../core/src/index.js';
+import { deriveIr, emptyApp, headerWords, isGroup, parse, parseFile, parseProject, sig, walkStatements, type App, type BlueprintTransition, type FunctionDef, type Property, type PropertyBlock, type Workflow } from '../../core/src/index.js';
 import { createRuntime, LIMITS } from '../../shims/src/runtime.js';
 import { RecordAccessError } from '../../shims/src/access.js';
 import { mockDatastore } from '../../shims/test/zcql-mock.js';
@@ -4914,6 +4914,8 @@ test('alert verdicts follow the innermost event header', () => {
     'on change of Status',
     'on change of Due/Paid',
     'on click',
+    'on add row of Items',
+    'on delete row of Items',
     'on add / on click',
     'on success / on validate',
   ]) {
@@ -4941,7 +4943,7 @@ test('alert verdicts follow the innermost event header', () => {
 
   // Anything else is unverified, not proven disallowed. `on delete success`
   // was never live-tested, so it must not count as disallowed.
-  for (const event of ['on add', 'on add row of Items', 'On Delete Success', 'on add / on delete success', '']) {
+  for (const event of ['on add', 'On Delete Success', 'on add / on delete success', '']) {
     const g = generate(app({
       workflows: [workflow({ name: 'W', form: 'Orders', event, deluge })],
     }));
@@ -4951,6 +4953,90 @@ test('alert verdicts follow the innermost event header', () => {
     assert.equal(rep.alertDiagnostics[0].verdict, 'unverified', event);
     assert.equal(rep.untranslated.find((u) => u.construct === 'alert-in-unverified-event')?.count, 1, event);
   }
+});
+
+test('alert in subform add row unmasks client-condition-uses-server when condition depends on server query', async () => {
+  // volunteer-portal Add_Log / Run_Scripts_On_Always / on add row of Volunteered_Log:
+  // Unlocking alert on subform add row unmasks client-side condition evaluation for the enclosing
+  // if block. Because startingDate derives from a server database query (Create_Event), the client
+  // condition cannot be evaluated purely in the client and correctly records client-condition-uses-server.
+  const g = generate(
+    app({
+      forms: [
+        plainForm('Add_Log', [plainField('Event_Name'), plainField('Volunteered_Log', 'grid', ['Event_Dates', 'Check_In', 'Check_Out'])]),
+        plainForm('Create_Event', [plainField('Starting_Time'), plainField('Till_Date')]),
+      ],
+      workflows: [
+        workflow({
+          name: 'Run Scripts - On Always',
+          form: 'Add_Log',
+          event: 'on add row of Volunteered_Log',
+          deluge: {
+            text: [
+              'if (input.Event_Name != null) {',
+              '  getEventDate = Create_Event[ID == input.Event_Name];',
+              '  startingDate = getEventDate.Starting_Time.toDate();',
+              '  for each eachRow in input.Volunteered_Log {',
+              '    if (startingDate > zoho.currenttime) {',
+              '      alert "Sorry Logs cannot be added to Future Days";',
+              '    } else {',
+              '      if (startingDate <= getEventDate.Till_Date) {',
+              '        row.Event_Dates = startingDate;',
+              '        startingDate = startingDate.addDay(1);',
+              '      }',
+              '    }',
+              '  }',
+              '}',
+            ].join('\n'),
+            span: Z,
+          },
+        }),
+      ],
+    }),
+  );
+
+  const client = g.files.find((f) => f.path === 'client/handlers/add-log/on-add-row-of-volunteered-log.mjs');
+  assert.ok(client, 'client handler should be generated');
+  assert.match(stripComments(client.source), /actions\.push\(\{ op: "alert", message: "Sorry Logs cannot be added to Future Days" \}\)/);
+  assert.match(stripComments(client.source), /await shim\.todo\(ctx, "client-condition-uses-server"\)/);
+  assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length, 1);
+  assert.equal(g.todos.some((t) => t.construct.startsWith('alert-')), false);
+  const rep = JSON.parse(g.files.find((f) => f.path === 'migration-report.json')!.source) as { alertDiagnostics: unknown[] };
+  assert.equal(rep.alertDiagnostics.length, 0);
+  check(client.source, 'on-add-row-of-volunteered-log.mjs');
+
+  const mod = (await loadModule(client.source, 'on-add-row-of-volunteered-log-run.mjs')) as unknown as Record<
+    string,
+    (ctx: unknown) => Promise<unknown[]>
+  >;
+  const runtime = createRuntime({ dryRun: true });
+  const actions = await mod.clientActions!(runtime.context({ record: { Event_Name: 'EVT1', Volunteered_Log: [{}] } }));
+  assert.ok(Array.isArray(actions));
+  assert.ok(runtime.transcript.some((t) => t.op === 'todo' && t.construct === 'client-condition-uses-server'));
+});
+
+test('real volunteer portal Add_Log validate handler alerts on future dates only', { skip: !process.env.C2C_FIXTURES_DIR && 'needs C2C_FIXTURES_DIR' }, async () => {
+  const fixtureRoot = process.env.C2C_FIXTURES_DIR;
+  const parsed = parseFile(join(fixtureRoot!, 'gallery/volunteer-portal/Volunteer_Portal.ds'));
+  const g = generate(parsed.ir);
+  const file = g.files.find((f) => f.path === 'client/handlers/add-log/on-validate.mjs');
+  assert.ok(file, 'real Add_Log / Run_Scripts_On_Always validate handler is generated');
+  const mod = await loadModule(file.source, 'volunteer-portal-add-log-validate.mjs') as unknown as {
+    clientActions(ctx: unknown): Promise<{ op: string; message?: string }[]>;
+  };
+  const makeRuntime = (date: string) => createRuntime({
+    dryRun: true,
+    appTimeZone: 'UTC',
+    now: new Date('2026-10-14T12:00:00.000Z'),
+    seed: { Add_Log: [] },
+  }).context({ record: { Volunteered_Log: [{ Event_Dates: date }] } });
+  const future = await mod.clientActions(makeRuntime('2026-10-15'));
+  assert.deepEqual(future, [
+    { op: 'alert', message: "Sorry Logs can't be added to Future Dates" },
+    { op: 'cancelSubmit' },
+  ]);
+  const past = await mod.clientActions(makeRuntime('2026-10-13'));
+  assert.deepEqual(past, []);
 });
 
 test('an alert after a comment line keeps its real verdict with a note', () => {
