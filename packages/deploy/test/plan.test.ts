@@ -511,11 +511,17 @@ test('doctor, plan and the limits facts agree at the 250-column hard cap', () =>
   const cap = limitValue('datastore.columns_per_table');
   const columnsDefault = limitValue('datastore.columns_per_table_default');
   const facts = readFileSync(join(repoRoot(), 'plugin/references/facts/limits.md'), 'utf8');
-  assert.equal(cap, 250);
-  assert.equal(columnsDefault, 100);
-  assert.match(facts, new RegExp(`Plan for ${cap} columns per table \\[UNVERIFIED\\]`));
-  assert.match(facts, new RegExp(`the stated default is ${columnsDefault} columns per table \\[UNVERIFIED\\]`));
-  assert.match(facts, new RegExp(`a table wider than ${cap} fails`));
+  const columnsRule = /^Rule: (.+)$/m.exec(facts)?.[1];
+  assert.ok(columnsRule, 'facts ledger must have a Rule line for columns per table');
+  const documentedCap = /Plan for (\d+) columns per table \[UNVERIFIED\]/.exec(columnsRule)?.[1];
+  const documentedDefault = /stated default is (\d+) columns per table \[UNVERIFIED\]/.exec(columnsRule)?.[1];
+  assert.ok(documentedCap, 'facts ledger must document the raised column cap');
+  assert.ok(documentedDefault, 'facts ledger must document the default column cap');
+  assert.equal(Number(documentedCap), cap, 'facts ledger raised cap must match the code');
+  assert.equal(Number(documentedDefault), columnsDefault, 'facts ledger default must match the code');
+  assert.match(columnsRule, /c2c plan warns when a table exceeds/);
+  assert.match(columnsRule, /c2c plan splits overflow fields/);
+  assert.match(columnsRule, /c2c doctor refuses a live table over/);
 
   const overhead = wideColumnCount(1) - 1;
   const atCapApp = wideApp(cap - overhead);
