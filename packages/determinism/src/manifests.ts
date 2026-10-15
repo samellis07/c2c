@@ -10,8 +10,9 @@
  * The manifest set mirrors fixtures/redistributable: a fixture without a
  * committed manifest, or a committed manifest without a fixture, is drift.
  */
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isAbsentError } from '../../core/src/index.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { diffManifest, manifestFor, parseManifestFiles, renderManifest, type FileHash } from './tree.js';
 
@@ -84,7 +85,13 @@ export function updateManifests(fixturesDir: string, manifestsDir: string): { wr
   for (const name of fixtures) {
     const out = manifestPath(manifestsDir, name);
     const text = renderManifest(manifestFor(join(fixturesDir, name)));
-    const current = existsSync(out) ? readFileSync(out, 'utf8') : '';
+    // Read in one step: only a missing manifest is empty, a directory still throws EISDIR.
+    let current = '';
+    try {
+      current = readFileSync(out, 'utf8');
+    } catch (err) {
+      if (!isAbsentError(err)) throw err;
+    }
     if (current !== text) {
       writeFileSync(out, text);
       written.push(name);

@@ -54,23 +54,32 @@ export function parseBytes(path: string, bytes: Uint8Array, relName?: string): P
   return { path, encoding, bytes: bytes.length, cst, ir: deriveIr(cst, relName, roles), roles };
 }
 
-/** Parse a .ds file, or a project directory, classifying by the opened target. */
-export function parseFileOrProjectWithSidecars(target: string): { files: ParsedFile[]; ir: App } {
+/** Open `target` once: a directory, or a regular file's bytes. Anything else is NotFileError. */
+function readFileOrDirectory(target: string): Buffer | undefined {
   const fd = openSync(target, constants.O_RDONLY | constants.O_NONBLOCK);
-  let isDirectory: boolean;
-  let bytes: Buffer | undefined;
   try {
     const stat = fstatSync(fd);
-    isDirectory = stat.isDirectory();
-    if (!isDirectory) {
-      if (!stat.isFile()) throw new NotFileError(target);
-      bytes = readFileSync(fd);
-    }
+    if (stat.isDirectory()) return undefined;
+    if (!stat.isFile()) throw new NotFileError(target);
+    return readFileSync(fd);
   } finally {
     closeSync(fd);
   }
-  if (isDirectory) return parseProject(target);
-  const file = parseBytes(target, bytes!);
+}
+
+/** Parse a .ds file, or a project directory, classifying by the opened target. No widget sidecars. */
+export function parseFileOrProject(target: string): { files: ParsedFile[]; ir: App } {
+  const bytes = readFileOrDirectory(target);
+  if (!bytes) return parseProject(target);
+  const file = parseBytes(target, bytes);
+  return { files: [file], ir: file.ir };
+}
+
+/** Parse a .ds file, or a project directory, classifying by the opened target. */
+export function parseFileOrProjectWithSidecars(target: string): { files: ParsedFile[]; ir: App } {
+  const bytes = readFileOrDirectory(target);
+  if (!bytes) return parseProject(target);
+  const file = parseBytes(target, bytes);
   const widgets = listWidgetSidecars(dirname(target));
   if (widgets.length) file.ir.widgets = widgets;
   return { files: [file], ir: file.ir };

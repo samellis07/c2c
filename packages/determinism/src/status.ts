@@ -31,6 +31,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, readlinkSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
+import { isDirectoryPath } from '../../core/src/index.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { analyze } from '../../cli/src/analyze.js';
@@ -258,10 +259,16 @@ function tryRealpath(path: string): string | undefined {
 function canonicalSitesCandidate(abs: string): string {
   let cur = abs;
   for (let hops = 0; hops < 40; hops++) {
-    const entry = lstatSync(cur, { throwIfNoEntry: false });
-    if (!entry) break;
-    if (!entry.isSymbolicLink()) break;
-    cur = resolve(dirname(cur), readlinkSync(cur));
+    // readlink is the symlink test: EINVAL is not a link, ENOENT/ENOTDIR absent.
+    let link: string;
+    try {
+      link = readlinkSync(cur);
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      if (code === 'EINVAL' || code === 'ENOENT' || code === 'ENOTDIR') break;
+      throw err;
+    }
+    cur = resolve(dirname(cur), link);
   }
   const direct = tryRealpath(cur);
   if (direct) return direct;
@@ -275,10 +282,9 @@ function canonicalSitesCandidate(abs: string): string {
     }
     rest.push(basename(node));
     node = parent;
-    if (statSync(node, { throwIfNoEntry: false })) {
-      const base = tryRealpath(node) ?? node;
-      return join(base, ...rest.reverse());
-    }
+    // The realpath is the existence test: no stat ahead of it to race.
+    const base = tryRealpath(node);
+    if (base) return join(base, ...rest.reverse());
   }
 }
 
@@ -734,7 +740,7 @@ export function main(argv: string[]): number {
   }
   try {
     const dir = resolveStatusDir(process.env, take('--dir'));
-    if (!dir || !statSync(dir, { throwIfNoEntry: false })?.isDirectory()) {
+    if (!dir || !isDirectoryPath(dir)) {
       process.stderr.write('determinism:status: gallery not found; pass --dir or set C2C_FIXTURES_DIR or C2C_GALLERY_DIR\n');
       return 1;
     }

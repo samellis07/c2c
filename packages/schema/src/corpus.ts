@@ -1,6 +1,6 @@
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { listDsFiles, parseFile, parseProject, type App } from '../../core/src/index.js';
+import { entryKind, listDsFiles, parseFile, parseProject, type App } from '../../core/src/index.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { generateSchema, type FieldOutcome, type SchemaPlan } from './generator.js';
 
@@ -13,15 +13,16 @@ export interface CorpusApp {
 /** Sub-folders that contain a .ds, plus loose .ds files. Names only; file bodies stay out of the report. */
 export function loadCorpusApps(dir: string): CorpusApp[] {
   const apps: CorpusApp[] = [];
-  for (const name of readdirSync(dir).sort()) {
+  for (const ent of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    const name = ent.name;
     if (name.startsWith('.')) continue;
     const path = join(dir, name);
-    const st = statSync(path, { throwIfNoEntry: false });
-    if (!st) continue;
-    if (st.isDirectory()) {
+    // The entry kind comes from the directory read; a symlink is `other` and is skipped.
+    const kind = entryKind(ent);
+    if (kind === 'directory') {
       if (!listDsFiles(path).length) continue;
       apps.push({ link: name, ir: parseProject(path).ir });
-    } else if (st.isFile() && name.toLowerCase().endsWith('.ds')) {
+    } else if (kind === 'file' && name.toLowerCase().endsWith('.ds')) {
       apps.push({ link: name.slice(0, -'.ds'.length), ir: parseFile(path).ir });
     }
   }

@@ -4,8 +4,7 @@
  * Last write wins, matching writeDeployTree.
  */
 import { createHash } from 'node:crypto';
-import { statSync } from 'node:fs';
-import { parseFile, parseProject, type App } from '../../core/src/index.js';
+import { parseFileOrProject, type App } from '../../core/src/index.js';
 import { toolchain, type Toolchain } from '../../core/src/toolchain.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from '../../deploy/src/guards.js';
 import { withEdits } from '../../deploy/src/edit.js';
@@ -30,8 +29,7 @@ const FIXTURE_PROJECT_ID = '00000000000000000';
 const FIXTURE_REGISTRY: ProjectRegistry = { org: FIXTURE_ORG, env: 'Development', projects: {}, dc: 'us' };
 
 export function loadApp(target: string): App {
-  const st = statSync(target);
-  return withEdits(st.isDirectory() ? parseProject(target).ir : parseFile(target).ir, target);
+  return withEdits(parseFileOrProject(target).ir, target);
 }
 
 /**

@@ -12,9 +12,10 @@
  */
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { readdirSync, statSync, writeSync } from 'node:fs';
+import { readdirSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { entryKind } from '../../core/src/index.js';
 import { digestOf, manifestFor, writeTree } from './tree.js';
 
 /** stdout.write + exit drops the tail once the pipe buffer fills. */
@@ -26,16 +27,16 @@ function emit(text: string, code = 0): never {
 }
 
 function listTargets(dir: string): string[] {
-  const names = readdirSync(dir).filter((name) => !name.startsWith('.'));
-  names.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const entries = readdirSync(dir, { withFileTypes: true }).filter((ent) => !ent.name.startsWith('.'));
+  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const out: string[] = [];
-  for (const name of names) {
-    const path = join(dir, name);
-    const st = statSync(path, { throwIfNoEntry: false });
-    if (!st) continue;
-    if (st.isDirectory()) {
+  for (const ent of entries) {
+    const path = join(dir, ent.name);
+    // The entry kind comes from the directory read; a symlink is skipped.
+    if (ent.isSymbolicLink()) continue;
+    if (entryKind(ent) === 'directory') {
       if (readdirSync(path).some((child) => child.toLowerCase().endsWith('.ds'))) out.push(path);
-    } else if (name.toLowerCase().endsWith('.ds')) out.push(path);
+    } else if (ent.name.toLowerCase().endsWith('.ds')) out.push(path);
   }
   return out;
 }

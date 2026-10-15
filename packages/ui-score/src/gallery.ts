@@ -15,11 +15,11 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseFile, parseProject, type App } from '../../core/src/index.js';
+import { entryKind, openKind, parseFileOrProject, type App } from '../../core/src/index.js';
 import { buildUi } from '../../ui/src/index.js';
 import { generateReactApp, TEMPLATE_DIR, writeReactApp } from '../../ui-react/src/index.js';
 import { CHECK_KINDS, VIEWPORTS, bundleFromDir, bundleFromFiles, checkKind, loadRubric, scoreUi, type Rubric, type UiScore, type Viewport } from './score.js';
@@ -43,26 +43,25 @@ export interface GalleryRow {
 
 /** Gallery entries in sorted order: each sub-folder holding a .ds, or a .ds file. */
 export function galleryTargets(dir: string): string[] {
-  const st = statSync(dir, { throwIfNoEntry: false });
-  if (!st) return [];
-  if (st.isFile() && dir.toLowerCase().endsWith('.ds')) return [dir];
-  if (st.isDirectory() && readdirSync(dir).some((child) => child.toLowerCase().endsWith('.ds'))) {
-    const entries = readdirSync(dir).filter((name) => !name.startsWith('.'));
-    const subApp = entries.some((child) => {
-      const p = join(dir, child);
-      return statSync(p, { throwIfNoEntry: false })?.isDirectory() && readdirSync(p).some((c) => c.toLowerCase().endsWith('.ds'));
-    });
-    if (!subApp) return [dir];
+  // Kinds come from the opened target and Dirent kinds, never a stat ahead of the use.
+  const kind = openKind(dir);
+  if (!kind) return [];
+  if (kind === 'file' && dir.toLowerCase().endsWith('.ds')) return [dir];
+  // Anything else that is not a directory throws ENOTDIR from this read, as before.
+  const all = readdirSync(dir, { withFileTypes: true });
+  const entries = all.filter((ent) => !ent.name.startsWith('.')).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const appDir = (ent: (typeof all)[number], path: string): boolean =>
+    entryKind(ent) === 'directory' && readdirSync(path).some((c) => c.toLowerCase().endsWith('.ds'));
+  if (all.some((ent) => ent.name.toLowerCase().endsWith('.ds'))) {
+    if (!entries.some((ent) => appDir(ent, join(dir, ent.name)))) return [dir];
   }
-  const names = readdirSync(dir)
-    .filter((name) => !name.startsWith('.'))
-    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const out: string[] = [];
-  for (const name of names) {
-    const path = join(dir, name);
-    const s = statSync(path, { throwIfNoEntry: false });
-    if (s?.isDirectory() && readdirSync(path).some((child) => child.toLowerCase().endsWith('.ds'))) out.push(path);
-    else if (s?.isFile() && name.toLowerCase().endsWith('.ds')) out.push(path);
+  for (const ent of entries) {
+    const path = join(dir, ent.name);
+    const entKind = entryKind(ent);
+    if (entKind === 'directory') {
+      if (readdirSync(path).some((child) => child.toLowerCase().endsWith('.ds'))) out.push(path);
+    } else if (entKind === 'file' && ent.name.toLowerCase().endsWith('.ds')) out.push(path);
   }
   return out;
 }
@@ -92,6 +91,10 @@ export async function scoreReactUi(ir: App, rubric: Rubric = loadRubric()): Prom
       encoding: 'utf8',
       env: { ...process.env, NO_COLOR: '1' },
     });
+    // The binary can vanish after the check above; the spawn error says so.
+    if ((res.error as { code?: unknown } | undefined)?.code === 'ENOENT') {
+      throw new Error('React template dependencies are not installed');
+    }
     if (res.status !== 0) {
       throw new Error(`vite build failed: ${(res.stderr || res.stdout || '').trim().slice(0, 500)}`);
     }
@@ -107,7 +110,7 @@ export async function scoreGalleryTargets(targets: string[], rubric: Rubric = lo
   for (let i = 0; i < targets.length; i++) {
     const target = targets[i]!;
     try {
-      const ir = statSync(target).isDirectory() ? parseProject(target).ir : parseFile(target).ir;
+      const ir = parseFileOrProject(target).ir;
       if (mode === 'react') {
         const result = await scoreReactUi(ir, rubric);
         rows.push({ index: i + 1, result, react: result });
