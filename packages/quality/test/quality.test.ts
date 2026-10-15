@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { closeSync, constants as fsConstants, copyFileSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -720,17 +719,18 @@ function fixtureGallery(extra: (dir: string) => void = () => {}): string {
 }
 
 test('gallery watchdog: an app process blocked with its heartbeat still running is killed, retried, and reported failed', async (t) => {
-  // Reading a fifo that nobody writes blocks the app's main thread forever,
-  // while the heartbeat worker in the same process keeps reporting.
+  // Parsing refuses a fifo ('is not a file'), so opening one no longer blocks
+  // the app and the watchdog never fires. The child instead blocks its main
+  // thread (--stall-idle) while the heartbeat worker in that process keeps
+  // reporting. The file itself is a regular file.
   const dir = mkdtempSync(join(tmpdir(), 'c2c-gallery-blocked-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const fifo = join(dir, 'blocked.ds');
-  execFileSync('mkfifo', [fifo]);
+  writeFileSync(join(dir, 'blocked.ds'), 'form Blocked\n{\n}\n');
   const idleMs = 1_500;
   const took: number[] = [];
   const run = async (target: string, n: number) => {
     const started = Date.now();
-    const r = await runApp(target, n, { idleMs, heartbeatMs: 250 });
+    const r = await runApp(target, n, { idleMs, heartbeatMs: 250, stallIdle: true });
     took.push(Date.now() - started);
     return r;
   };
@@ -740,26 +740,18 @@ test('gallery watchdog: an app process blocked with its heartbeat still running 
     (e: unknown) => e,
   );
   void sweep.then(() => (settled = true));
-  // Bound the test: if the kill never fires, give the blocked reader end of file so the process exits.
   const deadline = Date.now() + 60_000;
   while (!settled && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
-  let unblocked = false;
-  while (!settled) {
-    try {
-      closeSync(openSync(fifo, fsConstants.O_WRONLY | fsConstants.O_NONBLOCK));
-      unblocked = true;
-    } catch {
-      // No reader at the moment.
-    }
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  assert.equal(unblocked, false, 'the blocked app process was not killed within 60 s');
+  assert.equal(settled, true, 'the blocked app process was not killed within 60 s');
   const err = await sweep;
   assert.ok(err instanceof GalleryIncomplete, 'a blocked app yields no summary');
   assert.deepEqual(err.sweep.rows, [{ error: 'timed out', kind: 'environment', cause: 'timeout' }]);
   assert.equal(err.sweep.stats.timeouts, 3, 'the first attempt and two retries all time out');
   assert.equal(err.sweep.stats.failed, 1);
-  for (const ms of took) assert.ok(ms > idleMs, `killed after the idle limit, not before (${ms} ms)`);
+  for (const ms of took) {
+    assert.ok(ms > idleMs, `killed after the idle limit, not before (${ms} ms)`);
+    assert.ok(ms < 60_000, `the blocked app process was not killed within 60 s (${ms} ms)`);
+  }
 });
 
 test('gallery sweep: an environmental failure is retried, an app failure is not', async () => {

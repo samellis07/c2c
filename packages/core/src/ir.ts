@@ -2024,18 +2024,92 @@ function deriveCreatorFunction(ctx: Ctx, s: Statement): void {
 
 // ---------------------------------------------------------------------------
 
-export function parseHeader(src: string): Header | undefined {
-  const m = /^\s*\/\*([\s\S]*?)\*\//.exec(src);
-  if (!m) return undefined;
-  const h: Header = {};
-  for (const line of m[1].split(/\r\n|\n|\r/)) {
-    const kv = /^\s*\*?\s*(Author|Generated on|Version)\s*:\s*(.*?)\s*$/i.exec(line);
-    if (!kv) continue;
-    const k = kv[1].toLowerCase();
-    if (k === 'author') h.author = kv[2];
-    else if (k === 'version') h.version = kv[2];
-    else h.generatedOn = kv[2];
+/**
+ * A leading comment bigger than this is not a file header. The bound is what
+ * stops a multi-megabyte export from being scanned for a header that, in a
+ * real export, is a few lines at the top.
+ */
+const HEADER_CAP = 2 * 1024 * 1024;
+
+/** JavaScript `\s`, so a header line breaks where the old pattern broke. */
+function isHeaderSpace(code: number): boolean {
+  return (
+    code === 0x09 ||
+    code === 0x0a ||
+    code === 0x0b ||
+    code === 0x0c ||
+    code === 0x0d ||
+    code === 0x20 ||
+    code === 0xa0 ||
+    code === 0x1680 ||
+    (code >= 0x2000 && code <= 0x200a) ||
+    code === 0x2028 ||
+    code === 0x2029 ||
+    code === 0x202f ||
+    code === 0x205f ||
+    code === 0x3000 ||
+    code === 0xfeff
+  );
+}
+
+/** ASCII case-insensitive match of a fixed header key. The key is not allocated. */
+function headerKeyAt(line: string, i: number, key: string): boolean {
+  if (i + key.length > line.length) return false;
+  for (let k = 0; k < key.length; k++) {
+    let c = line.charCodeAt(i + k);
+    if (c >= 65 && c <= 90) c += 32;
+    if (c !== key.charCodeAt(k)) return false;
   }
+  return true;
+}
+
+function takeHeaderLine(h: Header, line: string): void {
+  const n = line.length;
+  let i = 0;
+  while (i < n && isHeaderSpace(line.charCodeAt(i))) i++;
+  // One optional star, the same as `\*?` after the leading space.
+  if (i < n && line.charCodeAt(i) === 42) {
+    i++;
+    while (i < n && isHeaderSpace(line.charCodeAt(i))) i++;
+  }
+  let field: 'author' | 'generatedOn' | 'version' | undefined;
+  let keyLen = 0;
+  if (headerKeyAt(line, i, 'author')) {
+    field = 'author';
+    keyLen = 6;
+  } else if (headerKeyAt(line, i, 'generated on')) {
+    field = 'generatedOn';
+    keyLen = 12;
+  } else if (headerKeyAt(line, i, 'version')) {
+    field = 'version';
+    keyLen = 7;
+  } else return;
+  let j = i + keyLen;
+  while (j < n && isHeaderSpace(line.charCodeAt(j))) j++;
+  if (j >= n || line.charCodeAt(j) !== 58) return;
+  j++;
+  while (j < n && isHeaderSpace(line.charCodeAt(j))) j++;
+  let end = n;
+  while (end > j && isHeaderSpace(line.charCodeAt(end - 1))) end--;
+  h[field] = line.slice(j, end);
+}
+
+/**
+ * Author, version and "Generated on" from a leading block comment.
+ * The closer is found with indexOf inside a capped window, and each line is
+ * scanned once. The old patterns overlapped whitespace runs with a following
+ * lazy match, which is polynomial on a long line of spaces or stars.
+ */
+export function parseHeader(src: string): Header | undefined {
+  const end = Math.min(src.length, HEADER_CAP);
+  const capped = end === src.length ? src : src.slice(0, end);
+  let i = 0;
+  while (i < capped.length && isHeaderSpace(capped.charCodeAt(i))) i++;
+  if (capped.charCodeAt(i) !== 47 || capped.charCodeAt(i + 1) !== 42) return undefined;
+  const closeAt = capped.indexOf('*/', i + 2);
+  if (closeAt < 0) return undefined;
+  const h: Header = {};
+  for (const line of capped.slice(i + 2, closeAt).split(/\r\n|\n|\r/)) takeHeaderLine(h, line);
   return Object.keys(h).length ? h : undefined;
 }
 

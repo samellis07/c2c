@@ -300,6 +300,12 @@ export interface RunAppOptions {
   heartbeatMs?: number;
   /** Called for each heartbeat the child reports, with whether it counted as progress. */
   onBeat?: (beat: { at: number; cpuMicros: number; marks: number; counted: boolean }) => void;
+  /**
+   * Block the child's main thread while its heartbeat keeps reporting.
+   * Parsing refuses a non-file, so a test cannot block the child by handing
+   * it a fifo any more.
+   */
+  stallIdle?: boolean;
 }
 
 /** Watchdog limits for one app process. */
@@ -332,6 +338,7 @@ export function runApp(target: string, iterations: number, opts: RunAppOptions =
       resolve(r);
     };
     const args = [script, '--once', target, '--iterations', String(iterations), '--heartbeat-ms', String(heartbeat)];
+    if (opts.stallIdle) args.push('--stall-idle');
     const proc = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
@@ -775,6 +782,17 @@ export function asText(s: GallerySummary): string {
   ].join('\n');
 }
 
+/**
+ * Hold the main thread, using no CPU, long enough for the parent watchdog's
+ * idle limit to fire. The heartbeat worker started at import keeps reporting;
+ * its cost stays under the progress floor. The wait is bounded so a missed
+ * kill still lets the process exit.
+ */
+function stallIdleMainThread(): void {
+  const gate = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(gate, 0, 0, 90_000);
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const at = argv.indexOf('--iterations');
@@ -784,6 +802,7 @@ async function main(): Promise<void> {
   if (once >= 0) {
     const target = argv[once + 1];
     if (!target) emit('smoke:gallery --once <path>\n', 2);
+    if (argv.includes('--stall-idle')) stallIdleMainThread();
     let row: AppRow;
     try {
       row = await runOne(target, iterations);
