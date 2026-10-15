@@ -324,12 +324,42 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
     ]);
     files.push({ path: `manual/${name}.csv`, body: csvDocument(['ID', 'ROWID', ...list.map((item) => item.header)], data) });
   }
-  for (const [name, entries] of fileCells) {
-    const table = schema.tables.find((item) => item.name === name)!;
-    const label = table.role === 'form' ? table.form : name;
+  for (const table of formTables) {
+    const label = table.form;
+    const entries: { sourceId: string; rowid: string; field: string; key: string }[] = [];
+    const ownEntries = fileCells.get(table.name) ?? [];
+    const missingIds = ownEntries.filter((entry) => !entry.sourceId).length;
+    entries.push(...ownEntries.filter((entry) => entry.sourceId));
+    if (missingIds) warn(`${table.form}: ${missingIds} file value(s) were refused because the Creator record ID could not be resolved; no blank ID was emitted`);
+    for (const ext of schema.tables.filter((item) => item.role === 'extension' && item.extensionOf === table.name)) {
+      let refused = 0;
+      for (const entry of fileCells.get(ext.name) ?? []) {
+        const extension = byRowId.get(ext.name)?.get(entry.rowid);
+        const parentRowId = extension?.cells.get(EXTENSION_KEY) ?? '';
+        const parent = parentRowId ? byRowId.get(table.name)?.get(parentRowId) : undefined;
+        if (!parent?.sourceId) {
+          refused += 1;
+          continue;
+        }
+        entries.push({ ...entry, sourceId: parent.sourceId });
+      }
+      if (refused) warn(`${table.form}: ${refused} file value(s) in ${ext.name} were refused because the parent Creator record ID could not be resolved; no blank ID was emitted`);
+    }
+    if (!entries.length) continue;
     const data = entries.map((entry) => [entry.sourceId, entry.rowid, entry.field, entry.key, entry.key.split('/').pop() ?? '']);
     files.push({ path: `files/${label}.files.csv`, body: csvDocument(['ID', 'ROWID', 'Field', 'Object_Key', 'File_Name'], data) });
-    warn(`${table.form}: ${entries.length} file value(s) in ${name} are Stratus object keys the report importer cannot load; fetch each object and re-attach it from files/${label}.files.csv`);
+    warn(`${table.form}: ${entries.length} file value(s) in ${table.name} or its extension tables are Stratus object keys the report importer cannot load; fetch each object and re-attach it from files/${label}.files.csv`);
+  }
+  for (const [name, tableEntries] of fileCells) {
+    const table = schema.tables.find((item) => item.name === name)!;
+    if (table.role === 'form' || table.role === 'extension') continue;
+    const entries = tableEntries.filter((entry) => entry.sourceId);
+    const refused = tableEntries.length - entries.length;
+    if (refused) warn(`${table.form}: ${refused} file value(s) in ${name} were refused because the Creator record ID could not be resolved; no blank ID was emitted`);
+    if (!entries.length) continue;
+    const data = entries.map((entry) => [entry.sourceId, entry.rowid, entry.field, entry.key, entry.key.split('/').pop() ?? '']);
+    files.push({ path: `files/${name}.files.csv`, body: csvDocument(['ID', 'ROWID', 'Field', 'Object_Key', 'File_Name'], data) });
+    warn(`${table.form}: ${entries.length} file value(s) in ${name} are Stratus object keys the report importer cannot load; fetch each object and re-attach it from files/${name}.files.csv`);
   }
   const order = importOrder(formTables).map((name) => formTables.find((table) => table.name === name)!.form);
   files.push({ path: 'IMPORT_ORDER.txt', body: `${order.map((form, index) => `${index + 1}. import/${form}.csv`).join('\n')}\n` });

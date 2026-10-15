@@ -1144,6 +1144,41 @@ test('rollback export joins an extension table back onto the form row', () => {
   assert.deepEqual(result.files.map((file) => file.path).filter((path) => path.startsWith('manual/') || path.startsWith('files/')), []);
 });
 
+test('rollback export places extension file fields in the form manifest with the parent Creator ID', () => {
+  const fields = Array.from({ length: 259 }, (_, index) => `Field_${index}\n(\ntype = text\n)`).join('\n');
+  const app = deriveIr(parse(`application "Wide Files"\n{\nform Wide_Form\n{\n${fields}\nAttachment\n(\ntype = file upload\n)\n}\n}\n`));
+  const schema = generateSchema(app);
+  const base = schema.tables.find((table) => table.role === 'form')!;
+  const ext = schema.tables.find((table) => table.role === 'extension')!;
+  const fileColumn = ext.columns.find((column) => column.field === 'Attachment' || column.name === 'Attachment')!;
+  const rows = new Map<string, Record<string, unknown>[]>([
+    [base.name, [{ ROWID: '9101', c2c_source_id: '1000000000003570211' }]],
+    [ext.name, [{ ROWID: '9102', parent_rowid: '9101', [fileColumn.name]: 'migrated/Wide_Form/Attachment/1000000000003570211/file.pdf' }]],
+  ]);
+  const result = rollbackExport(app, rows);
+  const files = new Map(result.files.map((file) => [file.path, file.body]));
+  const manifest = files.get('files/Wide_Form.files.csv')!.trimEnd().split('\n');
+  assert.equal(files.has(`files/${ext.name}.files.csv`), false);
+  assert.equal(manifest.length, 2);
+  assert.equal(manifest[1], `1000000000003570211,9102,Attachment,migrated/Wide_Form/Attachment/1000000000003570211/file.pdf,file.pdf`);
+});
+
+test('rollback export refuses extension file entries when the parent Creator ID cannot be resolved', () => {
+  const fields = Array.from({ length: 259 }, (_, index) => `Field_${index}\n(\ntype = text\n)`).join('\n');
+  const app = deriveIr(parse(`application "Wide Files"\n{\nform Wide_Form\n{\n${fields}\nAttachment\n(\ntype = file upload\n)\n}\n}\n`));
+  const schema = generateSchema(app);
+  const base = schema.tables.find((table) => table.role === 'form')!;
+  const ext = schema.tables.find((table) => table.role === 'extension')!;
+  const fileColumn = ext.columns.find((column) => column.field === 'Attachment' || column.name === 'Attachment')!;
+  const rows = new Map<string, Record<string, unknown>[]>([
+    [base.name, [{ ROWID: '9201' }]],
+    [ext.name, [{ ROWID: '9202', parent_rowid: 'missing', [fileColumn.name]: 'object/key.pdf' }]],
+  ]);
+  const result = rollbackExport(app, rows);
+  assert.equal(result.files.some((file) => file.path.startsWith('files/')), false);
+  assert.match(result.warnings.join('\n'), /1 file value\(s\) in .* were refused because the parent Creator record ID could not be resolved; no blank ID was emitted/);
+});
+
 test('rollback export writes an extension row whose parent is missing under manual/', () => {
   const { app, base, ext } = wideApp();
   const extColumn = ext.columns.find((column) => /^Field_\d+$/.test(column.name))!;
