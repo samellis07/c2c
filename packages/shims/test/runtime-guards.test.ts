@@ -156,12 +156,13 @@ test('compare.eq reads a lookup by its id or label and a multi lookup by any mem
   assert.equal(shim.compare.eq(null, null), true);
 });
 
-test('applyInitialValues fills only absent writable plain fields', () => {
+test('applyInitialValues fills only absent non-readonly plain fields, hidden included', () => {
   const fields: WriteField[] = [
     { name: 'Status', defaultValue: 'Open' },
     { name: 'Notes', defaultValue: 'none' },
     { name: 'Priority', defaultValue: 'Low' },
     { name: 'Locked', readOnly: true, defaultValue: 'x' },
+    { name: 'Flag', hidden: true, defaultValue: 'on' },
     { name: 'Owner', kind: 'lookup', defaultValue: '1' },
     { name: 'Doc', kind: 'file', defaultValue: 'k' },
     { name: 'NoDefault' },
@@ -179,6 +180,7 @@ test('applyInitialValues fills only absent writable plain fields', () => {
     Status: 'Open',
     Notes: '',
     Priority: 'Low',
+    Flag: 'on',
     Lines: [{ Qty: '1' }, { Qty: 5 }, 'not a row'],
     Address: { city: 'Chennai', country: 'IN' },
   });

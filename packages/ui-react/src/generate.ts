@@ -223,16 +223,18 @@ function q(value: string): string {
 }
 
 function formModule(form: FormSpec, component: string, governed: boolean): string {
-  const fields = form.fields.map((field) => `      <Field name=${q(field.name)} />`).join('\n');
+  // `visibility = false` fields are never drawn or posted; <Field> also guards.
+  const drawn = form.fields.filter((field) => field.visibility !== false);
+  const fields = drawn.map((field) => `      <Field name=${q(field.name)} />`).join('\n');
   // A form with no fields (a stateless Creator form) imports no Field and passes no children.
   const view = form.handlers?.length ? `<FormView form={form} edit={edit} handlers={formHandlers}` : '<FormView form={form} edit={edit}';
-  const formBody = form.fields.length ? `    ${view}>\n${fields}\n    </FormView>` : `    ${view} />`;
+  const formBody = drawn.length ? `    ${view}>\n${fields}\n    </FormView>` : `    ${view} />`;
   // Governed forms mount the stage bar above the edit screen; it reads the stored stage from the record.
   const body = governed
     ? `    <>\n    {edit ? <FlowStageBar form={form} rowId={edit} /> : null}\n${formBody}\n    </>`
     : formBody;
   const handlerImport = form.handlers?.length ? `import { formHandlers } from '../handlers';\n` : '';
-  return `${HEADER}import { ${form.fields.length ? 'Field, ' : ''}${governed ? 'FlowStageBar, ' : ''}FormView, type ScreenProps } from '@c2c/ui';
+  return `${HEADER}import { ${drawn.length ? 'Field, ' : ''}${governed ? 'FlowStageBar, ' : ''}FormView, type ScreenProps } from '@c2c/ui';
 ${handlerImport}import { model } from '../model';
 
 const form = model.forms[${q(form.name)}]!;

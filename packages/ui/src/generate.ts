@@ -2107,6 +2107,11 @@ export const fieldNames = ${JSON.stringify(fields.names)};
 export const readonlyFields = ${JSON.stringify(fields.readonlyNames)};
 export const hiddenFields = ${JSON.stringify(fields.hiddenNames)};
 export const fields = ${JSON.stringify(fields.fields)};${ruleDenied.length ? `\nexport const fieldRuleDenied = ${JSON.stringify(ruleDenied)};` : ''}
+function unhideField(field) {
+  const { hidden, ...rest } = field;
+  return rest.fields ? { ...rest, fields: rest.fields.map(unhideField) } : rest;
+}
+const storeFields = fields.map(unhideField);
 const validateAdd = ${JSON.stringify(validate.add)};
 const validateEdit = ${JSON.stringify(validate.edit)};
 const successAdd = ${JSON.stringify(success.add)};
@@ -2190,8 +2195,11 @@ ${requirePrincipal()}
       ...(datastore ? { datastore, ...(datastore.now ? { now: datastore.now } : {}) } : {}),
       access,
       // writeLive -> datastore.update re-authorizes the screened values; the
-      // schema lets a granted composite field carry its nested parts.
-      writeSchemas: { [formName]: { readonlyFields, hiddenFields, fieldNames, fields } },
+      // schema lets a granted composite field carry its nested parts. Hidden
+      // marks are stripped: the hidden rule screens the client-posted body
+      // (the authorizeWrite above), while this re-check covers values the
+      // on-validate scripts set, which legitimately include hidden fields.
+      writeSchemas: { [formName]: { readonlyFields, fieldNames, fields: storeFields } },
     });
     const ctx = runtime.context({
       record: { ...decision.values },

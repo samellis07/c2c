@@ -785,6 +785,9 @@ export function Field({ name }: { name: string }) {
   if (!state) throw new Error('@c2c/ui: <Field> outside <FormView>');
   const field = state.form.fields.find((item) => item.name === name);
   if (!field) return null;
+  // A `visibility = false` field is never drawn, like the vanilla runtime: no
+  // control mounts, so readRecord never has a value to post for it.
+  if (field.visibility === false) return null;
   const Widget = custom.forms?.[state.form.name]?.fields?.[name] ?? custom.components?.fields?.[field.widget] ?? defaultWidget(field);
   const version = state.versions?.[name] ?? 0;
   // The boundary also covers customizations that render a lazily-imported widget.
