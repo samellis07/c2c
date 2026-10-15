@@ -125,6 +125,7 @@ After `/c2c:doctor`, use the exact `FAIL D-*` id below. Only failing checks need
 | D-F3 | Refresh the project table evidence with `/c2c:doctor`; if an update plan reports tables missing from or outside the plan, reconcile the plan with the target project before provisioning. |
 | D-F4 | Re-run `/c2c:doctor` to record the org table count. If the combined existing and planned count exceeds the limit, reduce the planned tables or ask Catalyst support about the limit. |
 | D-F5 | Reduce the per-table budget breach in `/c2c:plan`: choose which fields lose `No Duplicate` (c2c enforces them in the app layer), or let the splitter handle it; then plan again. |
+| D-F7 | Ask the user to check the project in the Catalyst console; if it stays Importing, contact Catalyst support, or create the app under a new project name. A stuck import cannot be deleted and holds its name. Do not retry the delete. |
 | D-B1 | Correct the Catalyst MCP server URL/entry for the target DC, restart the host session, and re-record doctor evidence. |
 | D-B2 | Align the MCP endpoint with the target Catalyst DC: correct its URL and restart, or ask the user to run `/catalyst-by-zoho:switch-dc <DC>`; re-record evidence. |
 | D-B3 | Ask the user to open `/mcp` in Claude Code or run `codex mcp login catalyst-by-zoho`, complete Zoho sign-in, then re-record evidence. |
