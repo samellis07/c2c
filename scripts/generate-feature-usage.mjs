@@ -182,11 +182,17 @@ export function formatMarkdown(report) {
   for (const row of ranked) {
     const galleryCell = row.detectable ? String(row.galleryCount) : `not detectable (${row.reason})`;
     const syntheticCell = row.detectable ? String(row.syntheticCount) : `not detectable (${row.reason})`;
-    lines.push(`| ${row.id} | ${row.title.replace(/\|/g, '\\|')} | ${row.status} | ${galleryCell} | ${syntheticCell} |`);
+    const cells = [row.id, row.title, row.status, galleryCell, syntheticCell].map(markdownCell);
+    lines.push(`| ${cells.join(' | ')} |`);
   }
 
   lines.push('');
   return lines.join('\n');
+}
+
+/** Escapes a value for one Markdown table cell: backslashes first, then pipes; newlines become spaces. */
+function markdownCell(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
 
 function main() {
