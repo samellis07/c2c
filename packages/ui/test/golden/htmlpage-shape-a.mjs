@@ -225,10 +225,26 @@ function deployConfig() {
     const parsed = JSON.parse(readFileSync(file, "utf8"));
     const mode = modeOverride() || (parsed && parsed.mode === "live" ? "live" : "dry-run");
     const appTimeZone = parsed && typeof parsed.appTimeZone === "string" ? parsed.appTimeZone : "";
-    return { mode, appTimeZone };
+    const origins = c2cPageOrigins(parsed && parsed.allowedOrigins);
+    return { mode, appTimeZone, origins };
   } catch (err) {
-    return { mode: modeOverride() || "dry-run", appTimeZone: "" };
+    return { mode: modeOverride() || "dry-run", appTimeZone: "", origins: [] };
   }
+}
+
+// c2c-deploy.json allowedOrigins names this app's own page origins — the
+// Slate URL origin and the function's own domain — written by c2c deploy.
+// Each entry is normalized to a URL origin (scheme + host + port), so a
+// wildcard or a path suffix can never widen the match.
+function c2cPageOrigins(list) {
+  const out = [];
+  for (const item of Array.isArray(list) ? list : []) {
+    try {
+      const parsed = new URL(String(item));
+      if ((parsed.protocol === "http:" || parsed.protocol === "https:") && !parsed.host.includes("*") && parsed.pathname === "/" && !parsed.search && !parsed.hash) out.push(parsed.origin);
+    } catch (err) {}
+  }
+  return out;
 }
 
 async function liveDatastore() {

@@ -22,7 +22,7 @@ import { ALLOWED_ENV, GuardError, assertProtectedName, assertProtectedProject, c
 import { parseJsonExact } from './json-exact.js';
 import { APP_URL_LINE, applyAuthProvision, formatAuthProvision, slateUrlFrom } from './auth.js';
 import { slateHost } from '../../auth/src/slate-host.js';
-import { API_FUNCTION, FUNCTION_DIR, envVariables, secretEnvValues } from './function-dir.js';
+import { API_FUNCTION, FUNCTION_DIR, appOrigins, envVariables, secretEnvValues } from './function-dir.js';
 import { buildDeploy, commandLine, deployFiles, migrateCatalystJson, writeDeployTree, type DeployCommand, type DeployFile, type DeployUi } from './plan.js';
 import { asyncLaneBlocker } from './events.js';
 import { mailSenderEvidenceFor, mailSenderEvidenceVerified, observeMailSenders, readMailSenderEvidence } from './mail.js';
@@ -1099,9 +1099,48 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
       const steps = postDeploySteps(guard.projectId, services, { resume: code !== 0, shadowsOnExistingRows: diff.shadowsOnExistingRows, org: guard.org });
       // Auth console steps sit before the trailing resume step — "then re-run" stays last.
       const authSteps: PostDeployStep[] = auth.consoleSteps.map((text) => ({ kind: 'configure', projectId: guard.projectId, services: ['Authentication'], text }));
+      // The function deploys before slate:link, so a Slate URL (or the function
+      // base) learned only during this run never reached the deployed
+      // c2c-deploy.json allowedOrigins — a write-guarded page endpoint refuses
+      // the app's own page until a re-run stamps the resolved origins.
+      const originSteps: PostDeployStep[] = [];
+      {
+        let written: unknown = [];
+        try {
+          const parsed = JSON.parse(readFileSync(join(cwd, FUNCTION_DIR, 'c2c-deploy.json'), 'utf8')) as { allowedOrigins?: unknown };
+          written = parsed.allowedOrigins;
+        } catch {
+          /* no written config */
+        }
+        const normalized = (list: unknown): Set<string> => {
+          const out = new Set<string>();
+          for (const item of Array.isArray(list) ? list : []) {
+            try {
+              const url = new URL(String(item));
+              if (url.protocol === 'https:' || url.protocol === 'http:') out.add(url.origin);
+            } catch {
+              /* not a URL */
+            }
+          }
+          return out;
+        };
+        const wanted = normalized(appOrigins({ apiBase, slateDomain: slateHost(slateDomainFlag ?? state.slateUrl) }));
+        const deployed = normalized(written);
+        const writeEndpoints = bundle.files.some(
+          (file) => file.path.startsWith(`${FUNCTION_DIR}/`) && typeof file.data === 'string' && file.data.includes('deployConfig().origins'),
+        );
+        if (writeEndpoints && (wanted.size !== deployed.size || [...wanted].some((origin) => !deployed.has(origin)))) {
+          originSteps.push({
+            kind: 'configure',
+            projectId: guard.projectId,
+            services: ['Functions'],
+            text: 'the Slate app URL or function base was learned during this run, after the function deployed, so the deployed c2c-deploy.json allowedOrigins does not list every page origin — re-run deploy --confirm --resume so the page write endpoints accept this app\'s own origins',
+          });
+        }
+      }
       const resumeAt = steps.findIndex((step) => step.kind === 'resume');
-      if (resumeAt >= 0) steps.splice(resumeAt, 0, ...authSteps);
-      else steps.push(...authSteps);
+      if (resumeAt >= 0) steps.splice(resumeAt, 0, ...authSteps, ...originSteps);
+      else steps.push(...authSteps, ...originSteps);
       state.touched = services;
       writeState(cwd, state);
       const failedOps = auth.results.filter((op) => op.status === 'failed');

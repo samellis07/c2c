@@ -9,7 +9,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { deriveIr, parse, parseFile, type App } from '../../core/src/index.js';
 import { mockDatastore } from '../../shims/test/zcql-mock.js';
@@ -65,7 +65,11 @@ const ORDERS = `\tform Orders
 \t}`;
 
 /** Write all generated `functions/*` so sibling imports resolve, like deluge/test's loadTree. */
-async function loadTree(files: { path: string; data: string | Buffer }[], entry: string): Promise<Record<string, unknown>> {
+const loadedDirs: string[] = [];
+after(() => {
+  for (const dir of loadedDirs) rmSync(dir, { recursive: true, force: true });
+});
+async function loadTree(files: { path: string; data: string | Buffer }[], entry: string, origins: readonly string[] = PAGE_ORIGINS): Promise<Record<string, unknown>> {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-hp-'));
   writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
   mkdirSync(join(dir, 'node_modules'), { recursive: true });
@@ -75,12 +79,25 @@ async function loadTree(files: { path: string; data: string | Buffer }[], entry:
     mkdirSync(dirname(dest), { recursive: true });
     writeFileSync(dest, file.data);
   }
+  // The deploy stamps allowedOrigins into the shipped c2c-deploy.json. The
+  // module reads it lazily at request time, so the tree must outlive loadTree.
   try {
-    return (await import(pathToFileURL(join(dir, entry)).href)) as Record<string, unknown>;
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+    const target = join(dir, 'functions/c2c-deploy.json');
+    const parsed = JSON.parse(readFileSync(target, 'utf8')) as Record<string, unknown>;
+    parsed.allowedOrigins = [...origins];
+    writeFileSync(target, `${JSON.stringify(parsed, null, 2)}\n`);
+  } catch {
+    /* the generated tree ships no c2c-deploy.json */
   }
+  loadedDirs.push(dir);
+  return (await import(pathToFileURL(join(dir, entry)).href)) as Record<string, unknown>;
 }
+
+/** The documented deployment: the page rides a Slate host, the function the project domain — different origins. */
+const SLATE_ORIGIN = 'https://c2c-app-4f3a.onslate.in';
+const FUNCTION_HOST = 'c2c-app-1001.development.catalystserverless.in';
+const FUNCTION_ORIGIN = `https://${FUNCTION_HOST}`;
+const PAGE_ORIGINS = [SLATE_ORIGIN, FUNCTION_ORIGIN];
 
 async function invoke(handler: (req: unknown, res: unknown) => unknown, req: unknown) {
   let status = 0;
@@ -93,27 +110,32 @@ async function invoke(handler: (req: unknown, res: unknown) => unknown, req: unk
       raw = body;
     },
   };
-  await handler(req, res);
+  await handler({ method: 'POST', headers: { host: FUNCTION_HOST, origin: SLATE_ORIGIN }, ...(req && typeof req === 'object' ? req as object : {}) }, res);
   return { status, body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {} };
 }
 
 /** Live mode + injected fake datastore preloaded with rows; restore() in finally. */
 async function liveStore(rows: Record<string, Record<string, unknown>[]>) {
-  const { datastore } = mockDatastore({});
+  const { datastore, tables } = mockDatastore({});
   const realMode = process.env.C2C_DEPLOY_MODE;
   const realZone = process.env.C2C_APP_TIMEZONE;
+  const realAdmin = process.env.C2C_ADMIN_USER_ID;
   const realStore = (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
   process.env.C2C_DEPLOY_MODE = 'live';
   process.env.C2C_APP_TIMEZONE = 'UTC';
+  process.env.C2C_ADMIN_USER_ID = 'u1';
   (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = datastore;
   for (const [form, list] of Object.entries(rows)) if (list.length) await datastore.insert(form, list);
   return {
     datastore,
+    tables,
     restore() {
       if (realMode === undefined) delete process.env.C2C_DEPLOY_MODE;
       else process.env.C2C_DEPLOY_MODE = realMode;
       if (realZone === undefined) delete process.env.C2C_APP_TIMEZONE;
       else process.env.C2C_APP_TIMEZONE = realZone;
+      if (realAdmin === undefined) delete process.env.C2C_ADMIN_USER_ID;
+      else process.env.C2C_ADMIN_USER_ID = realAdmin;
       if (realStore === undefined) delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
       else (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = realStore;
     },
@@ -2465,14 +2487,14 @@ for each step in steps
 });
 
 test('a write or external action anywhere in an island is refused as an effectful render: no endpoint, one counted TODO', () => {
-  const effects: Array<{ name: string; island: string }> = [
-    { name: 'insert into', island: 'if(Orders[Status == "open"].count() == 0)\n{\n\tinsert into Orders\n\t[\n\t\tStatus="open"\n\t]\n}' },
-    { name: 'assigned insert', island: 'row = insert into Orders [ Status : "open" ];' },
-    { name: 'criteria field write', island: 'Orders[Status == "open"].Name = "x";' },
-    { name: 'update', island: 'update Orders[Status == "open"] [ Status = "closed" ];' },
-    { name: 'delete', island: 'delete from Orders[Status == "open"];' },
-    { name: 'sendmail', island: 'sendmail\n[\n\tfrom :zoho.adminuserid\n\tto :"a@example.com"\n\tsubject :"x"\n\tmessage :"y"\n]' },
-    { name: 'invokeUrl', island: 'r = invokeurl\n[\n\turl :"https://example.com"\n\ttype :GET\n];' },
+  const effects: Array<{ name: string; island: string; reason: string }> = [
+    { name: 'insert into', island: 'if(Orders[Status == "open"].count() == 0)\n{\n\tinsert into Orders\n\t[\n\t\tStatus="open"\n\t]\n}', reason: 'island writes are unguarded' },
+    { name: 'assigned insert', island: 'row = insert into Orders [ Status : "open" ];', reason: 'island writes are unguarded' },
+    { name: 'criteria field write', island: 'Orders[Status == "open"].Name = "x";', reason: 'island writes are unguarded' },
+    { name: 'update', island: 'update Orders[Status == "open"] [ Status = "closed" ];', reason: 'island writes are unguarded' },
+    { name: 'delete', island: 'delete from Orders[Status == "open"];', reason: 'island is not a read-only render' },
+    { name: 'sendmail', island: 'sendmail\n[\n\tfrom :zoho.adminuserid\n\tto :"a@example.com"\n\tsubject :"x"\n\tmessage :"y"\n]', reason: 'island is not a read-only render' },
+    { name: 'invokeUrl', island: 'r = invokeurl\n[\n\turl :"https://example.com"\n\ttype :GET\n];', reason: 'island is not a read-only render' },
   ];
   for (const e of effects) {
     const template = `htmlpage hp1()\ncontent\n<%{\n${e.island}\n%}\n<p><%= Orders[Status == "open"].count() %></p>`;
@@ -2480,7 +2502,7 @@ test('a write or external action anywhere in an island is refused as an effectfu
     assert.equal(compiled.ok, false, e.name);
     assert.equal(compiled.file, undefined, e.name);
     assert.equal(compiled.src, undefined, e.name);
-    assert.equal(compiled.reason, 'island is not a read-only render', e.name);
+    assert.equal(compiled.reason, e.reason, e.name);
     const { model } = generateUi(appOf(`${ORDERS}\n${pageWithSnippet(template)}`));
     assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], e.name);
     assert.ok(model.todos[0]?.manualReasons?.includes('write'), e.name);
@@ -2614,3 +2636,274 @@ test('one page with carried <style> CSS, a <script>, an ExecuteFunction button a
     ],
   );
 });
+
+const ACCOUNTS = `\tform Accounts
+\t{
+\t\tEmail
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tRole
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}`;
+
+test('shape C: non-administrator profile is refused before the write', async () => {
+  const snippet = `htmlpage hp1()
+content
+<p>
+<%
+if (zoho.loginuserid == zoho.adminuserid) {
+  if (Accounts[Email == zoho.adminuserid].count() == 0) {
+    insert into Accounts [
+      Email = zoho.adminuserid
+      Role = "Admin"
+    ];
+  }
+}
+%>
+Ready
+</p>`;
+  const { files, model } = generateUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+  assert.deepEqual(model.todos, []);
+  const entry = uiSnippetFiles(model)[0];
+  const mod = await loadTree(files, entry.path);
+  const live = await liveStore({});
+  try {
+    const out = await invoke(mod.default as never, { ...CLERK, body: { input: {} } });
+    assert.equal(out.status, 403, JSON.stringify(out.body));
+    const rows = live.tables.get('Accounts') ?? [];
+    assert.equal(rows.length, 0);
+  } finally {
+    live.restore();
+  }
+});
+
+test('shape C: admin render writes exactly once (idempotent when existence check is present)', async () => {
+  const snippet = `htmlpage hp1()
+content
+<p>
+<%
+if (zoho.loginuserid == zoho.adminuserid) {
+  rec = Accounts[Email == zoho.adminuserid];
+  if (rec.count() <= 0) {
+    insert into Accounts [
+      Email = zoho.loginuserid
+      Role = "Admin"
+    ];
+  }
+}
+%>
+Ready
+</p>`;
+  const { files, model } = generateUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+  assert.deepEqual(model.todos, []);
+  const entry = uiSnippetFiles(model)[0];
+  const mod = await loadTree(files, entry.path);
+  const live = await liveStore({});
+  try {
+    const out1 = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(out1.status, 200, JSON.stringify(out1.body));
+    const rows1 = live.tables.get('Accounts') ?? [];
+    assert.equal(rows1.length, 1);
+    assert.equal(rows1[0].Email, 'u1');
+    assert.equal(rows1[0].Role, 'Admin');
+
+    const out2 = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(out2.status, 200, JSON.stringify(out2.body));
+    const rows2 = live.tables.get('Accounts') ?? [];
+    assert.equal(rows2.length, 1);
+  } finally {
+    live.restore();
+  }
+});
+
+test('shape C without an existence check keeps Creator every-render semantics', async () => {
+  const snippet = `htmlpage hp1()
+content
+<p>
+<%
+if (zoho.loginuserid == zoho.adminuserid) {
+  insert into Accounts [
+    Email = zoho.adminuserid
+    Role = "Admin"
+  ];
+}
+%>
+Ready
+</p>`;
+  const { files, model } = generateUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+  assert.deepEqual(model.todos, []);
+  const entry = uiSnippetFiles(model)[0];
+  const mod = await loadTree(files, entry.path);
+  const live = await liveStore({});
+  try {
+    await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    const rows1 = live.tables.get('Accounts') ?? [];
+    assert.equal(rows1.length, 1);
+
+    await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    const rows2 = live.tables.get('Accounts') ?? [];
+    assert.equal(rows2.length, 2);
+  } finally {
+    live.restore();
+  }
+});
+
+test('shape C: write failure renders the Creator error path (HTTP 500 without HTML)', async () => {
+  const snippet = `htmlpage hp1()
+content
+<p>
+<%
+if (zoho.loginuserid == zoho.adminuserid) {
+  insert into Accounts [
+    Email = zoho.adminuserid
+    Role = "Admin"
+  ];
+}
+%>
+Ready
+</p>`;
+  const { files, model } = generateUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+  assert.deepEqual(model.todos, []);
+  const entry = uiSnippetFiles(model)[0];
+  const mod = await loadTree(files, entry.path);
+  const live = await liveStore({});
+  try {
+    live.datastore.insert = async () => {
+      throw new Error('database connection lost');
+    };
+    const out = await invoke(mod.default as never, { ...USER, body: { input: {} } });
+    assert.equal(out.status, 500, JSON.stringify(out.body));
+    assert.equal(out.body.error, 'render failed');
+    assert.equal('html' in out.body, false);
+  } finally {
+    live.restore();
+  }
+});
+
+test('shape C negative: unconditional write refused', () => {
+  const snippet = `htmlpage hp1()
+content
+<p>
+<%
+insert into Accounts [
+  Email = "x@example.com"
+  Role = "Admin"
+];
+%>
+Done
+</p>`;
+  const { model } = buildUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+  assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO]);
+  assert.equal(uiSnippetFiles(model).length, 0);
+});
+
+test('shape C negative: write in for each loop refused', () => {
+  const snippet = `htmlpage hp1()
+content
+<p>
+<%
+for each row in Accounts[ID != 0] {
+  if (zoho.loginuserid == zoho.adminuserid) {
+    insert into Accounts [
+      Email = zoho.adminuserid
+      Role = "Admin"
+    ];
+  }
+}
+%>
+Done
+</p>`;
+  const { model } = buildUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+  assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO]);
+  assert.equal(uiSnippetFiles(model).length, 0);
+});
+
+test('shape C negative: write guarded by non-user condition refused', () => {
+  const snippet = `htmlpage hp1()
+content
+<p>
+<%
+if (input.setup == "yes") {
+  insert into Accounts [
+    Email = "x@example.com"
+    Role = "Admin"
+  ];
+}
+%>
+Done
+</p>`;
+  const { model } = buildUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+  assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO]);
+  assert.equal(uiSnippetFiles(model).length, 0);
+});
+
+test('shape C negative: guards that merely mention a user identity are refused', () => {
+  const guards = [
+    'zoho.loginuserid != "never"',
+    'zoho.loginuserid == zoho.adminuserid || input.force == true',
+    'input.user == zoho.adminuserid',
+    'zoho.loginuserid == input.admin',
+    'zoho.loginuserid == "admin@example.com"',
+  ];
+  for (const guard of guards) {
+    const snippet = `htmlpage hp1()\ncontent\n<p><%\nif (${guard}) {\n  insert into Accounts [ Email = zoho.loginuserid Role = "Admin" ];\n}\n%>Done</p>`;
+    const { model } = buildUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+    assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], guard);
+    assert.equal(uiSnippetFiles(model).length, 0, guard);
+  }
+});
+
+test('shape C endpoint accepts only this app\'s configured page origins, before writes', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<p><%\nif (zoho.loginuserid == zoho.adminuserid) {\n  insert into Accounts [ Email = zoho.loginuserid Role = "Admin" ];\n}\n%>Done</p>`;
+  const { files, model } = generateUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+  const mod = await loadTree(files, uiSnippetFiles(model)[0]!.path);
+  const live = await liveStore({});
+  try {
+    const get = await invoke(mod.default as never, { ...USER, method: 'GET' });
+    assert.equal(get.status, 405);
+    // The app's own Slate page — Origin is the Slate host, Host the function's.
+    const own = await invoke(mod.default as never, { ...USER });
+    assert.equal(own.status, 200, JSON.stringify(own.body));
+    // Same-origin calls from the function's own domain also run.
+    const ownFunction = await invoke(mod.default as never, { ...USER, headers: { host: FUNCTION_HOST, origin: FUNCTION_ORIGIN } });
+    assert.equal(ownFunction.status, 200);
+    assert.equal((live.tables.get('Accounts') ?? []).length, 2);
+    // Another app on the same Slate platform is not this app.
+    const otherSlate = await invoke(mod.default as never, { ...USER, headers: { host: FUNCTION_HOST, origin: 'https://other-app-9z9q.onslate.in' } });
+    assert.equal(otherSlate.status, 403);
+    const foreign = await invoke(mod.default as never, { ...USER, headers: { host: FUNCTION_HOST, origin: 'https://evil.example' } });
+    assert.equal(foreign.status, 403);
+    // Exact match: scheme, port and host-suffix variants of a listed origin all refuse.
+    for (const origin of ['http://c2c-app-4f3a.onslate.in', 'https://c2c-app-4f3a.onslate.in:8443', 'https://c2c-app-4f3a.onslate.in.evil.test', 'https://onslate.in']) {
+      const res = await invoke(mod.default as never, { ...USER, headers: { host: FUNCTION_HOST, origin } });
+      assert.equal(res.status, 403, origin);
+    }
+    const missing = await invoke(mod.default as never, { ...USER, headers: { host: FUNCTION_HOST } });
+    assert.equal(missing.status, 403);
+    const malformed = await invoke(mod.default as never, { ...USER, headers: { host: FUNCTION_HOST, origin: 'not-a-url' } });
+    assert.equal(malformed.status, 403);
+    const clerk = await invoke(mod.default as never, { ...CLERK });
+    assert.equal(clerk.status, 403);
+    assert.equal((live.tables.get('Accounts') ?? []).length, 2);
+  } finally {
+    live.restore();
+  }
+});
+
+test('shape C endpoint refuses every origin when the deploy config lists none', async () => {
+  const snippet = `htmlpage hp1()\ncontent\n<p><%\nif (zoho.loginuserid == zoho.adminuserid) {\n  insert into Accounts [ Email = zoho.loginuserid Role = "Admin" ];\n}\n%>Done</p>`;
+  const { files, model } = generateUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+  const mod = await loadTree(files, uiSnippetFiles(model)[0]!.path, []);
+  const live = await liveStore({});
+  try {
+    const own = await invoke(mod.default as never, { ...USER });
+    assert.equal(own.status, 403);
+    assert.equal((live.tables.get('Accounts') ?? []).length, 0);
+  } finally {
+    live.restore();
+  }
+});
+

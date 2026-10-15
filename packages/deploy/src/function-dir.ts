@@ -74,8 +74,39 @@ export interface FunctionDirOptions {
   mailFrom?: string;
   /** Custom Catalyst role -> Creator profile entries from the auth apply plan. Built-ins stay authoritative. */
   roleMap?: Readonly<Record<string, string>>;
+  /**
+   * The exact origins this app's generated write endpoints accept
+   * (c2c-deploy.json `allowedOrigins`): the Slate page origin and the
+   * function's own origin. Absent or empty means no browser origin is trusted —
+   * the page's write calls are refused rather than guessed.
+   */
+  origins?: readonly string[];
   /** Spike: copy only the subset of shim modules imported by the app's generated code. Off by default. */
   subsetShims?: boolean;
+}
+
+/**
+ * The origins a deploy knows to write into `allowedOrigins`: the API base's
+ * origin (the function's own domain) and the Slate page origin. Every value is
+ * normalized through URL parsing to a scheme + host + port origin — a path, a
+ * wildcard or a non-URL string contributes nothing.
+ */
+export function appOrigins(opts: { apiBase?: string; slateDomain?: string }): string[] {
+  const out = new Set<string>();
+  const add = (value: string | undefined): void => {
+    const text = (value ?? '').trim();
+    if (!text || text.startsWith('/')) return;
+    const candidate = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(text) ? text : `https://${text}`;
+    try {
+      const url = new URL(candidate);
+      if ((url.protocol === 'https:' || url.protocol === 'http:') && !url.host.includes('*')) out.add(url.origin);
+    } catch {
+      /* not a URL — contributes no origin */
+    }
+  };
+  add(opts.apiBase);
+  add(opts.slateDomain);
+  return [...out].sort();
 }
 
 /** Column types the adapter converts by type. Other columns are written and read as they are. */
@@ -466,7 +497,11 @@ export function functionDir(generated: readonly FunctionFile[], opts: FunctionDi
     if (rel === 'manifest.json') continue;
     let data = file.data;
     if (rel === 'c2c-deploy.json' && typeof data === 'string') {
-      data = json({ ...(JSON.parse(data) as Record<string, unknown>), mode: opts.mode });
+      data = json({
+        ...(JSON.parse(data) as Record<string, unknown>),
+        mode: opts.mode,
+        ...(opts.origins?.length ? { allowedOrigins: [...opts.origins].sort(byPath) } : {}),
+      });
     } else if (typeof data === 'string' && rel.endsWith('.mjs')) {
       data = rewriteShimsImport(data, rel);
     }
