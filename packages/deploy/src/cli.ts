@@ -469,7 +469,7 @@ function stripAnsi(text: string): string {
 }
 
 /** The exact message a fresh project answers `deploy slate` with until Slate is opened in the console once. */
-const SLATE_SERVICE_CLOSED = /Please access the Slate service in your project's console before deploying via the CLI\./;
+const SLATE_SERVICE_CLOSED = /Please\s+access\s+the\s+Slate\s+service\s+in\s+your\s+project'?s\s+console\s+before\s+deploying\s+via\s+the\s+CLI/i;
 
 /**
  * Verify the console first-use gates a run needs before its first write: c2c

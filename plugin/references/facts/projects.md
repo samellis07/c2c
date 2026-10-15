@@ -167,12 +167,14 @@ Rule: [TESTED] no API or CLI command opens a service on a project ("Start Explor
 | Cloud Scale (Data Store, Authentication) | every app | the project → Cloud Scale → Start Exploring | `GET /baas/v1/project/<project-id>/table` | an "access the … service" refusal or `INVALID_URL_PATTERN` | `200` success envelope |
 | Stratus | the app has file fields | the project → Cloud Scale → Stratus → Start Exploring | `GET /baas/v1/project/<project-id>/bucket` | same | `200` (an empty bucket list still opens the gate) |
 | SmartBrowz | the app renders PDF | the project → SmartBrowz → Start Exploring | the SmartBrowz browser-grid list | same | `200` |
-| Slate | the app ships a Slate client | the project → Slate → Start Exploring | `GET /slate/v1/project/<project-id>/app` | `400` "Please access the Slate service in your project's console before deploying via the CLI." | `200` `{"status":"success","data":[...]}` |
+| Slate | the app ships a Slate client | the project → Slate → Start Exploring | `GET /slate/v1/project/<project-id>/app` | `400` "Please access the Slate service in your project's console before deploying via the CLI." | `200 []` proves only that the list route is reachable; it does not prove activation. The CLI deploy 400 is the activation signal. |
 
 - Provision: `c2c provision --out c2c-out/<app> --record <gate>-enable` runs the probe; any later `--run` probes every unverified gate before it and stops on a closed one. Deploy `--confirm` and `migrate-data --seed --confirm` probe the gates they need before the first write; re-run (deploy: `--resume`) after the console step.
 - Data Store, Functions and Authentication calls usually work on a fresh project before any click, so the Cloud Scale probe normally answers open and no human step is printed.
 - An unrecognised probe answer (`401`, `5xx`, a failure envelope without the refusal text) is unverified, never open.
 - Project services are opt-in — the first console open of a service (Start Exploring) enables it for the project.
+- Read and list operations are not gated: MCP `List_All_Slate_Apps` and REST `GET /slate/v1/project/<project-id>/app` on an unactivated project return HTTP 200 with an empty list (`[]`), not an error; read operations cannot detect activation state. Detection of unactivated Slate relies on the CLI `400` message during deploy.
+- Never bypass the `400` gate: slipping a deploy past it creates records but deployment builds fail and serve `404`.
 
 ### Treat DevOps (APM, alerts, logs) as opt-in console observability
 

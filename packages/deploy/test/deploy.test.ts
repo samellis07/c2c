@@ -1208,6 +1208,87 @@ test('an unrecognised Slate probe answer stops deploy --confirm like a closed ga
   rmSync(out, { recursive: true, force: true });
 });
 
+test('a slate deploy refused with line-wrapped CLI 400 and BAD_REQUEST detects unactivated Slate', async () => {
+  const ds = writeDs();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-out-slate-wrapped-'));
+  const cap = capture();
+  cap.io.spawn = async (command, args, opts) => {
+    cap.spawned.push({ command, args, env: opts.env });
+    if (args.includes('project:list')) return { code: 0, stdout: FAITHFUL_PROJECT_LIST, stderr: '' };
+    if (args.includes('slate:link')) return { code: 0, stdout: 'Linked\n', stderr: '' };
+    if (args.includes('slate')) {
+      return {
+        code: 1,
+        stdout: '',
+        stderr:
+          "⚠ slate: HTTP Error: 400, Please access the Slate service in your project's\n" +
+          '  console before deploying via the CLI.\n' +
+          '✖ Slate Deploy failed  (HTTP 400, error_code BAD_REQUEST)',
+      };
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out], cap.io);
+  assert.equal(code, 1);
+  assert.match(cap.stderr(), /the Slate service was never opened on this project/);
+  assert.match(cap.stderr(), /Start Exploring/);
+  assert.match(cap.stderr(), /slate-enable/);
+  assert.match(cap.stderr(), /console\.catalyst\.zoho\.in\/baas\/10000000000\/project\/1001\/Development#\/slate/);
+  const report = JSON.parse(readFileSync(join(out, DEPLOY_REPORT), 'utf8')) as { exitCode: number };
+  assert.equal(report.exitCode, 1);
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('a slate deploy prints the activation guidance only for the gate message', async () => {
+  // Negative: an unrelated slate 400 must not be mistaken for the gate.
+  const ds = writeDs();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-out-slate-unrelated-'));
+  const cap = capture();
+  cap.io.spawn = async (command, args, opts) => {
+    cap.spawned.push({ command, args, env: opts.env });
+    if (args.includes('project:list')) return { code: 0, stdout: FAITHFUL_PROJECT_LIST, stderr: '' };
+    if (args.includes('slate:link')) return { code: 0, stdout: 'Linked\n', stderr: '' };
+    if (args.includes('slate')) {
+      return {
+        code: 1,
+        stdout: '',
+        stderr: '⚠ slate: HTTP Error: 400, Invalid slate name\n✖ Slate Deploy failed  (HTTP 400, error_code BAD_REQUEST)',
+      };
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out], cap.io);
+  assert.equal(code, 1);
+  assert.match(cap.stderr(), /Invalid slate name/);
+  assert.doesNotMatch(cap.stderr(), /the Slate service was never opened on this project/);
+  assert.doesNotMatch(cap.stderr(), /Start Exploring/);
+  assert.doesNotMatch(cap.stderr(), /slate-enable/);
+  rmSync(out, { recursive: true, force: true });
+
+  // Positive control: the gate message in lower case still detects — this
+  // fails on the old case-sensitive literal regex.
+  const out2 = mkdtempSync(join(tmpdir(), 'c2c-out-slate-lower-'));
+  const cap2 = capture();
+  cap2.io.spawn = async (command, args, opts) => {
+    cap2.spawned.push({ command, args, env: opts.env });
+    if (args.includes('project:list')) return { code: 0, stdout: FAITHFUL_PROJECT_LIST, stderr: '' };
+    if (args.includes('slate:link')) return { code: 0, stdout: 'Linked\n', stderr: '' };
+    if (args.includes('slate')) {
+      return {
+        code: 1,
+        stdout: '',
+        stderr: '⚠ slate: HTTP Error: 400, please access the slate service in your project\'s console before deploying via the cli.',
+      };
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const code2 = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out2], cap2.io);
+  assert.equal(code2, 1);
+  assert.match(cap2.stderr(), /the Slate service was never opened on this project/);
+  assert.match(cap2.stderr(), /slate-enable/);
+  rmSync(out2, { recursive: true, force: true });
+});
+
 test('a plain second --confirm re-runs the deploy commands but never re-posts auth ops', async () => {
   const ds = writeDs();
   const out = mkdtempSync(join(tmpdir(), 'c2c-out-'));
