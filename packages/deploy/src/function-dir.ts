@@ -179,15 +179,55 @@ export function computeShimModules(generated: readonly FunctionFile[], dir = shi
 
   const allShimNames = readdirSync(dir).filter((name) => name.endsWith('.js') && name !== 'index.js');
 
-  // Dependency map between shim modules
+  // Dependency map between shim modules: every static import form (named,
+  // default, namespace, side-effect, re-export) and literal dynamic import().
   const shimDeps: Record<string, string[]> = {};
+  const shimOpaqueDynamic = new Set<string>();
   for (const name of allShimNames) {
     const content = readFileSync(join(dir, name), 'utf8');
-    const matches = [...content.matchAll(/from\s+['"]\.\/([a-z0-9\-]+)(?:\.js)?['"]/g)];
-    shimDeps[name] = [...new Set(matches.map((m) => `${m[1]}.js`))].sort();
+    const deps = new Set<string>();
+    for (const m of content.matchAll(/\bfrom\s*['"]\.\/([a-z0-9\-]+)(?:\.js)?['"]/g)) deps.add(`${m[1]}.js`);
+    for (const m of content.matchAll(/\bimport\s*['"]\.\/([a-z0-9\-]+)(?:\.js)?['"]/g)) deps.add(`${m[1]}.js`);
+    for (const m of content.matchAll(/\bimport\s*\(\s*['"]\.\/([a-z0-9\-]+)(?:\.js)?['"]\s*\)/g)) deps.add(`${m[1]}.js`);
+    for (const m of content.matchAll(/\bimport\s*\(\s*([\s\S]*?)\)/g)) {
+      if (!/^['"]/.test(m[1]!)) shimOpaqueDynamic.add(name);
+    }
+    shimDeps[name] = [...deps].sort();
   }
 
   const directRoots = new Set<string>();
+
+  /**
+   * A specifier that refers to the vendored shims: the package name or a
+   * relative path ending in vendor/shims, optionally with a module segment.
+   * `named` is the symbol list of an import {…} from / export {…} from clause,
+   * or null for any other form (default, namespace, star, side-effect,
+   * dynamic). Returns false when the reference cannot be resolved to modules.
+   */
+  const SHIM_SPEC = /^(?:creator-to-catalyst\/shims|(?:\.\.?\/)*[A-Za-z0-9_\-\/]*vendor\/shims)(?:\/([a-z0-9\-]+?)(?:\.js)?)?$/;
+  const resolveSpecifier = (spec: string, named: string[] | null): boolean => {
+    const m = SHIM_SPEC.exec(spec);
+    if (!m) {
+      // Unparseable references that still mention the shims fail closed; other
+      // specifiers are followed transitively by scanning every generated file.
+      return !spec.includes('vendor/shims') && spec !== SHIMS_IMPORT && !spec.startsWith(`${SHIMS_IMPORT}/`);
+    }
+    const target = m[1];
+    if (target !== undefined && target !== 'index') {
+      const mod = `${target}.js`;
+      if (!allShimNames.includes(mod)) return false;
+      directRoots.add(mod);
+      return true;
+    }
+    // The index without a symbol list stands for the whole shim surface.
+    if (named === null) return false;
+    for (const sym of named) {
+      const mod = symbolToModule[sym];
+      if (!mod || !allShimNames.includes(mod)) return false;
+      directRoots.add(mod);
+    }
+    return true;
+  };
 
   // fn/index.js imports this module when mapping datastore errors to HTTP errors.
   directRoots.add('store-errors.js');
@@ -202,54 +242,57 @@ export function computeShimModules(generated: readonly FunctionFile[], dir = shi
     if (typeof file.data !== 'string') continue;
     const text = file.data;
 
-    // Check dynamic imports: fail closed if an argument could refer to shims.
-    const dynMatches = [...text.matchAll(/import\s*\(([\s\S]*?)\)/g)];
-    for (const m of dynMatches) {
+    // Dynamic imports: a literal specifier is followed like a static one.
+    // Generated dispatch loops only ever iterate `spec` over generated sibling
+    // modules (their specifier arrays are quoted literals, caught by the
+    // residual check below if they named a shim); any other non-literal
+    // argument could resolve to anything, so it fails closed.
+    for (const m of text.matchAll(/\bimport\s*\(([\s\S]*?)\)/g)) {
       const arg = m[1]!.trim();
-      const isKnownStatic =
-        arg === 'spec' ||
-        arg === '"zcatalyst-sdk-node"' ||
-        arg === "'zcatalyst-sdk-node'" ||
-        /^["']\.\.?\/[a-zA-Z0-9_\-\.\/]+\.mjs["']$/.test(arg);
-      if (!isKnownStatic) return null;
-    }
-
-    // Check static named imports from creator-to-catalyst/shims or vendor/shims/index.js.
-    // Any other occurrence of the package specifier below fails closed, including
-    // re-exports, require(), side-effect imports, and namespace/default imports.
-    const staticImports = [...text.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"](?:creator-to-catalyst\/shims|(?:\.\.?\/)*vendor\/shims(?:\/index(?:\.js)?)?)['"]/g)];
-    const unparsedSpecifiers = text.replace(
-      /import\s*\{[^}]*\}\s*from\s*['"](?:creator-to-catalyst\/shims|(?:\.\.?\/)*vendor\/shims(?:\/index(?:\.js)?)?)['"]/g,
-      '',
-    );
-    if (unparsedSpecifiers.includes(SHIMS_IMPORT)) return null;
-    if (/['"](?:\.\.?\/)*vendor\/shims(?:\/index(?:\.js)?)?['"]/.test(unparsedSpecifiers)) return null;
-    for (const m of staticImports) {
-      const syms = m[1]!
-        .split(',')
-        .map((s) => s.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]!.trim())
-        .filter(Boolean);
-      for (const sym of syms) {
-        const mod = symbolToModule[sym];
-        if (!mod || !allShimNames.includes(mod)) return null;
-        directRoots.add(mod);
+      const lit = /^(['"])([\s\S]*?)\1$/.exec(arg);
+      if (lit) {
+        if (!resolveSpecifier(lit[2]!, null)) return null;
+      } else if (arg !== 'spec') {
+        return null;
       }
     }
 
-    // Check direct imports of vendor/shims or creator-to-catalyst/shims
-    const directShims = [...text.matchAll(/from\s*['"](?:(?:\.\.?\/)+vendor\/shims\/|vendor\/shims\/|creator-to-catalyst\/shims\/)([a-z0-9\-]+)(?:\.js)?['"]/g)];
-    for (const m of directShims) {
-      const mod = `${m[1]}.js`;
-      if (!allShimNames.includes(mod)) return null;
-      directRoots.add(mod);
+    // Static forms with a from clause: named, default, namespace and
+    // re-exports (export {x} from, export * from, export * as x from).
+    for (const m of text.matchAll(/\b(?:import|export)\s*([^'";]*?)\s*from\s*['"]([^'"]+)['"]/g)) {
+      const brace = /\{([^}]*)\}/.exec(m[1]!)?.[1];
+      const tail = m[1]!.replace(/\{[^}]*\}/, '').replace(/\btype\b/g, '').replace(/[\s,]+/g, '');
+      const named =
+        tail === ''
+          ? (brace ?? '')
+              .split(',')
+              .map((s) => s.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]!.trim())
+              .filter(Boolean)
+          : null;
+      if (!resolveSpecifier(m[2]!, named)) return null;
     }
+
+    // Side-effect imports: import 'spec'.
+    for (const m of text.matchAll(/\bimport\s*['"]([^'"]+)['"]/g)) {
+      if (!resolveSpecifier(m[1]!, null)) return null;
+    }
+
+    // Any quoted shim reference outside the forms above (require(), template
+    // strings, unhandled syntax) cannot be traced, so it fails closed.
+    const consumed = text
+      .replace(/\b(?:import|export)\s*[^'";]*?\s*from\s*['"][^'"]*['"]/g, '')
+      .replace(/\bimport\s*['"][^'"]*['"]/g, '')
+      .replace(/\bimport\s*\([\s\S]*?\)/g, '');
+    if (consumed.includes(SHIMS_IMPORT) || /['"`][^'"`]*vendor\/shims/.test(consumed)) return null;
   }
 
-  // Transitive closure
+  // Transitive closure; a selected shim with a dynamic import whose specifier
+  // is not a literal fails closed, since its dependencies cannot be traced.
   const closure = new Set<string>(directRoots);
   const queue = [...directRoots].sort();
   while (queue.length > 0) {
     const cur = queue.shift()!;
+    if (shimOpaqueDynamic.has(cur)) return null;
     const deps = shimDeps[cur] ?? [];
     for (const dep of deps) {
       if (!closure.has(dep)) {
