@@ -7,11 +7,12 @@
 # --theirs is ever right: pick a side and you silently revert the other side's
 # source changes inside the same derived file. So:
 #
-#   1. Regenerate offline manifests from in-repo inputs when dist/ is built.
-#   2. Gallery docs are union-merged by default. Regenerate them only when the
-#      train explicitly sets C2C_MERGE_REGENERATE=1; never sweep during an
-#      ordinary merge or rebase.
-#   3. Otherwise union-merge so no side is dropped; freshness checks catch it.
+#   1. The driver never runs code during an ordinary merge or rebase: it
+#      union-merges so no side is dropped, and the freshness checks fail stale
+#      until you run the documented regen command.
+#   2. Gallery docs are regenerated only when you explicitly opt in with
+#      C2C_MERGE_REGENERATE=1 for that merge command and the gallery inputs
+#      are present; never sweep during an ordinary merge or rebase.
 set -u
 
 ancestor="${1:?ancestor}"
@@ -47,10 +48,9 @@ gallery_dir() {
 
 case "$path" in
   packages/determinism/test/manifests/*.sha256)
-    # Regenerates every manifest from the merged committed fixtures — offline.
-    if [ -f dist/determinism/src/manifests.js ]; then
-      node dist/determinism/src/manifests.js --update >/dev/null 2>&1 && take
-    fi
+    # Union-merge only: a merge must not run repo code or rewrite files beyond
+    # %A. determinism:check flags the union as stale; regenerate with
+    # npm run determinism:update.
     union ;;
   docs/determinism-status.md)
     if [ "${C2C_MERGE_REGENERATE:-}" = "1" ] && [ -f dist/determinism/src/status.js ] && [ -n "$(gallery_dir)" ]; then
@@ -87,11 +87,6 @@ case "$path" in
         fi
         rm -f "$tmpblock"
       fi
-    fi
-    union ;;
-  docs/coverage-gate.md)
-    if [ "${C2C_MERGE_REGENERATE:-}" = "1" ] && [ -f tools/coverage95.mjs ] && [ -n "${C2C_FIXTURES_DIR:-}" ]; then
-      node tools/coverage95.mjs --md "$path" >/dev/null 2>&1 && take
     fi
     union ;;
   *)

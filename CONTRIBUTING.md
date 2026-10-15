@@ -58,7 +58,7 @@ derived file. Regenerate instead.
 | `docs/determinism-status.md` | `C2C_FIXTURES_DIR=<fixtures> npm run determinism:status` |
 | `docs/decimal-audit.md` | `node dist/determinism/src/decimal-audit.js <fixtures>/gallery > docs/decimal-audit.md` |
 | `docs/quality-gate.md` | `C2C_FIXTURES_DIR=<fixtures> npm run smoke:gallery -- --markdown`, paste the block between the markers |
-| `docs/coverage-gate.md` | `C2C_FIXTURES_DIR=<fixtures> npm run coverage:95` |
+| `docs/coverage-gate.md` | no in-repo generator; union-merge it and say so in the pull request |
 
 A merge driver automates this. Run once per clone (`git config` cannot be
 committed):
@@ -67,14 +67,15 @@ committed):
 npm run merge-driver:install
 ```
 
-`.gitattributes` then routes these paths through `tools/merge-generated.sh`,
-which regenerates offline manifests from in-repo inputs and union-merges gallery
-docs by default. Gallery regeneration can run only in the train's explicit
-regen gate, with `C2C_MERGE_REGENERATE=1` set for that merge command and the
-gallery inputs available. Ordinary merge and rebase commands must leave that
-variable unset, even when fixtures are present. A union-merged generated file
-is not canonical, so `npm test` fails stale until you run the regen command
-above — that failure, not a hand-merge, is the resolution path.
+`.gitattributes` then routes these paths through `tools/merge-generated.sh`.
+The driver never runs repository code during an ordinary merge or rebase: it
+union-merges so no side is dropped, and prints the regen command to run
+afterwards. Gallery docs can additionally be regenerated in place when you
+explicitly opt in — set `C2C_MERGE_REGENERATE=1` for that one merge command
+with the gallery inputs available. Ordinary merge and rebase commands must
+leave that variable unset, even when fixtures are present. A union-merged
+generated file is not canonical, so `npm test` fails stale until you run the
+regen command above — that failure, not a hand-merge, is the resolution path.
 
 ## Tests
 
