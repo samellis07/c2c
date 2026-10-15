@@ -271,6 +271,27 @@ content
   assert.match(main.textContent ?? '', /^OuterBefore/);
 });
 
+test('component attributes with hostile syntax are never trusted as inline targets', () => {
+  const tags = [
+    `<div elName='zc-component' formLinkName='Intake' title='" onmouseover="alert(1)'>`,
+    `<div elName='zc-component' formLinkName='Intake<svg/onload=alert(1)'>`,
+    `<div elName='zc-component' formLinkName='Intake' href='javascript:alert(1)'>`,
+    `<div elName='zc-component' formLinkName='Intake' src='data:text/html,<script>alert(1)</script>'>`,
+    `<div elName='zc-component' formLinkName='Intake' onerror='alert(1)'>`,
+    `<div elName='zc-component' formLinkName='Intake' data-name='\u0049ntake'>`,
+    `<div elName='zc-component' formLinkName='\u0049ntake'>`,
+    `<div elName='zc-component' formLinkName='Intake' params='x=&quot; onload=&quot;alert(1)'>`,
+  ];
+  for (const tag of tags) {
+    const snippet = `htmlpage Outer1()\ncontent\n<%{ %>${tag}Loading<% }%>`;
+    const { model } = buildUi(componentApp(snippet));
+    const el = snippetOf(model, 'Outer');
+    assert.equal(el?.components, undefined, tag);
+    assert.ok(!/data-zml=\"component-(?:form|report):/.test(el?.html ?? ''), tag);
+    assert.ok(!/<script|on(?:error|load|mouseover)=|javascript:|data:text\/html/i.test(el?.html ?? ''), tag);
+  }
+});
+
 test('zc-component embeds with params or unknown targets remain counted TODOs', () => {
   const snippet = `htmlpage Outer1()
 content
@@ -286,6 +307,25 @@ content
     'Embedded zc-component report "Missing" has no generated view',
   ]);
   assert.equal(snippetOf(model, 'Outer')?.components, undefined);
+});
+
+test('a denied embedded report renders no rows and never requests them', async () => {
+  const snippet = `htmlpage Outer1()\ncontent\n<%{ %><div elName='zc-component' viewLinkName='All_Rows'></div><% }%>`;
+  const { model } = buildUi(componentApp(snippet));
+  model.nav = [{ name: 'Back', hidden: true, items: [{ kind: 'report', name: 'All_Rows', label: 'All rows', href: '#/report/All_Rows' }] }];
+  const runtime = await loadRuntime();
+  const dom = new JSDOM('<!doctype html><body><main id=\"main\"></main></body>');
+  const main = mainOf(dom);
+  main.innerHTML = runtime.renderPage(model.pages.find((page) => page.name === 'Outer'), dom.window.document, model);
+  const calls: string[] = [];
+  runtime.hydrateComponentEmbeds(main, model, { fetch: async (url: string, init: unknown) => { calls.push(`${url} ${JSON.stringify(init)}`); return { status: 403, ok: false }; } });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(main.querySelector('section[data-report=\"All_Rows\"]'), null, main.innerHTML);
+  assert.equal(main.querySelector('[data-access-status]')?.getAttribute('data-access-status'), '403', main.innerHTML);
+  assert.equal(calls.length, 1, 'only the view authorization probe ran');
+  assert.match(calls[0]!, /htmlpages|reports/);
+  assert.match(calls[0]!, /\"op\":\"view\"/);
+  assert.doesNotMatch(calls.join(' '), /queryEndpoint|op\":\"query/);
 });
 
 test('hidden zc-component targets show the same 403 notice as their route', async () => {
