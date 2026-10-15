@@ -50,14 +50,12 @@ items:
 - The Zia AI builder.
 - On-prem Data Bridge.
 
-Several features are **not supported in this version (counted; on the roadmap)**.
+Several features are **not supported in this version (counted)**.
 Each one is named in the report when your app uses it:
 
-- **Payments.** No payment gateway is generated. A payment
-  workflow is counted, and saving a record does not take a payment.
-- **Native mobile apps and MDM.** No native iOS or Android app or
-  mobile device management (MDM) package is generated in this
-  version; the installable client is the Slate web app (PWA).
+- **Payments are not supported in this version (counted).** No
+  payment gateway is generated. A payment workflow is counted, and
+  saving a record does not take a payment.
 - **Offline mode.** The web app does not keep your records on the
   device. While you are offline it says that data is unavailable
   ([what the web app generates](../../docs/ui.md)).
@@ -67,6 +65,11 @@ Each one is named in the report when your app uses it:
   Functions are not generated in this version.
 - **C8 dialect.** Deluge scripts in the C8 dialect are not supported
   yet (C5 and C6 are supported).
+
+**Native mobile apps and MDM are not supported in this version
+(counted; on the roadmap).** No native iOS or Android app or mobile
+device management (MDM) package is generated in this version; the
+installable client is the Slate web app (PWA).
 
 **Single sign-on (Zoho One or SAML)** has no built-in Catalyst
 equivalent for app users. The report lists it as a manual item.
