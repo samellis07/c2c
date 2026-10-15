@@ -137,6 +137,7 @@ After `/c2c:doctor`, use the exact `FAIL D-*` id below. Only failing checks need
 | D-R1 | For a React UI, ask the user to install/select the pinned Node version shown by doctor, then re-run doctor. |
 | D-R2 | Install/select the pinned Node version (npm ships with it), or update npm to the minimum version shown by doctor; then re-run doctor. |
 | D-R4 | Repair the Node/npm installation if `npm config get cache` returns nothing. Otherwise ask the user to make the reported cache writable or choose a writable npm cache (`npm config set cache <dir>`). |
+| D-M1 | Set `mail.from` in `c2c-deploy.json` if none is set, then ask the user to verify that sender in the Catalyst console (Mail → Email Configuration). `mail.verified` is only the operator's attestation and never counts as verified. After verification, re-run `c2c deploy app.ds --confirm` so the live Catalyst read-back is recorded under `c2c-out/.c2c/mail-sender.json`, then re-run doctor. |
 
 Checks omitted from this table currently emit no `FAIL` result: D-A4, D-B4, D-B6, D-D2, D-E2, and D-R3 are warning/skip/info-only today; D-F6 is warning/pass-only. D-B6, D-F5 JOIN/SELECT, and D-F6 row-count limits may also be described as deferred notes. A new failing `D-*` must get a route here in the same change that adds the check.
 
