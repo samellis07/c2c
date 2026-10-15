@@ -2369,11 +2369,24 @@ async function authToken(viewRef) {
   const scope = viewRef || globalThis;
   const auth = scope && scope.catalyst && scope.catalyst.auth;
   if (!auth || typeof auth.generateAuthToken !== 'function') return '';
+  // The SDK token chain is best-effort: on a host where the SDK's auth
+  // endpoints are not served (e.g. a Slate domain, where the BaaS routes the
+  // SDK calls root-relative answer 404), generateAuthToken can stay pending
+  // forever — and awaiting it would hang every API call. Bound the wait and
+  // send the call without a token instead; the server still refuses or
+  // accepts on the session cookie.
+  const timer = (scope && scope.setTimeout) || setTimeout;
+  const wait = typeof scope.C2C_AUTH_TIMEOUT_MS === 'number' ? scope.C2C_AUTH_TIMEOUT_MS : 5000;
   try {
-    // generateAuthToken needs a session; isUserAuthenticated fails fast without one.
-    if (typeof auth.isUserAuthenticated === 'function') await auth.isUserAuthenticated();
-    const result = await auth.generateAuthToken();
-    const token = result && result.access_token;
+    const token = await Promise.race([
+      (async () => {
+        // generateAuthToken needs a session; isUserAuthenticated fails fast without one.
+        if (typeof auth.isUserAuthenticated === 'function') await auth.isUserAuthenticated();
+        const result = await auth.generateAuthToken();
+        return result && result.access_token;
+      })(),
+      new Promise((resolve) => timer(() => resolve(''), wait)),
+    ]);
     return typeof token === 'string' ? token : '';
   } catch {
     return '';
@@ -3490,11 +3503,19 @@ function mountSmoke(appModel, main, view) {
     setState('unavailable', 'No smoke plan is embedded in this build.');
     return;
   }
-  apiCall(call, view, '/admin/smoke', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ op: 'status' }),
-  })
+  // The access check must always settle: a dropped connection or an auth
+  // SDK call that never resolves must not leave the page on "Checking
+  // access…" forever — report the stall instead.
+  const timer = (view && view.setTimeout) || setTimeout;
+  const statusWait = typeof (view && view.C2C_SMOKE_STATUS_TIMEOUT_MS) === 'number' ? view.C2C_SMOKE_STATUS_TIMEOUT_MS : 30000;
+  Promise.race([
+    apiCall(call, view, '/admin/smoke', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'status' }),
+    }),
+    new Promise((resolve, reject) => timer(() => reject(new Error('smoke status timeout')), statusWait)),
+  ])
     .then(async (res) => {
       // Authorization is the documented status shape — { ok: true, dryRun,
       // mode, forms } — never a bare 2xx: a sign-in page or any HTML answer
@@ -3541,7 +3562,14 @@ function mountSmoke(appModel, main, view) {
       }
       setState(result.ok ? 'done' : 'failed', result.ok ? 'Done — every check passed.' : 'Failed — see the steps below.');
     })
-    .catch(() => setState('failed', 'The smoke run failed to finish.'));
+    .catch((err) =>
+      setState(
+        'failed',
+        err && err.message === 'smoke status timeout'
+          ? 'Timed out checking access — the smoke service or sign-in did not answer. Reload to retry.'
+          : 'The smoke run failed to finish.',
+      ),
+    );
 }
 
 export function boot(appModel, doc) {

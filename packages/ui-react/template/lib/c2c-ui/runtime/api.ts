@@ -24,6 +24,10 @@ export interface AppWindow extends Window {
   C2C_SMOKE_PLAN?: unknown;
   /** The Catalyst project id the deploy targeted, for the smoke block's binding. */
   C2C_SMOKE_PROJECT?: string;
+  /** Bound on the auth-token wait — see authToken. Default 5000 ms. */
+  C2C_AUTH_TIMEOUT_MS?: number;
+  /** Bound on the smoke page's access check — see smoke/run.ts. Default 30000 ms. */
+  C2C_SMOKE_STATUS_TIMEOUT_MS?: number;
   catalyst?: { auth?: CatalystAuth };
 }
 
@@ -99,10 +103,23 @@ export function apiUrl(view: AppWindow, endpoint: string): string {
 async function authToken(view: AppWindow): Promise<string> {
   const auth = view.catalyst?.auth;
   if (!auth || typeof auth.generateAuthToken !== 'function') return '';
+  // The SDK token chain is best-effort: on a host where the SDK's auth
+  // endpoints are not served (e.g. a Slate domain, where the BaaS routes the
+  // SDK calls root-relative answer 404), generateAuthToken can stay pending
+  // forever — and awaiting it would hang every API call. Bound the wait and
+  // send the call without a token instead; the server still refuses or
+  // accepts on the session cookie.
+  const wait = typeof view.C2C_AUTH_TIMEOUT_MS === 'number' ? view.C2C_AUTH_TIMEOUT_MS : 5000;
+  const generate = auth.generateAuthToken;
   try {
-    // generateAuthToken needs a session; isUserAuthenticated fails fast without one.
-    if (typeof auth.isUserAuthenticated === 'function') await auth.isUserAuthenticated();
-    const token = (await auth.generateAuthToken())?.access_token;
+    const token = await Promise.race([
+      (async () => {
+        // generateAuthToken needs a session; isUserAuthenticated fails fast without one.
+        if (typeof auth.isUserAuthenticated === 'function') await auth.isUserAuthenticated();
+        return (await generate.call(auth))?.access_token;
+      })(),
+      new Promise<unknown>((resolve) => setTimeout(() => resolve(''), wait)),
+    ]);
     return typeof token === 'string' ? token : '';
   } catch {
     return '';
