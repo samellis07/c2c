@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { deriveIr, parse } from '../../core/src/index.js';
@@ -148,4 +150,28 @@ test('committed table budget doc equals a fresh gallery computation', { skip: !g
   assert.ok(dir);
   const fresh = renderTableBudgetDoc(computeTableBudget(dir));
   assert.equal(readFileSync(join(repoRoot(), 'docs/table-budget.md'), 'utf8'), fresh, 'docs/table-budget.md is stale: run npm run tables:budget');
+});
+
+test('tables:budget refuses --help, a missing gallery and an empty gallery without writing the doc', () => {
+  const script = join(repoRoot(), 'dist/determinism/src/table-budget.js');
+  const env = { ...process.env };
+  delete env.C2C_FIXTURES_DIR;
+  delete env.C2C_GALLERY_DIR;
+  const run = (...args: string[]) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env });
+  const tmp = mkdtempSync(join(tmpdir(), 'c2c-budget-'));
+  try {
+    const out = join(tmp, 'budget.md');
+    const help = run('--help');
+    assert.equal(help.status, 2);
+    assert.match(help.stderr, /usage: tables:budget/);
+    const missing = run('--dir', join(tmp, 'absent'), '--out', out);
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /gallery not found/);
+    const empty = run('--dir', tmp, '--out', out);
+    assert.equal(empty.status, 1);
+    assert.match(empty.stderr, /no apps in the gallery directory/);
+    assert.equal(existsSync(out), false);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

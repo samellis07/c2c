@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import compat from '../../doctor/data/compat.json' with { type: 'json' };
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { nodeSatisfies, repoRoot, toolchain, toolchainHeader } from '../../core/src/toolchain.js';
-import { formatFindings, lintCodegen, scanSource } from '../src/lint.js';
+import { formatFindings, lintCodegen, maskNonCode, scanSource } from '../src/lint.js';
 import { checkManifests, copyManifests, manifestNames, manifestPath, updateManifests, MANIFESTS_DIR, FIXTURES_DIR } from '../src/manifests.js';
 import { diffManifest, digestOf, loadApp, manifestFor, parseManifestFiles, renderManifest, type Manifest } from '../src/tree.js';
 
@@ -273,4 +273,80 @@ test('manifests --check passes on the committed tree', () => {
   });
   assert.equal(child.status, 0, child.stderr + child.stdout);
   assert.match(child.stdout, /manifests=current/);
+});
+
+test('lint masks comments, strings and regexes inside template interpolations but still scans their code', () => {
+  const src = [
+    'const a = `x ${y /* Date.now() */ + 1} z`;',
+    'const b = `x ${y // Math.random()\n} z`;',
+    "const c = `x ${f('Date.now()', \"new Date()\")} z`;",
+    'const d = `x ${s.replace(/Date.now()/g, \'\')} z`;',
+    'const e = `x ${`inner ${Date.now()}`} z`;',
+    'const g = `x ${({ k: 1 }).k + Math.random()} z`;',
+  ].join('\n');
+  const masked = maskNonCode(src);
+  assert.equal(masked.length, src.length);
+  assert.equal(masked.split('\n').length, src.split('\n').length);
+  assert.doesNotMatch(masked, /Date\.now\(\) \*\/|'Date|"new Date|\/Date/);
+  const lines = new Set(scanSource('fixture.ts', src).map((f) => f.line));
+  assert.equal(lines.has(1), false, 'block comment inside ${}');
+  assert.equal(lines.has(2), false, 'line comment inside ${}');
+  assert.equal(lines.has(3), false, 'line comment ends at the newline');
+  assert.equal(lines.has(4), false, 'string literals inside ${}');
+  assert.equal(lines.has(5), false, 'regex literal inside ${}');
+  assert.equal(lines.has(6), true, 'nested template interpolation');
+  assert.equal(lines.has(7), true, 'code after a nested object literal brace');
+});
+
+test('a committed manifest must be canonical: terminated, hex, sorted, unique, non-escaping paths', () => {
+  const h = 'a'.repeat(64);
+  assert.deepEqual(parseManifestFiles(`${h}  a.txt\n${h}  b/c.txt\n`), [
+    { path: 'a.txt', sha256: h },
+    { path: 'b/c.txt', sha256: h },
+  ]);
+  const bad: [string, RegExp][] = [
+    [`${h}  a.txt`, /not newline-terminated/],
+    ['\n', /not "<sha256>  <path>"/],
+    [`${'A'.repeat(64)}  a.txt\n`, /not "<sha256>  <path>"/],
+    [`${h} a.txt\n`, /not "<sha256>  <path>"/],
+    [`${h}  /etc/passwd\n`, /bad path: \/etc\/passwd/],
+    [`${h}  web/../../escape\n`, /bad path/],
+    [`${h}  ..\n`, /bad path/],
+    [`${h}  web\\a.txt\n`, /bad path/],
+    [`${h}  a.txt \n`, /bad path/],
+    [`${h}  b.txt\n${h}  a.txt\n`, /not sorted and unique: a\.txt follows b\.txt/],
+    [`${h}  a.txt\n${h}  a.txt\n`, /not sorted and unique/],
+    ['', /not newline-terminated/],
+  ];
+  for (const [text, message] of bad) assert.throws(() => parseManifestFiles(text), message, JSON.stringify(text));
+});
+
+test('manifest check reports orphan and non-canonical manifests; update drops orphans only', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'c2c-manifests-'));
+  try {
+    const fixtures = join(tmp, 'fixtures');
+    const manifests = join(tmp, 'manifests');
+    mkdirSync(join(fixtures, 'broken'), { recursive: true });
+    mkdirSync(join(fixtures, '.hidden'), { recursive: true });
+    mkdirSync(manifests);
+    writeFileSync(join(manifests, 'broken.sha256'), 'not a manifest\n');
+    writeFileSync(join(manifests, 'gone.sha256'), `${'a'.repeat(64)}  a.txt\n`);
+    writeFileSync(join(manifests, 'README.txt'), 'kept\n');
+    assert.deepEqual(checkManifests(fixtures, manifests), [
+      'gone: committed manifest has no fixture',
+      'broken: committed manifest is not canonical: manifest line is not "<sha256>  <path>": not a manifest',
+    ]);
+    rmSync(join(fixtures, 'broken'), { recursive: true });
+    assert.deepEqual(updateManifests(fixtures, manifests), { written: [], removed: ['broken', 'gone'] });
+    assert.equal(existsSync(join(manifests, 'README.txt')), true, 'non-manifest files are left alone');
+    assert.deepEqual(manifestNames(manifests), []);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('manifests without --check or --update prints usage and exits 2', () => {
+  const child = spawnSync(process.execPath, [join(root, 'dist/determinism/src/manifests.js')], { encoding: 'utf8', cwd: root });
+  assert.equal(child.status, 2);
+  assert.match(child.stderr, /usage: manifests\.js --check \| --update/);
 });
