@@ -56,7 +56,7 @@ export interface SmokeSlot {
   session?: string;
   /** Why a report run could not start (for example, sign in first). */
   blocker?: string;
-  /** The step lines a c2c-smoke-report/1 carries, printed verbatim in the proof. */
+  /** The step lines a c2c-smoke-report/1 carries. Markdown renders them as escaped text. */
   lines?: string[];
 }
 
@@ -92,6 +92,7 @@ export interface CutoverInput {
   scope: { org: string; projectId: string; dc: string };
   smoke?: SmokeSlot;
   rollback?: RollbackEvidence;
+  smokeSource?: string;
 }
 
 function fingerprints(app: App, loaded: CsvLoad): Map<string, Record<string, string>> {
@@ -170,32 +171,69 @@ export function proofReport(input: CutoverInput): ProofReport {
   };
 }
 
-function cell(value: string | number | boolean | undefined): string {
-  return value === undefined ? '-' : String(value);
+function mdText(value: string | number | boolean | undefined): string {
+  return (value === undefined ? '-' : String(value))
+    .replace(/\\/g, '\\\\')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\|/g, '\\|')
+    .replace(/`/g, '\\`')
+    .replace(/\[/g, '\\[')
+    .replace(/\]/g, '\\]')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Untrusted URLs are escaped text, never a Markdown link. There is no host
+ * allow-list that would make an active link safe.
+ */
+function mdUrl(value: string): string {
+  return mdText(value);
+}
+
+/** Code span that stays closed when an escaped value still contains a backtick. */
+function mdInlineCode(code: string): string {
+  const fence = code.includes('`') ? '``' : '`';
+  return `${fence}${code}${fence}`;
+}
+
+function tableRow(cells: readonly (string | number | boolean | undefined)[]): string {
+  return `| ${cells.map(mdText).join(' | ')} |`;
 }
 
 export function proofMarkdown(proof: ProofReport): string {
   const lines = [
-    `# Migration proof: ${proof.app}`,
+    `# Migration proof: ${mdText(proof.app)}`,
     '',
-    `Readiness: ${proof.readiness.automatic}% automatic (${proof.readiness.band}); ${proof.readiness.manual.length} manual item(s).`,
-    `Source: ${proof.source ?? 'none given'}. Checkpoint: ${proof.checkpointSince ? `since ${proof.checkpointSince}` : 'none'}.`,
-    `Smoke: ${proof.smoke.status}${proof.smoke.session ? ` (${proof.smoke.session} session)` : ''}${proof.smoke.blocker ? ` — ${proof.smoke.blocker}` : ''}.`,
-    ...(proof.smoke.lines?.length ? ['', ...proof.smoke.lines.map((line) => `- ${line}`)] : []),
+    `Readiness: ${mdText(proof.readiness.automatic)}% automatic (${mdText(proof.readiness.band)}); ${mdText(proof.readiness.manual.length)} manual item(s).`,
+    `Source: ${mdText(proof.source ?? 'none given')}. Checkpoint: ${proof.checkpointSince ? `since ${mdText(proof.checkpointSince)}` : 'none'}.`,
+    `Smoke: ${mdText(proof.smoke.status)}${proof.smoke.session ? ` (${mdText(proof.smoke.session)} session)` : ''}${proof.smoke.blocker ? ` — ${mdText(proof.smoke.blocker)}` : ''}.`,
+    ...(proof.smoke.lines?.length ? ['', ...proof.smoke.lines.map((line) => `- ${mdText(line)}`)] : []),
     '',
-    '| Table | Form | Export rows | Checkpoint rows | Match | New | Changed | Deleted |',
+    tableRow(['Table', 'Form', 'Export rows', 'Checkpoint rows', 'Match', 'New', 'Changed', 'Deleted']),
     '| --- | --- | --- | --- | --- | --- | --- | --- |',
     ...proof.tables.map((table) =>
-      `| ${table.table} | ${table.form} | ${cell(table.sourceRows)} | ${cell(table.checkpointRows)} | ${cell(table.match === undefined ? undefined : table.match ? 'yes' : 'no')} | ${cell(table.delta?.new)} | ${cell(table.delta?.changed)} | ${table.delta?.missing ? 'not computed' : cell(table.delta?.deleted)} |`,
+      tableRow([
+        table.table,
+        table.form,
+        table.sourceRows,
+        table.checkpointRows,
+        table.match === undefined ? undefined : table.match ? 'yes' : 'no',
+        table.delta?.new,
+        table.delta?.changed,
+        table.delta?.missing ? 'not computed' : table.delta?.deleted,
+      ]),
     ),
     '',
-    `Checksums are the ${proof.checksum}:`,
+    `Checksums are the ${mdText(proof.checksum)}:`,
     '',
-    ...proof.tables.map((table) => `- ${table.table}: export ${table.sourceChecksum ?? '-'}, checkpoint ${table.checkpointChecksum ?? '-'}`),
+    ...proof.tables.map((table) => `- ${mdText(table.table)}: export ${mdText(table.sourceChecksum)}, checkpoint ${mdText(table.checkpointChecksum)}`),
     '',
     '## Manual items',
     '',
-    ...proof.readiness.manual.map((item) => `- [ ] ${item}`),
+    ...proof.readiness.manual.map((item) => `- [ ] ${mdText(item)}`),
     '',
   ];
   return lines.join('\n');
@@ -203,11 +241,12 @@ export function proofMarkdown(proof: ProofReport): string {
 
 export function cutoverChecklist(input: CutoverInput, proof: ProofReport): string {
   const app = input.app;
-  const name = app.name ?? '(none)';
+  const name = mdText(app.name ?? '(none)');
   const auth = authPlan(app);
-  const sourceFlag = `--source-${input.sourceKind ?? 'json'}`;
-  const project = input.state?.projectId ?? input.scope.projectId;
-  const slate = input.state?.slateUrl ?? '<app-url>';
+  const sourceFlag = mdText(`--source-${input.sourceKind ?? 'json'}`);
+  const project = mdText(input.state?.projectId ?? input.scope.projectId);
+  const slate = input.state?.slateUrl ? mdUrl(input.state.slateUrl) : '<app-url>';
+  const dc = mdText(input.scope.dc);
   const totalRows = proof.tables.reduce((sum, table) => sum + (table.sourceRows ?? 0), 0);
   const pending = proof.tables.filter((table) => table.delta && (table.delta.new || table.delta.changed));
   const rollback = input.rollback;
@@ -217,7 +256,7 @@ export function cutoverChecklist(input: CutoverInput, proof: ProofReport): strin
   if (rollback?.status === 'valid') {
     rollbackBaselineLine = `- [x] \`c2c rollback-export --ds <app.ds> --out <rollback-dir> --project ${project} --confirm\` — the pre-cut-over baseline, taken before the freeze while the store is still stable. (automatic)`;
   } else if (rollback) {
-    rollbackBaselineLine = `- [ ] \`c2c rollback-export --ds <app.ds> --out <rollback-dir> --project ${project} --confirm\` — the pre-cut-over baseline, taken before the freeze while the store is still stable. (open: ${rollback.reason ?? 'checksum mismatch'})`;
+    rollbackBaselineLine = `- [ ] \`c2c rollback-export --ds <app.ds> --out <rollback-dir> --project ${project} --confirm\` — the pre-cut-over baseline, taken before the freeze while the store is still stable. (open: ${mdText(rollback.reason ?? 'checksum mismatch')})`;
   } else {
     rollbackBaselineLine = `- [ ] \`c2c rollback-export --ds <app.ds> --out <rollback-dir> --project ${project} --confirm\` — the pre-cut-over baseline, taken before the freeze while the store is still stable.`;
   }
@@ -225,16 +264,52 @@ export function cutoverChecklist(input: CutoverInput, proof: ProofReport): strin
   if (rollback?.status === 'valid') {
     rollbackLocationLine = '- [x] Keep the exported folder somewhere outside this workspace. (automatic)';
   } else if (rollback) {
-    rollbackLocationLine = `- [ ] Keep the exported folder somewhere outside this workspace. (open: ${rollback.outsideWorkspace ? (rollback.reason ?? 'invalid manifest') : 'export is inside the workspace'})`;
+    rollbackLocationLine = `- [ ] Keep the exported folder somewhere outside this workspace. (open: ${rollback.outsideWorkspace ? mdText(rollback.reason ?? 'invalid manifest') : 'export is inside the workspace'})`;
   } else {
     rollbackLocationLine = '- [ ] Keep the exported folder somewhere outside this workspace.';
   }
 
+  const smokeEvidence = `${input.smokeSource ? `Input report: ${input.smokeSource}; ` : ''}${
+    proof.smoke.lines?.join('; ') ||
+    proof.smoke.blocker ||
+    (proof.smoke.status === 'not run' ? 'Run the smoke command below and save its report; attach report path and result.' : 'Attach the supplied smoke report path and verify its steps.')
+  }`;
   const lines = [
     `# Cut-over checklist: ${name}`,
     '',
-    `Project ${project}, data centre ${input.scope.dc}. ${app.forms.length} form(s), ${proof.tables.length} table(s)${proof.tables.some((table) => table.sourceRows !== undefined) ? `, ${totalRows} record(s) in the export` : ''}.`,
-    `Readiness ${proof.readiness.automatic}% automatic (${proof.readiness.band}); the manual items are in ${PROOF_MD}.`,
+    `Project ${project}, data centre ${dc}. ${mdText(app.forms.length)} form(s), ${mdText(proof.tables.length)} table(s)${proof.tables.some((table) => table.sourceRows !== undefined) ? `, ${mdText(totalRows)} record(s) in the export` : ''}.`,
+    `Readiness ${mdText(proof.readiness.automatic)}% automatic (${mdText(proof.readiness.band)}); the manual items are in ${mdText(PROOF_MD)}.`,
+    '',
+    'This offline checklist verifies only the local app, export, checkpoint and smoke report named in the proof. It does not query Catalyst, Creator, users, DNS or links. Record the requested evidence before marking each human check complete; an empty evidence field means the item is still open.',
+    '',
+    tableRow(['Check', 'Type', 'Evidence to record']),
+    '| --- | --- | --- |',
+    tableRow([
+      `Source app parses and readiness is ${proof.readiness.automatic}% (${proof.readiness.band})`,
+      'Verified from local inputs',
+      `${PROOF_JSON}: readiness and app facts`,
+    ]),
+    ...proof.tables.map((table) =>
+      tableRow([
+        `${table.table}: ${table.sourceRows ?? 'unknown'} source row(s)${table.checkpointRows === undefined ? '' : `; checkpoint ${table.match ? 'matches' : 'does not match'}`}`,
+        'Verified from local inputs',
+        `${PROOF_JSON}: table counts, checksums${table.delta ? ` and delta (${table.delta.new} new, ${table.delta.changed} changed, ${table.delta.deleted} deleted)` : ''}`,
+      ]),
+    ),
+    tableRow([
+      `Smoke result: ${proof.smoke.status}${proof.smoke.session ? ` (${proof.smoke.session})` : ''}`,
+      proof.smoke.status === 'not run' ? 'Human check' : 'Supplied report; not independently observed',
+      smokeEvidence,
+    ]),
+    tableRow(['Rollback baseline', 'Human check', 'Record rollback-export output path, project id, export time, and confirm the folder is stored outside this workspace.']),
+    tableRow(['Creator freeze', 'Human check', 'Record who restricted Creator edits, the exact freeze time, and how users were notified.']),
+    tableRow(['Final delta', 'Human check', 'Record final export folder and timestamp, sync-delta plan output, apply result, and the second plan showing 0 new / 0 changed for every table.']),
+    tableRow(['Post-cutover smoke', 'Human check', 'Record smoke report path and pass result; include each form tested and the matching created record visible in its report.']),
+    tableRow(['Sign-in and roles', 'Human check', 'Record each role tested, a non-sensitive test user identifier, successful landing URL, and role-appropriate page visibility.']),
+    tableRow(['Redirect and links', 'Human check', 'Record the app URL opened, Creator home redirect result, and locations updated (emails, documents, bookmarks, integrations/webhooks).']),
+    tableRow(['DNS and certificate', 'Human check', 'If a custom domain is used, record hostname, resolved target, and successful HTTPS/certificate check; otherwise record “not used”.']),
+    tableRow(['Rollback readiness', 'Human check', 'Record the baseline path and whether a second post-cutover rollback export was needed and where it is stored.']),
+    tableRow(['Owner sign-off', 'Human check', 'Record owner name, date, and approval after reviewing the proof and closing every manual item.']),
     '',
     '## 1. Rollback baseline',
     '',
@@ -243,50 +318,50 @@ export function cutoverChecklist(input: CutoverInput, proof: ProofReport): strin
     '',
     '## 2. Freeze Creator edits',
     '',
-    `- [ ] Announce the cut-over window to the users of ${name}.`,
-    '- [ ] Stop data entry in Creator: restrict the app to administrators or disable its forms.',
-    '- [ ] Note the freeze time. Records saved after it are not in the final delta.',
+    `- [ ] Human: notify ${name} users of the cut-over window; record the notice and time.`,
+    '- [ ] Human: in Zoho Creator, open the app permissions and restrict write access to administrators or disable each form. Record the setting changed and verify a non-admin test account cannot submit.',
+    '- [ ] Human: record the freeze time with timezone and the person who confirmed Creator writes are stopped.',
     '',
     '## 3. Final delta',
     '',
-    `- [ ] Export every report again with record ids (${sourceFlag}).`,
-    `- [ ] Plan: \`c2c sync-delta ${sourceFlag} <export-dir> --ds <app.ds> --since <state-dir> --project ${project}\``,
-    ...(pending.length ? pending.map((table) => `  - ${table.table}: ${table.delta!.new} new, ${table.delta!.changed} changed at the last plan`) : []),
-    '- [ ] Apply: the same command with `--confirm`.',
+    `- [ ] Human: export every Creator report after the freeze with record ids (${sourceFlag}); record export folder and timestamp.`,
+    `- [ ] Run and retain the plan output: ${mdInlineCode(`c2c sync-delta ${sourceFlag} <export-dir> --ds <app.ds> --since <state-dir> --project ${project}`)}.`,
+    ...(pending.length ? pending.map((table) => `  - ${mdText(table.table)}: ${mdText(table.delta!.new)} new, ${mdText(table.delta!.changed)} changed at the last plan`) : []),
+    '- [ ] After reviewing and approving the plan, run the same command with `--confirm`; record the result and checkpoint path.',
     '- [ ] Plan again: every table shows new 0 changed 0.',
-    ...proof.tables.filter((table) => table.delta?.deleted).map((table) => `- [ ] ${table.table}: ${table.delta!.deleted} record(s) deleted in Creator. Delete them with \`--apply-deletes\` or keep them.`),
+    ...proof.tables.filter((table) => table.delta?.deleted).map((table) => `- [ ] ${mdText(table.table)}: ${mdText(table.delta!.deleted)} record(s) deleted in Creator. Delete them with \`--apply-deletes\` or keep them.`),
     '',
     '## 4. Smoke',
     '',
-    `- [ ] \`c2c smoke <app.ds> --project ${project} --url ${slate} --confirm\` (last result: ${proof.smoke.status}).`,
-    ...app.forms.map((form) => `- [ ] Open ${form.displayName ?? form.name}, add a record, see it in its report.`),
+    `- [ ] Human: run ${mdInlineCode(`c2c smoke <app.ds> --project ${project} --url ${slate} --confirm --report <report.json>`)}; record report path and result. This command does not drive a browser.`,
+    ...app.forms.map((form) => `- [ ] Human: open ${mdText(form.displayName ?? form.name)} in the app, submit a test record, then open its report and confirm that same record appears. Record form, report, and pass/fail; remove test data only with explicit approval.`),
     '',
     '## 5. Sign-in',
     '',
-    `- [ ] Roles exist: ${auth.roles.length ? auth.roles.map((role) => role.role_name).join(', ') : 'App User and App Administrator only'}.`,
-    `- [ ] Invite the users${auth.portalUsers.length ? ` and ${auth.portalUsers.length} portal user profile(s)` : ''}; the invitation redirect is ${slate}.`,
-    '- [ ] One user of each role signs in and sees only their pages.',
+    `- [ ] Human: verify these roles in the Catalyst console: ${auth.roles.length ? auth.roles.map((role) => mdText(role.role_name)).join(', ') : 'App User and App Administrator only'}. Record the role list shown.`,
+    `- [ ] Human: invite the users${auth.portalUsers.length ? ` and ${mdText(auth.portalUsers.length)} portal user profile(s)` : ''}; set invitation redirect to ${slate}. Record invitation count and redirect URL, without recording email addresses.`,
+    '- [ ] Human: have one user of each role sign in; record role, landing URL, and which permitted pages they can see. Do not record credentials.',
     '',
     '## 6. Redirect',
     '',
-    `- [ ] The new app answers at ${slate}.`,
-    `- [ ] The Creator app home page tells users the app moved to ${slate}.`,
+    `- [ ] Human: open ${slate} in a normal browser and record the resulting URL and whether the app loads.`,
+    `- [ ] Human: open the Creator app home page and confirm it directs users to ${slate}; record the observed destination.`,
     '',
     '## 7. DNS and links',
     '',
-    '- [ ] A custom domain, if used, points at the new app and its certificate is valid.',
-    '- [ ] Links in emails, documents, bookmarks and other apps use the new URL.',
-    '- [ ] Integrations and webhooks that called Creator call the new functions.',
+    '- [ ] Human: if using a custom domain, check its DNS target and HTTPS certificate in the browser or DNS tooling; record hostname, target and result. Otherwise record “not used”.',
+    '- [ ] Human: check links in emails, documents, bookmarks and other apps; record each location updated and its new URL.',
+    '- [ ] Human: update integrations and webhooks that called Creator, then run one representative operation and record the successful new-function response.',
     '',
     '## 8. Rollback ready',
     '',
-    '- [ ] The baseline export from step 1 is intact.',
-    `- [ ] If records were written to the new app after the baseline, run \`c2c rollback-export\` again so the post-cut-over data is held too.`,
+    '- [ ] Human: open the step 1 baseline folder and verify its expected files are intact; record path and check time.',
+    `- [ ] Human: if records were written to the new app after the baseline, run ${mdInlineCode(`c2c rollback-export --ds <app.ds> --out <post-cutover-rollback-dir> --project ${project} --confirm`)}; record output path and record counts. Otherwise record “not needed”.`,
     '',
     '## 9. Owner sign-off',
     '',
-    `- [ ] ${PROOF_MD} reviewed: every table matches and the manual items are closed.`,
-    '- [ ] Owner: ____________________  Date: ____________',
+    `- [ ] Human: review ${mdText(PROOF_MD)}; confirm every table matches, resolve each listed manual item, and record any accepted exception with its reason.`,
+    '- [ ] Human owner: record name, date, and explicit approval here: ____________________',
     '',
   ];
   return lines.join('\n');
@@ -530,6 +605,7 @@ export function cutoverInput(target: string, args: readonly string[]): CutoverIn
     scope: { org: guard.org, projectId: guard.projectId, dc: guard.dc },
     ...(smoke ? { smoke } : {}),
     ...(rollback ? { rollback } : {}),
+    ...(flag(args, '--smoke') ? { smokeSource: flag(args, '--smoke') } : {}),
   };
 }
 
