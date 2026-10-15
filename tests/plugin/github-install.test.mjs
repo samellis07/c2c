@@ -293,6 +293,77 @@ test('two waiters reclaim one dead lock and share exactly one completed install'
   assert.deepEqual(readdirSync(cache), [lock.sha256]);
 });
 
+test('a waiter paused mid-reclaim cannot steal a newer live lock', async () => {
+  const cache = path.join(temp, 'stale-lock-reclaim-race');
+  const installed = path.join(cache, lock.sha256);
+  const lockPath = `${installed}.lock`;
+  mkdirSync(cache, { recursive: true });
+  const dead = spawnSync(node, ['-e', '']);
+  assert.equal(dead.status, 0);
+  writeFileSync(lockPath, JSON.stringify({ pid: dead.pid ?? 0, time: Date.now() }));
+  const fetcher = path.join(clone, 'plugin/runtime/fetch-runtime.mjs');
+  const pauseFile = path.join(temp, 'reclaim-paused');
+  const acquiredFile = path.join(temp, 'lock-acquired');
+  const run = (extra) => new Promise((resolve) => {
+    const child = spawn(node, [fetcher], { env: cleanEnv({ C2C_RUNTIME_DIR: cache, C2C_RUNTIME_ARCHIVE: archiveFile, ...extra }) });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => (stdout += chunk));
+    child.stderr.on('data', (chunk) => (stderr += chunk));
+    child.on('close', (status) => resolve({ status, stdout, stderr, pid: child.pid }));
+  });
+  const waitFor = async (file) => {
+    for (let i = 0; i < 3000 && !existsSync(file); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(existsSync(file), true, `timed out waiting for ${file}`);
+  };
+  // B inspects the stale lock, then pauses before moving it aside.
+  const b = run({ C2C_TEST_LOCK_RECLAIM_BARRIER: pauseFile });
+  await waitFor(pauseFile);
+  // A reclaims the stale lock itself and holds its fresh lock; B's pause file
+  // proves it already judged the old lock stale before A's lock existed.
+  const a = run({ C2C_TEST_LOCK_ACQUIRED_FILE: acquiredFile, C2C_TEST_LOCK_HOLD_MS: '2000' });
+  await waitFor(acquiredFile);
+  const aPid = Number(readFileSync(acquiredFile, 'utf8').trim());
+  writeFileSync(`${pauseFile}.go`, 'go\n');
+  // While A still holds its fresh lock, B's rename must not keep it: the lock
+  // file at lockPath must still belong to A.
+  let keptLiveLock = false;
+  for (let i = 0; i < 300 && !keptLiveLock; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    try {
+      keptLiveLock = JSON.parse(readFileSync(lockPath, 'utf8')).pid === aPid;
+    } catch { /* lock momentarily moved aside */ }
+  }
+  const [ra, rb] = await Promise.all([a, b]);
+  assert.equal(keptLiveLock, true, 'B removed or kept the newer lock A was holding');
+  const runtime = path.join(installed, 'c2c');
+  for (const res of [ra, rb]) {
+    assert.equal(res.status, 0, `exit ${res.status}\nstderr=${res.stderr}`);
+    assert.equal(res.stdout.trim(), runtime);
+  }
+  assert.equal(existsSync(path.join(runtime, 'MANIFEST.sha256')), true);
+  assert.deepEqual(readdirSync(cache), [lock.sha256]);
+});
+
+test('a group-writable runtime cache entry is refused before using a planted runtime', () => {
+  const cache = path.join(temp, 'unsafe-entry-cache');
+  const installed = path.join(cache, lock.sha256);
+  mkdirSync(path.join(installed, 'c2c'), { recursive: true, mode: 0o700 });
+  writeFileSync(path.join(installed, 'c2c/MANIFEST.sha256'), 'planted\n');
+  chmodSync(installed, 0o777);
+  try {
+    const res = spawnSync(node, [path.join(clone, 'plugin/runtime/fetch-runtime.mjs')], {
+      env: cleanEnv({ C2C_RUNTIME_DIR: cache, C2C_RUNTIME_ARCHIVE: archiveFile }),
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 6, `stdout=${res.stdout}\nstderr=${res.stderr}`);
+    assert.match(res.stderr, /runtime cache entry .* must be a real directory owned by the current user/);
+    assert.equal(res.stdout, '');
+  } finally {
+    chmodSync(installed, 0o700);
+  }
+});
+
 test('an unpublished runtime asset (HTTP 404) names the release page and the source build', async () => {
   const server = createServer((req, res) => {
     res.writeHead(404).end('not found');

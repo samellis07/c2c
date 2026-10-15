@@ -21,7 +21,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { closeSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -195,9 +195,28 @@ async function acquireInstallLock(lockPath, isReady) {
       // A live process is never timed out, regardless of how long it has run.
       const stale = holder.pid ? !pidAlive(holder.pid) : age > LOCK_STALE_MS;
       if (stale) {
+        // Test-only seam: pause between judging the lock stale and moving it
+        // aside so a test can interleave a fresh lock creation.
+        const barrier = process.env.C2C_TEST_LOCK_RECLAIM_BARRIER;
+        if (barrier) {
+          writeFileSync(barrier, `${process.pid}\n`);
+          for (let i = 0; i < 3000 && !existsSync(`${barrier}.go`); i++) await sleep(10);
+        }
         const reclaimed = `${lockPath}.stale-${process.pid}-${randomBytes(8).toString('hex')}`;
         try {
           renameSync(lockPath, reclaimed);
+          // The lock may have been replaced since our inspection: a newer live
+          // lock must be restored, never removed as if it were the stale one.
+          const moved = lstatSync(reclaimed, { throwIfNoEntry: false });
+          const movedHolder = moved ? lockHolder(reclaimed) : {};
+          const same = moved
+            && moved.ino === stat.ino && moved.dev === stat.dev && moved.mtimeMs === stat.mtimeMs
+            && movedHolder.pid === holder.pid && movedHolder.token === holder.token && movedHolder.time === holder.time;
+          if (!same) {
+            try {
+              linkSync(reclaimed, lockPath);
+            } catch { /* a newer lock already holds the path */ }
+          }
           rmSync(reclaimed, { force: true });
         } catch { /* another waiter reclaimed it; retry */ }
         continue;
@@ -210,6 +229,11 @@ async function acquireInstallLock(lockPath, isReady) {
     } finally {
       closeSync(fd);
     }
+    // Test-only seams: signal acquisition and hold the lock briefly so a test
+    // can observe interleavings between holders and waiters.
+    if (process.env.C2C_TEST_LOCK_ACQUIRED_FILE) writeFileSync(process.env.C2C_TEST_LOCK_ACQUIRED_FILE, `${process.pid}\n`);
+    const hold = Number(process.env.C2C_TEST_LOCK_HOLD_MS);
+    if (hold > 0) await sleep(hold);
     return token;
   }
 }
