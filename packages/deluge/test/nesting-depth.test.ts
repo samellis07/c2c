@@ -11,7 +11,7 @@ type AnyNode = { kind: string; reason?: string; span?: { start: number; end: num
 /** Iteratively collect every `too-deeply-nested` reason in a statement tree. */
 function deepReasons(body: unknown[]): string[] {
   const out: string[] = [];
-  const stack: AnyNode[] = body as AnyNode[];
+  const stack: AnyNode[] = [...(body as AnyNode[])];
   while (stack.length > 0) {
     const n = stack.pop()!;
     if (typeof n !== 'object' || n === null) continue;
