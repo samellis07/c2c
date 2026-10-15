@@ -28,6 +28,7 @@ import { missingRequiredTools, shortToolName, type McpEvidence } from './evidenc
 import { verifyVendorDir, MANIFEST_NAME } from './vendor.js';
 import { entryKind, isAbsentError, isSymlinkRefusedError } from '../../core/src/fs-kind.js';
 import { readRegularFile, type FileRead } from './read-file.js';
+import { MCP_EVIDENCE_MAX_AGE_MS } from './mcp-state.js';
 import type { CheckResult, DoctorIo, SpawnResult } from './types.js';
 import { invalidTokenOutput, readWithNewerToken } from '../../deploy/src/retry.js';
 import { FIDELITY_JSON, LOADER_REPORT, hasReportJson } from '../../deploy/src/csv.js';
@@ -52,6 +53,8 @@ export interface DoctorContext {
   evidenceSource?: 'observed' | 'operator';
   /** The D-A3/D-B/D-V rows of the last recorded MCP observation for this scope, when no evidence is merged this run. */
   carried?: { checks: CheckResult[]; at: string };
+  /** Reused or expired earlier evidence: shown on D-B1 (reused) or the D-B skip (expired). */
+  evidenceNote?: string;
   /** CLI login-store readers; injectable for tests. */
   cliDc?: () => string | undefined;
   cliOrg?: () => string | undefined;
@@ -1137,7 +1140,7 @@ function checkV(ctx: DoctorContext, evidence: McpEvidence): CheckResult[] {
     /* workspace may not exist yet */
   }
   const wsMatch = !evidence.workspace || evidence.workspace === ctx.workspace || evidence.workspace === workspaceReal;
-  if (!Number.isFinite(age) || age < 0 || age > 12 * 60 * 60 * 1000 || !wsMatch) {
+  if (!Number.isFinite(age) || age < 0 || age > MCP_EVIDENCE_MAX_AGE_MS || !wsMatch) {
     out.push(fail('D-V2', 'MCP evidence is stale/incomplete: too old, undated, or from another workspace; re-record', 'run /c2c:doctor again'));
   } else {
     out.push(pass('D-V2', 'MCP evidence is fresh'));
@@ -1235,14 +1238,16 @@ export async function runDoctorChecks(ctx: DoctorContext): Promise<DoctorRun> {
 
   if (ctx.evidence) {
     checks.push(checkA3(ctx));
-    checks.push(...checkB(ctx, ctx.evidence, cliProjects));
+    const b = checkB(ctx, ctx.evidence, cliProjects);
+    if (ctx.evidenceNote && b[0]) b[0] = { ...b[0], detail: `${b[0].detail}; ${ctx.evidenceNote}` };
+    checks.push(...b);
     checks.push(...checkV(ctx, ctx.evidence));
   } else if (ctx.carried) {
     // The same rows the gate reads: a failed observation stays red until a new one is recorded.
     checks.push(...ctx.carried.checks);
   } else {
     checks.push(skip('D-A3', 'agent half not recorded yet'));
-    checks.push(skip('D-B', 'agent half not recorded yet (run c2c doctor --mcp-begin; the agent makes the MCP calls it names and pipes the results into c2c doctor --mcp-observed -)'));
+    checks.push(skip('D-B', ctx.evidenceNote ?? 'agent half not recorded yet (run c2c doctor --mcp-begin; the agent makes the MCP calls it names and pipes the results into c2c doctor --mcp-observed -)'));
   }
 
   const green = checks.every((c) => c.status !== 'fail');
