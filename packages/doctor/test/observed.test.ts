@@ -262,6 +262,23 @@ test('mcp-observed: a fabricated stdio observation without the server-side write
   }
 });
 
+test('mcp-observed: a fabricated org host or a matching CLI selection never stands in for the probe', async () => {
+  const { env } = workspace();
+  const { request } = await begin(env);
+  const body = observation(request, {
+    host_of_url: undefined,
+    transport: 'stdio',
+    calls: [
+      { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(`c2cprobe${request}`) },
+      // Caller claims an org host in the target DC; CLI hooks claim the same org/DC.
+      { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG], 'console.zoho.in') },
+    ],
+  });
+  const run = await observe(env, body, [], { cliDc: () => 'in', cliOrg: () => ORG }, fakeRest({}));
+  assert.equal(run.code, 1, run.out + run.err);
+  assert.match(run.out, /FAIL D-B2 .*probe write was not read back/);
+});
+
 test('mcp-observed: a probe that landed under a different org/project is red', async () => {
   const { env } = workspace();
   const { request } = await begin(env);
@@ -381,6 +398,19 @@ test('mcp-observed: a verified observation carries to a bare run, so doctor and 
   assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 0, out());
   assert.match(out(), /PASS D-B1 /);
   assert.equal(evaluateGate({ workspace: dir, scope: SCOPE }).ok, true);
+});
+
+test('mcp-observed: a record from another c2c version is not carried to a bare run', async () => {
+  const { dir, env } = workspace();
+  const { request } = await begin(env);
+  const probe = `c2cprobe${request}`;
+  assert.equal((await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: {} }))).code, 0);
+  const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
+  writeFileSync(doctorJsonPath(dir), JSON.stringify({ ...file, c2c: '0.0.0' }));
+  const { io, out } = fakeIo(env);
+  await doctorCli([], io, { hooks: NO_HOOKS });
+  assert.match(out(), /SKIP D-B /);
+  assert.equal(evaluateGate({ workspace: dir, scope: SCOPE }).ok, false);
 });
 
 test('gate: a stored-green file that fails the gate never reports "last: green"', async () => {
