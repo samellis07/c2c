@@ -6,45 +6,137 @@
  * Only the validated record is kept — connector server/host/transport, the
  * DC/org/project it was bound to, the tool list, the tool schemas (names
  * only) and their digests, the org ids, the probe read-back and when it was
- * observed. No raw call result, no URL path, no email. On read the record is
- * validated again exactly like a supplied evidence file; anything malformed
- * is ignored, never trusted.
+ * observed. No raw call result, no URL path, no email.
  *
- * Reuse is bounded: a record is reused only for the same dc/org/project and
- * only for MCP_EVIDENCE_MAX_AGE_HOURS after it was observed (the same window
- * D-V2 and the exit-5 gate apply). After that the doctor asks for a new
- * observation (`c2c doctor --mcp-begin`).
+ * The file is in the workspace, so its contents are never trusted on their
+ * own: the doctor signs each record it writes with an HMAC-SHA256 key kept
+ * per user outside the workspace (`$XDG_CONFIG_HOME/c2c/mcp-state.key`,
+ * default `~/.config/c2c`, created 0600 in a 0700 directory). On read a
+ * record whose signature does not match — hand-written, edited (scope,
+ * source, binding, `at`, anything), copied from another workspace, or
+ * synced or committed from another machine — is rejected whole: nothing
+ * from it is used, so it can never raise trust. A signed record is then
+ * validated again exactly like a supplied evidence file. This stops
+ * workspace-only writers and accidental edits; it does not stop a process
+ * running as the same user that reads the key file.
+ *
+ * Reuse is bounded by one rule, shared with every carry of an MCP record
+ * across runs (mcpCarryRefusal): the same c2c version, exactly the same
+ * dc/org/project, and observed no more than MCP_EVIDENCE_MAX_AGE_HOURS ago
+ * (the same window D-V2 and the exit-5 gate apply), never in the future.
+ * After that the doctor asks for a new observation (`c2c doctor --mcp-begin`).
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { EvidenceRejected, parseEvidence, schemaDigest, type McpEvidence } from './evidence.js';
 import type { Observed } from './observed.js';
+import { c2cVersion } from './report.js';
 
 /** Reused evidence expires this many hours after it was observed; then a re-check is required. */
 export const MCP_EVIDENCE_MAX_AGE_HOURS = 12;
 export const MCP_EVIDENCE_MAX_AGE_MS = MCP_EVIDENCE_MAX_AGE_HOURS * 60 * 60 * 1000;
-const STATE_SCHEMA = 1;
+/** 2: signed (`mac`), bound to the workspace and c2c version. Unsigned schema-1 files are ignored. */
+const STATE_SCHEMA = 2;
+const KEY_BYTES = 32;
 
 type Scope = { dc?: string; org?: string; project?: string };
 type Origin = { source: 'observed'; observed: Observed } | { source: 'operator' };
+type Env = NodeJS.ProcessEnv;
 
 interface StateFile {
-  schema: number;
   scope: Scope;
   source: 'observed' | 'operator';
   evidence: McpEvidence;
-  schemaDigest?: Record<string, string>;
   observed?: Observed;
 }
 
 export type McpEvidenceReuse =
   | { status: 'none' }
-  | { status: 'other-scope' }
+  | { status: 'rejected'; reason: string }
+  | { status: 'other-scope'; reason: string }
   | { status: 'expired'; at: string; ageMs: number }
   | { status: 'reused'; evidence: McpEvidence; origin: Origin; at: string; ageMs: number; expires: string };
 
 export function mcpStatePath(workspace: string): string {
   return join(workspace, 'c2c-out', '.c2c', 'mcp-state.json');
+}
+
+/** The per-user signing key: `$XDG_CONFIG_HOME/c2c/mcp-state.key`, default `~/.config/c2c`. */
+export function mcpStateKeyPath(env: Env): string {
+  const config = env.XDG_CONFIG_HOME && isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : join(env.HOME || homedir(), '.config');
+  return join(config, 'c2c', 'mcp-state.key');
+}
+
+function realOr(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+function inside(child: string, parent: string): boolean {
+  const rel = relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+/**
+ * The signing key, or a reason there is none. The key must live outside the
+ * workspace, be a regular file (not a link) owned by this user and readable
+ * by nobody else. `create` makes it once (0600, directory 0700).
+ */
+function stateKey(env: Env, workspace: string, create: boolean): { key: Buffer } | { refused: string } {
+  const path = mcpStateKeyPath(env);
+  if (inside(realOr(dirname(path)), realOr(workspace)) || inside(resolve(dirname(path)), resolve(workspace))) {
+    return { refused: 'the signing key directory is inside the workspace' };
+  }
+  if (create) {
+    try {
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+      writeFileSync(path, randomBytes(KEY_BYTES), { flag: 'wx', mode: 0o600 });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') return { refused: `cannot create the signing key (${(err as NodeJS.ErrnoException).code ?? 'error'})` };
+    }
+  }
+  let fd: number | undefined;
+  try {
+    const link = lstatSync(path);
+    if (!link.isFile()) return { refused: 'the signing key is not a regular file' };
+    fd = openSync(path, 'r');
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.ino !== link.ino) return { refused: 'the signing key is not a regular file' };
+    if ((stat.mode & 0o077) !== 0) return { refused: 'the signing key is readable by other users' };
+    if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return { refused: 'the signing key is owned by another user' };
+    if (stat.size !== KEY_BYTES) return { refused: 'the signing key has the wrong length' };
+    const key = Buffer.alloc(KEY_BYTES);
+    if (readSync(fd, key, 0, KEY_BYTES, 0) !== KEY_BYTES) return { refused: 'the signing key has the wrong length' };
+    return { key };
+  } catch (err) {
+    return { refused: (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'no signing key' : 'the signing key cannot be read' };
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/** JSON with sorted object keys, so the signature does not depend on key order. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined);
+    entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+function macOf(key: Buffer, body: Record<string, unknown>): string {
+  return `hmac-sha256:${createHmac('sha256', key).update(canonical(body)).digest('hex')}`;
+}
+
+function workspaceId(workspace: string): string {
+  return realOr(workspace);
 }
 
 function scopeOf(scope: Scope): Scope {
@@ -55,24 +147,61 @@ function scopeOf(scope: Scope): Scope {
   };
 }
 
-/** Persist the evidence a run accepted, bound to that run's scope. */
-export function writeMcpEvidence(workspace: string, evidence: McpEvidence, scope: Scope, origin: Origin): string {
+/**
+ * The one rule for carrying an MCP record into a later run: same c2c
+ * version, the dc and org present and every one of dc/org/project exactly
+ * equal, and `at` no more than MCP_EVIDENCE_MAX_AGE_HOURS old (never in the
+ * future). Returns why the record may not be carried, or undefined when it
+ * may. `at` must come from an authenticated record, never a workspace file
+ * read on trust.
+ */
+export function mcpCarryRefusal(
+  record: { c2c?: string; scope?: Scope; at?: string },
+  wanted: { version: string; scope: Scope; now: Date },
+): { status: 'other-scope' | 'expired'; reason: string; ageMs?: number } | undefined {
+  if (record.c2c !== wanted.version) return { status: 'other-scope', reason: `recorded by c2c ${record.c2c ?? '?'}, this is ${wanted.version}` };
+  const want = scopeOf(wanted.scope);
+  const have = scopeOf(record.scope ?? {});
+  if (want.dc === undefined || want.org === undefined) return { status: 'other-scope', reason: 'the dc/org of this run is not known' };
+  if (!(['dc', 'org', 'project'] as const).every((key) => have[key] === want[key])) return { status: 'other-scope', reason: 'recorded for another dc/org/project' };
+  const ageMs = wanted.now.getTime() - Date.parse(record.at ?? '');
+  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > MCP_EVIDENCE_MAX_AGE_MS) return { status: 'expired', reason: 'older than the window, undated or dated in the future', ageMs };
+  return undefined;
+}
+
+/**
+ * Persist the evidence a run accepted, bound to that run's scope, workspace
+ * and c2c version, and signed. Returns the path, or `{refused}` when there is
+ * no usable key (then nothing is stored and later runs ask for a new
+ * observation).
+ */
+export function writeMcpEvidence(
+  workspace: string,
+  evidence: McpEvidence,
+  scope: Scope,
+  origin: Origin,
+  opts: { env: Env; version?: string },
+): string | { refused: string } {
+  const signer = stateKey(opts.env, workspace, true);
+  if ('refused' in signer) return signer;
   const digest: Record<string, string> = {};
   for (const [tool, entry] of Object.entries(evidence.schemas ?? {})) digest[tool] = schemaDigest(entry);
   // A per-project table listing is stored in the shape parseEvidence reads back.
   const { projectTables, ...kept } = evidence;
   const stored: Record<string, unknown> = { ...kept, ...(projectTables ? { tables: Object.entries(projectTables).map(([project_id, tables]) => ({ project_id, tables })) } : {}) };
-  const state = {
+  const body: Record<string, unknown> = {
     schema: STATE_SCHEMA,
+    c2c: opts.version ?? c2cVersion(),
+    workspace: workspaceId(workspace),
     scope: scopeOf(scope),
     source: origin.source,
-    evidence: stored,
+    evidence: JSON.parse(JSON.stringify(stored)) as unknown,
     ...(Object.keys(digest).length ? { schemaDigest: digest } : {}),
     ...(origin.source === 'observed' ? { observed: origin.observed } : {}),
   };
   const path = mcpStatePath(workspace);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`);
+  writeFileSync(path, `${JSON.stringify({ ...body, mac: macOf(signer.key, body) }, null, 2)}\n`);
   return path;
 }
 
@@ -101,60 +230,84 @@ function observedOf(value: unknown): Observed | undefined {
   return { request: o.request, orgs: [...(o.orgs as string[])], calls };
 }
 
-/** The stored record, validated again; undefined when absent or malformed. */
-function readState(workspace: string): StateFile | undefined {
+type Read = { state: StateFile & { c2c: string; at: string } } | { status: 'none' } | { status: 'rejected'; reason: string };
+
+/** The stored record, authenticated and validated again. */
+function readState(workspace: string, env: Env): Read {
+  let text: string;
+  try {
+    text = readFileSync(mcpStatePath(workspace), 'utf8');
+  } catch {
+    return { status: 'none' };
+  }
+  const rejected = (reason: string): Read => ({ status: 'rejected', reason });
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(mcpStatePath(workspace), 'utf8'));
+    raw = JSON.parse(text);
   } catch {
-    return undefined;
+    return rejected('not valid JSON');
   }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
-  const state = raw as Record<string, unknown>;
-  if (state.schema !== STATE_SCHEMA || (state.source !== 'observed' && state.source !== 'operator')) return undefined;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return rejected('not a record');
+  const { mac, ...body } = raw as Record<string, unknown>;
+  if (body.schema !== STATE_SCHEMA || typeof mac !== 'string') return rejected('not signed by this doctor');
+  // Authenticate before reading anything from the file.
+  const signer = stateKey(env, workspace, false);
+  if ('refused' in signer) return rejected(signer.refused);
+  const want = Buffer.from(macOf(signer.key, body));
+  const got = Buffer.from(mac);
+  if (got.length !== want.length || !timingSafeEqual(got, want)) return rejected('signature mismatch (edited, hand-written or copied)');
+  if (body.workspace !== workspaceId(workspace)) return rejected('recorded for another workspace');
+  if (typeof body.c2c !== 'string') return rejected('malformed');
+  const state = body;
+  if (state.source !== 'observed' && state.source !== 'operator') return rejected('malformed');
   const scope = state.scope as Record<string, unknown> | undefined;
-  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) return undefined;
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) return rejected('malformed');
   for (const key of ['dc', 'org', 'project'] as const) {
-    if (scope[key] !== undefined && typeof scope[key] !== 'string') return undefined;
+    if (scope[key] !== undefined && typeof scope[key] !== 'string') return rejected('malformed');
   }
   const stored = state.evidence as Record<string, unknown> | undefined;
-  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return undefined;
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return rejected('malformed');
   const { binding, ...rest } = stored;
   let evidence: McpEvidence;
   try {
     evidence = parseEvidence(JSON.stringify(rest));
   } catch (err) {
-    if (err instanceof EvidenceRejected) return undefined;
+    if (err instanceof EvidenceRejected) return rejected('malformed');
     throw err;
   }
   if (binding !== undefined) {
     const checked = bindingOf(binding);
-    if (!checked) return undefined;
+    if (!checked) return rejected('malformed');
     evidence.binding = checked;
   }
+  const digest: Record<string, string> = {};
+  for (const [tool, entry] of Object.entries(evidence.schemas ?? {})) digest[tool] = schemaDigest(entry);
+  if (canonical(digest) !== canonical(state.schemaDigest ?? {})) return rejected('schema digests do not match the schemas');
   let observed: Observed | undefined;
   if (state.source === 'observed') {
     observed = observedOf(state.observed);
-    if (!observed) return undefined;
+    if (!observed) return rejected('malformed');
   }
-  return { schema: STATE_SCHEMA, scope: scopeOf(scope as Scope), source: state.source, evidence, ...(observed ? { observed } : {}) };
+  return { state: { c2c: body.c2c, at: evidence.at ?? '', scope: scopeOf(scope as Scope), source: state.source, evidence, ...(observed ? { observed } : {}) } };
 }
 
 /**
- * The stored evidence for this scope, when it may still be reused. A record
- * for another dc/org/project is never reused; one older than the window (or
- * dated in the future) is reported as expired.
+ * The stored evidence for this scope, when it may still be reused: only a
+ * record this doctor signed, for this workspace, that passes
+ * mcpCarryRefusal. Anything else is reported (rejected, other-scope or
+ * expired) and never used.
  */
-export function loadMcpEvidence(workspace: string, scope: Scope, now: Date = new Date()): McpEvidenceReuse {
-  const state = readState(workspace);
-  if (!state) return { status: 'none' };
-  const wanted = scopeOf(scope);
-  if (!(['dc', 'org', 'project'] as const).every((key) => state.scope[key] === wanted[key])) return { status: 'other-scope' };
-  const at = state.evidence.at ?? '';
-  const ageMs = now.getTime() - Date.parse(at);
-  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > MCP_EVIDENCE_MAX_AGE_MS) return { status: 'expired', at, ageMs };
+export function loadMcpEvidence(workspace: string, scope: Scope, opts: { env: Env; version?: string; now?: Date }): McpEvidenceReuse {
+  const read = readState(workspace, opts.env);
+  if (!('state' in read)) return read;
+  const { state } = read;
+  const now = opts.now ?? new Date();
+  const refusal = mcpCarryRefusal(state, { version: opts.version ?? c2cVersion(), scope, now });
+  if (refusal?.status === 'expired') return { status: 'expired', at: state.at, ageMs: refusal.ageMs ?? Number.NaN };
+  if (refusal) return { status: 'other-scope', reason: refusal.reason };
+  const ageMs = now.getTime() - Date.parse(state.at);
   const origin: Origin = state.source === 'observed' ? { source: 'observed', observed: state.observed! } : { source: 'operator' };
-  return { status: 'reused', evidence: state.evidence, origin, at, ageMs, expires: new Date(Date.parse(at) + MCP_EVIDENCE_MAX_AGE_MS).toISOString() };
+  return { status: 'reused', evidence: state.evidence, origin, at: state.at, ageMs, expires: new Date(Date.parse(state.at) + MCP_EVIDENCE_MAX_AGE_MS).toISOString() };
 }
 
 /** A short human age: `less than a minute`, `25 min`, `3 h 5 min`. */
