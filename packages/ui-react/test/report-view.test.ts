@@ -447,8 +447,9 @@ test('record detail draws configured sections and related rows from the authoriz
     ],
   };
   const view = await mount(out, report, [], new Set(), '1');
-  assert.equal(view.posted[0]?.endpoint, '/forms/Order/record');
-  assert.deepEqual(view.posted[0]?.body, { ROWID: '1' });
+  const recordRead = view.posted.find((call) => call.endpoint.endsWith('/record'));
+  assert.equal(recordRead?.endpoint, '/reports/Orders/record');
+  assert.deepEqual(recordRead?.body, { ROWID: '1' });
   assert.equal(view.container.querySelector('[data-detail-block="Overview"] dt')?.textContent, 'Private Memo');
   assert.equal(view.container.querySelector('[data-detail-block="Overview"] dd')?.textContent, 'Read me');
   assert.deepEqual([...view.container.querySelectorAll('[data-detail-block="Items"] thead th')].map((el) => el.textContent), ['Material Name', 'Qty']);
