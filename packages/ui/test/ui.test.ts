@@ -490,8 +490,7 @@ test('HTML snippets drop slash, uppercase, and entity-encoded handlers', () => {
       for (const payload of payloads) assertNoActiveHtml(runtime.sanitizeSnippet(payload, runtimeWindow.document));
       assertNoActiveHtml(runtime.renderPage(page, runtimeWindow.document));
       assert.equal(runtime.sanitizeSnippet('<script>bad()</script><b onclick="x">ok</b>', runtimeWindow.document), '<b>ok</b>');
-      // A static-URL ZML <embed> draws as a lazy, no-referrer iframe; a
-      // non-http(s) spec renders nothing.
+      // Only HTTPS ZML embeds draw, inside a fully sandboxed, no-referrer frame.
       const embedded = runtime.renderPage(
         {
           name: 'E',
@@ -499,13 +498,15 @@ test('HTML snippets drop slash, uppercase, and entity-encoded handlers', () => {
           status: 'generated',
           elements: [
             { tag: 'embed', kind: 'embed', embed: { url: 'https://example.com/map.pdf', width: '300', height: '800' }, children: [] },
+            { tag: 'embed', kind: 'embed', embed: { url: 'http://example.com/insecure' }, children: [] },
             { tag: 'embed', kind: 'embed', embed: { url: 'javascript:alert(1)' }, children: [] },
           ],
         },
         runtimeWindow.document,
       );
-      assert.match(embedded, /<iframe[^>]*src="https:\/\/example\.com\/map\.pdf"[^>]*width="300"[^>]*height="800"[^>]*loading="lazy"[^>]*referrerpolicy="no-referrer"/);
-      assert.doesNotMatch(embedded, /javascript:/);
+      assert.match(embedded, /<iframe[^>]*src="https:\/\/example\.com\/map\.pdf"[^>]*sandbox=""[^>]*width="300"[^>]*height="800"[^>]*loading="lazy"[^>]*referrerpolicy="no-referrer"/);
+      assert.equal((embedded.match(/<iframe/g) || []).length, 1, 'HTTP and script URLs do not render frames');
+      assert.doesNotMatch(embedded, /http:\/\/example\.com|javascript:/);
     }).finally(() => rmSync(dir, { recursive: true, force: true }));
   } catch (err) {
     rmSync(dir, { recursive: true, force: true });

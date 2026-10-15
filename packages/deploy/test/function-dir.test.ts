@@ -557,6 +557,14 @@ test('the Advanced I/O entry serves the generated handlers with a consistent err
   const previousMode = process.env.C2C_DEPLOY_MODE;
   const app = await sampleApp();
   writeDeployTree(out, deployFiles(app, guardFor(app), false, { mode: 'live' }).files);
+  const functionDir = join(out, 'functions/c2c_api');
+  const routes = JSON.parse(readFileSync(join(functionDir, 'routes.json'), 'utf8')) as Record<string, string>;
+  routes['POST /unsafe-error'] = 'unsafe-error.mjs';
+  writeFileSync(join(functionDir, 'routes.json'), JSON.stringify(routes));
+  writeFileSync(
+    join(functionDir, 'unsafe-error.mjs'),
+    `export default async function unsafeError(call, res) {\n  res.writeHead(500, { 'content-type': 'application/json' });\n  res.end(JSON.stringify({ message: 'Unable to cast SECRET_TOKEN_91', error: 'stack trace /private/app/index.js:12', stack: 'Error\\n at handler', query: 'SELECT * FROM ZCQL_SECRET' }));\n}\n`,
+  );
   const req = createRequire(import.meta.url);
   const sdk = req(fake) as { setSession(token: string, user: unknown): void; state(): { tables: Record<string, Record<string, unknown>[]>; calls: unknown[][] } };
   sdk.setSession('t1', { user_id: '1', email_id: 'operator@example.test', role_details: { role_name: 'App Administrator' } });
@@ -622,6 +630,25 @@ test('the Advanced I/O entry serves the generated handlers with a consistent err
     const wrongMethod = await post(submit, {}, 't1', 'GET');
     assert.equal(wrongMethod.status, 405);
     assertErrorShape(wrongMethod);
+    const logged: string[] = [];
+    const originalError = console.error;
+    console.error = (...parts: unknown[]) => logged.push(parts.map(String).join(' '));
+    let unsafe: { status: number; body: Record<string, unknown> };
+    try {
+      unsafe = await post('/server/c2c_api/unsafe-error', {}, 't1');
+    } finally {
+      console.error = originalError;
+    }
+    assert.equal(unsafe!.status, 500);
+    assert.deepEqual(Object.keys(unsafe!.body).sort(), ['code', 'correlationId', 'message']);
+    assert.equal(unsafe!.body.code, 'INTERNAL_ERROR');
+    assert.equal(unsafe!.body.message, 'Internal server error');
+    assert.match(String(unsafe!.body.correlationId), /^[0-9a-f-]{36}$/i);
+    assert.doesNotMatch(JSON.stringify(unsafe!.body), /SECRET_TOKEN|stack trace|ZCQL_SECRET|SELECT/);
+    assert.equal(logged.length, 1);
+    assert.match(logged[0]!, /SECRET_TOKEN_91/);
+    assert.match(logged[0]!, /ZCQL_SECRET/);
+    assert.ok(logged[0]!.includes(String(unsafe!.body.correlationId)), 'server details carry the response correlation id');
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     moduleAny._resolveFilename = original;
