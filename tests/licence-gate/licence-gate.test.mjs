@@ -5,7 +5,7 @@
  * APPROVED exceptions.json entry.
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -160,6 +160,7 @@ test('local workspace links inside the repo pass; workspace links escaping the r
       'node_modules/local-ws': { link: true, resolved: 'packages/local-ws' },
     },
   });
+  mkdirSync(path.join(validWs, 'packages/local-ws'), { recursive: true });
   const ok = auditLockfile({ root: validWs, dir: '.', label: 'fixture' });
   assert.deepEqual(ok.problems, []);
   assert.equal(ok.packages[0].name, 'local-ws');
@@ -169,6 +170,7 @@ test('local workspace links inside the repo pass; workspace links escaping the r
     ['escape-abs', '/tmp/outside'],
     ['escape-proto', 'workspace:*'],
     ['escape-missing', undefined],
+    ['escape-nonexistent', 'packages/not-there'],
   ]) {
     const badWs = fixtureTree(t, {
       deps: {},
@@ -182,6 +184,25 @@ test('local workspace links inside the repo pass; workspace links escaping the r
       `expected ${name} to fail workspace link check, got: ${problems.join('\n')}`,
     );
   }
+});
+
+test('a workspace link whose in-repo path is a symlink to a directory outside the repo fails', (t) => {
+  const dir = fixtureTree(t, {
+    deps: { 'sneaky-ws': '1.0.0' },
+    lockEntries: {
+      'packages/sneaky-ws': { version: '1.0.0', license: 'MIT' },
+      'node_modules/sneaky-ws': { link: true, resolved: 'packages/sneaky-ws' },
+    },
+  });
+  const outside = mkdtempSync(path.join(tmpdir(), 'c2c-licence-outside-'));
+  t.after(() => rmSync(outside, { recursive: true, force: true }));
+  writeFileSync(path.join(outside, 'package.json'), `${JSON.stringify({ name: 'sneaky-ws', version: '1.0.0', license: 'GPL-3.0-only' })}\n`);
+  mkdirSync(path.join(dir, 'packages'), { recursive: true });
+  symlinkSync(outside, path.join(dir, 'packages/sneaky-ws'), 'dir');
+  const { problems } = auditLockfile({ root: dir, dir: '.', label: 'fixture' });
+  assert.ok(problems.some((p) => /sneaky-ws.*workspace link points outside the repository/.test(p)), problems.join('\n'));
+  // The unpaired definition entry no longer counts as a trusted workspace package.
+  assert.ok(problems.some((p) => /packages\/sneaky-ws.*no integrity hash/.test(p)), problems.join('\n'));
 });
 
 test('inBundle entries pass without own integrity/resolved when parent is verified, and still undergo licence checks', (t) => {
@@ -213,6 +234,27 @@ test('inBundle entries pass without own integrity/resolved when parent is verifi
   });
   const bad = auditLockfile({ root: copyleftBundle, dir: '.', label: 'fixture' });
   assert.ok(bad.problems.some((p) => /bundled-gpl@1\.0\.0.*GPL-3\.0-only.*not on the project allowlist/.test(p)), bad.problems.join('\n'));
+});
+
+test('inBundle entries without a verified registry parent get the normal integrity/source checks', (t) => {
+  for (const [name, lockEntries] of [
+    // Top-level entry self-asserting inBundle: there is no parent bundle at all.
+    ['top-bundled', { 'node_modules/top-bundled': { version: '1.0.0', inBundle: true, license: 'MIT' } }],
+    // Parent bundle exists but is not a verified registry tarball.
+    [
+      'orphan-bundled',
+      {
+        'node_modules/parent': { version: '1.0.0', resolved: 'https://example.invalid/parent.tgz', license: 'MIT', dependencies: { 'orphan-bundled': '1.0.0' } },
+        'node_modules/parent/node_modules/orphan-bundled': { version: '1.0.0', inBundle: true, license: 'MIT' },
+      },
+    ],
+  ]) {
+    const deps = name === 'top-bundled' ? { 'top-bundled': '1.0.0' } : { parent: '1.0.0' };
+    const dir = fixtureTree(t, { deps, lockEntries });
+    const { problems } = auditLockfile({ root: dir, dir: '.', label: 'fixture' });
+    assert.ok(problems.some((p) => new RegExp(`${name} \\(1\\.0\\.0\\) has no integrity hash`).test(p)), `${name}: ${problems.join('\n')}`);
+    assert.ok(problems.some((p) => new RegExp(`${name} \\(1\\.0\\.0\\) has no resolved registry URL`).test(p)), `${name}: ${problems.join('\n')}`);
+  }
 });
 
 test('registry tarballs with integrity hashes pass lockfile source checks', (t) => {
@@ -286,7 +328,7 @@ test('an APPROVED exceptions.json entry passes; EXCEPTION_NEEDED fails', (t) => 
 
 test('transitive deps and nested lockfile paths are walked; dev entries are not', (t) => {
   const dir = fixtureTree(t, {
-    deps: { top: '1.0.0', devtool: '1.0.0' },
+    deps: { top: '1.0.0' },
     lockEntries: {
       ...lockEntry('top', 'MIT', { mid: '1.0.0' }),
       'node_modules/top/node_modules/mid': {
@@ -339,4 +381,23 @@ test('no second literal copy of the project licence list outside the shared modu
     [],
     `second licence allowlist(s) found; import SHIPPED_LICENSES from ${sharedModule} instead:\n${offenders.join('\n')}`,
   );
+});
+
+test('a dev:true entry reached from production dependencies is audited like any production package', (t) => {
+  const dir = fixtureTree(t, {
+    deps: { x: '1' },
+    lockEntries: {
+      ...lockEntry('top', 'MIT', { hidden: '1.0.0' }),
+      'node_modules/x': { version: '1.0.0', dev: true, license: 'MIT' },
+      'node_modules/hidden': { version: '1.0.0', dev: true, license: 'GPL-3.0-only', integrity: VALID_SHA512, resolved: registryUrl('hidden') },
+    },
+  });
+  const direct = auditLockfile({ root: dir, dir: '.', label: 'fixture' });
+  assert.ok(direct.problems.some((p) => /node_modules\/x \(1\.0\.0\) has no integrity hash/.test(p)), direct.problems.join('\n'));
+  assert.ok(direct.problems.some((p) => /node_modules\/x \(1\.0\.0\) has no resolved registry URL/.test(p)), direct.problems.join('\n'));
+  assert.deepEqual(direct.packages.map((p) => p.name), ['x']);
+
+  const transitive = auditLockfile({ root: dir, dir: '.', label: 'fixture', deps: { top: '1.0.0' } });
+  assert.ok(transitive.problems.some((p) => /hidden@1\.0\.0.*GPL-3\.0-only.*not on the project allowlist/.test(p)), transitive.problems.join('\n'));
+  assert.deepEqual(transitive.packages.map((p) => p.name), ['hidden', 'top']);
 });
