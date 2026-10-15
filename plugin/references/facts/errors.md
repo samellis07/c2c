@@ -610,7 +610,7 @@ Cause: Pivots are Analytics objects, not Data Store reports.
 
 Fix: Leave pivots out of the migration. Remove them from the export you ask Creator to re-import. Do not create a Catalyst table for a pivot.
 
-Recipe: Re-export without the pivot. Success is an import that no longer fails on the pivot. The plan lists the pivot as out of scope.
+Recipe: Re-export without the pivot. Success is an import that no longer fails on the pivot. C2C does not migrate Analytics pivots or create a Catalyst table for them; it continues with the supported app data.
 
 ### Creator `You have reached your API call limit`
 

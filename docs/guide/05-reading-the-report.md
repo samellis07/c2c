@@ -40,6 +40,8 @@ means for you.
 | Did my data arrive whole? | per-table counts vs Creator's `counts.json`; links resolved 100% |
 | Is it proven working? | `c2c-proof.json` (and `c2c-proof.md`) — per-table counts and checksums, the smoke result, and readiness plus every manual item by name. The list of what you now own comes in the AI's summary |
 
+When the AI presents `analyze.json`, marketplace publishing, the Creator Zia AI app builder (not Catalyst Zia services the app calls), and on-prem Data Bridge are labelled `not applicable (out of scope)`. They are not counted gaps and do not change the readiness score. Payments, form email, native mobile, offline, and Cliq bots that cannot be carried are counted gaps (`not supported in this version`); native mobile/MDM is also on the roadmap.
+
 ## Counts must match, always
 
 The finding count the AI quotes must equal the count in the JSON;

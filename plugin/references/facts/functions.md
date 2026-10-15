@@ -79,6 +79,10 @@ Recipe: `zia().getKeywordExtraction`, `getSentimentAnalysis`, `extractOpticalCha
 
 Rule: use Zia calls for assistive fields only; never gate a migration step on OCR completeness.
 
+### The Creator Zia AI app builder is not applicable
+
+Rule: the Creator Zia AI app builder is not applicable (out of scope). Do not count it as a gap or a TODO, and do not include it in a readiness score. The Zia function APIs above are not that builder.
+
 ### Push notifications reach only authenticated app users
 
 Recipe: the console's Web push tab sends test pushes to an end-user email and offers `catalyst.notification.enableNotification()` in the Web SDK — no VAPID key or certificate upload for web; Android/iOS need FCM/APNs setup in the same console.

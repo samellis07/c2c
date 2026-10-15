@@ -104,6 +104,6 @@ must not continue until fixed.
 | `Column 'X' does not belongs to 'Y' view` | [§](facts/errors.md#column-does-not-belong-to-the-view) |
 | `The component 'X' does not have section mapping for Web version.` | [§](facts/errors.md#report-has-no-web-section-mapping) |
 | `Invalid entries found` / `Enter a valid phone number` / `Enter a valid email address` | [§](facts/errors.md#invalid-entries-found) |
-| A pivot report fails to export or migrate | [§](facts/errors.md#pivot-report-is-an-analytics-object) — pivots are Analytics objects, out of scope |
+| A pivot report fails to export or migrate | [§](facts/errors.md#pivot-report-is-an-analytics-object) — Analytics pivots are not migrated; C2C continues with supported app data |
 | `You have reached your API call limit` (HTTP 429 from Creator) | [§](facts/errors.md#creator-you-have-reached-your-api-call-limit) |
 | A raw insert skips a column's initial value | [§](facts/errors.md#initial-values-skipped-on-api-insert) |
