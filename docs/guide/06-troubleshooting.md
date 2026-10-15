@@ -24,13 +24,16 @@ The usual suspects:
   account that cannot see your organisation. Sign out, sign back in
   with the owning account.
 - **CLI not signed in** — you run the browser sign-in for the CLI.
-- **No free project slot** — 50/50 projects used (documented
-  platform limit: 50 projects per account). Delete an unused
-  project in the console, or ask Catalyst support to raise the limit.
+- **No free project slot** — 50/50 projects used (not yet proven:
+  observed cap of 50 projects per account —
+  [limits.md#projects-per-account](../../plugin/references/facts/limits.md#projects-per-account)).
+  Delete an unused project in the console, or ask Catalyst support
+  to raise the limit.
 - **Target project holds another app's tables** — use a fresh
   project for this app. Merging two apps into one project is refused
   (proven in testing: the second app's tables would merge into the
-  first app's).
+  first app's —
+  [doctor-spec.md#f-target-org--project-budget](../../plugin/references/doctor-spec.md#f-target-org--project-budget)).
 
 ## First-use service gates
 
@@ -56,23 +59,31 @@ The usual suspects:
   without the app address — tell the AI.
 - **Repeated sign-in attempts failing** — stop trying. Too many
   attempts can trip a throttle that can stay in place for many
-  hours (not yet proven — the safe move is to wait).
+  hours (not yet proven —
+  [limits.md#url-throttle](../../plugin/references/facts/limits.md#url-throttle);
+  the safe move is to wait).
 
 ## Quota and "too many requests" waits
 
 - **429 / "concurrency limit reached"** — the platform is busy; the
-  AI slows down and retries (not yet proven: the AI caps itself at
-  10 parallel calls and honours the wait it is told).
+  AI keeps to 10 parallel calls (the platform's own limit is not
+  yet proven —
+  [limits.md#concurrent-data-store-calls](../../plugin/references/facts/limits.md#concurrent-data-store-calls))
+  and honours the wait it is told.
 - **"You have reached the max limit of your current API limit"** —
   stop creating, keep what was created, and retry later with growing
-  waits (proven in testing for table creates: retry after 30
-  minutes, then 60, then 120 — clearing can take hours; row caps are
-  not yet proven). Deleting a project may not free capacity
-  immediately.
+  waits (proven in testing: the table-create refusal persists, even
+  after project deletes —
+  [limits.md#tables-per-organisation](../../plugin/references/facts/limits.md#tables-per-organisation);
+  the AI retries after 30, 60, then 120 minutes; row caps are not
+  yet proven —
+  [limits.md#rows-per-development-table](../../plugin/references/facts/limits.md#rows-per-development-table)).
+  Deleting a project may not free capacity immediately.
 - **Creator-side "you have reached your API call limit"** — same
   idea on the Creator side during exports; wait, then resume. Never
   call Creator from the new app's code on every click (not yet
-  proven: assume about one call a minute).
+  proven: assume about one call a minute —
+  [limits.md#creator-calls-from-a-catalyst-function](../../plugin/references/facts/limits.md#creator-calls-from-a-catalyst-function)).
 
 ## If the AI says "unverified: needs a probe"
 
