@@ -4130,7 +4130,7 @@ test('not in binds at the same level as in', () => {
   assert.equal(shape(assigned('a = a not in b.getAll();')).replaceAll('not in', 'in'), shape(assigned('a = a in b.getAll();')));
 });
 
-test('xml builtins stay manual under task:xml', () => {
+test('xml builtins map to shim.xml in method and free form', async () => {
   for (const src of [
     'x = executeXpath();',
     'x = EXECUTExpath();',
@@ -4138,13 +4138,31 @@ test('xml builtins stay manual under task:xml', () => {
     'x = "abc".toxml();',
     'x = "abc".toXmlList();',
     'x = "abc".toxmllist();',
-    'x = notARealFn().toXml();',
   ]) {
     const t = translate(src);
-    assert.match(t.server, /shim\.todo\(ctx, "task:xml"\)/, src);
-    assert.doesNotMatch(t.server, /xml_task|encryption_task|method:toXml|method:toxml|method:toXmlList|method:executeXpath/, src);
-    assert.ok(t.todos.some((item) => item.construct === 'task:xml'), src);
+    assert.equal(t.stats.todo, 0, src);
+    assert.match(t.server, /shim\.xml\.(?:executeXpath|toXml|toXmlList)\(/, src);
+    assert.doesNotMatch(t.server, /shim\.todo|task:xml|method:toXml|method:toxml|method:toXmlList|method:executeXpath/, src);
   }
+  const hole = translate('x = notARealFn().toXml();');
+  assert.match(hole.server, /shim\.xml\.toXml\(/);
+  assert.doesNotMatch(hole.server, /task:xml|method:toXml/);
+  assert.ok(hole.todos.length > 0);
+  const t = translate([
+    'city = "{\\"address\\":{\\"city\\":\\"Surat\\"}}".executeXpath("/root/address/city");',
+    'book = "<bookstore><book><title>Everyday Italian</title></book><book><title>Harry Potter</title></book><book><title>Learning XML</title></book></bookstore>".executeXpath("/bookstore/book[3]").executeXpath("/book/title/text()");',
+    'books = "<bookstore><book><title>Everyday Italian</title></book><book><title>Harry Potter</title></book><book><title>Learning XML</title></book></bookstore>".executeXpath("/bookstore/book").toXmlList();',
+    'return {"city": city, "book": book, "first": books.get(0), "third": books.get(2)};',
+  ].join('\n'));
+  assert.equal(t.stats.todo, 0);
+  assert.match(t.server, /shim\.xml\.executeXpath/);
+  assert.match(t.server, /shim\.xml\.toXmlList/);
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  const got = (await body(t.server)(runtime.shim, runtime.context({ record: {} }))) as Record<string, unknown>;
+  assert.equal(got.city, '<city>Surat</city>');
+  assert.equal(got.book, 'Learning XML');
+  assert.match(String(got.first), /Everyday Italian/);
+  assert.match(String(got.third), /Learning XML/);
 });
 
 test('htmlEncode is shim.string.htmlEncode in method and free form', async () => {

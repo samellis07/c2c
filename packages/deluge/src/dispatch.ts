@@ -336,10 +336,13 @@ export const LONGTAIL_METHODS = new Set([
 export const TEXT_FUNCTIONS = new Set(['len', 'length', 'lower', 'toLowerCase', 'toUpperCase', 'trim', 'removeFirstOccurence', 'removeLastOccurence', 'getAlpha', 'getAlphaNumeric', 'subText', 'matches', 'encodeUrl', 'left', 'right', 'mid', 'ltrim', 'rtrim', 'repeat', 'reverse', 'startsWithIgnoreCase', 'textToHex', 'getSuffix', 'isAscii', 'removeAllAlphaNumeric', 'hexToText', 'htmlDecode', 'htmlEncode']);
 
 /**
- * XML builtins that stay a manual hole. Deluge names are case-insensitive;
- * `canonicalBuiltin` maps them here. The translator emits one `task:xml` label.
+ * XML builtins emitted as `shim.xml.<name>(...)`. Deluge names are
+ * case-insensitive; `canonicalBuiltin` maps them here.
+ * https://www.zoho.com/deluge/help/functions/xml/toxml.html
+ * https://www.zoho.com/deluge/help/functions/xml/toxmllist.html
+ * https://www.zoho.com/deluge/help/xml-manipulation/executexpath.html
  */
-export const XML_MANUAL = new Set(['executeXpath', 'toXml', 'toXmlList']);
+export const XML_FUNCTIONS = new Set(['executeXpath', 'toXml', 'toXmlList']);
 
 /** `getUrl(url)`: the legacy GET task, sent through the invokeurl shim. */
 export const GET_URL = 'getUrl';
@@ -542,7 +545,7 @@ export function recognisedBuiltinNames(): string[] {
   const names = new Set<string>();
   for (const n of DATE_METHODS) names.add(n); // determinism-allow: collects into a Set returned as a sorted array by recognisedBuiltinNames
   for (const n of TEXT_FUNCTIONS) names.add(n); // determinism-allow: collects into a Set returned as a sorted array by recognisedBuiltinNames
-  for (const n of XML_MANUAL) names.add(n); // determinism-allow: collects into a Set returned as a sorted array by recognisedBuiltinNames
+  for (const n of XML_FUNCTIONS) names.add(n); // determinism-allow: collects into a Set returned as a sorted array by recognisedBuiltinNames
   for (const n of LONGTAIL_METHODS) names.add(n); // determinism-allow: collects into a Set returned as a sorted array by recognisedBuiltinNames
   for (const n of AGGREGATE_METHODS) names.add(n); // determinism-allow: collects into a Set returned as a sorted array by recognisedBuiltinNames
   for (const key of Object.keys(ZOHO_ENV)) names.add(`zoho.${key}`); // determinism-allow: collects into a Set returned as a sorted array by recognisedBuiltinNames

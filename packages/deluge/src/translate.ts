@@ -4386,8 +4386,8 @@ function callExpr(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fals
   }
   const recv = expr(e.callee.object, scope);
   // Before the todo-receiver return, so a hole such as `notARealFn().toXml()`
-  // uses this one label instead of a second check inside untranslatedMethod.
-  if (method === 'toXml' || method === 'toXmlList' || method === 'executeXpath') return xmlTask([recv, ...args]);
+  // still calls the XML shim instead of a second `method:toXml` hole.
+  if (method === 'toXml' || method === 'toXmlList' || method === 'executeXpath') return xmlCall(method, recv, args);
   if (recv.todo) return untranslatedMethod(method, recv, args);
   const direct = directMethod(method, recv, args);
   if (direct) return direct;
@@ -4532,7 +4532,7 @@ function namedCall(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fal
   const slot = scope.slot;
   const emittedMark = new Map(scope.emitted);
   const args = e.args.map((a) => expr(a, scope));
-  if (name === 'executeXpath' || name === 'toXml' || name === 'toXmlList') return xmlTask(args);
+  if (name === 'executeXpath' || name === 'toXml' || name === 'toXmlList') return xmlCall(name, null, args);
 
   const typeArg = e.typeArgs?.[0];
   if (name === 'List' || name === 'Collection') {
@@ -4725,9 +4725,13 @@ function callAsFunction(e: Extract<Expr, { kind: 'call' }>, name: string, scope:
  * Deluge `.size()` counts a real collection
  * (https://www.zoho.com/deluge/help/functions/common/size.html). A TODO is not one.
  */
-/** toXml, toXmlList, and executeXpath stay manual. One construct label: task:xml. */
-function xmlTask(parts: Fx[]): Fx {
-  return mergeFx(`await shim.todo(ctx, "task:xml")`, parts, { shim: true, todo: true, constructs: ['task:xml'] });
+/** toXml, toXmlList, and executeXpath. `toXmlList` returns a list. */
+function xmlCall(name: 'toXml' | 'toXmlList' | 'executeXpath', recv: Fx | null, args: Fx[]): Fx {
+  const parts = recv ? [recv, ...args] : args;
+  return mergeFx(`shim.xml.${name}(${parts.map((part) => part.code).join(', ')})`, parts, {
+    shim: true,
+    list: name === 'toXmlList',
+  });
 }
 
 function untranslatedMethod(method: string, recv: Fx, args: Fx[]): Fx {
