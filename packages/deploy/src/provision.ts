@@ -25,7 +25,7 @@ import { join } from 'node:path';
 import { slateHost } from '../../auth/src/slate-host.js';
 import { assertLiveProject, flag, type Io } from './cli.js';
 import { resolveProvisionScope, type ProvisionScope } from './provision-config.js';
-import { CUSTOMER_STEPS } from './customer-steps.js';
+import { planCustomerSteps } from './customer-steps.js';
 import { parseJsonExact } from './json-exact.js';
 import { AUTH_RE, catalystRestCall, EMAIL_RE, hasParamSecret, HEX_B64_TOKEN_RE, JWT_RE, listCatalystProjects, PARAM_SECRET_RE, readCliAccessToken, redactString, renewCliAccessToken, SAFE_CODE_KEY_RE, URL_RE, ZOHO_TOKEN_RE } from './rest.js';
 export { redactString };
@@ -33,7 +33,6 @@ import { catalystBaseFor, dcEndpoints } from './dc.js';
 import { catalystScopeArgs, scrubCatalystEnv } from './scope.js';
 import { isExactGrantList, isPerRowGrantMatch, PLAN_CLI_PATH, PLAN_EMITTED_CLI_PATHS, PLAN_STEP_TOOL, PLAN_STEP_TOOLS, STEP_KINDS, sha256, type ProvisionStep, type StepEndpoint } from './offline-plan.js';
 import { readConnectionSecretKeys, writeOrUpdateFunctionEnv } from './function-env.js';
-import { connectionSecretItem } from './human-steps.js';
 import { applyTablePlan, type RestCall, type RestFn, type RestResult, type TableCreateStep } from './tables.js';
 import { restWithRetry, spawnWithRetry, type ReRead, type RestRetry, type RetryOptions } from './retry.js';
 import { assertProtectedProject } from './guards.js';
@@ -1548,23 +1547,15 @@ function updateFunctionEnvFromCtx(ctx: Ctx): void {
   }
 }
 
-/** What no step can do for you once every step is done. */
+/** What no step can do for you once every step is done — the list plan.md names. */
 function humanChecklist(plan: ProvisionPlanFile, state?: ProvisionState, out?: string): string[] {
-  // The mail-sender step is the customer's only when this app sends mail.
-  const mail = plan.steps.some((step) => step.id === 'mail-sender');
   // A slate-enable step already done or existing proves Slate was started,
   // so a re-run drops that first step; the rest keep their numbering.
   const slateStarted = state
     ? plan.steps.some((step) => step.id === 'slate-enable' && ['done', 'existing'].includes(statusOf(state, step)))
     : false;
-  const items = CUSTOMER_STEPS.filter(
-    (step) => (mail || !step.startsWith('Verify mail sender:')) && (!slateStarted || !step.startsWith('Slate start:')),
-  );
-  const secretKeys = out ? readConnectionSecretKeys(out, plan.connectionSecretKeys) : (plan.connectionSecretKeys ?? []);
-  if (secretKeys.length > 0) {
-    items.push(connectionSecretItem(secretKeys));
-  }
-  return items;
+  const connectionSecretKeys = out ? readConnectionSecretKeys(out, plan.connectionSecretKeys) : (plan.connectionSecretKeys ?? []);
+  return planCustomerSteps(plan.steps, { slateStarted, connectionSecretKeys });
 }
 
 function printStatus(ctx: Ctx): number {

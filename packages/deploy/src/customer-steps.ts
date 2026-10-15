@@ -1,3 +1,5 @@
+import { connectionSecretItem } from './human-steps.js';
+
 /**
  * The steps only the customer can take, in order — every place that lists
  * them (deploy and provision output, the plugin skills, README and
@@ -17,4 +19,24 @@ export function formatCustomerSteps(done = 0): string {
   return CUSTOMER_STEPS.map((step, i) => `  ${i + 1}. ${step}\n`)
     .slice(done)
     .join('');
+}
+
+/**
+ * The customer's steps a provision plan ends with, unnumbered: what
+ * `c2c plan` lists in plan.md and what `c2c provision` prints once every step
+ * is done. The Slate start step applies only when the plan carries the
+ * slate-enable step and it is not done yet; the mail step only when the plan
+ * carries the mail-sender step. Connection secrets add one item naming the keys.
+ */
+export function planCustomerSteps(
+  steps: readonly { id: string }[],
+  opts: { slateStarted?: boolean; connectionSecretKeys?: readonly string[] } = {},
+): string[] {
+  const slate = steps.some((step) => step.id === 'slate-enable');
+  const mail = steps.some((step) => step.id === 'mail-sender');
+  const items = CUSTOMER_STEPS.filter(
+    (step) => (mail || !step.startsWith('Verify mail sender:')) && ((slate && !opts.slateStarted) || !step.startsWith('Slate start:')),
+  );
+  if (opts.connectionSecretKeys?.length) items.push(connectionSecretItem(opts.connectionSecretKeys));
+  return items;
 }

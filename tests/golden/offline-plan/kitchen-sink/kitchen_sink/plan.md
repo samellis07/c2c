@@ -91,6 +91,12 @@ project: new — provision/plan.json creates it with one IaC import (provision/i
 - import-security-rule [mcp] CatalystbyZoho_List_All_Functions → read back CatalystbyZoho_List_All_Functions
 - crons [cli] c2c provision --confirm --run crons (crons are created disabled; the user enables each in the console) → read back CatalystbyZoho_List_All_Crons
 
+## Human steps (after the last provision step; c2c provision prints the same list)
+
+1. Accept invite: accept the app invite mail
+2. Sign in once: sign in to the deployed app once
+3. Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
+
 ## Required MCP tools (doctor D-B5)
 
 - base (16): CatalystbyZoho_List_All_Organizations, CatalystbyZoho_List_All_Tables, CatalystbyZoho_List_All_Columns, CatalystbyZoho_Execute_Query, CatalystbyZoho_Get_Table_Permissions, CatalystbyZoho_Update_Table_Permissions, CatalystbyZoho_Get_Table_Scopes, CatalystbyZoho_Update_Table_Scopes, CatalystbyZoho_Get_Authentication_Configurations, CatalystbyZoho_List_All_Roles, CatalystbyZoho_List_All_CORS_Domains, CatalystbyZoho_List_All_Project_Users, CatalystbyZoho_List_All_Functions, CatalystbyZoho_List_All_Env_Variables, CatalystbyZoho_List_All_Slate_Apps, CatalystbyZoho_Get_Logs

@@ -46,7 +46,7 @@ test('the plugin skills list exactly these steps', () => {
   // The deploy and provision CLIs print the shared list rather than their own wording.
   for (const file of ['packages/deploy/src/cli.ts', 'packages/deploy/src/provision.ts']) {
     const source = readFileSync(join(root, file), 'utf8');
-    assert.match(source, /CUSTOMER_STEPS|formatCustomerSteps/, file);
+    assert.match(source, /CUSTOMER_STEPS|formatCustomerSteps|planCustomerSteps/, file);
     assert.doesNotMatch(source, /accepts the invite mail, the sender email is verified/, file);
   }
 });

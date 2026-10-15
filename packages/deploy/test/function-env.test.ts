@@ -290,6 +290,15 @@ test('Acceptance 2: a fixture with one connection yields exactly one checklist i
     const scopesResult = writeResult(out, 'import-table-scopes', { '101': { 'App Administrator': ['GLOBAL'], 'App User': ['GLOBAL'] } });
     assert.equal(await provisionCli(['--out', out, '--record', 'import-table-scopes', '--result', scopesResult, '--org', ORG, '--dc', 'in'], cap(sandbox).io), 0);
 
+    // Every app ships a Slate client, so its gate, domain and sign-in check close too.
+    assert.equal(await provisionCli(['--out', out, '--record', 'slate-enable', '--org', ORG, '--dc', 'in'], cap(sandbox).io), 0);
+    const inputsPath = join(out, 'provision', 'inputs.json');
+    writeFileSync(inputsPath, `${JSON.stringify({ ...JSON.parse(readFileSync(inputsPath, 'utf8')), slateDomain: 'app.example.test' }, null, 2)}\n`);
+    const corsResult = writeResult(out, 'authorized-domain', { domains: [{ domain: 'app.example.test', cors: true, iframe: true }] });
+    assert.equal(await provisionCli(['--out', out, '--record', 'authorized-domain', '--result', corsResult, '--org', ORG, '--dc', 'in'], cap(sandbox).io), 0);
+    const signInResult = writeResult(out, 'sign-in-check', { sign_in_page: true });
+    assert.equal(await provisionCli(['--out', out, '--record', 'sign-in-check', '--result', signInResult, '--org', ORG, '--dc', 'in'], cap(sandbox).io), 0);
+
     const secResult = writeResult(out, 'import-security-rule', { c2c_api: { is_authenticated: true } });
     assert.equal(await provisionCli(['--out', out, '--record', 'import-security-rule', '--result', secResult, '--org', ORG, '--dc', 'in'], cap(sandbox).io), 0);
 
