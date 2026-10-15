@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { openZip } from '../src/zipfile.js';
 import { buildOfflinePlan, planCli, PLAN_STEP_TOOLS, resolveDc, type ProvisionStep } from '../src/offline-plan.js';
+import { isVerifiedMcpTool, VERIFIED_MCP_TOOL_REGISTRY } from '../src/mcp-registry.js';
 import { ALL_REQUIRED_MCP_TOOLS, REQUIRED_MCP_TOOLS } from '../../doctor/src/required-tools.js';
 import { f5TableBudgets } from '../../doctor/src/checks.js';
 import { loadApp, type Io } from '../src/cli.js';
@@ -328,6 +329,28 @@ test('a bare client app still ends in the sign-in check', async () => {
   assert.ok(ids.indexOf('authorized-domain') < ids.indexOf('sign-in-check'), 'the sign-in check follows the authorised domain');
   assert.equal(ids.includes('app-users'), false, 'no portal users — no invites');
   rmSync(out, { recursive: true, force: true });
+});
+
+test('a plan for a fixture app with users and auth names no tool outside the registry', () => {
+  const app = deriveIr(parse(DS_PORTAL_APP));
+  const { plan } = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false, newProject: true });
+  const allPlanTools = [...plan.mcpTools.base, ...plan.mcpTools.plan];
+  assert.ok(plan.mcpTools.plan.includes('CatalystbyZoho_Add_User'), 'expected Add_User in plan.mcpTools.plan for app with users');
+  for (const tool of allPlanTools) {
+    assert.ok(
+      isVerifiedMcpTool(tool),
+      `tool ${tool} in plan.mcpTools is outside the verified Catalyst MCP tool registry`,
+    );
+  }
+});
+
+test('missing Stratus signature tool falls back to the documented CLI-token REST route', () => {
+  const uploadSignature = VERIFIED_MCP_TOOL_REGISTRY.find((entry) => entry.name === 'Create_Upload_Signature');
+  assert.ok(uploadSignature, 'Create_Upload_Signature registry entry missing');
+  assert.match(uploadSignature.fallback, /CLI-token REST PUT/);
+  assert.match(uploadSignature.fallback, /documented Stratus object URL/);
+  assert.match(uploadSignature.fallback, /Get_All_Objects/);
+  assert.doesNotMatch(uploadSignature.fallback, /authorization headers/i);
 });
 
 

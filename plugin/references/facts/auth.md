@@ -9,7 +9,7 @@ Operating rules for enabling auth, authorized domains, app users, roles, table p
 Rule: enabling authentication works with the CLI token; reading or updating the configuration does not.
 
 - `POST /baas/v1/project/<project-id>/authentication/enable?auth_type=hosted` then `?auth_type=embedded`, body `{"public_signup":false}` → `200`. Public signup stays off; enable it only as a deliberate step, never as a workaround.
-- `GET` and `PUT /baas/v1/project/<project-id>/authentication/configuration` with the token → `401 OAUTH_SCOPE_MISMATCH`. Read via MCP `Get_Authentication_Configurations`; write via MCP `Update_Authentication_Configuration` or a console step the user performs.
+- `GET` and `PUT /baas/v1/project/<project-id>/authentication/configuration` with the token → `401 OAUTH_SCOPE_MISMATCH`. Read via MCP `Get_Authentication_Configurations`; write via a console step the user performs under Authentication (there is no verified MCP update tool).
 - `url_preference` (the hosted-login redirect target) is changed only in the console — the token's `PUT` is the scope mismatch above; embedded sign-in does not need it, so leave it unchanged.
 - Social-login client secrets apply to Development only — the user re-enters them in Production after promotion.
 
