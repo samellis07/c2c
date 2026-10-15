@@ -1,6 +1,6 @@
 ---
 name: c2c-preflight
-description: "c2c prerequisite gate (doctor). Verifies, read-only, that the official Catalyst plugin skills are installed, the Catalyst MCP connector is connected on the right data centre with the required tools, the Catalyst CLI is installed and signed in to the same org, Creator exports are usable, a supported Node (20 or 22, >=20.20 <23) is active, and the project budget fits. Use at the start of every c2c session, for '/c2c:doctor', 'c2c doctor', 'invalid MCP url', 'MCP not connecting', 'PERMISSION_NEEDED', 'wrong DC', or before any provision/deploy/data step."
+description: "c2c prerequisite gate (doctor). Verifies, read-only, that the official Catalyst plugin skills are installed, the Catalyst MCP connector is connected on the right data centre with the required tools, the Catalyst CLI is installed and signed in to the same org, Creator exports are usable, a supported Node version (20.20 or newer, under 23) is active, and the project budget fits. Use at the start of every c2c session, for '/c2c:doctor', 'c2c doctor', 'invalid MCP url', 'MCP not connecting', 'PERMISSION_NEEDED', 'wrong DC', or before any provision/deploy/data step."
 metadata:
   version: "0.2.0"
 ---
