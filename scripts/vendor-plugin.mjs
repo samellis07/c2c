@@ -6,6 +6,18 @@
  *   node scripts/vendor-plugin.mjs --check-versions [--root dir] [--require-vendor]
  *   node scripts/vendor-plugin.mjs --check-hygiene [--root dir] [--scan dir] [--require-vendor]
  *   node scripts/vendor-plugin.mjs --schema [--root dir]
+ *   node scripts/vendor-plugin.mjs --pack [--root dir] [--archive-dir dir]
+ *   node scripts/vendor-plugin.mjs --check-runtime [--root dir]
+ *
+ * --pack builds the runtime archive (the vendor tree, gzip'd tar) into
+ * --archive-dir (default c2c-out/release) and writes
+ * plugin/runtime/runtime.json, which pins its release URL and sha256. A
+ * GitHub install has no plugin/vendor (it is not committed), so bin/c2c
+ * downloads that archive once, checks the sha256, and unpacks it outside
+ * the plugin directory. Upload the archive as a release asset under
+ * tag v<version>. --check-runtime fails when runtime.json does not match the
+ * archive this tree builds. Run both on the pinned Node: gzip bytes depend
+ * on its zlib.
  *
  * The vendor tree is generated. Do not commit it. Two runs on the same dist
  * write the same MANIFEST.sha256.
@@ -22,9 +34,11 @@
  * id. It does not rewrite compiled files.
  */
 import { createHash } from 'node:crypto';
-import { copyFileSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import { scanDirectory, scanText } from './check-hygiene.mjs';
 import { SHIPPED_LICENSES } from './licenses/allowed-licenses.mjs';
 
@@ -387,6 +401,124 @@ export function vendorPlugin({ root = repoRoot, outDir } = {}) {
   return out;
 }
 
+/**
+ * The runtime archive: the vendor tree as a gzip'd ustar file, every entry
+ * under `c2c/`, sorted bytewise, mtime 0, uid/gid 0, mode 0644 or 0755.
+ * Paths longer than ustar allows get a pax `path` record. The gzip header
+ * carries mtime 0 and OS 255, so the bytes depend only on the tree and the
+ * zlib in the pinned Node.
+ */
+const RUNTIME_PREFIX = 'c2c';
+const RUNTIME_REPO = 'samellis07/c2c';
+
+function tarHeader(name, size, mode, type = '0', prefix = '') {
+  const block = Buffer.alloc(512);
+  const put = (text, offset, length) => block.write(text, offset, Math.min(Buffer.byteLength(text), length), 'utf8');
+  const octal = (value, offset, length) => put(`${value.toString(8).padStart(length - 1, '0')}\0`, offset, length);
+  put(name, 0, 100);
+  octal(mode, 100, 8);
+  octal(0, 108, 8);
+  octal(0, 116, 8);
+  octal(size, 124, 12);
+  octal(0, 136, 12);
+  block.fill(' ', 148, 156);
+  put(type, 156, 1);
+  put('ustar\0', 257, 6);
+  put('00', 263, 2);
+  put(prefix, 345, 155);
+  let sum = 0;
+  for (const byte of block) sum += byte;
+  put(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 8);
+  return block;
+}
+
+function tarPad(size) {
+  return Buffer.alloc((512 - (size % 512)) % 512);
+}
+
+function splitUstarPath(name) {
+  if (Buffer.byteLength(name) <= 100) return { name, prefix: '' };
+  for (let i = name.indexOf('/'); i > 0; i = name.indexOf('/', i + 1)) {
+    const prefix = name.slice(0, i);
+    const rest = name.slice(i + 1);
+    if (Buffer.byteLength(prefix) <= 155 && Buffer.byteLength(rest) <= 100) return { name: rest, prefix };
+  }
+  return undefined;
+}
+
+function tarEntry(name, data, mode) {
+  const parts = [];
+  let header = splitUstarPath(name);
+  if (!header) {
+    // pax record: "<len> path=<name>\n", where <len> counts itself.
+    const body = ` path=${name}\n`;
+    let length = Buffer.byteLength(body) + 1;
+    while (String(length).length + Buffer.byteLength(body) !== length) length = String(length).length + Buffer.byteLength(body);
+    const record = Buffer.from(`${length}${body}`, 'utf8');
+    parts.push(tarHeader('PaxHeader', record.length, 0o644, 'x'), record, tarPad(record.length));
+    header = { name: name.slice(0, 100), prefix: '' };
+  }
+  parts.push(tarHeader(header.name, data.length, mode, '0', header.prefix), data, tarPad(data.length));
+  return parts;
+}
+
+/** gzip'd tar bytes for `dir`, entries under `c2c/`. */
+export function runtimeArchive(dir) {
+  const files = [];
+  const walk = (rel) => {
+    const abs = rel ? path.join(dir, rel) : dir;
+    for (const name of readdirSync(abs)) {
+      const child = rel ? `${rel}/${name}` : name;
+      const info = lstatSync(path.join(dir, child));
+      if (info.isSymbolicLink()) throw new Error(`vendor-plugin: symlink in vendor tree ${child}`);
+      if (info.isDirectory()) walk(child);
+      else if (info.isFile()) files.push({ rel: child, mode: info.mode & 0o111 ? 0o755 : 0o644 });
+      else throw new Error(`vendor-plugin: not a regular file ${child}`);
+    }
+  };
+  walk('');
+  files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
+  const parts = [];
+  for (const { rel, mode } of files) parts.push(...tarEntry(`${RUNTIME_PREFIX}/${rel}`, readFileSync(path.join(dir, rel)), mode));
+  parts.push(Buffer.alloc(1024));
+  const gz = gzipSync(Buffer.concat(parts), { level: 9 });
+  gz[9] = 255;
+  return gz;
+}
+
+/** plugin/runtime/runtime.json for an archive: where bin/c2c downloads it and the sha256 it must have. */
+export function runtimeLock(version, archive) {
+  const sha256 = createHash('sha256').update(archive).digest('hex');
+  const asset = `c2c-runtime-${version}-${sha256.slice(0, 12)}.tgz`;
+  return {
+    version,
+    asset,
+    url: `https://github.com/${RUNTIME_REPO}/releases/download/v${version}/${asset}`,
+    sha256,
+    bytes: archive.length,
+  };
+}
+
+export function runtimeLockText(lock) {
+  return `${JSON.stringify(lock, null, 2)}\n`;
+}
+
+/**
+ * Vendor `root` into a temp dir and build the runtime archive. Returns the
+ * archive bytes and the lock that pins it.
+ */
+export function packRuntime({ root = repoRoot, from } = {}) {
+  const temp = from ? undefined : mkdtempSync(path.join(tmpdir(), 'c2c-runtime-'));
+  try {
+    const vendorDir = from ?? vendorPlugin({ root, outDir: path.join(temp, 'c2c') });
+    const version = readFileSync(path.join(vendorDir, 'VERSION'), 'utf8').trim();
+    const archive = runtimeArchive(vendorDir);
+    return { archive, lock: runtimeLock(version, archive) };
+  } finally {
+    if (temp) rmSync(temp, { recursive: true, force: true });
+  }
+}
+
 export function versionProblems(root, { requireVendor = false } = {}) {
   const errors = [];
   let expected;
@@ -403,8 +535,14 @@ export function versionProblems(root, { requireVendor = false } = {}) {
 
   const pluginJson = path.join(root, 'plugin/.claude-plugin/plugin.json');
   const cursorJson = path.join(root, 'plugin/.cursor-plugin/plugin.json');
-  const marketJson = path.join(root, 'plugin/.claude-plugin/marketplace.json');
+  const marketJson = path.join(root, '.claude-plugin/marketplace.json');
   const compatJson = path.join(root, 'plugin/references/compat.json');
+  const runtimeJson = path.join(root, 'plugin/runtime/runtime.json');
+  try {
+    compare('plugin/runtime/runtime.json', readJson(runtimeJson).version);
+  } catch {
+    errors.push(`plugin/runtime/runtime.json unreadable != package.json ${expected}`);
+  }
   try {
     compare('plugin/.claude-plugin/plugin.json', readJson(pluginJson).version);
   } catch {
@@ -468,7 +606,7 @@ export function schemaProblems(root) {
     errors.push('plugin.json unreadable');
   }
   try {
-    market = readJson(path.join(root, 'plugin/.claude-plugin/marketplace.json'));
+    market = readJson(path.join(root, '.claude-plugin/marketplace.json'));
   } catch {
     errors.push('marketplace.json unreadable');
   }
@@ -490,7 +628,22 @@ export function schemaProblems(root) {
     else {
       market.plugins.forEach((entry, index) => {
         if (!entry || typeof entry.name !== 'string' || !entry.name.trim()) errors.push(`marketplace.json plugins[${index}].name: expected a non-empty string`);
-        if (!entry || typeof entry.source !== 'string' || !entry.source.trim()) errors.push(`marketplace.json plugins[${index}].source: expected a string`);
+        if (!entry || typeof entry.source !== 'string' || !entry.source.trim()) {
+          errors.push(`marketplace.json plugins[${index}].source: expected a string`);
+          return;
+        }
+        // Claude Code resolves a relative source from the marketplace root, the
+        // directory that contains .claude-plugin/, and rejects "..".
+        if (!entry.source.startsWith('./') || entry.source.split('/').includes('..')) {
+          errors.push(`marketplace.json plugins[${index}].source: expected a ./ path inside the marketplace root`);
+          return;
+        }
+        const manifest = path.join(root, entry.source, '.claude-plugin/plugin.json');
+        if (!lstatSync(manifest, { throwIfNoEntry: false })?.isFile()) {
+          errors.push(`marketplace.json plugins[${index}].source: ${entry.source} has no .claude-plugin/plugin.json`);
+        } else if (plugin && entry.source.replace(/\/+$/, '') === './plugin' && entry.name !== plugin.name) {
+          errors.push(`marketplace.json plugins[${index}].name ${entry.name} != plugin.json name ${plugin.name}`);
+        }
       });
     }
   }
@@ -526,6 +679,35 @@ function main() {
     }
     return;
   }
+  if (args.includes('--pack') || args.includes('--check-runtime')) {
+    try {
+      const { archive, lock } = packRuntime({ root });
+      const lockFile = path.join(root, 'plugin/runtime/runtime.json');
+      if (args.includes('--check-runtime')) {
+        let current;
+        try {
+          current = readFileSync(lockFile, 'utf8');
+        } catch {
+          current = '';
+        }
+        if (current !== runtimeLockText(lock)) {
+          fail([`runtime: plugin/runtime/runtime.json does not match the archive this tree builds (sha256 ${lock.sha256}). Run node scripts/vendor-plugin.mjs --pack and commit plugin/runtime/runtime.json.`]);
+        }
+        process.stdout.write(`runtime: ${lock.asset} matches\n`);
+        return;
+      }
+      const archiveDir = path.resolve(flag(args, '--archive-dir') ?? path.join(root, 'c2c-out/release'));
+      mkdirSync(archiveDir, { recursive: true });
+      writeFileSync(path.join(archiveDir, lock.asset), archive);
+      mkdirSync(path.dirname(lockFile), { recursive: true });
+      writeFileSync(lockFile, runtimeLockText(lock));
+      process.stdout.write(`packed ${path.join(archiveDir, lock.asset)} (${lock.bytes} bytes, sha256 ${lock.sha256})\n`);
+    } catch (error) {
+      process.stderr.write(`${error instanceof Error ? error.message : 'vendor-plugin --pack failed'}\n`);
+      process.exit(1);
+    }
+    return;
+  }
   if (args.includes('--schema')) {
     const errors = schemaProblems(root);
     if (errors.length) fail(errors);
@@ -533,7 +715,7 @@ function main() {
     return;
   }
   if (args.includes('-h') || args.includes('--help')) {
-    process.stdout.write('usage: node scripts/vendor-plugin.mjs [--out dir]\n       node scripts/vendor-plugin.mjs --check-versions [--root dir] [--require-vendor]\n       node scripts/vendor-plugin.mjs --check-hygiene [--root dir] [--scan dir] [--require-vendor]\n       node scripts/vendor-plugin.mjs --schema [--root dir]\n');
+    process.stdout.write('usage: node scripts/vendor-plugin.mjs [--out dir]\n       node scripts/vendor-plugin.mjs --check-versions [--root dir] [--require-vendor]\n       node scripts/vendor-plugin.mjs --check-hygiene [--root dir] [--scan dir] [--require-vendor]\n       node scripts/vendor-plugin.mjs --schema [--root dir]\n       node scripts/vendor-plugin.mjs --pack [--root dir] [--archive-dir dir]\n       node scripts/vendor-plugin.mjs --check-runtime [--root dir]\n');
     return;
   }
   try {

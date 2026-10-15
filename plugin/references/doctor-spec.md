@@ -97,7 +97,7 @@ Status words: **PASS**, **WARN** (continues), **FAIL** (red), **SKIP** (not appl
 |---|---|---|---|---|
 | D-E1 | Node supported | `node --version` satisfies `compat.json.node.range` (`>=20.20 <23` — Node 20 or 22; also the repo `engines.node`) | `node v20.20.1 (pinned)` | `FAIL D-E1: Node <v> is not supported; c2c needs Node >=20.20 <23 (20 or 22).` → `install Node 20.20.1 (nvm install 20.20.1 && nvm use 20.20.1)` (or your installer). Exit 6. |
 | D-E2 | Node patch | equals `20.20.1` | — | `WARN D-E2: Node <v> is not the pinned 20.20.1; output is correct but byte-identical manifests are only guaranteed on 20.20.1.` |
-| D-E3 | Vendor integrity | recompute sha256 of `vendor/c2c/**` vs `MANIFEST.sha256` | `vendor ok (c2c 0.2.0)` | `FAIL D-E3: the c2c plugin files were modified (<n> files differ).` → reinstall the plugin (`/plugin uninstall c2c` then install). Exit 6. |
+| D-E3 | Vendor integrity | recompute sha256 of the runtime (`vendor/c2c/**` in a local build, else the cached runtime, see [Runtime](#runtime-on-a-github-install)) vs `MANIFEST.sha256` | `vendor ok (c2c 0.2.0)` | `FAIL D-E3: the c2c plugin files were modified (<n> files differ).` → reinstall the plugin (`/plugin uninstall c2c` then install). Exit 6. |
 | D-E4 | Workspace writable, plugin dir untouched | can create `c2c-out/.c2c/`; the plugin dir is not the cwd | `workspace ok` | `FAIL D-E4: run c2c from your own workspace folder, not from the plugin folder.` |
 
 ### F. Target org / project budget
@@ -172,3 +172,9 @@ Every session fact comes from MCP calls made live in the current session, each u
 2. Agent half: D-B1 → D-B3 → D-B4 → D-B5 → D-B7 (≈ 4–6 MCP reads; D-B6 adds one `getSchema` per plan tool, cached by digest).
 3. `--mcp-observed -`, then D-V*.
 4. Doctor is run once per session and again only if the context changes (DC, org, project, a `PERMISSION_NEEDED`), mirroring the official preflight rule.
+
+## Runtime on a GitHub install
+
+- The marketplace file lives at `.claude-plugin/marketplace.json` in the repository root; a relative plugin `source` is written from that root (the directory that contains `.claude-plugin/`) and must not use `..` [DOC: https://code.claude.com/docs/en/plugin-marketplaces]. c2c's entry is `"source": "./plugin"`.
+- A GitHub install is a checkout of tracked files, so `plugin/vendor/` (built, gitignored) is absent [TESTED: `tests/plugin/github-install.test.mjs`]. On first use `bin/c2c` downloads the release archive pinned in `plugin/runtime/runtime.json`, refuses it unless its sha256 matches, and unpacks it to `$C2C_RUNTIME_DIR`, else `$XDG_CACHE_HOME/c2c/runtime`, else `~/.cache/c2c/runtime` (Windows `%LOCALAPPDATA%\c2c\runtime`), never into the plugin directory. `${CLAUDE_PLUGIN_ROOT}` changes on update and `${CLAUDE_PLUGIN_DATA}` is not exported to Bash-tool commands, so neither is used [DOC: https://code.claude.com/docs/en/plugins-reference#environment-variables].
+- Offline first run: exit 6, `c2c: could not download the c2c <version> runtime from <url> (<reason>) ...` → download the named asset on a connected machine and run with `C2C_RUNTIME_ARCHIVE=<path>`. A mirror is `C2C_RUNTIME_URL=<url>`. Both are still checked against the pinned sha256; a mismatch is exit 6 `... failed its checksum ...`.

@@ -12,7 +12,18 @@ c2c converts a Zoho Creator app (`.ds` export plus its records) into a Zoho Cata
 
 ## Install
 
-The converter ships as a local build (`plugin/vendor/c2c`), so install from a checkout, not from the marketplace shorthand. From the repo root:
+**Claude Code** installs straight from GitHub:
+
+```sh
+claude plugin marketplace add samellis07/c2c
+claude plugin install c2c@creator-to-catalyst
+```
+
+(or `/plugin marketplace add samellis07/c2c` and `/plugin install c2c@creator-to-catalyst` inside a session). Then run `/c2c:doctor`.
+
+The first `c2c` run downloads the c2c runtime once (about 8 MB, pinned by sha256 in `runtime/runtime.json`) into `~/.cache/c2c/runtime`, outside the plugin folder. Offline machine: download the archive named in the error on a connected machine and set `C2C_RUNTIME_ARCHIVE=<path>`; see `references/doctor-spec.md` (Runtime on a GitHub install).
+
+To work from a local build instead (`plugin/vendor/c2c`), or to set up OpenAI Codex or Cursor, build from a checkout. From the repo root:
 
 ```sh
 npm ci
@@ -20,7 +31,7 @@ npm run build
 node scripts/vendor-plugin.mjs
 ```
 
-- **Claude Code:** `claude plugin marketplace add "$PWD/plugin"` then `claude plugin install c2c@creator-to-catalyst` (or the same two steps as `/plugin` commands inside Claude Code). Then run `/c2c:doctor`.
+- **Claude Code:** `claude plugin marketplace add "$PWD"` then `claude plugin install c2c@creator-to-catalyst` (or the same two steps as `/plugin` commands inside Claude Code). Then run `/c2c:doctor`.
 - **OpenAI Codex:** unpack the plugin once (clone the repo and build it as above, or copy the `plugin/` folder somewhere stable), then copy its skills and commands into the host's folders — from the repo root:
   ```sh
   PLUGIN_DIR="$PWD/plugin"   # path to the unpacked plugin/ folder

@@ -44,13 +44,14 @@ function fixtureRoot(pkg, pluginVersion) {
     version: pluginVersion,
     description: 'fixture',
   });
-  writeJson(path.join(root, 'plugin/.claude-plugin/marketplace.json'), {
+  writeJson(path.join(root, '.claude-plugin/marketplace.json'), {
     name: 'creator-to-catalyst',
     owner: { name: 'c2c-test' },
     description: 'fixture',
-    plugins: [{ name: 'c2c', source: './', version: pluginVersion }],
+    plugins: [{ name: 'c2c', source: './plugin', version: pluginVersion }],
   });
   writeJson(path.join(root, 'plugin/references/compat.json'), { c2c: pluginVersion });
+  writeJson(path.join(root, 'plugin/runtime/runtime.json'), { version: pluginVersion });
   const skill = path.join(root, 'plugin/skills/c2c-migrate/SKILL.md');
   mkdirSync(path.dirname(skill), { recursive: true });
   writeFileSync(skill, `---\nname: c2c-migrate\ndescription: fixture\nmetadata:\n  version: "${pluginVersion}"\n---\n\n# fixture\n`);

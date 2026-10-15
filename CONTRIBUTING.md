@@ -112,6 +112,12 @@ with a reviewed reason, stated in the pull request.
 - A codegen lint in `npm test` (`packages/determinism/src/lint.ts`) rejects
   clocks, locale-dependent comparison and unordered iteration in pipeline
   sources unless a `// determinism-allow:` comment names the reason.
+- `plugin/runtime/runtime.json` pins the runtime archive a GitHub install
+  downloads (the built `plugin/vendor/c2c` tree, packed deterministically).
+  Any change to what ships (`dist/`, runtime packages, `package.json`) moves
+  its sha256: run `node scripts/vendor-plugin.mjs --pack` on Node 20.20.1 and
+  commit `runtime.json`; `--check-runtime` fails on a stale pin. The release
+  uploads the packed `c2c-out/release/<asset>` under tag `v<version>`.
 
 Full detail: [docs/contributing/determinism.md](docs/contributing/determinism.md).
 

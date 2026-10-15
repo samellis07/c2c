@@ -8,7 +8,6 @@ set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT=$(dirname -- "$HERE")
 VENDOR="$ROOT/vendor/c2c"
-ENTRY="$VENDOR/dist/cli/src/c2c.js"
 PINNED_NODE="20.20.1"
 # Source of truth for supported Node: the repo package.json engines.node and
 # packages/doctor/data/compat.json node.range (currently ">=20.20 <23",
@@ -53,8 +52,15 @@ if [ "$NODE_V" != "$PINNED_NODE" ] && [ -z "${C2C_QUIET_NODE_WARN:-}" ]; then
   echo "c2c: warning: Node $NODE_V is not the pinned $PINNED_NODE; byte-identical manifests are only guaranteed on $PINNED_NODE." >&2
 fi
 
+# A local build has vendor/c2c. A GitHub install does not (it is generated, not
+# committed): fetch the pinned runtime archive once into the user cache, outside
+# the plugin directory (see runtime/fetch-runtime.mjs; exit 6 when offline).
+if [ ! -f "$VENDOR/dist/cli/src/c2c.js" ]; then
+  VENDOR=$(node "$ROOT/runtime/fetch-runtime.mjs") || exit 6
+fi
+ENTRY="$VENDOR/dist/cli/src/c2c.js"
 if [ ! -f "$ENTRY" ]; then
-  echo "c2c: the vendored converter is missing ($ENTRY). Reinstall the c2c plugin." >&2
+  echo "c2c: the c2c converter is missing ($ENTRY). Reinstall the c2c plugin." >&2
   exit 6
 fi
 

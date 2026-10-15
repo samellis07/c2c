@@ -61,6 +61,7 @@ jobs:
           node scripts/vendor-plugin.mjs
           cmp "$RUNNER_TEMP/c2c-manifest-a.sha256" plugin/vendor/c2c/MANIFEST.sha256
           node scripts/vendor-plugin.mjs --check-versions --require-vendor
+          node scripts/vendor-plugin.mjs --check-runtime
 
       - name: Plugin hygiene scan
         run: node scripts/vendor-plugin.mjs --check-hygiene --require-vendor
@@ -71,8 +72,8 @@ jobs:
       - name: Validate plugin and marketplace manifests
         run: |
           if command -v claude >/dev/null 2>&1; then
-            claude plugin validate plugin/.claude-plugin/plugin.json
-            claude plugin validate plugin/.claude-plugin/marketplace.json
+            claude plugin validate plugin
+            claude plugin validate .
           else
             echo "TODO: claude CLI is not on PATH; JSON-schema check stands in for claude plugin validate."
             node scripts/vendor-plugin.mjs --schema

@@ -16,7 +16,7 @@
         "migration",
         "c2c"
       ],
-      "source": "./",
+      "source": "./plugin",
       "version": "0.2.0"
     }
   ]

@@ -20,6 +20,7 @@ tests/plugin/hygiene.test.mjs
 tests/plugin/test-concurrency.test.mjs
 tests/plugin/links.test.mjs
 tests/plugin/packaging.test.mjs
+tests/plugin/github-install.test.mjs
 tests/plugin/packaged-hygiene.test.mjs
 tests/plugin/router-evals.test.mjs
 tests/plugin/rules-limits.test.mjs
