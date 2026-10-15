@@ -17,10 +17,10 @@
  * ordered with compareEnUs, never localeCompare.
  */
 import { createHash } from 'node:crypto';
-import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compareEnUs } from '../../core/src/order.js';
-import { parseFile, parseProject } from '../../core/src/parse.js';
+import { parseFileOrProjectWithSidecars } from '../../core/src/parse.js';
 import { LockedExportError } from '../../core/src/source.js';
 import { transitionOwnerProperties } from './blueprint-rules.js';
 import { isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleWorkflow, type App, type Form, type FunctionDef, type Property, type Workflow } from '../../core/src/ir.js';
@@ -1752,9 +1752,13 @@ export function applyFillLock(app: App, files: { source: string }[], lock: FillL
 }
 
 export function loadApp(target: string): App {
-  const st = statSync(target, { throwIfNoEntry: false });
-  if (!st) throw new FillTodoError(`c2c: no such file or directory: ${target}`);
-  return st.isDirectory() ? parseProject(target).ir : parseFile(target).ir;
+  try {
+    return parseFileOrProjectWithSidecars(target).ir;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') throw new FillTodoError(`c2c: no such file or directory: ${target}`);
+    throw err;
+  }
 }
 
 export async function fillTodosMain(args: string[]): Promise<number> {

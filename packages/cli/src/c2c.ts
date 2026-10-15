@@ -158,8 +158,9 @@ import {
   formatSummary,
   listDsFiles,
   LockedExportError,
+  NotFileError,
   parseFile,
-  parseFileWithSidecars,
+  parseFileOrProjectWithSidecars,
   parseProject,
   roundTrips,
   runCorpus,
@@ -252,12 +253,16 @@ function summarize(ir: App): string {
 }
 
 function loadIr(target: string): App | undefined {
-  const st = statSync(target, { throwIfNoEntry: false });
-  if (!st) {
-    process.stderr.write(`c2c: no such file or directory: ${target}\n`);
-    return undefined;
+  try {
+    return parseFileOrProjectWithSidecars(target).ir;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      process.stderr.write(`c2c: no such file or directory: ${target}\n`);
+      return undefined;
+    }
+    throw err;
   }
-  return st.isDirectory() ? parseProject(target).ir : parseFileWithSidecars(target).ir;
 }
 
 /**
@@ -674,24 +679,22 @@ function main(argv: string[]): number {
     return 0;
   }
   if (cmd === 'parse') {
-    const st = statSync(target, { throwIfNoEntry: false });
-    if (!st) {
-      process.stderr.write(`c2c: no such file or directory: ${target}\n`);
-      return 1;
-    }
     let ir: App;
     let ok = true;
     try {
-      if (st.isDirectory()) {
-        const p = parseProject(target);
-        ir = p.ir;
-        ok = p.files.every((f) => roundTrips(f));
-      } else {
-        const f = parseFileWithSidecars(target);
-        ir = f.ir;
-        ok = roundTrips(f);
-      }
+      const p = parseFileOrProjectWithSidecars(target);
+      ir = p.ir;
+      ok = p.files.every((f) => roundTrips(f));
     } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        process.stderr.write(`c2c: no such file or directory: ${target}\n`);
+        return 1;
+      }
+      if (err instanceof NotFileError) {
+        process.stderr.write(`c2c: ${err.message}\n`);
+        return 1;
+      }
       if (err instanceof LockedExportError) {
         process.stderr.write(`c2c: ${err.message}\n`);
         return 2;

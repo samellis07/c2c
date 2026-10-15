@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { parseCst, print, type Document, type Statement } from './cst.js';
 import type { Dialect } from './dialect.js';
@@ -24,7 +24,25 @@ export function parse(source: string): Document {
 export { print };
 
 export function parseFile(path: string, relName?: string): ParsedFile {
-  const bytes = readFileSync(path);
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  let bytes: Buffer;
+  try {
+    if (!fstatSync(fd).isFile()) throw new NotFileError(path);
+    bytes = readFileSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  return parseBytes(path, bytes, relName);
+}
+
+export class NotFileError extends Error {
+  constructor(path: string) {
+    super(`${path} is not a file`);
+    this.name = 'NotFileError';
+  }
+}
+
+export function parseBytes(path: string, bytes: Uint8Array, relName?: string): ParsedFile {
   const { text, encoding } = decode(bytes);
   // A locked Marketplace install exports an HTML "Access denied" page, not a
   // .ds. Fail closed here so every ingestion point (precheck, analyze, plan,
@@ -33,6 +51,28 @@ export function parseFile(path: string, relName?: string): ParsedFile {
   const cst = parseCst(text);
   const roles = new Map<Statement, string>();
   return { path, encoding, bytes: bytes.length, cst, ir: deriveIr(cst, relName, roles), roles };
+}
+
+/** Parse a .ds file, or a project directory, classifying by the opened target. */
+export function parseFileOrProjectWithSidecars(target: string): { files: ParsedFile[]; ir: App } {
+  const fd = openSync(target, constants.O_RDONLY | constants.O_NONBLOCK);
+  let isDirectory: boolean;
+  let bytes: Buffer | undefined;
+  try {
+    const stat = fstatSync(fd);
+    isDirectory = stat.isDirectory();
+    if (!isDirectory) {
+      if (!stat.isFile()) throw new NotFileError(target);
+      bytes = readFileSync(fd);
+    }
+  } finally {
+    closeSync(fd);
+  }
+  if (isDirectory) return parseProject(target);
+  const file = parseBytes(target, bytes!);
+  const widgets = listWidgetSidecars(dirname(target));
+  if (widgets.length) file.ir.widgets = widgets;
+  return { files: [file], ir: file.ir };
 }
 
 /** True when printing the CST matches the file's bytes exactly. */
