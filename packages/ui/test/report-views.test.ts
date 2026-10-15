@@ -136,6 +136,7 @@ test('kanban with nothing to group is a counted manual TODO without an invented 
 interface Runtime {
   boot(model: UiModel, doc: Document): Promise<void>;
   renderReport(report: UiModel['reports'][number]): string;
+  renderReportRows(report: UiModel['reports'][number], rows: unknown[]): string;
 }
 
 async function loadRuntime(): Promise<Runtime> {
@@ -159,6 +160,16 @@ async function bootReport(model: UiModel, name: string, rows: unknown[]) {
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   return { doc: win.document, bodies, runtime };
 }
+
+test('editable report renders bounded bulk selection and selectable rows', async () => {
+  const model = buildUi(appOf([FORM, report('list', 'Bookings', '')].join('\n'))).model;
+  const target = model.reports.find((item) => item.name === 'Bookings')!;
+  target.form = 'Booking';
+  target.rowActions = { edit: true, delete: false };
+  const runtime = await loadRuntime();
+  assert.match(runtime.renderReport(target), /data-bulk-edit/);
+  assert.match(runtime.renderReportRows(target, [{ ROWID: '17', Guest: 'A' }]), /data-bulk-select value="17"/);
+});
 
 function lanes(doc: Document): { key: string | null; head: string; items: string[] }[] {
   return Array.from(doc.querySelectorAll('[data-board] [data-lane]')).map((lane) => ({

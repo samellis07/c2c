@@ -722,15 +722,19 @@ export function renderReport(report) {
   const filterSelect = filters ? `<select data-filter aria-label="Filter"><option value=""></option>${filters}</select>` : '';
   // Record affordances are a trailing column — Creator's per-row Edit/Delete.
   const opsHead = report.rowActions && (report.rowActions.edit || report.rowActions.delete) ? '<th scope="col" data-row-ops></th>' : '';
+  const bulkHead = report.rowActions && report.rowActions.edit ? '<th scope="col">Select</th>' : '';
   // Kanban, calendar and timeline fill grouped lanes; every other view is a table.
   const rowsHtml = BOARD_VIEWS.has(report.view)
     ? '<div data-board></div>'
-    : `<div class="table-wrap"><table><thead><tr>${cols}${opsHead}</tr></thead><tbody></tbody></table></div>`;
+    : `<div class="table-wrap"><table><thead><tr>${bulkHead}${cols}${opsHead}</tr></thead><tbody></tbody></table></div>`;
   const detailAttr = report.detail ? ' data-detail="true"' : '';
   const formAttr = report.form ? ` data-form="${escapeHtml(report.form)}"` : '';
+  const bulk = report.form && report.rowActions && report.rowActions.edit
+    ? '<div class="report-tools"><button type="button" data-bulk-edit disabled>Edit selected</button><span data-bulk-count aria-live="polite">No rows selected</span></div>'
+    : '';
   // Toolbar, grid, and pagination start hidden: the export's default controls
   // appear only after a successful non-empty load (see setReportChrome).
-  return `<section class="card" data-report="${escapeHtml(report.name)}" data-view="${escapeHtml(report.view)}" data-endpoint="${escapeHtml(report.queryEndpoint)}" data-page-size="${report.pageSize || PAGE_SIZE}"${detailAttr}${formAttr}><h1>${escapeHtml(report.label || report.name)}</h1>${formatNote}${viewNote}<div class="report-tools" data-report-tools hidden><form data-report-search><input name="q" type="search" aria-label="Search"><button type="submit">Search</button></form>${filterSelect}${actions}</div><div data-state></div><div data-rows hidden>${rowsHtml}</div><nav data-pages aria-label="Report pages" hidden><button type="button" data-prev>Previous</button><span data-page-label>Page 1</span><button type="button" data-next>Next</button></nav></section>`;
+  return `<section class="card" data-report="${escapeHtml(report.name)}" data-view="${escapeHtml(report.view)}" data-endpoint="${escapeHtml(report.queryEndpoint)}" data-page-size="${report.pageSize || PAGE_SIZE}"${detailAttr}${formAttr}><h1>${escapeHtml(report.label || report.name)}</h1>${formatNote}${viewNote}${bulk}<div class="report-tools" data-report-tools hidden><form data-report-search><input name="q" type="search" aria-label="Search"><button type="submit">Search</button></form>${filterSelect}${actions}</div><div data-state></div><div data-rows hidden>${rowsHtml}</div><nav data-pages aria-label="Report pages" hidden><button type="button" data-prev>Previous</button><span data-page-label>Page 1</span><button type="button" data-next>Next</button></nav></section>`;
 }
 
 /** The model this page renders with: the boot argument, else the module import. */
@@ -1590,12 +1594,13 @@ export function renderReportRows(report, rows) {
           return `<td${head}${primary}${numeric}${style}>${escapeHtml(text)}</td>`;
         })
         .join('');
+      const select = report.rowActions && report.rowActions.edit && id ? `<td data-bulk-select-cell><input type="checkbox" data-bulk-select value="${escapeHtml(id)}" aria-label="Select record ${escapeHtml(id)}"></td>` : '';
       const ops = report.rowActions
         ? `<td data-row-ops>${report.rowActions.edit ? `<button type="button" data-row-edit>Edit</button>` : ''}${report.rowActions.delete ? `<button type="button" data-row-delete>Delete</button>` : ''}</td>`
         : '';
       // Row ops need the ROWID on the row even without the detail link.
       const rowAttr = (report.detail || report.rowActions) && id ? ` data-row="${escapeHtml(id)}"` : '';
-      return `<tr data-card=""${rowAttr}>${cells}${ops}${cardActionsHtml(report, id)}</tr>`;
+      return `<tr data-card=""${rowAttr}>${select}${cells}${ops}${cardActionsHtml(report, id)}</tr>`;
     })
     .join('');
 }
@@ -3267,6 +3272,33 @@ export async function apiCall(call, viewRef, endpoint, init) {
   return call(url, { ...init, headers, credentials: 'include' });
 }
 
+/** Apply one field patch to at most 25 selected rows through the ordinary edit endpoint. Each request independently runs server grants and validation workflows. */
+export async function applyBulkEdit(viewRef, form, rowIds, patch) {
+  const ids = Array.isArray(rowIds) ? rowIds.map(String) : [];
+  if (!ids.length || ids.length > 25) throw new Error('Select between 1 and 25 rows.');
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).length !== 1) throw new Error('Choose one field to edit.');
+  const endpoint = form && (form.editSubmitEndpoint || form.submitEndpoint);
+  const call = (viewRef && viewRef.fetch) || globalThis.fetch;
+  if (!endpoint || typeof call !== 'function') throw new Error('The edit endpoint is unavailable.');
+  const results = [];
+  for (const rowId of ids) {
+    try {
+      const res = await apiCall(call, viewRef, endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ROWID: rowId, record: patch }, jsonReplacer),
+      });
+      if (!res || res.ok === false) {
+        const body = await readJson(res);
+        results.push({ rowId, ok: false, error: body && typeof body.error === 'string' ? body.error : `HTTP ${res ? res.status : 'no response'}` });
+      } else results.push({ rowId, ok: true });
+    } catch (error) {
+      results.push({ rowId, ok: false, error: error && typeof error.message === 'string' ? error.message : 'request failed' });
+    }
+  }
+  return results;
+}
+
 /** Key spellings a generated index access may never touch: they reach the shared prototype. */
 const UNSAFE_INDEX_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -4738,6 +4770,7 @@ export function boot(appModel, doc) {
   if (!documentRef || !appModel) return;
   const view = documentRef.defaultView || globalThis;
   const main = documentRef.getElementById('main');
+  const bulkSelections = new Map();
   const nav = documentRef.getElementById('nav');
   const title = documentRef.getElementById('app-title');
   if (title) title.textContent = appModel.name || 'App';
@@ -4866,6 +4899,87 @@ export function boot(appModel, doc) {
     const hash = documentRef.location ? documentRef.location.hash : '';
     if (nav) setCurrent(nav, hash);
     markPhoneCurrent(documentRef, hash);
+  };
+  const bulkFieldsFor = (form) => (form && form.fields || []).filter((field) =>
+    field && field.status === 'generated' && !field.readonly && ['text', 'textarea', 'email', 'phone', 'number', 'decimal', 'percent', 'currency', 'date', 'datetime', 'time', 'decision', 'select', 'radio', 'url'].includes(field.widget),
+  );
+  const openBulkEdit = (section) => {
+    const report = reportOf(section);
+    const form = report && (appModel.forms || []).find((item) => item.name === report.form);
+    const ids = report && bulkSelections.get(report.name);
+    const fields = bulkFieldsFor(form);
+    if (!section || !form || !ids || !ids.size || !fields.length) return;
+    const wrap = documentRef.createElement('div');
+    wrap.className = 'modal-backdrop';
+    wrap.setAttribute('data-bulk-modal', '');
+    const dialog = documentRef.createElement('form');
+    dialog.className = 'modal-card';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-label', `Edit ${ids.size} selected records`);
+    const title = documentRef.createElement('h2');
+    title.textContent = `Edit ${ids.size} selected records`;
+    const label = documentRef.createElement('label');
+    label.textContent = 'Field';
+    const select = documentRef.createElement('select');
+    select.name = 'field';
+    for (const field of fields) {
+      const option = documentRef.createElement('option');
+      option.value = field.name;
+      option.textContent = field.label || field.name;
+      select.appendChild(option);
+    }
+    const valueLabel = documentRef.createElement('label');
+    valueLabel.textContent = 'New value';
+    const input = documentRef.createElement('input');
+    input.name = 'value';
+    input.type = 'text';
+    const updateControl = () => {
+      const field = fields.find((item) => item.name === select.value);
+      const current = valueLabel.querySelector('[name="value"]');
+      const next = field && ['select', 'radio', 'decision'].includes(field.widget) ? (() => {
+        const choice = documentRef.createElement('select');
+        choice.name = 'value';
+        const blank = documentRef.createElement('option'); blank.value = ''; blank.textContent = 'Choose a value'; choice.appendChild(blank);
+        const values = field.widget === 'decision' ? ['true', 'false'] : (field.choices || []);
+        for (const value of values) { const option = documentRef.createElement('option'); option.value = value; option.textContent = value; choice.appendChild(option); }
+        return choice;
+      })() : documentRef.createElement('input');
+      if (next.tagName === 'INPUT') next.type = field && field.widget === 'number' ? 'number' : 'text';
+      next.name = 'value';
+      if (current) current.replaceWith(next); else valueLabel.appendChild(next);
+    };
+    valueLabel.appendChild(input);
+    label.appendChild(select);
+    select.addEventListener('change', updateControl);
+    updateControl();
+    const buttons = documentRef.createElement('div');
+    const submit = documentRef.createElement('button');
+    submit.type = 'submit'; submit.textContent = 'Apply to selected';
+    const cancel = documentRef.createElement('button');
+    cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', () => wrap.remove());
+    buttons.append(submit, cancel);
+    dialog.append(title, label, valueLabel, buttons);
+    dialog.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const value = dialog.elements.namedItem('value');
+      const currentField = fields.find((field) => field.name === select.value);
+      if (!currentField || !value) return;
+      submit.disabled = true;
+      const result = await applyBulkEdit(view, form, [...ids], { [currentField.name]: value.value });
+      const failed = result.filter((item) => !item.ok);
+      bulkSelections.set(report.name, new Set(failed.map((item) => item.rowId)));
+      wrap.remove();
+      const summary = failed.length
+        ? `Updated ${result.length - failed.length} of ${result.length} records. Failed rows: ${failed.map((item) => `${item.rowId} (${item.error})`).join('; ')}`
+        : `Updated ${result.length} records.`;
+      showToast(documentRef, failed.length ? 'failure' : 'success', summary);
+      const tbody = section.querySelector('[data-rows] tbody');
+      if (tbody) loadRows(report, tbody, view, Number(section.dataset.page || 0));
+    });
+    wrap.appendChild(dialog);
+    documentRef.body.appendChild(wrap);
+    select.focus();
   };
   const reportOf = (section) => {
     if (!section || !section.getAttribute) return null;
@@ -5013,9 +5127,34 @@ export function boot(appModel, doc) {
       })
       .catch(() => showDenied(403));
   };
+  documentRef.addEventListener('change', (event) => {
+    const target = event.target && event.target.closest ? event.target.closest('[data-bulk-select]') : null;
+    if (!target) return;
+    const section = target.closest('section[data-report]');
+    const report = reportOf(section);
+    if (!report) return;
+    const selected = bulkSelections.get(report.name) || new Set();
+    if (target.checked && !selected.has(target.value) && selected.size >= 25) {
+      target.checked = false;
+      showToast(documentRef, 'failure', 'Bulk edit is limited to 25 rows at a time.');
+      return;
+    }
+    if (target.checked) selected.add(target.value); else selected.delete(target.value);
+    bulkSelections.set(report.name, selected);
+    const count = section.querySelector('[data-bulk-count]');
+    const button = section.querySelector('[data-bulk-edit]');
+    if (count) count.textContent = selected.size ? `${selected.size} selected (maximum 25)` : 'No rows selected';
+    if (button) button.disabled = selected.size === 0;
+  });
   documentRef.addEventListener('click', (event) => {
     const target = event.target && event.target.closest ? event.target : null;
     if (target) {
+      const bulk = target.closest('[data-bulk-edit]');
+      if (bulk) {
+        event.preventDefault();
+        openBulkEdit(bulk.closest('section[data-report]'));
+        return;
+      }
       const chartBtn = target.closest('button[data-chart-refresh],button[data-chart-sort]');
       if (chartBtn) {
         const section = chartBtn.closest('section[data-report]');
@@ -5212,7 +5351,14 @@ export function boot(appModel, doc) {
         if (tbody.hasAttribute('data-board')) fillBoard(report, tbody, rows);
         else {
           tbody.innerHTML = renderReportRows(report, rows);
+          const selected = bulkSelections.get(report.name) || new Set();
+          for (const checkbox of tbody.querySelectorAll('[data-bulk-select]')) checkbox.checked = selected.has(checkbox.value);
         }
+        const bulkCount = section && section.querySelector('[data-bulk-count]');
+        const bulkButton = section && section.querySelector('[data-bulk-edit]');
+        const selectedCount = (bulkSelections.get(report.name) || new Set()).size;
+        if (bulkCount) bulkCount.textContent = selectedCount ? `${selectedCount} selected (maximum 25)` : 'No rows selected';
+        if (bulkButton) bulkButton.disabled = selectedCount === 0;
         setReportChrome(section, rows.length > 0);
         if (stateEl) {
           stateEl.innerHTML = rows.length ? '' : reportStateHtml('empty', emptyOpts);
