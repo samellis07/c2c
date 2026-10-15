@@ -3469,7 +3469,30 @@ function criteriaValue(e: Expr): Criteria {
  * `now` / `zoho.currenttime` are the current instant. `in this month` is a period.
  * A period under `<` or `==` stays untranslated: the read must not guess a window.
  */
+function invertCompareOp(op: string): string | null {
+  switch (op) {
+    case '==':
+    case '!=':
+      return op;
+    case '<':
+      return '>';
+    case '<=':
+      return '>=';
+    case '>':
+      return '<';
+    case '>=':
+      return '<=';
+    default:
+      return null;
+  }
+}
+
 function relativeCompare(op: string, field: string, rel: { spec: string; role: 'day' | 'instant' | 'period' }): Criteria {
+  if (op === 'not in') {
+    const inner = relativeCompare('in', field, rel);
+    if (inner.op === 'todo') return inner;
+    return { op: 'not', arg: inner };
+  }
   if (rel.role === 'period') {
     if (op !== 'in') return { op: 'todo', construct: 'criteria-dynamic' };
     return { op: 'in', field, value: { __rel: rel.spec } };
@@ -3569,7 +3592,7 @@ function criteria(e: Expr, scope: Scope, form?: string): Fx {
     return mergeFx(`{ op: ${JSON.stringify(op)}, args: [${l.code}, ${r.code}] }`, [l, r]);
   }
   if (e.kind === 'binary' && (e.op === 'is' || e.op === 'is not')) {
-    const rel = relativeRef(e.right);
+    const rel = relativeRef(e.right, scope);
     // `is today` and `is this week` are markers. The query binds them. `is now` stays IS NULL.
     if (rel && rel.role !== 'instant') {
       const field = comparedField(e.left, scope, form);
@@ -3584,15 +3607,41 @@ function criteria(e: Expr, scope: Scope, form?: string): Fx {
   if (e.kind === 'binary' && e.op === 'not in') {
     // `Field not in list` — the negated membership test, not a dynamic leaf.
     const field = comparedField(e.left, scope, form);
+    const rel = relativeRef(e.right, scope);
+    if (field && rel) {
+      const cmp = relativeCompare('not in', field, rel);
+      if (cmp.op !== 'todo') {
+        return fx({ code: JSON.stringify(cmp) });
+      }
+    }
     const right = expr(e.right, scope);
     if (!field) return mergeFx('{ op: "todo", construct: "criteria-dynamic" }', [right], { todo: true, constructs: ['criteria-dynamic'] });
     return mergeFx(`{ op: "not", arg: { op: "in", field: ${JSON.stringify(field)}, value: ${right.code} } }`, [right]);
   }
   if (e.kind === 'binary') {
-    const field = comparedField(e.left, scope, form);
+    let field = comparedField(e.left, scope, form);
+    let op = e.op === '=' ? '==' : e.op;
+    let rel = relativeRef(e.right, scope);
+    if (!field && !rel) {
+      const leftRel = relativeRef(e.left, scope);
+      const rightField = comparedField(e.right, scope, form);
+      if (leftRel && rightField) {
+        const inv = invertCompareOp(op);
+        if (inv) {
+          field = rightField;
+          rel = leftRel;
+          op = inv;
+        }
+      }
+    }
+    if (field && rel && COMPARE.has(op)) {
+      const cmp = relativeCompare(op, field, rel);
+      if (cmp.op !== 'todo') {
+        return fx({ code: JSON.stringify(cmp) });
+      }
+    }
     const right = expr(e.right, scope);
     if (!field) return mergeFx('{ op: "todo", construct: "criteria-dynamic" }', [right], { todo: true, constructs: ['criteria-dynamic'] });
-    const op = e.op === '=' ? '==' : e.op;
     return mergeFx(`{ op: ${JSON.stringify(op)}, field: ${JSON.stringify(field)}, value: ${right.code} }`, [right]);
   }
   if (e.kind === 'call' && e.callee.kind === 'member') {
@@ -4011,9 +4060,10 @@ function relativeDay(e: Expr): string | null {
 }
 
 /** Right-hand side of a report comparison. `null` means a static literal (or something else). */
-function relativeRef(e: Expr): { spec: string; role: 'day' | 'instant' | 'period' } | null {
+function relativeRef(e: Expr, scope?: Scope): { spec: string; role: 'day' | 'instant' | 'period' } | null {
   if (e.kind === 'relative') return { spec: e.spec, role: 'period' };
   if (e.kind === 'name') {
+    if (scope && scope.local.has(e.name)) return null;
     const folded = e.name.toLowerCase();
     if (RELATIVE_DAY.has(folded)) return { spec: folded, role: 'day' };
     if (folded === 'now') return { spec: 'now', role: 'instant' };

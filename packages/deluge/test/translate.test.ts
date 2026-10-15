@@ -1844,6 +1844,76 @@ test('workflow criteria accept the documented relative-day and period membership
   }
 });
 
+test('dynamic criteria with in/not in and relative periods translate and execute correctly', async () => {
+  const periods = [
+    'this month',
+    'this week',
+    'this year',
+    'last month',
+    'last week',
+    'last year',
+    'next month',
+    'next week',
+    'next year',
+    '2 days ago',
+    'last 7 days',
+  ];
+  for (const period of periods) {
+    const t = translate(`rows = Invoices[Added_Time in ${period}];`, { formNames: ['Invoices'] });
+    assert.equal(t.todos.some((item) => item.construct === 'criteria-dynamic'), false, period);
+    assert.match(stripComments(t.server), new RegExp(`"__rel":"${period}"`), period);
+  }
+
+  // Case-insensitive period parsing (e.g. 'Last month')
+  const upperPeriod = translate('rows = Invoices[Added_Time in Last month];', { formNames: ['Invoices'] });
+  assert.equal(upperPeriod.todos.some((item) => item.construct === 'criteria-dynamic'), false);
+  assert.match(stripComments(upperPeriod.server), /"__rel":"last month"/);
+
+  // 'not in' with relative period
+  const notIn = translate('rows = Invoices[Added_Time not in this month];', { formNames: ['Invoices'] });
+  assert.equal(notIn.todos.some((item) => item.construct === 'criteria-dynamic'), false);
+  assert.match(stripComments(notIn.server), /"op":"not"/);
+  assert.match(stripComments(notIn.server), /"__rel":"this month"/);
+
+  // Chained aggregate and conversion (e.g. Add_Invoice[...].sum(Total).toLong())
+  const chained = translate('val = Invoices[Added_Time in this month].sum(Total).toLong();', { formNames: ['Invoices'] });
+  assert.equal(chained.todos.some((item) => item.construct === 'criteria-dynamic'), false);
+  assert.equal(chained.todos.some((item) => item.construct === 'method:toLong'), false);
+  assert.match(stripComments(chained.server), /shim\.convert\.toLong\(/);
+
+  // Negative / mutation cases: invalid operators on periods fail closed
+  for (const badOp of ['>', '<', '>=', '<=', '==', '!=']) {
+    const bad = translate(`rows = Invoices[Added_Time ${badOp} this month];`, { formNames: ['Invoices'] });
+    assert.equal(bad.todos.some((item) => item.construct === 'criteria-dynamic'), true, badOp);
+    assert.match(stripComments(bad.server), /shim\.todo\(ctx, "criteria-dynamic"\)/, badOp);
+  }
+
+  // Execution verification using dryRun runtime with known dates
+  const src = [
+    'names = "";',
+    'for each r in Invoices[Added_Time in this month]',
+    '{',
+    '  names = names + r.Note + ",";',
+    '}',
+    'return names;',
+  ].join('\n');
+  const t = translate(src, { formNames: ['Invoices'] });
+  assert.equal(t.todos.length, 0);
+
+  const seed = {
+    Invoices: [
+      { ROWID: 'prev', Added_Time: '2026-09-30 23:59:59', Note: 'prev' },
+      { ROWID: 'first', Added_Time: '2026-10-01 00:00:00', Note: 'first' },
+      { ROWID: 'mid', Added_Time: '2026-10-15 12:00:00', Note: 'mid' },
+      { ROWID: 'next', Added_Time: '2026-11-01 00:00:00', Note: 'next' },
+    ],
+  };
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'Asia/Kolkata', now: new Date('2026-10-15T06:30:00.000Z'), seed });
+  const names = await body(t.server)(runtime.shim, runtime.context({ record: {} }));
+  assert.deepEqual(String(names).split(',').filter(Boolean).sort(), ['first', 'mid']);
+});
+
+
 test('the bare-field criteria shorthand applies to a single name, not a member path', () => {
   const bare = translate('rows = FlagRow[Qty != 99 && Billable];');
   assert.match(stripComments(bare.server), /{ op: "==", field: "Billable", value: true }/);
