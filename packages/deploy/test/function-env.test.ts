@@ -397,27 +397,60 @@ const functionList = { data: [{ function_name: 'c2c_api', function_id: '2001' },
 test('isSecretEnvName marks token/secret/key/password/credential names', () => {
   for (const name of ['C2C_OWNER_APPROVAL_TOKEN', 'API_KEY', 'client_secret', 'DB_PASSWORD', 'oauth_credential', 'SERVICE_TOKEN'])
     assert.ok(isSecretEnvName(name), name);
+  for (const name of ['DB_PASS', 'PWD', 'DATABASE_URL', 'WEBHOOK_URL', 'AUTH', 'PRIVATE_PEM', 'SIGNING_SALT', 'DSN'])
+    assert.ok(!isSecretEnvName(name), `${name} is an acknowledged matcher limit`);
   for (const name of ['C2C_DEPLOY_MODE', 'C2C_MAIL_FROM', 'C2C_APP_TIMEZONE', 'TABLE_ID', 'REGION']) assert.ok(!isSecretEnvName(name), name);
   assert.deepEqual(secretEnvValues({ API_KEY: 'k', PLAIN: 'p' }), { API_KEY: 'k' });
 });
 
-test('applyFunctionEnvSecrets merges the live set and POSTs the full replace-only set', async () => {
+test('applyFunctionEnvSecrets merges, posts, and verifies the full replace-only set', async () => {
+  let posted: Record<string, string> | undefined;
   const { rest, calls } = restStub((call) => {
     if (call.method === 'GET' && call.path === `${PREFIX}/function`) return { status: 200, body: functionList };
     if (call.method === 'GET' && call.path === `${PREFIX}/function/2001`)
-      return { status: 200, body: { data: { configuration: { environment: { variables: { C2C_DEPLOY_MODE: 'live', TABLE_ID: '55', C2C_OWNER_APPROVAL_TOKEN: '' } } } } } };
-    if (call.method === 'POST' && call.path === `${PREFIX}/function/2001/configuration`) return { status: 200, body: { status: 'success' } };
+      return { status: 200, body: { data: { configuration: { environment: { variables: posted ?? { C2C_DEPLOY_MODE: 'live', TABLE_ID: '55', C2C_OWNER_APPROVAL_TOKEN: '' } } } } } };
+    if (call.method === 'POST' && call.path === `${PREFIX}/function/2001/configuration`) {
+      posted = (call.body as { variables: Record<string, string> }).variables;
+      return { status: 200, body: { status: 'success' } };
+    }
     return undefined;
   });
-  const applied = await applyFunctionEnvSecrets(rest, '1001', { C2C_OWNER_APPROVAL_TOKEN: 'real-token' }, { tries: 1 });
+  const applied = await applyFunctionEnvSecrets(rest, '1001', { C2C_OWNER_APPROVAL_TOKEN: 'real-token' }, ['C2C_DEPLOY_MODE'], { tries: 1 });
   assert.deepEqual(applied, ['C2C_OWNER_APPROVAL_TOKEN']);
   assert.deepEqual(
     calls.map((call) => `${call.method} ${call.path}`),
-    [`GET ${PREFIX}/function`, `GET ${PREFIX}/function/2001`, `POST ${PREFIX}/function/2001/configuration`],
+    [`GET ${PREFIX}/function`, `GET ${PREFIX}/function/2001`, `POST ${PREFIX}/function/2001/configuration`, `GET ${PREFIX}/function/2001`],
   );
   // The POST replaces every variable, so the body is the live set plus the
   // secrets — the name-only placeholder gains its value, nothing else is lost.
   assert.deepEqual(calls[2]?.body, { variables: { C2C_DEPLOY_MODE: 'live', C2C_OWNER_APPROVAL_TOKEN: 'real-token', TABLE_ID: '55' } });
+});
+
+test('unknown or incomplete live env refuses before POST', async () => {
+  for (const detail of [{ data: {} }, { data: { configuration: { environment: { variables: { C2C_DEPLOY_MODE: 'live', TABLE_ID: 5 } } } } }]) {
+    const { rest, calls } = restStub((call) => {
+      if (call.path === `${PREFIX}/function`) return { status: 200, body: functionList };
+      if (call.method === 'GET') return { status: 200, body: detail };
+      return undefined;
+    });
+    await assert.rejects(() => applyFunctionEnvSecrets(rest, '1001', { API_KEY: 'k' }, ['C2C_DEPLOY_MODE'], { tries: 1 }), /unknown shape|non-string|refusing/);
+    assert.equal(calls.some((call) => call.method === 'POST'), false);
+  }
+});
+
+test('applyFunctionEnvSecrets rejects a POST whose read-back omits a deployed key', async () => {
+  let detailReads = 0;
+  const { rest } = restStub((call) => {
+    if (call.path === `${PREFIX}/function`) return { status: 200, body: functionList };
+    if (call.method === 'POST') return { status: 200, body: {} };
+    if (call.method === 'GET') {
+      detailReads++;
+      const variables = detailReads === 1 ? { C2C_DEPLOY_MODE: 'live' } : { C2C_DEPLOY_MODE: 'live' };
+      return { status: 200, body: { data: { configuration: { environment: { variables } } } } };
+    }
+    return undefined;
+  });
+  await assert.rejects(() => applyFunctionEnvSecrets(rest, '1001', { API_KEY: 'k' }, ['C2C_DEPLOY_MODE'], { tries: 1 }), /did not match/);
 });
 
 test('applyFunctionEnvSecrets is a no-op with no secrets and fails on any refused call', async () => {
@@ -426,18 +459,18 @@ test('applyFunctionEnvSecrets is a no-op with no secrets and fails on any refuse
   assert.equal(idle.calls.length, 0);
 
   const refusedList = restStub(() => ({ status: 403, body: {} }));
-  await assert.rejects(() => applyFunctionEnvSecrets(refusedList.rest, '1001', { API_KEY: 'k' }, { tries: 1 }), /listing functions/);
+  await assert.rejects(() => applyFunctionEnvSecrets(refusedList.rest, '1001', { API_KEY: 'k' }, ['C2C_DEPLOY_MODE'], { tries: 1 }), /listing functions/);
 
   const missing = restStub((call) => (call.path === `${PREFIX}/function` ? { status: 200, body: { data: [{ function_name: 'other', id: '9' }] } } : undefined));
-  await assert.rejects(() => applyFunctionEnvSecrets(missing.rest, '1001', { API_KEY: 'k' }, { tries: 1 }), /c2c_api is not in the project function list/);
+  await assert.rejects(() => applyFunctionEnvSecrets(missing.rest, '1001', { API_KEY: 'k' }, ['C2C_DEPLOY_MODE'], { tries: 1 }), /c2c_api is not in the project function list/);
 
   const refusedPost = restStub((call) => {
     if (call.path === `${PREFIX}/function`) return { status: 200, body: functionList };
-    if (call.method === 'GET') return { status: 200, body: { data: { configuration: { environment: { variables: {} } } } } };
+    if (call.method === 'GET') return { status: 200, body: { data: { configuration: { environment: { variables: { C2C_DEPLOY_MODE: 'live' } } } } } };
     if (call.method === 'POST') return { status: 500, body: {} };
     return undefined;
   });
-  await assert.rejects(() => applyFunctionEnvSecrets(refusedPost.rest, '1001', { API_KEY: 'k' }, { tries: 1 }), /setting c2c_api env vars/);
+  await assert.rejects(() => applyFunctionEnvSecrets(refusedPost.rest, '1001', { API_KEY: 'k' }, ['C2C_DEPLOY_MODE'], { tries: 1 }), /setting c2c_api env vars/);
 });
 
 test('functionIdFromList and liveFunctionVariables tolerate envelope shapes', () => {
@@ -445,6 +478,6 @@ test('functionIdFromList and liveFunctionVariables tolerate envelope shapes', ()
   assert.equal(functionIdFromList({ functions: [{ name: 'c2c_api', id: '8' }] }), '8');
   assert.equal(functionIdFromList({ data: { functions: [{ function_name: 'c2c_api', function_id: '9' }] } }), '9');
   assert.equal(functionIdFromList({ data: [] }), undefined);
-  assert.deepEqual(liveFunctionVariables({ data: { configuration: { environment: { variables: { A: '1', B: 2 } } } } }), { A: '1' });
-  assert.deepEqual(liveFunctionVariables({}), {});
+  assert.deepEqual(liveFunctionVariables({ data: { configuration: { environment: { variables: { A: '1' } } } } }), { A: '1' });
+  assert.throws(() => liveFunctionVariables({}), /unknown shape/);
 });

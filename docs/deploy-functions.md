@@ -64,8 +64,9 @@ writes `dry-run`.
 **Secret values never enter the generated tree.** The generated project is the
 customer's and is often committed, so a `--function-env` name matching
 `token`, `secret`, `key`, `password` or `credential` (case-insensitive) is
-written to `env_variables` as a name-only entry (`"NAME": ""`) — `catalyst
-deploy` keeps the variable without learning its value. Right after the
+written to `env_variables` as a name-only entry (`"NAME": ""`). Whether
+`catalyst deploy` accepts the empty value and keeps the variable is
+[UNVERIFIED]. Right after the
 functions deploy succeeds, `c2c deploy --confirm` sets the real values on the
 live function over the Catalyst env API (`POST
 /baas/v1/project/<project-id>/function/<id>/configuration`, which replaces the
@@ -73,6 +74,8 @@ whole set — the live variables are re-read and merged first; see
 `plugin/references/facts/functions.md`, "Manage env vars as one replace-only
 set", and `packages/deploy/src/function-env.ts`). If that write fails the run
 exits non-zero and names the console/MCP env-var route as the manual fallback.
+The matcher intentionally has limits: names such as `DB_PASS`, `PWD`, `DATABASE_URL`, `WEBHOOK_URL`, `AUTH`, `PRIVATE_PEM`, `SIGNING_SALT` and `DSN` are not recognized and can be written verbatim. Name secrets with one of the five matched words. Conversely, harmless names containing `key` (such as `KEYBOARD_LAYOUT`) are over-matched; they remain functional because the value is sent in the POST. A concurrent console edit between the live GET and POST can be overwritten because the Catalyst endpoint replaces the full set.
+
 A plan-only run writes the same name-only placeholders; whoever deploys that
 tree by hand must set the secret values in the console or through the MCP env
 tools before the function runs.
