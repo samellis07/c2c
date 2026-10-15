@@ -171,7 +171,7 @@ import { accumulate, emptyNumbers, formatCorpus } from '../../deluge/src/index.j
 import { authApplyPlan, authApplyReport, authAsJson, authAsReport, authPlan } from '../../auth/src/index.js';
 import { buildUi, DomUnavailableError, formatUiReport, uiCorpus } from '../../ui/src/index.js';
 import { generateReactApp, HandEditedError, writeReactApp } from '../../ui-react/src/index.js';
-import { defaultIo, deployCli, diffTemplate, editCli, formatDrift, hasReportJson, planCli, projectTemplateJson, provisionCli, readSourceBackup, readSourceCsv, readSourceJson, rollbackExportCli, seedMigrateCli, smokeCli, sourceBackupCli, sourceCsvCli, statusCli, syncDeltaCli, usersCli } from '../../deploy/src/index.js';
+import { defaultIo, deployCli, diffTemplate, editCli, formatDrift, hasReportJson, planCli, projectTemplateJson, provisionCli, readSourceBackup, readSourceCsv, readSourceJson, rollbackExportCli, seedMigrateCli, smokeCli, sourceBackupCli, sourceCsvCli, statusCli, syncDeltaCli, usersCli, verifyCli } from '../../deploy/src/index.js';
 import { cutoverCli } from './cutover.js';
 import { argvShapeProblems, seedArgsProblem } from './argv.js';
 import { GATE_EXIT, defaultDoctorIo, doctorCli, doctorGateForArgs, doctorStamp, gateRefusalMessage, verifyVendorCli, workspaceDir, type DoctorStamp } from '../../doctor/src/index.js';
@@ -208,6 +208,7 @@ function usage(): never {
       '       c2c cutover-checklist <file|dir> [--source-json|--source-csv <dir>|--source-backup <zip|dir>] [--since <state-file|dir>] [--smoke <file>] [--out <dir>]\n' +
       '       c2c proof <file|dir> [same options as cutover-checklist]\n' +
       '       c2c rollback-export --ds <file|dir> --out <dir> (--rows <dir> | --project <id> --org <org> --confirm)\n' +
+      '       c2c verify --data-parity --ds <file|dir> (--source-json <dir> | --source-csv <dir> | --source-backup <zip|dir>) --rows <dir> [--json]\n' +
       '       c2c deploy <file|dir> --project <id> --org <org> [--env Development] [--out <dir>] [--mail] [--confirm]\n' +
       '       c2c deploy <file|dir> --project <id> --org <org> --backfill-shadows [--confirm]\n' +
       '       c2c plan <file|dir> --out <dir> [--dc <dc>] [--mail] [--allow-budget-fail]\n' +
@@ -490,6 +491,14 @@ function main(argv: string[]): number {
       },
     );
     return 0;
+  }
+  if (cmd === 'verify') {
+    try {
+      return verifyCli(restAll, defaultIo());
+    } catch (err) {
+      process.stderr.write(`c2c: ${err instanceof Error ? err.message : 'verify failed'}\n`);
+      return 1;
+    }
   }
   if (cmd === 'status') {
     statusCli(restAll, defaultIo()).then(
