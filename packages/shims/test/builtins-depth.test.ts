@@ -4,7 +4,7 @@ import { DelugeConversionError, toJSONList, toListString } from '../src/convert.
 import { DelugeDate } from '../src/date.js';
 import { Decimal } from '../src/decimal.js';
 import { DelugeRuntimeError } from '../src/errors.js';
-import { aggregate, column, subList } from '../src/list.js';
+import { aggregate, column, numberList, subList } from '../src/list.js';
 import { createRuntime, type RuntimeOptions } from '../src/runtime.js';
 import {
   encodeUrl,
@@ -418,6 +418,13 @@ test('aggregate: sum, avg, median, min, max, count, distinct with Creator blanks
   // A non-numeric value cannot be summed.
   assert.throws(() => aggregate(['a', 'b'], 'sum'), DelugeRuntimeError);
   assert.throws(() => aggregate([1], 'mode'), DelugeRuntimeError);
+});
+
+test('numberList average and median inputs reject undocumented members', () => {
+  assert.deepEqual(numberList([1, 2, Decimal.from('3.5'), '4'], 'average'), [1, 2, Decimal.from('3.5'), '4']);
+  for (const members of [[1, null, 3], [1, '', 3], [1, '   ', 3], [1, 'text', 3]]) {
+    assert.throws(() => numberList(members, 'median'), DelugeRuntimeError);
+  }
 });
 
 test('toListString splits comma text into text elements; toJSONList parses a JSON array', () => {

@@ -3416,6 +3416,19 @@ function tooDeepExpr(): Fx {
   });
 }
 
+function hasInvalidNumberListLiteral(expr: Expr): boolean {
+  let value = expr;
+  while (value.kind === 'paren') value = value.expr;
+  if (value.kind !== 'list') return false;
+  const isNumeric = (item: Expr): boolean => {
+    if (item.kind === 'number') return true;
+    if (item.kind === 'string') return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(item.value.trim());
+    if (item.kind === 'unary' && (item.op === '+' || item.op === '-')) return isNumeric(item.expr);
+    return false;
+  };
+  return value.elements.some((item) => !isNumeric(item));
+}
+
 function expr(e: Expr, scope: Scope): Fx {
   const depth = scope.exprDepth + 1;
   if (depth > EXPR_STACK_LIMIT) return tooDeepExpr();
@@ -4384,7 +4397,8 @@ function callExpr(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fals
     // (`(1).average()`) is not a documented call and stays a counted hole.
     if ((method === 'average' || method === 'median') && e.args.length === 0 && !q.query && !q.todo) {
       const fn = JSON.stringify(aggregateFn(method));
-      if (q.list) return mergeFx(`shim.list.aggregate(${q.code}, ${fn})`, [q], { shim: true });
+      const notes = hasInvalidNumberListLiteral(obj) ? [`call:${method}`] : [];
+      if (q.list) return mergeFx(`shim.list.aggregate(shim.list.numberList(${q.code}, ${JSON.stringify(method)}), ${fn})`, [q], { shim: true, notes });
       if (obj.kind === 'member') return mergeFx(`shim.list.aggregate(shim.list.numberList(${q.code}, ${JSON.stringify(method)}), ${fn})`, [q], { shim: true });
       return mergeFx(`await shim.todo(ctx, ${JSON.stringify('call:' + method)})`, [q], { shim: true, todo: true, constructs: [`call:${method}`] });
     }
@@ -4721,10 +4735,13 @@ function namedCall(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fal
       if (!q.query && !q.todo && q.list) {
         const exact = !!fieldName && scope.decimalFields.has(fieldName);
         const extra = fieldName ? `, ${JSON.stringify(fieldName)}${exact ? ', true' : ''}` : '';
-        return mergeFx(`shim.list.aggregate(${q.code}, ${JSON.stringify(fn)}${extra})`, [q], {
+        const isNumberList = aggregateCall === 'average' || aggregateCall === 'median';
+        const listCode = isNumberList ? `shim.list.numberList(${q.code}, ${JSON.stringify(aggregateCall)})` : q.code;
+        return mergeFx(`shim.list.aggregate(${listCode}, ${JSON.stringify(fn)}${extra})`, [q], {
           shim: true,
           decimal: exact && fn !== 'count',
           list: fn === 'distinct',
+          notes: isNumberList && hasInvalidNumberListLiteral(objAst) ? [`call:${aggregateCall}`] : [],
         });
       }
       if (!q.query && !q.todo && fieldName) {

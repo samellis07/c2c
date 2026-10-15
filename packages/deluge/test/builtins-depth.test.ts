@@ -91,6 +91,18 @@ test('number builtins refuse receivers and arguments the pages do not document',
   assert.equal(await run('out = input.Values.median();', { Values: [1, 5, 2, 3] }), 2.5);
   await assert.rejects(run('out = input.Values.average();', { Values: 3 }), /average: expected a number list/);
   await assert.rejects(run('out = input.Values.median();', { Values: null }), /median: expected a number list/);
+  for (const values of [[1, null, 3], [1, '', 3], [1, '   ', 3], [1, 'text', 3]]) {
+    await assert.rejects(run('out = input.Values.average();', { Values: values }), /average: expected numeric list members/);
+    await assert.rejects(run('out = input.Values.median();', { Values: values }), /median: expected numeric list members/);
+  }
+  // The help pages explicitly permit numeric values written in quotes.
+  assert.equal(await run('out = input.Values.average();', { Values: ['1', '3'] }), 2);
+  assert.equal(await run('out = average({1, 5, 2, 3});'), 2.75);
+  for (const [src, kind] of [
+    ['out = average({1, null, 3});', 'call:average'],
+    ['out = {1, "", 3}.median();', 'call:median'],
+    ['out = median({1, "text", 3});', 'call:median'],
+  ] as const) assert.ok(translate(src).todos.some((item) => item.construct === kind), `${src} should be counted`);
   // An empty number list still aggregates; average/median of no values is null.
   assert.equal(await run('l = List(); out = l.average();'), null);
 });
