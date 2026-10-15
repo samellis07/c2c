@@ -247,7 +247,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
   emitScheduling(app, schedulePlans, put, options?.schema, asyncSuccess);
   const publishers = apiPublishers(app);
   const admins = administratorProfiles(app);
-  for (const fn of app.functions) emitFunction(app, fn, put, stats, todos, alertDiagnostics, thisappEntries, publishers.get(fn.name), admins, warnings, clientCalls.names, calledFunctions, options?.schema);
+  for (const fn of app.functions) emitFunction(app, fn, put, stats, todos, alertDiagnostics, thisappEntries, publishers.get(fn.name), admins, warnings, options?.schema);
   const callAccess = app.profiles.length ? accessPolicyFor(app) : undefined;
   for (const fn of app.functions) {
     const key = fn.name.toLowerCase();
@@ -499,7 +499,7 @@ function emitSchedule(
   alertDiagnostics: AlertDiagnostic[],
   schema?: SchemaPlan,
 ): void {
-  const translated = w.deluge ? translateInApp(app, w.deluge.text, serverScriptOptions(app, w.form)) : emptyTranslate();
+  const translated = w.deluge ? translateInApp(app, w.deluge.text, scheduleScriptOptions(app, w.form)) : emptyTranslate();
   addStats(stats, translated.stats);
   todos.push(...shift(translated.todos, w.deluge));
   recordAlertDiags(translated.todos, w.deluge, w, alertDiagnostics);
@@ -1258,28 +1258,26 @@ function emitFunction(
   api: ApiPublish[] | undefined,
   admins: string[],
   warnings: GenerateWarning[],
-  clientCallFunctions: ReadonlySet<string>,
-  calledFunctions: Set<string>,
   schema?: SchemaPlan,
 ): void {
   const binding = functionRowBinding(fn);
   let slot = 0;
   const parts = fn.deluge.map((d) => {
-    const tr = translateInApp(app, d.text, { ...functionScriptOptions(app, fn, slot), clientCallFunctions: [...clientCallFunctions] });
+    const tr = translateInApp(app, d.text, functionScriptOptions(app, fn, slot));
     slot = tr.nextSlot;
     addStats(stats, tr.stats);
     todos.push(...shift(tr.todos, d));
     recordAlertDiags(tr.todos, d, { form: fn.form, event: fn.name, name: fn.name }, alertDiagnostics);
     return tr;
   });
+  // functionScriptOptions is serverOnly: a function has no client half, so
+  // there is no client module, prefetch module, or client-call endpoint.
   const server = parts.map((p) => p.server).filter((s) => s.trim()).join('\n');
-  const client = parts.map((p) => p.client).filter((s) => s.trim()).join('\n');
-  const prefetch = parts.map((p) => p.prefetch).filter((s) => s.trim()).join('\n');
   const name = slug(fn.name || 'function');
   // A declared function with an empty body is still a function. Skipping it
   // leaves the declaration out of the tree and out of the readiness report.
   const declaredEmpty = !fn.deluge.some((d) => d.text.trim());
-  if (!server.trim() && !client.trim() && !prefetch.trim() && !declaredEmpty) {
+  if (!server.trim() && !declaredEmpty) {
     if (!parts.some((p) => p.todos.length)) {
       warnings.push({
         construct: 'function-untranslated',
@@ -1360,24 +1358,6 @@ function emitFunction(
       recordParams,
       rowForm: binding && fn.form ? fn.form : '',
     });
-  }
-  const prefetchPath = prefetch.trim() ? `/functions/${name}/prefetch` : '';
-  if (prefetchPath) {
-    put(
-      `functions/custom/${name}-prefetch.mjs`,
-      prefetchModule({ app, title: `Prefetch for ${fn.name}`, path: prefetchPath, body: prefetch, params, form: fn.form, schema, element: parts.some((p) => p.usesElement) }),
-    );
-  }
-  if (client.trim()) {
-    collectClientCalls(client, calledFunctions);
-    put(
-      `client/handlers/functions/${name}.mjs`,
-      clientModule(
-        [functionRowSource(binding, params, client), client].filter((s) => s.trim()).join('\n'),
-        prefetchPath,
-        { form: fn.form, event: fn.name, when: 'function', signature: fn.signature, params },
-      ),
-    );
   }
 }
 
@@ -1658,17 +1638,6 @@ function declaresIdent(body: string, id: string): boolean {
   return new RegExp(`\\bvar\\s+(?:${id}\\b|\\[[^\\]\\n]*\\b${id}\\b)|\\bfunction\\s+${id}\\b`).test(body);
 }
 
-/**
- * `rec`/`recs` for a for-each-record function. The server module binds the row
- * (`const d_rec = ctx.row`); a client twin that reads it binds the same ctx.record
- * (the browser's current form record) so a bare field reference is never a free identifier.
- */
-function functionRowSource(row: '' | 'rec' | 'recs', params: string[], body: string): string {
-  const id = row ? jsIdent(row) : '';
-  if (!id || params.includes(id) || declaresIdent(body, id) || !new RegExp(`(^|[^\\w$.])${id}\\b`).test(body)) return '';
-  return `const ${id} = ctx.record;`;
-}
-
 /** `row` for a subform row event, read and written through shim.record. Only when the body uses it. */
 function subformRowSource(subform: string | null, body: string): string {
   const id = jsIdent('row');
@@ -1822,6 +1791,15 @@ export function serverScriptOptions(app: App, form: string | undefined): Transla
 }
 
 /**
+ * Translate options for a schedule script. The job module is the schedule's
+ * only output: no browser runs a schedule, so it has no client half
+ * (`serverOnly`). Shared with fill-todos.
+ */
+export function scheduleScriptOptions(app: App, form: string | undefined): TranslateOptions {
+  return { ...serverScriptOptions(app, form), serverOnly: true };
+}
+
+/**
  * Translate options inside an approval machine: `approver.<x>` is an explicit
  * TODO, `alert` is unverified. Shared with fill-todos.
  */
@@ -1839,6 +1817,9 @@ export function functionScriptOptions(app: App, fn: FunctionDef, slotStart: numb
     ...functionRowOptions(app, fn),
     slotStart,
     alertEvent: 'unverified',
+    // Neither UI target loads client/handlers/functions/*: a function runs
+    // only as its server module, so it has no client half.
+    serverOnly: true,
     decimalVars: fnDecimalParams(fn.signature),
     prefetchBound: rawFnParams(fn.signature),
   };

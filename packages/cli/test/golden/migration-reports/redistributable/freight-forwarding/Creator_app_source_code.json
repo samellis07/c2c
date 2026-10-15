@@ -40,11 +40,11 @@
       "label": "not applicable (out of scope)"
     }
   ],
-  "todoCount": 14,
+  "todoCount": 12,
   "todoKinds": [
     {
       "construct": "client-condition-uses-server",
-      "count": 13
+      "count": 11
     },
     {
       "construct": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
@@ -55,7 +55,7 @@
     {
       "severity": "warning",
       "check": "converter-gap",
-      "count": 13
+      "count": 11
     },
     {
       "severity": "warning",

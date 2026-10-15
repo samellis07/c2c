@@ -39,6 +39,7 @@ import {
   generate,
   scheduleCriteriaGap,
   schedulePlansFor,
+  scheduleScriptOptions,
   serverScriptOptions,
   translateInApp,
   unmigratedReportCriteria,
@@ -1010,7 +1011,7 @@ function pushSchedule(state: WalkState, app: App, workflow: Workflow, plan: Sche
   }
   const swept = plan?.kind === 'form' && !!plan.sweep;
   const fragment = workflow.deluge
-    ? translateFragment(state, workflow.deluge.text, workflow.deluge.span.start, workflowIr(workflow, workflow.deluge.span), serverScriptOptions(app, workflow.form), app)
+    ? translateFragment(state, workflow.deluge.text, workflow.deluge.span.start, workflowIr(workflow, workflow.deluge.span), scheduleScriptOptions(app, workflow.form), app)
     : emptyFragment(workflowIr(workflow, workflow.span));
   const { fragment: gated, suppressed } = gateFragment(state, app, workflow, fragment, false);
   if (suppressed) pushGateNote(state, workflow);
