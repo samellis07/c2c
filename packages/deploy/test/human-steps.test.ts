@@ -101,7 +101,7 @@ test('the live-run guide documents the shared five customer steps', () => {
   for (const item of CUSTOMER_STEPS) {
     assert.ok(guide.includes(`“${item}”`), `guide is missing the shared customer step: ${item}`);
   }
-  assert.ok(guide.includes('200 `[]` app-list response only proves connectivity'));
+  assert.ok(guide.includes('200 [] app-list response only proves connectivity'));
 });
 
 test('a re-run after Slate started drops the Slate start and keeps numbering contiguous', () => {
