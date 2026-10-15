@@ -52,32 +52,20 @@ div class="c2c-app"
       article aria-label="Ada Lovelace" class="c2c-record"
         h2
           "Ada Lovelace"
-        dl
-          div
-            dt
-              "Full Name"
-            dd
-              "Ada Lovelace"
-          div
-            dt
-              "Email"
-            dd
-              "ada@example.com"
-          div
-            dt
-              "Kind"
-            dd
-              "Work"
-          div
-            dt
-              "Birthday"
-            dd
-              "1815-12-10"
-          div
-            dt
-              "Owner_Ref"
-            dd
-              "–"
+        section
+          h3
+            "Overview"
+          dl
+            div
+              dt
+                "Full Name"
+              dd
+                "Ada Lovelace"
+            div
+              dt
+                "Email"
+              dd
+                "ada@example.com"
         p
           a aria-label="Edit record 1" class="c2c-row-open" href="#/form/New_Contact/edit/1"
             "Edit"
