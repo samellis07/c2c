@@ -250,10 +250,15 @@ test('each decoration runs and the page shows a form and a report', async () => 
     url: 'http://127.0.0.1/slate/index.html#/report/All_Purchase_Orders',
     runScripts: 'outside-only',
   }).window as unknown as PageWin;
-  reportWin.fetch = (async () => ({
-    ok: true,
-    status: 200,
-    json: async () => ({ rows }),
+  reportWin.fetch = (async (_url: string, init?: { body?: string }) => {
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(init?.body ?? '{}') as Record<string, unknown>; } catch { /* test request without a body */ }
+    const record = body.ROWID == null ? null : rows.find((row) => String(row.ROWID) === String(body.ROWID));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => record ? { record } : { rows },
+    };
   })) as unknown as typeof fetch;
   await runtime.boot(model, reportWin.document);
   // The decoration pass runs on a timer scheduled after the rows' fetch
