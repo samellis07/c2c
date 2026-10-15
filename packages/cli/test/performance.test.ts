@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -26,9 +26,14 @@ function filesDigest(dir: string): string {
     for (const name of readdirSync(at).sort()) {
       const full = path.join(at, name);
       const relative = path.posix.join(prefix, name);
-      const stat = statSync(full);
-      if (stat.isDirectory()) visit(full, relative);
-      else hash.update(relative).update('\0').update(readFileSync(full)).update('\0');
+      let content: Buffer | undefined;
+      try {
+        content = readFileSync(full);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EISDIR') throw error;
+      }
+      if (content === undefined) visit(full, relative);
+      else hash.update(relative).update('\0').update(content).update('\0');
     }
   };
   visit(dir, '');
