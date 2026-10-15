@@ -717,3 +717,82 @@ test('time-tracker: on-load hides and disable, input show, validate cancel — s
   assert.match(rendered.container.querySelector('.c2c-banner')?.textContent ?? '', /Record added|Dry run/);
   assert.doesNotMatch(rendered.container.textContent ?? '', /Client handler failed/);
 });
+
+/* Subform row events: `on add row` fires with the new row bound and `on
+   delete row` with the removed row bound — the React mirror of the vanilla
+   "browser subform row add and delete" test in packages/ui. */
+const ROW_EVENTS = `\tform Add_Order
+\t{
+${field('Name', 'text')}
+${subform('Lines', `${column('Qty', 'number')}`)}
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tAdded as "Row added"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Add_Order
+\t\t\t\trecord event = on add or edit
+\t\t\t\ton add row of Lines
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\t\tcustom deluge script
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\trow.Qty = 7;
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t\tRemoved as "Row removed"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Add_Order
+\t\t\t\trecord event = on add or edit
+\t\t\t\ton delete row of Lines
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\t\tcustom deluge script
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tinput.Name = row.Qty;
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`;
+
+function clickButton(rendered: Rendered, predicate: (button: HTMLButtonElement) => boolean, what: string): void {
+  const button = [...rendered.container.querySelectorAll('button')].find(predicate);
+  assert.ok(button, what);
+  button.dispatchEvent(new rendered.win.MouseEvent('click', { bubbles: true }));
+}
+
+test('subform row add and delete fire addrow/deleterow handlers with the row bound — like vanilla', async () => {
+  const app = appOf(ROW_EVENTS);
+  const { spec, handlers } = generated(app);
+  const form = spec.forms['Add_Order']!;
+  const rendered = await renderForm(form, handlers);
+  const grid = () => rendered.container.querySelectorAll('.c2c-subform tbody tr');
+
+  // The grid opens with one empty row. Add fires `on add row` with the new
+  // row bound: the script's `row.Qty = 7` lands in the second row's cell.
+  clickButton(rendered, (button) => /Add Lines row/.test(button.textContent ?? ''), 'the grid renders an add-row button');
+  await rendered.flush();
+  assert.equal(grid().length, 2);
+  const addedQty = rendered.container.querySelector('input[name="Lines[1].Qty"]') as HTMLInputElement | null;
+  assert.ok(addedQty, 'the added row renders a Qty cell');
+  assert.equal(addedQty.value, '7', 'the addrow handler ran with the new row bound');
+
+  // Delete row 2: `on delete row` runs with the removed row still bound, so
+  // `input.Name = row.Qty` copies its answer into the Name control.
+  clickButton(rendered, (button) => button.getAttribute('aria-label') === 'Remove row 2', 'the second row renders a remove button');
+  await rendered.flush();
+  assert.equal(grid().length, 1);
+  const name = rendered.container.querySelector('input[name="Name"]') as HTMLInputElement | null;
+  assert.equal(name?.value, '7', 'the deleterow handler ran with the removed row bound');
+  assert.doesNotMatch(rendered.container.textContent ?? '', /Client handler failed/);
+});

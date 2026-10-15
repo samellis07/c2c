@@ -29,7 +29,7 @@ import { Slot, useCustomization } from '../runtime/extend';
 import { FormContext } from './fields';
 import { applyHandlerActions, matchingHandlers, mergeScriptRecord, runHandlers, type FormHandlers, type HandlerCtx, type HandlerDraft } from './handlers';
 import { chosenFiles, firstErrorControl, readRecord, validate } from './record';
-import { validateSubforms } from '../subform/rows';
+import { subformRows, validateSubforms } from '../subform/rows';
 
 interface Banner {
   tone: 'success' | 'danger' | 'info';
@@ -187,6 +187,15 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
       if (!specs.length || !handlers) return [];
       const formEl = formRef.current;
       const controls = formEl ? (readRecord(formEl, form) as Record<string, unknown>) : {};
+      // The handler record keeps every drawn grid row, including the empty
+      // rows the submit body drops: `row` binds at the grid index the row
+      // event carried, and publishing this record never collapses the grid.
+      if (formEl) {
+        for (const field of form.fields) {
+          if (field.widget !== 'subform') continue;
+          controls[field.name] = subformRows(formEl, field).map((row) => row.values);
+        }
+      }
       const ctx: HandlerCtx = {
         record: { ...live.current.record, ...controls },
         old: live.current.old,
@@ -210,6 +219,13 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
         },
       });
       mergeScriptRecord(draft.record, ctx.record);
+      // A deleterow run reads the record before the grid drops the row, so the
+      // removed index is still in it — the handler needs `row` bound. Drop it
+      // from the published record so it never repaints as a live row.
+      if (when === 'deleterow' && subformRow) {
+        const list = draft.record[subformRow.field];
+        if (Array.isArray(list) && subformRow.index >= 0 && subformRow.index < list.length) list.splice(subformRow.index, 1);
+      }
       live.current.record = draft.record;
       live.current.notes = draft.notes;
       publish(draft);

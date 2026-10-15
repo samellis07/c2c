@@ -2190,6 +2190,8 @@ function deleteStub(app: App, form: UiModel['forms'][number], path: string, delu
     'Modify All only a row the caller added), on-delete-scoped validates,',
     'the shim delete, then the on-delete script and delete-scoped on-success modules.',
     'A `cancel delete` in a validate answers 422 refused; the row stays.',
+    'The post-commit modules run after the row is gone: a throw there answers 500',
+    '(403 on an access error) with deleted: true — the row is never restored.',
   ])}${policyPrelude('../../access-policy.json', false, 'import { authorizeDelete, createRuntime, replyStoreError } from "creator-to-catalyst/shims";\n')}
 export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(path)}, dryRun: true };
 export const formName = ${JSON.stringify(form.name)};
