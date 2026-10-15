@@ -18,7 +18,7 @@
  *   Create_Bucket connector schema declares.
  *   https://docs.catalyst.zoho.com/en/cloud-scale/help/stratus/buckets/create-bucket/
  */
-import type { RestFn } from './tables.js';
+import { readBucketList, type RestFn } from './tables.js';
 
 export type SeedBucketEnsure =
   | { outcome: 'exists' }
@@ -44,18 +44,18 @@ function detailOf(body: unknown): string {
 }
 
 /**
- * GET the bucket, then POST the create only on 404. A bucket that already
- * exists takes no write, so a re-run is safe. A 403 on the read means the
- * project answered but the caller cannot see the bucket — that is a failure,
- * not a create.
+ * Read the bucket through the paginated list route. Create only after every
+ * page proves the exact bucket name is absent; any list error is unverifiable.
  */
 export async function ensureSeedBucket(rest: RestFn, projectId: string, bucket: string): Promise<SeedBucketEnsure> {
-  const read = await rest({ method: 'GET', path: `/baas/v1/project/${projectId}/bucket/${encodeURIComponent(bucket)}` });
-  if (read.status >= 200 && read.status < 300) return { outcome: 'exists' };
-  if ((read.status === 400 || read.status === 405) && SERVICE_CLOSED.test(detailOf(read.body))) {
-    return { outcome: 'console-step', httpStatus: read.status, detail: detailOf(read.body) };
+  const read = await readBucketList(rest, projectId, bucket);
+  if (read.status === 'found') return { outcome: 'exists' };
+  if (read.status === 'unverifiable') {
+    if (read.httpStatus !== undefined && (read.httpStatus === 400 || read.httpStatus === 405) && SERVICE_CLOSED.test(read.detail)) {
+      return { outcome: 'console-step', httpStatus: read.httpStatus, detail: read.detail };
+    }
+    return { outcome: 'failed', httpStatus: read.httpStatus ?? 0, detail: read.detail };
   }
-  if (read.status !== 404) return { outcome: 'failed', httpStatus: read.status, detail: detailOf(read.body) };
   const created = await rest({ method: 'POST', path: `/baas/v1/project/${projectId}/bucket`, body: bucketCreateBody(bucket) });
   if (created.status >= 200 && created.status < 300) return { outcome: 'created' };
   if ((created.status === 400 || created.status === 405) && SERVICE_CLOSED.test(detailOf(created.body))) {

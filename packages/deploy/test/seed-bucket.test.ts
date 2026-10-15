@@ -70,9 +70,9 @@ function projectDetails() {
 }
 
 interface BucketSpec {
-  /** Answer for GET /bucket/<name>. */
+  /** Answer for GET /bucket; 404 is a fixture shorthand for an empty successful list. */
   read: { status: number; body?: unknown };
-  /** Answer for POST /bucket, when the read misses. */
+  /** Answer for POST /bucket, when the list proves the bucket is absent. */
   create?: { status: number; body?: unknown };
 }
 
@@ -83,11 +83,10 @@ function fakeRest(spec: BucketSpec): { rest: RestFn; calls: { method: string; pa
     calls.push({ method: call.method, path: call.path, body: call.body });
     if (call.method === 'GET' && /^\/baas\/v1\/project\/[0-9]+$/.test(call.path)) return { status: 200, body: projectDetails() };
     if (call.method === 'GET' && call.path.endsWith('/table')) return { status: 200, body: { data: [] } };
-    if (call.method === 'GET' && /\/bucket\/[^/]+$/.test(call.path)) {
-      return { status: spec.read.status, body: spec.read.body ?? {} };
-    }
-    if (call.method === 'GET' && call.path.endsWith('/bucket')) {
-      return { status: spec.read.status === 200 ? 200 : 200, body: { status: 'success', data: spec.read.status === 200 ? [spec.read.body] : [] } };
+    if (call.method === 'GET' && call.path === `/baas/v1/project/${PROJECT}/bucket`) {
+      const status = spec.read.status === 404 ? 200 : spec.read.status;
+      const body = spec.read.status === 404 ? { status: 'success', data: [] } : spec.read.body ?? {};
+      return { status, body };
     }
     if (call.method === 'POST' && call.path.endsWith('/bucket')) {
       const create = spec.create ?? { status: 404 };
@@ -200,29 +199,55 @@ test('the import template emits the bucket only when the app has file columns', 
   assert.equal((JSON.parse(importTemplateJson({ plan: generateSchema(appOf(TEXT_DS)) })) as { components: Record<string, unknown[]> }).components.Stratus?.length, 0);
 });
 
-test('ensureSeedBucket: existing bucket takes no write, missing bucket is created once', async () => {
+test('ensureSeedBucket reads only the bucket list and creates only after proven absence', async () => {
   const seen: string[] = [];
   const rest: RestFn = async (call) => {
     seen.push(`${call.method} ${call.path}`);
-    if (call.path.endsWith(`/bucket/${BUCKET}`)) return { status: 200, body: { data: [{ bucket_name: BUCKET }] } };
-    return { status: 200, body: {} };
+    if (call.path.endsWith('/bucket')) return { status: 200, body: { data: [{ bucket_name: `${BUCKET}-other` }, { bucket_name: BUCKET }] } };
+    return { status: 500, body: {} };
   };
   assert.equal((await ensureSeedBucket(rest, PROJECT, BUCKET)).outcome, 'exists');
-  assert.deepEqual(seen, [`GET /baas/v1/project/${PROJECT}/bucket/${BUCKET}`]);
+  assert.deepEqual(seen, [`GET /baas/v1/project/${PROJECT}/bucket`]);
 
   const created: string[] = [];
   const missing: RestFn = async (call) => {
     created.push(`${call.method} ${call.path}`);
-    if (call.method === 'GET') return { status: 404, body: {} };
+    if (call.method === 'GET') return { status: 200, body: { data: [] } };
     assert.deepEqual(call.body, bucketCreateBody(BUCKET));
     return { status: 200, body: { status: 'success' } };
   };
   assert.equal((await ensureSeedBucket(missing, PROJECT, BUCKET)).outcome, 'created');
-  assert.deepEqual(created, [`GET /baas/v1/project/${PROJECT}/bucket/${BUCKET}`, `POST /baas/v1/project/${PROJECT}/bucket`]);
+  assert.deepEqual(created, [`GET /baas/v1/project/${PROJECT}/bucket`, `POST /baas/v1/project/${PROJECT}/bucket`]);
   assert.deepEqual(bucketCreateBody(BUCKET), {
     bucket_name: BUCKET,
     bucket_meta: { type: 'protected', versioning: false, caching: { status: false }, encryption: false, audit_consent: false },
   });
+});
+
+test('seed bucket list pagination finds exact names and refuses uncertain absence', async () => {
+  const paths: string[] = [];
+  const paged: RestFn = async ({ path }) => {
+    paths.push(path);
+    if (paths.length === 1) return { status: 200, body: { data: [{ bucket_name: `${BUCKET}-prefix` }], more_records: true, next_token: 'page 2' } };
+    return { status: 200, body: JSON.stringify({ data: [{ bucket_name: BUCKET }] }) };
+  };
+  assert.equal((await ensureSeedBucket(paged, PROJECT, BUCKET)).outcome, 'exists');
+  assert.deepEqual(paths, [`/baas/v1/project/${PROJECT}/bucket`, `/baas/v1/project/${PROJECT}/bucket?next_token=page%202`]);
+
+  for (const badList of [
+    async () => ({ status: 403, body: { message: 'denied' } }),
+    async () => ({ status: 200, body: '{not-json' }),
+    async () => ({ status: 200, body: { data: 'not a list' } }),
+    async () => ({ status: 200, body: { data: [], more_records: true } }),
+  ]) {
+    let creates = 0;
+    const result = await ensureSeedBucket(async ({ method }) => {
+      if (method === 'POST') creates++;
+      return badList();
+    }, PROJECT, BUCKET);
+    assert.equal(result.outcome, 'failed');
+    assert.equal(creates, 0);
+  }
 });
 
 test('a missing bucket is created once, then the file cells upload', async (t) => {
@@ -234,7 +259,7 @@ test('a missing bucket is created once, then the file cells upload', async (t) =
   assert.deepEqual(
     bucketCalls.map((call) => `${call.method} ${call.path}`),
     // The first GET is the Stratus first-use gate probe a file-bearing seed runs before any write.
-    [`GET /baas/v1/project/${PROJECT}/bucket`, `GET /baas/v1/project/${PROJECT}/bucket/${BUCKET}`, `POST /baas/v1/project/${PROJECT}/bucket`],
+    [`GET /baas/v1/project/${PROJECT}/bucket`, `GET /baas/v1/project/${PROJECT}/bucket`, `POST /baas/v1/project/${PROJECT}/bucket`],
   );
   assert.deepEqual(bucketCalls[2]?.body, bucketCreateBody(BUCKET));
   const uploads = cap.fetched.filter((call) => call.url.includes('zohostratus'));
@@ -250,6 +275,7 @@ test('an existing bucket skips the create and the load still uploads', async (t)
   const code = await seedMigrateCli(confirmArgs(layout), cap.io);
   assert.equal(code, 0, cap.stderr());
   assert.equal(cap.restCalls.filter((call) => call.method === 'POST' && call.path.endsWith('/bucket')).length, 0);
+  assert.equal(cap.restCalls.some((call) => call.path.includes('/bucket/')), false);
   assert.ok(cap.fetched.some((call) => call.url.includes('zohostratus')));
 });
 
