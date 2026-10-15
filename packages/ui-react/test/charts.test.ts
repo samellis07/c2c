@@ -7,9 +7,9 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
-import { compileCriteria } from '../src/charts.js';
+import { compileCriteria, decodeEntities } from '../src/charts.js';
 import { TEMPLATE_DIR, generateReactApp, reactAppSpec, writeReactApp } from '../src/index.js';
-import { chartSeries, matches, metricValue, type Day } from '../template/lib/c2c-ui/charts/data.js';
+import { chartSeries, dayOf, matches, metricValue, textOf, todayIn, valueAt, type Day } from '../template/lib/c2c-ui/charts/data.js';
 import type { ChartSpec, MetricSpec, PageElement } from '../template/lib/c2c-ui/types.js';
 
 /** ZML inside a page `Content="..."` literal: attribute quotes are single quotes, criteria quotes are entities. */
@@ -33,7 +33,7 @@ const ZML = [
   "</column></row></layout></zml>",
 ].join('');
 
-function source(): string {
+function source(zml: string = ZML): string {
   return `application "Shop"
 {
 \tform Add_Order
@@ -84,15 +84,15 @@ function source(): string {
 \t\tpage Dashboard
 \t\t{
 \t\t\tdisplayname = "Dashboard"
-\t\t\tContent="${ZML.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+\t\t\tContent="${zml.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
 \t\t}
 \t}
 }
 `;
 }
 
-function appOf(): App {
-  return deriveIr(parse(source()));
+function appOf(zml: string = ZML): App {
+  return deriveIr(parse(source(zml)));
 }
 
 function leaves(elements: PageElement[]): PageElement[] {
@@ -386,4 +386,63 @@ test('further values of a one-caption panel carry their own labels', () => {
   assert.equal(metric.extra.length, 1);
   const second = metric.extra[0] as MetricSpec & { label?: string };
   assert.equal(second.label, 'Count of records', 'the second value explains itself');
+});
+
+test('a page button or embed runs only an in-app route or an http(s) address; anything else is a TODO', () => {
+  const zml = [
+    "<zml><layout><row><column width='100%'>",
+    "<button text='Pay' url='javascript:alert(document.cookie)'/>",
+    "<button text='Help' url='https://help.example.test/orders'/>",
+    "<button action='OpenForm' componentLinkName='No_Such_Form' text='Ghost'/>",
+    "<embed title='Map' url='javascript:alert(1)'/>",
+    "<embed title='Docs' url='https://docs.example.test/'/>",
+    "<report elementName='Gone' linkName='No_Such_Report'/>",
+    "</column></row></layout></zml>",
+  ].join('');
+  const page = reactAppSpec(appOf(zml)).pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  const all = leaves(page.elements);
+  const hrefs = all.flatMap((el) => ('href' in el && typeof el.href === 'string' ? [el.href] : []));
+  assert.ok(hrefs.every((href) => !/^javascript:/i.test(href)), `no script address is drawn: ${hrefs.join(', ')}`);
+  assert.ok(all.some((el) => el.kind === 'button' && el.label === 'Help' && el.href === 'https://help.example.test/orders'));
+  const reasons = all.flatMap((el) => (el.kind === 'todo' ? [el.reason] : []));
+  assert.ok(reasons.includes('the Pay button has no action the app can run'), reasons.join(' | '));
+  assert.ok(reasons.includes('the Ghost button has no action the app can run'), 'a button to a form outside the app is a TODO');
+  assert.ok(reasons.includes('the No_Such_Report report is not part of the app'));
+  assert.ok(!all.some((el) => el.kind === 'link' && /^javascript:/i.test(el.href)), 'a script embed is never a link');
+});
+
+test('entity decoding keeps an out-of-range or zero code point as written', () => {
+  assert.equal(decodeEntities('&#65;&#x42;&lt;&AMP;'), 'AB<&');
+  assert.equal(decodeEntities('&#0;&#x110000;&bogus;'), '&#0;&#x110000;&bogus;');
+});
+
+test('chart data reads lookup paths, display values and the app time zone', () => {
+  const row = { Customer: { display_value: 'Acme', Region: 'North' }, Tags: ['a', { label: 'b' }], Flag: true, Note: { x: 'one', y: 2 } };
+  assert.equal(valueAt(row, 'Customer.Region'), 'North');
+  assert.deepEqual(valueAt(row, 'Customer.Missing'), row.Customer, 'a lookup without the sub-field falls back to the lookup');
+  assert.equal(valueAt(row, 'Missing'), undefined);
+  assert.equal(valueAt(row, ''), undefined);
+  assert.equal(textOf(row.Customer), 'Acme');
+  assert.equal(textOf(row.Tags), 'a, b');
+  assert.equal(textOf(row.Flag), 'true');
+  assert.equal(textOf(row.Note), 'one 2');
+  assert.equal(dayOf('31-Foo-2026'), null, 'an unknown month name is no day');
+  assert.equal(dayOf('2026-13-01'), null, 'month 13 is no day');
+  const now = new Date(Date.UTC(2026, 9, 10, 23, 30));
+  assert.deepEqual(todayIn('Asia/Kolkata', now), { y: 2026, m: 10, d: 11 });
+  const local = { y: now.getFullYear(), m: now.getMonth() + 1, d: now.getDate() };
+  assert.deepEqual(todayIn('Not/AZone', now), local, 'an unknown zone falls back to the browser day');
+  assert.deepEqual(todayIn(undefined, now), local);
+});
+
+test('a field-to-field clause compares numbers, then dates, then text', () => {
+  const today = TODAY;
+  assert.equal(matches({ A: '1,000', B: 999 }, { field: 'A', op: 'gt', ref: 'B' }, today), true);
+  assert.equal(matches({ A: '10-Oct-2026', B: '2026-10-09' }, { field: 'A', op: 'gt', ref: 'B' }, today), true, 'dates compare by day, not text');
+  assert.equal(matches({ A: 'pear', B: 'apple' }, { field: 'A', op: 'gt', ref: 'B' }, today), true);
+  assert.equal(matches({ A: 'pear', B: 'pear' }, { field: 'A', op: 'ne', ref: 'B' }, today), false);
+  assert.equal(matches({ D: '2026-01-05' }, { field: 'D', op: 'period', when: 'this', unit: 'year' }, today), true);
+  assert.equal(matches({ D: '2025-01-05' }, { field: 'D', op: 'period', when: 'last', unit: 'year' }, today), true);
+  assert.equal(matches({ D: 'soon' }, { field: 'D', op: 'period', when: 'this', unit: 'year' }, today), false);
 });
