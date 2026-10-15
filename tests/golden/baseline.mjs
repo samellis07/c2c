@@ -7,7 +7,6 @@
  * Removals (a listed id that now matches) are applied. Additions are refused
  * unless --allow-add is passed. Prints the added and removed ids either way.
  */
-import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -20,6 +19,7 @@ import {
   loadBaselineIds,
   loadVectorBundle,
   planBaselineUpdate,
+  readTextIfPresent,
   vectorStatus,
   writeBaseline,
 } from './parity.mjs';
@@ -60,7 +60,7 @@ if (plan.refused) {
 
 const nextText = formatBaseline(plan.next);
 const file = join(root, BASELINE_FILE);
-const current = existsSync(file) ? readFileSync(file, 'utf8') : null;
+const current = readTextIfPresent(file);
 if (current === nextText) {
   console.log(`${BASELINE_FILE} unchanged (${plan.next.length} ids)`);
 } else {

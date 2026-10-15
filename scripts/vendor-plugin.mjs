@@ -22,11 +22,99 @@
  * id. It does not rewrite compiled files.
  */
 import { createHash } from 'node:crypto';
-import { copyFileSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, copyFileSync, fchmodSync, fstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { scanDirectory, scanText } from './check-hygiene.mjs';
 import { SHIPPED_LICENSES } from './licenses/allowed-licenses.mjs';
+
+/**
+ * Open `p` without following a final symlink, for a classify-then-read on one
+ * descriptor. Returns null where `lstat(p, { throwIfNoEntry: false })` would
+ * report nothing or a symlink (ENOENT, ELOOP) or a socket (ENXIO,
+ * EOPNOTSUPP); any other error throws, as lstat did. O_NONBLOCK keeps a FIFO
+ * from blocking the open; callers fstat and refuse it as not a regular file.
+ */
+function openNoFollow(p) {
+  try {
+    return openSync(p, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  } catch (err) {
+    const code = err?.code;
+    if (code === 'ENOENT' || code === 'ELOOP' || code === 'ENXIO' || code === 'EOPNOTSUPP') return null;
+    throw err;
+  }
+}
+
+/** True when `p` is a real directory (a symlink to one is not), checked on a descriptor. */
+function isRealDirectory(p) {
+  const fd = openNoFollow(p);
+  if (fd === null) return false;
+  try {
+    return fstatSync(fd).isDirectory();
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** True when `p` is a regular file (a symlink to one is not), checked on a descriptor. */
+function isRegularFile(p) {
+  const fd = openNoFollow(p);
+  if (fd === null) return false;
+  try {
+    return fstatSync(fd).isFile();
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** The contents of `p` when it is a regular file (not a symlink), read on the descriptor that was checked; otherwise null. */
+function readRegularFile(p, encoding) {
+  const fd = openNoFollow(p);
+  if (fd === null) return null;
+  try {
+    return fstatSync(fd).isFile() ? readFileSync(fd, encoding) : null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Open a path whose symlink is refused with `symlinkMessage`: O_NOFOLLOW makes
+ * the open itself the symlink check, so a swap after a listing or a check
+ * cannot slip a link through. Returns null for a socket (it cannot be
+ * opened); callers fstat the descriptor for everything else.
+ */
+function openRefusingSymlink(p, symlinkMessage) {
+  try {
+    return openSync(p, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  } catch (err) {
+    if (err?.code === 'ELOOP') throw new Error(symlinkMessage);
+    if (err?.code === 'ENXIO' || err?.code === 'EOPNOTSUPP') return null;
+    throw err;
+  }
+}
+
+/** A walked entry the listing reported as a regular file, opened; null if it is no longer one. */
+function openListedFile(p, symlinkMessage) {
+  const fd = openRefusingSymlink(p, symlinkMessage);
+  if (fd === null) return null;
+  if (fstatSync(fd).isFile()) return fd;
+  closeSync(fd);
+  return null;
+}
+
+const byName = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+
+/** copyFileSync from an open descriptor: same bytes, same permission bits. `bytes` is the descriptor's contents when already read. */
+function copyFromDescriptor(fd, to, bytes = readFileSync(fd)) {
+  const out = openSync(to, 'w');
+  try {
+    writeFileSync(out, bytes);
+    fchmodSync(out, fstatSync(fd).mode & 0o7777);
+  } finally {
+    closeSync(out);
+  }
+}
 
 const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -47,13 +135,13 @@ function readJson(file) {
 /** Scan `<root>/plugin` with the generic hygiene rules. */
 export function pluginHygieneProblems(root, { requireVendor = false, scanDir, ignore, skipSegments } = {}) {
   const pluginDir = scanDir ?? path.join(root, 'plugin');
-  if (!lstatSync(pluginDir, { throwIfNoEntry: false })?.isDirectory()) {
+  if (!isRealDirectory(pluginDir)) {
     return ['plugin-hygiene: plugin/ is missing'];
   }
   const errors = [];
   if (requireVendor && !scanDir) {
     const vendorDist = path.join(pluginDir, 'vendor/c2c/dist');
-    if (!lstatSync(vendorDist, { throwIfNoEntry: false })?.isDirectory()) {
+    if (!isRealDirectory(vendorDist)) {
       errors.push('plugin-hygiene: plugin/vendor/c2c/dist is missing');
     }
   }
@@ -85,25 +173,32 @@ export function sanitizeVendored(text) {
 function copyRuntimeDist(distDir, destDist) {
   const walk = (rel) => {
     const abs = rel ? path.join(distDir, rel) : distDir;
-    for (const name of readdirSync(abs)) {
+    for (const entry of readdirSync(abs, { withFileTypes: true })) {
+      const name = entry.name;
       if (name === 'test') continue;
       const child = rel ? `${rel}/${name}` : name;
       const from = path.join(distDir, child);
-      const info = lstatSync(from);
-      if (info.isSymbolicLink()) throw new Error(`vendor-plugin: refusing to vendor symlink ${child}`);
-      if (info.isDirectory()) {
+      const symlinkMessage = `vendor-plugin: refusing to vendor symlink ${child}`;
+      if (entry.isSymbolicLink()) throw new Error(symlinkMessage);
+      if (entry.isDirectory()) {
         walk(child);
         continue;
       }
-      if (!info.isFile() || name.endsWith('.map')) continue;
-      const target = path.join(destDist, child);
-      mkdirSync(path.dirname(target), { recursive: true });
-      if (name.endsWith('.js') || name.endsWith('.d.ts') || name.endsWith('.json')) {
-        const cleaned = sanitizeVendored(readFileSync(from, 'utf8'));
-        refuseIfUnhygienic(child, cleaned);
-        writeFileSync(target, cleaned);
-      } else {
-        copyFileSync(from, target);
+      if (!entry.isFile() || name.endsWith('.map')) continue;
+      const fd = openListedFile(from, symlinkMessage);
+      if (fd === null) continue;
+      try {
+        const target = path.join(destDist, child);
+        mkdirSync(path.dirname(target), { recursive: true });
+        if (name.endsWith('.js') || name.endsWith('.d.ts') || name.endsWith('.json')) {
+          const cleaned = sanitizeVendored(readFileSync(fd, 'utf8'));
+          refuseIfUnhygienic(child, cleaned);
+          writeFileSync(target, cleaned);
+        } else {
+          copyFromDescriptor(fd, target);
+        }
+      } finally {
+        closeSync(fd);
       }
     }
   };
@@ -132,16 +227,22 @@ function copyFunctionRuntime(root, out) {
   const target = path.join(out, 'dist/deploy/src/fn');
   const walk = (rel) => {
     const dir = rel ? path.join(source, rel) : source;
-    for (const name of readdirSync(dir)) {
-      const child = rel ? `${rel}/${name}` : name;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const child = rel ? `${rel}/${entry.name}` : entry.name;
       const from = path.join(source, child);
-      const info = lstatSync(from);
-      if (info.isSymbolicLink()) throw new Error(`vendor-plugin: refusing to vendor symlink ${child}`);
-      if (info.isDirectory()) walk(child);
-      else if (info.isFile()) {
-        const dest = path.join(target, child);
-        mkdirSync(path.dirname(dest), { recursive: true });
-        copyFileSync(from, dest);
+      const symlinkMessage = `vendor-plugin: refusing to vendor symlink ${child}`;
+      if (entry.isSymbolicLink()) throw new Error(symlinkMessage);
+      if (entry.isDirectory()) walk(child);
+      else if (entry.isFile()) {
+        const fd = openListedFile(from, symlinkMessage);
+        if (fd === null) continue;
+        try {
+          const dest = path.join(target, child);
+          mkdirSync(path.dirname(dest), { recursive: true });
+          copyFromDescriptor(fd, dest);
+        } finally {
+          closeSync(fd);
+        }
       }
     }
   };
@@ -150,7 +251,16 @@ function copyFunctionRuntime(root, out) {
 
 function ensureMatrixSnapshot(root, outDir) {
   const dest = path.join(outDir, 'dist/cli/data/feature-matrix-v4.snapshot.json');
-  if (lstatSync(dest, { throwIfNoEntry: false })?.isFile()) return;
+  const existing = openNoFollow(dest);
+  if (existing !== null) {
+    let keep;
+    try {
+      keep = fstatSync(existing).isFile();
+    } finally {
+      closeSync(existing);
+    }
+    if (keep) return;
+  }
   const source = path.join(root, 'packages/cli/data/feature-matrix-v4.snapshot.json');
   mkdirSync(path.dirname(dest), { recursive: true });
   const cleaned = sanitizeVendored(readFileSync(source, 'utf8'));
@@ -209,14 +319,16 @@ const LICENSE_FILE = /^(licen[cs]e|copying|notice|thirdpartynoticetext)([-.].*)?
 /** Every installed package root under a node_modules dir, nested ones included, in path order. */
 function packageRoots(nodeModulesDir, prefix = '') {
   const roots = [];
-  const names = lstatSync(nodeModulesDir, { throwIfNoEntry: false })?.isDirectory() ? readdirSync(nodeModulesDir).sort() : [];
-  for (const name of names) {
-    if (name.startsWith('.') || !lstatSync(path.join(nodeModulesDir, name)).isDirectory()) continue;
+  const entries = isRealDirectory(nodeModulesDir) ? readdirSync(nodeModulesDir, { withFileTypes: true }).sort(byName) : [];
+  for (const entry of entries) {
+    const name = entry.name;
+    if (name.startsWith('.') || !entry.isDirectory()) continue;
     const rels = name.startsWith('@') ? readdirSync(path.join(nodeModulesDir, name)).sort().map((inner) => `${name}/${inner}`) : [name];
     for (const rel of rels) {
       const dir = path.join(nodeModulesDir, rel);
-      if (!lstatSync(path.join(dir, 'package.json'), { throwIfNoEntry: false })?.isFile()) continue;
-      roots.push({ id: `${prefix}${rel}`, dir });
+      const pkgText = readRegularFile(path.join(dir, 'package.json'), 'utf8');
+      if (pkgText === null) continue;
+      roots.push({ id: `${prefix}${rel}`, dir, pkg: JSON.parse(pkgText) });
       roots.push(...packageRoots(path.join(dir, 'node_modules'), `${prefix}${rel}/node_modules/`));
     }
   }
@@ -238,18 +350,26 @@ export function shippedLicenses(
   nodeModulesDir,
   { textsDir = path.join(repoRoot, 'scripts/licenses'), exceptionsFile = path.join(repoRoot, 'scripts/licenses/exceptions.json') } = {},
 ) {
-  const exceptions = lstatSync(exceptionsFile, { throwIfNoEntry: false })?.isFile() ? readJson(exceptionsFile) : [];
+  const exceptionsText = readRegularFile(exceptionsFile, 'utf8');
+  const exceptions = exceptionsText === null ? [] : JSON.parse(exceptionsText);
   const packages = [];
   const problems = [];
   const pending = [];
-  for (const { id, dir } of packageRoots(nodeModulesDir)) {
-    const pkg = readJson(path.join(dir, 'package.json'));
+  for (const { id, dir, pkg } of packageRoots(nodeModulesDir)) {
     const license = typeof pkg.license === 'string' ? pkg.license : undefined;
     const fallback = `${String(pkg.name).replace('/', '__')}-${pkg.version}.txt`;
-    const files = readdirSync(dir).filter((name) => LICENSE_FILE.test(name) && lstatSync(path.join(dir, name)).isFile()).sort();
-    let texts = files.map((name) => ({ source: `node_modules/${id}/${name}`, text: readFileSync(path.join(dir, name), 'utf8') }));
-    if (!texts.length && lstatSync(path.join(textsDir, fallback), { throwIfNoEntry: false })?.isFile()) {
-      texts = [{ source: `upstream repository (the published package ships no licence file)`, text: readFileSync(path.join(textsDir, fallback), 'utf8') }];
+    const files = readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => LICENSE_FILE.test(entry.name) && entry.isFile())
+      .map((entry) => entry.name)
+      .sort();
+    const texts = [];
+    for (const name of files) {
+      const text = readRegularFile(path.join(dir, name), 'utf8');
+      if (text !== null) texts.push({ source: `node_modules/${id}/${name}`, text });
+    }
+    if (!texts.length) {
+      const text = readRegularFile(path.join(textsDir, fallback), 'utf8');
+      if (text !== null) texts.push({ source: `upstream repository (the published package ships no licence file)`, text });
     }
     if (!license || !SHIPPED_LICENSES.has(license)) {
       const exception = exceptions.find((entry) => entry.package === pkg.name && entry.version === pkg.version && entry.license === license);
@@ -301,26 +421,32 @@ const SANITIZED = /\.(js|mjs|cjs|json|ts|tsx|css|html|md|txt)$/;
 
 function copySourceAssets(root, outDir) {
   const copy = (from, to, label) => {
-    const info = lstatSync(from);
-    if (info.isSymbolicLink()) throw new Error(`vendor-plugin: refusing to vendor symlink ${label}`);
-    if (info.isDirectory()) {
-      if (!label.startsWith('node_modules/') && (path.basename(from) === 'node_modules' || path.basename(from) === 'dist')) return;
-      for (const name of readdirSync(from)) copy(path.join(from, name), path.join(to, name), `${label}/${name}`);
-      return;
-    }
-    if (!info.isFile()) throw new Error(`vendor-plugin: runtime asset ${label} is not a file`);
-    mkdirSync(path.dirname(to), { recursive: true });
-    if (label.startsWith('node_modules/')) {
-      // An installed package ships byte-identical; rewriting it would corrupt it.
-      copyFileSync(from, to);
-      return;
-    }
-    if (SANITIZED.test(label) || !readFileSync(from).includes(0)) {
-      const cleaned = sanitizeVendored(readFileSync(from, 'utf8'));
-      refuseIfUnhygienic(label, cleaned);
-      writeFileSync(to, cleaned);
-    } else {
-      copyFileSync(from, to);
+    const fd = openRefusingSymlink(from, `vendor-plugin: refusing to vendor symlink ${label}`);
+    if (fd === null) throw new Error(`vendor-plugin: runtime asset ${label} is not a file`);
+    try {
+      const info = fstatSync(fd);
+      if (info.isDirectory()) {
+        if (!label.startsWith('node_modules/') && (path.basename(from) === 'node_modules' || path.basename(from) === 'dist')) return;
+        for (const name of readdirSync(from)) copy(path.join(from, name), path.join(to, name), `${label}/${name}`);
+        return;
+      }
+      if (!info.isFile()) throw new Error(`vendor-plugin: runtime asset ${label} is not a file`);
+      mkdirSync(path.dirname(to), { recursive: true });
+      if (label.startsWith('node_modules/')) {
+        // An installed package ships byte-identical; rewriting it would corrupt it.
+        copyFromDescriptor(fd, to);
+        return;
+      }
+      const bytes = readFileSync(fd);
+      if (SANITIZED.test(label) || !bytes.includes(0)) {
+        const cleaned = sanitizeVendored(bytes.toString('utf8'));
+        refuseIfUnhygienic(label, cleaned);
+        writeFileSync(to, cleaned);
+      } else {
+        copyFromDescriptor(fd, to, bytes);
+      }
+    } finally {
+      closeSync(fd);
     }
   };
   for (const rel of SOURCE_ASSETS) {
@@ -328,7 +454,7 @@ function copySourceAssets(root, outDir) {
   }
   for (const name of runtimePackageNames(root)) {
     const from = path.join(root, 'node_modules', name);
-    if (!lstatSync(from, { throwIfNoEntry: false })?.isDirectory()) {
+    if (!isRealDirectory(from)) {
       throw new Error(`vendor-plugin: runtime package node_modules/${name} is missing. Run npm ci first.`);
     }
     copy(from, path.join(outDir, 'node_modules', name), `node_modules/${name}`);
@@ -340,32 +466,38 @@ export function manifestText(dir) {
   const files = [];
   const walk = (rel) => {
     const abs = rel ? path.join(dir, rel) : dir;
-    for (const name of readdirSync(abs)) {
+    for (const entry of readdirSync(abs, { withFileTypes: true })) {
+      const name = entry.name;
       if (!rel && name === 'MANIFEST.sha256') continue;
       const child = rel ? `${rel}/${name}` : name;
-      const info = lstatSync(path.join(dir, child));
-      if (info.isSymbolicLink()) throw new Error(`vendor-plugin: symlink in vendor tree ${child}`);
-      if (info.isDirectory()) walk(child);
-      else if (info.isFile()) files.push(child);
-      else throw new Error(`vendor-plugin: not a regular file ${child}`);
+      const symlinkMessage = `vendor-plugin: symlink in vendor tree ${child}`;
+      if (entry.isSymbolicLink()) throw new Error(symlinkMessage);
+      if (entry.isDirectory()) {
+        walk(child);
+        continue;
+      }
+      const fd = entry.isFile() ? openListedFile(path.join(dir, child), symlinkMessage) : null;
+      if (fd === null) throw new Error(`vendor-plugin: not a regular file ${child}`);
+      try {
+        files.push({ name: child, hash: createHash('sha256').update(readFileSync(fd)).digest('hex') });
+      } finally {
+        closeSync(fd);
+      }
     }
   };
   walk('');
-  files.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  const lines = files.map((rel) => {
-    const hash = createHash('sha256').update(readFileSync(path.join(dir, rel))).digest('hex');
-    return `${hash}  ${rel}`;
-  });
+  files.sort(byName);
+  const lines = files.map(({ name, hash }) => `${hash}  ${name}`);
   return `${lines.join('\n')}\n`;
 }
 
 export function vendorPlugin({ root = repoRoot, outDir } = {}) {
   const distDir = path.join(root, 'dist');
   const out = outDir ?? path.join(root, 'plugin/vendor/c2c');
-  if (!lstatSync(distDir, { throwIfNoEntry: false })?.isDirectory()) {
+  if (!isRealDirectory(distDir)) {
     throw new Error('vendor-plugin: dist/ is missing. Run npm run build first.');
   }
-  if (!lstatSync(path.join(distDir, 'cli/src/c2c.js'), { throwIfNoEntry: false })?.isFile()) {
+  if (!isRegularFile(path.join(distDir, 'cli/src/c2c.js'))) {
     throw new Error('vendor-plugin: dist/cli/src/c2c.js is missing. Run npm run build first.');
   }
   rmSync(out, { recursive: true, force: true });
@@ -432,7 +564,10 @@ export function versionProblems(root, { requireVendor = false } = {}) {
   const skillsDir = path.join(root, 'plugin/skills');
   let skills = [];
   try {
-    skills = readdirSync(skillsDir).filter((name) => lstatSync(path.join(skillsDir, name)).isDirectory()).sort();
+    skills = readdirSync(skillsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
   } catch {
     errors.push(`plugin/skills is missing != package.json ${expected}`);
   }
@@ -449,11 +584,11 @@ export function versionProblems(root, { requireVendor = false } = {}) {
   }
 
   const versionFile = path.join(root, 'plugin/vendor/c2c/VERSION');
-  const versionInfo = lstatSync(versionFile, { throwIfNoEntry: false });
-  if (!versionInfo?.isFile()) {
+  const versionText = readRegularFile(versionFile, 'utf8');
+  if (versionText === null) {
     if (requireVendor) errors.push(`plugin/vendor/c2c/VERSION missing != package.json ${expected}`);
   } else {
-    compare('plugin/vendor/c2c/VERSION', readFileSync(versionFile, 'utf8').trim());
+    compare('plugin/vendor/c2c/VERSION', versionText.trim());
   }
   return errors;
 }

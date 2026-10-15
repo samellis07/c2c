@@ -14,7 +14,7 @@
  * Two quoted vendor addresses are allowed because the product repeats them.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -188,17 +188,16 @@ export function scanDirectory(dir, { ignore = [], skipSegments = [] } = {}) {
   const walk = (rel) => {
     if (rel && skipped(rel, ignore, skipSegments)) return;
     const abs = rel ? path.join(dir, rel) : dir;
-    for (const name of readdirSync(abs)) {
-      const child = rel ? `${rel}/${name}` : name;
+    for (const entry of readdirSync(abs, { withFileTypes: true })) {
+      const child = rel ? `${rel}/${entry.name}` : entry.name;
       if (skipped(child, ignore, skipSegments)) continue;
-      const info = lstatSync(path.join(dir, child));
-      if (info.isSymbolicLink()) throw new Error(`check-hygiene: symlink ${child}`);
-      if (info.isDirectory()) {
+      if (entry.isSymbolicLink()) throw new Error(`check-hygiene: symlink ${child}`);
+      if (entry.isDirectory()) {
         walk(child);
         continue;
       }
-      if (!info.isFile()) throw new Error(`check-hygiene: not a regular file ${child}`);
-      if (BINARY.test(name)) continue;
+      if (!entry.isFile()) throw new Error(`check-hygiene: not a regular file ${child}`);
+      if (BINARY.test(entry.name)) continue;
       const buf = readFileSync(path.join(dir, child));
       if (buf.includes(0)) continue;
       hits.push(...scanText(child, buf.toString('utf8')));
@@ -208,8 +207,8 @@ export function scanDirectory(dir, { ignore = [], skipSegments = [] } = {}) {
   return hits;
 }
 
-function trackedFiles() {
-  const raw = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: root });
+function trackedFiles(dir) {
+  const raw = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: dir });
   const files = [];
   let start = 0;
   for (let i = 0; i <= raw.length; i++) {
@@ -225,12 +224,17 @@ function trackedFiles() {
   return files;
 }
 
-export function scanTree() {
+export function scanTree(dir = root) {
   const hits = [];
-  for (const file of trackedFiles()) {
+  for (const file of trackedFiles(dir)) {
     // A tracked file deleted in the working tree is not part of the tree.
-    if (!existsSync(path.join(root, file))) continue;
-    const buf = readFileSync(path.join(root, file));
+    let buf;
+    try {
+      buf = readFileSync(path.join(dir, file));
+    } catch (err) {
+      if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR' || err?.code === 'ELOOP') continue;
+      throw err;
+    }
     if (buf.includes(0)) continue;
     hits.push(...scanText(file, buf.toString('utf8')));
   }
