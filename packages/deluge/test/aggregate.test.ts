@@ -231,3 +231,98 @@ test('a record-typed parameter guard `if (faculty_Obj.count() != 0)` needs no Da
     /\(faculty_Obj \? \(Array\.isArray\(faculty_Obj\) \? faculty_Obj\.length : 1\) : 0\)/,
   );
 });
+
+const facultySeed = {
+  Faculty: [
+    { ROWID: '1', Name: 'a' },
+    { ROWID: '2', Name: 'b' },
+    { ROWID: '3', Name: 'c' },
+  ],
+};
+
+async function evalSeeded(src: string, options?: { formNames?: string[] }) {
+  const rt = createRuntime({ dryRun: true, appTimeZone: 'UTC', seed: facultySeed });
+  const t = translate(src, options);
+  const body = new Function('shim', 'ctx', `return (async () => {\n${t.server}\nreturn out;\n})();`);
+  const value = await body(rt.shim, rt.context({ record: {} }));
+  return { value, server: t.server, todos: t.todos.map((item) => item.construct), transcript: rt.transcript };
+}
+
+test('count() on a fetch local is the number of matching rows', async () => {
+  const zero = await evalSeeded('faculty_Obj = Faculty[ID == 99];\nout = faculty_Obj.count();');
+  const one = await evalSeeded('faculty_Obj = Faculty[ID == 2];\nout = faculty_Obj.count();');
+  const three = await evalSeeded('faculty_Obj = Faculty[ID != 0];\nout = faculty_Obj.count();');
+  assert.equal(zero.value, 0);
+  assert.equal(one.value, 1);
+  assert.equal(three.value, 3);
+  for (const result of [zero, one, three]) {
+    assert.deepEqual(result.todos, []);
+    assert.match(result.server, /shim\.datastore\.aggregate\(ctx, faculty_Obj, "count", undefined\)/);
+    assert.equal(result.server.match(/shim\.datastore\.query\(/g)?.length, 1);
+    assert.deepEqual(result.transcript.map((entry) => entry.op), ['aggregate']);
+  }
+
+  const eq1 = await evalSeeded('faculty_Obj = Faculty[ID == 2];\nif(faculty_Obj.count() == 1) { out = "yes"; } else { out = "no"; }');
+  const eq1many = await evalSeeded('faculty_Obj = Faculty[ID != 0];\nif(faculty_Obj.count() == 1) { out = "yes"; } else { out = "no"; }');
+  const ne0 = await evalSeeded('faculty_Obj = Faculty[ID != 0];\nif(faculty_Obj.count() != 0) { out = "yes"; } else { out = "no"; }');
+  const ne0none = await evalSeeded('faculty_Obj = Faculty[ID == 99];\nif(faculty_Obj.count() != 0) { out = "yes"; } else { out = "no"; }');
+  assert.equal(eq1.value, 'yes');
+  assert.equal(eq1many.value, 'no');
+  assert.equal(ne0.value, 'yes');
+  assert.equal(ne0none.value, 'no');
+
+  const text = translate('localStringVar = "x";\nout = localStringVar.count();');
+  assert.match(text.server, /shim\.todo\(ctx, "method:count"\)/);
+  assert.doesNotMatch(text.server, /shim\.datastore\.aggregate/);
+  assert.ok(text.todos.some((item) => item.construct === 'method:count'));
+});
+
+test('count() on a row binding counts the fetch it was given', async () => {
+  const opts = { rowNames: ['faculty_Obj'] };
+  const t = translate('out = faculty_Obj.count();', opts);
+  assert.ok(!t.todos.some((item) => item.construct === 'method:count'));
+  assert.match(t.server, /shim\.datastore\.aggregate\(ctx, faculty_Obj, "count", undefined\)/);
+  assert.doesNotMatch(t.server, /shim\.datastore\.query\(/);
+
+  const rt = createRuntime({ dryRun: true, appTimeZone: 'UTC', seed: facultySeed });
+  let aggregates = 0;
+  const orig = rt.shim.datastore.aggregate.bind(rt.shim.datastore);
+  rt.shim.datastore.aggregate = async (ctx, query, fn, field) => {
+    aggregates += 1;
+    return orig(ctx, query, fn, field);
+  };
+  const ctx = rt.context({ record: {} });
+  const run = async (src: string, arg: unknown) => {
+    const translated = translate(src, opts);
+    const body = new Function('shim', 'ctx', 'faculty_Obj', `return (async () => {\n${translated.server}\nreturn out;\n})();`);
+    return body(rt.shim, ctx, arg);
+  };
+  const queryFor = (criteria: { op: '==' | '!='; field: string; value: number }) => rt.shim.datastore.query(ctx, 'Faculty', criteria);
+
+  aggregates = 0;
+  assert.equal(await run('out = faculty_Obj.count();', queryFor({ op: '==', field: 'ID', value: 99 })), 0);
+  assert.equal(aggregates, 1);
+  aggregates = 0;
+  assert.equal(await run('out = faculty_Obj.count();', queryFor({ op: '==', field: 'ID', value: 2 })), 1);
+  assert.equal(aggregates, 1);
+  aggregates = 0;
+  assert.equal(await run('out = faculty_Obj.count();', queryFor({ op: '!=', field: 'ID', value: 0 })), 3);
+  assert.equal(aggregates, 1);
+
+  aggregates = 0;
+  assert.equal(await run('out = faculty_Obj.count();', null), 0);
+  assert.equal(await run('out = faculty_Obj.count();', { ID: 2 }), 1);
+  assert.equal(await run('out = faculty_Obj.count();', [{ ID: 1 }, { ID: 2 }, { ID: 3 }]), 3);
+  assert.equal(aggregates, 0);
+
+  assert.equal(await run('if(faculty_Obj.count() == 1) { out = "yes"; } else { out = "no"; }', queryFor({ op: '==', field: 'ID', value: 2 })), 'yes');
+  assert.equal(await run('if(faculty_Obj.count() == 1) { out = "yes"; } else { out = "no"; }', queryFor({ op: '!=', field: 'ID', value: 0 })), 'no');
+  assert.equal(await run('if(faculty_Obj.count() != 0) { out = "yes"; } else { out = "no"; }', queryFor({ op: '!=', field: 'ID', value: 0 })), 'yes');
+  assert.equal(await run('if(faculty_Obj.count() != 0) { out = "yes"; } else { out = "no"; }', queryFor({ op: '==', field: 'ID', value: 99 })), 'no');
+
+  const text = translate('localStringVar = "x";\nout = localStringVar.count();', opts);
+  assert.match(text.server, /shim\.todo\(ctx, "method:count"\)/);
+  const reassigned = translate('faculty_Obj = "x";\nout = faculty_Obj.count();', opts);
+  assert.match(reassigned.server, /shim\.todo\(ctx, "method:count"\)/);
+  assert.doesNotMatch(reassigned.server, /shim\.datastore\.aggregate/);
+});

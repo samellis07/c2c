@@ -4307,6 +4307,18 @@ function callExpr(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fals
       const id = jsIdent(aliasRoot);
       return mergeFx(`(${id} ? (Array.isArray(${id}) ? ${id}.length : 1) : 0)`, [q], { shim: true });
     }
+    // A row binding (a form-typed parameter, or the current record) may be the
+    // fetch the caller passed or the rows that fetch already holds. Count those
+    // rows. Do not build another query.
+    // https://www.zoho.com/deluge/help/data-access/aggregate-records/count.html
+    if (obj.kind === 'name' && method === 'count' && scope.row.has(obj.name)) {
+      const id = jsIdent(obj.name);
+      return mergeFx(
+        `((${id} && ${id}.__query) ? await shim.datastore.aggregate(ctx, ${id}, "count", undefined) : (${id} ? (Array.isArray(${id}) ? ${id}.length : 1) : 0))`,
+        [q],
+        { shim: true },
+      );
+    }
     if (q.query || (obj.kind === 'name' && !scope.local.has(obj.name) && !scope.list.has(obj.name))) {
       const queryCode = q.query
         ? q.code
