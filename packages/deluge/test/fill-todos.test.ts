@@ -56,11 +56,11 @@ function sources(result: { files: { path: string; source: string }[] }): string 
 }
 
 /**
- * One expression hole on a vector-covered builtin: method:getDay (covering
- * call:subBusinessDay) has Creator vectors and they pass, so fills are acceptable.
+ * One expression hole on a vector-covered method: an unknown receiver leaves
+ * `getDay` untranslated, while Creator date vectors cover the method itself.
  * task:shareTo / call:unknownFunc holes have no coverage and are rejected.
  */
-function coveredApp(text = 'x = subBusinessDay(Calendar,0).getDay();'): App {
+function coveredApp(text = 'x = unknownCall().getDay();'): App {
   return app({
     workflows: [
       workflow({
@@ -265,7 +265,7 @@ test('an accepted fill replays byte-identically and a missing lock leaves output
   const plain = generate(demo);
   const task = collectTasks(demo).find((item) => item.role !== 'note');
   assert.ok(task);
-  assert.match(stripComments(task.sourceSpan.text), /subBusinessDay/);
+  assert.match(stripComments(task.sourceSpan.text), /getDay/);
   const dir = mkdtempSync(join(tmpdir(), 'c2c-replay-'));
   const lockPath = join(dir, 'c2c.lock.json');
   try {
@@ -299,7 +299,7 @@ test('a changed span is stale and a tampered key is an integrity failure', async
   try {
     await acceptTodo({ app: demo, taskId: task.id, fill: 'shim.input.get(ctx, "A")', lockPath });
     const lock = readLock(lockPath);
-    const moved = coveredApp('x = subBusinessDay(Other,1).getDay();');
+    const moved = coveredApp('x = anotherCall().getDay();');
     const stale: StaleFill[] = [];
     const out = generate(moved, { lock, stale });
     assert.equal(stale.length, 1);
@@ -334,7 +334,7 @@ test('dual emissions of one TODO take the same fill, and a note cannot be accept
         name: 'Approve',
         form: 'Orders',
         event: 'on approve',
-        deluge: { text: 'x = subBusinessDay(A,0).getDay();\ny = subBusinessDay(B,1).getDay();', span: { start: 8, end: 60 } },
+        deluge: { text: 'x = unknownCall().getDay();\ny = anotherCall().getDay();', span: { start: 8, end: 60 } },
         approvers: [{ key: 'Approver Field', value: 'Owner', span: { start: 1, end: 5 } }],
       }),
     ],
@@ -918,7 +918,7 @@ test('c2c fill-todos emit, accept, and report from the CLI', async () => {
       '\t\t\t\t{',
       '\t\t\t\ton success',
       '\t\t\t\t(',
-      '\t\t\t\t\tx = subBusinessDay(zoho.currentdate,0).getDay();',
+      '\t\t\t\t\tx = unknownCall().getDay();',
       '\t\t\t\t)',
       '\t\t\t\t}',
       '\t\t\t}',
@@ -1126,7 +1126,7 @@ test('fill limits name the cap and the measured value', () => {
 });
 
 test('accept refuses a fill over each cap and does not write the lock', async (t) => {
-  const demo = coveredApp('subBusinessDay(Calendar,0).getDay();');
+  const demo = coveredApp('unknownCall().getDay();');
   const task = collectTasks(demo).find((item) => item.role === 'statement' && item.construct === 'method:getDay');
   assert.ok(task);
   const dir = mkdtempSync(join(tmpdir(), 'c2c-fill-cap-'));
@@ -1146,7 +1146,7 @@ test('accept refuses a fill over each cap and does not write the lock', async (t
 });
 
 test('replay of an over-cap lock entry fails closed and leaves the hole unchanged', () => {
-  const demo = coveredApp('subBusinessDay(Calendar,0).getDay();');
+  const demo = coveredApp('unknownCall().getDay();');
   const task = collectTasks(demo).find((item) => item.role === 'statement' && item.construct === 'method:getDay');
   assert.ok(task);
   const fills = [
@@ -1166,7 +1166,7 @@ test('replay of an over-cap lock entry fails closed and leaves the hole unchange
 });
 
 test('accept takes a fill that meets each cap and replay splices it whole', async (t) => {
-  const demo = coveredApp('subBusinessDay(Calendar,0).getDay();');
+  const demo = coveredApp('unknownCall().getDay();');
   const task = collectTasks(demo).find((item) => item.role === 'statement' && item.construct === 'method:getDay');
   assert.ok(task);
   const dir = mkdtempSync(join(tmpdir(), 'c2c-fill-at-cap-'));

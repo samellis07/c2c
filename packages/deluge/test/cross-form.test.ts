@@ -189,9 +189,6 @@ test('a pair with no translation on either form stays a hole, and a different fu
   for (const src of [
     'return now();',
     'return today();',
-    'return edate("2020-01-01", 1);',
-    'return "2020-01-01".edate(1);',
-    'return subBusinessDay("2020-01-01", 1);',
     'return toText("12");',
     'return "12".toText();',
     'return toHex(255);',
