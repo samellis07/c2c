@@ -16,6 +16,7 @@ dist/quality/test
 dist/ui-score/test
 dist/doctor/test
 tests/matrix/matrix-check.test.mjs
+tests/docs/commands.test.mjs
 tests/plugin/hygiene.test.mjs
 tests/plugin/test-concurrency.test.mjs
 tests/plugin/links.test.mjs

@@ -1,8 +1,15 @@
 # c2c coverage vs the 95% bar
 
-A snapshot measurement of the Creator→Catalyst converter against the stated v1
-definition: **at least 95% of components convert and pass parity; 100% of the
-rest are flagged with a reason.**
+A dated snapshot measurement of the Creator→Catalyst converter against the
+stated v1 definition: **at least 95% of components convert and pass parity;
+100% of the rest are flagged with a reason.**
+
+This snapshot was produced by an internal measurement tool that is not part
+of this repository, so the numbers below are not reproducible from the
+public tree alone. The rules a row is classified by (`tools/matrix-check.mjs`
+and the feature-matrix schema) are shipped and testable here; the corpus
+sweep that applied them to the Creator feature inventory and produced these
+totals is not.
 
 ## Denominator and statuses
 
