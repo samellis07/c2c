@@ -1,5 +1,6 @@
 # Generated artifacts: merged by tools/merge-generated.sh (merge=c2c-generated).
-# The driver regenerates when the inputs are on the machine, else union-merges;
+# The driver union-merges and runs no code (regeneration only with
+# C2C_MERGE_REGENERATE=1);
 # `npm test` then fails stale until the documented regen command runs.
 # One-time setup per clone: bash tools/install-merge-driver.sh
 packages/determinism/test/manifests/*.sha256 merge=c2c-generated
