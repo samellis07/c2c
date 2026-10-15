@@ -125,7 +125,8 @@ function capture(env: NodeJS.ProcessEnv = { X_ZC_CREDENTIAL_PATH: SECRET }): {
       // files the deploy itself cannot supply.
       if (command === 'npm' && args[0] === 'run' && args[1] === 'build') {
         mkdirSync(join(opts.cwd, 'dist'), { recursive: true });
-        writeFileSync(join(opts.cwd, 'dist', 'index.html'), '<!doctype html>\n');
+        const sourceHtml = join(opts.cwd, 'index.html');
+        writeFileSync(join(opts.cwd, 'dist', 'index.html'), existsSync(sourceHtml) ? readFileSync(sourceHtml) : '<!doctype html>\n');
       }
       return { code: 0, stdout: '', stderr: '' } satisfies SpawnResult;
     },
@@ -257,8 +258,14 @@ test('--ui react --confirm installs, builds, rewrites the config and deploys web
     // The learned function base lands in the source config the build reads and
     // in the built dist/ the deploy uploads (rewritten after the clean build).
     const apiBase = 'https://c2c-widget-1001.development.catalystserverless.in/server/c2c_api';
+    const origin = 'https://c2c-widget-1001.development.catalystserverless.in';
     assert.match(readFileSync(join(out, 'web', 'public', 'c2c-config.js'), 'utf8'), new RegExp(`C2C_API_BASE = ${JSON.stringify(apiBase)}`));
     assert.match(readFileSync(join(out, 'web', 'dist', 'c2c-config.js'), 'utf8'), new RegExp(`C2C_API_BASE = ${JSON.stringify(apiBase)}`));
+    for (const rel of ['web/index.html', 'web/dist/index.html']) {
+      const html = readFileSync(join(out, rel), 'utf8');
+      assert.match(html, new RegExp(`connect-src 'self' ${origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), rel);
+      assert.doesNotMatch(html, /\*\.catalystserverless/, rel);
+    }
     const toml = readFileSync(join(out, 'web', 'dist', '.catalyst', 'slate-config.toml'), 'utf8');
     assert.match(toml, /framework = "static"/);
     assert.match(toml, /deployment_name = "default"/);
@@ -347,6 +354,21 @@ test('the old Slate service-closed CLI text remains a fallback with the console 
   }
 });
 
+test('--ui vanilla --confirm puts the learned function origin in the shell CSP', async () => {
+  const ds = writeDs();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-ui-out-'));
+  try {
+    const cap = capture();
+    const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--ui', 'vanilla', '--out', out], cap.io);
+    assert.equal(code, 0, `stdout:\n${cap.stdout()}\nstderr:\n${cap.stderr()}`);
+    const html = readFileSync(join(out, 'slate', 'index.html'), 'utf8');
+    assert.match(html, /connect-src 'self' https:\/\/c2c-widget-1001\.development\.catalystserverless\.in/);
+    assert.doesNotMatch(html, /\*\.catalystserverless/);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
 test('build failure -> deploy stops before Slate with the tail', async () => {
   const ds = writeDs();
   const out = mkdtempSync(join(tmpdir(), 'c2c-ui-out-'));
@@ -430,6 +452,7 @@ test('--ui refuses an unknown target', async () => {
 test('the bundle digest ignores the rewritten client config for both targets', () => {
   const app = deriveIr(parse(DS));
   const guard = checkGuards({ org: '10000000000', projectId: '1001', appLink: 'Widget', credentialPath: SECRET, registry });
+  const origin = 'https://c2c-widget-1001.development.catalystserverless.in';
   for (const ui of ['vanilla', 'react'] as const) {
     const a = deployFiles(app, guard, false, { ui, apiBase: 'https://a.invalid/server/c2c_api' });
     const b = deployFiles(app, guard, false, { ui, apiBase: 'https://b.invalid/server/c2c_api' });
@@ -437,7 +460,15 @@ test('the bundle digest ignores the rewritten client config for both targets', (
     // so it legitimately differs — that difference is what makes a resumed
     // deploy re-run. Every other file still matches across client configs.
     const strip = (files: { path: string; data: string | Buffer }[]) => files.filter((file) => file.path !== 'functions/c2c_api/c2c-deploy.json');
+    const real = deployFiles(app, guard, false, { ui, apiBase: `${origin}/server/c2c_api` });
     assert.equal(bundleDigest(strip(a.files)), bundleDigest(strip(b.files)), ui);
+    assert.equal(bundleDigest(strip(real.files)), bundleDigest(strip(a.files)), `${ui} function origin`);
+    const htmlPath = ui === 'react' ? 'web/index.html' : 'slate/index.html';
+    const html = String(real.files.find((file) => file.path === htmlPath)?.data);
+    assert.match(html, new RegExp(`connect-src 'self' ${origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), htmlPath);
+    assert.doesNotMatch(html, /\*\.catalystserverless/, htmlPath);
+    const foreign = String(a.files.find((file) => file.path === htmlPath)?.data);
+    assert.doesNotMatch(foreign, /a\.invalid/, htmlPath);
   }
   const react = buildDeploy(app, guard, false, false, undefined, undefined, {}, undefined, undefined, undefined, 'react');
   assert.ok(react.files.some((f) => f.path === 'web/public/c2c-config.js'));

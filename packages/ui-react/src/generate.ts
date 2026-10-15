@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import type { App } from '../../core/src/ir.js';
 import { REACT_BUILD_NODE_RANGE } from '../../core/src/toolchain.js';
 import { generateUi, serviceWorker, slateConfigSource, appTimeZone, clientRuntimeSource, stampUploadCap } from '../../ui/src/generate.js';
+import { functionOriginFromApiBase, shellContentSecurityPolicy } from '../../ui/src/csp.js';
 import { solidPng } from '../../ui/src/build.js';
 import type { UiField, UiHandler, UiModel } from '../../ui/src/model.js';
 import { iconColorRgb, paletteFor } from '../../ui/src/theme-map.js';
@@ -39,7 +40,7 @@ export interface ReactFile {
 }
 
 export interface ReactGenerateOptions {
-  /** Function base URL written to public/c2c-config.js. `c2c deploy` rewrites it. */
+  /** Function base URL written to public/c2c-config.js. An Advanced I/O origin is also added to connect-src. `c2c deploy` rewrites both. */
   apiBase?: string;
   /** Load the Catalyst Web SDK and require sign-in. Default true. */
   auth?: boolean;
@@ -312,14 +313,18 @@ export default function ${component}() {
 `;
 }
 
-function indexHtml(spec: AppSpec): string {
+function indexHtml(spec: AppSpec, apiBase?: string): string {
   const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch] ?? ch);
+  const policy = shellContentSecurityPolicy(functionOriginFromApiBase(apiBase));
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="${esc(spec.theme.accent)}" />
+    <!-- Slate serves static files without configurable response headers. Meta CSP cannot enforce frame-ancestors. -->
+    <meta http-equiv="Content-Security-Policy" content="${policy}" />
+    <meta name="referrer" content="same-origin" />
     <title>${esc(spec.name)}</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png" />
@@ -513,7 +518,7 @@ export function generateReactApp(app: App, opts: ReactGenerateOptions = {}): Rea
     `${HEADER}import type { RouteTable } from '@c2c/ui';\n${imports.map((r) => `import ${r.component} from './${r.module}';`).join('\n')}\n\nexport const routes: RouteTable = {\n${routes.map((r) => `  ${q(r.key)}: ${r.component},`).join('\n')}\n};\n`,
   );
   gen('src/generated/theme.css', themeCss(ui.model));
-  gen('index.html', indexHtml(spec));
+  gen('index.html', indexHtml(spec, opts.apiBase));
   gen('public/c2c-config.js', slateConfigSource({ ...(opts.apiBase ? { apiBase: opts.apiBase } : {}), auth: opts.auth !== false, appTimeZone: appTimeZone(app) }));
   gen('public/manifest.webmanifest', webManifest(spec));
   const rgb = iconColorRgb(ui.model.theme?.iconColor);

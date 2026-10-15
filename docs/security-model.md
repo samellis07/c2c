@@ -290,13 +290,15 @@ is a manual action in the Catalyst console, outside the generated code.
 
 ## Headers and transport
 
-- Function replies set only `Content-Type: application/json`. No
-  `Content-Security-Policy`, HSTS, `X-Frame-Options`, or CSRF-token header is
-  emitted by the generated function or the generated `index.html` (no
-  `helmet`/CSP/meta was found in the generator or template). Transport
-  security, framing policy for the hosted app, and authorized domains are the
-  Catalyst platform's and your console settings (the sign-in hint
-  names Authentication › Whitelisting › iFrame explicitly).
+- Function replies set `Content-Type: application/json`,
+  `X-Content-Type-Options: nosniff`, and `Cache-Control: no-store`, including
+  store refusals. No HSTS, `X-Frame-Options`, or CSRF-token header is emitted.
+  Generated `index.html` carries a meta Content-Security-Policy (`connect-src`
+  is `'self'` plus the function origin when that URL is known). Browsers ignore
+  `frame-ancestors` in a meta policy, and no Slate response-header setting is
+  known [UNVERIFIED], so framing control and static-file `nosniff` stay with
+  the Catalyst platform and your console settings (the sign-in hint names
+  Authentication › Whitelisting › iFrame explicitly).
 - Session handling: the browser attaches the Catalyst Web SDK raw token as
   the `authorization` header (no prefix) and sends cookies on remote calls
   ([`packages/ui-react/template/lib/c2c-ui/runtime/api.ts`](../packages/ui-react/template/lib/c2c-ui/runtime/api.ts),

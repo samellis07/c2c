@@ -242,7 +242,8 @@ Decision: the Slate app signs users in with **Catalyst Authentication**
    `catalyst.auth.generateAuthToken()` (raw token, no prefix) and
    `credentials: 'include'`. Slate (`*.onslate.*`) and the function
    (`*.catalystserverless.*`) are on different domains, so the client calls the
-   absolute function URL.
+   absolute function URL. The shell `connect-src` allows that function origin
+   plus `'self'`.
 3. `index.js` resolves the user with user scope
    (`catalyst.initialize(req).userManagement().getCurrentUser()`). No user, or a
    role with no matching profile, gets **401** before any handler runs.
@@ -261,6 +262,11 @@ Why not public access: the generated handlers write rows and need a profile.
 A public function would make every caller the same profile with no audit
 trail. Project collaborators in the console are not app users, so the test
 user must be added as an app user.
+
+Every generated function reply, including a store refusal from `replyStoreError`,
+includes `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`. The
+shared entry and the generated handlers apply these on every status so JSON
+responses are not MIME-sniffed or cached.
 
 Not yet verified: the exact header the Catalyst gateway
 accepts for `generateAuthToken()` tokens on an Advanced I/O call, and whether

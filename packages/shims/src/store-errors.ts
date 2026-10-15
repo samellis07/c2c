@@ -218,7 +218,11 @@ export function replyStoreError(
   };
   if (classified.field) body.field = classified.field;
   if (opts.wrote !== undefined) body.wrote = opts.wrote;
-  res.writeHead(storeErrorStatus(classified.code), { 'Content-Type': 'application/json' });
+  res.writeHead(storeErrorStatus(classified.code), {
+    'Content-Type': 'application/json',
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'no-store',
+  });
   res.end(JSON.stringify(body, jsonReplacer));
   return true;
 }
