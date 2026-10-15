@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const plugin = path.join(repo, 'plugin');
@@ -30,9 +31,26 @@ function parseMap(markdown) {
 function paths(cell) { return [...cell.matchAll(/`([^`]+\.md)`/g)].map((m) => m[1]); }
 function words(cell) { return cell.replaceAll('`', '').split(',').map((s) => s.trim()).filter((s) => s && s !== 'none').map((s) => s.replace(/^c2c\s+/, '')); }
 function normalizedWhitespace(value) { return value.trim().replace(/\s+/g, ' '); }
-function validate(rows) {
+function readDispatchVerbs() {
+  const source = readFileSync(path.join(repo, 'packages/cli/src/c2c.ts'), 'utf8');
+  const file = ts.createSourceFile('c2c.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  let dispatch;
+  function visit(node) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'dispatch') dispatch = node.initializer;
+    ts.forEachChild(node, visit);
+  }
+  visit(file);
+  assert.ok(dispatch && ts.isObjectLiteralExpression(dispatch), 'CLI dispatch table missing');
+  return new Set(dispatch.properties.map((property) => {
+    const name = property.name;
+    assert.ok(name, 'CLI dispatch entry has no name');
+    if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
+    assert.fail(`unsupported CLI dispatch entry name: ${name.getText(file)}`);
+  }));
+}
+function validate(rows, verbs = readDispatchVerbs()) {
   assert.ok(rows.length);
-  const verbs = new Set([...readFileSync(path.join(repo, 'packages/cli/src/c2c.ts'), 'utf8').matchAll(/\bcmd\s*===\s*'([^']+)'/g)].map((m) => m[1]));
+  for (const row of rows) for (const verb of words(row.verbs)) assert.ok(verbs.has(verb), `unknown c2c verb ${verb}`);
   for (const group of groups) {
     const groupRows = rows.filter((r) => r.group === group);
     assert.ok(groupRows.length, `group missing: ${group}`);
@@ -43,7 +61,6 @@ function validate(rows) {
   }
   for (const row of rows) {
     for (const p of [...paths(row.command), ...paths(row.skill)]) assert.ok(existsSync(path.join(plugin, p)), `missing ${p}`);
-    for (const verb of words(row.verbs)) assert.ok(verbs.has(verb), `unknown c2c verb ${verb}`);
     for (const step of row.human.replaceAll('`', '').split(',').map((s) => s.trim()).filter((s) => s !== 'none')) {
       assert.ok(humanSteps.includes(normalizedWhitespace(step)), `unapproved human step: ${step}`);
     }
@@ -70,11 +87,11 @@ test('validation fails when a command or skill row is removed', () => {
 test('validation rejects unknown verbs and human steps', () => {
   const rows = parseMap(readFileSync(path.join(plugin, 'C2C.md'), 'utf8'));
   rows[0] = { ...rows[0], verbs: 'bogusverb' };
-  assert.throws(() => {
-    const cliVerbs = new Set([...readFileSync(path.join(repo, 'packages/cli/src/c2c.ts'), 'utf8').matchAll(/\bcmd\s*===\s*'([^']+)'/g)].map((m) => m[1]));
-    for (const row of rows) for (const verb of words(row.verbs)) assert.ok(cliVerbs.has(verb), `unknown c2c verb ${verb}`);
-  }, /unknown c2c verb/);
+  assert.throws(() => validate(rows), /unknown c2c verb/);
   const valid = parseMap(readFileSync(path.join(plugin, 'C2C.md'), 'utf8'));
+  const dispatchWithoutDoctor = readDispatchVerbs();
+  dispatchWithoutDoctor.delete('doctor');
+  assert.throws(() => validate(valid, dispatchWithoutDoctor), /unknown c2c verb doctor/);
   valid[0] = { ...valid[0], human: 'Click arbitrary button' };
   assert.throws(() => validate(valid), /unapproved human step/);
   valid[0] = { ...valid[0], human: 'Start Slate once then click Publish' };
