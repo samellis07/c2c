@@ -801,7 +801,7 @@ export function measureApp(plan: SchemaPlan, reports: readonly { form?: string; 
     try {
       read = planReportQuery(plan, report.form, report.columns);
     } catch {
-      counts.reportJoins += 1;
+      // An unplannable read is one join hit, counted once below.
       read = { queries: [], staged: true, exceeded: { select: false, joins: true } };
     }
     if (read.exceeded.select) counts.reportSelect += 1;
