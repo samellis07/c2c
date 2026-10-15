@@ -123,7 +123,7 @@ export { applyAuthProvision, authProvisionPlan, errorCode, formatAuthProvision, 
 export type { AuthOpId, AuthOpResult, AuthOpStatus, AuthProvisionInput, AuthProvisionResult } from './auth.js';
 export { restWithRetry, retryableStatus, retryDelayMs, spawnWithRetry, transientCatalystOutput } from './retry.js';
 export type { ReRead, RestRetry, RetryOptions, SpawnedResult } from './retry.js';
-export { readSlateAppUrl, SLATE_LIST_WAITS_MS, slateAppName, slateApps, slateConfigToml, slateDeploymentDomain, slateNameProblem, slateUrlOf, waitForSlateApp } from './slate.js';
+export { readSlateAppUrl, SLATE_DOMAIN_WAITS_MS, SLATE_LIST_WAITS_MS, slateAppName, slateApps, slateConfigToml, slateDeploymentDomain, slateNameProblem, slateUrlOf, waitForSlateApp, waitForSlateDomain } from './slate.js';
 export type { SlateAppRef, SlateRead } from './slate.js';
 
 export { appShadowColumns, backfillCommand, backfillPageQuery, backfillShadows, formatBackfill, shadowColumns, staleShadowCountQuery, type BackfillResult, type ShadowColumn } from './shadows.js';

@@ -8,7 +8,7 @@
  *   c2c precheck <file.ds> [--json]  every migration finding in one pass (blockers and warnings)
  *                                   exit 0 no blockers, 1 blockers, 2 usage or locked Marketplace export,
  *                                   3 missing file, 4 not a parseable .ds
- *   c2c doctor [--app <file.ds>] [--dc <dc>] [--org <id>] [--project <id>] [--json]
+ *   c2c doctor [--app <file.ds|dir>] [--dc <dc>] [--org <id>] [--project <id>] [--json]
  *                                   read-only environment check; writes c2c-out/.c2c/doctor.json
  *                                   exit 0 green, 1 a FAIL check, 2 usage, 6 Node/vendor integrity
  *   c2c doctor --mcp-begin           open a one-time request naming the Catalyst MCP calls to make in the session
@@ -222,7 +222,7 @@ const USAGE =
       '       c2c smoke <file|dir> --result <file|-> [--project <id>] [--url <app-url>] [--max-age <minutes>] [--report <file>]\n' +
       '       c2c analyze <file|dir> [--json] [--lock <file>] [--quality]\n' +
       '       c2c precheck <file.ds> [--json]\n' +
-      '       c2c doctor [--app <file.ds>] [--dc <dc>] [--org <id>] [--project <id>] [--json] [--local] [--quiet]\n' +
+      '       c2c doctor [--app <file.ds|dir>] [--dc <dc>] [--org <id>] [--project <id>] [--json] [--local] [--quiet]\n' +
       '       c2c doctor --mcp-begin [--json]\n' +
       '       c2c doctor --mcp-observed - [--dc <dc>] [--org <id>] [--project <id>]\n' +
       '       c2c doctor --record-mcp <file> --operator   (operator-only)\n' +

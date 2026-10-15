@@ -34,7 +34,7 @@ import { emptyRegistry, type ProjectRegistry } from './registry.js';
 import { catalystRestCall, listCatalystProjects, readCliAccessToken } from './rest.js';
 import { importingAgeState, isStuckImporting, projectDataRecord, stuckImportGuidedStep, unknownImportAgeGuidedStep, type ListedProject } from './stuck-import.js';
 import { spawnWithRetry, restWithRetry, type RetryOptions } from './retry.js';
-import { readSlateAppUrl, slateAppName, slateConfigToml, slateNameProblem, waitForSlateApp } from './slate.js';
+import { slateAppName, slateConfigToml, slateNameProblem, waitForSlateApp, waitForSlateDomain } from './slate.js';
 import { applyEdits, editsPathFor, readEdits, withEdits } from './edit.js';
 import { unsupportedSchemaOps } from './delta.js';
 import { assertProjectDetails, assertReportedScope, catalystScopeArgs, scrubCatalystEnv } from './scope.js';
@@ -1000,7 +1000,9 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         return;
       }
       try {
-        const found = await readSlateAppUrl(restFn, guard.projectId, slateName, retry);
+        // The served domain can lag the app listing after a deploy; the read
+        // waits (bounded) instead of reporting "no served domain yet" once.
+        const found = await waitForSlateDomain(restFn, guard.projectId, slateName, retry);
         slateListed = found.listed;
         slateSeen = slateSeen || found.apps.length > 0;
         if (found.url) {
@@ -2162,7 +2164,9 @@ export async function smokeCli(args: readonly string[], io: Io, opts?: { browser
         let why: string | undefined;
         try {
           const admin = await assertLiveProject(io, guard.org, guard.projectId);
-          const read = await readSlateAppUrl(admin, guard.projectId, slateAppName(guard.projectName), retryLog(io));
+          // A smoke run right after deploy can race the served domain; the
+          // read waits (bounded) rather than refusing on the first answer.
+          const read = await waitForSlateDomain(admin, guard.projectId, slateAppName(guard.projectName), retryLog(io));
           bound = read.url;
           why = read.note;
         } catch (err) {

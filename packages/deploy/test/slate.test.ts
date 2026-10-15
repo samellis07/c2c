@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readSlateAppUrl, SLATE_LIST_WAITS_MS, slateAppName, slateApps, slateDeploymentDomain, slateNameProblem, slateUrlOf, waitForSlateApp } from '../src/slate.js';
+import { readSlateAppUrl, SLATE_DOMAIN_WAITS_MS, SLATE_LIST_WAITS_MS, slateAppName, slateApps, slateDeploymentDomain, slateNameProblem, slateUrlOf, waitForSlateApp, waitForSlateDomain } from '../src/slate.js';
 import { slateUrlFrom } from '../src/auth.js';
 import type { RestCall, RestFn } from '../src/tables.js';
 
@@ -228,4 +228,41 @@ test('waitForSlateApp refuses a listed app serving another domain, or two same-n
   // Listed without a domain yet still counts: the build printed the URL.
   const bare = listingRest([{ data: [{ id: '1', name: 'c2c-widget' }] }]);
   assert.equal(await waitForSlateApp(bare.rest, '1001', 'c2c-widget', PRINTED, { sleep: async () => {} }), true);
+});
+
+test('waitForSlateDomain polls while the listed app reports no served domain yet', async () => {
+  const waits: number[] = [];
+  const unserved = { data: [{ id: '1', name: 'c2c-widget' }] };
+  const { rest, calls } = listingRest([unserved, unserved, LISTED]);
+  const found = await waitForSlateDomain(rest, '1001', 'c2c-widget', { sleep: async (ms) => { waits.push(ms); } });
+  assert.equal(found.url, PRINTED);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(waits, [4000, 8000]);
+});
+
+test('waitForSlateDomain is bounded and fail-closed when the domain never appears', async () => {
+  const waits: number[] = [];
+  const unserved = { data: [{ id: '1', name: 'c2c-widget' }] };
+  const { rest, calls } = listingRest([unserved]);
+  const found = await waitForSlateDomain(rest, '1001', 'c2c-widget', { sleep: async (ms) => { waits.push(ms); } });
+  assert.equal(found.url, undefined);
+  assert.match(found.note ?? '', /no served domain yet/);
+  assert.equal(calls.length, SLATE_DOMAIN_WAITS_MS.length + 1);
+  assert.deepEqual(waits, [...SLATE_DOMAIN_WAITS_MS]);
+  assert.equal(waits.reduce((a, b) => a + b, 0), 28000);
+});
+
+test('waitForSlateDomain returns at once on two same-name apps and on an absent app', async () => {
+  const waits: number[] = [];
+  const twice = listingRest([{ data: [{ id: '1', name: 'c2c-widget' }, { id: '2', name: 'c2c-widget' }] }]);
+  const ambiguous = await waitForSlateDomain(twice.rest, '1001', 'c2c-widget', { sleep: async (ms) => { waits.push(ms); } });
+  assert.equal(ambiguous.url, undefined);
+  assert.equal(twice.calls.length, 1);
+  // An app missing from the list keeps the single-read "no app named" answer —
+  // the app-list lag after a build is waitForSlateApp's job.
+  const absent = listingRest([{ data: [] }]);
+  const missing = await waitForSlateDomain(absent.rest, '1001', 'c2c-widget', { sleep: async (ms) => { waits.push(ms); } });
+  assert.equal(missing.url, undefined);
+  assert.equal(absent.calls.length, 1);
+  assert.deepEqual(waits, []);
 });
