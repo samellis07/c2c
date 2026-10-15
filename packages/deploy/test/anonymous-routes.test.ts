@@ -194,7 +194,7 @@ test('every generated route family answers an anonymous call with 401 and writes
       const [method, path] = key.split(' ') as [string, string];
       const res = await call(method, concrete(path));
       assert.equal(res.status, 401, `${key}: ${res.text}`);
-      assert.deepEqual(JSON.parse(res.text), { error: 'sign in required' }, key);
+      assert.deepEqual(JSON.parse(res.text), { code: 'UNAUTHENTICATED', message: 'Sign in required' }, key);
     }
     assert.equal(writes(), 0, 'an anonymous call must not write');
   });

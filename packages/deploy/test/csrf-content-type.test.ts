@@ -145,7 +145,7 @@ test('a text/plain cross-site-shaped write is refused with 415 and writes nothin
   await withApp(async ({ post, noteRows }) => {
     const res = await post('/forms/Note/submit', SMUGGLED, 'text/plain', 'clerk');
     assert.equal(res.status, 415, res.text);
-    assert.deepEqual(JSON.parse(res.text), { error: 'content type must be application/json' });
+    assert.deepEqual(JSON.parse(res.text), { code: 'REQUEST_FAILED', message: 'Invalid request' });
     assert.doesNotMatch(res.text, /csrf-pwned/, 'the refusal echoes no record data');
     assert.equal(noteRows().length, 0, 'a refused write must not write');
   });
