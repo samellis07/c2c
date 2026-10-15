@@ -1015,8 +1015,12 @@ test('D-B5: every registry entry cites a facts-ledger row or reference file line
     assert.ok(entry.source, `${entry.name} lacks a source citation`);
     const [relPath, lineStr] = entry.source.split(':');
     const fullPath = join(root, relPath);
-    assert.ok(existsSync(fullPath), `${entry.name} cites non-existent file: ${relPath}`);
-    const content = readFileSync(fullPath, 'utf8');
+    let content: string;
+    try {
+      content = readFileSync(fullPath, 'utf8');
+    } catch {
+      assert.fail(`${entry.name} cites non-existent file: ${relPath}`);
+    }
     assert.ok(content.includes(entry.name), `${entry.name} not found in cited file: ${relPath}`);
     if (lineStr) {
       const lineNum = parseInt(lineStr, 10);

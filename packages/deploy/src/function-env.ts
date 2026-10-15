@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { unquote, type App, type PropertyBlock } from '../../core/src/ir.js';
 
@@ -193,12 +193,10 @@ export function writeOrUpdateFunctionEnv(
   mkdirSync(outDir, { recursive: true });
   const fenvPath = join(outDir, 'function-env.json');
   let existing: Record<string, string> = {};
-  if (existsSync(fenvPath)) {
-    try {
-      existing = JSON.parse(readFileSync(fenvPath, 'utf8'));
-    } catch {
-      existing = {};
-    }
+  try {
+    existing = JSON.parse(readFileSync(fenvPath, 'utf8'));
+  } catch {
+    existing = {};
   }
 
   const env = buildFunctionEnv({ ...input, existingEnv: existing });
@@ -227,15 +225,13 @@ export function writeOrUpdateFunctionEnv(
 export function readConnectionSecretKeys(outDir: string, knownKeys?: readonly string[]): string[] {
   const keys = new Set<string>(knownKeys ?? []);
   const fenvPath = join(outDir, 'function-env.json');
-  if (existsSync(fenvPath)) {
-    try {
-      const data = JSON.parse(readFileSync(fenvPath, 'utf8')) as Record<string, unknown>;
-      for (const k of Object.keys(data)) {
-        if (!isDerivableEnvKey(k)) keys.add(k);
-      }
-    } catch {
-      // ignore
+  try {
+    const data = JSON.parse(readFileSync(fenvPath, 'utf8')) as Record<string, unknown>;
+    for (const k of Object.keys(data)) {
+      if (!isDerivableEnvKey(k)) keys.add(k);
     }
+  } catch {
+    // ignore
   }
   return [...keys];
 }

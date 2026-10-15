@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
@@ -154,8 +154,8 @@ test('generated report modules forward the record route and mark pending views a
 
 test('Arc pagination and filter toolbar are vendored at the recorded commit', () => {
   for (const name of ['pagination', 'filter-toolbar']) {
-    assert.ok(existsSync(join(TEMPLATE_DIR, `lib/c2c-ui/arc/components/${name}/${name}.tsx`)), name);
-    assert.ok(existsSync(join(TEMPLATE_DIR, `lib/c2c-ui/arc/components/${name}/${name}.module.css`)), `${name} css`);
+    assert.ok(textOf(`lib/c2c-ui/arc/components/${name}/${name}.tsx`).length > 0, name);
+    assert.ok(textOf(`lib/c2c-ui/arc/components/${name}/${name}.module.css`).length > 0, `${name} css`);
   }
   const upstream = textOf('lib/c2c-ui/ARC-UPSTREAM.md');
   assert.match(upstream, /`pagination`/);
@@ -177,7 +177,6 @@ test('the report view queries with the server sort, search and filter, and wires
 });
 
 test('the report criteria matcher paints conditional formats and names unmigrated ones', () => {
-  assert.ok(existsSync(join(TEMPLATE_DIR, 'lib/c2c-ui/report/criteria.ts')));
   const matcher = textOf('lib/c2c-ui/report/criteria.ts');
   assert.match(matcher, /matchCriteria/);
   assert.match(matcher, /criteriaTodo/);

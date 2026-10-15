@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { test } from 'node:test';
@@ -192,9 +192,9 @@ application "PaymentApp"
 function allFilesUnder(dir: string): string[] {
   const result: string[] = [];
   function walk(current: string): void {
-    for (const entry of readdirSync(current)) {
-      const full = join(current, entry);
-      if (statSync(full).isDirectory()) walk(full);
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const full = join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
       else result.push(full);
     }
   }
@@ -242,7 +242,6 @@ test('Acceptance 1: a fixture app with no third-party connections ends plan+prov
 
     // function-env.json must exist under --out and contain derivable keys
     const fenvPath = join(out, 'function-env.json');
-    assert.ok(existsSync(fenvPath), 'function-env.json must be generated under --out');
     const fenv = JSON.parse(readFileSync(fenvPath, 'utf8')) as Record<string, string>;
 
     assert.equal(fenv.PROJECT_ID, PROJECT);
@@ -297,7 +296,6 @@ test('Acceptance 2: a fixture with one connection yields exactly one checklist i
 
     // function-env.json must hold the connection secret key
     const fenvPath = join(out, 'function-env.json');
-    assert.ok(existsSync(fenvPath), 'function-env.json must exist');
     const fenv = JSON.parse(readFileSync(fenvPath, 'utf8')) as Record<string, string>;
     const secretKey = Object.keys(fenv).find((k) => /STRIPE.*SECRET|MY_STRIPE/i.test(k));
     assert.ok(secretKey, `secret key must be present in function-env.json, got: ${Object.keys(fenv).join(', ')}`);
@@ -362,14 +360,18 @@ test('function-env.json is mode 0600 on create and update under umask 022', asyn
   const root = mkdtempSync(join(tmpdir(), 'c2c-fenv-mode-'));
   const oldUmask = umask(0o022);
   try {
-    const path = join(root, 'function-env.json');
-    writeOrUpdateFunctionEnv(root, { projectId: '1001', connectionSecrets: [{ connectionName: 'stripe', propertyKey: 'secret', envKey: 'STRIPE_SECRET', secretValue: 'canary' }] });
-    assert.equal(statSync(path).mode & 0o777, 0o600, 'new secret file must be private');
+    const createdDir = join(root, 'created');
+    const createdPath = join(createdDir, 'function-env.json');
+    writeOrUpdateFunctionEnv(createdDir, { projectId: '1001', connectionSecrets: [{ connectionName: 'stripe', propertyKey: 'secret', envKey: 'STRIPE_SECRET', secretValue: 'canary' }] });
+    assert.equal(statSync(createdPath).mode & 0o777, 0o600, 'new secret file must be private');
     // Simulate a pre-fix file and confirm an update repairs its permissions.
+    const updatedDir = join(root, 'updated');
+    const updatedPath = join(updatedDir, 'function-env.json');
+    writeOrUpdateFunctionEnv(updatedDir, { projectId: '1001', connectionSecrets: [{ connectionName: 'stripe', propertyKey: 'secret', envKey: 'STRIPE_SECRET', secretValue: 'canary' }] });
     const { chmodSync } = await import('node:fs');
-    chmodSync(path, 0o644);
-    writeOrUpdateFunctionEnv(root, { projectId: '1002' });
-    assert.equal(statSync(path).mode & 0o777, 0o600, 'updated secret file must be private');
+    chmodSync(updatedPath, 0o644);
+    writeOrUpdateFunctionEnv(updatedDir, { projectId: '1002' });
+    assert.equal(statSync(updatedPath).mode & 0o777, 0o600, 'updated secret file must be private');
   } finally {
     umask(oldUmask);
     rmSync(root, { recursive: true, force: true });
