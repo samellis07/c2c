@@ -5273,7 +5273,7 @@ test('a for-each-record function reads bare form fields and ID from rec', async 
   assert.equal(await mod.vote!(ctx), 'T:42');
 });
 
-test('a for-each-record client twin binds ctx.record', async () => {
+test('a for-each-record function runs only as its server module: no client twin', () => {
   const fn: FunctionDef = {
     name: 'approveTask',
     kind: 'creator',
@@ -5283,18 +5283,13 @@ test('a for-each-record client twin binds ctx.record', async () => {
     span: Z,
   };
   const g = generate(app({ forms: [plainForm('Tasks', [plainField('Audit_Require'), plainField('Status')])], functions: [fn] }));
-  const client = g.files.find((f) => f.path === 'client/handlers/functions/approvetask.mjs');
-  assert.ok(client);
-  assert.match(stripComments(client.source), /const d_rec = ctx\.record;/);
-  check(client.source, 'approveTask-client.mjs');
-  const mod = (await loadModule(client.source, 'approveTask-client.mjs')) as unknown as Record<
-    string,
-    (ctx: unknown) => Promise<unknown>
-  >;
-  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
-  const record: Record<string, unknown> = { Audit_Require: true };
-  await mod.clientActions!(runtime.context({ record }));
-  assert.equal(record.Status, 'Approved');
+  const custom = g.files.find((f) => f.path === 'functions/custom/approvetask.mjs');
+  assert.ok(custom);
+  assert.match(stripComments(custom.source), /const d_rec = ctx\.row;/);
+  assert.match(stripComments(custom.source), /shim\.input\.set\(ctx, \["Status"\], "Approved"\)/);
+  check(custom.source, 'approvetask.mjs');
+  assert.equal(g.files.some((f) => f.path.startsWith('client/handlers/functions/')), false);
+  assert.deepEqual(g.todos, []);
 });
 
 test('subform row events bind row on the server and the client and write through shim.record', async () => {
@@ -5446,46 +5441,38 @@ test('generator-owned identifiers are reserved: Deluge params named like them be
   };
   const g = generate(app({ forms: [plainForm('Orders', [plainField('Code')])], functions: [fn] }));
   const custom = g.files.find((f) => f.path === 'functions/custom/clash.mjs');
-  const prefetch = g.files.find((f) => f.path === 'functions/custom/clash-prefetch.mjs');
-  const client = g.files.find((f) => f.path === 'client/handlers/functions/clash.mjs');
-  assert.ok(custom && prefetch && client);
+  assert.ok(custom);
+  // A function has no client half: the condition and its info run in the
+  // server module, so every renamed parameter is read there.
+  assert.equal(g.files.some((f) => f.path === 'functions/custom/clash-prefetch.mjs' || f.path === 'client/handlers/functions/clash.mjs'), false);
   const renamed = 'd_ctx, d_shim, d_slots, d_actions, d_prefetched, d_record, d_principal, d_runtime, d_rec, d_recs, d_row';
   assert.match(stripComments(custom.source), new RegExp(`Clash\\(ctx, ${renamed}\\)`));
-  assert.match(stripComments(prefetch.source), new RegExp(`var \\[${renamed}\\]`));
-  assert.match(stripComments(client.source), new RegExp(`clientActions\\(ctx, ${renamed}\\)`));
+  assert.match(stripComments(custom.source), /shim\.log\.info\(ctx, [^\n]*d_actions[^\n]*d_prefetched[^\n]*d_record[^\n]*d_principal[^\n]*d_runtime[^\n]*d_rec[^\n]*d_recs[^\n]*d_row[^\n]*d_ctx\)/);
   for (const file of g.files.filter((f) => f.path.endsWith('.mjs'))) {
     check(file.source, file.path.replace(/[^\w.]+/g, '_') || 'clash.mjs');
   }
 });
 
 test('loop variables and locals named like generated bindings rename, so every module parses', () => {
-  const fn: FunctionDef = {
-    name: 'LoopClash',
-    kind: 'creator',
-    signature: 'void LoopClash()',
-    properties: [],
-    deluge: [
-      {
-        text: [
-          'for each actions in "a,b".toList(",") { info actions; }',
-          'for each slots in "a,b".toList(",") { info slots; }',
-          'for each shim in "a,b".toList(",") { info shim; }',
-          'for each index i ctx in "a,b".toList(",") { info ctx; }',
-          'record = "r";',
-          'principal = "p";',
-          'runtime = "t";',
-          'prefetched = "s";',
-          'slots = list();',
-          'slots.add("s2");',
-        ].join('\n'),
-        span: Z,
-      },
-    ],
+  // An on-load workflow carries the client loops: a function has no client half.
+  const deluge = {
+    text: [
+      'for each actions in "a,b".toList(",") { info actions; }',
+      'for each slots in "a,b".toList(",") { info slots; }',
+      'for each shim in "a,b".toList(",") { info shim; }',
+      'for each index i ctx in "a,b".toList(",") { info ctx; }',
+      'record = "r";',
+      'principal = "p";',
+      'runtime = "t";',
+      'prefetched = "s";',
+      'slots = list();',
+      'slots.add("s2");',
+    ].join('\n'),
     span: Z,
   };
-  const g = generate(app({ forms: [plainForm('F', [])], functions: [fn] }));
-  const custom = g.files.find((f) => f.path === 'functions/custom/loopclash.mjs');
-  const client = g.files.find((f) => f.path === 'client/handlers/functions/loopclash.mjs');
+  const g = generate(app({ forms: [plainForm('F', [])], workflows: [workflow({ name: 'LoopClash', form: 'F', event: 'on load', deluge })] }));
+  const custom = g.files.find((f) => f.path === 'functions/aio/f/on-load.mjs');
+  const client = g.files.find((f) => f.path === 'client/handlers/f/on-load.mjs');
   assert.ok(custom && client);
   assert.match(stripComments(client.source), /for \(var d_actions of shim\.each/);
   assert.match(stripComments(client.source), /for \(var d_slots of shim\.each/);
@@ -5543,42 +5530,6 @@ test('a for-each-record function parameter named rec does not collide with the r
   // `rec` is the row binding name; the parameter is d_rec and wins it.
   assert.match(stripComments(custom.source), /SumRec\(ctx, d_rec\)/);
   check(custom.source, 'sumrec.mjs');
-});
-
-test('a function prefetch applies the function gate: hidden form, then authorizeRead of the function form', async () => {
-  // The same gate the custom route applies: isHidden(fn.form) → authenticated
-  // profile → authorizeRead(fn.form). Before, the prefetch only required a
-  // signed-in caller.
-  const fn: FunctionDef = {
-    name: 'Peek',
-    kind: 'creator',
-    signature: 'string Peek(Visa visaDetails)',
-    form: 'SecretForm',
-    properties: [],
-    deluge: [{ text: 'if (SecretForm[Code == visaDetails.Status].count() > 0) { info "yes"; }\nreturn visaDetails.Status;', span: Z }],
-    span: Z,
-  };
-  const g = generate(
-    app({ forms: [plainForm('SecretForm', [plainField('Status'), plainField('Code')]), plainForm('Visa', [plainField('Status')])], functions: [fn] }),
-  );
-  const pre = g.files.find((f) => f.path === 'functions/custom/peek-prefetch.mjs');
-  assert.ok(pre);
-  assert.match(stripComments(pre.source), /export const formName = "SecretForm";/);
-  assert.match(stripComments(pre.source), /if \(isHidden\(formName\)\)/);
-  assert.match(stripComments(pre.source), /authorizeRead\(access, principal, formName, \{ op: "true" \}\)/);
-  const hiddenAt = pre.source.indexOf('if (isHidden(formName))');
-  const authAt = pre.source.indexOf('authorizeRead(access, principal, formName');
-  const callAt = pre.source.indexOf('await prefetch(ctx)');
-  assert.ok(hiddenAt >= 0 && hiddenAt < authAt && authAt < callAt);
-  check(pre.source, 'peek-prefetch.mjs');
-  const mod = await loadModule(pre.source, 'peek-prefetch.mjs');
-  // No signed-in caller → 401; a caller whose profile cannot read the function's
-  // form → 403 before any prefetch runs.
-  const anon = await invoke(mod.default, { body: { args: [[{ Status: 'a' }]] } });
-  assert.equal(anon.status, 401);
-  const denied = await invoke(mod.default, { user: { profile: 'Staff' }, body: { args: [[{ Status: 'a' }]] } });
-  assert.equal(denied.status, 403);
-  assert.equal(JSON.stringify(denied.body).includes('Status'), false);
 });
 
 test('for each over a form-typed parameter is a record loop: record.set and one flush', async () => {
@@ -5643,7 +5594,9 @@ test('for each over the selected records — by binding or form name — is a re
   assert.deepEqual(rows.map((row) => row.Status), ['Done', 'Done', 'Done']);
 });
 
-test('a client function handler binds its declared parameters and sends them with its prefetch', async () => {
+test('a function has no client half: no client module, prefetch or call endpoint, and no client-split todos', () => {
+  // Neither UI target loads client/handlers/functions/*, so a function's
+  // client half never runs. Its condition and loop run in the server module.
   const fn: FunctionDef = {
     name: 'OpenForm.Review',
     kind: 'creator',
@@ -5657,39 +5610,70 @@ test('a client function handler binds its declared parameters and sends them wit
     kind: 'creator',
     signature: 'void Check(int recID)',
     properties: [],
-    deluge: [{ text: 'if (Orders[Code == recID].count() > 0) { openUrl("#Report:Orders", "same window"); }', span: Z }],
+    deluge: [
+      {
+        text: [
+          'for each o in Orders[Code == recID] { info o.Code; }',
+          'if (Orders[Code == recID].count() > 0) { openUrl("#Report:Orders", "same window"); }',
+          'if (Orders[Code == thisapp.Pick(recID)].count() > 0) { insert into Orders [ Code = "x" ]; }',
+        ].join('\n'),
+        span: Z,
+      },
+    ],
     span: Z,
   };
-  const g = generate(app({ functions: [fn, reads] }));
-  const client = g.files.find((f) => f.path === 'client/handlers/functions/openform-review.mjs');
-  assert.ok(client);
-  assert.match(stripComments(client.source), /export async function clientActions\(ctx, recID\)/);
-  assert.match(stripComments(client.source), /Signature \(verbatim\): void OpenForm\.Review\(int recID\)/);
-  check(client.source, 'review.mjs');
-  const mod = (await loadModule(client.source, 'review.mjs')) as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
-  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
-  const actions = (await mod.clientActions!(runtime.context({ record: {} }), 42)) as { args: unknown[] }[];
-  assert.equal(actions[0]!.args[0], '#Form:Add_Review?recID=42');
+  const pick: FunctionDef = { name: 'Pick', kind: 'creator', signature: 'string Pick(int recID)', properties: [], deluge: [{ text: 'return Orders[Code == recID].Code;', span: Z }], span: Z };
+  const g = generate(app({ forms: [plainForm('Orders', [plainField('Code')])], functions: [fn, reads, pick] }));
+  assert.deepEqual(
+    g.files.filter((f) => f.path.startsWith('client/') || f.path.endsWith('-prefetch.mjs') || f.path.endsWith('-call.mjs')).map((f) => f.path),
+    [],
+  );
+  assert.equal(g.files.some((f) => f.path === 'functions/custom/openform-review.mjs'), false);
+  const check = g.files.find((f) => f.path === 'functions/custom/check.mjs')!;
+  assert.ok(check);
+  assert.match(stripComments(check.source), /shim\.log\.info\(ctx, shim\.record\.get\(o, "Code"\)\)/);
+  assert.match(stripComments(check.source), /shim\.datastore\.insert\(/);
+  assert.doesNotMatch(check.source, /actions\.push|client-condition-uses-server|client-loop-uses-server/);
+  assert.deepEqual(g.todos, []);
+});
 
-  const checkClient = g.files.find((f) => f.path === 'client/handlers/functions/check.mjs')!;
-  const checkPre = g.files.find((f) => f.path === 'functions/custom/check-prefetch.mjs')!;
-  assert.ok(checkClient && checkPre);
-  assert.match(stripComments(checkClient.source), /ctx\.args = \[recID\];/);
-  assert.match(stripComments(checkPre.source), /var \[recID\] = Array\.isArray\(ctx\.args\) \? ctx\.args : \[\];/);
-  assert.match(stripComments(checkPre.source), /args: requestArgs\(req, 1\),/);
-  check(checkPre.source, 'pre.mjs');
-  const pre = (await loadModule(checkPre.source, 'pre.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<Record<string, unknown>>>;
-  const cmod = (await loadModule(checkClient.source, 'check.mjs')) as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
-  const seeded = createRuntime({
-    dryRun: true,
-    appTimeZone: 'UTC',
-    seed: { Orders: [{ ROWID: '1', Code: '5' }] },
-    clientPrefetch: async (_path, nonce, request) => ({ nonce, slots: await pre.prefetch!(seeded.context({ record: {}, args: request?.args })) }),
-  });
-  const hit = (await cmod.clientActions!(seeded.context({ record: {} }), '5')) as { op: string }[];
-  assert.deepEqual(hit.map((a) => a.op), ['openUrl']);
-  const miss = (await cmod.clientActions!(seeded.context({ record: {} }), '6')) as { op: string }[];
-  assert.deepEqual(miss, []);
+test('a form workflow keeps its client half and its client-split todos', () => {
+  // The negative of the function rule: the same reads in a browser-run event
+  // stay a client module, a prefetch, and a counted client-split todo.
+  const deluge = {
+    text: [
+      'if (Orders[Code == input.Code].count() > 0) { openUrl("#Report:Orders", "same window"); }',
+      'if (thisapp.Write(input.Code)) { info "x"; }',
+    ].join('\n'),
+    span: Z,
+  };
+  const write: FunctionDef = { name: 'Write', kind: 'creator', signature: 'bool Write(string c)', properties: [], deluge: [{ text: 'insert into Orders [ Code = c ];\nreturn true;', span: Z }], span: Z };
+  const g = generate(app({ forms: [plainForm('Orders', [plainField('Code')])], functions: [write], workflows: [workflow({ name: 'Load', form: 'Orders', event: 'on load', deluge })] }));
+  assert.ok(g.files.some((f) => f.path === 'client/handlers/orders/on-load.mjs'));
+  assert.ok(g.files.some((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs'));
+  assert.deepEqual(g.todos.map((t) => t.construct), ['client-condition-uses-server']);
+});
+
+test('a schedule has no client half: its server reads are not client-split todos', () => {
+  const deluge = {
+    text: [
+      'for each o in Orders[Code == "a"] { if (Orders[Code == o.Code].count() > 1) { info o.Code; } }',
+      'if (Orders[Code == "b"].count() > 0) { openUrl("#Report:Orders", "same window"); }',
+    ].join('\n'),
+    span: Z,
+  };
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Code')])],
+      workflows: [workflow({ name: 'Nightly', type: 'schedule', form: 'Orders', event: 'schedule', deluge })],
+    }),
+  );
+  const job = g.files.find((f) => f.path === 'functions/job/nightly.mjs');
+  assert.ok(job);
+  assert.match(stripComments(job.source), /shim\.log\.info\(ctx, shim\.record\.get\(o, "Code"\)\)/);
+  assert.equal(g.files.some((f) => f.path.startsWith('client/')), false);
+  // schedule-start is the missing start property, unrelated to the body.
+  assert.deepEqual(g.todos.map((t) => t.construct).filter((c) => c !== 'schedule-start'), []);
 });
 
 test('body.args are untrusted: plain JSON per parameter, never a forged row, query or binding', async () => {
@@ -5720,13 +5704,14 @@ test('body.args are untrusted: plain JSON per parameter, never a forged row, que
       apis: [apiBlock('Peek_Api', 'r = thisapp.Peek(null)', [{ key: 'scope', value: '"Admin only"' }])],
     }),
   );
-  const pre = g.files.find((f) => f.path === 'functions/custom/check-prefetch.mjs')!;
   const peek = g.files.find((f) => f.path === 'functions/custom/peek.mjs')!;
-  assert.ok(pre && peek);
-  assert.match(stripComments(pre.source), /args: requestArgs\(req, 2\),/);
+  assert.ok(peek);
+  // A function has no client half, so Check has no prefetch: the published
+  // route is the one place body.args reach a function.
+  assert.equal(g.files.some((f) => f.path === 'functions/custom/check-prefetch.mjs'), false);
   assert.match(stripComments(peek.source), /argsList = requestArgs\(req, 1\);[\s\S]*Peek\(ctx, \.\.\.argsList\)/);
-  assert.doesNotMatch(stripComments(`${pre.source}\n${peek.source}`), /req\.body\.args|req\?\.body\?\.args/);
-  const helper = /function plainJsonArg\([\s\S]*?function requestArgs\([\s\S]*?\n}\n/.exec(pre.source)![0];
+  assert.doesNotMatch(stripComments(peek.source), /req\.body\.args|req\?\.body\?\.args/);
+  const helper = /function plainJsonArg\([\s\S]*?function requestArgs\([\s\S]*?\n}\n/.exec(peek.source)![0];
   // A request body is JSON parsed in the handler's own realm.
   const realm = vm.createContext({});
   const requestArgs = vm.runInContext(`${helper} requestArgs`, realm) as (req: unknown, count: number) => unknown[];
@@ -6094,6 +6079,17 @@ test('a submit claim is per machine: two machines on one form write one submit h
   assert.equal(one[0]!.row.Action, 'submit');
 });
 
+/**
+ * The element round-trip tests run their script as an on-load workflow of a
+ * form that declares the fields it reads. A standalone function has no client
+ * half, so it cannot carry client prefetch mechanics.
+ */
+const GUEST_DESK = plainForm('Guest_Desk', [plainField('Guest_Name'), plainField('Guest_Email')]);
+
+function onLoad(fn: FunctionDef): Workflow {
+  return workflow({ name: fn.name, form: 'Guest_Desk', event: 'on load', deluge: fn.deluge[0]! });
+}
+
 test('a non-record loop element round-trips per element through the prefetch endpoint', async () => {
   const fn: FunctionDef = {
     name: 'Check',
@@ -6115,15 +6111,16 @@ test('a non-record loop element round-trips per element through the prefetch end
   const g = generate(
     app({
       forms: [
+        GUEST_DESK,
         plainForm('Booking_Form', [plainField('Status'), plainField('Choose_Room')]),
         plainForm('Bookings', [plainField('Room'), plainField('Guest')]),
       ],
-      functions: [fn],
+      workflows: [onLoad(fn)],
       profiles: [ADMIN],
     }),
   );
-  const pre = g.files.find((f) => f.path === 'functions/custom/check-prefetch.mjs')!;
-  const client = g.files.find((f) => f.path === 'client/handlers/functions/check.mjs')!;
+  const pre = g.files.find((f) => f.path === 'functions/aio/guest-desk/on-load-prefetch.mjs')!;
+  const client = g.files.find((f) => f.path === 'client/handlers/guest-desk/on-load.mjs')!;
   assert.ok(pre && client);
   assert.match(stripComments(pre.source), /element: requestElement\(req\)/);
   assert.match(stripComments(pre.source), /function requestElement\(req\)/);
@@ -6182,9 +6179,9 @@ test('per-element round trips stop at the cap and an empty collection makes none
     ],
     span: Z,
   };
-  const g = generate(app({ forms: [plainForm('Booking_Form', [plainField('Status'), plainField('Choose_Room')]), plainForm('Bookings', [plainField('Room')])], functions: [fn], profiles: [ADMIN] }));
-  const pre = g.files.find((f) => f.path === 'functions/custom/check-prefetch.mjs')!;
-  const client = g.files.find((f) => f.path === 'client/handlers/functions/check.mjs')!;
+  const g = generate(app({ forms: [GUEST_DESK, plainForm('Booking_Form', [plainField('Status'), plainField('Choose_Room')]), plainForm('Bookings', [plainField('Room')])], workflows: [onLoad(fn)], profiles: [ADMIN] }));
+  const pre = g.files.find((f) => f.path === 'functions/aio/guest-desk/on-load-prefetch.mjs')!;
+  const client = g.files.find((f) => f.path === 'client/handlers/guest-desk/on-load.mjs')!;
   const preMod = (await loadModule(pre.source, 'pre.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<Record<string, unknown>>>;
   const cmod = (await loadModule(client.source, 'check.mjs')) as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
   const rooms = Array.from({ length: 120 }, (_, i) => ({ ROWID: String(i + 1), Status: 'Reserved', Choose_Room: `R${i}` }));
@@ -6240,9 +6237,9 @@ test('a refused per-element round trip shows nothing', async () => {
     ],
     span: Z,
   };
-  const g = generate(app({ forms: [plainForm('Booking_Form', [plainField('Status'), plainField('Choose_Room')]), plainForm('Bookings', [plainField('Room')])], functions: [fn], profiles: [ADMIN] }));
-  const pre = g.files.find((f) => f.path === 'functions/custom/check-prefetch.mjs')!;
-  const client = g.files.find((f) => f.path === 'client/handlers/functions/check.mjs')!;
+  const g = generate(app({ forms: [GUEST_DESK, plainForm('Booking_Form', [plainField('Status'), plainField('Choose_Room')]), plainForm('Bookings', [plainField('Room')])], workflows: [onLoad(fn)], profiles: [ADMIN] }));
+  const pre = g.files.find((f) => f.path === 'functions/aio/guest-desk/on-load-prefetch.mjs')!;
+  const client = g.files.find((f) => f.path === 'client/handlers/guest-desk/on-load.mjs')!;
   const preMod = (await loadModule(pre.source, 'pre.mjs')) as unknown as Record<string, (ctx: unknown) => Promise<Record<string, unknown>>>;
   const cmod = (await loadModule(client.source, 'check.mjs')) as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
   const denied = createRuntime({
@@ -6279,15 +6276,16 @@ function elementLoopFixture(condition = 'if (Bookings[Room == room].count() > 0)
   const g = generate(
     app({
       forms: [
+        GUEST_DESK,
         plainForm('Booking_Form', [plainField('Status'), plainField('Choose_Room')]),
         plainForm('Bookings', [plainField('Room'), plainField('Guest')]),
       ],
-      functions: [fn],
+      workflows: [onLoad(fn)],
       profiles: [ADMIN],
     }),
   );
-  const pre = g.files.find((f) => f.path === 'functions/custom/check-prefetch.mjs')!;
-  const client = g.files.find((f) => f.path === 'client/handlers/functions/check.mjs')!;
+  const pre = g.files.find((f) => f.path === 'functions/aio/guest-desk/on-load-prefetch.mjs')!;
+  const client = g.files.find((f) => f.path === 'client/handlers/guest-desk/on-load.mjs')!;
   assert.ok(pre && client);
   return { g, pre, client };
 }
@@ -6390,15 +6388,16 @@ test('a use-before-binding alias serves no truthy element slot on a direct prefe
   const g = generate(
     app({
       forms: [
+        GUEST_DESK,
         plainForm('Booking_Form', [plainField('Status'), plainField('Choose_Room')]),
         plainForm('Bookings', [plainField('Room'), plainField('Guest')]),
       ],
-      functions: [fn],
+      workflows: [onLoad(fn)],
       profiles: [ADMIN],
     }),
   );
-  const pre = g.files.find((f) => f.path === 'functions/custom/check-prefetch.mjs')!;
-  const client = g.files.find((f) => f.path === 'client/handlers/functions/check.mjs')!;
+  const pre = g.files.find((f) => f.path === 'functions/aio/guest-desk/on-load-prefetch.mjs')!;
+  const client = g.files.find((f) => f.path === 'client/handlers/guest-desk/on-load.mjs')!;
   assert.ok(pre && client);
   assert.doesNotMatch(stripComments(pre.source), /ctx\.element/);
   assert.doesNotMatch(stripComments(client.source), /shim\.client\.element/);

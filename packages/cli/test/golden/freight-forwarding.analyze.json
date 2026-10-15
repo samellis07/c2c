@@ -1293,19 +1293,9 @@
     "units": 54,
     "statements": 553,
     "translated": 59,
-    "shimmed": 481,
-    "todo": 14,
+    "shimmed": 483,
+    "todo": 12,
     "todoLocations": [
-      {
-        "location": "function Zoho_Books_Cus_Updt2:6",
-        "construct": "client-condition-uses-server",
-        "scope": "unit"
-      },
-      {
-        "location": "function Zoho_Books_Cus_Updt2:9",
-        "construct": "client-condition-uses-server",
-        "scope": "unit"
-      },
       {
         "location": "workflow Zoho_Book_Customer_Update:13",
         "construct": "client-condition-uses-server",
@@ -1369,18 +1359,6 @@
     ]
   },
   "blockers": [
-    {
-      "kind": "deluge",
-      "label": "function Zoho_Books_Cus_Updt2:6",
-      "detail": "client-condition-uses-server",
-      "scope": "unit"
-    },
-    {
-      "kind": "deluge",
-      "label": "function Zoho_Books_Cus_Updt2:9",
-      "detail": "client-condition-uses-server",
-      "scope": "unit"
-    },
     {
       "kind": "deluge",
       "label": "workflow Zoho_Book_Customer_Update:13",
@@ -1456,12 +1434,12 @@
   ],
   "determinism": {
     "deterministic": false,
-    "todoCount": 14,
+    "todoCount": 12,
     "fillLockEntries": 0,
     "todoKinds": [
       {
         "construct": "client-condition-uses-server",
-        "count": 13
+        "count": 11
       },
       {
         "construct": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
@@ -1474,11 +1452,11 @@
     "readiness": 78,
     "band": "needs-work",
     "features": 75,
-    "deluge": 80
+    "deluge": 81
   },
   "effort": {
     "estimate": true,
-    "hours": 190.1,
+    "hours": 188.3,
     "weights": {
       "hoursPerFeature": {
         "supported": 0,
