@@ -1179,6 +1179,145 @@ test('rollback export refuses extension file entries when the parent Creator ID 
   assert.match(result.warnings.join('\n'), /1 file value\(s\) in .* were refused because the parent Creator record ID could not be resolved; no blank ID was emitted/);
 });
 
+/** A wide form whose file column sits on the 1:1 extension table. */
+function wideFileApp() {
+  const fields = Array.from({ length: 259 }, (_, index) => `Field_${index}\n(\ntype = text\n)`).join('\n');
+  const source = `application "Wide Files"\n{\nform Wide_Form\n{\n${fields}\nAttachment\n(\ntype = file upload\n)\n}\n}\n`;
+  const app = deriveIr(parse(source));
+  const schema = generateSchema(app);
+  const base = schema.tables.find((table) => table.role === 'form')!;
+  const ext = schema.tables.find((table) => table.role === 'extension')!;
+  const fileColumn = ext.columns.find((column) => column.field === 'Attachment' || column.name === 'Attachment')!;
+  return { source, app, base, ext, fileColumn };
+}
+
+/**
+ * File row 9303 points at extension row 9302, which points at form row 9301.
+ * Only 9301 carries the Creator record id, so the manifest needs both hops.
+ */
+function twoHopFileRows(baseName: string, extName: string, fileColumn: string): Map<string, Record<string, unknown>[]> {
+  const creatorId = '1000000000003570221';
+  const key = `migrated/Wide_Form/Attachment/${creatorId}/file.pdf`;
+  return new Map([
+    [baseName, [{ ROWID: '9301', c2c_source_id: creatorId }]],
+    [
+      extName,
+      [
+        { ROWID: '9302', parent_rowid: '9301' },
+        { ROWID: '9303', parent_rowid: '9302', [fileColumn]: key },
+      ],
+    ],
+  ]);
+}
+
+function fileManifest(result: { files: { path: string; body: string }[] }): string {
+  return result.files.find((file) => file.path === 'files/Wide_Form.files.csv')?.body ?? '';
+}
+
+test('rollback export re-attaches a file whose parent is resolved through a second hop', () => {
+  const { app, base, ext, fileColumn } = wideFileApp();
+  const rows = twoHopFileRows(base.name, ext.name, fileColumn.name);
+  const extension = rows.get(ext.name)!;
+  assert.equal(extension[0]!.parent_rowid, '9301');
+  assert.equal(extension[1]!.parent_rowid, '9302');
+  assert.equal(extension[0]!.c2c_source_id, undefined);
+  const creatorId = '1000000000003570221';
+  const key = `migrated/Wide_Form/Attachment/${creatorId}/file.pdf`;
+  const field = fileColumn.field ?? fileColumn.name;
+  const result = rollbackExport(app, rows);
+  const manifest = fileManifest(result);
+  assert.equal(manifest, `ID,ROWID,Field,Object_Key,File_Name\n${creatorId},9303,${field},${key},file.pdf\n`);
+  assert.equal(result.files.some((file) => file.path === `files/${ext.name}.files.csv`), false);
+  assert.equal(result.warnings.some((line) => line.includes('could not be resolved')), false);
+});
+
+test('rollback export round-trips an extension file manifest byte for byte', () => {
+  const { app, base, ext, fileColumn } = wideFileApp();
+  const key = 'migrated/Wide_Form/Attachment/1000000000003570221/file.pdf';
+  const exported = rollbackExport(app, twoHopFileRows(base.name, ext.name, fileColumn.name));
+  const files = new Map(exported.files.map((file) => [file.path, file.body]));
+  const manifest = files.get('files/Wide_Form.files.csv');
+  assert.ok(manifest, 'extension file manifest');
+  const importCsv = files.get('import/Wide_Form.csv')!.trimEnd().split('\n');
+  const importHeader = importCsv[0]!.split(',');
+  const importRow = importCsv[1]!.split(',');
+  assert.equal(importRow[importHeader.indexOf('ID')], '1000000000003570221');
+  const ids = files.get('ids/Wide_Form.ids.csv')!.trimEnd().split('\n');
+  const idHeader = ids[0]!.split(',');
+  const idRow = ids[1]!.split(',');
+  const formRowId = idRow[idHeader.indexOf('ROWID')]!;
+  assert.equal(idRow[idHeader.indexOf('ID')], '1000000000003570221');
+  const manifestLines = manifest.trimEnd().split('\n');
+  const manifestHeader = manifestLines[0]!.split(',');
+  const attached = manifestLines.slice(1).map((line) => {
+    const cells = line.split(',');
+    const creatorId = cells[manifestHeader.indexOf('ID')]!;
+    assert.equal(creatorId, importRow[importHeader.indexOf('ID')]);
+    return {
+      ROWID: cells[manifestHeader.indexOf('ROWID')]!,
+      parent_rowid: formRowId,
+      [fileColumn.name]: cells[manifestHeader.indexOf('Object_Key')]!,
+    };
+  });
+  assert.equal(attached[0]![fileColumn.name], key);
+  const imported = new Map<string, Record<string, unknown>[]>([
+    [base.name, [{ ROWID: formRowId, c2c_source_id: '1000000000003570221' }]],
+    [ext.name, attached],
+  ]);
+  const again = rollbackExport(app, imported);
+  assert.equal(fileManifest(again), manifest);
+});
+
+function parentRefusals(text: string): { count: number; ids: string[] }[] {
+  return text
+    .split('\n')
+    .filter((line) => line.includes('parent Creator record ID could not be resolved'))
+    .map((line) => ({
+      count: Number(/(\d+) file value\(s\)/.exec(line)?.[1]),
+      ids: /\(records: ([^)]*)\)/.exec(line)?.[1]?.split(',').map((id) => id.trim()).filter(Boolean) ?? [],
+    }));
+}
+
+test('rollback export reports unresolved parents in the CLI output and the migration report', async () => {
+  const { source, base, ext, fileColumn } = wideFileApp();
+  const ws = workspace(source);
+  const rowsDir = mkdtempSync(join(tmpdir(), 'c2c-rollback-rows-'));
+  writeFileSync(join(rowsDir, `${base.name}.json`), JSON.stringify([{ ROWID: '9201', c2c_source_id: '1000000000003570221' }]));
+  writeFileSync(
+    join(rowsDir, `${ext.name}.json`),
+    JSON.stringify([
+      { ROWID: '9202', parent_rowid: 'absent-a', [fileColumn.name]: 'object/a.pdf' },
+      { ROWID: '9204', parent_rowid: 'absent-b', [fileColumn.name]: 'object/b.pdf' },
+    ]),
+  );
+  const out = mkdtempSync(join(tmpdir(), 'c2c-rollback-report-'));
+  const run = cli(fakeStore());
+  assert.equal(await rollbackExportCli(['--ds', ws.ds, '--out', out, '--rows', rowsDir], run.io), 0, run.err());
+  const cliRefusals = parentRefusals(run.out());
+  const reportRefusals = parentRefusals(readFileSync(join(out, 'README.md'), 'utf8'));
+  assert.deepEqual(cliRefusals, reportRefusals);
+  assert.deepEqual(cliRefusals, [{ count: 2, ids: ['9202', '9204'] }]);
+  assert.equal(cliRefusals[0]!.count, cliRefusals[0]!.ids.length);
+  assert.equal(existsSync(join(out, 'files', 'Wide_Form.files.csv')), false);
+});
+
+test('rollback export refuses a cyclic extension parent without hanging', () => {
+  const { app, base, ext, fileColumn } = wideFileApp();
+  const rows = new Map<string, Record<string, unknown>[]>([
+    [base.name, [{ ROWID: '9401', c2c_source_id: '1000000000003570221' }]],
+    [
+      ext.name,
+      [
+        { ROWID: '9402', parent_rowid: '9403' },
+        { ROWID: '9403', parent_rowid: '9402', [fileColumn.name]: 'object/cycle.pdf' },
+      ],
+    ],
+  ]);
+  const result = rollbackExport(app, rows);
+  assert.equal(result.files.some((file) => file.path.startsWith('files/')), false);
+  assert.deepEqual(parentRefusals(result.warnings.join('\n')), [{ count: 1, ids: ['9403'] }]);
+});
+
 test('rollback export writes an extension row whose parent is missing under manual/', () => {
   const { app, base, ext } = wideApp();
   const extColumn = ext.columns.find((column) => /^Field_\d+$/.test(column.name))!;

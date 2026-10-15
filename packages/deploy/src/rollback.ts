@@ -19,7 +19,11 @@
  * times, IP addresses) and shadows are never exported. File fields store a
  * Stratus object key, which report import cannot load: each cell is listed in
  * files/<Form>.files.csv (record id, field, key, file name) so the files can
- * be fetched from the bucket and re-attached by hand.
+ * be fetched from the bucket and re-attached by hand. A file on an extension
+ * row is listed on the form manifest under the form row's Creator record id.
+ * parent_rowid may name that form row, or another extension row whose own
+ * parent_rowid continues the chain; the export follows those rows. A file
+ * whose form row has no Creator record id is counted, named, and omitted.
  *
  * The import/ folder reads back with `--source-csv`, so a re-plan against the
  * last checkpoint shows no changes when the store and checkpoint agree.
@@ -324,6 +328,22 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
     ]);
     files.push({ path: `manual/${name}.csv`, body: csvDocument(['ID', 'ROWID', ...list.map((item) => item.header)], data) });
   }
+  // Form row Creator id for an extension file. parent_rowid names the form row, or
+  // another extension row in this export whose parent_rowid continues the chain.
+  const creatorIdFromExport = (formTable: string, rowid: string, seen: Set<string>): string => {
+    if (!rowid || seen.has(rowid)) return '';
+    seen.add(rowid);
+    const direct = byRowId.get(formTable)?.get(rowid);
+    if (direct) return direct.sourceId;
+    for (const ext of schema.tables) {
+      if (ext.role !== 'extension' || ext.extensionOf !== formTable) continue;
+      const intermediate = byRowId.get(ext.name)?.get(rowid);
+      if (!intermediate) continue;
+      const nested = creatorIdFromExport(formTable, intermediate.cells.get(EXTENSION_KEY) ?? '', seen);
+      if (nested) return nested;
+    }
+    return '';
+  };
   for (const table of formTables) {
     const label = table.form;
     const entries: { sourceId: string; rowid: string; field: string; key: string }[] = [];
@@ -332,18 +352,22 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
     entries.push(...ownEntries.filter((entry) => entry.sourceId));
     if (missingIds) warn(`${table.form}: ${missingIds} file value(s) were refused because the Creator record ID could not be resolved; no blank ID was emitted`);
     for (const ext of schema.tables.filter((item) => item.role === 'extension' && item.extensionOf === table.name)) {
-      let refused = 0;
+      const refusedIds: string[] = [];
       for (const entry of fileCells.get(ext.name) ?? []) {
         const extension = byRowId.get(ext.name)?.get(entry.rowid);
         const parentRowId = extension?.cells.get(EXTENSION_KEY) ?? '';
-        const parent = parentRowId ? byRowId.get(table.name)?.get(parentRowId) : undefined;
-        if (!parent?.sourceId) {
-          refused += 1;
+        const sourceId = creatorIdFromExport(table.name, parentRowId, new Set());
+        if (!sourceId) {
+          refusedIds.push(entry.rowid || parentRowId || 'unknown');
           continue;
         }
-        entries.push({ ...entry, sourceId: parent.sourceId });
+        entries.push({ ...entry, sourceId });
       }
-      if (refused) warn(`${table.form}: ${refused} file value(s) in ${ext.name} were refused because the parent Creator record ID could not be resolved; no blank ID was emitted`);
+      if (refusedIds.length) {
+        warn(
+          `${table.form}: ${refusedIds.length} file value(s) in ${ext.name} were refused because the parent Creator record ID could not be resolved; no blank ID was emitted (records: ${refusedIds.join(', ')})`,
+        );
+      }
     }
     if (!entries.length) continue;
     const data = entries.map((entry) => [entry.sourceId, entry.rowid, entry.field, entry.key, entry.key.split('/').pop() ?? '']);
