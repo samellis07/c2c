@@ -269,8 +269,13 @@ test('a failed child insert rolls the new parent row back', async () => {
 });
 
 test('the edit record read returns subform rows, and an edit that omits a subform leaves its stored rows byte for byte', async () => {
-  const { dir } = emit();
+  const { dir, files } = emit();
   try {
+    const policyPath = 'functions/access-policy.json';
+    const policy = JSON.parse(String(files.get(policyPath)));
+    policy.profiles.Staff['Order__Lines'] = { fields: ['Item'] };
+    policy.profiles.Staff['Order__Notes'] = { fields: ['Body'] };
+    writeFileSync(join(dir, policyPath), JSON.stringify(policy));
     const rec = await import(pathToFileURL(join(dir, 'functions/aio/order/record.mjs')).href);
     const submit = await import(pathToFileURL(join(dir, 'functions/aio/order/submit.mjs')).href);
     const store = memoryDatastore();
@@ -313,6 +318,29 @@ test('the edit record read returns subform rows, and an edit that omits a subfor
     assert.equal(added.status, 200, JSON.stringify(added.body));
     assert.deepEqual(store.tables.get('Order__Lines')!.map((row) => row.Item), ['Bolt', 'Washer']);
     assert.equal(JSON.stringify(store.tables.get('Order__Notes')), notesBefore);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('record subforms require a child-table read grant and project child fields', async () => {
+  const { dir, files } = emit();
+  try {
+    const policyPath = 'functions/access-policy.json';
+    const policy = JSON.parse(String(files.get(policyPath)));
+    policy.profiles.Staff['Order__Lines'] = { fields: ['Item'] };
+    writeFileSync(join(dir, policyPath), JSON.stringify(policy));
+    const rec = await import(pathToFileURL(join(dir, 'functions/aio/order/record.mjs')).href);
+    const submit = await import(pathToFileURL(join(dir, 'functions/aio/order/submit.mjs')).href);
+    const store = memoryDatastore();
+    await withLive(store, () => invoke(submit.default, { ...staff, body: { record: { ...record, Lines: [{ Item: 'Bolt', Secret: 'hidden' }] } } }));
+    const parent = store.tables.get('Order')![0]!;
+    const loaded = await withLive(store, () => invoke(rec.default, { ...staff, body: { ROWID: parent.ROWID } }));
+    assert.equal(loaded.status, 200, JSON.stringify(loaded.body));
+    const values = loaded.body.record as Record<string, Record<string, unknown>[]>;
+    assert.deepEqual(values.Lines, [{ Item: 'Bolt' }]);
+    assert.deepEqual(values.Notes, [], 'a child form without a read grant contributes no rows');
+    assert.equal(Object.hasOwn(values.Lines[0]!, 'Secret'), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

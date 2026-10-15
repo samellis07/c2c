@@ -553,20 +553,30 @@ async function loadViewsRuntime(): Promise<ViewsRuntime> {
   return (await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)) as ViewsRuntime;
 }
 
-async function bootDecorated(name: string, rows: Record<string, unknown>[], kind: 'report' | 'page' = 'report') {
+async function bootDecorated(name: string, rows: Record<string, unknown>[], kind: 'report' | 'page' = 'report', recordId?: string) {
   (globalThis as { CSS?: unknown }).CSS ??= { escape: (value: string) => value };
   const runtime = await loadViewsRuntime();
   const model = decoratedViews();
   const win = new JSDOM(`<!doctype html><body><nav id="nav"></nav><main id="main"></main></body>`, {
-    url: `http://localhost/slate/index.html#/${kind}/${name}`,
+    url: `http://localhost/slate/index.html#/${kind}/${name}${recordId ? `/row/${recordId}` : ''}`,
   }).window as unknown as { document: Document; fetch: typeof fetch; location: { hash: string } };
-  win.fetch = (async (_url: string, init: { body: string }) => {
-    const body = JSON.parse(init.body) as { op?: string };
-    return { ok: true, status: 200, json: async () => ({ rows: body.op === 'query' ? rows : [] }) };
+  const recordReads: { url: string; body: Record<string, unknown> }[] = [];
+  win.fetch = (async (url: string, init: { body: string }) => {
+    const body = JSON.parse(init.body) as Record<string, unknown>;
+    if (body.ROWID != null) recordReads.push({ url, body });
+    const payload = body.ROWID != null
+      ? { record: { ROWID: String(body.ROWID), Product: 'Off page record' } }
+      : { rows: body.op === 'query' ? rows : [] };
+    return { ok: true, status: 200, json: async () => payload };
   }) as unknown as typeof fetch;
   runtime.installReportViews(model, win.document);
   await runtime.boot(model, win.document);
-  return { doc: win.document, runtime, model };
+  await until(() => !recordId || docRecordLoaded(win.document));
+  return { doc: win.document, runtime, model, recordReads };
+}
+
+function docRecordLoaded(doc: Document): boolean {
+  return (doc.body.textContent ?? '').includes('Off page record');
 }
 
 async function until(pred: () => boolean) {
@@ -612,6 +622,16 @@ test('Active BOM list matches the Overview quick view and a row opens three bloc
   assert.match(doc.body.textContent ?? '', /Widget/);
   assert.match(doc.body.textContent ?? '', /Steel/);
   assert.equal(doc.querySelector('[data-block="List Of Raw Materials"] td')?.textContent, 'Steel');
+});
+
+test('vanilla detail loads an off-page row from the authorized record endpoint', async () => {
+  const { doc, recordReads, model } = await bootDecorated('Active_BOM', [], 'report', '907');
+  const form = model.forms.find((item) => item.name === 'Create_BOM');
+  assert.ok(form?.recordEndpoint);
+  assert.equal(recordReads.length, 1);
+  assert.equal(recordReads[0]?.url.endsWith(form.recordEndpoint), true);
+  assert.deepEqual(recordReads[0]?.body, { ROWID: '907' });
+  assert.match(doc.body.textContent ?? '', /Off page record/);
 });
 
 test('Stock Details groups by Warehouse Code in first-seen order and sorts by Product Name', async () => {

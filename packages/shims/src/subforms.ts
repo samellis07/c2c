@@ -33,6 +33,16 @@ export interface SubformStore {
   delete?(table: string, rowIds: readonly unknown[]): Promise<unknown>;
 }
 
+/** Optional read scope used when attaching child rows to an authorized parent. */
+export interface SubformReadScope {
+  criteria: string;
+  fields?: readonly string[];
+}
+export interface AttachSubformsOptions {
+  authorize?: (table: string) => SubformReadScope | null;
+  project?: (row: Record<string, unknown>, fields?: readonly string[]) => Record<string, unknown>;
+}
+
 /** Catalyst insertRows / deleteRows take at most 200 rows per call. */
 export const SUBFORM_WRITE_BATCH = 200;
 /** ZCQL returns at most 300 rows per query; IN lists use the same cap. */
@@ -235,16 +245,23 @@ export async function attachSubforms(
   tables: SubformTables | undefined,
   form: string,
   parents: Record<string, unknown>[],
+  options: AttachSubformsOptions = {},
 ): Promise<Record<string, unknown>[]> {
   const links = linksOf(tables, form);
   if (!links.length || !parents.length) return parents;
   if (!store.query) throw new Error('subform read needs datastore.query');
   const ids = parents.map((row) => row.ROWID).filter((id) => id != null && id !== '').map((id) => rowIdLiteral(id).slice(1, -1));
   for (const link of links) {
+    const scope = options.authorize ? options.authorize(link.table) : undefined;
+    if (scope === null) {
+      for (const parent of parents) parent[link.field] = [];
+      continue;
+    }
     const byParent = new Map<string, Record<string, unknown>[]>();
     for (let i = 0; i < ids.length; i += SUBFORM_READ_PAGE) {
       const chunk = ids.slice(i, i + SUBFORM_READ_PAGE);
-      const where = `${ident(link.parentColumn)} IN (${chunk.map((id) => `'${id}'`).join(', ')})`;
+      const parentWhere = `${ident(link.parentColumn)} IN (${chunk.map((id) => `'${id}'`).join(', ')})`;
+      const where = scope && scope.criteria && scope.criteria !== 'true' ? `(${parentWhere}) AND (${scope.criteria})` : parentWhere;
       for (let offset = 0; ; offset += SUBFORM_READ_PAGE) {
         const page = await store.query(link.table, where, SUBFORM_READ_PAGE, offset, `ORDER BY ${ident(link.orderColumn)}, ROWID`);
         for (const row of page) {
@@ -260,7 +277,10 @@ export async function attachSubforms(
       const key = parent.ROWID == null ? '' : String(parent.ROWID);
       const rows = (byParent.get(key) ?? []).slice();
       rows.sort((a, b) => orderOf(link, a) - orderOf(link, b) || compareRowIds(a.ROWID, b.ROWID));
-      parent[link.field] = rows.map((row) => stripLink(link, row));
+      parent[link.field] = rows.map((row) => {
+        const projected = options.project ? options.project(row, scope && scope.fields) : row;
+        return stripLink(link, projected);
+      });
     }
   }
   return parents;

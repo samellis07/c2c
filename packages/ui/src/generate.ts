@@ -2060,7 +2060,18 @@ function recordStub(app: App, form: UiModel['forms'][number], path: string): str
     return [[report.name, { criteria, fields: report.columns.map((column) => column.field), profiles }]];
   }));
   const queryName = subformLinks.length ? 'queried' : 'rows';
-  const attachRows = subformLinks.length ? 'if (Array.isArray(queried)) await attachSubforms(datastore, subformTables, formName, queried);\n    ' : '';
+  const attachRows = subformLinks.length ? `if (Array.isArray(queried)) await attachSubforms(datastore, subformTables, formName, queried, {
+      authorize(table) {
+        try {
+          const child = authorizeRead(access, principal, table, { op: "true" });
+          const where = compileCriteria(child.criteria);
+          return { criteria: where === "true" ? "" : where, fields: child.fields };
+        } catch {
+          return null;
+        }
+      },
+      project(row, fields) { return projectFields(row, fields); },
+    });\n    ` : '';
   const bannerLines = [
     `Record ${form.name}. Reads one row for the generated edit screen.`,
     'authorizeRead applies functions/access-policy.json: only a row the caller can read is returned,',
