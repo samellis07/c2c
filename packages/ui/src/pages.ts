@@ -34,6 +34,8 @@ export interface ZmlEnv {
   emit?: (file: HtmlpageFile) => void;
   /** Counter for unique snippet ids within a page. */
   seq?: { n: number };
+  /** Generated views available to inline zc-component embeds. */
+  components?: { forms: Set<string>; reports: Set<string> };
 }
 
 export interface UiElement {
@@ -71,6 +73,10 @@ export interface UiElement {
   style?: Record<string, string>;
   /** `openUrl(..., "popup window")` actions a snippet would have run server-side. */
   popups?: UiPopup[];
+  /** Pages of this app the snippet embedded by `page-embed` iframe, drawn inline at their markers. */
+  includes?: string[];
+  /** Generated forms/reports embedded by a zc-component marker. */
+  components?: { kind: 'form' | 'report'; name: string }[];
   /** A ZML `<embed>` element with a static http(s) URL, drawn as an iframe. */
   embed?: { url: string; width?: string; height?: string };
   children: UiElement[];
@@ -901,8 +907,25 @@ export function elementFromZml(
       const styleRules = droppedStyleRules(decoded);
       const lostCss = styleRules ? { droppedStyleRules: styleRules, staticCss: decoded } : {};
       const actionItems = imageActionTodos(imageActions, compiled && !compiled.ok ? compiled.reason : undefined);
+      if (compiled?.ok) {
+        const inline = (compiled.components ?? []).filter((item) => env?.components?.[item.kind === 'form' ? 'forms' : 'reports'].has(item.name));
+        const unavailable = (compiled.components ?? []).filter((item) => !inline.includes(item)).map((item) => `${item.kind} "${item.name}"`);
+        const notes = [...(compiled.componentTodos ?? []), ...unavailable].map((item) => ({ tag, kind: 'todo' as const, todo: `Embedded zc-component ${item} has no generated view`, children: [] }));
+        children = [...notes, ...children];
+      }
       if (compiled?.ok && compiled.staticOnly) {
-        return { tag, kind, ...(name ? { name } : {}), html: compiled.html ?? '', ...lostCss, ...(compiled.droppedTags?.length ? { droppedTags: compiled.droppedTags } : {}), ...(popups.length ? { popups } : {}), children: [...actionItems, ...children] };
+        return {
+          tag,
+          kind,
+          ...(name ? { name } : {}),
+          html: compiled.html ?? '',
+          ...lostCss,
+          ...(compiled.droppedTags?.length ? { droppedTags: compiled.droppedTags } : {}),
+          ...(compiled.includes?.length ? { includes: compiled.includes } : {}),
+          ...(compiled.components?.length ? { components: compiled.components.filter((item) => env?.components?.[item.kind === 'form' ? 'forms' : 'reports'].has(item.name)) } : {}),
+          ...(popups.length ? { popups } : {}),
+          children: [...actionItems, ...children],
+        };
       }
       if (compiled?.ok && compiled.file && compiled.src !== undefined) {
         env?.emit?.(compiled.file);
@@ -914,6 +937,8 @@ export function elementFromZml(
           ...lostCss,
           ...(compiled.droppedTags?.length ? { droppedTags: compiled.droppedTags } : {}),
           src: compiled.src,
+          ...(compiled.includes?.length ? { includes: compiled.includes } : {}),
+          ...(compiled.components?.length ? { components: compiled.components.filter((item) => env?.components?.[item.kind === 'form' ? 'forms' : 'reports'].has(item.name)) } : {}),
           ...(popups.length ? { popups } : {}),
           children: [...actionItems, ...children],
         };

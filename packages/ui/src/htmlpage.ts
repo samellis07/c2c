@@ -49,6 +49,12 @@ export interface HtmlpageCompiled {
   file?: HtmlpageFile;
   /** Why this template is not compiled (the element keeps its TODO). */
   reason?: string;
+  /** Pages of this app the template embedded by `page-embed` iframe, now inline includes. */
+  includes?: string[];
+  /** `zc-component` embeds that can resolve to generated in-app forms or reports. */
+  components?: { kind: 'form' | 'report'; name: string }[];
+  /** Component embeds without a generated inline target; each remains a counted TODO. */
+  componentTodos?: string[];
 }
 
 /** Decode the XML entities the ZML attribute escapes the template with. */
@@ -432,6 +438,93 @@ function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'comme
     return 'text';
   }
   return 'reject';
+}
+
+/**
+ * `data-zml` value a translated page embed leaves in the markup. `data-zml`
+ * survives every snippet sanitizer, and the runtime fills only the names the
+ * element declares (`UiElement.includes`), so markup cannot invent one.
+ */
+export const PAGE_INCLUDE_PREFIX = 'page-include:';
+
+const IFRAME_ATTR = `[${TAG_WS}]+[A-Za-z_:][\\w:.-]*(?:[${TAG_WS}]*=[${TAG_WS}]*(?:"[^"<%]*"|'[^'<%]*'|[^${TAG_WS}"'=<>\`%]+))?`;
+const IFRAME_OPEN = new RegExp(`^<iframe(?:${IFRAME_ATTR})*?[${TAG_WS}]+src[${TAG_WS}]*=[${TAG_WS}]*(["'])$`, 'i');
+const APPURI_ISLAND = /<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>/gi;
+
+/**
+ * A literal `<iframe src="<%=zoho.appuri%>page-embed/<Page>">` of another page
+ * of this app becomes an inline include of that page's generated view. Creator
+ * draws the named page inside the frame [UNVERIFIED]; `zc_*` query keys are
+ * Creator display flags (header, footer) [UNVERIFIED] with no view effect
+ * here, so they may stay. Anything else is left as written, and the iframe
+ * keeps the snippet counted: an unknown page, the page embedding itself, any
+ * other query parameter, an island in the URL or the tag, frame content, or a
+ * position that is not plain text (a comment, a raw-text or dropped element).
+ */
+function inlinePageEmbeds(template: string, app: App, page: string): { template: string; includes: string[] } {
+  const includes: string[] = [];
+  const known = new Set(app.pages.map((item) => item.name));
+  let out = '';
+  let at = 0;
+  APPURI_ISLAND.lastIndex = 0;
+  for (let m = APPURI_ISLAND.exec(template); m; m = APPURI_ISLAND.exec(template)) {
+    const left = template.slice(at, m.index);
+    const start = left.toLowerCase().lastIndexOf('<iframe');
+    if (start < 0) continue;
+    const open = IFRAME_OPEN.exec(left.slice(start));
+    if (!open) continue;
+    const quote = open[1];
+    const rest = template.slice(m.index + m[0].length);
+    const tail = new RegExp(
+      `^page-embed/([A-Za-z_]\\w*)(?:\\?([^"'<>%${TAG_WS}]*))?${quote}(?:${IFRAME_ATTR})*[${TAG_WS}]*>[${TAG_WS}]*</iframe[${TAG_WS}]*>`,
+      'i',
+    ).exec(rest);
+    if (!tail) continue;
+    const name = tail[1];
+    const query = tail[2] ?? '';
+    if (!known.has(name) || name === page) continue;
+    if (query && !query.split('&').every((part) => part === '' || /^zc_\w+(=[^&]*)?$/i.test(part))) continue;
+    // The tag must open in a text position of an element the sanitizer keeps.
+    const before = out + template.slice(at, at + start);
+    const pieces = splitChunks(before);
+    if (!pieces) continue;
+    if (slotContext(pieces.map((c) => (c.kind === 'static' ? c.text : 'x')).join('')) !== 'text') continue;
+    out = `${before}<div data-zml="${PAGE_INCLUDE_PREFIX}${name}"></div>`;
+    at = m.index + m[0].length + tail[0].length;
+    APPURI_ISLAND.lastIndex = at;
+    if (!includes.includes(name)) includes.push(name);
+  }
+  return { template: out + template.slice(at), includes };
+}
+
+const ZC_COMPONENT = /\belname[ \t\n\f\r]*=[ \t\n\f\r]*["']?zc-component\b/i;
+const ZC_LINK = /\b(form|view|report|page)linkname[ \t\n\f\r]*=[ \t\n\f\r]*["']?([A-Za-z_]\w*)/i;
+const ZC_PARAMS = /\bparams[ \t\n\f\r]*=/i;
+
+interface EmbeddedComponent { kind: 'form' | 'report'; name: string }
+
+/**
+ * Creator zc-component divs can name a generated form/report [UNVERIFIED]. Only a literal
+ * link name without a params attribute is provable; other embeds stay TODOs.
+ */
+function embeddedComponents(template: string, app: App): { template: string; components: EmbeddedComponent[]; todos: string[] } {
+  const components: EmbeddedComponent[] = [];
+  const todos: string[] = [];
+  const rewritten = template.replace(/<div\b[^>]*>/gi, (tag) => {
+    if (!ZC_COMPONENT.test(tag)) return tag;
+    const link = ZC_LINK.exec(tag);
+    const kind = link ? (link[1].toLowerCase() === 'view' || link[1].toLowerCase() === 'report' ? 'report' : link[1].toLowerCase()) : '';
+    const name = link?.[2] ?? '';
+    const known = kind === 'form' ? app.forms.some((form) => form.name === name) : kind === 'report' ? app.reports.some((report) => report.name === name) : false;
+    if (known && !ZC_PARAMS.test(tag)) {
+      const component = { kind: kind as 'form' | 'report', name };
+      components.push(component);
+      return tag.replace(/>$/, ` data-zml="component-${component.kind}:${component.name}">`);
+    }
+    todos.push(link ? `${kind || link[1].toLowerCase()} "${name}"` : 'component');
+    return tag;
+  });
+  return { template: rewritten, components, todos };
 }
 
 /** Split the decoded template into static markup and `<% %>` / `<%{ }%>` / `<%= %>` islands. */
@@ -1632,10 +1725,34 @@ export function compileHtmlpage(
   head.template = convertZmlSnippetToHtml(head.template);
   head.template = rewriteEmbedIframes(head.template, app);
   if (hasExecuteFunctionButton(head.template)) return fail(EXECUTE_FUNCTION_BUTTON);
+  // A template that already writes the include marker could name a page the
+  // compiler never checked: it stays the counted snippet.
+  if (head.template.toLowerCase().includes(PAGE_INCLUDE_PREFIX)) return fail('marker collision');
+  const embeds = inlinePageEmbeds(head.template, app, page);
+  head.template = embeds.template;
+  const includes = embeds.includes;
+  if (head.template.toLowerCase().includes('component-form:') || head.template.toLowerCase().includes('component-report:')) return fail('marker collision');
+  const embedded = embeddedComponents(head.template, app);
+  head.template = embedded.template;
+  const withIncludes = (done: HtmlpageCompiled): HtmlpageCompiled => {
+    // Every include must survive sanitization where it stood; a marker the
+    // allowlist removed would be an embed that silently vanished.
+    const html = done.html ?? '';
+    for (const name of includes) if (!html.includes(`data-zml="${PAGE_INCLUDE_PREFIX}${name}"`)) return fail('page embed did not survive markup sanitization');
+    for (const item of embedded.components) if (!html.includes(`data-zml="component-${item.kind}:${item.name}"`)) return fail('component embed did not survive markup sanitization');
+    return { ...done, ...(includes.length ? { includes } : {}), ...(embedded.components.length ? { components: embedded.components } : {}), ...(embedded.todos.length ? { componentTodos: embedded.todos } : {}) };
+  };
   const chunks = splitChunks(head.template);
   if (!chunks) return fail('malformed Deluge island');
   const rawIslands = chunks.filter((c) => c.kind !== 'static');
-  if (!rawIslands.length) return fail('no Deluge islands');
+  if (!rawIslands.length) {
+    if (!includes.length && !embedded.components.length) return fail('no Deluge islands');
+    // The embed's appuri island or a generated component marker was the only
+    // dynamic construct: the rest is static markup.
+    const staticMarkup = chunks.map((c) => c.text).join('');
+    if (droppedStyles(staticMarkup, false).length) return fail('static markup contains a dropped style declaration');
+    return withIncludes({ ok: true, staticOnly: true, html: sanitizeSnippet(staticMarkup) });
+  }
   // Legacy exports sometimes wrap entirely static markup in an empty
   // statement block. Parse every statement island before accepting this path:
   // comments and whitespace have no AST nodes, while any real statement keeps
@@ -1657,12 +1774,12 @@ export function compileHtmlpage(
     if (droppedStyles(staticMarkup, false).length) return fail('static markup contains a dropped style declaration');
     const droppedTags: string[] = [];
     const html = sanitizeSnippet(staticMarkup, undefined, droppedTags);
-    return {
+    return withIncludes({
       ok: true,
       staticOnly: true,
       html,
       ...(droppedTags.length ? { droppedTags } : {}),
-    };
+    });
   }
   if (MARK_CHECK.test(head.template) || /\bc2c_(out|parts|static|str|esc|link|notes|css)\b/i.test(head.template))
     return fail('marker collision');
@@ -1859,7 +1976,7 @@ export function compileHtmlpage(
       statics: cleanStatics,
     }),
   };
-  return { ok: true, html: cleanStatics.join(''), ...(droppedTags.length ? { droppedTags } : {}), src: path, file };
+  return withIncludes({ ok: true, html: cleanStatics.join(''), ...(droppedTags.length ? { droppedTags } : {}), src: path, file });
 }
 
 function islandOrdinal(chunks: Chunk[], target: Chunk): number {

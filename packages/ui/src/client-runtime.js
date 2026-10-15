@@ -846,7 +846,11 @@ function renderElement(el, doc, parentReport, appModel) {
       )
       .join('');
     const inner = el.src ? `<div data-snippet-src="${escapeHtml(el.src)}">${clean}</div>` : clean;
-    return `${inner.trim() || markers ? `<div class="snippet">${inner}${markers}</div>` : ''}${kids}`;
+    const includes = (el.includes || []).filter((item) => /^[A-Za-z_]\w*$/.test(item));
+    const declared = includes.length ? ` data-page-includes="${escapeHtml(includes.join(' '))}"` : '';
+    const components = (el.components || []).filter((item) => item && (item.kind === 'form' || item.kind === 'report') && /^[A-Za-z_]\w*$/.test(item.name));
+    const componentDecl = components.length ? ` data-page-components="${escapeHtml(components.map((item) => `${item.kind}:${item.name}`).join(' '))}"` : '';
+    return `${inner.trim() || markers ? `<div class="snippet"${declared}${componentDecl}>${inner}${markers}</div>` : ''}${kids}`;
   }
   if (el.kind === 'embed') {
     const spec = el.embed || {};
@@ -911,12 +915,113 @@ function renderElement(el, doc, parentReport, appModel) {
   return `<p${styleAttr(el)}>${escapeHtml(el.text || el.name || '')}</p>${kids}`;
 }
 
-export function renderPage(page, doc, appModel) {
+function pageBody(page, doc, appModel) {
   const body = (page.elements || []).map((el) => renderElement(el, doc, undefined, appModel)).join('');
   if (page.status === 'todo') console.info(`[c2c] page "${page.name}" is not generated: ${page.todo || ''}`);
+  return body;
+}
+
+export function renderPage(page, doc, appModel) {
+  const body = pageBody(page, doc, appModel);
   const style = typeof page.scopedCss === 'string' && page.scopedCss ? `<style>${page.scopedCss.replace(/</g, '')}</style>` : '';
   return `<article data-page="${escapeHtml(page.name)}">${style}<h2>${escapeHtml(page.label || page.name)}</h2>${body}</article>`;
 }
+
+const PAGE_INCLUDE_PREFIX = 'page-include:';
+
+/**
+ * Inline includes of other app pages (a translated `page-embed` iframe). A
+ * marker is filled only when its snippet element declared that page, and the
+ * included page passes the same gate as opening its route: a page only a
+ * hidden menu section lists is refused, and its own snippets fetch their own
+ * endpoints, which check the caller. A page already open above the marker is
+ * not drawn again (an include cycle).
+ */
+export function hydratePageIncludes(root, appModel, viewRef) {
+  if (!root || !root.querySelectorAll) return;
+  for (const slot of root.querySelectorAll(`[data-zml^="${PAGE_INCLUDE_PREFIX}"]`)) {
+    if (slot.getAttribute('data-include-done') === 'true') continue;
+    const name = (slot.getAttribute('data-zml') || '').slice(PAGE_INCLUDE_PREFIX.length);
+    const host = slot.closest('[data-page-includes]');
+    const declared = host ? (host.getAttribute('data-page-includes') || '').split(' ') : [];
+    if (!name || !declared.includes(name)) continue;
+    slot.setAttribute('data-include-done', 'true');
+    const page = (appModel.pages || []).find((item) => item.name === name);
+    if (!page) {
+      console.info(`[c2c] embedded page "${name}" is not in this app`);
+      continue;
+    }
+    let cycle = false;
+    for (let up = slot.parentElement; up; up = up.parentElement) {
+      if (up.getAttribute('data-page') === name) cycle = true;
+    }
+    if (cycle) {
+      console.info(`[c2c] embedded page "${name}" is already open above this point; not drawn again`);
+      continue;
+    }
+    if (hiddenTarget(appModel, name)) {
+      slot.innerHTML = '<p data-access-status="403">This page is not available.</p>';
+      continue;
+    }
+    slot.innerHTML = `<div class="page-include" data-page="${escapeHtml(page.name)}">${pageBody(page, slot.ownerDocument, appModel)}</div>`;
+    hydrateCharts(slot, appModel, viewRef);
+    hydratePopups(slot, appModel, viewRef);
+    hydrateSnippets(slot, appModel, viewRef);
+    hydratePageIncludes(slot, appModel, viewRef);
+    hydrateComponentEmbeds(slot, appModel, viewRef);
+  }
+}
+
+/**
+ * Fill generated form/report component markers inside a compiled snippet.
+ * A marker is honored only when its containing snippet declared the same target.
+ * Hidden-nav targets ask the same view endpoint as their standalone route.
+ */
+export function hydrateComponentEmbeds(root, appModel, viewRef) {
+  if (!root || !root.querySelectorAll) return;
+  const call = (viewRef && viewRef.fetch) || globalThis.fetch;
+  for (const slot of root.querySelectorAll('[data-zml^="component-"]')) {
+    if (slot.getAttribute('data-component-done') === 'true') continue;
+    const match = /^component-(form|report):([A-Za-z_]\w*)$/.exec(slot.getAttribute('data-zml') || '');
+    if (!match) continue;
+    const [, kind, name] = match;
+    const host = slot.closest('[data-page-components]');
+    const declared = host ? (host.getAttribute('data-page-components') || '').split(' ') : [];
+    if (!declared.includes(`${kind}:${name}`)) continue;
+    const target = kind === 'form'
+      ? (appModel.forms || []).find((item) => item.name === name)
+      : (appModel.reports || []).find((item) => item.name === name && item.status === 'generated');
+    if (!target) continue;
+    slot.setAttribute('data-component-done', 'true');
+    const paint = () => {
+      slot.innerHTML = renderRoute(appModel, { name: kind, id: name }, slot.ownerDocument);
+      const mount = componentMounts.get(appModel);
+      if (mount) mount(slot, kind, target, viewRef);
+    };
+    if (!hiddenTarget(appModel, name)) {
+      paint();
+      continue;
+    }
+    const endpoint = gateEndpoint(appModel, { name: kind, id: name });
+    if (!endpoint || typeof call !== 'function') {
+      slot.innerHTML = '<p data-access-status="403">This page is not available.</p>';
+      continue;
+    }
+    apiCall(call, viewRef, endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'view' }),
+    }).then((res) => {
+      if (!res || res.status === 401 || res.status === 403 || res.ok === false) {
+        slot.innerHTML = `<p data-access-status="${(res && res.status) || 403}">This page is not available.</p>`;
+      } else paint();
+    }).catch(() => {
+      slot.innerHTML = '<p data-access-status="403">This page is not available.</p>';
+    });
+  }
+}
+
+const componentMounts = new WeakMap();
 
 /** Last loaded rows and sort order per chart section. */
 const chartState = new WeakMap();
@@ -1237,7 +1342,11 @@ export function hydrateSnippets(root, appModel, viewRef) {
         return responseJson(res);
       })
       .then((body) => {
-        if (body && typeof body.html === 'string') host.innerHTML = sanitizeSnippet(body.html, docRef || undefined);
+        if (body && typeof body.html === 'string') {
+          host.innerHTML = sanitizeSnippet(body.html, docRef || undefined);
+          hydratePageIncludes(host, appModel, viewRef);
+          hydrateComponentEmbeds(host, appModel, viewRef);
+        }
       })
       .catch(() => {});
   }
@@ -4895,6 +5004,29 @@ export function boot(appModel, doc) {
       }
     });
   }
+  componentMounts.set(appModel, (slot, kind, target, viewRef) => {
+    if (kind === 'form') {
+      const formEl = slot.querySelector('form');
+      if (formEl) openForm(appModel, target, formEl, viewRef, { name: 'form', id: target.name });
+      return;
+    }
+    if (target.view === 'chart') {
+      const section = slot.querySelector('section[data-report]');
+      if (section) loadChart(target, section, viewRef);
+    } else {
+      const tbody = slot.querySelector('[data-rows] tbody, [data-rows] [data-board]');
+      if (tbody) loadRows(target, tbody, viewRef);
+      const section = slot.querySelector('section[data-report]');
+      const loadLive = (page) => {
+        const live = section && section.querySelector('[data-rows] tbody, [data-rows] [data-board]');
+        if (live) loadRows(target, live, viewRef, page);
+      };
+      const search = section && section.querySelector('[data-report-search]');
+      if (search) search.addEventListener('submit', (event) => { event.preventDefault(); loadLive(0); });
+      const filter = section && section.querySelector('select[data-filter]');
+      if (filter) filter.addEventListener('change', () => loadLive(0));
+    }
+  });
   const markCurrent = () => {
     const hash = documentRef.location ? documentRef.location.hash : '';
     if (nav) setCurrent(nav, hash);
@@ -5088,6 +5220,8 @@ export function boot(appModel, doc) {
       hydrateCharts(main, appModel, view);
       hydratePopups(main, appModel, view);
       hydrateSnippets(main, appModel, view);
+      hydratePageIncludes(main, appModel, view);
+      hydrateComponentEmbeds(main, appModel, view);
     }
     if (route.name === 'smoke') mountSmoke(appModel, main, view);
     if (route.name === 'report') {
