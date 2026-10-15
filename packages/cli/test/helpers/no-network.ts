@@ -1,5 +1,6 @@
 import { createRequire, syncBuiltinESMExports } from 'node:module';
-import { basename } from 'node:path';
+import { delimiter, resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
 
 const require = createRequire(import.meta.url);
 
@@ -13,7 +14,7 @@ export interface NetworkTrap {
 export interface NetworkTrapOptions {
   /** Leave selected API traps open so a lower-level boundary can be tested. */
   exclude?: string[];
-  /** Executable basenames child_process may still run while trapped (default none). */
+  /** Executable paths child_process may still run while trapped (default none). */
   allowExec?: string[];
 }
 
@@ -21,7 +22,7 @@ export interface NetworkTrapOptions {
  * Trap families assertTrapsWork must see covered; a family with no probe and no
  * excluded member means a trap line was lost or a module shape changed.
  */
-const REQUIRED_KINDS = ['fetch', 'http', 'net', 'socket', 'tls', 'http2', 'dns', 'child_process'];
+const REQUIRED_KINDS = ['fetch', 'http', 'net', 'socket', 'tls', 'http2', 'dns', 'child_process', 'worker'];
 
 /** Release whatever an untrapped probe may have started (request, socket, session, child). */
 function tidy(value: unknown): void {
@@ -117,18 +118,33 @@ export function trapNetwork(options: NetworkTrapOptions = {}): NetworkTrap {
   }
 
   const cp = require('node:child_process') as Record<string, unknown>;
-  const allowExec = new Set(options.allowExec ?? []);
-  const execName = (value: unknown, shell: boolean) => {
+  const resolveExecutable = (value: unknown): string => {
     const text = String(value ?? '');
-    const first = shell ? (text.trim().split(/\s+/)[0] ?? '') : text;
-    return basename(first);
+    if (!text || /[\n\r]/.test(text)) return '';
+    try {
+      if (text.includes('/') || text.includes('\\')) return realpathSync(resolve(text));
+      for (const directory of (process.env.PATH ?? '').split(delimiter)) {
+        if (!directory) continue;
+        try { return realpathSync(resolve(directory, text)); } catch { /* try next PATH entry */ }
+      }
+    } catch { /* unresolved commands are denied */ }
+    return '';
   };
-  const guardExec = (api: string, shell: boolean) => (original: (...args: unknown[]) => unknown) => (...args: unknown[]): unknown => {
-    const name = execName(args[0], shell);
-    if (!allowExec.has(name)) {
-      calls.push(api);
-      throw new Error(`unexpected network attempt: ${api} (${name || 'unknown'})`);
+  const allowedExecutables = new Set((options.allowExec ?? []).map((path) => resolveExecutable(path)).filter(Boolean));
+  const denyExec = (api: string, detail: string): never => {
+    calls.push(api);
+    throw new Error(`unexpected network attempt: ${api}${detail ? ` (${detail})` : ''}`);
+  };
+  const guardExec = (api: string) => (original: (...args: unknown[]) => unknown) => (...args: unknown[]): unknown => {
+    const command = String(args[0] ?? '');
+    const opts = (args.find((arg) => arg && typeof arg === 'object' && !Array.isArray(arg)) ?? {}) as { shell?: unknown };
+    const shellExec = api.endsWith('.exec') || api.endsWith('.execSync');
+    const argv = args.find(Array.isArray) as unknown[] | undefined;
+    if (opts.shell || shellExec || /[;|&`$\n\r]/.test(command) || argv?.some((value) => /[;|&`$\n\r]/.test(String(value)))) {
+      return denyExec(api, 'shell command refused');
     }
+    const path = resolveExecutable(args[0]);
+    if (!allowedExecutables.has(path)) return denyExec(api, path || 'unknown executable');
     return original.apply(cp, args);
   };
   const cpProbeArg = 'c2c-netprobe-nonexistent';
@@ -142,8 +158,24 @@ export function trapNetwork(options: NetworkTrapOptions = {}): NetworkTrap {
     fork: () => tidy((cp.fork as (...a: unknown[]) => unknown)(cpProbeArg)),
   };
   for (const key of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']) {
-    const shell = key === 'exec' || key === 'execSync';
-    replace(cp, key, `node:child_process.${key}`, 'child_process', cpProbes[key], guardExec(`node:child_process.${key}`, shell));
+    replace(cp, key, `node:child_process.${key}`, 'child_process', cpProbes[key], guardExec(`node:child_process.${key}`));
+  }
+
+  const workerThreads = require('node:worker_threads') as Record<string, unknown>;
+  if (!options.exclude?.includes('node:worker_threads.Worker')) {
+    const originalWorker = workerThreads.Worker as new (...args: unknown[]) => unknown;
+    workerThreads.Worker = new Proxy(originalWorker, {
+      construct() { return deny('node:worker_threads.Worker')(); },
+    });
+    originals.push(() => { workerThreads.Worker = originalWorker; });
+    excludedKinds.delete('worker');
+    probes.push({
+      api: 'node:worker_threads.Worker',
+      kind: 'worker',
+      run: () => new (workerThreads.Worker as new (...args: unknown[]) => unknown)("fetch('http://127.0.0.1:1/')", { eval: true }),
+    });
+  } else {
+    excludedKinds.add('worker');
   }
 
   // Node bundles undici for global fetch, while some projects also install it
