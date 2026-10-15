@@ -4,18 +4,26 @@
  * - toXml — https://www.zoho.com/deluge/help/functions/xml/toxml.html
  *   JSON object text, or Deluge `{key:value}` map text, becomes an XML
  *   document whose root is `<root>`. An array value is repeated sibling
- *   elements of that key. Keys stay in source order. Null, a top-level
- *   array, and a key that is not an XML name throw.
+ *   elements of that key. Keys stay in source order; the doc example shows
+ *   `OrderNo` before `Name`, which this deliberately diverges from (Deluge
+ *   map order is hash-based, so source order is the deterministic choice).
+ *   Null, a top-level array, and a key that is not an XML name throw.
  * - executeXpath — https://www.zoho.com/deluge/help/xml-manipulation/executexpath.html
  *   XML text, or the same JSON/map text (address it under `/root`), selected
  *   by an absolute path. An element result is that element. Several elements
  *   are concatenated. An attribute result is `<name>value</name>`. `text()`
- *   is the decoded character data; several text nodes join with `-|-`.
- *   A path the subset cannot express, or a path that is not absolute, throws.
+ *   is the decoded character data; several text nodes join with `-|-`
+ *   [UNVERIFIED: the cited doc shows only single-value results, so the
+ *   separator is a convention, not sourced Deluge behaviour]. A path the
+ *   subset cannot express, or a path that is not absolute, throws.
  *   No match is `""`.
  * - toXmlList — https://www.zoho.com/deluge/help/functions/xml/toxmllist.html
  *   Top-level elements of an XML fragment (the usual executeXpath result)
  *   become a list of one XML string each. Whitespace between them is ignored.
+ *
+ * Bounds: input text is capped at 5 MB, parsed nodes at 100k, nesting depth
+ * at 256 (parser, toXml emitter, and loose map reader alike), and an
+ * executeXpath result at 8 MB. Exceeding any of them throws a Deluge error.
  *
  * The parser accepts only the five predefined entities and numeric character
  * references. A DOCTYPE, a custom entity, or any external identifier throws
@@ -30,6 +38,7 @@ import { parseJsonLossless } from './ids.js';
 const MAX_TEXT = 5 * 1024 * 1024;
 const MAX_NODES = 100_000;
 const MAX_DEPTH = 256;
+const MAX_RESULT = 8 * 1024 * 1024;
 
 const XML_NAME = /^[:A-Za-z_][:A-Za-z0-9._-]*$/;
 const XML_NAME_AT = /^[:A-Za-z_][:A-Za-z0-9._-]*/;
@@ -37,6 +46,8 @@ const XML_NAME_AT = /^[:A-Za-z_][:A-Za-z0-9._-]*/;
 type El = {
   kind: 'el';
   id: number;
+  /** First id past this element's subtree; lets `//` skip nested hosts. */
+  end: number;
   name: string;
   attrs: Attr[];
   children: Array<El | Text>;
@@ -65,7 +76,7 @@ export function toXml(value: unknown, ...extra: unknown[]): string {
   const bump = () => {
     if (++nodes > MAX_NODES) throw new DelugeConversionError('toXml: value exceeds the node limit');
   };
-  return `<root>${emitObject(data, bump)}</root>`;
+  return `<root>${emitObject(data, bump, 0)}</root>`;
 }
 
 export function toXmlList(value: unknown, ...extra: unknown[]): string[] {
@@ -99,6 +110,7 @@ function asMap(value: unknown): Record<string, unknown> {
   if (value.length > MAX_TEXT) throw new DelugeConversionError('toXml: text exceeds 5 MB');
   const text = stripBom(value).trim();
   if (!text.startsWith('{')) throw new DelugeConversionError('toXml: text is not JSON or map text');
+  checkDepth(text);
   try {
     const parsed = parseJsonLossless(text);
     if (isPlain(parsed)) return parsed;
@@ -108,27 +120,48 @@ function asMap(value: unknown): Record<string, unknown> {
   return parseLooseMap(text);
 }
 
-function emitObject(data: Record<string, unknown>, bump: () => void): string {
+/** Nesting of `{`/`[` outside quotes, so neither JSON.parse nor Loose overflows the stack. */
+function checkDepth(text: string): void {
+  let depth = 0;
+  let quote = '';
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === '{' || c === '[') {
+      if (++depth > MAX_DEPTH) throw new DelugeConversionError('toXml: value exceeds the depth limit');
+    } else if (c === '}' || c === ']') depth--;
+  }
+}
+
+function emitObject(data: Record<string, unknown>, bump: () => void, depth: number): string {
   let out = '';
   for (const key of Object.keys(data)) {
     if (!XML_NAME.test(key)) throw new DelugeConversionError('toXml: key is not an XML name');
-    out += emitValue(data[key], key, bump);
+    out += emitValue(data[key], key, bump, depth);
   }
   return out;
 }
 
-function emitValue(value: unknown, key: string, bump: () => void): string {
+function emitValue(value: unknown, key: string, bump: () => void, depth: number): string {
   if (Array.isArray(value)) {
     let out = '';
     for (const item of value) {
       if (Array.isArray(item)) throw new DelugeConversionError('toXml: nested array has no element name');
-      out += emitValue(item, key, bump);
+      out += emitValue(item, key, bump, depth);
     }
     return out;
   }
   bump();
   if (value == null) throw new DelugeConversionError('toXml: null has no XML representation');
-  if (isPlain(value)) return `<${key}>${emitObject(value, bump)}</${key}>`;
+  if (isPlain(value)) {
+    if (depth >= MAX_DEPTH) throw new DelugeConversionError('toXml: value exceeds the depth limit');
+    return `<${key}>${emitObject(value, bump, depth + 1)}</${key}>`;
+  }
   return `<${key}>${escapeText(formatScalar(value))}</${key}>`;
 }
 
@@ -176,11 +209,11 @@ class Loose {
     this.i++;
   }
 
-  parseValue(): unknown {
+  parseValue(depth = 0): unknown {
     this.skip();
     const c = this.peek();
-    if (c === '{') return this.parseObject();
-    if (c === '[') return this.parseArray();
+    if (c === '{') return this.parseObject(depth);
+    if (c === '[') return this.parseArray(depth);
     if (c === '"' || c === "'") return this.parseString();
     if (c === '-' || (c >= '0' && c <= '9')) return this.parseNumber();
     const ident = this.parseIdent();
@@ -191,7 +224,8 @@ class Loose {
     return ident;
   }
 
-  private parseObject(): Record<string, unknown> {
+  private parseObject(depth: number): Record<string, unknown> {
+    if (depth >= MAX_DEPTH) throw new DelugeConversionError('toXml: value exceeds the depth limit');
     this.eat('{');
     const out: Record<string, unknown> = {};
     this.skip();
@@ -202,7 +236,7 @@ class Loose {
     while (this.i < this.s.length) {
       const key = this.parseKey();
       this.eat(':');
-      setOwn(out, key, this.parseValue());
+      setOwn(out, key, this.parseValue(depth + 1));
       this.skip();
       if (this.peek() === ',') {
         this.i++;
@@ -216,7 +250,8 @@ class Loose {
     throw new DelugeConversionError('toXml: text is not JSON or map text');
   }
 
-  private parseArray(): unknown[] {
+  private parseArray(depth: number): unknown[] {
+    if (depth >= MAX_DEPTH) throw new DelugeConversionError('toXml: value exceeds the depth limit');
     this.eat('[');
     const out: unknown[] = [];
     this.skip();
@@ -225,7 +260,7 @@ class Loose {
       return out;
     }
     while (this.i < this.s.length) {
-      out.push(this.parseValue());
+      out.push(this.parseValue(depth + 1));
       this.skip();
       if (this.peek() === ',') {
         this.i++;
@@ -361,12 +396,13 @@ function parseXml(input: string): Doc {
       i++;
       const open = stack.pop();
       if (!open || open.name !== name.value) throw new DelugeRuntimeError('XML is not well-formed');
+      open.end = nextId;
       continue;
     }
     i++;
     const name = readXmlName(text, i);
     i = name.end;
-    const el: El = { kind: 'el', id: bump(), name: name.value, attrs: [], children: [] };
+    const el: El = { kind: 'el', id: bump(), end: 0, name: name.value, attrs: [], children: [] };
     const seen = new Set<string>();
     let closed = false;
     while (i < text.length) {
@@ -398,7 +434,9 @@ function parseXml(input: string): Doc {
       i = end + 1;
     }
     parent().children.push(el);
-    if (!closed) {
+    if (closed) {
+      el.end = nextId;
+    } else {
       if (stack.length >= MAX_DEPTH) throw new DelugeRuntimeError('XML exceeds the depth limit');
       stack.push(el);
     }
@@ -561,38 +599,55 @@ function evalPath(doc: Doc, steps: Step[]): Array<El | Text | Attr> {
   let current: Array<El | Text | Attr | Doc> = [doc];
   for (const step of steps) {
     const found: Array<El | Text | Attr> = [];
-    for (const node of current) found.push(...stepNodes(node, step));
-    let selected = dedupe(found);
-    for (const pred of step.predicates) selected = applyPred(selected, pred);
-    current = selected;
+    // A `//` step expands each subtree once: a nested context adds only
+    // descendants its topmost ancestor already covers, so expanding it is
+    // O(depth) of duplicated work for zero extra nodes.
+    const contexts = step.descendant ? topmost(current) : current;
+    for (const node of contexts) stepNodes(node, step, found);
+    current = dedupe(found);
   }
   return current as Array<El | Text | Attr>;
 }
 
-function stepNodes(node: Node, step: Step): Array<El | Text | Attr> {
+/** The outermost doc/element nodes of a document-order node-set. */
+function topmost(nodes: Array<El | Text | Attr | Doc>): Array<Doc | El> {
+  let bound = -1;
+  const out: Array<Doc | El> = [];
+  for (const node of nodes) {
+    if (node.kind === 'doc') return [node];
+    if (node.kind !== 'el' || node.id < bound) continue;
+    out.push(node);
+    bound = Math.max(bound, node.end);
+  }
+  return out;
+}
+
+function stepNodes(node: Node, step: Step, out: Array<El | Text | Attr>): void {
   const hosts: Array<Doc | El> = [];
   if (step.descendant) {
-    if (node.kind === 'doc') hosts.push(node, ...descendantEls(node));
-    else if (node.kind === 'el') hosts.push(node, ...descendantEls(node));
+    if (node.kind === 'doc' || node.kind === 'el') hosts.push(node, ...descendantEls(node));
   } else if (node.kind === 'doc' || node.kind === 'el') {
     hosts.push(node);
   }
-  const out: Array<El | Text | Attr> = [];
   for (const host of hosts) {
+    // XPath applies a step's predicates to that step's node-set per context
+    // (per host here): /r/a/b[1] is the first b child of EACH a, not the
+    // first of all b children merged.
+    let cands: Array<El | Text | Attr> = [];
     if (step.axis === 'attribute') {
-      if (host.kind !== 'el') continue;
-      for (const attr of host.attrs) if (step.name === '*' || attr.name === step.name) out.push(attr);
-      continue;
+      if (host.kind === 'el') {
+        for (const attr of host.attrs) if (step.name === '*' || attr.name === step.name) cands.push(attr);
+      }
+    } else if (step.axis === 'text') {
+      for (const child of host.children) if (child.kind === 'text') cands.push(child);
+    } else {
+      for (const child of host.children) {
+        if (child.kind === 'el' && (step.name === '*' || child.name === step.name)) cands.push(child);
+      }
     }
-    if (step.axis === 'text') {
-      for (const child of host.children) if (child.kind === 'text') out.push(child);
-      continue;
-    }
-    for (const child of host.children) {
-      if (child.kind === 'el' && (step.name === '*' || child.name === step.name)) out.push(child);
-    }
+    for (const pred of step.predicates) cands = applyPred(cands, pred);
+    out.push(...cands);
   }
-  return out;
 }
 
 function descendantEls(node: Doc | El): El[] {
@@ -650,12 +705,28 @@ function stringValue(node: El | Text | Attr): string {
 
 function renderSelection(nodes: Array<El | Text | Attr>): string {
   if (!nodes.length) return '';
-  if (nodes.every((node) => node.kind === 'text')) return nodes.map((node) => (node as Text).value).join('-|-');
-  if (nodes.every((node) => node.kind === 'attr')) {
-    return nodes.map((node) => `<${(node as Attr).name}>${escapeText((node as Attr).value)}</${(node as Attr).name}>`).join('');
+  let sep = '';
+  let render: (node: El | Text | Attr) => string;
+  if (nodes.every((node) => node.kind === 'text')) {
+    sep = '-|-';
+    render = (node) => (node as Text).value;
+  } else if (nodes.every((node) => node.kind === 'attr')) {
+    render = (node) => `<${(node as Attr).name}>${escapeText((node as Attr).value)}</${(node as Attr).name}>`;
+  } else if (nodes.every((node) => node.kind === 'el')) {
+    render = (node) => serializeEl(node as El);
+  } else {
+    throw new DelugeRuntimeError('Invalid Xpath');
   }
-  if (nodes.every((node) => node.kind === 'el')) return nodes.map((node) => serializeEl(node as El)).join('');
-  throw new DelugeRuntimeError('Invalid Xpath');
+  // Serialize one node at a time and stop at the cap: overlapping subtrees
+  // can total far more than the input, so checking only at the end would
+  // still do the unbounded work the cap exists to prevent.
+  let out = '';
+  for (let i = 0; i < nodes.length; i++) {
+    if (i) out += sep;
+    out += render(nodes[i]!);
+    if (out.length > MAX_RESULT) throw new DelugeRuntimeError('executeXpath: result exceeds 8 MB');
+  }
+  return out;
 }
 
 function serializeEl(el: El): string {

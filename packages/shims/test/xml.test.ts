@@ -101,3 +101,55 @@ test('executeXpath is case-sensitive, does not trim text, and rejects unsafe XML
   assert.throws(() => toXmlList('not xml'), DelugeConversionError);
   assert.throws(() => toXmlList('<a>1</a>text<b>2</b>'), DelugeConversionError);
 });
+
+test('executeXpath applies [n] per context node, not on the merged node-set', () => {
+  // XPath 1.0: /r/a/b[1] is the first b child of EACH a.
+  const doc = '<r><a><b>1</b><b>2</b></a><a><b>3</b><b>4</b></a></r>';
+  assert.equal(executeXpath(doc, '/r/a/b[1]/text()'), '1-|-3');
+  assert.equal(executeXpath(doc, '/r/a/b[2]/text()'), '2-|-4');
+  assert.equal(executeXpath(doc, '//b[1]/text()'), '1-|-3');
+  assert.equal(executeXpath(doc, '/r/a[1]/b[2]/text()'), '2');
+  assert.equal(executeXpath(doc, '/r/a[2]/b[1]/text()'), '3');
+  assert.equal(executeXpath(doc, '/r/a/b[3]/text()'), '');
+  // Comparison predicates still filter per host, then merge.
+  const shop = '<r><s><i p="1"/><i p="9"/></s><s><i p="2"/><i p="8"/></s></r>';
+  assert.equal(executeXpath(shop, '/r/s/i[@p>5]'), '<i p="9"></i><i p="8"></i>');
+  assert.equal(executeXpath(shop, '/r/s/i[2]/@p'), '<p>9</p><p>8</p>');
+});
+
+test('toXml rejects nesting deeper than the depth limit with a Deluge error', () => {
+  const deep = (n: number) => '{"a":'.repeat(n) + '1' + '}'.repeat(n);
+  assert.equal(toXml(deep(256)), `<root>${'<a>'.repeat(256)}1${'</a>'.repeat(256)}</root>`);
+  assert.throws(() => toXml(deep(257)), (err: unknown) => {
+    assert.ok(err instanceof DelugeConversionError);
+    assert.match((err as Error).message, /depth limit/);
+    return true;
+  });
+  const loose = (n: number) => '{a:'.repeat(n) + '1' + '}'.repeat(n);
+  assert.throws(() => toXml(loose(300)), /depth limit/);
+  // A plain object (not text) hits the same cap in the emitter.
+  let obj: Record<string, unknown> = { leaf: 1 };
+  for (let i = 0; i < 300; i++) obj = { a: obj };
+  assert.throws(() => toXml(obj), /depth limit/);
+  // And executeXpath on deep JSON fails with a Deluge error, not a RangeError.
+  assert.throws(() => executeXpath(deep(1e5), '/root/a'), /depth limit/);
+});
+
+test('executeXpath bounds // work and result size with a clear error', () => {
+  // 390 chains of 250-deep <a> (~680 KB, ~97k elements): under the input caps.
+  const chain = '<a>'.repeat(250) + 'x' + '</a>'.repeat(250);
+  const doc = `<r>${chain.repeat(390)}</r>`;
+  assert.throws(() => executeXpath(doc, '//*//*'), (err: unknown) => {
+    assert.ok(err instanceof DelugeRuntimeError);
+    assert.match((err as Error).message, /result exceeds/);
+    return true;
+  });
+  // The output cap is deterministic; bounded queries over the same input
+  // remain valid: // runs once from the
+  // topmost context, and a same-name sibling list is a real selection.
+  assert.equal(toXmlList(executeXpath(doc, '/r/a')).length, 390);
+  assert.equal(executeXpath(doc, '//a[250]/text()'), '');
+  // Every a is the first a child of its parent, so //a[1] selects all of
+  // them; only the innermost a of each chain has text.
+  assert.equal(executeXpath(doc, '//a[1]/text()'), Array(390).fill('x').join('-|-'));
+});
