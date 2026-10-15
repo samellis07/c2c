@@ -147,6 +147,16 @@ Checks omitted from this table currently emit no `FAIL` result: D-A4, D-B4, D-B6
 
 `Error when refreshing the access token`, an empty stored token, or a read-only `401 INVALID_TOKEN` means a second process refreshed the same login — the refresh token rotates on refresh (the entry in `references/facts/errors.md`). Have the user stop every other `catalyst`/`c2c` process or keep-fresh loop sharing the credential, re-read the stored token (or `catalyst whoami`, then `catalyst login --dc <dc>` if it still fails), then resume with `--resume`. Never fix it by starting another refresher or by copying the credential to a second profile (C2C.md rule 14).
 
+## Service not started (first-use gate closed)
+
+`<Service> first-use gate is closed (GET … → …). Checklist: …` from `deploy --confirm`, `migrate-data --seed --confirm` or `c2c provision --out c2c-out/<app> --record <gate>-enable` means the project never opened a service the app uses. First activation has no API, CLI or MCP path: hand the user the one sentence for that service, then re-run (deploy: `--resume`) — c2c probes the gate again and continues only on an open answer.
+
+- Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring
+- SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring
+- Slate — in the Catalyst console open the project → Slate → Start Exploring
+
+Name only the services the app uses; never ask for a service the app does not use. The gate table is in [facts/projects.md](../../references/facts/projects.md#console-first-use-gates-are-one-checklist-line-plus-a-read-c2c-verifies).
+
 ## Where to look
 
 - c2c reports: `c2c-out/<app>/c2c-deploy-report.json`, `provision/state.json`, `state/*.json`, `verify/report.json`.

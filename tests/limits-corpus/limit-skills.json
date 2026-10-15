@@ -29,5 +29,8 @@
   "L-STRATUS-OBJECT": ["c2c-schema-and-data"],
   "L-SLATE-CACHE": ["c2c-ui"],
   "L-CREATOR-EGRESS": ["c2c-integrations"],
-  "L-UNIQUE-RACE": ["c2c-schema-and-data", "c2c-logic"]
+  "L-UNIQUE-RACE": ["c2c-schema-and-data", "c2c-logic"],
+  "L-SERVICE-ACTIVATION": ["c2c-provision-and-deploy"],
+  "L-INBOUND-MAIL": ["c2c-integrations"],
+  "L-PAYMENTS": ["c2c-integrations"]
 }

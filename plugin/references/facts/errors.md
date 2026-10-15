@@ -82,7 +82,7 @@ Rule: `401 AUTHENTICATION_FAILURE` on a write means the token is not accepted fo
 
 Cause: POST /baas/v1/project/<project-id>/role, or a console-only action (Production enable, diff, migrate or disable; a service's Start Exploring) attempted with the CLI token.
 
-Fix: Custom roles and Production enable, diff, migrate, and disable are guided console steps. Skip Start Exploring for Data Store, Functions, and Authentication; on a fresh imported project Slate needs that console click before the first `catalyst deploy slate`. Declare custom roles, table scopes, and table permissions in the greenfield template when the project is created.
+Fix: Custom roles and Production enable, diff, migrate, and disable are guided console steps. Skip Start Exploring for Data Store, Functions, and Authentication. A service the app uses whose gate probe answers closed is one guided console action in the same sentence pattern: Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring; SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring; Slate — in the Catalyst console open the project → Slate → Start Exploring. Declare custom roles, table scopes, and table permissions in the greenfield template when the project is created.
 
 Recipe: Do not retry the token call. Success is the console action's read-back: MCP CatalystbyZoho_List_All_Roles, or GET /baas/v1/project/<project-id>/environment showing both environments after a promotion the user ran.
 
@@ -456,7 +456,7 @@ Rule: `Please access the Slate service in your project's console before deployin
 
 Cause: `catalyst deploy slate` on a fresh imported project where "Start Exploring" for Slate was never clicked. Data Store and Functions deploys do not need it.
 
-Fix: The user opens Slate in the project console once (the CLI token cannot enable it: `401 AUTHENTICATION_FAILURE`), then re-run the deploy. No IaC component pre-enables it.
+Fix: Slate — in the Catalyst console open the project → Slate → Start Exploring (once; the CLI token cannot enable it: `401 AUTHENTICATION_FAILURE`), then re-run the deploy. No IaC component pre-enables it.
 
 Recipe: `catalyst deploy slate`. Success is the deploy finishing and GET /slate/v1/project/<project-id>/app/<app>/deployment returning the app_url.
 

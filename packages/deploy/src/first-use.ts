@@ -28,6 +28,8 @@ export interface FirstUseGate {
   /** The provision step that tracks the gate. */
   stepId: `${FirstUseGateId}-enable`;
   service: string;
+  /** The console page that holds the service's "Start Exploring" action, from the project. */
+  page: string;
   /** One checklist line; `<console>`, `<org>` and `<project>` are filled per project. */
   console: string;
   /** The read c2c runs: a GET path template with `<project>`. */
@@ -43,6 +45,7 @@ export const FIRST_USE_GATES: Readonly<Record<FirstUseGateId, FirstUseGate>> = {
     id: 'cloudscale',
     stepId: 'cloudscale-enable',
     service: 'Cloud Scale',
+    page: 'Cloud Scale',
     console: `Catalyst console → the project → Cloud Scale → Start Exploring (${CONSOLE_PROJECT}#/cloudscale)`,
     probe: '/baas/v1/project/<project>/table',
     doc: 'https://docs.catalyst.zoho.com/en/api/code-reference/cloud-scale/data-store/get-all-tables-metadata/',
@@ -51,6 +54,7 @@ export const FIRST_USE_GATES: Readonly<Record<FirstUseGateId, FirstUseGate>> = {
     id: 'stratus',
     stepId: 'stratus-enable',
     service: 'Stratus',
+    page: 'Cloud Scale → Stratus',
     console: `Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (${CONSOLE_PROJECT}#/cloudscale)`,
     probe: '/baas/v1/project/<project>/bucket',
     doc: 'https://docs.catalyst.zoho.com/en/api/code-reference/cloud-scale/stratus/get-all-buckets/',
@@ -59,6 +63,7 @@ export const FIRST_USE_GATES: Readonly<Record<FirstUseGateId, FirstUseGate>> = {
     id: 'smartbrowz',
     stepId: 'smartbrowz-enable',
     service: 'SmartBrowz',
+    page: 'SmartBrowz',
     console: `Catalyst console → the project → SmartBrowz → Start Exploring (${CONSOLE_PROJECT}#/smartbrowz)`,
     probe: '/browser360/v1/project/<project>/browser-grid',
     doc: 'https://docs.catalyst.zoho.com/en/api/code-reference/smartbrowz/browser-grid/list-all-grids/',
@@ -67,6 +72,7 @@ export const FIRST_USE_GATES: Readonly<Record<FirstUseGateId, FirstUseGate>> = {
     id: 'slate',
     stepId: 'slate-enable',
     service: 'Slate',
+    page: 'Slate',
     console: `Catalyst console → the project → Slate → Start Exploring (${CONSOLE_PROJECT}#/slate)`,
     probe: '/slate/v1/project/<project>/app',
     doc: 'https://docs.catalyst.zoho.com/en/api/code-reference/slate/redeploy-app/',
@@ -87,6 +93,30 @@ export function requiredGates(signals: { client: boolean; files: boolean; pdf: b
       (gate.id === 'stratus' && signals.files) ||
       (gate.id === 'smartbrowz' && signals.pdf) ||
       (gate.id === 'slate' && signals.client),
+  );
+}
+
+/**
+ * The services whose first activation the human checklist names. Each has no
+ * API, CLI or MCP path, so it stays one guided console action inside the
+ * customer's first step — named only when the app uses the service. Cloud
+ * Scale is not listed: its probe normally answers open on a fresh project, and
+ * a closed answer is the provision step's guided line.
+ */
+export type ActivationServiceId = Extract<FirstUseGateId, 'stratus' | 'smartbrowz' | 'slate'>;
+
+export const ACTIVATION_SERVICES: readonly ActivationServiceId[] = ['stratus', 'smartbrowz', 'slate'];
+
+/** One sentence per service, always the same pattern: `<Service> — in the Catalyst console open the project → <page> → Start Exploring`. */
+export function activationSentence(id: ActivationServiceId): string {
+  const gate = FIRST_USE_GATES[id];
+  return `${gate.service} — in the Catalyst console open the project → ${gate.page} → Start Exploring`;
+}
+
+/** The services an app uses, in checklist order, from the plan signals. */
+export function activationServices(signals: { client: boolean; files: boolean; pdf: boolean }): ActivationServiceId[] {
+  return ACTIVATION_SERVICES.filter(
+    (id) => (id === 'stratus' && signals.files) || (id === 'smartbrowz' && signals.pdf) || (id === 'slate' && signals.client),
   );
 }
 

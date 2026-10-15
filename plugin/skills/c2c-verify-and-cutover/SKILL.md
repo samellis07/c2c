@@ -41,12 +41,18 @@ Run the probes the plan needs (it lists them), not all of them.
 
 Customer steps (in order) — tell the user exactly these, nothing else:
 
-1. Slate start: in the Catalyst console open the project → Slate → Start Exploring
+1. Start services: for each service the app uses (Stratus, SmartBrowz, Slate), in the Catalyst console open the project → its page → Start Exploring
 2. Accept invite: accept the app invite mail
 3. Sign in once: sign in to the deployed app once
 4. Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
 5. Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
  Check the sign-in path too: before sign-in the app shows a clear signed-out state, and the framed sign-in page renders the login form — if it serves the app shell, the service worker is answering `/accounts/`, `/__catalyst/`, `/baas/`, `/server/` or cross-origin navigations it must bypass. After sign-in the user must land on the app root — a landing on `/app/` (404) means the `signIn` call is missing `{service_url}` (Slate has no redirect field in `catalyst.json`).
+
+Step 1 names only the services the app uses, one sentence each (an app that uses none of them has no step 1):
+
+- Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring (only when the app has file fields)
+- SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring (only when the app renders PDF)
+- Slate — in the Catalyst console open the project → Slate → Start Exploring (only when the app ships a Slate web client)
 
 ### A3. Parity
 
@@ -63,7 +69,7 @@ The parity runner (planned) executes the app's given/when/then cases against the
 
 Run `c2c cutover-checklist <app.ds> [--source-json|--source-csv|--source-backup <export>] [--since <state>] [--smoke <report>] --out <dir>` while offline. The generated `cutover-checklist.md` has an evidence ledger and exact actions; `c2c-proof.json` and `c2c-proof.md` name the local facts it can establish. The command does not connect to Creator or Catalyst and cannot verify that a human performed a freeze, promotion, sign-in, DNS change or link update. Treat those rows as open until the requested evidence is recorded. Never infer a live success from a checkbox or from readiness percentage.
 
-The automated smoke sequence is the `c2c smoke` check above — the CLI verifies origin, project, plan, freshness and step results with no browser. The customer's human steps are exactly five, in order: (1) in Catalyst, open the project → Slate → Start Exploring; (2) accept the app invite email; (3) sign in to the deployed app once; (4) open `<app-url>#/admin/smoke`, wait for Done, press Copy and paste the result code into the AI chat; and (5) confirm the Catalyst Mail sender only when the app sends mail. Separately, the [human cutover checklist](#human-actions-after-the-offline-checklist) lists the remaining human actions it requires (freeze, promotion, post-promotion checks, link switch and sign-off). Anything else that would require browser automation is a P1 bug: fix the plugin via CLI/MCP/skills or stop and report it. Never silently turn an unverified check into a passing item.
+The automated smoke sequence is the `c2c smoke` check above — the CLI verifies origin, project, plan, freshness and step results with no browser. The customer's human steps are exactly five, in order: (1) for each service the app uses, open its console page and press Start Exploring (Stratus: the project → Cloud Scale → Stratus; SmartBrowz: the project → SmartBrowz; Slate: the project → Slate); (2) accept the app invite email; (3) sign in to the deployed app once; (4) open `<app-url>#/admin/smoke`, wait for Done, press Copy and paste the result code into the AI chat; and (5) confirm the Catalyst Mail sender only when the app sends mail. Separately, the [human cutover checklist](#human-actions-after-the-offline-checklist) lists the remaining human actions it requires (freeze, promotion, post-promotion checks, link switch and sign-off). Anything else that would require browser automation is a P1 bug: fix the plugin via CLI/MCP/skills or stop and report it. Never silently turn an unverified check into a passing item.
 
 1. **Rollback baseline and freeze:** before freezing, the user runs `c2c rollback-export --ds <app.ds> --out <rollback-dir> --project <id> --confirm`, keeps the output outside the workspace, then restricts Creator writes and records the freeze time. Record command output, path and time in the checklist evidence ledger.
 2. **Final delta:** the user exports every Creator report with record IDs after the freeze. Run the generated `sync-delta` plan, review it, apply only with explicit approval and `--confirm`, then plan again. Record export folder/time, plan and apply results, and zero-new/zero-changed read-back in the evidence ledger.

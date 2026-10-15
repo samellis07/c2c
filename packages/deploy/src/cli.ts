@@ -47,7 +47,17 @@ import { formatCustomerSteps } from './customer-steps.js';
 import { cdpBrowser, openOnOrigin, pageFetch, runBrowserSmoke, type BrowserSmokeResult, type SmokeBrowser } from './browser.js';
 import { TablePlanError, applyTablePlan, formatMandatoryRelaxed, formatTableDiff, provisionedConstraints, type RestCall, type RestFn, type TableDiff } from './tables.js';
 import { appShadowColumns, backfillShadows, formatBackfill } from './shadows.js';
-import { checkGate, FIRST_USE_GATES, gateConsoleLine, requiredGates, type FirstUseGate } from './first-use.js';
+import {
+  ACTIVATION_SERVICES,
+  activationSentence,
+  activationServices,
+  checkGate,
+  FIRST_USE_GATES,
+  gateConsoleLine,
+  requiredGates,
+  type ActivationServiceId,
+  type FirstUseGate,
+} from './first-use.js';
 import { DcNotConfiguredError, catalystBaseFor, dcEndpoints, deployMailRecipients, findDeployConfig, readCliActiveDc, readCliActiveOrg, readDeployConfig, resolveDeployDc, type DeployConfigFile } from './dc.js';
 import { matchListedProject, missingProjectGuide, resolveOrgId, resolveProjectChoice } from './target.js';
 import {
@@ -1043,8 +1053,12 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
       const services = servicesTouched({ createdTables: diff.createdTables, createdColumns: diff.createdColumns, commands: done, extra: earlier, auth: true });
       // A completed Slate command proves the service was opened in the
       // console (a fresh project refuses the Slate deploy until it is), so
-      // the end-of-run checklist drops the Slate start item.
+      // the end-of-run checklist drops Slate from the start-services item.
       const slateStarted = done.some((command) => command.id === 'slate-link' || command.id === 'slate');
+      const pendingActivation = (): ActivationServiceId[] =>
+        activationServices({ client: services.includes('Web Client Hosting (Slate)'), files: signals.files.length > 0, pdf: signals.pdf }).filter(
+          (id) => !gates.some((gate) => gate.id === id) && !(id === 'slate' && slateStarted),
+        );
       // A run that captured no "App Url:" — including a resumed run that skipped
       // the slate commands — reads the URL from the Slate API before CORS needs it.
       if (!state.slateUrl && !slateHost(slateDomainFlag)) await readBackSlate();
@@ -1097,11 +1111,12 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
       io.stdout(formatAuthProvision(auth));
       io.stdout(formatPostDeploySteps(steps, true));
       if (code === 0) {
-        // The customer's steps in the shared wording. A deploy with no Slate
-        // service, or one where a Slate command completed, is past step 1
-        // (Slate start); the mail step carries its own condition, so it stays.
-        const slate = services.includes('Web Client Hosting (Slate)');
-        io.stdout(`human checklist:\n${formatCustomerSteps(!slate || slateStarted ? 1 : 0)}`);
+        // The customer's steps in the shared wording. Step 1 names only the
+        // services this app uses that this run did not verify started: every
+        // gate in `gates` answered open before the first write, and a
+        // completed Slate command proves Slate. The mail step carries its own
+        // condition, so it stays.
+        io.stdout(`human checklist:\n${formatCustomerSteps(pendingActivation())}`);
       }
       // A successful run that only saw the URL on slate:link still reports it.
       // A failed slate build does not: that URL did not come from the build.
@@ -1130,6 +1145,9 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         postDeploySteps: steps,
         humanChecklist: humanChecklist({
           slate: services.includes('Web Client Hosting (Slate)'),
+          files: signals.files.length > 0,
+          pdf: signals.pdf,
+          started: ACTIVATION_SERVICES.filter((id) => gates.some((gate) => gate.id === id)),
           sendsMail: bundle.sendsMail,
           mailFrom: bundle.mail.from,
           slateStarted,
@@ -1274,7 +1292,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         // failure — name the console action and the provision step that tracks it.
         if (command.id === 'slate' && SLATE_SERVICE_CLOSED.test(combined)) {
           const slateConsole = `${dcEndpoints(guard.dc).console}/baas/${guard.org}/project/${guard.projectId}/Development#/slate`;
-          io.stderr(`c2c: the Slate service was never opened on this project — Catalyst console → Slate → Start Exploring (${slateConsole}; provision step slate-enable), then re-run deploy\n`);
+          io.stderr(`c2c: the Slate service was never opened on this project — ${activationSentence('slate')} (${slateConsole}; provision step slate-enable), then re-run deploy\n`);
         }
         return await finish(result.code || 1);
       }
@@ -1565,7 +1583,7 @@ export async function seedMigrateCli(args: readonly string[], io: Io): Promise<n
       const ensured = await ensureSeedBucket(restFn, guard.projectId, seedBucket);
       if (ensured.outcome === 'console-step') {
         io.stderr(
-          `c2c: the Stratus service was never opened on this project — Catalyst console → the project → Stratus → Start Exploring, then create bucket ${seedBucket} (provision step bucket), then re-run migrate-data\n`,
+          `c2c: the Stratus service was never opened on this project — ${activationSentence('stratus')}, then create bucket ${seedBucket} (provision step bucket), then re-run migrate-data\n`,
         );
         return 1;
       }

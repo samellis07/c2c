@@ -97,6 +97,42 @@ test('the checklist is one numbered list: slate start, admin invite, sign in, se
   assert.match(printed, /^human checklist:\n1\. .*Start Exploring[\s\S]*2\. .*invite[\s\S]*3\. .*[Ss]ign in[\s\S]*4\. .*sender/);
 });
 
+test('the start item names exactly the services the app uses, in the shared sentence', () => {
+  const INVITE = 'Accept the admin invite: open the invite mail sent to the admin address and set the password.';
+  const SIGN_IN = 'Sign in to the app once at the Slate app URL — the first sign-in finishes activating the login.';
+  const STRATUS = 'Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring';
+  const SMARTBROWZ = 'SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring';
+  const SLATE = 'Slate — in the Catalyst console open the project → Slate → Start Exploring';
+  assert.equal(
+    formatHumanChecklist({ slate: true, sendsMail: false }),
+    `human checklist:\n1. Start services: ${SLATE}\n2. ${INVITE}\n3. ${SIGN_IN}\n`,
+  );
+  assert.equal(
+    formatHumanChecklist({ slate: false, files: true, sendsMail: false }),
+    `human checklist:\n1. Start services: ${STRATUS}\n2. ${INVITE}\n`,
+  );
+  assert.equal(
+    formatHumanChecklist({ slate: false, pdf: true, sendsMail: false }),
+    `human checklist:\n1. Start services: ${SMARTBROWZ}\n2. ${INVITE}\n`,
+  );
+  assert.equal(
+    formatHumanChecklist({ slate: true, files: true, pdf: true, sendsMail: false }),
+    `human checklist:\n1. Start services: ${STRATUS}; ${SMARTBROWZ}; ${SLATE}\n2. ${INVITE}\n3. ${SIGN_IN}\n`,
+  );
+  // An app that uses none of the three: no start item at all.
+  assert.equal(formatHumanChecklist({ slate: false, files: false, pdf: false, sendsMail: false }), `human checklist:\n1. ${INVITE}\n`);
+  // A service verified started drops out; the others stay.
+  assert.equal(
+    formatHumanChecklist({ slate: true, files: true, pdf: true, sendsMail: false, started: ['stratus', 'smartbrowz'] }),
+    `human checklist:\n1. Start services: ${SLATE}\n2. ${INVITE}\n3. ${SIGN_IN}\n`,
+  );
+  // Every service in use and every optional item still fits in five.
+  assert.equal(
+    humanChecklist({ slate: true, files: true, pdf: true, sendsMail: true, connectionSecretKeys: ['A_SECRET'] }).length,
+    5,
+  );
+});
+
 test('a re-run after Slate started drops the Slate start and keeps numbering contiguous', () => {
   const items = humanChecklist({ slate: true, sendsMail: true, slateStarted: true });
   assert.equal(items.length, 3);

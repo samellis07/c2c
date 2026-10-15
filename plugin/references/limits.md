@@ -36,6 +36,9 @@ Every row below has a stable limit id (`L-…`). Skills cite the id of each limi
 | [L-STRATUS-OBJECT](#l-stratus-object-stratus-single-object) | Stratus single object | note |
 | [L-SLATE-CACHE](#l-slate-cache-slate-indexhtml-cache) | Slate `index.html` cache | version |
 | [L-CREATOR-EGRESS](#l-creator-egress-creator-api-from-catalyst) | Creator API from Catalyst | queue |
+| [L-SERVICE-ACTIVATION](#l-service-activation-first-activation-of-stratus-smartbrowz-and-slate) | First activation of Stratus, SmartBrowz and Slate | guide |
+| [L-INBOUND-MAIL](#l-inbound-mail-inbound-email) | Inbound email | refuse |
+| [L-PAYMENTS](#l-payments-payments) | Payments | map |
 | [L-UNIQUE-RACE](#l-unique-race-unique-under-concurrency) | Unique under concurrency | refuse |
 
 ## Schema shape
@@ -175,3 +178,17 @@ Value: `cache-control: public, max-age=31536000`. Label: [TESTED]. Behaviour: ve
 ### L-CREATOR-EGRESS: Creator API from Catalyst
 
 Value: 429 at ~1 req/min. Label: [UNVERIFIED]. Behaviour: queue — run the mover on the customer machine; queue with backoff. Probe: none.
+
+## Platform scope
+
+### L-SERVICE-ACTIVATION: First activation of Stratus, SmartBrowz and Slate
+
+Value: no API, CLI or MCP path; one console action per service. Label: [UNVERIFIED]. Behaviour: guide — the customer's first step names only the services the app uses, one sentence each: `<Service> — in the Catalyst console open the project → <page> → Start Exploring`; c2c probes each gate before the first write. Probe: the gate probes in facts/projects.md.
+
+### L-INBOUND-MAIL: Inbound email
+
+Value: no inbound email receipt; on the roadmap. Label: [UNVERIFIED]. Behaviour: refuse — Form Email is counted as not supported in this version; no mail-in route is generated. Probe: none.
+
+### L-PAYMENTS: Payments
+
+Value: provider-hosted billing page plus a webhook into a function. Label: [UNVERIFIED]. Behaviour: map — no gateway call or card handling is generated; a Creator payment workflow becomes a counted stub. Probe: none.
