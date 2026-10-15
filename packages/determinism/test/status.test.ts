@@ -5,17 +5,20 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { emptyApp, type App, type Workflow } from '../../core/src/ir.js';
-import { buildMigrationReport, type MigrationReport } from '../../cli/src/migration-report.js';
+import { buildMigrationReport, migrationReportForDir, type MigrationReport } from '../../cli/src/migration-report.js';
 import {
   builtinTodoCount,
   canonicalStatusJson,
   computeDeterminismStatus,
+  main,
   parseStatusDoc,
   publicConstruct,
   renderStatusDoc,
+  resolveSitesPath,
   resolveStatusDir,
   statusFromReport,
   type DeterminismStatus,
+  type SiteAttribution,
 } from '../src/status.js';
 
 const root = repoRoot();
@@ -285,6 +288,54 @@ test('status records one sorted name-free construct set per non-deterministic ap
   const reversed = { ...report, apps: [...report.apps].reverse() } as MigrationReport;
   assert.equal(canonicalStatusJson(statusFromReport(reversed)), again);
   assert.equal(renderStatusDoc(statusFromReport(reversed)), doc);
+});
+
+test('resolveSitesPath refuses in-repo paths and accepts outside paths', () => {
+  assert.throws(() => resolveSitesPath(root), /outside the repo tree/);
+  assert.throws(() => resolveSitesPath(join(root, 'sites.json')), /outside the repo tree/);
+  assert.throws(() => resolveSitesPath(join(root, 'docs', 'sites.json')), /outside the repo tree/);
+  assert.throws(() => resolveSitesPath(join(root, 'sub', '..', 'docs', 'sites.json')), /outside the repo tree/);
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-sites-'));
+  assert.equal(resolveSitesPath(join(dir, 'sites.json')), join(dir, 'sites.json'));
+  // A path that escapes the root through .. is outside, not inside.
+  assert.equal(resolveSitesPath(join(root, '..', 'outside-sites.json')), join(root, '..', 'outside-sites.json'));
+});
+
+test('--sites writes per-app attribution; the rendered doc is byte-identical without it', () => {
+  const fixtures = join(root, 'fixtures/redistributable');
+  const tmp = mkdtempSync(join(tmpdir(), 'c2c-sites-'));
+  const docWithout = join(tmp, 'without.md');
+  const docWith = join(tmp, 'with.md');
+  const sites = join(tmp, 'sites.json');
+  assert.equal(main(['--dir', fixtures, '--out', docWithout]), 0);
+  assert.equal(main(['--dir', fixtures, '--out', docWith, '--sites', sites]), 0);
+  assert.equal(readFileSync(docWith, 'utf8'), readFileSync(docWithout, 'utf8'));
+  const attribution = JSON.parse(readFileSync(sites, 'utf8')) as SiteAttribution;
+  assert.equal(attribution.schema, 'c2c-determinism-sites/1');
+  const report = migrationReportForDir(fixtures, 'gallery');
+  assert.equal(attribution.apps.length, report.apps.length);
+  for (const app of attribution.apps) {
+    const entry = report.apps.find((candidate) => candidate.app === app.app);
+    assert.ok(entry, app.app);
+    assert.equal(app.deterministic, entry.deterministic);
+    assert.equal(app.fillLockEntries, entry.fillLockEntries);
+    assert.equal(app.todos.length, entry.todoCount, app.app);
+    for (const todo of app.todos) {
+      assert.equal(todo.signature, publicConstruct(todo.construct));
+      assert.match(todo.location, /\S/);
+      assert.ok(todo.scope === 'app' || todo.scope === 'unit' || todo.scope === 'ui', todo.scope);
+    }
+  }
+});
+
+test('--sites inside the repo tree is refused before the gallery is scanned', () => {
+  const fixtures = join(root, 'fixtures/redistributable');
+  const tmp = mkdtempSync(join(tmpdir(), 'c2c-sites-'));
+  const doc = join(tmp, 'doc.md');
+  const inRepo = join(root, 'docs', 'sites-test-leak.json');
+  assert.equal(main(['--dir', fixtures, '--out', doc, '--sites', inRepo]), 2);
+  assert.equal(existsSync(doc), false, 'no doc written when --sites is refused');
+  assert.equal(existsSync(inRepo), false);
 });
 
 test('committed status doc equals a fresh gallery computation', { skip: !statusDir() && 'needs C2C_FIXTURES_DIR or C2C_GALLERY_DIR' }, () => {

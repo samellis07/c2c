@@ -76,7 +76,7 @@ export function listReportApps(dir: string): { name: string; target: string }[] 
   return out;
 }
 
-function lockFor(target: string): FillLock | undefined {
+export function lockFor(target: string): FillLock | undefined {
   const st = statSync(target, { throwIfNoEntry: false });
   if (!st?.isDirectory()) return undefined;
   const candidate = join(target, 'c2c.lock.json');
@@ -84,7 +84,7 @@ function lockFor(target: string): FillLock | undefined {
   return readLock(candidate);
 }
 
-function loadIr(target: string): App {
+export function loadIr(target: string): App {
   const st = statSync(target);
   return st.isDirectory() ? parseProject(target).ir : parseFileWithSidecars(target).ir;
 }
