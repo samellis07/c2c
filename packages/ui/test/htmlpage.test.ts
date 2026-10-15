@@ -1626,6 +1626,38 @@ row = insert into Orders [ Status : "open" ];
   }
 });
 
+test('a ZML ExecuteFunction button keeps the snippet counted with a button-specific reason', () => {
+  const specific = "Server-side Deluge snippet with an ExecuteFunction button requires manual translation of the button's function call";
+  const button = (params: string, action = 'ExecuteFunction') =>
+    `<button text='Go' type='rounded' action='${action}' functionName='helpers.mark' parameters='${params}' successMsg='Done' />`;
+  const wrap = (inner: string) => `htmlpage hp1()
+content
+<%{
+  rec = Orders[Status == "open"];
+  %>
+<panel><pr><pc><text type='Text' value='<%=rec.Status%>' /></pc></pr>
+<pr><pc>${inner}</pc></pr></panel>
+<%
+}%>`;
+  // An island parameter, two island parameters, a static parameter, and an
+  // action written with odd case and spacing all name the button.
+  for (const inner of [button('<%=rec.ID%>'), button('<%=rec.ID%>,<%=rec.Amount%>'), button('7'), button('1', ' executeFunction ')]) {
+    const snippet = wrap(inner);
+    const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', snippet);
+    assert.equal(compiled.ok, false, inner);
+    assert.equal(compiled.reason, 'ZML ExecuteFunction button', inner);
+    const { model } = buildUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
+    assert.equal(model.todos.length, 1, inner);
+    assert.equal(model.todos[0].reason, specific, inner);
+    assert.equal(uiSnippetFiles(model).length, 0, inner);
+  }
+  // Without the button the same snippet compiles: the button alone is the blocker.
+  assert.equal(compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', wrap('')).ok, true);
+  // A button with another action is not an ExecuteFunction call and keeps today's result.
+  const other = compileHtmlpage(appOf(ORDERS), 'Home', 'hp1', wrap(button('1', 'OpenUrl')));
+  assert.notEqual(other.reason, 'ZML ExecuteFunction button');
+});
+
 test('a for-each loop over a form query renders a row per record', async () => {
   const { files, model } = generateUi(
     appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()

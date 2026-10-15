@@ -10,7 +10,7 @@
 import { createRequire } from 'node:module';
 import type { App } from '../../core/src/ir.js';
 import type { ZmlElement } from '../../core/src/zml.js';
-import { compileHtmlpage, decodeXmlEntities, type HtmlpageFile } from './htmlpage.js';
+import { compileHtmlpage, decodeXmlEntities, EXECUTE_FUNCTION_BUTTON, type HtmlpageFile } from './htmlpage.js';
 import { safeUrl } from './url-policy.js';
 
 const require = createRequire(import.meta.url);
@@ -509,7 +509,11 @@ export function elementFromZml(
           children,
         };
       }
-      const todo = { tag, kind: 'todo' as const, ...(name ? { name } : {}), todo: 'Server-side Deluge snippet requires manual translation', children: [] };
+      // A function-calling button names the step to hand-port: the click's Deluge call.
+      const reason = compiled?.reason === EXECUTE_FUNCTION_BUTTON
+        ? 'Server-side Deluge snippet with an ExecuteFunction button requires manual translation of the button\'s function call'
+        : 'Server-side Deluge snippet requires manual translation';
+      const todo = { tag, kind: 'todo' as const, ...(name ? { name } : {}), todo: reason, children: [] };
       return { tag, kind, ...(name ? { name } : {}), html: '', ...(popups.length ? { popups } : {}), children: [todo, ...children] };
     }
     return { tag, kind, ...(name ? { name } : {}), html: sanitizeSnippet(source), ...(popups.length ? { popups } : {}), children };
