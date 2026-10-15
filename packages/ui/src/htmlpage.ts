@@ -1189,7 +1189,7 @@ function commentClose(input: string, from: number): number {
 }
 
 export function convertZmlSnippetToHtml(template: string): string {
-  if (!/<\/?(panel|pr|pc|prefix|suffix|text|row|column)\b/i.test(template)) {
+  if (!/<\/?(panel|pr|pc|prefix|suffix|text|row|column|image)\b/i.test(template)) {
     return template;
   }
   let out = '';
@@ -1198,10 +1198,13 @@ export function convertZmlSnippetToHtml(template: string): string {
 
   while (at < template.length) {
     if (template.startsWith('<%', at)) {
+      // Same closer rule as splitChunks: a `<%{` island ends at whichever of
+      // `%}` and `%>` comes first. A later `<%}%>` must not swallow the markup
+      // between them, or the ZML tags inside are never converted.
       const isBlock = template.startsWith('<%{', at);
-      const close = isBlock
-        ? (template.indexOf('%}', at + 3) >= 0 ? template.indexOf('%}', at + 3) + 2 : template.indexOf('%>', at + 3) + 2)
-        : template.indexOf('%>', at + 2) + 2;
+      const brace = isBlock ? template.indexOf('%}', at + 3) : -1;
+      const plain = template.indexOf('%>', at + (isBlock ? 3 : 2));
+      const close = brace >= 0 && (plain < 0 || brace < plain) ? brace + 2 : plain + 2;
       const end = close > 1 ? close : template.length;
       out += template.slice(at, end);
       at = end;
@@ -1278,6 +1281,19 @@ export function convertZmlSnippetToHtml(template: string): string {
           continue;
         }
 
+        // A ZML icon image is a decorative styled tile, as on a page-level
+        // ZML layout: the box keeps its size, colours and corner radius, and
+        // the icon glyph name is not rendered.
+        if (tag === 'image' && !isClosing && (parseZmlAttributes(attrStr).type ?? '').trim().toLowerCase() === 'icon') {
+          out += `<div data-zml="icon"${zmlAttributesToStyle(parseZmlAttributes(attrStr))}></div>`;
+          at += full.length;
+          if (!isSelfClosing) {
+            const closeMatch = /^\s*<\/image>/i.exec(template.slice(at));
+            if (closeMatch) at += closeMatch[0].length;
+          }
+          continue;
+        }
+
         if (tag === 'panel' || tag === 'pr' || tag === 'pc' || tag === 'row' || tag === 'column') {
           if (isClosing) {
             out += '</div>';
@@ -1303,6 +1319,9 @@ export function convertZmlSnippetToHtml(template: string): string {
 
   return out;
 }
+
+/** Todo constructs raised only by the translator's client projection. */
+const CLIENT_PROJECTION_TODOS: ReadonlySet<string> = new Set(['client-condition-uses-server', 'client-loop-uses-server']);
 
 /**
  * Compile a decoded `htmlpage` template into a generated endpoint plus the
@@ -1501,7 +1520,12 @@ export function compileHtmlpage(
   } catch {
     return fail('island translation failed');
   }
-  if (tr.todos.length || tr.stats.todo > 0) return fail('island needs manual translation');
+  // The endpoint runs only the server translation. A `client-*-uses-server`
+  // todo is about the client projection of the same code (a client condition
+  // or loop that would need a server read), which a server render never runs;
+  // the server code itself is still refused below if it holds a shim.todo.
+  const serverTodos = tr.todos.filter((t) => !CLIENT_PROJECTION_TODOS.has(t.construct));
+  if (serverTodos.length || (tr.stats.todo > 0 && !tr.todos.length)) return fail('island needs manual translation');
   // The translator may also emit a client projection of the same code (slot
   // conditions, list pushes). Only a real client action — a UI effect the
   // endpoint cannot perform — is out of scope.

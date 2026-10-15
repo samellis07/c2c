@@ -2245,3 +2245,75 @@ test('shape A: a text island the sanitizer would not keep still stays the counte
     assert.equal(uiSnippetFiles(model).length, 0, snippet);
   }
 });
+
+test('a ZML snippet opened by a statement block and closed by a later brace island still converts its tags', async () => {
+  const snippet = `<%{
+rec = Orders[ID == input.id];
+%>
+<panel><pr><pc><text type="Text" value="<%=rec.Name%>" size="3"> </text></pc></pr></panel>
+<%}%>`;
+  const html = convertZmlSnippetToHtml(snippet);
+  assert.match(html, /<div data-zml="panel">/);
+  assert.match(html, /<div style="font-size:16px"><%=rec\.Name%><\/div>/);
+  assert.doesNotMatch(html, /<text\b/);
+  const { out } = await renderLiveZml(snippet, [{ Name: 'Ada', Status: 'open', Amount: 1 }], { id: FIRST_ID });
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.match(String(out.body.html), /<div style="font-size:16px">Ada<\/div>/);
+});
+
+test('a ZML icon image in a snippet renders as a styled tile and keeps its colour island', async () => {
+  const html = convertZmlSnippetToHtml(`<image color="#FFFFFF" bgColor="#00aa00" width="20px" height="20px" type="icon" value="glyph-x" cornerRadius="10px" />`);
+  assert.equal(html, '<div data-zml="icon" style="width:20px;height:20px;background-color:#00aa00;color:#FFFFFF;border-radius:10px"></div>');
+  // A non-icon image is not this tile.
+  assert.doesNotMatch(convertZmlSnippetToHtml(`<panel><image type="url" value="x.png" /></panel>`), /data-zml="icon"/);
+  const { out } = await renderLiveZml(
+    `<%{
+rec = Orders[ID == input.id];
+tone = "#111111";
+if(rec.Status == "open")
+{
+\ttone = "#00aa00";
+}
+%>
+<panel><pr><pc><image bgColor="<%=tone%>" width="20px" height="20px" type="icon" value="glyph-x" /></pc></pr></panel>
+<%}%>`,
+    [{ Name: 'Ada', Status: 'open', Amount: 1 }],
+    { id: FIRST_ID },
+  );
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.match(String(out.body.html), /<div data-zml="icon" style="width:20px;height:20px;background-color:#00aa00"><\/div>/);
+});
+
+test('a snippet loop whose condition reads server data renders on the server; a server-side todo still stays counted', async () => {
+  const snippet = `<%{
+steps = {"open","closed"};
+tone = "#111111";
+current = Orders[ID == input.id].Status;
+for each step in steps
+{
+\tif(step == current)
+\t{
+\t\ttone = "#00aa00";
+\t}
+}
+%>
+<p style="color:<%=tone%>">x</p>
+<%}%>`;
+  const compiled = compileHtmlpage(appOf(ORDERS), 'Home', 'zml1', `htmlpage zml1()\ncontent\n${snippet}`);
+  assert.equal(compiled.ok, true, compiled.reason);
+  const { out } = await renderLiveZml(snippet, [{ Name: 'Ada', Status: 'closed', Amount: 1 }], { id: FIRST_ID });
+  assert.equal(out.status, 200, JSON.stringify(out.body));
+  assert.match(String(out.body.html), /color:#00aa00/);
+  const miss = await renderLiveZml(snippet, [{ Name: 'Ada', Status: 'held', Amount: 1 }], { id: FIRST_ID });
+  assert.match(String(miss.out.body.html), /color:#111111/);
+
+  // An unknown builtin in the same position is a server-side todo.
+  const refused = compileHtmlpage(
+    appOf(ORDERS),
+    'Home',
+    'zml1',
+    `htmlpage zml1()\ncontent\n<%{\ntone = input.id.frobnicate();\n%>\n<p><%=tone%></p>\n<%}%>`,
+  );
+  assert.equal(refused.ok, false);
+  assert.equal(refused.reason, 'island needs manual translation');
+});
