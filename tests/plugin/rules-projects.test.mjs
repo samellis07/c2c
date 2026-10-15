@@ -17,6 +17,7 @@ const factsDir = path.join(repo, 'plugin', 'references', 'facts');
 const file = path.join(factsDir, 'projects.md');
 
 const PUBLIC_EVIDENCE = /\[(?:DOC|CLI|MCP-LISTED|TESTED|UNVERIFIED)\]/g;
+const PUBLIC_FACT_ID = /\[L-PROJECTS\]/g;
 const EVIDENCE_LABEL = /\[[A-Z][A-Z0-9 -]{1,14}\]/;
 const FIELD_LABEL = /^\s*[-*]?\s*\*{0,2}(status|evidence|verified|source|date)\s*\*{0,2}\s*:/im;
 const ISO_DATE = /\b20\d\d-\d\d-\d\d\b/;
@@ -105,7 +106,7 @@ test('every Recipe and Rule line carries an evidence label', () => {
 });
 
 test('no provenance fields, internal labels or dates in the shipped rules', () => {
-  const md = text().replace(PUBLIC_EVIDENCE, '');
+  const md = text().replace(PUBLIC_EVIDENCE, '').replace(PUBLIC_FACT_ID, '');
   assert.equal(EVIDENCE_LABEL.test(md), false, md.match(EVIDENCE_LABEL)?.[0]);
   assert.equal(FIELD_LABEL.test(md), false, md.match(FIELD_LABEL)?.[0]);
   assert.equal(ISO_DATE.test(md), false, md.match(ISO_DATE)?.[0]);
