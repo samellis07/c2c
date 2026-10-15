@@ -23,7 +23,7 @@ import { generateUi } from '../../ui/src/generate.js';
 import { buildUi } from '../../ui/src/index.js';
 import { pageSpecs } from '../src/charts.js';
 import { TEMPLATE_DIR, reactAppSpec } from '../src/index.js';
-import type { AppSpec, NavSection } from '../template/lib/c2c-ui/types.js';
+import type { AppSpec, NavSection, PageElement } from '../template/lib/c2c-ui/types.js';
 
 const MODULES = join(TEMPLATE_DIR, 'node_modules');
 const runtimeReady = existsSync(join(MODULES, 'react')) && existsSync(join(MODULES, 'react-dom'));
@@ -157,13 +157,16 @@ test('the spec carries the hidden target names on denied, and keeps the nav clea
 
 let compiled: string | undefined;
 function lib(): string {
-  if (!compiled) {
-    compiled = join(tmpdir(), `c2c-hidden-route-${process.pid}`);
-    const out = compiled;
-    after(() => rmSync(out, { recursive: true, force: true }));
+  if (!compiled) compiled = join(tmpdir(), `c2c-hidden-route-${process.pid}`);
+  const out = compiled;
+  // `after` below is scoped to the test that compiles, so a later test can
+  // find the shared directory already torn down (earlier tests only survived
+  // on cached modules). Rebuild on demand instead of trusting the directory.
+  if (!existsSync(join(out, 'lib/c2c-ui/boot.js'))) {
     compileLib(out);
+    after(() => rmSync(out, { recursive: true, force: true }));
   }
-  return compiled;
+  return out;
 }
 
 interface Mounted {
@@ -341,18 +344,21 @@ const EMBED_SOURCE = `application "Desk"
 test('a page embedding a denied report renders the denial and fires no report query', { skip: SKIP }, async (t) => {
   const ir = deriveIr(parse(EMBED_SOURCE));
   const spec = reactAppSpec(ir);
+  const embedded = (elements: PageElement[]): boolean =>
+    elements.some((el) => (el.kind === 'report' && el.report === 'LedgerRows') || (el.kind === 'box' && embedded(el.children)));
   assert.ok(
-    Object.values(spec.pages ?? {}).some((page) => page.elements.some((el) => el.kind === 'report' && el.report === 'LedgerRows')),
+    Object.values(spec.pages ?? {}).some((page) => embedded(page.elements)),
     'the page spec embeds the hidden report',
   );
   assert.ok(spec.denied?.includes('LedgerRows'), 'the embedded report stays denied');
+  // Mount first: it compiles the template lib the page screen renders.
+  const m = await mount(t);
   const { createElement } = createRequire(join(lib(), 'lib', 'loader.cjs'))('react') as {
     createElement: (type: unknown, props?: unknown, ...children: unknown[]) => unknown;
   };
   const { PageView } = (await import(pathToFileURL(join(lib(), 'lib/c2c-ui/pages/PageView.js')).href)) as {
     PageView: unknown;
   };
-  const m = await mount(t);
   // Open the visible page, like a menu click: the page draws, the embedded
   // report it names is refused in place, before any rows request.
   m.view.location.hash = '#/page/Board';
