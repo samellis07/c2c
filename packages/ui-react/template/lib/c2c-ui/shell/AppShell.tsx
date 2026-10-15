@@ -16,6 +16,7 @@ import { Ellipsis, FileText, LayoutDashboard, ListChecks, Table } from 'lucide-r
 import type { NavItem, NavSection } from '../types';
 import { useEnv } from '../runtime/env';
 import { useRoute } from '../runtime/router';
+import { bridgeSignOut } from '../runtime/api';
 import { SessionExpiredPrompt } from '../runtime/auth';
 import { ScreenBoundary } from './ScreenBoundary';
 
@@ -69,6 +70,11 @@ export function AppShell({ title, sections, current, children }: AppShellProps) 
     <div className="c2c-app">
       <header className="c2c-topbar">
         <span id="app-title">{title}</span>
+        {typeof view.C2C_AUTH_BRIDGE === 'string' && view.C2C_AUTH_BRIDGE ? (
+          <button type="button" className="c2c-signout" onClick={() => bridgeSignOut(view)}>
+            Sign out
+          </button>
+        ) : null}
       </header>
       <nav id="nav" aria-label="Main menu">
         {sections.map((section) => (

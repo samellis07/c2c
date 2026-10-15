@@ -1,5 +1,5 @@
 /**
- * The vanilla client's token bridge (design d'), mirroring
+ * The vanilla client's token bridge, mirroring
  * packages/ui-react/test/auth-bridge.test.ts: fragment intake with the state
  * check, Authorization with no cookies, and the loop-guarded redirect.
  */
@@ -12,6 +12,7 @@ interface Runtime {
   apiCall(call: (url: string, init: Record<string, unknown>) => Promise<{ status: number }>, view: unknown, endpoint: string, init?: Record<string, unknown>): Promise<{ status: number }>;
   intakeBridgeFragment(view: unknown): void;
   bridgeRedirect(view: unknown, force?: boolean): boolean;
+  bridgeSignOut(view: unknown): boolean;
   hasBridgeToken(view: unknown): boolean;
 }
 
@@ -139,4 +140,32 @@ test('the retry mark survives token intake and bounds a persistent 401 to one br
   const refused = await runtime.apiCall(async () => ({ status: 401 }), view, '/admin/smoke');
   assert.equal(refused.status, 401);
   assert.equal(assigned.length, 1, 'a persistent 401 cannot re-bridge within the retry window');
+});
+
+test('bridgeSignOut clears every bridge key and leaves for the bridge signout action', async () => {
+  const runtime = await loadRuntime();
+  const { view, assigned, sessionStorage } = fakeView();
+  sessionStorage.setItem('c2c.bridge.token', 'Bearer tok');
+  sessionStorage.setItem('c2c.bridge.state', 's-1');
+  sessionStorage.setItem('c2c.bridge.route', '/app/');
+  sessionStorage.setItem('c2c.bridge.at', String(Date.now()));
+  assert.equal(runtime.bridgeSignOut(view), true);
+  assert.deepEqual(assigned, ['https://fn.example.test/server/c2c_auth/bridge?action=signout']);
+  for (const key of ['c2c.bridge.token', 'c2c.bridge.state', 'c2c.bridge.route', 'c2c.bridge.at']) {
+    assert.equal(sessionStorage.getItem(key), null, `${key} is cleared`);
+  }
+});
+
+test('bridgeSignOut refuses a missing or non-web bridge and navigates nowhere', async () => {
+  const runtime = await loadRuntime();
+  const missing = fakeView();
+  (missing.view as Record<string, unknown>).C2C_AUTH_BRIDGE = '';
+  assert.equal(runtime.bridgeSignOut(missing.view), false);
+  assert.equal(missing.assigned.length, 0);
+  const evil = fakeView();
+  (evil.view as Record<string, unknown>).C2C_AUTH_BRIDGE = 'javascript:alert(1)';
+  evil.sessionStorage.setItem('c2c.bridge.token', 'Bearer tok');
+  assert.equal(runtime.bridgeSignOut(evil.view), false);
+  assert.equal(evil.assigned.length, 0);
+  assert.equal(evil.sessionStorage.getItem('c2c.bridge.token'), 'Bearer tok', 'a refused sign-out keeps the session');
 });

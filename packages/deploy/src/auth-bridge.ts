@@ -5,8 +5,7 @@
  * /baas, init.js and hosted login as first party, so this Advanced I/O
  * function serves one static page that runs generateAuthToken on its own
  * origin and hands the token back to the Slate app in a URL fragment bound
- * to a state value the Slate page generated. Design:
- * harness research design-c2c-slate-auth-token-path.md (option d').
+ * to a state value the Slate page generated.
  */
 
 import { CATALYST_WEB_SDK } from '../../ui/src/generate.js';
