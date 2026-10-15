@@ -52,7 +52,7 @@ test('file-content TODOs pin the Creator upload-field source and its adapter lim
   const dispatch = readFileSync(join(repoRoot(), 'packages/deluge/src/dispatch.ts'), 'utf8');
   assert.match(dispatch, /Creator upload fields/);
   assert.match(dispatch, /`content` is the documented attribute/);
-  assert.match(dispatch, /https:\/\/www\.zoho\.com\/deluge\/help\/file-attributes\/content\.html/);
+  assert.ok(dispatch.includes('https://www.zoho.com/deluge/help/file-attributes/content.html'), 'dispatch cites the content attribute doc page');
   assert.match(dispatch, /Stratus object key/);
   assert.match(dispatch, /no head or metadata read/);
   assert.match(dispatch, /never retained on the stored value/);
