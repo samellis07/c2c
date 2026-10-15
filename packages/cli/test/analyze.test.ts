@@ -23,11 +23,16 @@ test('c2c parse rejects a FIFO promptly', () => {
   const fifo = path.join(dir, 'target.ds');
   try {
     execFileSync('mkfifo', [fifo]);
+    // No writer ever opens the FIFO, so a parse that waits on it (a blocking
+    // open or read) never returns and is reaped here. The bound only covers
+    // CLI startup on a loaded machine; the refusal itself does no waiting.
     const result = spawnSync(process.execPath, [path.join(root, 'dist/cli/src/c2c.js'), 'parse', fifo], {
       encoding: 'utf8',
-      timeout: 1900,
+      timeout: 30000,
+      killSignal: 'SIGKILL',
     });
-    assert.equal(result.error, undefined);
+    assert.equal(result.error, undefined, `parse did not return: ${result.error?.message}`);
+    assert.equal(result.signal, null);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /not a file/);
   } finally {
