@@ -3221,11 +3221,29 @@ test('clear on a list maps to shim.list.clear', async () => {
   assert.equal(await evalDeluge('l = {"a", "b"}; l.clear(); out = l.size();'), 0);
 });
 
-test('reverse on a list maps to shim.todo', { todo: 'wrong translation: reverse on a list currently maps to shim.todo' }, async () => {
-  const t = translate('out = {"a", "b"}.reverse();');
-  assert.match(t.server, /shim\.list\.reverse/); // as it SHOULD be
-  assert.deepEqual(await evalDeluge('out = {"a", "b"}.reverse();'), ["b", "a"]);
-  assert.deepEqual(await evalDeluge('out = {"a"}.reverse();'), ["a"]);
+test('reverse on a list, map, date, or query receiver stays a counted todo', async () => {
+  // functions/string/reverse.html: return type TEXT; a non-text input is
+  // converted to text first, and example 3 supplies the list {1, 2, 13} and
+  // gets the text "31, 2, 1". Reversing that output gives the text form
+  // "1, 2, 13", but no documented rule decides a list's text form (Deluge
+  // `toString()` of a list is its JSON text, "[1,2,13]", which cannot yield
+  // it), so a list receiver keeps the counted method:reverse todo. A map,
+  // date, or record query receiver has no documented text form either, so it
+  // keeps the same todo.
+  for (const src of [
+    'out = {"a", "b"}.reverse();',
+    'out = {1, 2, 13}.reverse();',
+    'l = {"a", "b"}; out = l.reverse();',
+    'out = reverse({1, 2, 13});',
+    'm = {"a": 1, "b": 2}; out = m.reverse();',
+    'out = today.reverse();',
+    'out = Orders[ID != 0].reverse();',
+  ]) {
+    const t = translate(src);
+    assert.match(t.server, /shim\.todo\(ctx, "(method:reverse|call:reverse)"\)/, src);
+    assert.doesNotMatch(t.server, /shim\.string\.reverse/, src);
+    assert.doesNotMatch(t.server, /shim\.list\.reverse/, src);
+  }
 });
 
 test('insert on a list maps to shim.list.insert', async () => {
@@ -3242,18 +3260,30 @@ test('sum on a list maps to shim.list.aggregate', async () => {
   assert.equal(await evalDeluge('out = {5, 6, 7}.sum();'), 18);
 });
 
-test('min on a list maps to shim.list.aggregate', { todo: 'wrong translation: min on a list falls through to method:min todo because it is excluded in methodCall' }, async () => {
-  const t = translate('out = {1, 2}.min();');
-  assert.match(t.server, /shim\.list\.aggregate/); // as it SHOULD be
-  assert.equal(await evalDeluge('out = {3, 1, 2}.min();'), 1);
-  assert.equal(await evalDeluge('out = {-1, 5}.min();'), -1);
-});
-
-test('max on a list maps to shim.list.aggregate', { todo: 'wrong translation: max on a list falls through to method:max todo because it is excluded in methodCall' }, async () => {
-  const t = translate('out = {1, 2}.max();');
-  assert.match(t.server, /shim\.list\.aggregate/); // as it SHOULD be
-  assert.equal(await evalDeluge('out = {3, 1, 2}.max();'), 3);
-  assert.equal(await evalDeluge('out = {-1, 5}.max();'), 5);
+test('0-argument min and max stay a counted todo on every receiver', async () => {
+  // functions/number/min.html and max.html document only the two-number
+  // functions, and functions/list.html documents no min or max on a list
+  // (its reducers are smallest and largest, which are not documented as the
+  // same functions). A 0-argument call therefore keeps the counted
+  // method:min / method:max todo on every receiver — a list, a member, or a
+  // scalar — instead of the list aggregate.
+  for (const src of [
+    'out = {1, 2}.min();',
+    'out = {1, 2}.max();',
+    'l = {9, 1, 4}; out = l.min();',
+    'out = List().min();',
+    'out = "abc".max();',
+    's = "abc"; out = s.min();',
+    'out = (10).max();',
+    'n = 10; out = n.min();',
+    'm = {"k": 10}; out = m.k.max();',
+    'm = {"k": "abc"}; out = m.k.min();',
+    'out = input.Amount.max();',
+  ]) {
+    const t = translate(src);
+    assert.match(t.server, /shim\.todo\(ctx, "method:(min|max)"\)/, src);
+    assert.doesNotMatch(t.server, /shim\.list\.aggregate/, src);
+  }
 });
 
 
