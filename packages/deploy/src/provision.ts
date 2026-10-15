@@ -1729,7 +1729,7 @@ async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> 
   if (id === 'import' && ctx.scope.projectId) {
     // The import POSTs a NEW project. With a configured (or learned) id the
     // plan is for an existing project — importing now would mint an orphan.
-    ctx.io.stderr(coded('C2C-DEPLOY-003', 
+    ctx.io.stderr(coded('C2C-DEPLOY-003',
       `c2c provision: the import step creates a new project, but a project id is already configured (${ctx.scope.sources.projectId ?? 'scope'}) — re-run c2c plan without a configured project, into a fresh --out\n`,
     ));
     return 2;
