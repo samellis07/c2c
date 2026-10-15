@@ -4926,11 +4926,12 @@
       "kind": "function",
       "category": "number",
       "receivers": [
-        "number"
+        "list"
       ],
       "arity": 0,
       "form": "method",
-      "docUrl": "https://www.zoho.com/deluge/help/functions/number/average.html"
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/average.html",
+      "snippet": "x = {1, 5, 2, 3}.average();"
     },
     {
       "name": "average",
@@ -5191,11 +5192,12 @@
       "kind": "function",
       "category": "number",
       "receivers": [
-        "number"
+        "list"
       ],
       "arity": 0,
       "form": "method",
-      "docUrl": "https://www.zoho.com/deluge/help/functions/number/median.html"
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/median.html",
+      "snippet": "x = {1, 5, 2, 3}.median();"
     },
     {
       "name": "median",
@@ -5236,22 +5238,24 @@
       "kind": "function",
       "category": "number",
       "receivers": [
-        "number"
+        "list"
       ],
       "arity": 1,
       "form": "method",
-      "docUrl": "https://www.zoho.com/deluge/help/functions/number/nth-largest.html"
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/nth-largest.html",
+      "snippet": "x = {300, 455, 124, 926, 780}.nthLargest(5);"
     },
     {
       "name": "nthSmallest",
       "kind": "function",
       "category": "number",
       "receivers": [
-        "number"
+        "list"
       ],
       "arity": 1,
       "form": "method",
-      "docUrl": "https://www.zoho.com/deluge/help/functions/number/nth-smallest.html"
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/nth-smallest.html",
+      "snippet": "x = {300, 455, 124, 926, 780}.nthSmallest(2);"
     },
     {
       "name": "power",
@@ -5460,7 +5464,8 @@
       ],
       "arity": 0,
       "form": "method",
-      "docUrl": "https://www.zoho.com/deluge/help/functions/number/tohex.html"
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/tohex.html",
+      "snippet": "x = (100).toHex();"
     },
     {
       "name": "toHex",
@@ -5471,7 +5476,8 @@
       ],
       "arity": 1,
       "form": "free",
-      "docUrl": "https://www.zoho.com/deluge/help/functions/number/tohex.html"
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/tohex.html",
+      "snippet": "x = toHex(100);"
     },
     {
       "name": "toLong",
@@ -5526,7 +5532,8 @@
       ],
       "arity": 1,
       "form": "method",
-      "docUrl": "https://www.zoho.com/deluge/help/functions/number/towords.html"
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/towords.html",
+      "snippet": "x = (1989).toWords(\"en-us\");"
     },
     {
       "name": "toWords",
@@ -5537,7 +5544,8 @@
       ],
       "arity": 2,
       "form": "free",
-      "docUrl": "https://www.zoho.com/deluge/help/functions/number/towords.html"
+      "docUrl": "https://www.zoho.com/deluge/help/functions/number/towords.html",
+      "snippet": "x = toWords(1989, \"en-us\");"
     },
     {
       "name": "concat",

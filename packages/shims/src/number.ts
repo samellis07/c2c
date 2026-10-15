@@ -12,7 +12,7 @@
  */
 import { DelugeConversionError } from './convert.js';
 import { Decimal } from './decimal.js';
-import { DelugeRuntimeError } from './errors.js';
+import { DelugeRuntimeError, UntranslatedConstruct } from './errors.js';
 
 export const NUMERIC = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
@@ -136,88 +136,140 @@ export function smallest(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// toWords, toHex, nthLargest and nthSmallest follow
+// https://www.zoho.com/deluge/help/functions/number/towords.html, .../tohex.html,
+// .../nth-largest.html and .../nth-smallest.html. Input the pages do not
+// describe throws UntranslatedConstruct (a counted coverage gap), never a guess.
 const SMALL_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
 const TENS_WORDS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
 const SCALES = ['', 'thousand', 'million', 'billion', 'trillion', 'quadrillion'];
+const INDIAN_SCALES = ['', 'thousand', 'lakh', 'crore'];
+/** Languages the page lists. Only the English ones are rendered here. */
+export const TO_WORDS_LANGUAGES = ['en-gb', 'ar', 'zh', 'en-in', 'en-us', 'fr', 'de', 'it', 'ja', 'ko', 'pt', 'es'];
+export const TO_WORDS_RENDERED = ['en-us', 'en-gb', 'en-in'];
 
-function underThousand(n: number, british: boolean): string {
-  const words: string[] = [];
+function untranslated(fn: string, what: string): UntranslatedConstruct {
+  return new UntranslatedConstruct(`${fn}-${what}`, fn);
+}
+
+function underHundred(n: number): string {
+  if (n < 20) return SMALL_WORDS[n]!;
+  const tens = TENS_WORDS[Math.floor(n / 10)]!;
+  return n % 10 ? `${tens}-${SMALL_WORDS[n % 10]}` : tens;
+}
+
+// The page's en-us example (1989 -> "one thousand nine hundred eighty-nine")
+// has no "and". Its en-gb and en-in examples (-12, 10000000) never show
+// whether British or Indian English adds "and" after "hundred" or before a
+// final group under one hundred, so those spellings refuse.
+function underThousand(n: number, andUnknown: boolean, language: string): string {
   const hundreds = Math.floor(n / 100);
   const rest = n % 100;
+  if (hundreds && rest && andUnknown) throw untranslated('toWords', `${language}-and`);
+  const words: string[] = [];
   if (hundreds) words.push(SMALL_WORDS[hundreds]!, 'hundred');
-  if (rest) {
-    if (hundreds && british) words.push('and');
-    if (rest < 20) words.push(SMALL_WORDS[rest]!);
-    else {
-      const tens = TENS_WORDS[Math.floor(rest / 10)]!;
-      words.push(rest % 10 ? `${tens}-${SMALL_WORDS[rest % 10]}` : tens);
-    }
+  if (rest) words.push(underHundred(rest));
+  return words.join(' ');
+}
+
+function integerWords(value: bigint, language: string): string {
+  if (value === 0n) return 'zero';
+  const andUnknown = language !== 'en-us';
+  const groups: number[] = [];
+  let scales = SCALES;
+  if (language === 'en-in') {
+    // Lakh and crore only: the page shows "one crore" and nothing larger.
+    if (value >= 1_000_000_000n) throw untranslated('toWords', 'en-in-scale');
+    scales = INDIAN_SCALES;
+    groups.push(Number(value % 1000n)); value /= 1000n;
+    while (value > 0n) { groups.push(Number(value % 100n)); value /= 100n; }
+  } else {
+    while (value > 0n) { groups.push(Number(value % 1000n)); value /= 1000n; }
+  }
+  if (andUnknown && groups.length > 1 && groups[0]! > 0 && groups[0]! < 100) throw untranslated('toWords', `${language}-and`);
+  const words: string[] = [];
+  for (let i = groups.length - 1; i >= 0; i--) {
+    if (!groups[i]) continue;
+    words.push(underThousand(groups[i]!, andUnknown, language));
+    if (scales[i]) words.push(scales[i]!);
   }
   return words.join(' ');
 }
 
-function integerWords(text: string, language: string): string {
-  let value = BigInt(text);
-  if (value === 0n) return 'zero';
-  const negative = value < 0n;
-  if (negative) value = -value;
-  const british = language === 'en-gb';
-  const groups: number[] = [];
-  if (language === 'en-in') {
-    groups.push(Number(value % 1000n)); value /= 1000n;
-    while (value > 0n) { groups.push(Number(value % 100n)); value /= 100n; }
-    const scales = ['', 'thousand', 'lakh', 'crore', 'arab', 'kharab'];
-    const words: string[] = [];
-    for (let i = groups.length - 1; i >= 0; i--) if (groups[i]) words.push(underThousand(groups[i]!, false), scales[i] ?? '');
-    return `${negative ? 'minus ' : ''}${words.join(' ').trim()}`;
-  }
-  while (value > 0n) { groups.push(Number(value % 1000n)); value /= 1000n; }
-  const words: string[] = [];
-  for (let i = groups.length - 1; i >= 0; i--) if (groups[i]) words.push(underThousand(groups[i]!, british), SCALES[i] ?? '');
-  return `${negative ? 'minus ' : ''}${words.join(' ').trim()}`;
-}
-
-/** Zoho's documented English number words (en-us, en-gb and en-in). */
+/** Zoho's English number words (en-us, en-gb, en-in); the other listed languages refuse. */
 export function toWords(value: unknown, language: unknown): string {
-  const locale = String(language ?? '').toLowerCase();
-  if (!['en-us', 'en-gb', 'en-in'].includes(locale)) throw new DelugeRuntimeError(`toWords: unsupported language ${String(language)}`);
-  let text = value instanceof Decimal ? value.toString() : typeof value === 'bigint' ? value.toString() : String(value ?? '');
-  text = text.trim();
-  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text)) throw new DelugeRuntimeError('toWords: input must be a number');
+  if (typeof language !== 'string' || !TO_WORDS_RENDERED.includes(language)) {
+    throw untranslated('toWords', TO_WORDS_LANGUAGES.includes(String(language)) ? `language-${String(language)}` : 'language');
+  }
+  const isDecimal = value instanceof Decimal || (typeof value === 'number' && !Number.isInteger(value));
+  if (!(typeof value === 'number' && Number.isFinite(value)) && typeof value !== 'bigint' && !(value instanceof Decimal)) {
+    throw untranslated('toWords', value == null ? 'null' : 'non-number');
+  }
+  const text = value instanceof Decimal ? value.toString() : typeof value === 'number' ? Decimal.from(value).toString() : value.toString();
   const negative = text.startsWith('-');
-  text = text.replace(/^[+-]/, '');
-  const [whole = '0', fraction] = text.split('.');
-  const integer = integerWords(`${negative ? '-' : ''}${BigInt(whole || '0')}`, locale);
-  return fraction ? `${integer} point ${[...fraction].map((digit) => SMALL_WORDS[Number(digit)]).join(' ')}` : integer;
+  const [whole = '0', fraction = ''] = text.replace(/^-/, '').split('.');
+  // "A number input value can contain up to 18 digits"; "the whole and decimal
+  // parts of a decimal input value can collectively be up to 15 digits".
+  if (isDecimal ? whole.length + fraction.length > 15 : whole.length > 18) throw untranslated('toWords', 'digits');
+  // Whether Zoho reads a kept trailing zero ("1.50") is not documented.
+  if (fraction.endsWith('0')) throw untranslated('toWords', 'trailing-zero');
+  const integer = integerWords(BigInt(whole), language);
+  const words = `${negative ? 'minus ' : ''}${integer}`;
+  return fraction ? `${words} point ${[...fraction].map((digit) => SMALL_WORDS[Number(digit)]).join(' ')}` : words;
 }
 
-/** Converts an integer number to its base-16 text without locale dependence. */
+const LONG_MAX = 9223372036854775807n;
+
+/**
+ * Base-16 text of a NUMBER. The page shows only a positive whole number
+ * (100 -> "64"): a DECIMAL, a negative, null and text refuse.
+ */
 export function toHex(value: unknown): string {
-  let text = value instanceof Decimal ? value.toString() : typeof value === 'bigint' ? value.toString() : String(value ?? '');
-  text = text.trim();
-  if (!/^[+-]?\d+$/.test(text)) throw new DelugeRuntimeError('toHex: input must be an integer');
-  return BigInt(text).toString(16);
+  if (value instanceof Decimal || (typeof value === 'number' && !Number.isInteger(value))) throw untranslated('toHex', 'decimal');
+  if (typeof value !== 'number' && typeof value !== 'bigint') throw untranslated('toHex', value == null ? 'null' : 'non-number');
+  if (typeof value === 'number' && !Number.isSafeInteger(value)) throw untranslated('toHex', 'range');
+  const n = BigInt(value);
+  if (n < 0n) throw untranslated('toHex', 'negative');
+  if (n > LONG_MAX) throw untranslated('toHex', 'range');
+  return n.toString(16);
 }
 
 export function nthLargest(value: unknown, rank: unknown): unknown {
-  return numericListRank(value, rank, true);
+  return numericListRank('nthLargest', value, rank, true);
 }
 
 export function nthSmallest(value: unknown, rank: unknown): unknown {
-  return numericListRank(value, rank, false);
+  return numericListRank('nthSmallest', value, rank, false);
 }
 
-function numericListRank(value: unknown, rank: unknown, descending: boolean): unknown {
-  if (!Array.isArray(value)) throw new DelugeRuntimeError('nth: expected a number collection');
-  const values = value.filter((item) => item != null && !(typeof item === 'string' && item.trim() === '')).map((item) => {
-    const n = typeof item === 'number' ? item : Number(item instanceof Decimal ? item.toString() : item);
-    if (!Number.isFinite(n)) throw new DelugeRuntimeError('nth: collection contains a non-numeric value');
-    return n;
+function rankIndex(fn: string, rank: unknown): number {
+  if (typeof rank === 'number' && Number.isSafeInteger(rank)) return rank;
+  if (typeof rank === 'bigint') return rank > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(rank);
+  // nthSmallest documents a NUMBER / DECIMAL rank; how a fractional one rounds is not documented.
+  if (rank instanceof Decimal && rank.compare(Decimal.from(rank.toString().split('.')[0]!)) === 0) return Number(rank.toString().split('.')[0]);
+  throw untranslated(fn, rank instanceof Decimal || typeof rank === 'number' ? 'fractional-rank' : 'rank');
+}
+
+/**
+ * One-based rank in the collection sorted by value. Members keep their own
+ * type (a DECIMAL comes back as the exact Decimal) and ties keep their
+ * places. The pages describe a collection of NUMBER and DECIMAL values only:
+ * a null, blank or text member refuses instead of being skipped, which would
+ * shift every rank.
+ */
+function numericListRank(fn: string, value: unknown, rank: unknown, descending: boolean): unknown {
+  if (!Array.isArray(value)) throw new DelugeRuntimeError(`${fn}: expected a number collection`);
+  const members = value.map((item) => {
+    if (typeof item === 'number' ? !Number.isFinite(item) : typeof item !== 'bigint' && !(item instanceof Decimal)) {
+      throw untranslated(fn, item == null || (typeof item === 'string' && item.trim() === '') ? 'blank-member' : 'non-number-member');
+    }
+    return { item, key: Decimal.from(item as number | bigint | Decimal) };
   });
-  const index = Number(rank);
-  if (!Number.isInteger(index) || index < 1 || index > values.length) return null;
-  values.sort((a, b) => descending ? b - a : a - b);
-  return values[index - 1];
+  const index = rankIndex(fn, rank);
+  // "The index argument starts from 1" and "cannot be greater than the size of the collection".
+  if (index < 1 || index > members.length) throw new DelugeRuntimeError(`${fn}: index ${index} is outside the collection size ${members.length}`);
+  members.sort((a, b) => (descending ? b.key.compare(a.key) : a.key.compare(b.key)));
+  return members[index - 1]!.item;
 }
 
 export function abs(value: unknown): number | bigint | Decimal | null {

@@ -610,6 +610,7 @@ export interface Shim {
     subList(value: unknown, start: unknown, end?: unknown): unknown[];
     column(rows: unknown, field: unknown): unknown[];
     aggregate(rows: unknown, fn: unknown, field?: unknown, exact?: unknown): unknown;
+    numberList(value: unknown, fn: unknown): unknown[];
   };
   map(elementType?: string): Record<string, unknown>;
   /**
@@ -2433,6 +2434,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     subList: lists.subList,
     column: lists.column,
     aggregate: lists.aggregate,
+    numberList: lists.numberList,
   };
   function listCollection(elementType?: string): unknown[] {
     const arr: unknown[] = [];
