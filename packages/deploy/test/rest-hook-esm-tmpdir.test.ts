@@ -204,6 +204,38 @@ test('every credential-named key syntax and value length is redacted in REST and
   }
 });
 
+test('adversarial encodings (quad-%25 nesting, unbalanced JSON, \\u keys, array objects, Bearer forms) never leak in REST or token errors', async () => {
+  const cases: { line: string; canaries: string[] }[] = [
+    { line: 'diag %2525252563redential=CANARY-QUAD-ENCODED', canaries: ['CANARY-QUAD-ENCODED'] },
+    { line: 'diag {"token":"CANARY-UNBALANCED","a":{', canaries: ['CANARY-UNBALANCED'] },
+    { line: 'diag {"\\u0074oken":"CANARY-UNICODE-KEY"}', canaries: ['CANARY-UNICODE-KEY'] },
+    {
+      line: 'diag {"items":[{"secret":"CANARY-IN-ARRAY"},{"auth":"CANARY-IN-ARRAY-2"}]}',
+      canaries: ['CANARY-IN-ARRAY', 'CANARY-IN-ARRAY-2'],
+    },
+    { line: 'diag Authorization: Bearer CANARY-HEADER-TOKEN tail', canaries: ['CANARY-HEADER-TOKEN'] },
+    { line: 'diag authorization=bearer%20CANARY-ENCODED-BEARER tail', canaries: ['CANARY-ENCODED-BEARER'] },
+  ];
+
+  for (const { line, canaries } of cases) {
+    const env = fakeCatalyst(
+      `'use strict';\nrequire('fs').writeSync(2, ${JSON.stringify(line + '\n')});\nprocess.kill(process.pid, 'SIGKILL');\n`,
+      mkdtempSync(join(tmpdir(), 'c2c-r4-redact-')),
+    );
+    for (const call of [
+      () => catalystRestCall(env, ORG, PROJECT, { method: 'GET', path: `/baas/v1/project/${PROJECT}` }),
+      () => readCliAccessToken(env, ORG, PROJECT),
+    ]) {
+      await assert.rejects(call, (err: Error) => {
+        for (const canary of canaries) {
+          assert.ok(!err.message.includes(canary), `stderr secret leaked (${canary}) for line ${line}: ${err.message}`);
+        }
+        return true;
+      });
+    }
+  }
+});
+
 test('env dumps in child stderr are skipped while a benign line is preserved and long excerpts are capped', async () => {
   const envSecret = 'env-dump-canary-secret-999';
   const env = fakeCatalyst(
