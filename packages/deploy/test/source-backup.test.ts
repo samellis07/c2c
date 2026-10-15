@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
@@ -869,6 +869,7 @@ interface LiveTable {
 function provisionStore() {
   const tables = new Map<string, LiveTable>();
   const restCalls: { method: string; path: string }[] = [];
+  let functionVariables: Record<string, string> = { C2C_DEPLOY_MODE: 'live', C2C_MAIL_FROM: 'owner@example.test', API_KEY: '' };
   let seq = 1;
   const prefix = `/baas/v1/project/${SCOPE.projectId}`;
   const columnDetails = (table: LiveTable) =>
@@ -897,6 +898,12 @@ function provisionStore() {
         body: { data: [...tables].map(([table_name, table]) => ({ table_name, table_id: table.id, column_details: columnDetails(table) })) },
       };
     }
+    if (call.method === 'GET' && call.path === `${prefix}/function`) return { status: 200, body: { data: [{ function_name: 'c2c_api', function_id: 'f1' }] } };
+    if (call.method === 'GET' && call.path === `${prefix}/function/f1`) return { status: 200, body: { data: { configuration: { environment: { variables: functionVariables } } } } };
+    if (call.method === 'POST' && call.path === `${prefix}/function/f1/configuration`) {
+      functionVariables = { ...(call.body as { variables: Record<string, string> }).variables };
+      return { status: 200, body: { status: 'success' } };
+    }
     if (call.method === 'POST' && call.path === `${prefix}/table`) {
       const id = `t${seq++}`;
       tables.set((call.body as { table_name: string }).table_name, { id, columns: new Map() });
@@ -920,7 +927,7 @@ function provisionStore() {
     if (call.method === 'GET' && /^\/(slate|baas)\/v1\/project\/[0-9]+\/(app|bucket)$/.test(call.path)) return { status: 200, body: { status: 'success', data: [] } };
     return { status: 404, body: {} };
   };
-  return { tables, rest, restCalls };
+  return { tables, rest, restCalls, functionVariables: () => functionVariables };
 }
 
 function confirmIo(store: ReturnType<typeof provisionStore>): {
@@ -970,6 +977,29 @@ function confirmIo(store: ReturnType<typeof provisionStore>): {
   };
   return { io, out: () => out, err: () => err, fetches, tokens: () => tokens };
 }
+
+test('deploy CLI applies secret env by fake Catalyst API without exposing it in output or generated files', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-secret-cli-'));
+  const ds = join(dir, 'app.ds');
+  const outDir = join(dir, 'out');
+  const envFile = join(dir, 'function-env.json');
+  const plant = 'never-print-this-secret-value';
+  writeFileSync(ds, APP_LIVE);
+  writeFileSync(envFile, JSON.stringify({ API_KEY: plant, C2C_MAIL_FROM: 'owner@example.test' }));
+  const store = provisionStore();
+  const cap = confirmIo(store);
+  const code = await deployCli([ds, '--out', outDir, '--project', SCOPE.projectId, '--org', SCOPE.org, '--dc', 'in', '--confirm', '--function-env', envFile, '--ui', 'vanilla'], cap.io);
+  assert.equal(code, 0, cap.err());
+  assert.equal(store.functionVariables().API_KEY, plant);
+  assert.equal(store.functionVariables().C2C_DEPLOY_MODE, 'live');
+  assert.ok(store.restCalls.some((call) => call.method === 'POST' && call.path.endsWith('/function/f1/configuration')));
+  assert.doesNotMatch(`${cap.out()}${cap.err()}`, new RegExp(plant));
+  const scan = (path: string): string[] => readdirSync(path, { withFileTypes: true }).flatMap((entry) => {
+    const child = join(path, entry.name);
+    return entry.isDirectory() ? scan(child) : [readFileSync(child, 'utf8')];
+  });
+  assert.ok(scan(outDir).every((contents) => !contents.includes(plant)));
+});
 
 // A live deploy refuses a .ds without the application time zone; the same app
 // with the setting keeps every table, column, and constraint identical.
