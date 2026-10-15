@@ -263,3 +263,46 @@ test('convertSyntheticSeed refuses unknown forms, out-of-range indexes, and $use
   });
   assert.equal(withUser.T[0].Owner, 'tester@example.com');
 });
+
+test('convertSyntheticSeed resolves $today±N and $now±Nh across month, year and midnight, and refuses a bad clock', () => {
+  const clock = { today: '2026-12-31', now: '2026-12-31 23:30:00' };
+  const converted = convertSyntheticSeed(
+    { forms: { T: [{ Next: '$today+1', Prev: '$today-31', Soon: '$now+1h', Ago: '$now-24h', Plain: '$today+x', Tags: ['$today', null, 3, true] }] } },
+    clock,
+  );
+  assert.deepEqual(converted.T, [{
+    c2c_source_id: 'T#1',
+    Next: '2027-01-01',
+    Prev: '2026-11-30',
+    Soon: '2027-01-01 00:30:00',
+    Ago: '2026-12-30 23:30:00',
+    Plain: '$today+x',
+    Tags: '["2026-12-31",3,true]',
+  }]);
+  assert.throws(() => convertSyntheticSeed({ forms: {} }, { today: '31/12/2026' }), /today must be yyyy-MM-dd/);
+  assert.throws(() => convertSyntheticSeed({ forms: {} }, { today: '2026-12-31', now: '2026-12-31T23:30:00Z' }), /now must be yyyy-MM-dd HH:mm:ss/);
+});
+
+test('convertSyntheticSeed fails closed on every malformed shape instead of inventing a value', () => {
+  const opts = { today: '2026-01-15', now: '2026-01-15 09:00:00' };
+  const refused = (value: unknown, pattern: RegExp) => assert.throws(() => convertSyntheticSeed(value as never, opts), pattern);
+  refused(null, /is not an object/);
+  refused([], /is not an object/);
+  refused({ forms: [] }, /has no forms/);
+  refused({ forms: { T: {} } }, /form T rows are missing/);
+  refused({ forms: { T: [[]] } }, /row T#1 is not an object/);
+  refused({ forms: { T: [{ Cell: { nested: 1 } }] } }, /cell T\.Cell is not a value/);
+  refused({ forms: { T: [{ Mixed: [1, { a: 1 }] }] } }, /array T\.Mixed mixes values/);
+  refused({ forms: { P: [{ Name: 'p' }], T: [{ Parent: { $ref: 'P', key: 'Name' } }] } }, /lookup T\.Parent row T#1 is not a \{\$ref, key, index\} pointer/);
+  refused({ forms: { P: [{ Name: 'p' }], T: [{ Parent: { $ref: 'P', key: 'Code', index: 0 } }] } }, /key Code is missing in P/);
+  refused({ forms: { P: [{ Name: 'p' }], T: [{ Parent: { $ref: 'P', key: 'Name', index: -1 } }] } }, /index -1 is out of range \(1 rows in P\)/);
+  refused({ forms: { T: [{ Lines: [{ Qty: 1, Mixed: ['a', { b: 1 }] }] }] } }, /array T\.Lines\.Mixed mixes values/);
+});
+
+test('convertSyntheticSeed keeps scalar arrays inside a grid row as one JSON cell', () => {
+  const converted = convertSyntheticSeed(
+    { forms: { T: [{ Lines: [{ Qty: 2, Tags: ['$today', null, 'x'], Empty: [] }] }] } },
+    { today: '2026-01-15', now: '2026-01-15 09:00:00' },
+  );
+  assert.deepEqual(converted.T__Lines, [{ c2c_source_id: 'T__Lines#1#1', parent_id: 'T#1', row_order: '0', Qty: 2, Tags: '["2026-01-15","x"]' }]);
+});

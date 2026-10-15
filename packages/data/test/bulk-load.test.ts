@@ -554,3 +554,29 @@ test('a 20k-row load past the request cut runs as Job slices: 202, poll, resume 
   assert.ok(submitted.length > 2, 'the load spanned several Jobs');
   assertExactlyOnce(store, 'Customer', 20_000, 'C');
 });
+
+test('a job still running after maxPolls with no deadline fails loudly and keeps its id; the resume does not resend', async () => {
+  const store = new FakeBulkStore();
+  store.polls = 10_000;
+  const checkpoint = emptyBulkCheckpoint();
+  const opts = {
+    tables: [source('Customer', 5, customer)],
+    bucket: 'b',
+    prefix: 'p',
+    dryRun: false as const,
+    store,
+    chunkRows: 5,
+    checkpoint,
+    wait: noWait,
+    maxPolls: 3,
+  };
+  await assert.rejects(() => bulkLoad(opts), (err: unknown) => err instanceof BulkLoadError && /job 1 for Customer chunk 0 is still running after 3 status reads; resume/.test((err as Error).message));
+  assert.equal(checkpoint.tables['Customer']!.chunks['0']!.state, 'submitted');
+  await assert.rejects(() => bulkLoad(opts), (err: unknown) => err instanceof BulkLoadError && /job 1 for Customer chunk 0 is still running after 3 status reads/.test((err as Error).message));
+  assert.equal(store.jobs.size, 1, 'the resume waits on the submitted job instead of sending the chunk again');
+  store.jobs.get('1')!.polls = 0;
+  const resumed = await bulkLoad(opts);
+  assert.equal(resumed.ok, true, resumed.error);
+  assert.equal(store.jobs.size, 1);
+  assertExactlyOnce(store, 'Customer', 5, 'C');
+});

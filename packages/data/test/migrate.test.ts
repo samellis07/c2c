@@ -5,6 +5,8 @@ import {
   SOURCE_ID_MAX_LENGTH,
   TABLE_LOCK_TTL_MS,
   TableLockedError,
+  assertAllowedHost,
+  catalystErrorDetail,
   ZCQL_IN_LIMIT,
   emptyCheckpoint,
   migrateData as migrateDataReal,
@@ -643,4 +645,52 @@ test('a store failure at the sixth table leaves no duplicates: the rerun stores 
   for (const { table, report } of tables) {
     for (const row of source[report]!) assert.equal(store.rowsFor(table, row.ID).length, 1, `${table}/${row.ID}`);
   }
+});
+
+test('assertAllowedHost refuses an unparseable URL, userinfo, an unknown DC and a look-alike suffix', () => {
+  assert.doesNotThrow(() => assertAllowedHost('https://api.catalyst.zoho.in/baas/v1/query', 'in'));
+  assert.doesNotThrow(() => assertAllowedHost('https://www.zohoapis.in', ' IN '));
+  const refused = (url: string, dc: string, host: string) =>
+    assert.throws(
+      () => assertAllowedHost(url, dc),
+      (err: unknown) => err instanceof HostNotAllowedError && err.host === host,
+      `${url} for ${dc}`,
+    );
+  refused('not a url', 'in', 'not a url');
+  refused('https://user:pass@api.catalyst.zoho.in', 'in', 'api.catalyst.zoho.in');
+  refused('https://api.catalyst.zoho.in', 'mars', 'api.catalyst.zoho.in');
+  refused('https://api.catalyst.zoho.in.evil.example.test', 'in', 'api.catalyst.zoho.in.evil.example.test');
+  refused('https://evilzoho.in', 'in', 'evilzoho.in');
+});
+
+test('catalystErrorDetail reads code and message only from a failure object, and caps the message', () => {
+  assert.equal(catalystErrorDetail('<html>gateway</html>'), '');
+  assert.equal(catalystErrorDetail('null'), '');
+  assert.equal(catalystErrorDetail(JSON.stringify({ data: [{ error_code: 'X' }] })), '');
+  assert.equal(catalystErrorDetail(JSON.stringify({ data: { error_code: 7, message: null } })), '');
+  assert.equal(catalystErrorDetail(JSON.stringify({ data: { error_code: 'INVALID_TOKEN' } })), ' INVALID_TOKEN');
+  assert.equal(
+    catalystErrorDetail(JSON.stringify({ data: { error_code: 'E', message: 'm'.repeat(500) } })),
+    ` E: ${'m'.repeat(300)}`,
+  );
+});
+
+test('a failed reconcile query stops the table before any row POST and names status, code and path only', async () => {
+  let posts = 0;
+  const fetch: FetchLike = async (url, init) => {
+    if ((init?.method ?? 'GET') === 'GET') return response({ data: rows(3) });
+    if (new URL(url).pathname.endsWith('/query')) return catalystFailure(500, 'INTERNAL_SERVER_ERROR', 'query broke');
+    posts += 1;
+    return response({ ids: [] });
+  };
+  await assert.rejects(
+    () => migrateData({ ...bases, dryRun: false, fetch, checkpoint: emptyCheckpoint(), scope: { org: '10000000000', projectId: '10000000000000001', token: SECRET } }),
+    (err: unknown) => {
+      const message = (err as Error).message;
+      assert.match(message, /^catalyst query failed: 500 INTERNAL_SERVER_ERROR: query broke \(POST \/baas\/v1\/project\/10000000000000001\/query, table Book\)$/);
+      assert.equal(message.includes(SECRET), false);
+      return true;
+    },
+  );
+  assert.equal(posts, 0);
 });
