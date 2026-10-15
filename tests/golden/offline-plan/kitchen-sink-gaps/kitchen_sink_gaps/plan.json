@@ -372,6 +372,66 @@
       }
     },
     {
+      "id": "slate-enable",
+      "via": "console",
+      "command": "Catalyst console → the project → Slate → Start Exploring (<console>/baas/<org>/project/<project>/Development#/slate) — then c2c verifies it: c2c provision --record slate-enable (GET /slate/v1/project/<project>/app)",
+      "args": {
+        "service": "Slate"
+      },
+      "readBack": {
+        "via": "cli",
+        "command": "c2c provision --record slate-enable",
+        "args": {
+          "call": {
+            "method": "GET",
+            "path": "/slate/v1/project/<project>/app"
+          }
+        },
+        "match": {
+          "gate": "open"
+        }
+      }
+    },
+    {
+      "id": "authorized-domain",
+      "via": "cli",
+      "command": "c2c provision --confirm --run authorized-domain (after the Slate deploy, when the App URL host is known)",
+      "args": {
+        "call": {
+          "method": "POST",
+          "path": "/baas/v1/project/<project>/cors-domain",
+          "body": {
+            "domain": "<slate-app-url-host>",
+            "cors": true,
+            "iframe": true
+          }
+        }
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_List_All_CORS_Domains",
+        "match": {
+          "<slate-app-url-host>": {
+            "cors": true,
+            "iframe": true
+          }
+        }
+      }
+    },
+    {
+      "id": "sign-in-check",
+      "via": "console",
+      "command": "Open the Slate app URL — the sign-in box must show the Catalyst sign-in page, not the app itself or a blank box. A blank box means iFrame is off for the host: Authentication > Whitelisting > the Slate host > Edit > iFrame on, then reload.",
+      "args": {},
+      "readBack": {
+        "via": "console",
+        "command": "record the check: c2c provision --record sign-in-check --result <file> ({\"sign_in_page\": true} once the sign-in page shows)",
+        "match": {
+          "sign_in_page": true
+        }
+      }
+    },
+    {
       "id": "import-security-rule",
       "via": "mcp",
       "tool": "CatalystbyZoho_List_All_Functions",

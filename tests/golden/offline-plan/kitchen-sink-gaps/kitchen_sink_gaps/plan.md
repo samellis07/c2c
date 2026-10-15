@@ -43,7 +43,16 @@ project: new — provision/plan.json creates it with one IaC import (provision/i
 - tables [cli] c2c provision --confirm --run tables → read back CatalystbyZoho_List_All_Tables
 - import-table-permissions [mcp] CatalystbyZoho_Get_Table_Permissions → read back CatalystbyZoho_Get_Table_Permissions
 - import-table-scopes [mcp] CatalystbyZoho_Get_Table_Scopes → read back CatalystbyZoho_Get_Table_Scopes
+- slate-enable [console] Catalyst console → the project → Slate → Start Exploring (<console>/baas/<org>/project/<project>/Development#/slate) — then c2c verifies it: c2c provision --record slate-enable (GET /slate/v1/project/<project>/app) → read back c2c provision --record slate-enable
+- authorized-domain [cli] c2c provision --confirm --run authorized-domain (after the Slate deploy, when the App URL host is known) → read back CatalystbyZoho_List_All_CORS_Domains
+- sign-in-check [console] Open the Slate app URL — the sign-in box must show the Catalyst sign-in page, not the app itself or a blank box. A blank box means iFrame is off for the host: Authentication > Whitelisting > the Slate host > Edit > iFrame on, then reload. → read back record the check: c2c provision --record sign-in-check --result <file> ({"sign_in_page": true} once the sign-in page shows)
 - import-security-rule [mcp] CatalystbyZoho_List_All_Functions → read back CatalystbyZoho_List_All_Functions
+
+## Human steps (after the last provision step; c2c provision prints the same list)
+
+1. Accept invite: accept the app invite mail
+2. Sign in once: sign in to the deployed app once
+3. Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
 
 ## Required MCP tools (doctor D-B5)
 
