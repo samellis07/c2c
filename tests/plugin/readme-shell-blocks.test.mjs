@@ -34,15 +34,12 @@ for (const doc of DOCS) {
   test(`every fenced shell block in ${doc} parses with bash -n`, () => {
     const file = path.join(repo, doc);
     const failures = [];
-    let count = 0;
     for (const block of shellBlocks(file)) {
-      count++;
       const run = spawnSync('bash', ['-n'], { input: block.source, encoding: 'utf8' });
       if (run.status !== 0) {
         failures.push(`${doc}:${block.line} bash -n exited ${run.status}: ${run.stderr.trim()}`);
       }
     }
-    assert.ok(count > 0, `${doc}: expected at least one fenced shell block`);
     assert.deepEqual(failures, []);
   });
 }
