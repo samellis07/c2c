@@ -35,15 +35,42 @@ test('negative control: removing a route row makes the parity check fail', () =>
   assert.deepEqual([...failIds(source)].filter((id) => !routeIds(broken).has(id)), ['D-C1']);
 });
 
+function specCodexLabel(specText) {
+  const specRow = specText.split('\n').find((l) => l.startsWith('| D-A1 |')) ?? '';
+  return specRow.match(/OpenAI Codex:[^\n]*?(\[[A-Z-]+\])/)?.[1];
+}
+
+function codexCopyProblems(text, label) {
+  const problems = [];
+  if (!label || !text.includes(label)) problems.push(`missing verification label ${label ?? '<none>'}`);
+  if (
+    /\bcopies the `?skills\/?`? tree\b/i.test(text) ||
+    /\bclaude-plugin`? repo[^\n]*into `?~\/\.codex/i.test(text) ||
+    /\bcopy the Catalyst agent skills into [^\s]+\/skills(?![^\n.;]*\[[A-Z-]+\])/i.test(text)
+  ) {
+    problems.push('states settled OpenAI Codex copy procedure while spec marks repo path unverified');
+  }
+  return problems;
+}
+
 test('D-A1 OpenAI Codex wording matches doctor-spec verification status', () => {
   const spec = readFileSync(path.join(repo, 'plugin/references/doctor-spec.md'), 'utf8');
-  const specRow = spec.split('\n').find((l) => l.startsWith('| D-A1 |')) ?? '';
+  const label = specCodexLabel(spec);
+  assert.equal(label, '[UNVERIFIED]', 'doctor-spec D-A1 row must carry [UNVERIFIED] on the OpenAI Codex repo path');
   const skillRow = skill.split('\n').find((l) => l.startsWith('| D-A1 |')) ?? '';
-  assert.ok(specRow.length > 0 && skillRow.length > 0, 'D-A1 rows exist');
-  // While the spec marks the OpenAI Codex source repo path as unverified (PROBE FIRST),
-  // the route must not state a specific repo/copy procedure as settled fact.
-  if (specRow.includes('PROBE FIRST')) {
-    assert.match(skillRow, /PROBE FIRST|not (yet )?verified|unverified/i);
-    assert.doesNotMatch(skillRow, /copies the `?skills\/?`? tree|claude-plugin repo.*into `~\/\.codex/);
-  }
+  const fixMatch = source.match(/const D_A1_FIX =\s*'([^']+)'/);
+  assert.ok(skillRow.length > 0 && fixMatch?.[1], 'D-A1 troubleshooting row and D_A1_FIX exist');
+  assert.deepEqual(codexCopyProblems(skillRow, label), []);
+  assert.deepEqual(codexCopyProblems(fixMatch[1], label), []);
+});
+
+test('negative control: planting a settled OpenAI Codex copy procedure or dropping the label fails', () => {
+  const spec = readFileSync(path.join(repo, 'plugin/references/doctor-spec.md'), 'utf8');
+  const label = specCodexLabel(spec);
+  const skillRow = skill.split('\n').find((l) => l.startsWith('| D-A1 |')) ?? '';
+  const settledSkillRow = `${skillRow} OpenAI Codex copies the skills tree from the claude-plugin repo into ~/.codex/skills.`;
+  assert.notDeepEqual(codexCopyProblems(settledSkillRow, label), []);
+  const unhedgedFix =
+    'the official Catalyst skills are not installed. Claude Code: /plugin marketplace add catalystbyzoho/claude-plugin then /plugin install catalyst-by-zoho@catalyst-by-zoho. Codex: copy the Catalyst agent skills into ~/.codex/skills/. Cursor: clone the skills repo and set C2C_CATALYST_SKILLS_DIR=<path>/skills';
+  assert.notDeepEqual(codexCopyProblems(unhedgedFix, label), []);
 });

@@ -15,9 +15,9 @@
  *   D-F6 rows    plan.json holds no planned row counts and the Dev row cap is
  *                [UNVERIFIED]
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, join, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parseFile, type App } from '../../core/src/index.js';
 import { nodeSatisfies, REACT_BUILD_NODE_RANGE } from '../../core/src/toolchain.js';
 import { generateSchema, limitValue, type SchemaTable } from '../../schema/src/index.js';
@@ -150,9 +150,39 @@ function frontmatter(text: string): { name?: string; version?: string } {
   return { ...(name ? { name } : {}), ...(version ? { version } : {}) };
 }
 
-function readSkill(path: string, kind: SkillHit['kind']): SkillHit | undefined {
-  const st = statSync(path, { throwIfNoEntry: false });
-  if (!st?.isFile()) return undefined;
+function isSafeSkillPath(filePath: string, rootDir: string, home: string): boolean {
+  const absRoot = resolve(rootDir);
+  const absFile = resolve(filePath);
+  const absHome = resolve(home);
+  const relToRoot = relative(absRoot, absFile);
+  if (!relToRoot || relToRoot.startsWith('..') || isAbsolute(relToRoot)) return false;
+  const anchor = absRoot === absHome || absRoot.startsWith(absHome + sep) ? absHome : absRoot;
+  const relToAnchor = relative(anchor, absFile);
+  if (!relToAnchor || relToAnchor.startsWith('..') || isAbsolute(relToAnchor)) return false;
+  let cur = anchor;
+  const parts = [anchor, ...relToAnchor.split(sep).map((part) => (cur = join(cur, part)))];
+  for (const part of parts) {
+    const lst = lstatSync(part, { throwIfNoEntry: false });
+    if (!lst || lst.isSymbolicLink()) return false;
+    if (part !== absHome && (lst.mode & 0o022) !== 0) return false;
+  }
+  const fileStat = lstatSync(absFile, { throwIfNoEntry: false });
+  if (!fileStat?.isFile()) return false;
+  let realRoot: string;
+  let realAnchor: string;
+  let realFile: string;
+  try {
+    realRoot = realpathSync(absRoot);
+    realAnchor = realpathSync(anchor);
+    realFile = realpathSync(absFile);
+  } catch {
+    return false;
+  }
+  return realFile.startsWith(realRoot + sep) && realFile.startsWith(realAnchor + sep);
+}
+
+function readSkill(path: string, kind: SkillHit['kind'], rootDir: string, home: string): SkillHit | undefined {
+  if (!isSafeSkillPath(path, rootDir, home)) return undefined;
   const fm = frontmatter(readFileSync(path, 'utf8'));
   return { path, kind, ...fm };
 }
@@ -166,57 +196,59 @@ function findCatalystSkill(ctx: DoctorContext): { hit: SkillHit | undefined; err
     if (skillsDir) {
       const candidate = join(skillsDir, 'catalyst-by-zoho', 'SKILL.md');
       searched.push(candidate);
-      const hit = readSkill(candidate, 'skills-dir');
+      const hit = readSkill(candidate, 'skills-dir', skillsDir, home);
       if (hit) return { hit, searched };
     } else {
       searched.push('$C2C_CATALYST_SKILLS_DIR (unset)');
     }
-    const claudeSkillsRoot = join(home, '.claude', 'skills');
-    const claudeRouter = join(claudeSkillsRoot, 'catalyst-by-zoho', 'SKILL.md');
-    searched.push(claudeRouter);
-    const claudeDirect = readSkill(claudeRouter, 'claude-skills');
-    if (claudeDirect) return { hit: claudeDirect, searched };
-    const claudeSkillsDir = statSync(claudeSkillsRoot, { throwIfNoEntry: false });
-    if (claudeSkillsDir?.isDirectory()) {
-      for (const entry of readdirSync(claudeSkillsRoot).sort()) {
-        if (!entry.startsWith('catalyst-') || entry === 'catalyst-by-zoho') continue;
-        const candidate = join(claudeSkillsRoot, entry, 'skills', 'catalyst-by-zoho', 'SKILL.md');
-        searched.push(candidate);
-        const hit = readSkill(candidate, 'claude-skills');
-        if (hit) return { hit, searched };
-      }
-    }
     const cacheRoot = join(home, '.claude', 'plugins', 'cache');
-    const cacheDir = statSync(cacheRoot, { throwIfNoEntry: false });
+    const cacheDir = lstatSync(cacheRoot, { throwIfNoEntry: false });
     if (cacheDir?.isDirectory()) {
       for (const marketplace of readdirSync(cacheRoot).sort()) {
         const pluginDir = join(cacheRoot, marketplace, 'catalyst-by-zoho');
-        if (!statSync(pluginDir, { throwIfNoEntry: false })?.isDirectory()) continue;
+        if (!lstatSync(pluginDir, { throwIfNoEntry: false })?.isDirectory()) continue;
         for (const version of readdirSync(pluginDir).sort()) {
           const candidate = join(pluginDir, version, 'skills', 'catalyst-by-zoho', 'SKILL.md');
           searched.push(candidate);
-          const hit = readSkill(candidate, 'plugin-cache');
+          const hit = readSkill(candidate, 'plugin-cache', cacheRoot, home);
           if (hit) return { hit, searched };
         }
       }
     } else {
       searched.push(join(cacheRoot, '*', 'catalyst-by-zoho', '*', 'skills', 'catalyst-by-zoho', 'SKILL.md'));
     }
-    const marketPath = join(home, '.claude', 'plugins', 'marketplaces', 'catalyst-by-zoho', 'skills', 'catalyst-by-zoho', 'SKILL.md');
+    const marketRoot = join(home, '.claude', 'plugins', 'marketplaces');
+    const marketPath = join(marketRoot, 'catalyst-by-zoho', 'skills', 'catalyst-by-zoho', 'SKILL.md');
     searched.push(marketPath);
-    const market = readSkill(marketPath, 'marketplace');
+    const market = readSkill(marketPath, 'marketplace', marketRoot, home);
     if (market) return { hit: market, searched };
+    const claudeSkillsRoot = join(home, '.claude', 'skills');
+    const claudeRouter = join(claudeSkillsRoot, 'catalyst-by-zoho', 'SKILL.md');
+    searched.push(claudeRouter);
+    const claudeDirect = readSkill(claudeRouter, 'claude-skills', claudeSkillsRoot, home);
+    if (claudeDirect) return { hit: claudeDirect, searched };
+    const claudeSkillsDir = lstatSync(claudeSkillsRoot, { throwIfNoEntry: false });
+    if (claudeSkillsDir?.isDirectory()) {
+      for (const entry of readdirSync(claudeSkillsRoot).sort()) {
+        if (!entry.startsWith('catalyst-') || entry === 'catalyst-by-zoho') continue;
+        const candidate = join(claudeSkillsRoot, entry, 'skills', 'catalyst-by-zoho', 'SKILL.md');
+        searched.push(candidate);
+        const hit = readSkill(candidate, 'claude-skills', claudeSkillsRoot, home);
+        if (hit) return { hit, searched };
+      }
+    }
     const codexHome = ctx.io.env.CODEX_HOME || join(home, '.codex');
-    const codexPath = join(codexHome, 'skills', 'catalyst-by-zoho', 'SKILL.md');
+    const codexSkillsRoot = join(codexHome, 'skills');
+    const codexPath = join(codexSkillsRoot, 'catalyst-by-zoho', 'SKILL.md');
     searched.push(codexPath);
-    return { hit: readSkill(codexPath, 'codex'), searched };
+    return { hit: readSkill(codexPath, 'codex', codexSkillsRoot, home), searched };
   } catch (err) {
     return { hit: undefined, error: err instanceof Error ? err.message : String(err), searched };
   }
 }
 
 const D_A1_FIX =
-  'the official Catalyst skills are not installed. Claude Code: /plugin marketplace add catalystbyzoho/claude-plugin then /plugin install catalyst-by-zoho@catalyst-by-zoho. Codex: copy the Catalyst agent skills into ~/.codex/skills/. Cursor: clone the skills repo and set C2C_CATALYST_SKILLS_DIR=<path>/skills';
+  'the official Catalyst skills are not installed. Claude Code: /plugin marketplace add catalystbyzoho/claude-plugin then /plugin install catalyst-by-zoho@catalyst-by-zoho. Codex: copy the Catalyst agent skills into ~/.codex/skills/ (exact repo path [UNVERIFIED]). Cursor: clone the skills repo and set C2C_CATALYST_SKILLS_DIR=<path>/skills';
 
 /** The skills the agent half must see in-session (D-A3, per plugin/references/doctor-spec.md). */
 const REQUIRED_SKILLS = [
