@@ -96,7 +96,7 @@ test('an icon image without an action adds no TODO', () => {
 
 test('image markup inside a Deluge island is not an image action', () => {
   assert.deepEqual(zmlImageActions(`<p><%= "<image action='Function'>" %></p>`), []);
-  assert.deepEqual(zmlImageActions(`<IMAGE ACTION="OpenUrl" src="x.png"><image action=''>`), [{ action: 'OpenUrl', label: 'x.png' }]);
+  assert.deepEqual(zmlImageActions(`<IMAGE ACTION="OpenUrl" src="x.png"><image action=''>`), [{ action: 'OpenUrl', siteId: 'image-0', label: 'x.png' }]);
 });
 
 test('a plain non-island ExecuteFunction button is a counted manual step naming its function', () => {
