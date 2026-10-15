@@ -21,7 +21,8 @@ import { ALLOWED_ENV, GuardError, assertProtectedName, assertProtectedProject, c
 import { parseJsonExact } from './json-exact.js';
 import { applyAuthProvision, formatAuthProvision, slateUrlFrom } from './auth.js';
 import { slateHost } from '../../auth/src/slate-host.js';
-import { API_FUNCTION, FUNCTION_DIR, envVariables } from './function-dir.js';
+import { API_FUNCTION, FUNCTION_DIR, envVariables, secretEnvValues } from './function-dir.js';
+import { applyFunctionEnvSecrets } from './function-env.js';
 import { buildDeploy, commandLine, deployFiles, migrateCatalystJson, writeDeployTree, type DeployCommand, type DeployFile, type DeployUi } from './plan.js';
 import { asyncLaneBlocker } from './events.js';
 import { humanChecklist } from './human-steps.js';
@@ -919,6 +920,10 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     const cwd = out as string;
     writeState(cwd, state);
     const retry = retryLog(io);
+    // Secret --function-env values ride with the deploy but land on the live
+    // function through the env API after the functions deploy, not in a file.
+    const secretsToApply = secretEnvValues(functionEnv);
+    let secretsApplied = false;
     const childEnv = scrubCatalystEnv(io.env);
     const probe = await spawnWithRetry(
       () => io.spawn('catalyst', [...catalystScopeArgs(guard.org, guard.projectId), 'project:list'], { cwd, env: childEnv }),
@@ -1212,6 +1217,21 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
           apiBase = found;
           state.apiBase = found;
           io.stdout(`api base: ${found}\n`);
+        }
+      }
+      // Secret --function-env values were written to catalyst-config.json as
+      // name-only entries; the real values go straight onto the live function
+      // over the Catalyst env API, so no generated file ever carries them
+      // (facts: functions.md "Manage env vars as one replace-only set").
+      if (command.id === 'functions' && !secretsApplied && Object.keys(secretsToApply).length) {
+        try {
+          const applied = await applyFunctionEnvSecrets(restFn, guard.projectId, secretsToApply, retry);
+          secretsApplied = true;
+          io.stdout(`function env: set ${applied.length} secret variable(s) on ${API_FUNCTION}; the values never entered the generated files\n`);
+        } catch (err) {
+          io.stderr(`c2c: ${redact(err instanceof Error ? err.message : String(err), secret)}\n`);
+          io.stderr(`next step: set the secret variables on ${API_FUNCTION} (Catalyst console env vars or the MCP env tools), then re-run deploy --confirm --resume --out ${cwd}\n`);
+          return await finish(1);
         }
       }
       if (command.id === 'ui-build') {
