@@ -269,3 +269,45 @@ test('analyze, the generated migration-report.json and the determinism status ag
   assert.equal(status.todoTotal, 1);
   assert.equal(status.deterministicApps, 1);
 });
+
+const INLINE_STYLES_APP = `application "Inline_Styles_App"
+{
+pages
+{
+page Dashboard
+{
+displayname = "Dashboard"
+Content="<zml><layout><row><column width='100%'><dsp id='snippet'><![CDATA[<div style=\\"width:calc(70% - 1.5px);height:100%\\">Left</div><p style=\\"margin: 0 0 5px 0; text-align: justify;font-size:15px;text\\">To</p>]]></dsp></column></row></layout></zml>"
+}
+}
+}
+`;
+
+test('page snippet with calc() and trailing non-declaration identifier analyzes with zero inline-style residuals', () => {
+  const ir = deriveIr(parse(INLINE_STYLES_APP));
+  const report = analyze(ir);
+  const status = statusFromReport(buildMigrationReport([{ name: 'inline-styles', ir }], 'inline'));
+  const residualConstruct = 'Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)';
+  assert.equal(report.determinism.todoKinds.some((kind) => kind.construct.includes('Inline style declarations')), false);
+  assert.equal(status.kinds.some((kind) => kind.construct === residualConstruct), false);
+  assert.equal(report.determinism.todoCount, 0);
+  assert.equal(report.determinism.deterministic, true);
+});
+
+test('a page snippet that drops url() still counts an inline-style residual', () => {
+  const ir = deriveIr(parse(`application "Unsafe_Style"
+{
+pages
+{
+page Home
+{
+displayname = "Home"
+Content="<zml><layout><row><column width='100%'><dsp id='snippet'><![CDATA[<div style=\\"background:url(//example.test/x)\\">x</div>]]></dsp></column></row></layout></zml>"
+}
+}
+}
+`));
+  const report = analyze(ir);
+  assert.equal(report.determinism.todoKinds.some((kind) => kind.construct.includes('Inline style declarations')), true);
+  assert.equal(report.determinism.deterministic, false);
+});
