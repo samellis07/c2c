@@ -2564,7 +2564,7 @@ test('matchRow NULL and blank handling characterization', () => {
   for (const t of tests) {
     const row = rows[t.rowVal];
     let criteria: any;
-    
+
     if (t.op === 'isNull' || t.op === 'notNull') {
       criteria = { op: t.op, field: t.field };
     } else {
@@ -2577,7 +2577,7 @@ test('matchRow NULL and blank handling characterization', () => {
         criteria = { op: t.op, field: t.field, value: val };
       }
     }
-    
+
     const actual = matchRow(row, criteria);
     assert.equal(actual, t.expected, `${t.rowVal} ${t.field} ${t.op} ${t.targetVal}`);
   }
