@@ -52,3 +52,4 @@ tests/plugin/doctor-command-fixes.test.mjs
 tests/docs/links.test.mjs
 tests/ratchet/todo-kinds.test.mjs
 tests/plugin/limits-registry-parity.test.mjs
+tests/plugin/troubleshooting-error-links.test.mjs
