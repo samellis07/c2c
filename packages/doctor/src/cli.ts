@@ -25,7 +25,7 @@ import { catalystRestCall } from '../../deploy/src/rest.js';
 import { c2cVersion, detectHost, workspaceDir, writeDoctorFile } from './report.js';
 import { cliStoreHooks, resolveScope, type ScopeHooks } from './scope.js';
 import { verifyVendorDir } from './vendor.js';
-import { GATE_EXIT, doctorStamp, evaluateGate, gateRefusalMessage, type GateScope } from './gate.js';
+import { GATE_EXIT, carriedMcpRecord, doctorStamp, evaluateGate, gateRefusalMessage, type GateScope } from './gate.js';
 import type { CheckResult, DoctorFile, DoctorIo, SpawnResult } from './types.js';
 
 export function flag(args: readonly string[], name: string): string | undefined {
@@ -287,6 +287,9 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
     }
   }
 
+  // No evidence this run: carry the last MCP record for this exact scope, so
+  // doctor and the gate read the same D-B rows and agree on the verdict.
+  const carried = evidence === undefined ? carriedMcpRecord({ workspace, scope: { dc: scope.dc, org: scope.org, project: scope.project } }) : undefined;
   const ctx: DoctorContext = {
     io,
     workspace,
@@ -296,6 +299,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
     local: parsed.local,
     ...(evidence ? { evidence } : {}),
     ...(origin ? { evidenceSource: origin.source } : {}),
+    ...(carried ? { carried: { checks: carried.checks, at: carried.mcp.at ?? '' } } : {}),
     cliDc: cliHooks.cliDc,
     cliOrg: cliHooks.cliOrg,
   };
@@ -312,7 +316,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
       ...(appName !== undefined ? { app: appName } : {}),
     },
     checks: run.checks.map(({ id, status, detail, fix }) => ({ id, status, detail, fix })),
-    ...(evidence ? { mcp: mcpRecord(evidence, { dc: run.scope.dc, org: run.scope.org, project: run.scope.project }, origin) } : {}),
+    ...(evidence ? { mcp: mcpRecord(evidence, { dc: run.scope.dc, org: run.scope.org, project: run.scope.project }, origin) } : carried ? { mcp: carried.mcp } : {}),
     deferred: run.deferred,
     green: run.green,
   };
@@ -324,6 +328,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
       io.stdout(`${JSON.stringify({ ...file, ...(path ? { doctorJson: path } : {}) }, null, 2)}\n`);
     } else {
       io.stdout(formatTable(run.checks, file));
+      if (carried) io.stdout(`D-B/D-V: from the MCP observation recorded at ${carried.mcp.at}; run c2c doctor --mcp-begin to record a new one\n`);
       if (path) io.stdout(`doctor.json: ${path}\n`);
       else io.stdout('(local run; doctor.json not updated)\n');
     }

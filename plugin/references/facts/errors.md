@@ -100,7 +100,7 @@ Recipe: `catalyst whoami` prints `Logged as: <email>` again. Success is the fail
 
 Rule: `404 INVALID_URL_PATTERN` and `Please check if the URL trying to access is a correct one` mean the path does not exist.
 
-Cause: A wrong path. The row collection is `/table/<table-id>/row`, not `/rows`. `/project-user/roles` does not exist. A connection create posted to the api host 404s. Quota paths 404.
+Cause: A wrong path. The row collection is `/table/<table-id>/row`, not `/rows`. `/project-user/roles` does not exist. A connection create posted to the api host 404s. Quota paths 404. [UNVERIFIED] GET .../bucket/<name> answered 404 INVALID_URL_PATTERN in one DC; the list route works (`jobs-and-files.md`).
 
 Fix: Switch to the path in the surface decision table. A c2c message `c2c: catalyst write failed: 404` is this same wrong row path: post to `/row` and include the URL and table name in the error.
 

@@ -15,9 +15,11 @@ import {
   doctorCli,
   doctorJsonPath,
   evaluateGate,
+  gateRefusalMessage,
   MCP_RESULT_MAX_BYTES,
   OBSERVATION_MAX_BYTES,
   readStdinBounded,
+  verifyProbe,
   type DoctorFile,
   type DoctorIo,
   type ScopeHooks,
@@ -83,20 +85,34 @@ function fakeIo(env: NodeJS.ProcessEnv, stdin?: string, rest?: DoctorIo['rest'])
     env,
     spawn: async (command, args) => greenCatalyst(command, args),
     // Default fake REST: the probe bucket was never written server-side.
-    rest: rest ?? (async () => ({ status: 404, body: { code: 'INVALID_ID' } })),
+    rest: rest ?? fakeRest({}),
     ...(stdin !== undefined ? { stdin: () => stdin } : {}),
   } as DoctorIo;
   return { io, out: () => out, err: () => err };
 }
 
-/** A fake REST that answers 200 only for the probe bucket it was told exists. */
+/** The specific-bucket route answer recorded in one DC for every bucket, existing or not. */
+const INVALID_URL_PATTERN = { status: 404, body: { status: 'failure', data: { message: 'Please check if the URL trying to access is a correct one', error_code: 'INVALID_URL_PATTERN' } } };
+
+/**
+ * A fake REST shaped like the recorded live behaviour: the bucket LIST route
+ * answers every bucket the project holds (the keys of `buckets`), and the
+ * specific-bucket route answers 404 INVALID_URL_PATTERN for any name.
+ */
 function fakeRest(buckets: Record<string, unknown> = {}, seen?: { path: string }[]): NonNullable<DoctorIo['rest']> {
   return async (call) => {
     seen?.push({ path: call.path });
-    const name = decodeURIComponent(call.path.split('/bucket/')[1] ?? '');
-    if (name in buckets) return { status: 200, body: buckets[name] };
+    if (call.method === 'GET' && /^\/baas\/v1\/project\/[0-9]+\/bucket$/.test(call.path)) {
+      return { status: 200, body: { status: 'success', data: Object.keys(buckets).map((bucket_name) => ({ bucket_name, bucket_url: `https://${bucket_name}-development.zohostratus.in` })) } };
+    }
+    if (call.path.includes('/bucket/')) return INVALID_URL_PATTERN;
     return { status: 404, body: { code: 'INVALID_ID' } };
   };
+}
+
+/** A fake REST whose bucket LIST route answers `body` (status 200 unless given). */
+function listRest(body: unknown, status = 200): NonNullable<DoctorIo['rest']> {
+  return async (call) => (/\/bucket$/.test(call.path) ? { status, body } : INVALID_URL_PATTERN);
 }
 
 /** The verbatim Create_Bucket result the MCP session reports (caller-controlled; never trusted). */
@@ -209,7 +225,7 @@ test('mcp-observed: stdio is green when the probe write is read back in the sele
   assert.match(run.out, /PASS D-B1 .*stdio.*bound by the probe write/);
   assert.match(run.out, /PASS D-B2 .*in .*project write probe/);
   // The read-back went to the selected project with the CLI credential.
-  assert.equal(seen[0]?.path, `/baas/v1/project/${PROJECT}/bucket/${probe}`);
+  assert.equal(seen[0]?.path, `/baas/v1/project/${PROJECT}/bucket`);
   const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
   assert.equal(file.mcp?.binding?.status, 'verified');
   // The cleanup instruction always follows a verified probe.
@@ -245,22 +261,22 @@ test('mcp-observed: a fabricated stdio observation without the server-side write
 test('mcp-observed: a probe that landed under a different org/project is red', async () => {
   const { env } = workspace();
   const { request } = await begin(env);
-  const probe = `c2cprobe${request}`;
   const body = observation(request, { host_of_url: undefined, transport: 'stdio' });
   // The write happened — but not where the CLI credential reads: the selected
   // project's read-back names only another request's bucket.
   const seen: { path: string }[] = [];
   const run = await observe(env, body, [], NO_HOOKS, fakeRest({ 'c2cprobeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa': {} }, seen));
   assert.equal(run.code, 1, run.out + run.err);
-  assert.equal(seen[0]?.path, `/baas/v1/project/${PROJECT}/bucket/${probe}`);
+  assert.equal(seen[0]?.path, `/baas/v1/project/${PROJECT}/bucket`);
   assert.match(run.out, /FAIL D-B1 .*not proved bound/);
 });
 
-test('mcp-observed: a 200 read-back must contain the exact probe bucket name', async () => {
+test('mcp-observed: the bucket list must name the exact probe bucket — never a prefix, substring or malformed row', async () => {
   for (const [label, body] of [
     ['different bucket', { data: [{ bucket_name: 'some-other-bucket' }] }],
     ['empty data', { data: [] }],
-    ['several buckets', (request: string) => ({ data: [{ bucket_name: `c2cprobe${request}` }, { bucket_name: 'some-other-bucket' }] })],
+    ['name prefix', (request: string) => ({ data: [{ bucket_name: `c2cprobe${request.slice(0, -1)}` }] })],
+    ['name superstring', (request: string) => ({ data: [{ bucket_name: `c2cprobe${request}x` }, { bucket_name: `x-c2cprobe${request}` }] })],
     ['row without a name', { data: [{ bucket_url: 'https://x-development.zohostratus.in' }] }],
     ['data not a list', { data: { bucket_name: 'x' } }],
     ['top-level name only', { bucket_name: 'x' }],
@@ -269,50 +285,127 @@ test('mcp-observed: a 200 read-back must contain the exact probe bucket name', a
   ] as const) {
     const { dir, env } = workspace();
     const { request } = await begin(env);
-    const probe = `c2cprobe${request}`;
     const resolved = typeof body === 'function' ? body(request) : body;
-    const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: resolved }));
+    const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, listRest(resolved));
     assert.equal(run.code, 1, `${label}: ${run.out}${run.err}`);
     assert.match(run.out, /FAIL D-B2 .*probe write was not read back/);
     const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
     assert.notEqual(file.mcp?.binding?.status, 'verified');
-    assert.ok(existsSync(join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json')), `${label}: cleanup remains tracked`);
+    // A list that was read and lacks the probe proves it absent (nothing to
+    // clean up); an unreadable list cannot rule the bucket out.
+    const absent = file.mcp?.binding?.status === 'absent';
+    assert.equal(existsSync(join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json')), !absent, `${label}: cleanup tracked unless proved absent`);
   }
 });
 
-test('mcp-observed: the real Catalyst get-bucket envelope verifies — data array, one row, exact name', async () => {
+test('mcp-observed: the probe verifies from the bucket list among other buckets; the specific-bucket 404 INVALID_URL_PATTERN is never consulted', async () => {
   const { dir, env } = workspace();
   const { request } = await begin(env);
   const probe = `c2cprobe${request}`;
-  // The exact body the specific-bucket REST read-back returns
-  // (packages/deploy/test/seed-bucket.test.ts): the row rides in `data`.
+  const seen: { path: string }[] = [];
+  // The project also holds a console-created bucket and an earlier probe; the
+  // specific-bucket route answers 404 INVALID_URL_PATTERN for all of them.
   const run = await observe(
     env,
     observation(request, { host_of_url: undefined, transport: 'stdio' }),
     [],
     NO_HOOKS,
-    fakeRest({ [probe]: { data: [{ bucket_name: probe, bucket_url: `https://${probe}-development.zohostratus.in` }] } }),
+    fakeRest({ 'console-bucket': {}, [probe]: {}, c2cprobeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: {} }, seen),
   );
   assert.equal(run.code, 0, run.out + run.err);
   const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
   assert.equal(file.mcp?.binding?.status, 'verified');
+  assert.ok(seen.length > 0 && seen.every((call) => !call.path.includes('/bucket/')), JSON.stringify(seen));
 });
 
-test('mcp-observed: a fabricated org host or a matching CLI selection never stands in for the probe', async () => {
-  const { env } = workspace();
+test('verifyProbe: a paginated bucket list is followed to the page that holds the probe', async () => {
+  const name = 'c2cprobe0123456789abcdef0123456789abcdef';
+  const target = { org: ORG, project: PROJECT };
+  const pages: Record<string, unknown> = {
+    [`/baas/v1/project/${PROJECT}/bucket`]: { data: [{ bucket_name: 'a' }], more_records: true, next_token: 'tok2' },
+    [`/baas/v1/project/${PROJECT}/bucket?next_token=tok2`]: { data: [{ bucket_name: 'b' }], more_records: true, next_token: 'tok3' },
+    [`/baas/v1/project/${PROJECT}/bucket?next_token=tok3`]: { data: [{ bucket_name: name }], more_records: false },
+  };
+  const seen: string[] = [];
+  const rest = async (call: { path: string }) => {
+    seen.push(call.path);
+    return call.path in pages ? { status: 200, body: pages[call.path] } : INVALID_URL_PATTERN;
+  };
+  assert.equal((await verifyProbe(rest, target, name)).status, 'verified');
+  assert.equal(seen.length, 3);
+  // The probe is on no page: absent only after the last page.
+  pages[`/baas/v1/project/${PROJECT}/bucket?next_token=tok3`] = { data: [{ bucket_name: 'c' }] };
+  assert.equal((await verifyProbe(rest, target, name)).status, 'absent');
+  // More rows announced without a token cannot rule the probe out.
+  pages[`/baas/v1/project/${PROJECT}/bucket?next_token=tok3`] = { data: [{ bucket_name: 'c' }], more_records: true };
+  assert.equal((await verifyProbe(rest, target, name)).status, 'unverifiable');
+  // A repeated token never loops.
+  pages[`/baas/v1/project/${PROJECT}/bucket?next_token=tok3`] = { data: [], next_token: 'tok2' };
+  assert.equal((await verifyProbe(rest, target, name)).status, 'unverifiable');
+  // A list route error is unverifiable, never absent.
+  assert.equal((await verifyProbe(async () => INVALID_URL_PATTERN, target, name)).status, 'unverifiable');
+});
+
+test('mcp-observed: a failed observation stays red on the next bare doctor run, and the gate says the same', async () => {
+  const { dir, env } = workspace();
   const { request } = await begin(env);
-  const body = observation(request, {
-    host_of_url: undefined,
-    transport: 'stdio',
-    calls: [
-      { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(`c2cprobe${request}`) },
-      // Caller claims an org host in the target DC; CLI hooks claim the same org/DC.
-      { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG], 'console.zoho.in') },
-    ],
-  });
-  const run = await observe(env, body, [], { cliDc: () => 'in', cliOrg: () => ORG }, fakeRest({}));
+  const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({}));
   assert.equal(run.code, 1, run.out + run.err);
-  assert.match(run.out, /FAIL D-B2 .*probe write was not read back/);
+  for (let i = 0; i < 2; i++) {
+    const { io, out } = fakeIo(env);
+    const code = await doctorCli([], io, { hooks: NO_HOOKS });
+    assert.equal(code, 1, out());
+    assert.match(out(), /FAIL D-B1 .*not proved bound/);
+    assert.doesNotMatch(out(), /SKIP D-B /);
+    assert.match(out(), /from the MCP observation recorded at/);
+    const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
+    assert.equal(file.green, false);
+    assert.equal(file.mcp?.binding?.status, 'absent');
+    const verdict = evaluateGate({ workspace: dir, scope: SCOPE });
+    assert.equal(verdict.ok, false);
+    assert.equal(verdict.status, 'red');
+    assert.doesNotMatch(gateRefusalMessage(verdict, SCOPE), /last: \S+ green/);
+  }
+});
+
+test('mcp-observed: a verified observation carries to a bare run, so doctor and the gate both stay green', async () => {
+  const { dir, env } = workspace();
+  const { request } = await begin(env);
+  const probe = `c2cprobe${request}`;
+  assert.equal((await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: {} }))).code, 0);
+  const { io, out } = fakeIo(env);
+  assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 0, out());
+  assert.match(out(), /PASS D-B1 /);
+  assert.equal(evaluateGate({ workspace: dir, scope: SCOPE }).ok, true);
+});
+
+test('gate: a stored-green file that fails the gate never reports "last: green"', async () => {
+  const { dir, env } = workspace();
+  // A bare run with no MCP record: no fail rows (doctor green), but D-B is skipped.
+  const { io, out } = fakeIo(env);
+  assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 0, out());
+  assert.match(out(), /SKIP D-B /);
+  const verdict = evaluateGate({ workspace: dir, scope: SCOPE });
+  assert.equal(verdict.status, 'checks');
+  const message = gateRefusalMessage(verdict, SCOPE);
+  assert.doesNotMatch(message, /last: \S+ green/);
+  assert.match(message, /checks failing or incomplete\): required checks not pass\/warn: .*D-B1/);
+});
+
+test('mcp-observed: a record for another project or past 12 h is not carried', async () => {
+  const { dir, env } = workspace();
+  const { request } = await begin(env);
+  assert.equal((await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({}))).code, 1);
+  const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
+  writeFileSync(doctorJsonPath(dir), JSON.stringify({ ...file, mcp: { ...file.mcp, at: new Date(Date.now() - 13 * 3600 * 1000).toISOString() } }));
+  const { io, out } = fakeIo(env);
+  await doctorCli([], io, { hooks: NO_HOOKS });
+  assert.match(out(), /SKIP D-B /);
+  assert.equal(evaluateGate({ workspace: dir, scope: SCOPE }).ok, false);
+  writeFileSync(doctorJsonPath(dir), JSON.stringify({ ...file, mcp: { ...file.mcp, scope: { ...SCOPE, project: '10000000000000002' } } }));
+  const again = fakeIo(env);
+  await doctorCli([], again.io, { hooks: NO_HOOKS });
+  assert.match(again.out(), /SKIP D-B /);
 });
 
 test('mcp-observed: cleanup is re-printed while the probe may still exist, and cleared once it is gone', async () => {

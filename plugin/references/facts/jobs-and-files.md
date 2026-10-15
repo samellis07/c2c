@@ -92,6 +92,18 @@ write. Bucket names are global across all accounts: always suffix
 generated names with an org or random part. `c2c doctor` reads the
 bucket list back to confirm the bucket exists before any upload.
 
+### Read a bucket back from the bucket list, never the per-bucket path
+
+Recipe: [UNVERIFIED] GET .../bucket/<name> answered 404 INVALID_URL_PATTERN in one DC; the list route works.
+`GET /baas/v1/project/<project-id>/bucket` returns every bucket inside the
+`data` envelope.
+
+Rule: [UNVERIFIED] confirm a bucket exists by listing
+`GET /baas/v1/project/<project-id>/bucket` and matching `bucket_name`
+exactly (follow a page token when one is returned). Never treat a 404 from
+the per-bucket path as "bucket absent". The `c2c doctor` MCP probe
+read-back uses the list route.
+
 ### Assume 250 GB per single object
 
 Rule: [UNVERIFIED] assume one Stratus object holds at most 250 GB. Chunk anything
