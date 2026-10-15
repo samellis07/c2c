@@ -41,7 +41,7 @@ import { constraintDecisionNote, generateSchema, type SchemaColumn, type SchemaT
 import { normalizeType, SOURCE_ID_COLUMN, SYSTEM_FIELD_COLUMNS } from '../../schema/src/mapping.js';
 import { decimalShadow } from '../../shims/src/criteria.js';
 import { quantizeDecimal } from '../../shims/src/decimal.js';
-import { mandatoryMissingRefusals, normalizeDate, normalizeDateTime } from '../../data/src/integrity.js';
+import { mandatoryMissingRefusals, normalizeDate, overLengthRefusals, normalizeDateTime } from '../../data/src/integrity.js';
 import { appTimeZone } from '../../ui/src/generate.js';
 import { assertExportCounts, loaderColumns, parseCsv, type CsvColumnNote, type CsvGap, type CsvLoad } from './csv.js';
 import { orderTables } from './remap.js';
@@ -1124,6 +1124,7 @@ export function readSourceBackup(source: string, app: App, allowEmpty = false): 
     columns: notes,
     missingRequired,
     missingMandatory: mandatoryMissingRefusals(ordered, loaderColumns(checked, ordered, foreignKeys)),
+    overLength: overLengthRefusals(ordered, loaderColumns(checked, ordered, foreignKeys)),
     absentFields,
     derivedIds: [],
     lookups,

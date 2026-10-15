@@ -14,7 +14,7 @@ import { seedCompositeMap } from '../../data/src/seed.js';
 import { stratusRestSink } from '../../data/src/files.js';
 import { emptyCheckpoint, type Checkpoint, type FetchLike, type MigrateResult } from '../../data/src/migrate.js';
 import { writeCheckpointFile } from '../../data/src/checkpoint-file.js';
-import { emptyIntegrity, groupRefusals, integrityColumns, mandatoryMissingRefusals, type IntegrityReport } from '../../data/src/integrity.js';
+import { emptyIntegrity, groupRefusals, integrityColumns, cellRuleRefusals, mandatoryMissingRefusals, overLengthRefusals, type IntegrityReport } from '../../data/src/integrity.js';
 import { applyConstraintDecisions, columnRenamesOf, generateSchema, type ConstraintDecision, type SchemaPlan } from '../../schema/src/generator.js';
 import { FIDELITY_JSON, FIDELITY_MD, LOADER_REPORT, formatCsvPlan, hasReportJson, loaderColumns, migrateCsv, migrateLoaded, readSourceCsv, readSourceJson, type CsvLoad } from './csv.js';
 import { readSourceBackup } from './backup.js';
@@ -1684,9 +1684,11 @@ export async function sourceCsvCli(args: readonly string[], io: Io): Promise<num
       // can gate on it; nothing was written either way.
       if (loaded.missingMandatory.length) {
         io.stderr(`c2c: ${loaded.missingMandatory.length} mandatory value(s) missing; a confirmed run would refuse before any write\n`);
-        return 1;
       }
-      return 0;
+      if (loaded.overLength?.length) {
+        io.stderr(`c2c: ${loaded.overLength.length} value(s) longer than their column; a confirmed run would refuse before any write\n`);
+      }
+      return loaded.missingMandatory.length || loaded.overLength?.length ? 1 : 0;
     }
     const missingSchema = refuseMissingSchema(io, loaded.tables, columnsByTableOf(generateSchema(app)));
     if (missingSchema !== undefined) return missingSchema;
@@ -1697,22 +1699,22 @@ export async function sourceCsvCli(args: readonly string[], io: Io): Promise<num
     const provisioned = await provisionedSchemaOf(restFn, guard.projectId, app, retryLog(io));
     // Refuse before resolveScope: no token is minted and no row is written when
     // a store-mandatory column is absent from the export.
-    const missing = mandatoryMissingRefusals(loaded.tables, loaderColumns(provisioned.schema, loaded.tables, loaded.foreignKeys));
-    if (missing.length) {
-      const integrity = { ...emptyIntegrity(), refusedByRule: groupRefusals(missing) };
-      writeLoaderReport(dir, integrity);
-      writeFidelityReport(dir, {
+    const provisionedColumns = loaderColumns(provisioned.schema, loaded.tables, loaded.foreignKeys);
+    const missing = mandatoryMissingRefusals(loaded.tables, provisionedColumns);
+    const overLength = overLengthRefusals(loaded.tables, provisionedColumns);
+    if (overLength.length || missing.length) {
+      const integrity = { ...emptyIntegrity(), refusedByRule: groupRefusals(cellRuleRefusals(loaded.tables, provisionedColumns)) };
+      const reportDir = dir;
+      writeLoaderReport(reportDir, integrity);
+      writeFidelityReport(reportDir, {
         ok: false,
         dryRun: false,
         tables: [],
         integrity,
-        error: `refused ${missing.length} missing mandatory value(s) before any write`,
+        error: `refused ${missing.length} missing mandatory value(s) and ${overLength.length} over-length value(s) before any write`,
       });
       logRefusals(io, integrity);
-      const names = [...new Set(missing.map((item) => `${item.table}.${item.column}`))].join(', ');
-      io.stderr(
-        `c2c: refused: ${missing.length} mandatory value(s) missing; nothing was written. ${names} is store-mandatory; fix the source or re-provision the column without the constraint\n`,
-      );
+      io.stderr(`c2c: refused: ${missing.length} missing mandatory value(s) and ${overLength.length} over-length value(s); nothing was written. Fill required values, shorten over-length values, or re-provision the column as text\n`);
       return 1;
     }
     const checkpointPath = flag(args, '--checkpoint');
@@ -1846,9 +1848,11 @@ export async function sourceBackupCli(args: readonly string[], io: Io): Promise<
       // can gate on it; nothing was written either way.
       if (loaded.missingMandatory.length) {
         io.stderr(`c2c: ${loaded.missingMandatory.length} mandatory value(s) missing; a confirmed run would refuse before any write\n`);
-        return 1;
       }
-      return 0;
+      if (loaded.overLength?.length) {
+        io.stderr(`c2c: ${loaded.overLength.length} value(s) longer than their column; a confirmed run would refuse before any write\n`);
+      }
+      return loaded.missingMandatory.length || loaded.overLength?.length ? 1 : 0;
     }
     const missingSchema = refuseMissingSchema(io, loaded.tables, columnsByTableOf(generateSchema(app)));
     if (missingSchema !== undefined) return missingSchema;
@@ -1859,19 +1863,22 @@ export async function sourceBackupCli(args: readonly string[], io: Io): Promise<
     const provisioned = await provisionedSchemaOf(restFn, guard.projectId, app, retryLog(io));
     // Refuse before resolveScope: no token is minted and no row is written when
     // a store-mandatory column has empty cells.
-    const missing = mandatoryMissingRefusals(loaded.tables, loaderColumns(provisioned.schema, loaded.tables, loaded.foreignKeys));
-    if (missing.length) {
-      const integrity = { ...emptyIntegrity(), refusedByRule: groupRefusals(missing) };
-      writeLoaderReport(statSync(source).isDirectory() ? source : dirname(source), integrity);
-      writeFidelityReport(statSync(source).isDirectory() ? source : dirname(source), {
+    const provisionedColumns = loaderColumns(provisioned.schema, loaded.tables, loaded.foreignKeys);
+    const missing = mandatoryMissingRefusals(loaded.tables, provisionedColumns);
+    const overLength = overLengthRefusals(loaded.tables, provisionedColumns);
+    if (overLength.length || missing.length) {
+      const integrity = { ...emptyIntegrity(), refusedByRule: groupRefusals(cellRuleRefusals(loaded.tables, provisionedColumns)) };
+      const reportDir = statSync(source).isDirectory() ? source : dirname(source);
+      writeLoaderReport(reportDir, integrity);
+      writeFidelityReport(reportDir, {
         ok: false,
         dryRun: false,
         tables: [],
         integrity,
-        error: `refused ${missing.length} missing mandatory value(s) before any write`,
+        error: `refused ${missing.length} missing mandatory value(s) and ${overLength.length} over-length value(s) before any write`,
       });
       logRefusals(io, integrity);
-      io.stderr(`c2c: refused: ${missing.length} mandatory value(s) missing; nothing was written\n`);
+      io.stderr(`c2c: refused: ${missing.length} missing mandatory value(s) and ${overLength.length} over-length value(s); nothing was written. Fill required values, shorten over-length values, or re-provision the column as text\n`);
       return 1;
     }
     const checkpointPath = flag(args, '--checkpoint');

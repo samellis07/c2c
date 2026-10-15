@@ -58,7 +58,7 @@ Value: 130. Label: [UNVERIFIED]. Behaviour: warn. Probe: P-COLS.
 
 ### L-VARCHAR-LENGTH: varchar length
 
-Value: 255 clamp; REST insert **silently truncates**. Label: [TESTED]. Behaviour: split — values longer than 255 go to `text`; validate before write. Probe: none.
+Value: 255 clamp; REST insert **silently truncates**. Label: [TESTED]. Behaviour: split — multi line, rich text, and single line with maxchar above 255 go to `text`; a value longer than its varchar column is refused before any write and listed in the `c2c migrate-data` plan and the loader report by table, column and source id, never the value. Probe: none.
 
 ### L-TEXT-LENGTH: text length
 

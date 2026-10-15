@@ -53,6 +53,8 @@ import {
   emptyIntegrity,
   groupRefusals,
   mandatoryMissingRefusals,
+  cellRuleRefusals,
+  overLengthRefusals,
   mergeIntegrity,
   type IntegrityColumn,
 } from '../../data/src/integrity.js';
@@ -467,10 +469,19 @@ export async function migrateSeed(opts: {
   // report-shaped export cannot produce a partial load.
   const missing = mandatoryMissingRefusals(opts.tables, columnsByTable);
   const uniqueDupes = duplicateUniqueRefusals(opts.tables, opts.uniqueColumnsByTable ?? {});
-  const refused = [...missing, ...uniqueDupes];
+  // A value longer than its column would be stored cut short without an error.
+  // The report then carries every cell the writer would refuse.
+  const overLength = overLengthRefusals(opts.tables, columnsByTable);
+  const cells = overLength.length ? cellRuleRefusals(opts.tables, columnsByTable) : [];
+  const refused = [...missing, ...uniqueDupes, ...cells];
   if (refused.length) {
     const names = [...new Set(refused.map((item) => `${item.table}.${item.column}`))].join(', ');
-    const label = uniqueDupes.length ? `${refused.length} constraint violation(s)` : `${refused.length} missing mandatory value(s)`;
+    const label =
+      uniqueDupes.length || (cells.length && cells.length < refused.length)
+        ? `${refused.length} constraint violation(s)`
+        : cells.length
+          ? `${refused.length} value(s) the store would alter (${overLength.length} over length)`
+          : `${refused.length} missing mandatory value(s)`;
     return {
       ok: false,
       dryRun: opts.dryRun,
