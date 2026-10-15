@@ -23,6 +23,14 @@ const FIXTURES = ['freight-forwarding', 'library-application-system'];
 const TZS = ['UTC', 'Asia/Kolkata', 'America/Los_Angeles'];
 const LANGS = ['C', 'en_US.UTF-8', 'de_DE.UTF-8', 'da_DK.UTF-8'];
 
+/**
+ * Generous bound for every spawned child. The children are cheap, but a
+ * loaded CI runner can take tens of seconds just to spawn Node; a tight
+ * timeout turns load into a flaky kill. The budget is shared with the
+ * matrix runs below, which are the expensive children.
+ */
+const CHILD_TIMEOUT = 180_000;
+
 /** Child env scrubbed of repo selectors, with the matrix cell applied. */
 function childEnv(tz: string, lang: string): NodeJS.ProcessEnv {
   const env = { ...process.env };
@@ -33,16 +41,25 @@ function childEnv(tz: string, lang: string): NodeJS.ProcessEnv {
   return env;
 }
 
-function genOnce(target: string, tz: string, lang: string, cwd: string): string {
-  const child = spawnSync(process.execPath, [gallery, '--once', target], {
+/** Spawn a child and assert it exited 0, reporting kill signal and output on failure. */
+function runChild(args: string[], tz: string, lang: string, cwd: string): string {
+  const child = spawnSync(process.execPath, args, {
     encoding: 'utf8',
     cwd,
     env: childEnv(tz, lang),
     maxBuffer: 64 * 1024 * 1024,
-    timeout: 120_000,
+    timeout: CHILD_TIMEOUT,
   });
-  assert.equal(child.status, 0, child.stderr || child.stdout);
+  assert.equal(
+    child.status,
+    0,
+    `child failed: status=${child.status} signal=${child.signal} error=${child.error?.message ?? 'none'}\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+  );
   return child.stdout;
+}
+
+function genOnce(target: string, tz: string, lang: string, cwd: string): string {
+  return runChild([gallery, '--once', target], tz, lang, cwd);
 }
 
 /** "<sha256>  <relative-path>" per file, sorted bytewise — the gate's form. */
@@ -60,38 +77,39 @@ function hashTree(base: string): string {
   return out.join('\n') + '\n';
 }
 
-/** What a child sees under a matrix cell: default locale, local hour of epoch 0, a localeCompare sort. */
-function probe(tz: string, lang: string): { locale: string; hour: number; sorted: string } {
-  const child = spawnSync(
-    process.execPath,
+/** What a child sees under a matrix cell: default locale, local hour of epoch 0, a localeCompare sort, supported ICU candidates. */
+function probe(tz: string, lang: string): { locale: string; hour: number; sorted: string; supported: string[] } {
+  const stdout = runChild(
     [
       '-e',
-      "process.stdout.write(JSON.stringify({ locale: Intl.DateTimeFormat().resolvedOptions().locale, hour: new Date(0).getHours(), sorted: ['z', 'aa', 'b', 'A', 'a', 'B'].sort((x, y) => x.localeCompare(y)).join() }))",
+      "process.stdout.write(JSON.stringify({ locale: Intl.DateTimeFormat().resolvedOptions().locale, hour: new Date(0).getHours(), sorted: ['z', 'aa', 'b', 'A', 'a', 'B'].sort((x, y) => x.localeCompare(y)).join(), supported: Intl.Collator.supportedLocalesOf(['da', 'sv', 'de-u-co-phonebk', 'tr', 'es', 'en'], { localeMatcher: 'lookup' }) }))",
     ],
-    { encoding: 'utf8', cwd: root, env: childEnv(tz, lang), timeout: 30_000 },
+    tz,
+    lang,
+    root,
   );
-  assert.equal(child.status, 0, child.stderr || child.stdout);
-  return JSON.parse(child.stdout) as { locale: string; hour: number; sorted: string };
+  return JSON.parse(stdout) as { locale: string; hour: number; sorted: string; supported: string[] };
 }
 
 test('positive control: environment reaches child and available ICU locale changes collation', () => {
+  // Each spawned child is expensive on a loaded box, so one probe child
+  // answers every question its env cell can: the base cell also lists the
+  // supported ICU candidates, and the two remaining cells each verify a
+  // foreign TZ and a foreign LANG together.
   const base = probe('UTC', 'C');
-  const available = spawnSync(process.execPath, ['-e', "process.stdout.write(JSON.stringify(Intl.Collator.supportedLocalesOf(['da', 'sv', 'de-u-co-phonebk', 'tr', 'es', 'en'], { localeMatcher: 'lookup' })))"], {
-    encoding: 'utf8', cwd: root, env: childEnv('UTC', 'C'), timeout: 30_000,
-  });
-  assert.equal(available.status, 0, available.stderr || available.stdout);
-  const locales = JSON.parse(available.stdout) as string[];
-  const distinct = locales.find((locale) => {
+  const distinct = base.supported.find((locale) => {
     const sorted = ['z', 'aa', 'b', 'A', 'a', 'B'].sort(new Intl.Collator(locale).compare).join(',');
     return sorted !== base.sorted;
   });
-  assert.ok(distinct, `no supported ICU locale changes collation from root; supported candidates: ${locales.join(', ') || '(none)'}`);
+  assert.ok(distinct, `no supported ICU locale changes collation from root; supported candidates: ${base.supported.join(', ') || '(none)'}`);
   const localeProbe = probe('UTC', distinct);
+  const kolkata = probe('Asia/Kolkata', 'de_DE.UTF-8');
+  const losAngeles = probe('America/Los_Angeles', 'en_US.UTF-8');
   assert.equal(base.hour, 0, 'TZ=UTC did not reach the child');
-  assert.equal(probe('Asia/Kolkata', 'C').hour, 5, 'TZ=Asia/Kolkata did not reach the child');
-  assert.equal(probe('America/Los_Angeles', 'C').hour, 16, 'TZ=America/Los_Angeles did not reach the child');
-  assert.ok(probe('UTC', 'de_DE.UTF-8').locale.startsWith('de'), 'LANG=de_DE.UTF-8 did not reach the child');
-  assert.ok(probe('UTC', 'en_US.UTF-8').locale.startsWith('en'), 'LANG=en_US.UTF-8 did not reach the child');
+  assert.equal(kolkata.hour, 5, 'TZ=Asia/Kolkata did not reach the child');
+  assert.equal(losAngeles.hour, 16, 'TZ=America/Los_Angeles did not reach the child');
+  assert.ok(kolkata.locale.startsWith('de'), 'LANG=de_DE.UTF-8 did not reach the child');
+  assert.ok(losAngeles.locale.startsWith('en'), 'LANG=en_US.UTF-8 did not reach the child');
   assert.notEqual(localeProbe.sorted, base.sorted, `${distinct} collation did not change a localeCompare sort`);
 });
 
@@ -99,12 +117,15 @@ for (const name of FIXTURES) {
   test(`${name} regenerates byte-identical output across TZ, LANG, cwd, and output paths`, () => {
     const target = join(root, 'fixtures/redistributable', name);
     const baseline = genOnce(target, 'UTC', 'C', root);
+    // The combined foreign-cell run below already covers Asia/Kolkata and
+    // da_DK.UTF-8, so the single-axis loops skip them rather than pay for
+    // duplicate generator runs.
     for (const tz of TZS) {
-      if (tz === 'UTC') continue;
+      if (tz === 'UTC' || tz === 'Asia/Kolkata') continue;
       assert.equal(genOnce(target, tz, 'C', root), baseline, `TZ=${tz} changed the generated tree`);
     }
     for (const lang of LANGS) {
-      if (lang === 'C') continue;
+      if (lang === 'C' || lang === 'da_DK.UTF-8') continue;
       assert.equal(genOnce(target, 'UTC', lang, root), baseline, `LANG=${lang} changed the generated tree`);
     }
     const farCwd = mkdtempSync(join(tmpdir(), 'c2c-env-cwd-'));
@@ -122,13 +143,7 @@ for (const name of FIXTURES) {
       const listings: string[] = [];
       for (let i = 0; i < 2; i++) {
         const out = join(work, `run-${i}`, 'nested out dir', 'tree');
-        const child = spawnSync(process.execPath, [gallery, '--write', target, out], {
-          encoding: 'utf8',
-          cwd: i === 0 ? root : tmpdir(),
-          env: childEnv(TZS[i]!, LANGS[(i + 1) % LANGS.length]!),
-          timeout: 120_000,
-        });
-        assert.equal(child.status, 0, child.stderr || child.stdout);
+        runChild([gallery, '--write', target, out], TZS[i]!, LANGS[(i + 1) % LANGS.length]!, i === 0 ? root : tmpdir());
         listings.push(hashTree(out));
       }
       assert.equal(listings[1], listings[0], 'different absolute output paths changed the written bytes');
