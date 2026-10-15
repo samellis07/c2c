@@ -48,8 +48,8 @@ function lookups(count: number): string {
   return app(`${form('Ref', textFields(1, 'Name'))}\n${form('Item', fields)}`);
 }
 
-/** One Creator app that exceeds the row. A row with no stated number has no count to pass. */
-function exceedingSource(row: CatalystLimit): string {
+/** One Creator app that exceeds the row. A row with no stated number has no count to pass. Undefined when the row has no fixture. */
+function exceedingSource(row: CatalystLimit): string | undefined {
   switch (row.id) {
     case 'datastore.columns_per_table': {
       if (row.value === null) throw new Error(row.id);
@@ -88,7 +88,9 @@ function exceedingSource(row: CatalystLimit): string {
     case 'function.timeout_seconds':
       return withFunction();
     case 'datastore.write_requests_per_minute':
+    case 'datastore.rows_per_table_dev':
     case 'datastore.concurrency_dev':
+    case 'api.calls_dev':
     case 'url.throttle':
     case 'job.timeout_minutes':
     case 'bulk.rows_per_call':
@@ -96,7 +98,7 @@ function exceedingSource(row: CatalystLimit): string {
     case TABLE_NAME_LENGTH_UNVERIFIED:
       return app(form('N'.repeat(LONGEST_KEPT_TABLE_NAME.length + 1), textFields(1, 'Name')));
     default:
-      throw new Error(`no precheck fixture for ${row.id}`);
+      return undefined;
   }
 }
 
@@ -113,10 +115,17 @@ function hitsFor(row: CatalystLimit, findings: readonly PrecheckFinding[]): Prec
 }
 
 test('each Catalyst limit row is a precheck blocker only when the row is verified', () => {
+  const sources = new Map<string, string>();
+  for (const row of CATALYST_LIMITS) {
+    const source = exceedingSource(row);
+    if (source !== undefined) sources.set(row.id, source);
+  }
+  const missing = CATALYST_LIMITS.filter((row) => !sources.has(row.id)).map((row) => row.id);
+  assert.deepEqual(missing, [], `no precheck fixture for: ${missing.join(', ')}`);
   const seen = new Set<string>();
   for (const row of CATALYST_LIMITS) {
     seen.add(row.id);
-    const source = exceedingSource(row);
+    const source = sources.get(row.id)!;
     const report = precheck(deriveIr(parse(source)), source);
     const hits = hitsFor(row, report.findings);
     const expected = row.verified ? 'blocker' : 'warning';
