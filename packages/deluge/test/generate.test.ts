@@ -2602,6 +2602,83 @@ test('a read-only thisapp callee becomes an event-time client call and endpoint'
   assert.deepEqual(blocked.map((a) => a.op), ['info'], 'a failed call fails closed and discards queued actions');
 });
 
+test('a callee that mutates a parameter list or map is not a read-only client call', () => {
+  const generateWith = (body: string) =>
+    generate(
+      app({
+        forms: [plainForm('Orders', [plainField('Hours')])],
+        profiles: [ADMIN],
+        functions: [
+          {
+            name: 'Util.Ok',
+            kind: 'deluge',
+            signature: 'bool Util.Ok(list ids, map m, int n)',
+            deluge: [{ text: `${body}\nreturn n > 1;`, span: Z }],
+            properties: [],
+            span: Z,
+          },
+        ],
+        workflows: [
+          workflow({
+            name: 'Hours check',
+            form: 'Orders',
+            event: 'on user input',
+            deluge: { text: 'ids = {1, 2};\nm = {"a": 1};\nif(thisapp.Util.Ok(ids, m, input.Hours)) { alert "ok"; }', span: Z },
+          }),
+        ],
+      }),
+    );
+  const readOnly = (g: ReturnType<typeof generate>) => g.files.some((f) => f.path === 'functions/custom/util-ok-call.mjs');
+  // Every method in the shared mutator set, on a parameter, an alias, an
+  // element, a map value, `input.<param>` and an index assignment.
+  for (const body of [
+    'ids.add(3);',
+    'ids.addAll({3});',
+    'ids.insert(3);',
+    'ids.insertAll({3});',
+    'ids.remove(0);',
+    'ids.removeAll({1});',
+    'ids.removeElement(1);',
+    'ids.retainAll({1});',
+    'ids.clear();',
+    'ids.sort();',
+    'ids.delete(1);',
+    'ids.deleteItem(1);',
+    'ids.deleteAll({1});',
+    'ids.update(0, 5);',
+    'm.put("b", 2);',
+    'm.putAll({"b": 2});',
+    'm.remove("a");',
+    'm.deleteKey("a");',
+    'm.deleteKeys({"a"});',
+    'm.clear();',
+    'x = ids;\nx.add(3);',
+    'x = m;\ny = x;\ny.put("b", 2);',
+    'ids.get(0).put("b", 2);',
+    'for each e in ids { e.put("b", 2); }',
+    'v = m.get("a");\nv.add(3);',
+    'holder = List();\nholder.add(m);\nholder.get(0).put("b", 2);',
+    'input.ids.add(3);',
+    'ids[0] = 3;',
+    'ids.ADD(3);',
+  ]) {
+    const g = generateWith(body);
+    assert.equal(readOnly(g), false, body);
+    assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length, 1, body);
+  }
+  // Writes to a fresh local, reads of a parameter and a scalar parameter stay read-only.
+  for (const body of [
+    'l = List();\nl.add(n);\nl.sort();',
+    'l = {n, 2};\nl.removeElement(n);\nl.insert(n);\nl.clear();',
+    'k = ids.size() + m.keys().size();',
+    'n = n + 1;',
+  ]) {
+    const g = generateWith(body);
+    assert.equal(readOnly(g), true, body);
+    assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false, body);
+  }
+});
+
 test('a read-only thisapp call on a server-bound local keeps the manual condition', async () => {
   for (const text of [
     'n = Orders[Hours == input.Hours].count();\nif(thisapp.Util.F(n)) { alert "x"; }',
