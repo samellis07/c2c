@@ -1,5 +1,5 @@
 /**
- * The Slate token bridge (design d') on the client: fragment intake with the
+ * The Slate token bridge on the client: fragment intake with the
  * state check, the Authorization header with no cookies, and the loop-guarded
  * redirect on a missing or refused token.
  */
@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import {
   apiCall,
   bridgeRedirect,
+  bridgeSignOut,
   createApi,
   hasBridgeToken,
   intakeBridgeFragment,
@@ -167,4 +168,30 @@ test('the session-expired event still fires when the bridge trip is refused', as
   const reply = await createApi(view).get('/lookups/Book/Genre');
   assert.equal(reply.status, 401);
   assert.equal(events.filter((event) => event.type === SESSION_EXPIRED_EVENT).length, 1);
+});
+
+test('bridgeSignOut clears every bridge key and leaves for the bridge signout action', () => {
+  const { view, assigned, storage } = fakeWindow();
+  storage.setItem('c2c.bridge.token', 'Bearer tok');
+  storage.setItem('c2c.bridge.state', 's-43');
+  storage.setItem('c2c.bridge.route', '/app/');
+  storage.setItem('c2c.bridge.at', String(Date.now()));
+  assert.equal(bridgeSignOut(view), true);
+  assert.deepEqual(assigned, ['https://fn.example.test/server/c2c_auth/bridge?action=signout']);
+  for (const key of ['c2c.bridge.token', 'c2c.bridge.state', 'c2c.bridge.route', 'c2c.bridge.at']) {
+    assert.equal(storage.getItem(key), null, `${key} is cleared`);
+  }
+});
+
+test('bridgeSignOut refuses a missing or non-web bridge and navigates nowhere', () => {
+  const missing = fakeWindow();
+  (missing.view as unknown as Record<string, unknown>).C2C_AUTH_BRIDGE = '';
+  assert.equal(bridgeSignOut(missing.view), false);
+  assert.equal(missing.assigned.length, 0);
+  const evil = fakeWindow();
+  (evil.view as unknown as Record<string, unknown>).C2C_AUTH_BRIDGE = 'javascript:alert(1)';
+  evil.storage.setItem('c2c.bridge.token', 'Bearer tok');
+  assert.equal(bridgeSignOut(evil.view), false);
+  assert.equal(evil.assigned.length, 0);
+  assert.equal(evil.storage.getItem('c2c.bridge.token'), 'Bearer tok', 'a refused sign-out keeps the session');
 });

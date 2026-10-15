@@ -2676,6 +2676,7 @@ function indexHtml(model: UiModel): string {
   <button id="menu-toggle" type="button" aria-expanded="true" aria-controls="nav">Menu</button>
   <strong id="app-title"></strong>
   <button id="install" hidden type="button">Install app</button>
+  <button id="sign-out" hidden type="button">Sign out</button>
 </header>
 <div class="shell">
 <nav id="nav" aria-label="Sections"></nav>
@@ -2738,7 +2739,7 @@ export function slateConfigSource(opts: { apiBase?: string; auth?: boolean; auth
     lines.push(`globalThis.C2C_SMOKE_PROJECT = ${JSON.stringify(opts.smokeProject)};`);
   }
   if (opts.auth && opts.authBridge) {
-    // Token bridge (design d'): the Slate origin serves no /baas routes, so the
+    // Token bridge: the Slate origin serves no /baas routes, so the
     // Web SDK cannot mint a functions token here. The app instead redirects to
     // c2c_auth on the function origin and gets the token back in a fragment.
     lines.push(`globalThis.C2C_AUTH_BRIDGE = ${JSON.stringify(opts.authBridge)};`);

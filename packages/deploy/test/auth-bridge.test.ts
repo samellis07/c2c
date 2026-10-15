@@ -1,5 +1,5 @@
 /**
- * The c2c_auth token bridge (design d'): a Slate page cannot mint a functions
+ * The c2c_auth token bridge: a Slate page cannot mint a functions
  * token (its init.js leaves api_domain empty), so this function serves the
  * bridge page on the function origin. These tests load the generated index.js
  * and drive it with fake req/res — the page itself runs the Web SDK in a

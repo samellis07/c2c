@@ -107,7 +107,7 @@ export function apiUrl(view: AppWindow, endpoint: string): string {
 }
 
 /**
- * Token bridge (design d'). The Slate origin serves no /baas routes, so the
+ * Token bridge. The Slate origin serves no /baas routes, so the
  * Web SDK cannot mint a functions token on it. The configured C2C_AUTH_BRIDGE
  * page runs on the function origin — where the SDK is first-party — and
  * returns the token in `#c2c_auth=<token>&state=<state>`. The state binds the
@@ -265,6 +265,40 @@ export function bridgeRedirect(view: AppWindow, force = false): boolean {
 export function hasBridgeToken(view: AppWindow): boolean {
   intakeBridgeFragment(view);
   return storedBridgeToken(view) !== '';
+}
+
+/**
+ * Sign the tab out of the bridge session: every c2c.bridge.* key is dropped
+ * and the tab leaves for the bridge's signout action, which ends the
+ * function-origin session and returns to the Slate origin. The stored token
+ * is cleared first, so a navigation that never completes still cannot replay
+ * it. Returns false — navigating nowhere — when no web bridge is configured.
+ */
+export function bridgeSignOut(view: AppWindow): boolean {
+  const bridge = view.C2C_AUTH_BRIDGE;
+  if (typeof bridge !== 'string' || !bridge) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(bridge, pageUrl(view));
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && LOOPBACK_HOSTS.has(parsed.hostname))) return false;
+  try {
+    const store = sessionStore(view);
+    for (const key of [BRIDGE_TOKEN_KEY, BRIDGE_STATE_KEY, BRIDGE_ROUTE_KEY, BRIDGE_MARK]) store?.removeItem(key);
+  } catch {
+    // storage refused: the sign-out trip still happens
+  }
+  const location = view.location as Location & { assign?: (url: string) => void };
+  try {
+    const target = `${parsed.origin}${parsed.pathname}?action=signout`;
+    if (typeof location.assign === 'function') location.assign(target);
+    else location.href = target;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function authToken(view: AppWindow): Promise<string> {

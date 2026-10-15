@@ -58,7 +58,7 @@ export { MetricTile } from './charts/MetricTile';
 export { RowsScope, useRows, readRows } from './charts/rows';
 export { PageView } from './pages/PageView';
 export { sanitizeSnippet } from './pages/sanitize';
-export { createApi, apiCall, apiUrl, type Api, type ApiInit, type ApiReply, type ApiResponse, type AppWindow } from './runtime/api';
+export { createApi, apiCall, apiUrl, bridgeSignOut, type Api, type ApiInit, type ApiReply, type ApiResponse, type AppWindow } from './runtime/api';
 export { useEnv, type AppEnv } from './runtime/env';
 export { parseRoute, hrefFor, navigate, useRoute, type Route } from './runtime/router';
 export { AuthGate, serviceUrl } from './runtime/auth';
