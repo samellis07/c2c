@@ -50,6 +50,8 @@ export function mutatesParameters(scripts: readonly string[], params: readonly {
   const tainted = new Set<string>(['input']);
   for (const p of params) if (!SCALAR_TYPES.has(normType(p.type) ?? '')) tainted.add(p.name.toLowerCase());
   const groups: string[][] = [];
+  const elements: { target: string; sources: string[] }[] = [];
+  const compoundAssignments: { root: string[]; sources: string[] }[] = [];
   const derived: { targets: string[]; sources: string[] }[] = [];
   const mutations: { receiver: string[]; args: string[] }[] = [];
   const writes: { root: string[]; compound: boolean }[] = [];
@@ -74,11 +76,12 @@ export function mutatesParameters(scripts: readonly string[], params: readonly {
           const sources = reads(n.value);
           if (target.kind === 'name' && (n.value as Node).kind === 'name') groups.push([...targets, ...sources]);
           else if (target.kind === 'name') derived.push({ targets, sources });
+          else compoundAssignments.push({ root: targets.slice(0, 1), sources });
           if (target.kind !== 'name') writes.push({ root: targets, compound: true });
           return;
         }
         case 'forEach':
-          if (!n.iteratesIndex) groups.push([String(n.name).toLowerCase(), ...reads(n.collection)]);
+          if (!n.iteratesIndex) elements.push({ target: String(n.name).toLowerCase(), sources: reads(n.collection) });
           return;
         case 'call': {
           const callee = n.callee as Node;
@@ -108,13 +111,24 @@ export function mutatesParameters(scripts: readonly string[], params: readonly {
   for (let changed = true; changed; ) {
     changed = false;
     for (const group of groups) {
-      if (!group.some((name) => tainted.has(name))) continue;
+      const propagateAlias = group.some((name) => tainted.has(name));
+      const propagateContainer = group.some((name) => containing.has(name));
+      if (!propagateAlias && !propagateContainer) continue;
       for (const name of group) {
-        if (!tainted.has(name)) {
+        if (propagateAlias && !tainted.has(name)) {
           tainted.add(name);
           changed = true;
         }
+        if (propagateContainer && !containing.has(name)) {
+          containing.add(name);
+          changed = true;
+        }
       }
+    }
+    for (const { target, sources } of elements) {
+      if (!sources.some((name) => tainted.has(name) || containing.has(name)) || tainted.has(target)) continue;
+      tainted.add(target);
+      changed = true;
     }
     for (const { receiver, args } of mutations) {
       if (!args.some((name) => tainted.has(name) || containing.has(name))) continue;
@@ -130,6 +144,15 @@ export function mutatesParameters(scripts: readonly string[], params: readonly {
       for (const name of targets) {
         if (!tainted.has(name)) {
           tainted.add(name);
+          changed = true;
+        }
+      }
+    }
+    for (const { root, sources } of compoundAssignments) {
+      if (!sources.some((name) => tainted.has(name) || containing.has(name))) continue;
+      for (const name of root) {
+        if (!containing.has(name)) {
+          containing.add(name);
           changed = true;
         }
       }

@@ -2697,6 +2697,18 @@ test('fresh collections may contain parameter values without aliasing the parame
   }
 });
 
+test('containment propagates through aliases, loop elements, and compound assignments', () => {
+  const params = [{ type: 'list', name: 'ids' }];
+  for (const body of [
+    'r.add(ids); for each e in r { e.add(1); }',
+    'r.add(ids); x = r; x.get(0).add(1);',
+    'h.k = ids; y = h.k; y.add(1);',
+    'h.k = ids; h.k.add(1);',
+  ]) {
+    assert.equal(mutatesParameters([body], params), true, body);
+  }
+});
+
 test('a read-only thisapp call on a server-bound local keeps the manual condition', async () => {
   for (const text of [
     'n = Orders[Hours == input.Hours].count();\nif(thisapp.Util.F(n)) { alert "x"; }',
