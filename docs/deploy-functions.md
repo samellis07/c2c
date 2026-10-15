@@ -87,14 +87,18 @@ committed file — the next deploy writes only their names.
 
 ## Environment variables
 
-The deployed function reads configuration from its environment variables, set in `catalyst-config.json` (`env_variables`) via `--function-env`:
+The deployed function reads configuration from its environment variables in
+`catalyst-config.json` (`env_variables`). Values passed with `--function-env`
+are written there, and the deploy sets some itself: `--mail-from` becomes
+`C2C_MAIL_FROM`, the Catalyst Mail sender for `zoho.adminuserid` mail
+(`packages/deploy/src/function-dir.ts:493`).
 
 `zoho.adminuser` and `zoho.adminuserid` in report criteria are currently unsupported.
 Setting `C2C_ADMIN_USER` or `C2C_ADMIN_USERID` does not make those criteria
 compile. They remain counted as `report-criteria`, with a separate UI notice,
 and the report returns no rows. `zoho.adminuserid` denotes the Creator
-application owner's email, not a Catalyst user id; see the variable entry in
-[`deluge-builtins.json`](deluge-builtins.json). Follow
+application owner's email, not a Catalyst user id; see the report notice in
+[`packages/ui/src/model.ts`](../packages/ui/src/model.ts) (lines 811-814). Follow
 [the report filter repair procedure](report-filters.md) before deploying a
 report that depends on that identity.
 

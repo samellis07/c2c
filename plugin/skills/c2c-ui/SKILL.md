@@ -31,7 +31,7 @@ The default UI is the React app: `c2c deploy` writes the React source under `c2c
 ## Unsupported report filters
 
 For `report-criteria` and `Filter not migrated` TODOs, use
-[the manual repair procedure](../../../docs/report-filters.md). Report and named
+[the manual repair procedure](references/report-filters.md). Report and named
 filter criteria use the same compiler. Owner variables, function results and
 record-query values remain counted until resolved; configuring an owner env var
 alone does not translate them. Preserve authenticated record access and verify
