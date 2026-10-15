@@ -33,6 +33,69 @@ export interface RestResult {
 
 export type RestFn = (call: RestCall) => Promise<RestResult>;
 
+/** Page-token fields supported by Catalyst list responses. */
+const PAGE_TOKEN_KEYS = ['next_token', 'continuation_token', 'next_continuation_token'] as const;
+/** Bound list reads so a malformed/cyclic pagination response cannot loop forever. */
+export const BUCKET_LIST_MAX_PAGES = 50;
+
+export type BucketListRead =
+  | { status: 'found' }
+  | { status: 'absent' }
+  | { status: 'unverifiable'; httpStatus?: number; detail: string };
+
+function bucketListDetail(body: unknown): string {
+  const text = typeof body === 'string' ? body : JSON.stringify(body ?? '');
+  return text.replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+/** Read a bucket by exact name through Catalyst's paginated bucket LIST route. */
+export async function readBucketList(rest: RestFn, projectId: string, name: string): Promise<BucketListRead> {
+  const listPath = `/baas/v1/project/${projectId}/bucket`;
+  const seenTokens = new Set<string>();
+  let path = listPath;
+  for (let page = 0; page < BUCKET_LIST_MAX_PAGES; page++) {
+    let res: RestResult;
+    try {
+      res = await rest({ method: 'GET', path });
+    } catch (err) {
+      return { status: 'unverifiable', detail: `the REST read-back failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+    if (res.status < 200 || res.status >= 300) {
+      return { status: 'unverifiable', httpStatus: res.status, detail: `the REST bucket list answered HTTP ${res.status}; Stratus may not be enabled in this project: ${bucketListDetail(res.body)}` };
+    }
+    let body: unknown = res.body;
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body) as unknown;
+      } catch {
+        return { status: 'unverifiable', detail: `the REST bucket list returned malformed JSON; bucket ${name} could not be verified` };
+      }
+    }
+    const record = typeof body === 'object' && body !== null && !Array.isArray(body) ? body as Record<string, unknown> : undefined;
+    const data = record?.data;
+    if (!Array.isArray(data)) {
+      return { status: 'unverifiable', detail: `the REST bucket list did not return a data list; bucket ${name} could not be verified` };
+    }
+    if (data.some((row) => typeof row === 'object' && row !== null && (row as { bucket_name?: unknown }).bucket_name === name)) {
+      return { status: 'found' };
+    }
+    const tokenKey = PAGE_TOKEN_KEYS.find((key) => typeof record?.[key] === 'string' && record[key] !== '');
+    if (tokenKey === undefined) {
+      if (record?.more_records === true) {
+        return { status: 'unverifiable', detail: `the REST bucket list has more rows but no page token; bucket ${name} could not be ruled out` };
+      }
+      return { status: 'absent' };
+    }
+    const token = record![tokenKey] as string;
+    if (seenTokens.has(token)) {
+      return { status: 'unverifiable', detail: `the REST bucket list repeated a page token; bucket ${name} could not be verified` };
+    }
+    seenTokens.add(token);
+    path = `${listPath}?${tokenKey}=${encodeURIComponent(token)}`;
+  }
+  return { status: 'unverifiable', detail: `the REST bucket list ran past ${BUCKET_LIST_MAX_PAGES} pages; bucket ${name} could not be verified` };
+}
+
 export interface ColumnCreate {
   table: string;
   column_name: string;
