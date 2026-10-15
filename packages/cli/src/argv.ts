@@ -181,6 +181,12 @@ export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
       '--ui': 'value',
     },
   },
+  precheck: {
+    positional: 'required',
+    flags: {
+      '--json': 'bool',
+    },
+  },
 };
 
 /**
