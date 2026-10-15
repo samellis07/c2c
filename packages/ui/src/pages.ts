@@ -220,24 +220,31 @@ const STYLE_FUNCTIONS = new Set([
 /** Arguments of an allowed function: numbers with an optional unit, separated by spaces, commas or `/`. */
 const STYLE_ARGS = /^\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?(?:(?:\s*[,/]\s*|\s+)[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?)*\s*$/i;
 
+/** Arguments of a safe calc() call: numbers with an optional unit, separated by arithmetic operators (+, -, *, /) and spaces. */
+const CALC_ARGS = /^\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?(?:\s*[-+*/]\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?)*\s*$/i;
+
 /**
  * Split an inline style into the declarations kept and the ones refused.
  * Each declaration is checked on its own: the property must be a plain CSS
  * name (never behavior or -moz-binding) and the value a safe style value, so
- * a refused declaration never takes the safe ones beside it. The browser
- * runtime keeps an identical copy.
+ * a refused declaration never takes the safe ones beside it. A trailing token
+ * with no colon and no assignment, quote, escape, or call is not a declaration
+ * and is left out. The browser runtime keeps an identical copy.
  */
 export function cleanStyle(value: string): { style: string; dropped: string[] } {
   const kept: string[] = [];
   const dropped: string[] = [];
   const hasComment = String(value ?? '').includes('/*');
   const stripped = hasComment ? String(value ?? '').replace(/\/\*[\s\S]*?\*\//g, '') : String(value ?? '');
-  for (const declaration of stripped.split(';')) {
-    const text = declaration.trim();
-    if (!text) continue;
+  const rawPieces = stripped.split(';').map((piece) => piece.trim()).filter(Boolean);
+  for (const text of rawPieces) {
     const colon = text.indexOf(':');
-    const prop = colon < 0 ? '' : flatCss(text.slice(0, colon));
-    const body = colon < 0 ? '' : text.slice(colon + 1).replace(/!\s*important\s*$/i, '');
+    if (colon < 0) {
+      if (/[=@\\'"()]/.test(text)) dropped.push('?');
+      continue;
+    }
+    const prop = flatCss(text.slice(0, colon));
+    const body = text.slice(colon + 1).replace(/!\s*important\s*$/i, '');
     const flat = flatCss(body);
     const safe =
       /^-?[-a-z]+$/.test(prop) &&
@@ -249,15 +256,17 @@ export function cleanStyle(value: string): { style: string; dropped: string[] } 
     if (safe) kept.push(text);
     else dropped.push(/^-?[-a-z]+$/.test(prop) ? prop : '?');
   }
-  return { style: dropped.length ? kept.join('; ') : hasComment ? kept.join('; ') : String(value ?? ''), dropped };
+  const hasDebris = rawPieces.length !== kept.length + dropped.length;
+  return { style: dropped.length ? kept.join('; ') : hasComment || hasDebris ? kept.join('; ') : String(value ?? ''), dropped };
 }
 
 /**
  * One inline-style or exported presentation value: keywords, numbers,
- * lengths, `#hex`, the allowed functions with numeric arguments, and in
- * `font-family` quoted plain names. Backslashes (CSS escapes like `u\72 l(`),
- * comments, `@` rules and every other function (`url`, `image-set`, `attr`,
- * `var`, …) are refused.
+ * lengths, `#hex`, the allowed functions with numeric arguments, `calc()`
+ * with numbers, units and + - * /, and in `font-family` quoted plain names.
+ * Backslashes (CSS escapes like `u\72 l(`), comments, `@` rules, nested
+ * `calc()`, and every other function (`url`, `image-set`, `attr`, `var`, …)
+ * are refused.
  */
 function safeStyleValue(raw: string, prop?: string): boolean {
   let text = String(raw ?? '').trim();
@@ -266,9 +275,12 @@ function safeStyleValue(raw: string, prop?: string): boolean {
   if (/['"]/.test(text)) return false;
   const flat = flatCss(text);
   if (flat.includes('url(') || flat.includes('expression')) return false;
-  const rest = text.replace(/([-a-z0-9]*)\(([^()]*)\)/gi, (_call, name: string, args: string) =>
-    STYLE_FUNCTIONS.has(name.toLowerCase()) && STYLE_ARGS.test(args) ? ' ' : '(',
-  );
+  const rest = text.replace(/([-a-z0-9]*)\(([^()]*)\)/gi, (_call, name: string, args: string) => {
+    const fn = name.toLowerCase();
+    if (STYLE_FUNCTIONS.has(fn) && STYLE_ARGS.test(args)) return ' ';
+    if (fn === 'calc' && CALC_ARGS.test(args)) return ' ';
+    return '(';
+  });
   return !/[()]/.test(rest);
 }
 
