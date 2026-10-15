@@ -334,6 +334,7 @@ export interface PageSpec {
   name: string;
   label: string;
   elements: PageElement[];
+  scopedCss?: string;
   /** Every TODO on the page, in page order, listed at the top of the page. */
   todos: string[];
 }

@@ -18,6 +18,7 @@ import { criteriaHasTodo, sealRelativeCriteria } from '../../shims/src/criteria.
 import { LIMITS } from '../../shims/src/index.js';
 import {
   droppedStyleReason,
+  carriedStyleRules,
   droppedStyleRulesTodo,
   droppedStyles,
   droppedTagReason,
@@ -228,6 +229,8 @@ export interface UiPage {
   /** `todo` = every element is a TODO; `partial` = at least one element needs manual work. */
   status: 'generated' | 'partial' | 'todo';
   elements: UiElement[];
+  /** Sanitized static CSS scoped to this page container. */
+  scopedCss?: string;
   todo?: string;
 }
 
@@ -999,9 +1002,18 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
   const todoLeaves = pageLeaves.filter((el) => el.kind === 'todo');
   // Dropped `<style>` CSS is one counted manual step per page; the count stays off the generated element.
   let styleRules = 0;
+  let hadStaticStyle = false;
+  const styles: string[] = [];
+  const cssEscape = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, (ch) => `\\${ch.codePointAt(0)!.toString(16)} `);
   for (const el of pageLeaves) {
-    styleRules += el.droppedStyleRules ?? 0;
+    if (el.staticCss) {
+      hadStaticStyle = true;
+      const carried = carriedStyleRules(el.staticCss, `[data-page="${cssEscape(page.name)}"]`);
+      if (carried.css) styles.push(carried.css);
+      styleRules += carried.droppedRules;
+    } else styleRules += el.droppedStyleRules ?? 0;
     delete el.droppedStyleRules;
+    delete el.staticCss;
   }
   for (const el of todoLeaves) {
     todos.push({
@@ -1017,7 +1029,7 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
   for (const el of pageLeaves) {
     if (el.kind === 'html') {
       for (const tag of el.droppedTags ?? []) {
-        if (tag === 'style' && styleRules > 0) continue;
+        if (tag === 'style' && hadStaticStyle) continue;
         const key = `${el.tag}|${tag}`;
         if (seenDroppedTags.has(key)) continue;
         seenDroppedTags.add(key);
@@ -1038,6 +1050,7 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
     ...(page.section ? { section: page.section } : {}),
     status,
     elements,
+    ...(styles.length ? { scopedCss: styles.join('\n') } : {}),
     ...(status === 'todo' ? { todo: 'Every element on this page is a TODO.' } : {}),
   };
 }

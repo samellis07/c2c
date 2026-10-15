@@ -14,7 +14,7 @@
 import type { App } from '../../core/src/ir.js';
 import type { ZmlElement } from '../../core/src/zml.js';
 import type { UiModel, UiReport } from '../../ui/src/model.js';
-import { droppedStyleRulesTodo, elementFromZml } from '../../ui/src/pages.js';
+import { carriedStyleRules, droppedStyleRulesTodo, elementFromZml } from '../../ui/src/pages.js';
 import type { ChartSpec, FilterClause, MeasureSpec, MetricSpec, PageElement, PageSpec } from '../template/lib/c2c-ui/types.js';
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
@@ -148,6 +148,7 @@ interface Ctx {
   model: UiModel;
   reports: Map<string, UiReport>;
   forms: Set<string>;
+  pageName: string;
 }
 
 function fieldLabel(ctx: Ctx, form: string | undefined, path: string): string {
@@ -401,6 +402,8 @@ function convert(ctx: Ctx, node: ZmlElement): PageElement[] {
         : `the ${humanize(popup.name)} ${popup.target} opened on its own in Creator; here it is a link`,
     );
     const html = (ui.html ?? '').trim();
+    const pageSelector = ctx.pageName.replace(/[^a-zA-Z0-9_-]/g, (ch) => `\\${ch.codePointAt(0)!.toString(16)} `);
+    const carried = carriedStyleRules(raw, `[data-page="${pageSelector}"]`);
     const out: PageElement[] = [];
     if (html || links.length) out.push({ kind: 'html', html, links });
     // Keep the same sanitizer loss details and precedence as the vanilla model.
@@ -408,8 +411,8 @@ function convert(ctx: Ctx, node: ZmlElement): PageElement[] {
       if (tag === 'style' && (ui.droppedStyleRules ?? 0) > 0) continue;
       out.push({ kind: 'todo', tag: node.tag, reason: `The <${tag}> element is removed from this page snippet by the sanitizer` });
     }
-    if ((ui.droppedStyleRules ?? 0) > 0) {
-      const lost = droppedStyleRulesTodo('page', ui.droppedStyleRules!);
+    if (carried.droppedRules > 0) {
+      const lost = droppedStyleRulesTodo('page', carried.droppedRules);
       out.push({ kind: 'todo', tag: node.tag, reason: lost.reason });
     }
     for (const child of ui.children ?? []) {
@@ -478,16 +481,17 @@ function pageTodos(elements: PageElement[]): string[] {
 
 /** The spec of every Creator page, in model order. */
 export function pageSpecs(app: App, model: UiModel): Record<string, PageSpec> {
-  const ctx: Ctx = { app, model, reports: new Map(model.reports.map((r) => [r.name, r])), forms: new Set(model.forms.map((f) => f.name)) };
+  const ctx: Ctx = { app, model, reports: new Map(model.reports.map((r) => [r.name, r])), forms: new Set(model.forms.map((f) => f.name)), pageName: '' };
   const out: Record<string, PageSpec> = {};
   for (const page of model.pages) {
+    ctx.pageName = page.name;
     const ir = app.pages.find((p) => p.name === page.name);
     const elements: PageElement[] = ir?.zml.length
       ? ir.zml.flatMap((node) => convert(ctx, node))
       : ir?.content?.trim()
         ? [{ kind: 'text', text: ir.content.trim() }]
         : [];
-    out[page.name] = { name: page.name, label: page.label, elements, todos: pageTodos(elements) };
+    out[page.name] = { name: page.name, label: page.label, ...(page.scopedCss ? { scopedCss: page.scopedCss } : {}), elements, todos: pageTodos(elements) };
   }
   return out;
 }

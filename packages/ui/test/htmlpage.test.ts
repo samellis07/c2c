@@ -2343,10 +2343,8 @@ test('shape A golden: a query loop inside a <body> shell compiles to the pinned 
   const build = () => generateUi(appOf(`${ORDERS}\n${pageWithSnippet(SHAPE_A)}`));
   const first = build();
   const second = build();
-  // The shell's `<style>` rule is dropped by the sanitizer: counted, never silent.
-  assert.deepEqual(first.model.todos.map((todo) => [todo.name, todo.reason]), [
-    ['Home.style', 'Static <style> CSS not carried over: the page sanitizer drops 1 static style rule'],
-  ]);
+  assert.deepEqual(first.model.todos.map((todo) => [todo.name, todo.reason]), []);
+  assert.match(first.model.pages[0]?.scopedCss ?? '', /\[data-page="Home"\] \.c\{color: #333\}/);
   const entry = uiSnippetFiles(first.model)[0];
   assert.equal(entry.path, 'functions/htmlpages/home-s0.mjs');
   const source = String(first.files.find((file) => file.path === entry.path)?.data ?? '');
@@ -2561,6 +2559,7 @@ test('a record-summary frame generates a link to the authorized record route', (
   assert.match(compiled.file?.source ?? '', /#\/record\/Orders/);
   assert.match(compiled.file?.source ?? '', /shim\.datastore\.query/);
 test('one page with a <style>, a <script>, an ExecuteFunction button and a ZML image yields exactly the expected 4 TODOs once each', () => {
+test('one page with carried <style> CSS, a <script>, an ExecuteFunction button and a ZML image counts only lost constructs', () => {
   const snippet = [
     '<style>.highlight { color: red; }</style>',
     '<script>alert("hello")</script>',
@@ -2568,14 +2567,13 @@ test('one page with a <style>, a <script>, an ExecuteFunction button and a ZML i
     "<image action='Function' functionName='notify_team' elementName='Bell' src='https://example.com/bell.png'>",
   ].join('\n');
   const { model } = buildUi(appOf(`${ORDERS}\n${pageWithSnippet(snippet)}`));
-  assert.equal(model.todos.length, 4);
+  assert.equal(model.todos.length, 3);
   assert.deepEqual(
     model.todos.map((todo) => [todo.name, todo.reason]),
     [
       ['Home.image', 'ZML <image> "Bell" click action Function calling function notify_team is not generated; wire the click to the function by hand'],
       ['Home.button', 'ZML <button> "Go" click action ExecuteFunction calling function helpers.mark is not generated; wire the click to the function by hand'],
       ['Home.dsp', 'The <script> element is removed from this page snippet by the sanitizer'],
-      ['Home.style', 'Static <style> CSS not carried over: the page sanitizer drops 1 static style rule'],
     ],
   );
 });

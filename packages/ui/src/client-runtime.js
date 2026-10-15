@@ -901,7 +901,8 @@ function renderElement(el, doc, parentReport, appModel) {
 export function renderPage(page, doc, appModel) {
   const body = (page.elements || []).map((el) => renderElement(el, doc, undefined, appModel)).join('');
   if (page.status === 'todo') console.info(`[c2c] page "${page.name}" is not generated: ${page.todo || ''}`);
-  return `<article data-page="${escapeHtml(page.name)}"><h2>${escapeHtml(page.label || page.name)}</h2>${body}</article>`;
+  const style = typeof page.scopedCss === 'string' && page.scopedCss ? `<style>${page.scopedCss.replace(/[<>]/g, '')}</style>` : '';
+  return `<article data-page="${escapeHtml(page.name)}">${style}<h2>${escapeHtml(page.label || page.name)}</h2>${body}</article>`;
 }
 
 /** Last loaded rows and sort order per chart section. */
