@@ -117,3 +117,34 @@ The row endpoint is `/table/<t>/row`; `/table/<t>/rows` answers `404 INVALID_URL
 - Where the JSON report exports and `counts.json` are; confirm counts.
 - Whether to rehearse a large load outside Development.
 - "Load <n> rows into <tables> on <project>? (yes/no)" before `--confirm`.
+
+## Verified Data Store rules
+
+Apply these verified constraints during planning and loading; the IDs point to the detailed fact ledger in `references/facts/datastore.md`.
+
+| Fact | Rule |
+|---|---|
+| DS-01 | Send API calls with the configured data centre and required Catalyst headers. |
+| DS-02 | Diff desired tables against the live table list before creating. |
+| DS-03 | After a schema-write 5xx, re-read before retrying. |
+| DS-04 | Send column definitions as a one-element JSON array. |
+| DS-05 | Keep Development tables within the column and text-column budgets. |
+| DS-06 | Clamp varchar values to the column limit and verify stored values. |
+| DS-07 | Keep text within its limit and out of search-indexed fields. |
+| DS-08 | Limit unique varchar columns; use a unique bigint for numeric migration ids. |
+| DS-09 | Limit foreign keys and declare every key used by ZCQL joins. |
+| DS-10 | Keep row and id batches within 200; check affected counts. |
+| DS-11 | Use JSON report exports for source ids and reject ambiguous lookup display values. |
+| DS-12 | Validate dates, decimals, and string limits before writing; read values back. |
+| DS-13 | Set column defaults and send defaults in insert payloads. |
+| DS-14 | Preserve duplicate and mandatory errors with field name and status. |
+| DS-15 | Carry ids and integer values as strings end to end. |
+| DS-16 | Interpret system timestamps in the project time zone. |
+| DS-17 | Store currency in bounded doubles with client-side rounding or exact string shadows. |
+| DS-18 | Grant App User write access per table through the console. |
+| DS-19 | Create schema in Development; load rows only after promotion to Production. |
+| DS-20 | Do not depend on unique columns or read-modify-write for concurrency control. |
+| DS-21 | Make multi-call data moves resumable and compensate for failures. |
+| DS-22 | Bound write rate, honor Retry-After, and retry 429 responses idempotently. |
+| DS-23 | Budget quotas manually and surface raw limit codes with the affected table. |
+| DS-24 | Keep report data in relational child tables; create NoSQL tables only in the console. |
