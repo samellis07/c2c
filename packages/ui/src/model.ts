@@ -95,7 +95,7 @@ export interface UiField {
   column?: number;
   width?: string;
   height?: string;
-  /** Section visibility, when the export sets it. */
+  /** Field visibility from the export, when set; false fields render nothing and are never writable. */
   visibility?: boolean;
   /** Web label placement for the form (`top`, `left`, `labelinplace`). */
   labelPlacement?: string;

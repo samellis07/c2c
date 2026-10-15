@@ -97,10 +97,9 @@ function assignLayout(ui: UiField, ir: Field | undefined, placement: string | un
   if (column != null) ui.column = column;
   if (width) ui.width = width;
   if (height) ui.height = height;
-  if (ui.widget === 'section') {
-    const visibility = visibilityOf(ir.properties);
-    if (visibility != null) ui.visibility = visibility;
-  }
+  const visibility = visibilityOf(ir.properties);
+  // A hidden field is recorded on every widget; a section also keeps `true`.
+  if (visibility === false || (visibility != null && ui.widget === 'section')) ui.visibility = visibility;
 }
 
 /** A field height is a plain CSS length; a value with extra syntax is dropped. */
