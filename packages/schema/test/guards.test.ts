@@ -63,6 +63,10 @@ test('planZcql rejects a column or table name that is not a bare identifier', ()
   );
   assert.throws(() => planZcql({ from: 'Item x', columns: [{ table: 'Item x', column: 'Name' }] }), limitError('zcql.select_columns', /identifier rejected: Item x/));
   assert.throws(() => planZcql({ from: 'Item', columns: [{ table: 'Item', column: '1Name' }] }), /identifier rejected/);
+  for (const bad of ["Name'", '"Name"', 'Na`me', 'Nаme', 'Name/*x*/', 'Name--']) {
+    assert.throws(() => planZcql({ from: 'Item', columns: [{ table: 'Item', column: bad }] }), /identifier rejected/, `column ${bad}`);
+    assert.throws(() => planZcql({ from: bad, columns: [{ table: bad, column: 'Name' }] }), /identifier rejected/, `from ${bad}`);
+  }
 });
 
 test('planZcql refuses a semicolon in WHERE or ORDER BY and drops a literal true predicate', () => {
