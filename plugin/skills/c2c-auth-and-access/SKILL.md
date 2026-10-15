@@ -17,17 +17,17 @@ Every generated API call needs a signed-in Catalyst app user with role App Admin
 
 | Item | Do it with | Read back with | Evidence |
 |---|---|---|---|
-| Enable hosted login | CLI REST `POST /authentication/enable?auth_type=hosted` body `{"public_signup":false}` | MCP `Get_Authentication_Configurations` (CLI read → `OAUTH_SCOPE_MISMATCH`) | [TESTED] |
-| Enable embedded login | CLI REST `POST /authentication/enable?auth_type=embedded` `{}` | same | [TESTED] |
-| Authorized domain = Slate host | CLI REST `POST /cors-domain {"domain":"<app>.onslate.<dc>","cors":true,"iframe":true}` — iframe must be on at first create | MCP `List_All_CORS_Domains` + `OPTIONS` preflight returns ACAO | [TESTED]; repeat POST → `409`, `PUT` → `OAUTH_SCOPE_MISMATCH`: an existing iframe-off entry is a console edit |
-| `url_preference` (hosted-login redirect) | Console only — c2c uses embedded login, which does not need it; leave it unchanged | MCP `Get_Authentication_Configurations` | CLI `PUT` → 401 scope mismatch [TESTED] |
-| Other auth config | MCP `Update_Authentication_Configuration` [MCP-LISTED]; else console Authentication → Embedded | MCP `Get_Authentication_Configurations` | CLI `PUT` → 401 [TESTED] |
-| Role ids | default roles exist; ids differ per project | MCP `List_All_Roles` (CLI → 401 [TESTED]) | [TESTED] |
-| Custom roles (from Creator profiles) | IaC template (greenfield) or **console** | MCP `List_All_Roles` | role create → `AUTHENTICATION_FAILURE` [TESTED]; no MCP create |
-| Table permissions & scopes | MCP `Update_Table_Permissions`, `Update_Table_Scopes` | MCP `Get_Table_Permissions`, `Get_Table_Scopes` | CLI → 401 [TESTED] |
-| First admin user | CLI REST `POST /project-user` (admin add) or MCP `Add_User` | CLI `GET /project-user` / MCP `List_All_Project_Users` | `POST /project-user` worked [TESTED] with public signup on; with signup **off**: [UNVERIFIED]. `/project-user/signup` with signup off → `403 PUBLIC_SIGNUP_ERROR` [TESTED] |
-| Function security rule "authentication required" | IaC `SecurityRules` (greenfield) or console | Probe P-401 credential-free: `curl -s -o /dev/null -w '%{http_code}' <function-url>` → `401 NO_ACCESS` (`is_authenticated` is the only readable signal) | No CLI/MCP command [TESTED]; `catalyst deploy` leaves `optional` unless the rule arrived through the import |
-| Users beyond the first admin | Same as first admin, after the user approves the list | as above | Dev allows 25 users [DOC] (a higher effective cap is [UNVERIFIED]) |
+| Enable hosted login | CLI REST `POST /authentication/enable?auth_type=hosted` body `{"public_signup":false}` | MCP `Get_Authentication_Configurations` (CLI read → `OAUTH_SCOPE_MISMATCH`) | [E2E auth row 1] |
+| Enable embedded login | CLI REST `POST /authentication/enable?auth_type=embedded` `{}` | same | [E2E row 3] |
+| Authorized domain = Slate host | CLI REST `POST /cors-domain {"domain":"<app>.onslate.<dc>","cors":true,"iframe":true}` — iframe must be on at first create | MCP `List_All_CORS_Domains` + `OPTIONS` preflight returns ACAO | [E2E rows 2, 4]; repeat POST → `409`, `PUT` → `OAUTH_SCOPE_MISMATCH`: an existing iframe-off entry is a console edit |
+| `url_preference` (hosted-login redirect) | Console only — c2c uses embedded login, which does not need it; leave it unchanged | MCP `Get_Authentication_Configurations` | CLI `PUT` → 401 scope mismatch [E2E row 5] |
+| Other auth config | Console Authentication → Embedded (no MCP update tool exists) | MCP `Get_Authentication_Configurations` | CLI `PUT` → 401 [E2E row 5] |
+| Role ids | default roles exist; ids differ per project | MCP `List_All_Roles` (CLI → 401 [HV H5]) | [E2E] |
+| Custom roles (from Creator profiles) | IaC template (greenfield) or **console** | MCP `List_All_Roles` | role create → `AUTHENTICATION_FAILURE` [HV H6]; no MCP create |
+| Table permissions & scopes | MCP `Update_Table_Permissions`, `Update_Table_Scopes` | MCP `Get_Table_Permissions`, `Get_Table_Scopes` | CLI → 401 [HV H5] |
+| First admin user | CLI REST `POST /project-user` (admin add) or MCP `Add_User` | CLI `GET /project-user` / MCP `List_All_Project_Users` | `POST /project-user` worked [HV H7] with public signup on; with signup **off**: PROBE FIRST. `/project-user/signup` with signup off → `403 PUBLIC_SIGNUP_ERROR` [E2E] |
+| Function security rule "authentication required" | IaC `SecurityRules` (greenfield) or console | Probe P-401 credential-free: `curl -s -o /dev/null -w '%{http_code}' <function-url>` → `401 NO_ACCESS` (`is_authenticated` is the only readable signal) | No CLI/MCP command [§3a CA-15]; `catalyst deploy` leaves `optional` unless the rule arrived through the import |
+| Users beyond the first admin | Same as first admin, after the user approves the list | as above | Dev allows 25 users [DOC] (observed limit 1000 [E2E]: PROBE FIRST) |
 
 ## Steps
 

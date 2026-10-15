@@ -29,7 +29,6 @@
     "files_or_bulk_load": ["Create_Bucket", "Get_All_Buckets", "Head_Bucket", "Create_Upload_Signature"],
     "custom_apis": ["Configure_API_Gateway_Route", "List_All_API_route", "Get_API_route"],
     "sendmail": ["Create_Email_Configuration", "List_All_Emails_Configuration"],
-    "auth_config_update": ["Update_Authentication_Configuration"],
     "user_invites": ["Add_User"]
   },
   "probeFirst": {

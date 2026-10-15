@@ -127,3 +127,14 @@ export type { DataParityReport, ParityTableReport } from './parity.js';
 export { DELTA_SOURCES, deltaSource, readDeltaCheckpoint, readStateFile, rollbackExportCli, stateFilePath, syncDeltaCli } from './delta-cli.js';
 export { parseStoreRows, readStoreRows, rollbackExport, ROLLBACK_MANIFEST_FILE, ROLLBACK_MANIFEST_VERSION } from './rollback.js';
 export type { RollbackExport, RollbackFile } from './rollback.js';
+export {
+  ALL_REGISTRY_TOOLS,
+  CAPABILITY_MAPPINGS,
+  MCP_TOOL_PREFIX as REGISTRY_MCP_TOOL_PREFIX,
+  VERIFIED_MCP_TOOL_NAMES,
+  VERIFIED_MCP_TOOL_REGISTRY,
+  citationForTool,
+  fallbackForTool,
+  isVerifiedMcpTool,
+} from './mcp-registry.js';
+export type { CapabilityMapping, McpRegistryEntry } from './mcp-registry.js';

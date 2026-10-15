@@ -31,6 +31,7 @@ import { invalidTokenOutput, readWithNewerToken } from '../../deploy/src/retry.j
 import { FIDELITY_JSON, LOADER_REPORT, hasReportJson } from '../../deploy/src/csv.js';
 import { localRefreshAllowed } from '../../deploy/src/rest.js';
 import { importingAgeMs, importingAgeState, isStuckImporting, stuckImportGuidedStep, STUCK_IMPORT_MAX_AGE_HOURS, unknownImportAgeGuidedStep, type ListedProject } from '../../deploy/src/stuck-import.js';
+import { fallbackForTool } from '../../deploy/src/mcp-registry.js';
 
 export interface DoctorContext {
   io: DoctorIo;
@@ -943,7 +944,13 @@ function checkB(ctx: DoctorContext, evidence: McpEvidence, cliProjects: string[]
   if (missing.base.length || missing.plan.length) {
     const parts: string[] = [];
     if (missing.base.length) parts.push(`needed by doctor (${missing.base.length}): ${missing.base.join(', ')}`);
-    if (missing.plan.length) parts.push(`needed by this app's plan (${missing.plan.length}): ${missing.plan.join(', ')}`);
+    if (missing.plan.length) {
+      const planItems = missing.plan.map((name) => {
+        const fallback = fallbackForTool(name);
+        return fallback ? `${name} (fallback: ${fallback})` : name;
+      });
+      parts.push(`needed by this app's plan (${missing.plan.length}): ${planItems.join(', ')}`);
+    }
     out.push(fail('D-B5', `the Catalyst MCP server is missing tools — ${parts.join('; ')}`, MCP_TOOLS_GUIDANCE));
   } else {
     const baseCount = REQUIRED_MCP_TOOLS.base.length;
