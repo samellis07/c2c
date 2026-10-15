@@ -39,6 +39,24 @@ node scripts/vendor-plugin.mjs
 
 Installing never edits your MCP configuration; paste the snippet for your host yourself (see `templates/mcp-snippets.md`).
 
+## Quickstart (offline)
+
+No Zoho sign-in and no browser are needed here: this runs the read-only checks and the offline plan on the sample app in `fixtures/redistributable/`. From a fresh clone:
+
+```sh
+git clone https://github.com/samellis07/c2c.git
+cd c2c
+npm ci
+npm run build
+node scripts/vendor-plugin.mjs   # builds plugin/vendor/c2c, the converter plugin/bin/c2c runs
+plugin/bin/c2c doctor            # red (exit 1) until the Catalyst accounts are signed in; analyze and plan still run
+plugin/bin/c2c precheck fixtures/redistributable/library-application-system/library_application.ds
+plugin/bin/c2c analyze fixtures/redistributable/library-application-system/library_application.ds
+plugin/bin/c2c plan fixtures/redistributable/library-application-system/library_application.ds --dc us --out c2c-out/library
+```
+
+`plan` writes `c2c-out/library/plan.md` (the migration plan), `plan.json` and `provision/`. `--dc` only records the data centre for a later live deploy; nothing is contacted. To plan your own app, pass your Creator `.ds` export instead of the sample path. Anything past the plan needs the prerequisites above (the Catalyst plugin skills and MCP connector, the Catalyst CLI) and a green `doctor`.
+
 ## Flow
 
 `/c2c:doctor` → `/c2c:analyze` → `/c2c:plan` → `/c2c:migrate` (provision → deploy → data) → `/c2c:verify` (probes, parity, cutover). `/c2c:rollback` and `/c2c:troubleshoot` help when something goes wrong. See the [command map](C2C.md#4-command-map) for the mapping of command groups, slash commands, skills, CLI verbs, and human steps.
