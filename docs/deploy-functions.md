@@ -16,7 +16,7 @@ References (public docs; this page does not fetch them):
 ```
 catalyst.json                  functions: { targets: ["c2c_api"], source: "functions" }, slate: {...}
 functions/c2c_api/
-  catalyst-config.json         deployment { name, stack node20, type advancedio, env_variables { kept console env + C2C_DEPLOY_MODE } }, execution { main index.js }
+  catalyst-config.json         deployment { name, stack node20, type advancedio, env_variables { kept console env + C2C_DEPLOY_MODE; secret names hold "" } }, execution { main index.js }
   package.json                 exact pins: zcatalyst-sdk-node 3.4.0
   index.js                     module.exports(req, res): the Advanced I/O entry (CommonJS)
   routes.json                  "POST /forms/<Form>/submit" -> handler module
@@ -57,11 +57,30 @@ writes `dry-run`.
 
 - `--function-env <file>`: the function's current console environment as a JSON
   object of name -> string. Keep the file outside the repo; values may be secrets.
-  Every key goes into `env_variables` (sorted), and only key names are ever
-  printed. `C2C_DEPLOY_MODE` is always this deploy's mode.
+  Non-secret values go into `env_variables` (sorted), and only key names are
+  ever printed. `C2C_DEPLOY_MODE` is always this deploy's mode.
 - `--function-env new`: a first deploy, with nothing to keep.
 
-The written `--out` dir then holds those values in `catalyst-config.json`.
+**Secret values never enter the generated tree.** The generated project is the
+customer's and is often committed, so a `--function-env` name matching
+`token`, `secret`, `key`, `password` or `credential` (case-insensitive) is
+written to `env_variables` as a name-only entry (`"NAME": ""`) — `catalyst
+deploy` keeps the variable without learning its value. Right after the
+functions deploy succeeds, `c2c deploy --confirm` sets the real values on the
+live function over the Catalyst env API (`POST
+/baas/v1/project/<project-id>/function/<id>/configuration`, which replaces the
+whole set — the live variables are re-read and merged first; see
+`plugin/references/facts/functions.md`, "Manage env vars as one replace-only
+set", and `packages/deploy/src/function-env.ts`). If that write fails the run
+exits non-zero and names the console/MCP env-var route as the manual fallback.
+A plan-only run writes the same name-only placeholders; whoever deploys that
+tree by hand must set the secret values in the console or through the MCP env
+tools before the function runs.
+
+**Migration:** earlier versions wrote every `--function-env` value verbatim
+into `catalyst-config.json`. If a generated `--out` tree with real secret
+values was committed anywhere, rotate those values and remove them from the
+committed file — the next deploy writes only their names.
 
 ## Outbound invokeurl (`outboundHosts`)
 

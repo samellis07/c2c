@@ -85,6 +85,30 @@ const NUMBER_FIELDS: readonly string[] = ['number', 'auto-number'];
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
+ * A --function-env name that marks a secret: token/secret/key/password/credential
+ * anywhere in the name, case-insensitive. Secret VALUES are never written into
+ * the generated tree — the generated project is the customer's and is often
+ * committed — so env_variables keeps the name with an empty value and
+ * `c2c deploy --confirm` sets the real value on the live function over the
+ * Catalyst env API (see function-env.ts). Over-matching is deliberate: a
+ * non-secret kept name-only is a milder failure than a leaked secret value.
+ */
+const SECRET_NAME = /token|secret|key|password|credential/i;
+
+export function isSecretEnvName(name: string): boolean {
+  return SECRET_NAME.test(name);
+}
+
+/** The subset of an env map whose names mark secrets, keys sorted. */
+export function secretEnvValues(env: Readonly<Record<string, string>> = {}): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of Object.keys(env).sort(byPath)) {
+    if (isSecretEnvName(key)) out[key] = env[key] as string;
+  }
+  return out;
+}
+
+/**
  * The adapter type of one column: its Data Store type, except that an Int column
  * (subform row order) and a BigInt column holding a Creator number or auto-number
  * are `Number`. ZCQL returns BigInt and Int as text, so the adapter reads a
@@ -123,7 +147,9 @@ export function envVariables(mode: 'live' | 'dry-run', env: Readonly<Record<stri
   for (const [key, value] of Object.entries(env).sort(([a], [b]) => byPath(a, b))) {
     if (!ENV_KEY.test(key)) throw new Error(`function env: ${JSON.stringify(key)} is not an environment variable name`);
     if (typeof value !== 'string') throw new Error(`function env: ${key} must be a string`);
-    merged[key] = value;
+    // Secret names are kept so `catalyst deploy` neither erases the variable nor
+    // gains the value: the real value is POSTed to the function at deploy time.
+    merged[key] = isSecretEnvName(key) ? '' : value;
   }
   merged.C2C_DEPLOY_MODE = mode;
   const ordered: Record<string, string> = {};

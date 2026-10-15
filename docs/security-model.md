@@ -405,6 +405,10 @@ path):
   platform error text to the caller.
 - Secret sprawl: credentials live in server env / console config, never in
   the client bundle or logs; log lines are structured and value-free.
+  Generated files hold no secret values either: a `--function-env` name that
+  marks a secret (token/secret/key/password/credential) is written to
+  `env_variables` name-only, and `c2c deploy --confirm` sets the value on the
+  live function over the env API (`docs/deploy-functions.md`, "Mode").
 
 What it explicitly does **not** defend against:
 

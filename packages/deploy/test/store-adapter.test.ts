@@ -364,7 +364,8 @@ test('env_variables carry the kept console environment, sorted, and C2C_DEPLOY_M
   const env = { C2C_OWNER_APPROVAL_TOKEN: 'tok', C2C_MAIL_FROM: 'ops@example.test', TABLE_ID: '1000000000171021' };
   const { files } = deployFiles(app, guardFor(app), false, { mode: 'live', functionEnv: env });
   const config = JSON.parse(text(files, 'functions/c2c_api/catalyst-config.json')) as { deployment: { env_variables: Record<string, string> } };
-  assert.deepEqual(config.deployment.env_variables, { C2C_DEPLOY_MODE: 'live', C2C_MAIL_FROM: 'ops@example.test', C2C_OWNER_APPROVAL_TOKEN: 'tok', TABLE_ID: '1000000000171021' });
+  // Secret names are kept with an empty value; non-secret values stay inline.
+  assert.deepEqual(config.deployment.env_variables, { C2C_DEPLOY_MODE: 'live', C2C_MAIL_FROM: 'ops@example.test', C2C_OWNER_APPROVAL_TOKEN: '', TABLE_ID: '1000000000171021' });
   for (const key of Object.keys(env)) assert.ok(key in config.deployment.env_variables, `${key} would be erased`);
   // Input order does not change the bytes.
   const reversed = deployFiles(app, guardFor(app), false, { mode: 'live', functionEnv: Object.fromEntries(Object.entries(env).reverse()) }).files;
