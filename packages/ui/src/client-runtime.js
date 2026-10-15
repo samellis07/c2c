@@ -656,6 +656,15 @@ export function submitNotice(result) {
   return outcome.dryRun ? `${base} Preview: nothing was saved yet.` : base;
 }
 
+/** Formats a mail outcome note into user-facing non-blocking notice copy. */
+export function mailNoticeText(item) {
+  if (!item || typeof item !== 'object') return '';
+  const status = typeof item.status === 'string' && item.status ? item.status : 'outcome';
+  const reason = typeof item.reason === 'string' && item.reason ? `: ${item.reason}` : '';
+  const logFail = item.logged === false && item.status !== 'skipped' ? ' (delivery log failed)' : '';
+  return `Mail ${status}${reason}${logFail}`;
+}
+
 /** Append a success or failure toast to the live region (or the body without one). */
 export function showToast(doc, kind, text) {
   const documentRef = doc || (typeof document !== 'undefined' ? document : null);
@@ -1729,6 +1738,21 @@ function fidelityNote(root, text) {
   const p = doc.createElement('p');
   p.className = 'fidelity-note';
   p.textContent = `Not implemented: ${String(text)}`;
+  host.appendChild(p);
+}
+
+/** One `.fidelity-note` line for a non-blocking form outcome notice, under the form banner. */
+function formNotice(root, text) {
+  const banner = root && root.querySelector ? root.querySelector('[data-banner]') : null;
+  const host = banner && banner.parentElement ? banner.parentElement : root;
+  if (!host || typeof host.appendChild !== 'function') return;
+  const doc = host.ownerDocument || (typeof document !== 'undefined' ? document : null);
+  if (!doc) return;
+  const p = doc.createElement('p');
+  p.className = 'fidelity-note';
+  p.setAttribute('data-mail-notice', '');
+  p.setAttribute('data-notice', '');
+  p.textContent = String(text);
   host.appendChild(p);
 }
 
@@ -5247,6 +5271,7 @@ export function boot(appModel, doc) {
     }
     formEl.addEventListener('submit', async (event) => {
       event.preventDefault();
+      for (const old of formEl.querySelectorAll('p[data-mail-notice]')) old.remove();
       const values = readValues(formEl);
       const errors = validateForm(form, values);
       showErrors(formEl, form, errors);
@@ -5292,10 +5317,17 @@ export function boot(appModel, doc) {
         return;
       }
       // The success body is still unread here, so one read serves the toast mode.
-      const answerLive = (await readJson(res)).dryRun === false;
+      const answer = await readJson(res);
+      const answerLive = answer && answer.dryRun === false;
       const successNotes = await run('success');
       if (!successNotes.includes('success')) {
         if (banner) banner.textContent = form.successMessage || DEFAULT_SUCCESS_BANNER;
+      }
+      if (answer && Array.isArray(answer.mail)) {
+        for (const item of answer.mail) {
+          const text = mailNoticeText(item);
+          if (text) formNotice(formEl, text);
+        }
       }
       if (formDoc) {
         const shown = banner && banner.textContent ? banner.textContent : '';

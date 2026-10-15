@@ -1271,9 +1271,16 @@ function validMapKeys(keys: readonly unknown[]): unknown[] {
   return out;
 }
 
+export interface MailOutcome {
+  status: string;
+  reason: string;
+  logged?: boolean;
+}
+
 export interface Runtime {
   dryRun: boolean;
   transcript: TranscriptEntry[];
+  mail: MailOutcome[];
   shim: Shim;
   context(partial?: ContextInput): ShimContext;
 }
@@ -1488,6 +1495,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
   }
   const seed = typedSeed(options.seed, options.fieldValues);
   const transcript: TranscriptEntry[] = [];
+  const mailOutcomes: MailOutcome[] = [];
   const note = (entry: TranscriptEntry) => {
     transcript.push(entry);
   };
@@ -3419,7 +3427,22 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         note({ op: 'sendmail', message: sent, performed: false, dryRun });
         if (!dryRun && options.mail) {
           if (!options.mailGuarded) guardMessage('sendmail', zohoAdapters.mailDestinations(sent));
-          return options.mail(sent);
+          const outcome = (await options.mail(sent)) as Record<string, unknown> | null | undefined;
+          if (outcome && typeof outcome === 'object') {
+            const status = typeof outcome.status === 'string' ? outcome.status : outcome.performed ? 'sent' : 'refused';
+            const reason = typeof outcome.reason === 'string' ? outcome.reason : '';
+            const entry: MailOutcome = {
+              status,
+              reason,
+              ...(outcome.logged !== undefined ? { logged: Boolean(outcome.logged) } : {}),
+            };
+            mailOutcomes.push(entry);
+          }
+          return outcome;
+        }
+        if (dryRun) {
+          mailOutcomes.push({ status: 'skipped', reason: 'dry run' });
+          return { dryRun: true, performed: false };
         }
         refuseLive('sendmail');
         return { dryRun: true, performed: false };
@@ -3911,6 +3934,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
   return {
     dryRun,
     transcript,
+    mail: mailOutcomes,
     shim,
     context(partial = {}) {
       const override = nonemptyZone(partial.appTimeZone) ?? configuredZone;

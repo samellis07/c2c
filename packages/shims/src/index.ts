@@ -129,6 +129,7 @@ export {
   rangeSlotRequest,
   type PrefetchResult,
   type SlotRowsResult,
+  type MailOutcome,
   type Query,
   type RowMeta,
   type Runtime,

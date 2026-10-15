@@ -43,6 +43,16 @@ interface WriteReply {
   error?: string;
   record?: Record<string, unknown>;
   reference?: { key?: string };
+  mail?: Array<{ status: string; reason: string; logged?: boolean }>;
+}
+
+/** Formats a mail outcome note into user-facing non-blocking notice copy. */
+export function mailNoticeText(item: { status?: string; reason?: string; logged?: boolean }): string {
+  if (!item || typeof item !== 'object') return '';
+  const status = typeof item.status === 'string' && item.status ? item.status : 'outcome';
+  const reason = typeof item.reason === 'string' && item.reason ? `: ${item.reason}` : '';
+  const logFail = item.logged === false && item.status !== 'skipped' ? ' (delivery log failed)' : '';
+  return `Mail ${status}${reason}${logFail}`;
 }
 
 /** `Sub[2].Col` → the handler field `Sub.Col` and the row it fired on. */
@@ -356,6 +366,7 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
       return;
     }
     setBusy(true);
+    setNotes([]);
     try {
       for (const [field, file] of files) {
         if (!field.uploadEndpoint) continue;
@@ -398,6 +409,12 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
           setBanner({ tone: 'success', title: dryRun ? `${done} Dry run: nothing was saved.` : done });
         }
         if (mode === 'add' && !dryRun) formEl.reset();
+        const mailNotes = Array.isArray(reply.body?.mail)
+          ? reply.body.mail.map(mailNoticeText).filter(Boolean)
+          : [];
+        if (mailNotes.length) {
+          setNotes((prev) => [...prev, ...mailNotes]);
+        }
       }
       await custom?.afterSubmit?.({ ok: reply.ok, dryRun, body: reply.body }, ctx);
     } catch (error) {
