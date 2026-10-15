@@ -93,7 +93,7 @@ function bundle(formHtml = FORM): UiBundle {
 export function boot() {
   function render() {
     document.body.innerHTML = '<a href="#main">Skip</a><nav id="nav" aria-label="Main"><a href="#/form/W">Widget</a></nav>' +
-      '<main id="main"><h1>Widget</h1><form data-form="W">${formHtml.replace(/'/g, "\\'").replace(/\n/g, '')}</form></main>';
+      '<main id="main"><h1>Widget</h1><form data-form="W">${formHtml.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '')}</form></main>';
   }
   window.addEventListener("hashchange", render);
   render();
