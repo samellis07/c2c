@@ -497,9 +497,41 @@ function inlinePageEmbeds(template: string, app: App, page: string): { template:
   return { template: out + template.slice(at), includes };
 }
 
-const ZC_COMPONENT = /\belname[ \t\n\f\r]*=[ \t\n\f\r]*["']?zc-component\b/i;
-const ZC_LINK = /\b(form|view|report|page)linkname[ \t\n\f\r]*=[ \t\n\f\r]*["']?([A-Za-z_]\w*)/i;
-const ZC_PARAMS = /\bparams[ \t\n\f\r]*=/i;
+const ZC_COMPONENT = /\belname[ \t\n\f\r]*=[ \t\n\f\r]*(["'])zc-component\1(?:[ \t\n\f\r]|$)/i;
+const ZC_LINK = /^(form|view|report|page)linkname$/i;
+const ZC_PARAMS = /^params$/i;
+const SAFE_COMPONENT_NAME = /^[A-Za-z_]\w*$/;
+
+/** Parse a whole component tag's attributes; malformed quoting never proves an embed target. */
+function componentAttributes(tag: string): Map<string, string> | null {
+  const attrs = new Map<string, string>();
+  let at = tag.indexOf(' ') + 1;
+  while (at > 0 && at < tag.length) {
+    while (/[\t\n\f\r ]/.test(tag[at] ?? '')) at++;
+    if (tag[at] === '>' || (tag[at] === '/' && tag[at + 1] === '>')) return attrs;
+    const nameStart = at;
+    while (/[A-Za-z0-9_:.-]/.test(tag[at] ?? '')) at++;
+    if (at === nameStart) return null;
+    const name = tag.slice(nameStart, at).toLowerCase();
+    while (/[\t\n\f\r ]/.test(tag[at] ?? '')) at++;
+    if (tag[at] !== '=') return null;
+    at++;
+    while (/[\t\n\f\r ]/.test(tag[at] ?? '')) at++;
+    const quote = tag[at];
+    if (quote !== "'" && quote !== '"') return null;
+    at++;
+    const valueStart = at;
+    while (at < tag.length && tag[at] !== quote) {
+      if (tag[at] === '<' || tag[at] === '>') return null;
+      at++;
+    }
+    if (at >= tag.length) return null;
+    if (attrs.has(name)) return null;
+    attrs.set(name, tag.slice(valueStart, at));
+    at++;
+  }
+  return null;
+}
 
 interface EmbeddedComponent { kind: 'form' | 'report'; name: string }
 
@@ -511,12 +543,16 @@ function embeddedComponents(template: string, app: App): { template: string; com
   const components: EmbeddedComponent[] = [];
   const todos: string[] = [];
   const rewritten = template.replace(/<div\b[^>]*>/gi, (tag) => {
-    if (!ZC_COMPONENT.test(tag)) return tag;
-    const link = ZC_LINK.exec(tag);
-    const kind = link ? (link[1].toLowerCase() === 'view' || link[1].toLowerCase() === 'report' ? 'report' : link[1].toLowerCase()) : '';
-    const name = link?.[2] ?? '';
-    const known = kind === 'form' ? app.forms.some((form) => form.name === name) : kind === 'report' ? app.reports.some((report) => report.name === name) : false;
-    if (known && !ZC_PARAMS.test(tag)) {
+    if (!/\belname\s*=/i.test(tag)) return tag;
+    const attrs = componentAttributes(tag);
+    const componentAttr = attrs?.get('elname');
+    if (!attrs || !componentAttr || componentAttr.toLowerCase() !== 'zc-component') return tag;
+    const linkEntry = [...attrs.entries()].find(([key]) => ZC_LINK.test(key));
+    const linkKind = linkEntry?.[0].replace(/linkname$/i, '').toLowerCase() ?? '';
+    const kind = linkKind === 'view' || linkKind === 'report' ? 'report' : linkKind;
+    const name = linkEntry?.[1] ?? '';
+    const known = SAFE_COMPONENT_NAME.test(name) && (kind === 'form' ? app.forms.some((form) => form.name === name) : kind === 'report' ? app.reports.some((report) => report.name === name) : false);
+    if (known && ![...attrs.keys()].some((key) => ZC_PARAMS.test(key))) {
       const component = { kind: kind as 'form' | 'report', name };
       components.push(component);
       return tag.replace(/>$/, ` data-zml="component-${component.kind}:${component.name}">`);

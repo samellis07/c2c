@@ -20,6 +20,7 @@ import { after, test, type TestContext } from 'node:test';
 import ts from 'typescript';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { generateUi } from '../../ui/src/generate.js';
+import { buildUi } from '../../ui/src/index.js';
 import { TEMPLATE_DIR, reactAppSpec } from '../src/index.js';
 import type { AppSpec, NavSection } from '../template/lib/c2c-ui/types.js';
 
@@ -273,6 +274,54 @@ test('direct navigation to a hidden section paints the denied state and fires no
   assert.equal(denied(m.main()), null, 'a visible section still renders');
   assert.ok(m.main().querySelector('[data-mounted]'), 'the visible screen mounted');
   assert.ok(mounts >= 1, 'the visible screen rendered');
+});
+
+
+test('a denied embedded report renders no rows or report query', { skip: SKIP }, async (t) => {
+  const source = `application "Demo"
+{
+	section Main
+	{
+		form Intake
+		{
+			Name
+			(
+				type = text
+			)
+		}
+		report All_Rows
+		{
+			show all rows from Intake
+			(
+				Name
+			)
+		}
+		page Outer
+		{
+			Content = "<zml><layout><row><column width='100%'><dsp id='snippet'><![CDATA[htmlpage Outer1()\\ncontent\\n<%{ %><div elName='zc-component' viewLinkName='All_Rows'></div><% }%>]]></dsp></column></row></layout></zml>"
+		}
+	}
+	section Secret
+	{
+		hide = true
+		report All_Rows
+		{
+		}
+	}
+}`;
+  const ir = app(source);
+  const { model } = buildUi(ir);
+  const page = pageSpecs(ir, model).Outer;
+  assert.ok(page.todos.some((todo) => /server-side script/.test(todo)), page.todos.join('\n'));
+  assert.equal(page.elements.some((element) => element.kind === 'report' && element.report === 'All_Rows'), false);
+
+  const m = await mount(t);
+  m.view.location.hash = '#/report/All_Rows';
+  m.boot(reactAppSpec(ir, model), {});
+  await m.settle();
+  assert.equal(denied(m.main())?.getAttribute('data-access-status'), '403');
+  assert.equal(m.main().querySelector('[data-rows]'), null);
+  assert.deepEqual(m.calls, [], 'React denies the hidden report before any rows request');
 });
 
 test('a name shared by a hidden and a visible section stays reachable', { skip: SKIP }, async (t) => {
