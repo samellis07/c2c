@@ -12,7 +12,8 @@
  *      stops before its own time limit; if work is left it submits itself
  *      again with the same work id, so the next Job resumes from the cursor;
  *   4. GET on the poll path answers the status row: queued, running (with
- *      progress), done (with the result) or failed (with the error).
+ *      progress), done (with the result) or failed (with a caller-safe error;
+ *      the thrown text stays in the row's `detail`, never in the reply).
  *
  * Submitting is idempotent per work id: a retried request that finds a
  * queued, running or done row answers 202 again without a second Job.
@@ -53,7 +54,10 @@ export interface WorkStatus {
   cursor?: string;
   progress?: { done: number; total?: number };
   result?: unknown;
+  /** Caller-facing failure text: c2c's own wording, never a thrown message. */
   error?: string;
+  /** The thrown message behind a failure, for operators. The poll reply never carries it. */
+  detail?: string;
   /** Jobs submitted for this work so far. */
   jobs: number;
   /** When the work was last queued for a Job (ms epoch); a stale queued row is resubmitted. */
@@ -78,6 +82,21 @@ export interface Reply {
 
 export function pollPath(workId: string): string {
   return `/c2c/work/${encodeURIComponent(workId)}`;
+}
+
+/** Codes whose message is written for the caller (Creator's Deluge text, access and connection refusals). */
+const REPORTABLE = new Set(['DELUGE_RUNTIME', 'DELUGE_CONVERSION', 'RECORD_ACCESS_DENIED', 'ZOHO_CONNECTION_REFUSED']);
+
+/**
+ * Record a failure: `error` is what the poll reply shows, `detail` keeps the
+ * thrown text (a platform error body, query text, a path) server-side.
+ */
+function fail(status: WorkStatus, err: unknown, summary: string): void {
+  status.state = 'failed';
+  const code = err && typeof err === 'object' ? (err as { code?: unknown }).code : undefined;
+  const message = err instanceof Error ? err.message : String(err);
+  status.error = typeof code === 'string' && REPORTABLE.has(code) && message ? message : summary;
+  status.detail = message;
 }
 
 function accepted(workId: string, status: WorkStatus): Reply {
@@ -122,8 +141,7 @@ export async function runOrDefer(opts: {
   } catch (err) {
     // A failed submit must not leave the work queued: mark it failed so the
     // next request resubmits instead of answering 202 for a dead work id.
-    status.state = 'failed';
-    status.error = `the Job could not be submitted: ${err instanceof Error ? err.message : String(err)}`;
+    fail(status, err, 'the Job could not be submitted');
     await opts.statuses.put(opts.workId, status);
     throw err;
   }
@@ -134,7 +152,7 @@ export async function runOrDefer(opts: {
 export async function pollWork(statuses: WorkStatusStore, workId: string): Promise<Reply> {
   const status = await statuses.get(workId);
   if (!status) return { status: 404, body: { work_id: workId, error: 'no such work' } };
-  const { cursor: _cursor, ...visible } = status;
+  const { cursor: _cursor, detail: _detail, ...visible } = status;
   return { status: 200, body: { work_id: workId, ...visible } };
 }
 
@@ -185,8 +203,7 @@ export async function runWorkSlice(opts: {
       await opts.statuses.put(opts.workId, status);
     }
   } catch (err) {
-    status.state = 'failed';
-    status.error = err instanceof Error ? err.message : String(err);
+    fail(status, err, 'the work failed');
     await opts.statuses.put(opts.workId, status);
     return status;
   }
@@ -203,8 +220,7 @@ export async function runWorkSlice(opts: {
   try {
     await opts.jobs.submit({ name: opts.jobName, params: { ...opts.params, work_id: opts.workId } });
   } catch (err) {
-    status.state = 'failed';
-    status.error = `the follow-up Job could not be submitted: ${err instanceof Error ? err.message : String(err)}`;
+    fail(status, err, 'the follow-up Job could not be submitted');
     await opts.statuses.put(opts.workId, status);
   }
   return status;

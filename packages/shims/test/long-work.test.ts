@@ -115,7 +115,8 @@ test('a failing step marks the work failed; a new request may then start it agai
     jobs,
   });
   assert.equal(failed.state, 'failed');
-  assert.equal(failed.error, 'store refused the write');
+  assert.equal(failed.error, 'the work failed');
+  assert.equal(failed.detail, 'store refused the write');
   const retry = await runOrDefer({ workId: 'w4', estimate: 5000, runInline: async () => 0, jobName: 'c2c_jobs', jobs, statuses });
   assert.equal(retry.status, 202);
   assert.equal(jobs.submitted.length, 2);
@@ -133,7 +134,8 @@ test('a submit failure marks the work failed and a retried request resubmits it'
   );
   const stored = statuses.rows.get('w6')!;
   assert.equal(stored.state, 'failed', 'a failed submit does not leave the work queued');
-  assert.match(stored.error ?? '', /job pool is full/);
+  assert.equal(stored.error, 'the Job could not be submitted');
+  assert.match(stored.detail ?? '', /job pool is full/);
   jobs.submit = async (job: { name: string; params: Record<string, string> }) => (jobs.submitted.push(job), { jobId: 'j2' });
   const retry = await runOrDefer({ workId: 'w6', estimate: 5000, runInline: async () => 0, jobName: 'c2c_jobs', jobs, statuses });
   assert.equal(retry.status, 202);
@@ -181,9 +183,11 @@ test('a slice-end resubmit that throws marks the work failed instead of queued f
     now: () => clock,
   });
   assert.equal(status.state, 'failed');
-  assert.match(status.error ?? '', /queue unavailable/);
+  assert.equal(status.error, 'the follow-up Job could not be submitted');
+  assert.match(status.detail ?? '', /queue unavailable/);
   const polled = (await pollWork(statuses, 'w8')).body as Record<string, unknown>;
   assert.equal(polled.state, 'failed');
+  assert.equal(Object.hasOwn(polled, 'detail'), false);
 });
 
 test('work that never finishes is failed after maxJobs instead of resubmitting forever', async () => {
@@ -207,4 +211,27 @@ test('work that never finishes is failed after maxJobs instead of resubmitting f
   }
   assert.equal(status?.state, 'failed');
   assert.match(status?.error ?? '', /did not finish in 3 job/);
+});
+
+test('a failed step never puts the thrown text in the poll reply', async () => {
+  const jobs = queue();
+  const statuses = memoryStatuses();
+  await runOrDefer({ workId: 'w11', estimate: 5000, runInline: async () => 0, jobName: 'c2c_jobs', jobs, statuses });
+  const raw = '{"code":"INVALID_INPUT","message":"SELECT * FROM Sample_Item WHERE Owner = \'other@example.test\'"}\n    at step (/srv/app/functions/c2c_jobs/index.js:12:5)';
+  await runWorkSlice({ workId: 'w11', statuses, step: async () => Promise.reject(new Error(raw)), jobName: 'c2c_jobs', jobs });
+  const polled = await pollWork(statuses, 'w11');
+  assert.equal(polled.status, 200);
+  assert.deepEqual(polled.body, { work_id: 'w11', state: 'failed', progress: { done: 0, total: 5000 }, error: 'the work failed', jobs: 1, queuedAt: (polled.body as { queuedAt: number }).queuedAt });
+  assert.doesNotMatch(JSON.stringify(polled.body), /SELECT|other@example|\/srv\/|index\.js|INVALID_INPUT/);
+  assert.equal(statuses.rows.get('w11')?.detail, raw, 'the thrown text stays in the status row for operators');
+});
+
+test('a Deluge runtime failure in a step keeps its Creator text in the poll reply', async () => {
+  const jobs = queue();
+  const statuses = memoryStatuses();
+  await runOrDefer({ workId: 'w12', estimate: 5000, runInline: async () => 0, jobName: 'c2c_jobs', jobs, statuses });
+  const deluge = Object.assign(new Error('Given index 4 is greater than the list size'), { code: 'DELUGE_RUNTIME' });
+  await runWorkSlice({ workId: 'w12', statuses, step: async () => Promise.reject(deluge), jobName: 'c2c_jobs', jobs });
+  const polled = (await pollWork(statuses, 'w12')).body as Record<string, unknown>;
+  assert.equal(polled.error, 'Given index 4 is greater than the list size');
 });

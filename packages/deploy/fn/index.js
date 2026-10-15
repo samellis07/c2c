@@ -130,6 +130,29 @@ function send(res, status, body, err) {
   res.end(JSON.stringify(body, jsonReplacer));
 }
 
+/**
+ * Text that would expose server internals: a stack frame, a file path, query
+ * text, a credential, or a raw platform error body. Such a message is never
+ * sent; the caller gets the generic text and the server log keeps the rest.
+ */
+const INTERNAL_TEXT = [
+  /request failed|kaboom|\bstack\b|\n\s*at\s|\bat\s+(?:async\s+)?\S+\s+\((?:file:|node:|\/|[A-Za-z]:\\|<anonymous>)|\bat\s+(?:file:|\/|[A-Za-z]:\\)/i,
+  /node_modules|file:\/\/|(?:^|[\s"'(=:])\/(?:Users|home|private|var|tmp|opt|srv|usr|etc|app|root|catalyst)\/|[A-Za-z]:\\|\.[cm]?js:\d+/i,
+  /\bSELECT\b[\s\S]*\bFROM\b|\bINSERT INTO\b|\bDELETE FROM\b|\bUPDATE\s+\w+\s+SET\b|\bWHERE\s+\w+\s*(?:=|<|>|!=|LIKE\b|IS\b|IN\b)/,
+  /\bzcql\b/i,
+  /zoho-oauthtoken|\bbearer\s+\S|\b(?:access|refresh)_token\b|\b(?:authorization|cookie|set-cookie)\s*[:=]|\b(?=[\w.-]*\d)(?=[\w.-]*[A-Za-z])[\w.-]{32,}\b/i,
+  /^\s*[[{]|"(?:code|error_code|errorCode|status_code)"\s*:/,
+];
+
+/** A message the caller may see, or the generic text when it would leak internals. */
+function callerMessage(message) {
+  const text = typeof message === 'string' ? message : '';
+  return text && !INTERNAL_TEXT.some((pattern) => pattern.test(text)) ? text : 'Request failed';
+}
+
+/** Body keys that only ever carry server details (debug transcripts hold query text and record values). */
+const INTERNAL_KEYS = ['error', 'stack', 'status', 'transcript', 'cause', 'query', 'sql', 'zcql', 'criteria', 'detail'];
+
 /** Every failed request uses {code,message}; caller input and runtime details stay private. */
 function errorReply(res, status, message, extra = {}, err) {
   const code = status === 400 ? 'BAD_REQUEST'
@@ -142,7 +165,7 @@ function errorReply(res, status, message, extra = {}, err) {
                 : status === 409 ? 'CONFLICT'
                   : status === 429 ? 'TOO_MANY_REQUESTS'
                     : status >= 500 ? 'INTERNAL_ERROR' : 'REQUEST_FAILED';
-  send(res, status, { code, message, ...extra }, err);
+  send(res, status, { code, message: callerMessage(message), ...extra }, err);
 }
 
 function normalizeErrorBody(body, responseStatus) {
@@ -160,10 +183,8 @@ function normalizeErrorBody(body, responseStatus) {
   if (typeof out.code !== 'string') {
     out.code = status === 401 ? 'UNAUTHENTICATED' : status === 403 ? 'FORBIDDEN' : status === 404 ? 'NOT_FOUND' : status === 400 ? 'BAD_REQUEST' : status === 422 ? 'UNPROCESSABLE_ENTITY' : status >= 500 ? 'INTERNAL_ERROR' : 'REQUEST_FAILED';
   }
-  if (typeof out.message !== 'string') out.message = oldMessage && !/request failed|kaboom|stack|node_modules|\/Users\/|\/private\//i.test(oldMessage) ? oldMessage : status >= 500 ? 'Request failed' : 'Request failed';
-  delete out.error;
-  delete out.stack;
-  delete out.status;
+  out.message = callerMessage(oldMessage);
+  for (const key of INTERNAL_KEYS) delete out[key];
   return out;
 }
 
