@@ -125,7 +125,7 @@ const STYLE_FUNCTIONS = new Set([
 ]);
 
 /** Arguments of an allowed function: numbers with an optional unit, separated by spaces, commas or `/`. */
-const STYLE_ARGS = /^\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?(?:(?:\s*[,/]\s*|\s+)[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?)*\s*$/i;
+const STYLE_ARGS = /^\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|[a-z]{1,4})?(?:(?:\s*[,/]\s*|\s+)[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|[a-z]{1,4})?)*\s*$/i;
 
 /** Longest style attribute or declaration value the sanitizer scans; longer values are refused. */
 const STYLE_TEXT_MAX = 8192;
