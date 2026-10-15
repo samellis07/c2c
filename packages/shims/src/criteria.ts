@@ -48,6 +48,43 @@ export function criteriaHasTodo(criteria: Criteria): boolean {
   return false;
 }
 
+/**
+ * A dependent record query used as a report-criteria comparison value
+ * (`Form[criteria].field`, or a `thisapp` function that returns one). The
+ * report read resolves it against the datastore under the caller's scope;
+ * it is never compiled as a literal value.
+ */
+export interface RecordQuery {
+  __rows: { form: string; criteria: Criteria; path: string[] };
+}
+
+export function isRecordQuery(value: unknown): value is RecordQuery {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && typeof (value as { __rows?: unknown }).__rows === 'object';
+}
+
+/** True when any leaf value still carries a dependent record query marker. */
+export function criteriaHasRecordQuery(criteria: Criteria): boolean {
+  if (criteria.op === 'and' || criteria.op === 'or') return criteria.args.some(criteriaHasRecordQuery);
+  if (criteria.op === 'not') return criteriaHasRecordQuery(criteria.arg);
+  if (
+    criteria.op === '==' ||
+    criteria.op === '!=' ||
+    criteria.op === '<' ||
+    criteria.op === '>' ||
+    criteria.op === '<=' ||
+    criteria.op === '>=' ||
+    criteria.op === 'in' ||
+    criteria.op === 'contains' ||
+    criteria.op === 'startsWith' ||
+    criteria.op === 'endsWith'
+  ) {
+    const value = criteria.value;
+    if (isRecordQuery(value)) return true;
+    return Array.isArray(value) && value.some(isRecordQuery);
+  }
+  return false;
+}
+
 /** A report-criteria marker. Bound to concrete bounds before ZCQL or an in-memory match. */
 export interface RelativeValue {
   __rel: string;
@@ -113,6 +150,7 @@ export function sealRelativeCriteria(criteria: Criteria): Criteria {
 
 function lit(value: unknown): string {
   if (isRelativeValue(value)) throw new UntranslatedConstruct('criteria-dynamic');
+  if (isRecordQuery(value)) throw new UntranslatedConstruct('report-criteria');
   if (value === null || value === undefined) return 'null';
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   if (typeof value === 'boolean') return value ? 'true' : 'false';

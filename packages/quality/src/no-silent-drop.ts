@@ -107,7 +107,7 @@ export function collectOutputs(app: App): AuditOutputs {
     app.workflows.filter((w) => workflowKind(w) === 'schedule'),
     formLink,
     (src) => {
-      const criteria = reportCriteria(src);
+      const criteria = reportCriteria(src, app.functions);
       return criteriaHasTodo(criteria) ? null : criteria;
     },
   );

@@ -437,7 +437,7 @@ test('a report criteria Field is this week compiles and a failed criteria still 
   }
 });
 
-test('a report criteria on the application owner stays counted with owner guidance', () => {
+test('a report criteria on the application owner binds instead of staying counted', () => {
   const body = `\tsection Main
 \t{
 \t\tform Add_Item
@@ -465,9 +465,9 @@ test('a report criteria on the application owner stays counted with owner guidan
   const builtUi = buildUi(deriveIr(parse(`application "Demo"\n{\n${body}\n}\n`)));
   const owner = builtUi.model.reports.find((report) => report.name === 'Owner_Rows');
   const other = builtUi.model.reports.find((report) => report.name === 'Member_Rows');
-  assert.equal(owner?.status, 'todo');
-  assert.match(owner?.todo ?? '', /Filter not migrated/);
-  assert.match(owner?.todo ?? '', /zoho\.adminuserid \(the application owner email\)/);
+  assert.notEqual(owner?.status, 'todo');
+  const ownerSrc = sourceOf(new Map(builtUi.files.map((file) => [file.path, file.data])), 'functions/reports/owner-rows.mjs');
+  assert.match(ownerSrc, /"__bind":"adminUserId"/);
   assert.equal(other?.status, 'todo');
   assert.doesNotMatch(other?.todo ?? '', /adminuserid/);
 });

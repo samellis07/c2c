@@ -775,7 +775,7 @@ function namedFilterList(app: App, report: UiModel['reports'][number]): { label:
     const label = filter.label?.trim();
     const text = filter.criteria?.trim();
     if (!label || !text) continue;
-    const criteria = reportCriteria(text);
+    const criteria = reportCriteria(text, app.functions);
     // An untranslatable named filter ships closed, not dropped: selecting it
     // returns no rows instead of silently applying no filter.
     out.push({ label, criteria: criteriaHasTodo(criteria) ? { op: 'todo', construct: 'report-criteria' } : criteria });
@@ -788,7 +788,7 @@ function reportBaseCriteria(app: App, report: UiModel['reports'][number]): Crite
   // No criteria means all rows; a criteria that did not translate means none.
   const text = source?.criteria?.trim();
   if (!text) return { op: 'true' };
-  const parsed = reportCriteria(text);
+  const parsed = reportCriteria(text, app.functions);
   return criteriaHasTodo(parsed) ? { op: 'todo', construct: 'report-criteria' } : parsed;
 }
 
@@ -1438,6 +1438,32 @@ function alwaysRows() {
 const LOOKUP_POSITIVE_OPS = new Set(["==", "<", ">", "<=", ">=", "contains", "startsWith", "endsWith", "in", "isNull", "notNull"]);
 const LOOKUP_PARENT_PAGE_CAP = 1000;
 
+// The value a Form[criteria].field comparison reads: the first matching
+// row's field, queried under the caller's record-access scope on that form
+// (the same scope lookupParentIds applies, so a refused or failing read keeps
+// the leaf closed). undefined means no comparable value. A bare Form[criteria]
+// fetch is the row's id; a lookup cell resolves to its stored id.
+async function recordQueryValue(datastore, spec, principal) {
+  const form = spec && typeof spec.form === "string" ? spec.form : "";
+  const inner = spec && spec.criteria && typeof spec.criteria === "object" ? spec.criteria : null;
+  const path = spec && Array.isArray(spec.path) ? spec.path : [];
+  if (!form || !inner || path.some((key) => typeof key !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))) return undefined;
+  let rows;
+  try {
+    const scoped = authorizeRead(access, principal, form, inner);
+    rows = await readScoped(datastore, form, scoped.criteria, 0, 1);
+  } catch (err) {
+    return undefined;
+  }
+  const row = Array.isArray(rows) && rows[0] && typeof rows[0] === "object" ? rows[0] : null;
+  if (!row) return undefined;
+  if (!path.length) return row.ROWID ?? row.rowid ?? row.c2c_source_id;
+  let value = row;
+  for (const key of path) value = value && typeof value === "object" ? value[key] : undefined;
+  if (value && typeof value === "object" && !Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, "id")) value = value.id;
+  return value;
+}
+
 // ROWIDs of the parent rows one lookup-path leaf matches, read under the
 // caller's scope (the same lookupDisplayScope a display column uses). null
 // when the parent read is refused or fails — the leaf then matches nothing.
@@ -1479,6 +1505,16 @@ async function resolveLookupCriteria(datastore, criteria, principal) {
     return { ...criteria, args };
   }
   if (criteria.op === "not") return { ...criteria, arg: await resolveLookupCriteria(datastore, criteria.arg, principal) };
+  // A dependent record query value (Form[criteria].field or a thisapp
+  // function returning one) resolves to the first matching row's field under
+  // the caller's scope on that form. No match narrows like a failed lookup
+  // parent read: neverRows, or alwaysRows under !=.
+  const query = criteria.value && typeof criteria.value === "object" && !Array.isArray(criteria.value) ? criteria.value.__rows : null;
+  if (query && typeof query === "object") {
+    const resolved = await recordQueryValue(datastore, query, principal);
+    if (resolved === undefined) return criteria.op === "!=" ? alwaysRows() : neverRows();
+    criteria = { ...criteria, value: resolved };
+  }
   const field = typeof criteria.field === "string" ? criteria.field : "";
   const dot = field.indexOf(".");
   if (dot <= 0 || dot === field.length - 1) return criteria;
@@ -1546,7 +1582,8 @@ ${requirePrincipal()}
         searchCriteria(body.q, columnFields.filter((field) => readableField(field, readableFields))),
         filterCriteria(body.filter, readableFields),
       ]);
-      const scoped = authorizeRead(access, principal, formName, criteria);
+      const flat = await resolveLookupCriteria(datastore, criteria, principal);
+      const scoped = authorizeRead(access, principal, formName, flat);
       if (criteriaHasTodo(scoped.criteria)) {
         send(res, 200, {
           dryRun: false,

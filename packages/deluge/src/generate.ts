@@ -30,7 +30,7 @@ import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, writeLiveSource
 import { applyFillLock, reportLock, type FillLock, type StaleFill } from './fill-todos.js';
 import { afterCommitModule, ASYNC_ON_SUCCESS_WARNING, assertAsyncSuccessDeferrable, deadLetterModule, EVENT_FUNCTION_MODULE, eventSweeperModule, successSpecs, type AsyncCandidate } from './events.js';
 import { EVENT_SWEEPER_MODULE, JOB_LIVE_IMPORTS, jobLiveHelpers, planSchedules, schedulingConfig, sweeperModule, SWEEPER_MODULE, type SchedulePlan } from './schedules.js';
-import { emittedReadOnly, emittedThisappCalls, jsIdent, reportCriteria, translate, type AlertEventClass, type TodoItem, type TranslateOptions, type TranslateStats } from './translate.js';
+import { emittedReadOnly, emittedThisappCalls, jsIdent, reportCriteria, translate, type AlertEventClass, type CriteriaFunction, type TodoItem, type TranslateOptions, type TranslateStats } from './translate.js';
 import { normType } from './types.js';
 import { mutatesParameters } from './param-mutation.js';
 import { withoutDecimalAudit } from './audit.js';
@@ -310,7 +310,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
   }
   for (const report of app.reports) {
     for (const format of report.conditionalFormats) {
-      if (format.condition?.trim() && criteriaHasTodo(reportCriteria(format.condition))) {
+      if (format.condition?.trim() && criteriaHasTodo(reportCriteria(format.condition, app.functions))) {
         todos.push({ construct: 'report-conditional-format', start: format.span.start, end: format.span.end });
       }
     }
@@ -546,7 +546,7 @@ function isScheduleBranch(w: Workflow): boolean {
 /** The schedule plans generate() emits from. Shared with fill-todos. */
 export function schedulePlansFor(app: App): Map<Workflow, SchedulePlan> {
   return planSchedules(app, app.workflows.filter(isScheduleBranch), formLink, (src) => {
-    const criteria = reportCriteria(src);
+    const criteria = reportCriteria(src, app.functions);
     return criteriaHasTodo(criteria) ? null : criteria;
   });
 }
@@ -559,9 +559,9 @@ export const ACTION_CONDITION_GAP = 'await shim.todo(ctx, "workflow-action-condi
  * `workflow-action-condition` gap: scheduleBody emits the gap call even on an
  * empty body. Shared with fill-todos.
  */
-export function scheduleCriteriaGap(w: Workflow): boolean {
+export function scheduleCriteriaGap(w: Workflow, fns?: readonly CriteriaFunction[]): boolean {
   const link = formLink(w.form);
-  return !!link.criteria && criteriaHasTodo(reportCriteria(link.criteria));
+  return !!link.criteria && criteriaHasTodo(reportCriteria(link.criteria, fns));
 }
 
 /**
@@ -584,13 +584,13 @@ export function workflowKind(w: Workflow): 'payment' | 'blueprint' | 'approval' 
 function scheduleBody(app: App, w: Workflow, body: string, todos: TodoItem[]): string {
   const link = formLink(w.form);
   if (!link.criteria) return body;
-  if (scheduleCriteriaGap(w)) {
+  if (scheduleCriteriaGap(w, app.functions)) {
     if (!body.includes('workflow-action-condition')) {
       todos.push({ construct: 'workflow-action-condition', start: w.span.start, end: w.span.end });
     }
     return ACTION_CONDITION_GAP;
   }
-  const criteria = reportCriteria(link.criteria);
+  const criteria = reportCriteria(link.criteria, app.functions);
   const staged = stagedFullRead(schemaOf(app), link.name);
   const zcql = staged ? `, { zcql: ${JSON.stringify(staged)} }` : '';
   const query = `await shim.datastore.rows(ctx, shim.datastore.query(ctx, ${JSON.stringify(link.name)}, ${JSON.stringify(criteria)}${zcql}));`;
@@ -645,7 +645,7 @@ export function flowSpecs(app: App): FlowSpec[] {
     let criteria: Criteria | null = null;
     let criteriaUnmigrated = false;
     if (link.criteria) {
-      const parsed = reportCriteria(link.criteria);
+      const parsed = reportCriteria(link.criteria, app.functions);
       if (criteriaHasTodo(parsed)) criteriaUnmigrated = true;
       else criteria = parsed;
     }
@@ -1757,11 +1757,11 @@ export function translateInApp(app: App, src: string, options: TranslateOptions 
 export function unmigratedReportCriteria(app: App): { report: Report; criteria: string; start: number; end: number }[] {
   const out: { report: Report; criteria: string; start: number; end: number }[] = [];
   for (const report of app.reports) {
-    if (report.criteria?.trim() && criteriaHasTodo(reportCriteria(report.criteria))) {
+    if (report.criteria?.trim() && criteriaHasTodo(reportCriteria(report.criteria, app.functions))) {
       out.push({ report, criteria: report.criteria, start: report.span.start, end: report.span.end });
     }
     for (const filter of report.filters) {
-      if (filter.criteria?.trim() && criteriaHasTodo(reportCriteria(filter.criteria))) {
+      if (filter.criteria?.trim() && criteriaHasTodo(reportCriteria(filter.criteria, app.functions))) {
         out.push({ report, criteria: filter.criteria, start: filter.span.start, end: filter.span.end });
       }
     }
@@ -1972,7 +1972,7 @@ export function measureActionCriteria(app: App): { guarded: number; gap: number;
     if (w.actionCondition?.trim()) {
       const guard = actionGuard(w.actionCondition, fields, decimalFieldNames(app));
       const link = formLink(w.form);
-      const formGap = !!link.criteria && criteriaHasTodo(reportCriteria(link.criteria));
+      const formGap = !!link.criteria && criteriaHasTodo(reportCriteria(link.criteria, app.functions));
       if (formGap || guard.todo) gap++;
       else {
         guarded++;
@@ -3023,7 +3023,7 @@ function buildAccessPolicy(app: App): AccessPolicy {
   for (const report of app.reports) {
     if (!report.form) continue;
     const entry: { form: string; criteria?: Criteria } = { form: report.form };
-    if (report.criteria?.trim()) entry.criteria = reportCriteria(report.criteria);
+    if (report.criteria?.trim()) entry.criteria = reportCriteria(report.criteria, app.functions);
     reports.set(report.name, entry);
   }
   const profiles: AccessPolicy['profiles'] = {};

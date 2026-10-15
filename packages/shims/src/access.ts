@@ -6,7 +6,7 @@
  * Missing profile data is deny. A client-supplied body is not a principal.
  */
 
-import { criteriaHasTodo, type Criteria } from './criteria.js';
+import { criteriaHasRecordQuery, criteriaHasTodo, type Criteria } from './criteria.js';
 
 export class RecordAccessError extends Error {
   readonly code = 'RECORD_ACCESS_DENIED';
@@ -34,9 +34,25 @@ export interface Principal {
   loginUser?: string;
 }
 
-/** Value substituted from the principal at read time. Never taken from the request body. */
+/** Value substituted from the principal or the deploy environment at read time. Never taken from the request body. */
 export interface BoundValue {
-  __bind: 'loginUser' | 'loginUserId';
+  __bind: 'loginUser' | 'loginUserId' | 'adminUser' | 'adminUserId';
+}
+
+/**
+ * Dry-run placeholders for the application owner identity (`zoho.adminuser` /
+ * `zoho.adminuserid`) when no owner is configured — the same sentinels
+ * `shim.zoho.adminUser` / `shim.zoho.adminUserId` return, so a report criteria
+ * comparing them fails closed instead of matching a stored value.
+ * https://www.zoho.com/deluge/help/zoho-variables.html
+ */
+export const DRY_RUN_ADMIN_USER = '<c2c-dry-run:adminuser>';
+export const DRY_RUN_ADMIN_USER_ID = '<c2c-dry-run:adminuserid>';
+
+/** Deploy environment override for the application owner identity. */
+function envIdentity(key: 'C2C_ADMIN_USER' | 'C2C_ADMIN_USER_ID'): string | undefined {
+  const value = typeof process !== 'undefined' ? process.env?.[key] : undefined;
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 export interface FormGrant {
@@ -247,7 +263,9 @@ export function authorizeRead(
   }
   let filter = grant.recordFilter;
   if (filter) {
-    if (criteriaHasTodo(filter)) {
+    // An unmigrated criteria or a dependent record query narrows the same way:
+    // neither can be applied synchronously, so the read is refused.
+    if (criteriaHasTodo(filter) || criteriaHasRecordQuery(filter)) {
       throw new RecordAccessError(`record access: record filter for ${form} could not be applied`);
     }
     filter = resolveBinds(filter, principal);
@@ -257,6 +275,9 @@ export function authorizeRead(
   // A report's own criteria carries the same {__bind} placeholders the record
   // filter does (zoho.loginuser / zoho.loginuserid). Resolve them the same way
   // — an unresolved bind must never be compiled as a literal value.
+  if (criteriaHasRecordQuery(criteria)) {
+    throw new RecordAccessError(`record access: record filter for ${form} could not be applied`);
+  }
   const bound = resolveBinds(criteria, principal);
   // ZCQL has no literal true: an unfiltered read narrows to the scope alone.
   const scoped = extra ? (bound.op === 'true' ? extra : { op: 'and' as const, args: [bound, extra] }) : bound;
@@ -755,5 +776,9 @@ function resolveValue(value: unknown, principal: Principal): unknown {
     if (!principal.userId) throw new RecordAccessError('record access: login user is required to apply the record filter');
     return principal.userId;
   }
+  // The application owner is deploy configuration, not the caller: C2C_ADMIN_USER /
+  // C2C_ADMIN_USER_ID set it, the labelled sentinel is the dry-run default.
+  if (bind === 'adminUserId') return envIdentity('C2C_ADMIN_USER_ID') ?? DRY_RUN_ADMIN_USER_ID;
+  if (bind === 'adminUser') return envIdentity('C2C_ADMIN_USER') ?? DRY_RUN_ADMIN_USER;
   throw new RecordAccessError('record access: record filter could not be applied');
 }

@@ -465,11 +465,11 @@ test(
   () => {
   const course = analyze(galleryDs('course-planner', 'Course_Planner.ds'));
   assertCountedOnce(course);
-  assert.equal(course.determinism.todoCount, 3);
-  assert.equal(course.determinism.uiTodoCount, 1);
+  assert.equal(course.determinism.todoCount, 2);
+  assert.equal(course.determinism.uiTodoCount, 0);
   assert.deepEqual(
     course.deluge.todoLocations.filter((item) => item.scope === 'app').map((item) => `${item.location}|${item.construct}`),
-    ['report Ongoing_Courses_Student|report-criteria'],
+    [],
   );
   assert.deepEqual(
     course.deluge.todoLocations.filter((item) => item.scope === 'unit' && item.construct === 'criteria-dynamic'),
@@ -511,12 +511,6 @@ test(
   const emergency = analyze(galleryDs('employee-emergency-check-in', 'Employee_Emergency_Check_In.ds'));
   assertCountedOnce(emergency);
   assert.deepEqual(emergency.deluge.todoLocations, [
-    { location: 'report Open_Crisis_In_Our_Branch', construct: 'report-criteria', scope: 'app' },
-    {
-      location: 'report Open_Crisis_In_Our_Branch',
-      construct: 'Filter not migrated: dynamic or unsupported criteria need manual translation; the report returns no rows.',
-      scope: 'ui',
-    },
     {
       location: 'page Crisis_View_Page.dspZml',
       construct: 'Server-side Deluge snippet requires manual translation',

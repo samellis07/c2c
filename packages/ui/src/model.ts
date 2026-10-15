@@ -810,7 +810,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[]): UiReport {
   // A criteria that did not translate must not widen the report to all rows.
   // The generated endpoint fails closed (zero rows, "filter not migrated"),
   // and the report renders this notice instead of a table.
-  if (report.criteria?.trim() && criteriaHasTodo(reportCriteria(report.criteria))) {
+  if (report.criteria?.trim() && criteriaHasTodo(reportCriteria(report.criteria, app.functions))) {
     status = 'todo';
     todo = [todo, 'Filter not migrated: dynamic or unsupported criteria need manual translation; the report returns no rows.'].filter(Boolean).join(' ');
     // zoho.adminuserid is the application owner's email; the generated app
@@ -820,7 +820,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[]): UiReport {
     }
   }
   for (const filter of report.filters) {
-    if (filter.criteria?.trim() && criteriaHasTodo(reportCriteria(filter.criteria))) {
+    if (filter.criteria?.trim() && criteriaHasTodo(reportCriteria(filter.criteria, app.functions))) {
       todos.push({ area: 'report', name: report.name, reason: `Named filter "${filter.label ?? ''}" is not migrated; selecting it returns no rows.` });
     }
   }
@@ -843,7 +843,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[]): UiReport {
     if (head === undefined || builtColumns.some((column) => column.field === action.name)) return;
     builtColumns.push({ field: action.name, label: head || action.name, action: actions[index].endpoint });
   });
-  const formats = conditionalFormats(report);
+  const formats = conditionalFormats(app, report);
   return {
     name: report.name,
     label: report.displayName || report.name,
@@ -882,11 +882,11 @@ function buildReport(app: App, report: Report, todos: UiTodo[]): UiReport {
  * does not translate keeps a `todo` predicate so the client can show a
  * fidelity note instead of painting nothing silently.
  */
-function conditionalFormats(report: Report): NonNullable<UiReport['conditionalFormats']> {
+function conditionalFormats(app: App, report: Report): NonNullable<UiReport['conditionalFormats']> {
   return report.conditionalFormats.map((format) => ({
     name: format.name,
     fields: formatFieldList(format.fields),
-    criteria: sealRelativeCriteria(reportCriteria(format.condition || 'true')),
+    criteria: sealRelativeCriteria(reportCriteria(format.condition || 'true', app.functions)),
     format: format.format || '',
   }));
 }

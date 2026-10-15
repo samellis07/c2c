@@ -51,7 +51,7 @@ import {
 import { connectionArgIndex, resolveConnectionArgument, walk, type DeclaredConnection } from './connections.js';
 import { parse, parseExpression } from './parser.js';
 import { lex } from './lexer.js';
-import type { Criteria } from '../../shims/src/criteria.js';
+import { criteriaHasTodo, type Criteria } from '../../shims/src/criteria.js';
 import type { SchemaPlan } from '../../schema/src/generator.js';
 import { plainRecordStages } from '../../schema/src/limits.js';
 
@@ -3407,16 +3407,58 @@ const COMPARE = new Set(['==', '!=', '<', '>', '<=', '>=', 'in', 'not in']);
  * the application time zone when the report is read. Unresolved text stays
  * `todo` so the read is denied rather than unfiltered.
  */
-export function reportCriteria(src: string): Criteria {
-  return criteriaValue(parseExpression(src, true));
+export function reportCriteria(src: string, functions?: readonly CriteriaFunction[]): Criteria {
+  return criteriaValue(parseExpression(src, true), functions, 0);
 }
 
-function criteriaValue(e: Expr): Criteria {
-  if (e.kind === 'paren') return criteriaValue(e.expr);
+/**
+ * The app functions a report criteria may reference through `thisapp.f()`.
+ * Only a function whose body is one `return Form[criteria].field` resolves.
+ */
+export interface CriteriaFunction {
+  name: string;
+  deluge?: readonly { text: string }[];
+}
+
+/**
+ * A dependent record query used as a comparison value: `Form[criteria].field`
+ * (a member path rooted in a fetch) or `thisapp.f()` where `f` is a single
+ * `return Form[criteria].field`. The leaf value keeps a `{ __rows }` marker the
+ * report read resolves under the caller's record-access scope — never widened
+ * to a literal. Returns null when the shape is anything else, so the caller
+ * keeps the criteria counted.
+ */
+function recordQuery(e: Expr, fns: readonly CriteriaFunction[] | undefined, depth: number): { form: string; criteria: Criteria; path: string[] } | null {
+  if (depth > 4) return null;
+  const path: string[] = [];
+  let cur: Expr = e;
+  while (cur.kind === 'member') {
+    path.unshift(cur.property);
+    cur = cur.object;
+  }
+  if (cur.kind === 'criteria') {
+    const form = staticName(cur.object);
+    if (!form) return null;
+    const inner = criteriaValue(cur.criteria, fns, depth + 1);
+    if (criteriaHasTodo(inner)) return null;
+    return { form, criteria: inner, path };
+  }
+  if (cur.kind !== 'call' || path.length !== 0 || cur.callee.kind !== 'member' || cur.args.length !== 0) return null;
+  const callee = cur.callee;
+  if (callee.object.kind !== 'name' || callee.object.name !== 'thisapp') return null;
+  const fn = fns?.find((f) => f.name === callee.property);
+  const body = fn?.deluge?.length === 1 ? fn.deluge[0]!.text : '';
+  const returned = /^\s*return\b([\s\S]*?);?\s*$/.exec(body)?.[1]?.trim();
+  if (!returned) return null;
+  return recordQuery(parseExpression(returned, true), fns, depth + 1);
+}
+
+function criteriaValue(e: Expr, fns?: readonly CriteriaFunction[], depth = 0): Criteria {
+  if (e.kind === 'paren') return criteriaValue(e.expr, fns, depth);
   if (e.kind === 'name' && e.name === 'true') return { op: 'true' };
   if (e.kind === 'binary' && (e.op === '&&' || e.op === 'and' || e.op === '||' || e.op === 'or')) {
     const op = e.op === '||' || e.op === 'or' ? 'or' : 'and';
-    return { op, args: [criteriaValue(e.left), criteriaValue(e.right)] };
+    return { op, args: [criteriaValue(e.left, fns, depth), criteriaValue(e.right, fns, depth)] };
   }
   if (e.kind === 'binary' && (e.op === 'is' || e.op === 'is not')) {
     const rel = relativeRef(e.right);
@@ -3431,7 +3473,7 @@ function criteriaValue(e: Expr): Criteria {
     return { op: e.op === 'is' ? 'isNull' : 'notNull', field };
   }
   if (e.kind === 'unary' && (e.op === '!' || e.op === 'not')) {
-    return { op: 'not', arg: criteriaValue(e.expr) };
+    return { op: 'not', arg: criteriaValue(e.expr, fns, depth) };
   }
   if (e.kind === 'binary' && e.op === 'not in') {
     const field = literalField(e.left);
@@ -3447,6 +3489,10 @@ function criteriaValue(e: Expr): Criteria {
     const rel = relativeRef(e.right);
     if (field && rel && COMPARE.has(op)) return relativeCompare(op, field, rel);
     const value = literalValue(e.right);
+    if (field && value === undefined && COMPARE.has(op)) {
+      const query = recordQuery(e.right, fns, depth);
+      if (query) return compareCriteria(op, field, { __rows: query });
+    }
     if (!field || value === undefined || !COMPARE.has(op)) return { op: 'todo', construct: 'criteria-dynamic' };
     return compareCriteria(op, field, value);
   }
@@ -3569,6 +3615,10 @@ function literalValue(e: Expr): unknown | undefined {
     const head = path?.path[0]?.toLowerCase();
     if (path?.root === 'zoho' && path.path.length === 1 && head === 'loginuser') return { __bind: 'loginUser' };
     if (path?.root === 'zoho' && path.path.length === 1 && head === 'loginuserid') return { __bind: 'loginUserId' };
+    // zoho.adminuser is the application owner's username, zoho.adminuserid its
+    // email: both bind at read time like the login-user binds (shims/access.ts).
+    if (path?.root === 'zoho' && path.path.length === 1 && head === 'adminuser') return { __bind: 'adminUser' };
+    if (path?.root === 'zoho' && path.path.length === 1 && head === 'adminuserid') return { __bind: 'adminUserId' };
   }
   if (e.kind === 'list') {
     const items: unknown[] = [];
