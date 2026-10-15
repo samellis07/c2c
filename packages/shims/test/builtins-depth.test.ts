@@ -318,9 +318,14 @@ test('aggregate: sum, avg, median, min, max, count, distinct with Creator blanks
   assert.equal(aggregate([7, 1, 3], 'median'), 3);
   assert.equal(aggregate([7, 1, 3], 'maximum'), 7);
   assert.equal(aggregate([7, 1, 3], 'min'), 1);
-  // Blank values are skipped; count is the number of rows.
+  // Blank values are skipped; count without a field is the number of rows.
   assert.equal(aggregate([1, null, '', 3], 'avg'), 2);
   assert.equal(aggregate([1, null, '', 3], 'count'), 4);
+  // count(field) counts values the field holds: null is skipped, '' counts.
+  // Bare count of the same rows stays the row count (the case above).
+  const counted = [{ Amount: 1 }, { Amount: null }, { Amount: '' }];
+  assert.equal(aggregate(counted, 'count', 'Amount'), 2);
+  assert.equal(aggregate(counted, 'count'), 3);
   assert.deepEqual(aggregate(['a', 'b', 'a'], 'distinct'), ['a', 'b']);
   // Nothing to aggregate: null, and count 0.
   assert.equal(aggregate([], 'sum'), null);
@@ -448,6 +453,9 @@ test('Data Store sum / avg / max / min / median compute over the fetched rows (s
   assert.equal(await runtime.shim.datastore.aggregate(ctx, open, 'min', 'Qty'), 1);
   assert.equal(await runtime.shim.datastore.aggregate(ctx, open, 'median', 'Qty'), 2);
   assert.equal(await runtime.shim.datastore.aggregate(ctx, open, 'count'), 3);
+  // count(Amount) skips the null amount. count() above stays the row count.
+  assert.equal(await runtime.shim.datastore.aggregate(ctx, open, 'count', 'Amount'), 2);
+  assert.equal(await runtime.shim.datastore.aggregate(ctx, open, 'count', 'Qty'), 3);
   // A decimal column is exact: 0.10 + 0.20 is 0.30, and the blank is skipped.
   assert.equal(String(await runtime.shim.datastore.aggregate(ctx, open, 'sum', 'Amount')), '0.30');
   assert.equal(String(await runtime.shim.datastore.aggregate(ctx, open, 'avg', 'Amount')), '0.15');
@@ -464,9 +472,13 @@ test('Data Store sum / avg are computed on a live store, not null', async () => 
   for (const [qty, amount] of [[2, '0.10'], [5, '0.20'], [4, '1.00']] as const) {
     await runtime.shim.datastore.insert(ctx, 'Orders', { Qty: qty, Amount: amount });
   }
+  await runtime.shim.datastore.insert(ctx, 'Orders', { Qty: 1, Amount: null });
   const all = runtime.shim.datastore.query(ctx, 'Orders', { op: 'true' });
-  assert.equal(await runtime.shim.datastore.aggregate(ctx, all, 'sum', 'Qty'), 11);
-  assert.equal(await runtime.shim.datastore.aggregate(ctx, all, 'median', 'Qty'), 4);
+  assert.equal(await runtime.shim.datastore.aggregate(ctx, all, 'sum', 'Qty'), 12);
+  assert.equal(await runtime.shim.datastore.aggregate(ctx, all, 'median', 'Qty'), 3);
+  assert.equal(await runtime.shim.datastore.aggregate(ctx, all, 'count'), 4);
+  // The null amount is a fetched row, not a value the field holds.
+  assert.equal(await runtime.shim.datastore.aggregate(ctx, all, 'count', 'Amount'), 3);
   assert.equal(String(await runtime.shim.datastore.aggregate(ctx, all, 'sum', 'Amount')), '1.30');
   assert.equal(String(await runtime.shim.datastore.aggregate(ctx, all, 'max', 'Amount')), '1.00');
 });

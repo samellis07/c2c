@@ -396,8 +396,10 @@ function decimalText(v: unknown): string {
  * `median` and `distinct` (data-access/aggregate-records/*, functions/number/average).
  *
  * With `field`, `rows` is a list of records and the field is read from each.
- * Without it, `rows` is the value list. Blank values are skipped. `count` is
- * the number of rows. With no non-blank value every other function is null.
+ * Without it, `rows` is the value list. Blank values are skipped. `count()`
+ * is the number of rows. `count(field)` is the number of values that field
+ * holds: a stored empty string counts and null does not. With no non-blank
+ * value every other function is null.
  * `exact` (a decimal, percent or currency field, or any decimal in the list)
  * sums and averages as exact decimals; otherwise the result is a number.
  * `min` and `max` also order date and date-time values and return the value.
@@ -407,8 +409,11 @@ export function aggregate(rows: unknown, fn: unknown, field?: unknown, exact?: u
   const list = Array.isArray(rows) ? rows : rows == null ? [] : [rows];
   const name = String(fn).toLowerCase();
   const op = name === 'average' ? 'avg' : name === 'maximum' ? 'max' : name === 'minimum' ? 'min' : name;
-  if (op === 'count') return list.length;
   const raw = field == null || field === '' ? list : list.map((row) => readField(row, String(field)));
+  // `count(field)` counts the values the field holds. A stored empty string
+  // counts; null does not (data-access/aggregate-records/count). Without a
+  // field, count is the number of fetched records.
+  if (op === 'count') return field == null || field === '' ? list.length : raw.filter((v) => v != null).length;
   if (op === 'distinct') return distinct(raw);
   const values = raw.filter((v) => !blankValue(v));
   if (!values.length) return null;

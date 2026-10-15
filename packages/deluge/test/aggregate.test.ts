@@ -153,6 +153,38 @@ test('sum(m.k) on a map member translates exactly like m.k.sum()', () => {
   assert.match(t1.server, /shim\.list\.aggregate/);
 });
 
+function codeLines(src: string): string {
+  return src.split('\n').filter((line) => !line.trimStart().startsWith('//')).join('\n');
+}
+
+test('a datastore aggregate of a decimal column stays exact in later arithmetic', () => {
+  const sum = codeLines(translate('s = Sum(Orders.Amount);\nout = s * 2 + s;', { decimalFields: ['Amount'] }).server);
+  assert.match(sum, /shim\.decimal\.mul\(/);
+  assert.match(sum, /shim\.decimal\.add\(/);
+  assert.doesNotMatch(sum, / \* /);
+
+  const method = codeLines(translate('s = Orders.sum(Amount);\nout = s * 2;', { decimalFields: ['Amount'] }).server);
+  assert.match(method, /shim\.decimal\.mul\(/);
+  assert.doesNotMatch(method, / \* /);
+
+  // count and distinct are not decimals. A non-decimal field stays a JS number.
+  // These must fail if every aggregate result is marked exact.
+  const count = codeLines(translate('n = Count(Orders[ID != 0]);\nout = n * 2;', { decimalFields: ['Amount'] }).server);
+  assert.match(count, / \* /);
+  assert.doesNotMatch(count, /shim\.decimal\.mul\(/);
+
+  const countField = codeLines(translate('n = Orders.count(Amount);\nout = n * 2;', { decimalFields: ['Amount'] }).server);
+  assert.match(countField, / \* /);
+  assert.doesNotMatch(countField, /shim\.decimal\.mul\(/);
+
+  const qty = codeLines(translate('s = Sum(Orders.Qty);\nout = s * 2;', { decimalFields: ['Amount'] }).server);
+  assert.match(qty, / \* /);
+  assert.doesNotMatch(qty, /shim\.decimal\.mul\(/);
+
+  const distinct = codeLines(translate('s = Distinct(Orders.Amount);', { decimalFields: ['Amount'] }).server);
+  assert.doesNotMatch(distinct, /shim\.decimal\./);
+});
+
 test('a string argument is not an in-memory list aggregate', () => {
   const literal = translate('out = sum("localStringVar");');
   assert.match(literal.server, /shim\.todo\(ctx, "call:sum"\)/);

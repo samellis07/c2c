@@ -2729,8 +2729,9 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         }
       },
       async aggregate(ctx, query, fn, field) {
-        // `distinct ID` reads the record id: no field grant is needed on it.
-        const scoped = scopeRead(ctx, query.form, query.criteria, fn === 'count' || field === 'ID' ? undefined : field);
+        // `count()` and `distinct ID` read no field: no field grant is needed.
+        // `count(field)` does read the field (it counts the values it holds).
+        const scoped = scopeRead(ctx, query.form, query.criteria, field === 'ID' || field == null || field === '' ? undefined : field);
         const where = whereOf(query.form, scoped.criteria);
         note({ op: 'aggregate', form: query.form, fn, field: field ?? null, where, dryRun, authorized: !!options.access });
         const seeded = await readSeed(seed, dryRun, query.form, scoped.criteria, query.sort, query.range, decimalsOf(query.form));
@@ -2744,7 +2745,6 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
           return lists.distinct(got.map((row) => (field === 'ID' ? logicalId(row) : projectFields(row, scoped.fields)[fieldName(field)])));
         }
         const got = await readLive(query, scoped.criteria, where, query.range, query.sort);
-        if (fn === 'count') return got.length;
         return aggregateSeed(got, fn, field, scoped.fields, decimalsOf(query.form));
       },
       matches(ctx, row, criteria) {
@@ -2864,8 +2864,9 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         return out;
       },
       async aggregateMap(ctx, form, keyField, keys, fn, field, extra) {
-        // `distinct ID` reads the record id: no field grant is needed on it.
-        const scoped = scopeRead(ctx, form, isCriteria(extra) ? extra : { op: 'true' }, fn === 'count' || field === 'ID' ? undefined : field);
+        // `count()` and `distinct ID` read no field: no field grant is needed.
+        // `count(field)` does read the field (it counts the values it holds).
+        const scoped = scopeRead(ctx, form, isCriteria(extra) ? extra : { op: 'true' }, field === 'ID' || field == null || field === '' ? undefined : field);
         const out = new Map<string, unknown>();
 
         for (const batch of chunk(validMapKeys(keys), LIMITS.zcqlRowsPerQuery)) {
@@ -3878,9 +3879,11 @@ function aggregateSeed(
   fields: readonly string[] | undefined,
   decimals: DecimalColumns = {},
 ): unknown {
-  if (fn === 'count') return rows.length;
   const name = fieldName(field);
   const values = rows.map((row) => (name === 'ID' ? logicalId(row) : projectFields(row, fields)[name]));
+  // `count(field)` counts the values the field holds, not the fetched rows:
+  // nulls are skipped but a stored empty string counts (aggregate-records/count).
+  if (fn === 'count') return field == null || field === '' ? values.length : values.filter((v) => v != null).length;
   if (fn === 'distinct') return lists.distinct(values);
   // sum / avg / min / max / median of the fetched values. A decimal, percent
   // or currency column is exact (data-access/aggregate-records/*).
