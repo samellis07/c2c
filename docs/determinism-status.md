@@ -15,7 +15,7 @@ An app is deterministic when `c2c analyze` finds zero residual TODO items and no
 A residual TODO item is an untranslated Deluge hole or one generated UI stub
 (a field, report, page, or ZML item). Each UI stub is included in the residual,
 so an app with a stub is not deterministic.
-0 of the 10 deterministic apps still have UI TODO stubs (0 in total).
+0 of the 12 deterministic apps still have UI TODO stubs (0 in total).
 
 The builtin catalogue lists 27 TODO entries
 (`docs/deluge-builtins.json` `counts.todo`). That is not the corpus residual counted here: one
@@ -24,8 +24,8 @@ TODO item per untranslated construct occurrence.
 | | |
 |---|---:|
 | corpus apps | 67 |
-| deterministic apps | 10 (14.9%) |
-| residual TODO items | 559 |
+| deterministic apps | 12 (17.9%) |
+| residual TODO items | 493 |
 | distinct TODO kinds | 17 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
@@ -33,16 +33,16 @@ TODO item per untranslated construct occurrence.
 
 | construct | count |
 |---|---:|
-| `client-condition-uses-server` | 319 |
+| `client-condition-uses-server` | 255 |
 | `Server-side Deluge snippet requires manual translation` | 108 |
 | `client-loop-uses-server` | 86 |
 | `criteria-dynamic` | 8 |
 | `pushnotification` | 6 |
-| `task:(app identifier)` | 5 |
 | `Filter not migrated:(app identifier)` | 4 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)` | 4 |
 | `method:(app identifier)` | 4 |
 | `report-criteria` | 4 |
+| `task:(app identifier)` | 3 |
 | `call:(app identifier)` | 2 |
 | `Rebuild the pivot table manually:(app identifier)` | 2 |
 | `report-conditional-format` | 2 |
@@ -59,14 +59,14 @@ clears the app. The count is apps, not items.
 | construct | apps |
 |---|---:|
 | `Server-side Deluge snippet requires manual translation` | 11 |
-| `client-condition-uses-server` | 9 |
+| `client-condition-uses-server` | 7 |
 | `Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)` | 1 |
 
 ## Machine-readable
 
 ```json
 {
-  "deterministicApps": 10,
+  "deterministicApps": 12,
   "deterministicWithUiTodos": {
     "apps": 0,
     "uiTodos": 0
@@ -74,7 +74,7 @@ clears the app. The count is apps, not items.
   "kinds": [
     {
       "construct": "client-condition-uses-server",
-      "count": 319
+      "count": 255
     },
     {
       "construct": "Server-side Deluge snippet requires manual translation",
@@ -93,10 +93,6 @@ clears the app. The count is apps, not items.
       "count": 6
     },
     {
-      "construct": "task:(app identifier)",
-      "count": 5
-    },
-    {
       "construct": "Filter not migrated:(app identifier)",
       "count": 4
     },
@@ -111,6 +107,10 @@ clears the app. The count is apps, not items.
     {
       "construct": "report-criteria",
       "count": 4
+    },
+    {
+      "construct": "task:(app identifier)",
+      "count": 3
     },
     {
       "construct": "call:(app identifier)",
@@ -172,18 +172,6 @@ clears the app. The count is apps, not items.
       "constructs": [
         "client-condition-uses-server"
       ],
-      "items": 1
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server"
-      ],
-      "items": 2
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server"
-      ],
       "items": 2
     },
     {
@@ -215,20 +203,10 @@ clears the app. The count is apps, not items.
       "constructs": [
         "client-condition-uses-server",
         "client-loop-uses-server",
-        "criteria-dynamic",
-        "Server-side Deluge snippet requires manual translation",
-        "task:(app identifier)"
-      ],
-      "items": 10
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "client-loop-uses-server",
         "Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 34
+      "items": 28
     },
     {
       "constructs": [
@@ -244,7 +222,7 @@ clears the app. The count is apps, not items.
         "client-loop-uses-server",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 184
+      "items": 182
     },
     {
       "constructs": [
@@ -253,14 +231,14 @@ clears the app. The count is apps, not items.
         "Server-side Deluge snippet requires manual translation",
         "task:sort"
       ],
-      "items": 21
+      "items": 19
     },
     {
       "constructs": [
         "client-condition-uses-server",
         "criteria-dynamic"
       ],
-      "items": 5
+      "items": 4
     },
     {
       "constructs": [
@@ -284,14 +262,14 @@ clears the app. The count is apps, not items.
         "Inline style declarations not carried over (unsafe or unsupported CSS):(app identifier)",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 24
+      "items": 13
     },
     {
       "constructs": [
         "client-condition-uses-server",
         "pushnotification"
       ],
-      "items": 7
+      "items": 3
     },
     {
       "constructs": [
@@ -299,15 +277,7 @@ clears the app. The count is apps, not items.
         "pushnotification",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 14
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "pushnotification",
-        "task:(app identifier)"
-      ],
-      "items": 3
+      "items": 10
     },
     {
       "constructs": [
@@ -360,7 +330,7 @@ clears the app. The count is apps, not items.
         "client-condition-uses-server",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 4
+      "items": 3
     },
     {
       "constructs": [
@@ -368,6 +338,20 @@ clears the app. The count is apps, not items.
         "Server-side Deluge snippet requires manual translation"
       ],
       "items": 4
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 5
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 5
     },
     {
       "constructs": [
@@ -381,21 +365,14 @@ clears the app. The count is apps, not items.
         "client-condition-uses-server",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 7
+      "items": 6
     },
     {
       "constructs": [
         "client-condition-uses-server",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 7
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 13
+      "items": 9
     },
     {
       "constructs": [
@@ -407,16 +384,17 @@ clears the app. The count is apps, not items.
     {
       "constructs": [
         "client-condition-uses-server",
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 24
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
         "Server-side Deluge snippet with an ExecuteFunction button requires manual translation of the button's function call"
       ],
       "items": 3
+    },
+    {
+      "constructs": [
+        "client-loop-uses-server",
+        "criteria-dynamic",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 6
     },
     {
       "constructs": [
@@ -472,11 +450,17 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
-        "report-conditional-format",
-        "Server-side Deluge snippet requires manual translation",
+        "pushnotification",
         "task:(app identifier)"
       ],
-      "items": 4
+      "items": 2
+    },
+    {
+      "constructs": [
+        "report-conditional-format",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 3
     },
     {
       "constructs": [
@@ -545,7 +529,7 @@ clears the app. The count is apps, not items.
       "items": 7
     }
   ],
-  "todoTotal": 559,
+  "todoTotal": 493,
   "totalApps": 67
 }
 ```
