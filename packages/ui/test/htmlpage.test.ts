@@ -3469,3 +3469,39 @@ test('shape C endpoint refuses every origin when the deploy config lists none', 
 test('ZML attributes choose requested key order despite case variants', () => {
   assert.equal(isFormAction('noop', { URL: '#Form:First', url: '#Form:Second' }), true);
 });
+
+test('transcript: a live reply carries no query text, a dry-run reply keeps the transcript', async () => {
+  const { files, model } = generateUi(
+    appOf(`${ORDERS}\n${pageWithSnippet(`htmlpage hp1()
+content
+<%
+n = Orders[Status == input.s].count();
+t = Orders[Status == "open"].sum(Amount);
+%><p><%= n %></p>`)}`),
+  );
+  assert.deepEqual(model.todos, []);
+  const mod = await loadTree(files, uiSnippetFiles(model)[0].path);
+  const handler = mod.default as never;
+  const live = await liveStore({ Orders: [{ Status: 'open', Amount: 10 }] });
+  try {
+    const out = await invoke(handler, { ...USER, body: { input: { s: 'open' } } });
+    assert.equal(out.status, 200, JSON.stringify(out.body));
+    assert.equal(out.body.dryRun, false);
+    assert.match(String(out.body.html), /<p>1<\/p>/);
+    assert.equal(Object.hasOwn(out.body, 'transcript'), false, JSON.stringify(out.body));
+    assert.doesNotMatch(JSON.stringify(out.body), /Status = |\bwhere\b|aggregate/i);
+  } finally {
+    live.restore();
+  }
+  const realMode = process.env.C2C_DEPLOY_MODE;
+  process.env.C2C_DEPLOY_MODE = 'dry-run';
+  try {
+    const dry = await invoke(handler, { ...USER, body: { input: { s: 'open' } } });
+    assert.equal(dry.status, 200, JSON.stringify(dry.body));
+    assert.equal(dry.body.dryRun, true);
+    assert.ok(Array.isArray(dry.body.transcript) && dry.body.transcript.length > 0, JSON.stringify(dry.body));
+  } finally {
+    if (realMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+    else process.env.C2C_DEPLOY_MODE = realMode;
+  }
+});
