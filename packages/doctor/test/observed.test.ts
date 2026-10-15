@@ -19,6 +19,7 @@ import {
   gateRefusalMessage,
   MCP_RESULT_MAX_BYTES,
   mcpRequestPath,
+  mcpStatePath,
   ObservationRejected,
   OBSERVATION_MAX_BYTES,
   readStdinBounded,
@@ -28,6 +29,7 @@ import {
   type ScopeHooks,
   type SpawnResult,
 } from '../src/index.js';
+import { carriedMcpRecord } from '../src/gate.js';
 import { closeMcpRequest } from '../src/observed.js';
 import requiredTools from '../data/required-mcp-tools.json' with { type: 'json' };
 
@@ -66,7 +68,10 @@ function greenCatalyst(cmd: string, args: string[]): SpawnResult {
 function workspace(): { dir: string; env: NodeJS.ProcessEnv } {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-observed-'));
   dirs.push(dir);
-  const home = join(dir, 'home');
+  // HOME lies outside the workspace: the doctor keeps its MCP state key there
+  // and refuses a key directory inside the workspace.
+  const home = mkdtempSync(join(tmpdir(), 'c2c-observed-home-'));
+  dirs.push(home);
   const skills = join(home, 'skills', 'catalyst-by-zoho');
   mkdirSync(skills, { recursive: true });
   writeFileSync(join(skills, 'SKILL.md'), '---\nname: catalyst-by-zoho\ndescription: official\nmetadata:\n  version: "0.0.2"\n---\nbody\n');
@@ -372,13 +377,16 @@ test('mcp-observed: a failed observation stays red on the next bare doctor run, 
   const { request } = await begin(env);
   const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({}));
   assert.equal(run.code, 1, run.out + run.err);
+  // First pass: the signed record is reused. Second pass: with no signed
+  // record left, the failed rows are still carried from doctor.json.
   for (let i = 0; i < 2; i++) {
+    if (i === 1) rmSync(mcpStatePath(dir));
     const { io, out } = fakeIo(env);
     const code = await doctorCli([], io, { hooks: NO_HOOKS });
     assert.equal(code, 1, out());
     assert.match(out(), /FAIL D-B1 .*not proved bound/);
     assert.doesNotMatch(out(), /SKIP D-B /);
-    assert.match(out(), /from the MCP observation recorded at/);
+    if (i === 1) assert.match(out(), /D-B\/D-V: failed rows from the MCP observation recorded at/);
     const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
     assert.equal(file.green, false);
     assert.equal(file.mcp?.binding?.status, 'absent');
@@ -400,6 +408,78 @@ test('mcp-observed: a verified observation carries to a bare run, so doctor and 
   assert.equal(evaluateGate({ workspace: dir, scope: SCOPE }).ok, true);
 });
 
+/** A verified observation, then doctor.json is left with its PASS D-B1/D-B2 rows. */
+async function verifiedRecord(): Promise<{ dir: string; env: NodeJS.ProcessEnv; file: ObservedFile }> {
+  const { dir, env } = workspace();
+  const { request } = await begin(env);
+  const probe = `c2cprobe${request}`;
+  assert.equal((await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: {} }))).code, 0);
+  const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
+  for (const id of ['D-B1', 'D-B2']) assert.equal(file.checks.find((c) => c.id === id)?.status, 'pass', id);
+  return { dir, env, file };
+}
+
+async function assertNoPassingCarry(dir: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const { io, out } = fakeIo(env);
+  await doctorCli([], io, { hooks: NO_HOOKS });
+  assert.doesNotMatch(out(), /PASS D-B[12] /);
+  assert.match(out(), /SKIP D-B /);
+  const after = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
+  assert.ok(!after.checks.some((c) => c.id.startsWith('D-B') && c.status !== 'skip'), JSON.stringify(after.checks));
+  assert.equal(evaluateGate({ workspace: dir, scope: SCOPE }).ok, false);
+}
+
+test('mcp-observed: a doctor.json with PASS D-B rows and no signed record never carries a pass', async () => {
+  const { dir, env, file } = await verifiedRecord();
+  rmSync(mcpStatePath(dir));
+  // Hand-written: the same PASS rows, a fresh observed time, the right scope.
+  writeFileSync(doctorJsonPath(dir), JSON.stringify({ ...file, at: new Date().toISOString(), mcp: { ...file.mcp, at: new Date().toISOString() } }));
+  assert.equal(carriedMcpRecord({ workspace: dir, scope: SCOPE, env }), undefined);
+  await assertNoPassingCarry(dir, env);
+});
+
+test('mcp-observed: a doctor.json with PASS D-B rows beside a badly signed record never carries a pass', async () => {
+  const { dir, env } = await verifiedRecord();
+  const state = JSON.parse(readFileSync(mcpStatePath(dir), 'utf8')) as Record<string, unknown>;
+  assert.equal(typeof state.mac, 'string');
+  writeFileSync(mcpStatePath(dir), JSON.stringify({ ...state, mac: '0'.repeat(String(state.mac).length) }));
+  await assertNoPassingCarry(dir, env);
+});
+
+test('mcp-observed: PASS D-B rows dated other than the signed record are not carried', async () => {
+  const { dir, env, file } = await verifiedRecord();
+  // The signed record verifies, but doctor.json names another observation.
+  const other = new Date(Date.parse(file.mcp!.at!) - 1000).toISOString();
+  writeFileSync(doctorJsonPath(dir), JSON.stringify({ ...file, mcp: { ...file.mcp, at: other } }));
+  assert.equal(carriedMcpRecord({ workspace: dir, scope: SCOPE, env }), undefined);
+  // The signed record itself is still honoured on the doctor run.
+  const { io, out } = fakeIo(env);
+  assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 0, out());
+  assert.match(out(), /PASS D-B1 .*reused/);
+});
+
+test('mcp-observed: a signed record with the same observed time carries its PASS D-B rows', async () => {
+  const { dir, env, file } = await verifiedRecord();
+  const carried = carriedMcpRecord({ workspace: dir, scope: SCOPE, env });
+  assert.ok(carried);
+  assert.equal(carried.signed, true);
+  assert.equal(carried.mcp.at, file.mcp!.at);
+  for (const id of ['D-B1', 'D-B2']) assert.equal(carried.checks.find((c) => c.id === id)?.status, 'pass', id);
+});
+
+test('mcp-observed: a failed record with no signed state still carries its failed rows only', async () => {
+  const { dir, env } = workspace();
+  const { request } = await begin(env);
+  assert.equal((await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({}))).code, 1);
+  rmSync(mcpStatePath(dir));
+  const carried = carriedMcpRecord({ workspace: dir, scope: SCOPE, env });
+  assert.ok(carried);
+  assert.equal(carried.signed, false);
+  assert.ok(carried.checks.length > 0);
+  assert.ok(carried.checks.every((c) => c.status === 'fail'), JSON.stringify(carried.checks));
+  assert.ok(carried.checks.some((c) => c.id === 'D-B1'));
+});
+
 test('mcp-observed: a record from another c2c version is not carried to a bare run', async () => {
   const { dir, env } = workspace();
   const { request } = await begin(env);
@@ -407,6 +487,7 @@ test('mcp-observed: a record from another c2c version is not carried to a bare r
   assert.equal((await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: {} }))).code, 0);
   const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
   writeFileSync(doctorJsonPath(dir), JSON.stringify({ ...file, c2c: '0.0.0' }));
+  rmSync(mcpStatePath(dir));
   const { io, out } = fakeIo(env);
   await doctorCli([], io, { hooks: NO_HOOKS });
   assert.match(out(), /SKIP D-B /);
@@ -430,6 +511,7 @@ test('mcp-observed: a record for another project or past 12 h is not carried', a
   const { dir, env } = workspace();
   const { request } = await begin(env);
   assert.equal((await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({}))).code, 1);
+  rmSync(mcpStatePath(dir));
   const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
   writeFileSync(doctorJsonPath(dir), JSON.stringify({ ...file, mcp: { ...file.mcp, at: new Date(Date.now() - 13 * 3600 * 1000).toISOString() } }));
   const { io, out } = fakeIo(env);
