@@ -141,11 +141,16 @@ test('a blank date is null for arithmetic, and toString is not the literal "null
   // Creator returns the given text when it does not recognize a date-time, not null.
   assert.equal(runtime.shim.date.format('', 'yyyy-MM-dd', ctx), '');
   assert.equal(runtime.shim.date.format(null, 'yyyy-MM-dd', ctx), '');
+  assert.equal(runtime.shim.date.format(undefined, 'yyyy-MM-dd', ctx), '');
   assert.equal(runtime.shim.date.format('   ', 'yyyy-MM-dd', ctx), '   ');
   assert.equal(runtime.shim.date.format('not-a-date', 'yyyy-MM-dd', ctx), 'not-a-date');
+  assert.throws(() => runtime.shim.date.format(new Date('invalid'), 'yyyy-MM-dd', ctx), /UnParsable date/);
   assert.equal(`Membership Start Date: ${runtime.shim.date.format(null, 'dd-MMM-yyyy', ctx)}`, 'Membership Start Date: ');
   assert.notEqual(`Membership Start Date: ${runtime.shim.date.format(null, 'dd-MMM-yyyy', ctx)}`, 'Membership Start Date: null');
   assert.equal(runtime.shim.date.text(null, ctx), '');
+  assert.equal(runtime.shim.date.text(undefined, ctx), '');
+  assert.equal(runtime.shim.date.text('', ctx), '');
+  assert.equal(runtime.shim.date.text(new Date('invalid'), ctx), 'Invalid Date');
   assert.equal(runtime.shim.date.addDay(undefined, 3, ctx), null);
   assert.equal(runtime.shim.date.addDay('   ', 1, ctx), null);
   assert.equal(runtime.shim.date.cmp('', '01-Jan-2020', ctx), null);
