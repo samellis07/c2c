@@ -74,6 +74,8 @@ export interface FunctionDirOptions {
   mailFrom?: string;
   /** Custom Catalyst role -> Creator profile entries from the auth apply plan. Built-ins stay authoritative. */
   roleMap?: Readonly<Record<string, string>>;
+  /** Spike: copy only the subset of shim modules imported by the app's generated code. Off by default. */
+  subsetShims?: boolean;
 }
 
 /** Column types the adapter converts by type. Other columns are written and read as they are. */
@@ -152,22 +154,148 @@ function byPath(a: string, b: string): number {
 const CORE_DC_SPEC = /from (['"])(?:\.\.\/)+core\/src\/dc\.js\1/g;
 
 /**
+ * Compute the subset of compiled shim modules imported by an app's generated
+ * function files, including transitive dependencies between shims.
+ * Returns null when imports cannot be resolved safely (failing closed to copying all shims).
+ */
+export function computeShimModules(generated: readonly FunctionFile[], dir = shimsDir()): Set<string> | null {
+  const indexFile = join(dir, 'index.js');
+  if (!existsSync(indexFile)) return null;
+  const indexContent = readFileSync(indexFile, 'utf8');
+
+  // Map each symbol exported by index.js to its defining module (.js)
+  const symbolToModule: Record<string, string> = {};
+  const exportRegex = /export\s*\{([^}]+)\}\s*from\s*['"]\.\/([a-z0-9\-]+)(?:\.js)?['"]/g;
+  for (const match of indexContent.matchAll(exportRegex)) {
+    const mod = `${match[2]}.js`;
+    const syms = match[1]!
+      .split(',')
+      .map((s) => s.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]!.trim())
+      .filter(Boolean);
+    for (const sym of syms) {
+      symbolToModule[sym] = mod;
+    }
+  }
+
+  const allShimNames = readdirSync(dir).filter((name) => name.endsWith('.js') && name !== 'index.js');
+
+  // Dependency map between shim modules
+  const shimDeps: Record<string, string[]> = {};
+  for (const name of allShimNames) {
+    const content = readFileSync(join(dir, name), 'utf8');
+    const matches = [...content.matchAll(/from\s+['"]\.\/([a-z0-9\-]+)(?:\.js)?['"]/g)];
+    shimDeps[name] = [...new Set(matches.map((m) => `${m[1]}.js`))];
+  }
+
+  const directRoots = new Set<string>();
+
+  // fn/index.js imports this module when mapping datastore errors to HTTP errors.
+  directRoots.add('store-errors.js');
+
+  // If write rules are present in the deployed function, fn/index.js loads write-rules.js
+  if (generated.some((f) => f.path.endsWith('c2c-rules.json'))) {
+    directRoots.add('write-rules.js');
+  }
+
+  for (const file of generated) {
+    if (!file.path.endsWith('.mjs') && !file.path.endsWith('.js')) continue;
+    if (typeof file.data !== 'string') continue;
+    const text = file.data;
+
+    // Check dynamic imports: fail closed if an argument could refer to shims.
+    const dynMatches = [...text.matchAll(/import\s*\(([\s\S]*?)\)/g)];
+    for (const m of dynMatches) {
+      const arg = m[1]!.trim();
+      const isKnownStatic =
+        arg === 'spec' ||
+        arg === '"zcatalyst-sdk-node"' ||
+        arg === "'zcatalyst-sdk-node'" ||
+        /^["']\.\.?\/[a-zA-Z0-9_\-\.\/]+\.mjs["']$/.test(arg);
+      if (!isKnownStatic) return null;
+    }
+
+    // Check static named imports from creator-to-catalyst/shims or vendor/shims/index.js.
+    // Any other occurrence of the package specifier below fails closed, including
+    // re-exports, require(), side-effect imports, and namespace/default imports.
+    const staticImports = [...text.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"](?:creator-to-catalyst\/shims|(?:\.\.?\/)*vendor\/shims(?:\/index(?:\.js)?)?)['"]/g)];
+    const unparsedSpecifiers = text.replace(
+      /import\s*\{[^}]*\}\s*from\s*['"](?:creator-to-catalyst\/shims|(?:\.\.?\/)*vendor\/shims(?:\/index(?:\.js)?)?)['"]/g,
+      '',
+    );
+    if (unparsedSpecifiers.includes(SHIMS_IMPORT)) return null;
+    if (/['"](?:\.\.?\/)*vendor\/shims(?:\/index(?:\.js)?)?['"]/.test(unparsedSpecifiers)) return null;
+    for (const m of staticImports) {
+      const syms = m[1]!
+        .split(',')
+        .map((s) => s.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]!.trim())
+        .filter(Boolean);
+      for (const sym of syms) {
+        const mod = symbolToModule[sym];
+        if (!mod || !allShimNames.includes(mod)) return null;
+        directRoots.add(mod);
+      }
+    }
+
+    // Check direct imports of vendor/shims or creator-to-catalyst/shims
+    const directShims = [...text.matchAll(/from\s*['"](?:(?:\.\.?\/)+vendor\/shims\/|vendor\/shims\/|creator-to-catalyst\/shims\/)([a-z0-9\-]+)(?:\.js)?['"]/g)];
+    for (const m of directShims) {
+      const mod = `${m[1]}.js`;
+      if (!allShimNames.includes(mod)) return null;
+      directRoots.add(mod);
+    }
+  }
+
+  // Transitive closure
+  const closure = new Set<string>(directRoots);
+  const queue = [...directRoots];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    const deps = shimDeps[cur] ?? [];
+    for (const dep of deps) {
+      if (!closure.has(dep)) {
+        closure.add(dep);
+        queue.push(dep);
+      }
+    }
+  }
+
+  return closure;
+}
+
+/**
  * Compiled shims, without source-map comments (the maps are not shipped).
+ * When `modules` is specified, only that subset of modules is shipped (plus index.js
+ * filtered to re-export only the shipped modules).
  * A shim that imports the DC table is rewritten onto a vendored copy of that
  * table so the function bundle does not import packages/core.
  */
-export function vendoredShims(): FunctionFile[] {
+export function vendoredShims(modules?: ReadonlySet<string>): FunctionFile[] {
   const dir = shimsDir();
-  const names = readdirSync(dir).filter((name) => name.endsWith('.js')).sort(byPath);
+  const allNames = readdirSync(dir).filter((name) => name.endsWith('.js')).sort(byPath);
+  const names = modules ? allNames.filter((name) => name === 'index.js' || modules.has(name)) : allNames;
   let needsDcTable = false;
-  const files: FunctionFile[] = names.map((name) => {
+  const files: FunctionFile[] = [];
+
+  for (const name of names) {
     let data = readFileSync(join(dir, name), 'utf8').replace(/\n\/\/# sourceMappingURL=[^\n]*\n?$/, '\n');
+    if (name === 'index.js' && modules) {
+      const keptLines: string[] = [];
+      for (const line of data.split('\n')) {
+        const match = /export\s*\{[\s\S]*?\}\s*from\s*['"]\.\/([a-z0-9\-]+)(?:\.js)?['"]/.exec(line);
+        if (match) {
+          const mod = `${match[1]}.js`;
+          if (modules.has(mod)) keptLines.push(line);
+        }
+      }
+      data = keptLines.length ? `${keptLines.join('\n')}\n` : 'export {};\n';
+    }
     if (data.includes('/core/src/dc.js')) {
       needsDcTable = true;
       data = data.replace(CORE_DC_SPEC, 'from $1./zoho-dc-table.js$1');
     }
-    return { path: `vendor/shims/${name}`, data };
-  });
+    files.push({ path: `vendor/shims/${name}`, data });
+  }
+
   if (needsDcTable) {
     files.push({ path: 'vendor/shims/zoho-dc-table.js', data: zohoConnectionHostModuleSource() });
   }
@@ -267,7 +395,15 @@ export function functionDir(generated: readonly FunctionFile[], opts: FunctionDi
     if (name === 'c2c-sdk-datastore.mjs') data = injectSelectColumnCap(data);
     inner.push({ path: name, data });
   }
-  inner.push(...vendoredShims());
+  const subset = opts.subsetShims ?? false;
+  let shims: FunctionFile[];
+  if (subset) {
+    const modules = computeShimModules(generated);
+    shims = modules ? vendoredShims(modules) : vendoredShims();
+  } else {
+    shims = vendoredShims();
+  }
+  inner.push(...shims);
   inner.push({ path: 'routes.json', data: json(routeTable(inner)) });
   const extra = opts.roleMap ?? {};
   const merged: Record<string, string> = {};

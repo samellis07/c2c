@@ -81,6 +81,8 @@ export interface DeployOptions {
   ui?: DeployUi;
   /** Opt-in async on-success lane: emit the event function, dead-letter store and sweep Job (docs/event-deadletter.md). */
   asyncOnSuccess?: boolean;
+  /** Spike: copy only the subset of shim modules imported by generated code. Off by default. */
+  subsetShims?: boolean;
 }
 
 export interface DeployBundle {
@@ -277,6 +279,7 @@ export function deployFiles(
       env: opts.functionEnv,
       roleMap: principalRoleMap(authPlan(app)),
       ...(verifiedFrom ? { mailFrom: verifiedFrom } : {}),
+      ...(opts.subsetShims !== undefined ? { subsetShims: opts.subsetShims } : {}),
     }),
   );
   const widgetItems = widgetManualItems(app.widgets);
@@ -309,12 +312,13 @@ export function buildDeploy(
   source?: readonly SourceTableData[],
   ui: DeployUi = 'react',
   asyncOnSuccess = false,
+  subsetShims?: boolean,
 ): DeployBundle {
   const { files, mail, schema, sendsMail: mails, usesEvents } = deployFiles(
     app,
     guard,
     mailEnabled,
-    { mode: confirm ? 'live' : 'dry-run', apiBase, functionEnv, mailTestRecipients, ...(source ? { source } : {}), ui, ...(asyncOnSuccess ? { asyncOnSuccess } : {}) },
+    { mode: confirm ? 'live' : 'dry-run', apiBase, functionEnv, mailTestRecipients, ...(source ? { source } : {}), ui, ...(asyncOnSuccess ? { asyncOnSuccess } : {}), ...(subsetShims !== undefined ? { subsetShims } : {}) },
     sender,
   );
   const commands = deployCommands(guard.projectName, guard.org, guard.projectId, ui);

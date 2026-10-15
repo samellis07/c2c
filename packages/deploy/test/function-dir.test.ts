@@ -12,14 +12,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { deriveIr, parse, type App } from '../../core/src/index.js';
+import { deriveIr, parse, parseProject, type App } from '../../core/src/index.js';
 import { generateUi } from '../../ui/src/generate.js';
 import { decimal } from '../../shims/src/decimal.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from '../src/guards.js';
 import type { ProjectRegistry } from '../src/registry.js';
 import { deployFiles, writeDeployTree, type DeployFile } from '../src/plan.js';
-import { FUNCTION_DEPENDENCIES, functionDir, injectSelectColumnCap, rewriteShimsImport, routeTable } from '../src/function-dir.js';
+import { FUNCTION_DEPENDENCIES, computeShimModules, functionDir, injectSelectColumnCap, rewriteShimsImport, routeTable, vendoredShims } from '../src/function-dir.js';
 import { CATALYST_LIMITS, limitValue } from '../../schema/src/limits.js';
 import { bundleDigest, DEPLOY_REPORT, deployCli, functionBaseFrom, STATE_FILE, type Io, type SpawnResult } from '../src/cli.js';
 
@@ -1293,5 +1293,198 @@ test('an htmlpage endpoint pins parse5 and ships no jsdom', () => {
   for (const file of tree) {
     if (typeof file.data !== 'string') continue;
     assert.equal(file.data.includes('jsdom'), false, file.path);
+  }
+});
+
+test('subset shims: an app with no criteria/regex gets the subset and its handlers load', async () => {
+  const handlerSource = `import { jsonReplacer } from "creator-to-catalyst/shims";
+export const endpoint = { type: "advancedio", method: "POST", path: "/items/submit" };
+export default async function handler(req, res) {
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true, id: 9007199254740993n }, jsonReplacer));
+}
+`;
+  const generated: DeployFile[] = [
+    { path: 'functions/aio/items/submit.mjs', data: handlerSource },
+  ];
+  const files = functionDir(generated, { mode: 'dry-run', subsetShims: true });
+  const shimFiles = files.filter((f) => f.path.startsWith('functions/c2c_api/vendor/shims/'));
+  const shimPaths = shimFiles.map((f) => f.path);
+
+  // Criteria and java-regex (and runtime / zoho-adapters) are omitted
+  assert.equal(shimPaths.some((p) => p.endsWith('/criteria.js')), false, 'criteria.js should not be vendored');
+  assert.equal(shimPaths.some((p) => p.endsWith('/java-regex.js')), false, 'java-regex.js should not be vendored');
+  assert.equal(shimPaths.some((p) => p.endsWith('/runtime.js')), false, 'runtime.js should not be vendored');
+  assert.equal(shimPaths.some((p) => p.endsWith('/zoho-adapters.js')), false, 'zoho-adapters.js should not be vendored');
+
+  // ids.js, index.js, and package.json are present
+  assert.ok(shimPaths.some((p) => p.endsWith('/ids.js')), 'ids.js must be vendored');
+  assert.ok(shimPaths.some((p) => p.endsWith('/store-errors.js')), 'store-errors.js must always be vendored');
+  assert.ok(shimPaths.some((p) => p.endsWith('/index.js')), 'index.js must be vendored');
+  assert.ok(shimPaths.some((p) => p.endsWith('/package.json')), 'package.json must be vendored');
+
+  // Handlers load cleanly in Node without throwing ERR_MODULE_NOT_FOUND
+  const out = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), 'c2c-subset-shims-'));
+  try {
+    writeDeployTree(out, files);
+    const handlerUrl = pathToFileURL(join(out, 'functions/c2c_api/aio/items/submit.mjs')).href;
+    const mod = (await import(handlerUrl)) as { default: (req: unknown, res: { writeHead: (code: number) => void; end: (t: string) => void }) => Promise<void> };
+    assert.equal(typeof mod.default, 'function');
+
+    let responseData = '';
+    const fakeRes = {
+      writeHead: (_code: number) => {},
+      end: (data: string) => {
+        responseData = data;
+      },
+    };
+    await mod.default({}, fakeRes);
+    assert.equal(responseData, '{"ok":true,"id":"9007199254740993"}');
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('subset shims: an app with a dynamic import gets the full set', () => {
+  const handlerSource = `import { jsonReplacer } from "creator-to-catalyst/shims";
+export const endpoint = { type: "advancedio", method: "POST", path: "/dynamic" };
+export default async function handler(req, res) {
+  const dyn = await import("creator-to-catalyst/shims");
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true }, jsonReplacer));
+}
+`;
+  const generated: DeployFile[] = [
+    { path: 'functions/aio/items/submit.mjs', data: handlerSource },
+  ];
+  const files = functionDir(generated, { mode: 'dry-run', subsetShims: true });
+  const shimFiles = files.filter((f) => f.path.startsWith('functions/c2c_api/vendor/shims/'));
+  const allShims = vendoredShims();
+
+  // Failed closed: all shims are present
+  assert.equal(shimFiles.length, allShims.length, 'all shims must be included when a dynamic import exists');
+  const shimPaths = shimFiles.map((f) => f.path);
+  assert.ok(shimPaths.some((p) => p.endsWith('/criteria.js')));
+  assert.ok(shimPaths.some((p) => p.endsWith('/java-regex.js')));
+  assert.ok(shimPaths.some((p) => p.endsWith('/runtime.js')));
+  assert.ok(shimPaths.some((p) => p.endsWith('/zoho-adapters.js')));
+});
+
+test('subset shims: named import after an unrelated import is parsed independently', async () => {
+  const generated: DeployFile[] = [
+    { path: 'functions/c2c-mail.mjs', data: 'export const sendMail = () => {};' },
+    {
+      path: 'functions/aio/items/submit.mjs',
+      data: `import { sendMail } from "../../c2c-mail.mjs";\nimport { compileCriteria } from "creator-to-catalyst/shims";\nexport { sendMail, compileCriteria };\n`,
+    },
+  ];
+  const files = functionDir(generated, { mode: 'dry-run', subsetShims: true });
+  const shimFiles = files.filter((f) => f.path.startsWith('functions/c2c_api/vendor/shims/'));
+  assert.ok(shimFiles.some((f) => f.path.endsWith('/criteria.js')));
+
+  const out = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), 'c2c-subset-shims-import-'));
+  try {
+    writeDeployTree(out, files);
+    const handlerUrl = pathToFileURL(join(out, 'functions/c2c_api/aio/items/submit.mjs')).href;
+    const mod = (await import(handlerUrl)) as { compileCriteria: unknown; sendMail: unknown };
+    assert.equal(typeof mod.compileCriteria, 'function');
+    assert.equal(typeof mod.sendMail, 'function');
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('subset shims: non-named references to the module fail closed', () => {
+  const references = [
+    'export * from "creator-to-catalyst/shims";',
+    'export { compileCriteria } from "creator-to-catalyst/shims";',
+    'const shims = require("creator-to-catalyst/shims");',
+    'const shims = import("creator-to-catalyst/shims");',
+    'import * as shims from "creator-to-catalyst/shims";',
+    'import "creator-to-catalyst/shims";',
+  ];
+
+  for (const data of references) {
+    const generated: DeployFile[] = [{ path: 'functions/aio/reference.mjs', data }];
+    assert.equal(computeShimModules(generated), null, data);
+    const files = functionDir(generated, { mode: 'dry-run', subsetShims: true });
+    const shimFiles = files.filter((f) => f.path.startsWith('functions/c2c_api/vendor/shims/'));
+    assert.equal(shimFiles.length, vendoredShims().length, data);
+  }
+});
+
+test('subset shims: unknown symbols fail closed to the full set', () => {
+  const generated: DeployFile[] = [
+    { path: 'functions/aio/unknown.mjs', data: 'import { notARealShim } from "creator-to-catalyst/shims";' },
+  ];
+  assert.equal(computeShimModules(generated), null);
+  const files = functionDir(generated, { mode: 'dry-run', subsetShims: true });
+  const shimFiles = files.filter((f) => f.path.startsWith('functions/c2c_api/vendor/shims/'));
+  assert.equal(shimFiles.length, vendoredShims().length);
+});
+
+test('subset shims: multiline dynamic imports fail closed', () => {
+  const generated: DeployFile[] = [
+    { path: 'functions/aio/dynamic.mjs', data: 'const shims = await import(\n  "creator-to-catalyst/shims"\n);' },
+  ];
+  assert.equal(computeShimModules(generated), null);
+  const files = functionDir(generated, { mode: 'dry-run', subsetShims: true });
+  const shimFiles = files.filter((f) => f.path.startsWith('functions/c2c_api/vendor/shims/'));
+  assert.equal(shimFiles.length, vendoredShims().length);
+});
+
+test('subset shims: library ignores C2C_SUBSET_SHIMS environment setting', () => {
+  const previous = process.env.C2C_SUBSET_SHIMS;
+  process.env.C2C_SUBSET_SHIMS = '1';
+  try {
+    const generated: DeployFile[] = [
+      { path: 'functions/aio/env.mjs', data: 'export default function handler() {};' },
+    ];
+    const files = functionDir(generated, { mode: 'dry-run' });
+    const shimFiles = files.filter((f) => f.path.startsWith('functions/c2c_api/vendor/shims/'));
+    assert.equal(shimFiles.length, vendoredShims().length);
+  } finally {
+    if (previous === undefined) delete process.env.C2C_SUBSET_SHIMS;
+    else process.env.C2C_SUBSET_SHIMS = previous;
+  }
+});
+
+test('subset shims: default output is unchanged when option is omitted', () => {
+  const handlerSource = `import { jsonReplacer } from "creator-to-catalyst/shims";
+export const endpoint = { type: "advancedio", method: "POST", path: "/items/submit" };
+export default async function handler(req, res) {
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true }, jsonReplacer));
+}
+`;
+  const generated: DeployFile[] = [
+    { path: 'functions/aio/items/submit.mjs', data: handlerSource },
+  ];
+  const filesDefault = functionDir(generated, { mode: 'dry-run' });
+  const shimFilesDefault = filesDefault.filter((f) => f.path.startsWith('functions/c2c_api/vendor/shims/'));
+  const allShims = vendoredShims();
+  assert.equal(shimFilesDefault.length, allShims.length);
+});
+
+test('subset shims: computes byte savings on small fixture apps', () => {
+  const allShims = vendoredShims();
+  const allBytes = allShims.reduce((acc, f) => acc + Buffer.byteLength(f.data), 0);
+  assert.ok(allBytes > 470000 && allBytes < 500000, `total shims size ~474 KB: ${allBytes}`);
+
+  for (const appName of ['freight-forwarding', 'library-application-system']) {
+    const fixtureDir = join(root, 'fixtures/redistributable', appName);
+    const ir = parseProject(fixtureDir).ir;
+    const defaultBundle = deployFiles(ir, guardFor(ir), false, { mode: 'dry-run', subsetShims: false });
+    const subsetBundle = deployFiles(ir, guardFor(ir), false, { mode: 'dry-run', subsetShims: true });
+
+    const defaultShims = defaultBundle.files.filter((f) => f.path.startsWith('functions/c2c_api/vendor/shims/'));
+    const subsetShims = subsetBundle.files.filter((f) => f.path.startsWith('functions/c2c_api/vendor/shims/'));
+
+    const defaultBytes = defaultShims.reduce((acc, f) => acc + Buffer.byteLength(f.data), 0);
+    const subsetBytes = subsetShims.reduce((acc, f) => acc + Buffer.byteLength(f.data), 0);
+    const savings = defaultBytes - subsetBytes;
+
+    assert.ok(savings > 20000, `${appName} byte savings: ${savings} bytes`);
+    assert.ok(subsetShims.length < defaultShims.length);
   }
 });
