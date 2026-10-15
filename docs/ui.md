@@ -2,7 +2,7 @@
 
 This is the vanilla UI target. Generated UIs are moving to React: see `docs/react-target.md` (`c2c ui-react`).
 
-The UI generator writes a static app for Zoho Catalyst Slate. It does not deploy, and it does not generate a native app. Native iOS and Android apps are out of scope; the installable client is this PWA.
+The UI generator writes a static app for Zoho Catalyst Slate. It does not deploy, and it does not generate a native app. Native iOS and Android apps are not supported in this version (counted; on the roadmap); the installable client is this PWA.
 
 ## Framework
 
