@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const DOCS = ['README.md', 'plugin/README.md'];
+const DOCS = ['plugin/README.md', 'docs/guide/02-before-you-start.md'];
 
 function* shellBlocks(file) {
   const lines = readFileSync(file, 'utf8').split('\n');
