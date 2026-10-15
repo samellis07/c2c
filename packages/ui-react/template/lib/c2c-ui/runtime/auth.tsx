@@ -12,7 +12,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../arc/components/button/button';
-import { goToSignIn, SESSION_EXPIRED_EVENT, type SessionExpiredDetail } from './api';
+import { bridgeRedirect, goToSignIn, hasBridgeToken, SESSION_EXPIRED_EVENT, type SessionExpiredDetail } from './api';
 import { useEnv } from './env';
 
 /**
@@ -49,8 +49,23 @@ type AuthState = 'none' | 'checking' | 'signed-in' | 'signed-out';
 export function AuthGate({ children }: { children: ReactNode }) {
   const { view } = useEnv();
   const auth = view.catalyst?.auth;
-  const [state, setState] = useState<AuthState>(auth && typeof auth.isUserAuthenticated === 'function' ? 'checking' : 'none');
+  // Bridge mode (deployed app): a token the c2c_auth bridge returned, or a top-
+  // level trip to fetch one. The Slate origin has no /baas, so there is no SDK
+  // sign-in here — the check is "do we hold a token", and a 401 re-trips once.
+  const bridging = typeof view.C2C_AUTH_BRIDGE === 'string' && view.C2C_AUTH_BRIDGE.length > 0;
+  const [state, setState] = useState<AuthState>(bridging ? 'checking' : auth && typeof auth.isUserAuthenticated === 'function' ? 'checking' : 'none');
   const [frameMissing, setFrameMissing] = useState(false);
+
+  useEffect(() => {
+    if (!bridging || state !== 'checking') return;
+    if (hasBridgeToken(view)) {
+      setState('signed-in');
+      return;
+    }
+    // No token: one top-level bridge trip (loop-guarded inside). A refused
+    // trip — the tab just came back without a token — shows the sign-in card.
+    setState(bridgeRedirect(view) ? 'checking' : 'signed-out');
+  }, [bridging, state, view]);
 
   useEffect(() => {
     if (state !== 'checking' || !auth?.isUserAuthenticated) return;
@@ -80,6 +95,18 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (state === 'none' || state === 'signed-in') return <>{children}</>;
   if (state === 'checking') return <p className="c2c-auth-status" role="status">Checking your sign-in…</p>;
+  if (bridging) {
+    // The automatic trip was refused by the loop guard (the tab already came
+    // back once without a token). The button is a deliberate second try.
+    return (
+      <section className="c2c-login-card" aria-labelledby="c2c-login-title">
+        <h1 id="c2c-login-title">Sign in to continue.</h1>
+        <Button type="button" variant="primary" onClick={() => bridgeRedirect(view, true)}>
+          Sign in
+        </Button>
+      </section>
+    );
+  }
   return (
     <section className="c2c-login-card" aria-labelledby="c2c-login-title">
       <h1 id="c2c-login-title">Sign in to continue.</h1>
@@ -131,7 +158,16 @@ export function SessionExpiredPrompt() {
             ? 'Signing in again did not restore access. Your entries are kept on this page; ask the app administrator to check your app role.'
             : 'Sign in again to continue. Your entries are kept.'}
         </p>
-        <Button ref={buttonRef} type="button" variant="primary" onClick={() => goToSignIn(view, expired.login)}>
+        <Button
+          ref={buttonRef}
+          type="button"
+          variant="primary"
+          onClick={() => {
+            // Bridge mode has no hosted-login page on Slate: the bridge is the way back in.
+            if (typeof view.C2C_AUTH_BRIDGE === 'string' && view.C2C_AUTH_BRIDGE) bridgeRedirect(view, true);
+            else goToSignIn(view, expired.login);
+          }}
+        >
           Sign in again
         </Button>
       </section>

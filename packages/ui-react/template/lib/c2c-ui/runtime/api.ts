@@ -28,6 +28,12 @@ export interface AppWindow extends Window {
   C2C_AUTH_TIMEOUT_MS?: number;
   /** Bound on the smoke page's access check — see smoke/run.ts. Default 30000 ms. */
   C2C_SMOKE_STATUS_TIMEOUT_MS?: number;
+  /**
+   * The c2c_auth token bridge on the function origin (c2c-config.js, set on a
+   * deployed app). When present, the app carries the token the bridge returned
+   * in the #c2c_auth fragment and sends no cookies.
+   */
+  C2C_AUTH_BRIDGE?: string;
   catalyst?: { auth?: CatalystAuth };
 }
 
@@ -100,7 +106,166 @@ export function apiUrl(view: AppWindow, endpoint: string): string {
   return request;
 }
 
+/**
+ * Token bridge (design d'). The Slate origin serves no /baas routes, so the
+ * Web SDK cannot mint a functions token on it. The configured C2C_AUTH_BRIDGE
+ * page runs on the function origin — where the SDK is first-party — and
+ * returns the token in `#c2c_auth=<token>&state=<state>`. The state binds the
+ * fragment to this tab: a link carrying a foreign token is refused because
+ * its state never equals the sessionStorage value written here.
+ */
+const BRIDGE_STATE_KEY = 'c2c.bridge.state';
+const BRIDGE_TOKEN_KEY = 'c2c.bridge.token';
+const BRIDGE_ROUTE_KEY = 'c2c.bridge.route';
+/** sessionStorage timestamp of the last bridge redirect, for the loop guard. */
+const BRIDGE_MARK = 'c2c.bridge.at';
+/** Two bridge round trips inside this window mean the trip itself fails. */
+const BRIDGE_LOOP_MS = 60_000;
+
+function bridgeConfigured(view: AppWindow): boolean {
+  return typeof view.C2C_AUTH_BRIDGE === 'string' && view.C2C_AUTH_BRIDGE.length > 0;
+}
+
+/** A fixed-time compare so a fragment's state is checked without an early exit. */
+function sameState(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function storedBridgeToken(view: AppWindow): string {
+  try {
+    return sessionStore(view)?.getItem(BRIDGE_TOKEN_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function forgetBridgeToken(view: AppWindow): void {
+  try {
+    sessionStore(view)?.removeItem(BRIDGE_TOKEN_KEY);
+  } catch {
+    // storage refused
+  }
+}
+
+/**
+ * Read `#c2c_auth=<token>&state=<state>` off the address bar. A matching
+ * fragment is consumed exactly once: the token is kept in sessionStorage for
+ * reloads, the route saved before the bridge trip is restored, and the
+ * fragment is stripped with replaceState so it never reaches the router, a
+ * log, or a referrer. A mismatched or unsigned state drops the token.
+ */
+export function intakeBridgeFragment(view: AppWindow): void {
+  const hash = typeof view.location?.hash === 'string' ? view.location.hash : '';
+  if (!hash.startsWith('#c2c_auth=')) return;
+  let token = '';
+  let state = '';
+  try {
+    const params = new URLSearchParams(hash.slice(1));
+    token = params.get('c2c_auth') ?? '';
+    state = params.get('state') ?? '';
+  } catch {
+    return;
+  }
+  // Strip the fragment before anything else can see it, restoring the route
+  // the tab was on when it left for the bridge.
+  let route = '/';
+  try {
+    const stored = sessionStore(view);
+    const saved = stored?.getItem(BRIDGE_ROUTE_KEY);
+    if (saved && saved.startsWith('/')) route = saved;
+    stored?.removeItem(BRIDGE_ROUTE_KEY);
+  } catch {
+    // storage refused: fall back to the root route
+  }
+  try {
+    view.history?.replaceState(null, '', `${view.location.pathname}${route === '/' ? '' : route}`);
+  } catch {
+    // a host without history keeps the fragment — still never sent anywhere
+  }
+  let expected = '';
+  try {
+    expected = sessionStore(view)?.getItem(BRIDGE_STATE_KEY) ?? '';
+    sessionStore(view)?.removeItem(BRIDGE_STATE_KEY);
+  } catch {
+    // storage refused
+  }
+  if (!token || !expected || !sameState(state, expected)) return;
+  try {
+    sessionStore(view)?.setItem(BRIDGE_TOKEN_KEY, token);
+    sessionStore(view)?.removeItem(BRIDGE_MARK);
+  } catch {
+    // storage refused: the token stays in this page only
+  }
+}
+
+function recentBridge(view: AppWindow): boolean {
+  try {
+    const at = Number(sessionStore(view)?.getItem(BRIDGE_MARK));
+    return Number.isFinite(at) && at > 0 && Date.now() - at < BRIDGE_LOOP_MS;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Send the tab to the token bridge, remembering where it was. The bridge URL
+ * is the deploy-generated C2C_AUTH_BRIDGE: trusted config, https only (or a
+ * loopback host on a local stack). Returns false when the round trip would
+ * loop — a bridge return without a token lands on the signed-out prompt
+ * instead of redirecting forever.
+ */
+export function bridgeRedirect(view: AppWindow, force = false): boolean {
+  const bridge = view.C2C_AUTH_BRIDGE;
+  if (typeof bridge !== 'string' || !bridge) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(bridge, pageUrl(view));
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && LOOPBACK_HOSTS.has(parsed.hostname))) return false;
+  if (!force && recentBridge(view)) return false;
+  const store = sessionStore(view);
+  let state = '';
+  try {
+    const bytes = new Uint8Array(32);
+    (view.crypto ?? globalThis.crypto)?.getRandomValues(bytes);
+    state = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  } catch {
+    return false;
+  }
+  try {
+    const here = `${view.location.pathname}${view.location.hash && !view.location.hash.startsWith('#c2c_auth=') ? view.location.hash : ''}`;
+    store?.setItem(BRIDGE_ROUTE_KEY, here || '/');
+    store?.setItem(BRIDGE_STATE_KEY, state);
+    store?.setItem(BRIDGE_MARK, String(Date.now()));
+  } catch {
+    // storage refused: the fragment's state check will refuse the return — do not leave
+    return false;
+  }
+  const target = `${parsed.origin}${parsed.pathname}?state=${state}`;
+  const location = view.location as Location & { assign?: (url: string) => void };
+  try {
+    if (typeof location.assign === 'function') location.assign(target);
+    else location.href = target;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when the tab holds a bridge token (from intake or an earlier trip). */
+export function hasBridgeToken(view: AppWindow): boolean {
+  intakeBridgeFragment(view);
+  return storedBridgeToken(view) !== '';
+}
+
 async function authToken(view: AppWindow): Promise<string> {
+  intakeBridgeFragment(view);
+  if (bridgeConfigured(view)) return storedBridgeToken(view);
   const auth = view.catalyst?.auth;
   if (!auth || typeof auth.generateAuthToken !== 'function') return '';
   // The SDK token chain is best-effort: on a host where the SDK's auth
@@ -221,6 +386,9 @@ export function sessionExpired(view: AppWindow): void {
   }
   if (handled || detail.looping || redirected.has(view)) return;
   redirected.add(view);
+  // Bridge mode never parks on a hosted-login URL — Slate has none. The
+  // refused bridge trip leaves the page to its prompt, whose button forces it.
+  if (bridgeConfigured(view)) return;
   goToSignIn(view, detail.login);
 }
 
@@ -269,12 +437,14 @@ export async function apiCall(view: AppWindow, endpoint: string, init: ApiInit =
   const headers: Record<string, string> = { ...(init.headers ?? {}) };
   const token = await authToken(view);
   if (token) headers.authorization = token;
+  // Bridge mode sends no cookies at all: the Authorization header is the only
+  // authority, so a cross-site form cannot ride an ambient session.
   const remote = apiBase(view) !== '' || token !== '';
   return await call(url, {
     method: init.method ?? 'GET',
     headers,
     ...(init.body !== undefined ? { body: init.body } : {}),
-    ...(remote ? { credentials: 'include' as const } : {}),
+    ...(bridgeConfigured(view) ? { credentials: 'omit' as const } : remote ? { credentials: 'include' as const } : {}),
   });
 }
 
@@ -284,7 +454,7 @@ export function createApi(view: AppWindow, extraHeaders?: HeaderHook): Api {
     if (typeof call !== 'function') return { ok: false, status: 0, body: undefined };
     const headers: Record<string, string> = { 'content-type': 'application/json', ...(extraHeaders ? await extraHeaders() : {}) };
     const token = await authToken(view);
-    // Catalyst Web SDK v4.6.1+: the raw token, no prefix.
+    // Catalyst Web SDK v4.6.2+: the raw token, no prefix.
     if (token) headers.authorization = token;
     const remote = apiBase(view) !== '' || token !== '';
     let res: Response;
@@ -293,7 +463,7 @@ export function createApi(view: AppWindow, extraHeaders?: HeaderHook): Api {
         method,
         headers,
         ...(method === 'POST' ? { body: JSON.stringify(body, jsonReplacer) } : {}),
-        ...(remote ? { credentials: 'include' as const } : {}),
+        ...(bridgeConfigured(view) ? { credentials: 'omit' as const } : remote ? { credentials: 'include' as const } : {}),
       });
     } catch {
       // The network dropped or the host is unreachable: status 0, its own message.
@@ -312,7 +482,14 @@ export function createApi(view: AppWindow, extraHeaders?: HeaderHook): Api {
     // 401: one retry with a freshly generated token (a stale token renews
     // silently); a second 401 means the session is gone — the open form saves
     // its draft and the page goes to sign-in. 403 is never retried.
+    // Bridge mode: drop the stored token and take one bridge round trip
+    // (loop-guarded); a refused trip lands on the session-expired prompt.
     if (reply.status === 401) {
+      if (bridgeConfigured(view)) {
+        forgetBridgeToken(view);
+        if (!bridgeRedirect(view)) sessionExpired(view);
+        return reply;
+      }
       reply = await attempt<T>(method, url, body);
       if (reply.status === 401) sessionExpired(view);
     }

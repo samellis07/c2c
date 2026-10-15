@@ -3366,8 +3366,192 @@ export function apiUrl(endpoint, viewRef) {
   return request;
 }
 
+/**
+ * Token bridge (design d'). The Slate origin serves no /baas routes, so the
+ * Web SDK cannot mint a functions token on it. The configured C2C_AUTH_BRIDGE
+ * page runs on the function origin — where the SDK is first-party — and
+ * returns the token in `#c2c_auth=<token>&state=<state>`. The state binds the
+ * fragment to this tab: a link carrying a foreign token is refused because
+ * its state never equals the sessionStorage value written here.
+ */
+const BRIDGE_STATE_KEY = 'c2c.bridge.state';
+const BRIDGE_TOKEN_KEY = 'c2c.bridge.token';
+const BRIDGE_ROUTE_KEY = 'c2c.bridge.route';
+const BRIDGE_MARK = 'c2c.bridge.at';
+/** Two bridge round trips inside this window mean the trip itself fails. */
+const BRIDGE_LOOP_MS = 60_000;
+
+function bridgeScope(viewRef) {
+  return viewRef || globalThis;
+}
+
+function bridgeConfigured(viewRef) {
+  const scope = bridgeScope(viewRef);
+  return typeof scope.C2C_AUTH_BRIDGE === 'string' && scope.C2C_AUTH_BRIDGE.length > 0;
+}
+
+function bridgeStore(viewRef) {
+  try {
+    return bridgeScope(viewRef).sessionStorage || null;
+  } catch {
+    return null;
+  }
+}
+
+/** A fixed-time compare so a fragment's state is checked without an early exit. */
+function sameBridgeState(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function storedBridgeToken(viewRef) {
+  try {
+    return (bridgeStore(viewRef) && bridgeStore(viewRef).getItem(BRIDGE_TOKEN_KEY)) || '';
+  } catch {
+    return '';
+  }
+}
+
+function forgetBridgeToken(viewRef) {
+  try {
+    const store = bridgeStore(viewRef);
+    if (store) store.removeItem(BRIDGE_TOKEN_KEY);
+  } catch {
+    // storage refused
+  }
+}
+
+/**
+ * Read `#c2c_auth=<token>&state=<state>` off the address bar. A matching
+ * fragment is consumed exactly once: the token is kept in sessionStorage for
+ * reloads, the route saved before the bridge trip is restored, and the
+ * fragment is stripped with replaceState so it never reaches the router, a
+ * log, or a referrer. A mismatched or unsigned state drops the token.
+ */
+export function intakeBridgeFragment(viewRef) {
+  const scope = bridgeScope(viewRef);
+  const location = scope.location;
+  const hash = location && typeof location.hash === 'string' ? location.hash : '';
+  if (!hash.startsWith('#c2c_auth=')) return;
+  let token = '';
+  let state = '';
+  try {
+    const params = new URLSearchParams(hash.slice(1));
+    token = params.get('c2c_auth') || '';
+    state = params.get('state') || '';
+  } catch {
+    return;
+  }
+  // Strip the fragment before anything else can see it, restoring the route
+  // the tab was on when it left for the bridge.
+  let route = '/';
+  try {
+    const store = bridgeStore(viewRef);
+    const saved = store && store.getItem(BRIDGE_ROUTE_KEY);
+    if (saved && saved.startsWith('/')) route = saved;
+    if (store) store.removeItem(BRIDGE_ROUTE_KEY);
+  } catch {
+    // storage refused: fall back to the root route
+  }
+  try {
+    if (scope.history && typeof scope.history.replaceState === 'function') {
+      scope.history.replaceState(null, '', `${location.pathname}${route === '/' ? '' : route}`);
+    }
+  } catch {
+    // a host without history keeps the fragment — still never sent anywhere
+  }
+  let expected = '';
+  try {
+    const store = bridgeStore(viewRef);
+    expected = (store && store.getItem(BRIDGE_STATE_KEY)) || '';
+    if (store) store.removeItem(BRIDGE_STATE_KEY);
+  } catch {
+    // storage refused
+  }
+  if (!token || !expected || !sameBridgeState(state, expected)) return;
+  try {
+    const store = bridgeStore(viewRef);
+    if (store) {
+      store.setItem(BRIDGE_TOKEN_KEY, token);
+      store.removeItem(BRIDGE_MARK);
+    }
+  } catch {
+    // storage refused: the token stays in this page only
+  }
+}
+
+function recentBridge(viewRef) {
+  try {
+    const store = bridgeStore(viewRef);
+    const at = Number(store && store.getItem(BRIDGE_MARK));
+    return Number.isFinite(at) && at > 0 && Date.now() - at < BRIDGE_LOOP_MS;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Send the tab to the token bridge, remembering where it was. The bridge URL
+ * is the deploy-generated C2C_AUTH_BRIDGE: trusted config, https only (or a
+ * loopback host on a local stack). Returns false when the round trip would
+ * loop — a bridge return without a token lands on the signed-out prompt
+ * instead of redirecting forever.
+ */
+export function bridgeRedirect(viewRef, force) {
+  const scope = bridgeScope(viewRef);
+  const bridge = scope.C2C_AUTH_BRIDGE;
+  if (typeof bridge !== 'string' || !bridge) return false;
+  let parsed;
+  try {
+    parsed = new URL(bridge, pageUrl(viewRef));
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && LOOPBACK_HOSTS.has(parsed.hostname))) return false;
+  if (!force && recentBridge(viewRef)) return false;
+  const store = bridgeStore(viewRef);
+  let state = '';
+  try {
+    const bytes = new Uint8Array(32);
+    (scope.crypto || globalThis.crypto).getRandomValues(bytes);
+    state = btoa(String.fromCharCode.apply(null, Array.from(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  } catch {
+    return false;
+  }
+  try {
+    const here = `${scope.location.pathname}${scope.location.hash && !scope.location.hash.startsWith('#c2c_auth=') ? scope.location.hash : ''}`;
+    if (!store) return false;
+    store.setItem(BRIDGE_ROUTE_KEY, here || '/');
+    store.setItem(BRIDGE_STATE_KEY, state);
+    store.setItem(BRIDGE_MARK, String(Date.now()));
+  } catch {
+    // storage refused: the fragment's state check will refuse the return — do not leave
+    return false;
+  }
+  const target = `${parsed.origin}${parsed.pathname}?state=${state}`;
+  const location = scope.location;
+  try {
+    if (location && typeof location.assign === 'function') location.assign(target);
+    else if (location) location.href = target;
+    else return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when the tab holds a bridge token (from intake or an earlier trip). */
+export function hasBridgeToken(viewRef) {
+  intakeBridgeFragment(viewRef);
+  return storedBridgeToken(viewRef) !== '';
+}
+
 async function authToken(viewRef) {
   const scope = viewRef || globalThis;
+  intakeBridgeFragment(scope);
+  if (bridgeConfigured(scope)) return storedBridgeToken(scope);
   const auth = scope && scope.catalyst && scope.catalyst.auth;
   if (!auth || typeof auth.generateAuthToken !== 'function') return '';
   // The SDK token chain is best-effort: on a host where the SDK's auth
@@ -3409,7 +3593,16 @@ export async function apiCall(call, viewRef, endpoint, init) {
   const headers = { ...((init && init.headers) || {}) };
   // Catalyst Web SDK v4.6.1+: the raw token, no prefix.
   if (token) headers.authorization = token;
-  return call(url, { ...init, headers, credentials: 'include' });
+  // Bridge mode sends no cookies at all: the Authorization header is the only
+  // authority, so a cross-site form cannot ride an ambient session.
+  const res = await call(url, { ...init, headers, credentials: bridgeConfigured(viewRef) ? 'omit' : 'include' });
+  // A refused (or absent) bridge token is dropped and the tab takes one bridge
+  // round trip (loop-guarded); a refused trip keeps the 401 for the caller.
+  if (res && res.status === 401 && bridgeConfigured(viewRef)) {
+    forgetBridgeToken(viewRef);
+    bridgeRedirect(viewRef);
+  }
+  return res;
 }
 
 /** Apply one field patch to at most 25 selected rows through the ordinary edit endpoint. Each request independently runs server grants and validation workflows. */
@@ -4916,7 +5109,24 @@ export function boot(appModel, doc) {
   if (title) title.textContent = appModel.name || 'App';
   const auth = view && view.catalyst && view.catalyst.auth;
   const login = documentRef.getElementById('c2c-login');
-  if (auth && login && typeof auth.isUserAuthenticated === 'function') {
+  if (bridgeConfigured(view)) {
+    // Bridge mode: no SDK sign-in on Slate. Hold a token or take the one
+    // loop-guarded bridge trip; a refused trip leaves the sign-in note up.
+    if (!hasBridgeToken(view) && !bridgeRedirect(view) && login) {
+      login.hidden = false;
+      const line = documentRef.createElement('p');
+      line.textContent = 'Sign in to continue.';
+      login.appendChild(line);
+      const link = documentRef.createElement('a');
+      link.setAttribute('href', '#');
+      link.textContent = 'Sign in';
+      link.addEventListener('click', (event) => {
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
+        bridgeRedirect(view, true);
+      });
+      login.appendChild(link);
+    }
+  } else if (auth && login && typeof auth.isUserAuthenticated === 'function') {
     // Catalyst Authentication: show the embedded sign-in when there is no session.
     const note = (attr, text) => {
       if (login.querySelector(`[${attr}]`)) return;

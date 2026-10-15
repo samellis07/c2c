@@ -8,10 +8,11 @@ import type { App } from '../../core/src/ir.js';
 import { widgetManualItems, type WidgetManualItem } from '../../core/src/parse.js';
 import { integrityColumns } from '../../data/src/integrity.js';
 import { columnRenamesOf, constraintDecisionNote, generateSchema, schemaAsJson, type ConstraintDecision, type SchemaColumn, type SchemaTable, type SourceTableData } from '../../schema/src/generator.js';
-import { appTimeZone, buildUi, slateConfigSource } from '../../ui/src/generate.js';
+import { appTimeZone, authBridgeUrl, buildUi, slateConfigSource } from '../../ui/src/generate.js';
 import { mailTemplateCatalog } from '../../ui/src/decorations/print-templates.js';
 import { generateReactApp } from '../../ui-react/src/generate.js';
 import { API_FUNCTION, appOrigins, columnTypes, FUNCTION_DIR, functionDir, routeTable } from './function-dir.js';
+import { AUTH_FUNCTION, authBridgeFiles, slateOriginOf } from './auth-bridge.js';
 import { planSmoke } from './smoke.js';
 import { slateAppName } from './slate.js';
 import { confirmGuardLines, planScopeLines, type GuardOk } from './guards.js';
@@ -55,7 +56,7 @@ export type DeployUi = 'vanilla' | 'react';
 
 export interface DeployCommand {
   /** Step id recorded in the resume state. */
-  id: 'install' | 'functions' | 'ui-deps' | 'ui-build' | 'slate-link' | 'slate';
+  id: 'install' | 'functions' | 'functions-auth' | 'ui-deps' | 'ui-build' | 'slate-link' | 'slate';
   /** Program to spawn. Defaults to catalyst. */
   command?: 'catalyst' | 'npm';
   argv: string[];
@@ -84,6 +85,8 @@ export interface DeployOptions {
    * This app's Slate host (bare host or the App Url slate:link prints). Its
    * https origin goes into the function's `allowedOrigins` alongside the API
    * base's origin — the only page origins the generated write endpoints accept.
+   * When known (--slate-domain or a resumed slateUrl) it also lands as
+   * c2c_auth's C2C_SLATE_ORIGIN.
    */
   slateDomain?: string;
   /** Opt-in async on-success lane: emit the event function, dead-letter store and sweep Job (docs/event-deadletter.md). */
@@ -118,6 +121,9 @@ export function deployCommands(slateName: string, org: string, projectId: string
   return [
     { id: 'install', command: 'npm', argv: ['install', '--omit=dev', '--no-audit', '--no-fund'], cwd: FUNCTION_DIR },
     { id: 'functions', argv: [...scope, 'deploy', '--only', `functions:${API_FUNCTION}`, '-ni'] },
+    // c2c_auth is the Slate auth bridge (auth-bridge.ts): no dependencies, so
+    // no install step — its env carries only C2C_SLATE_ORIGIN.
+    { id: 'functions-auth', argv: [...scope, 'deploy', '--only', `functions:${AUTH_FUNCTION}`, '-ni'] },
     // The React target deploys the built dist/, not its source: the app's
     // pinned dependencies are installed and `npm run build` writes web/dist
     // inside the deploy dir before the Slate steps.
@@ -260,7 +266,7 @@ export function deployFiles(
         path: `web/${file.path}`,
         data:
           file.path === 'public/c2c-config.js'
-            ? slateConfigSource({ apiBase: opts.apiBase, auth: true, appTimeZone: appTimeZone(app), smokePlan: smoke, smokeProject: guard.projectId })
+            ? slateConfigSource({ apiBase: opts.apiBase, auth: true, authBridge: authBridgeUrl(opts.apiBase), appTimeZone: appTimeZone(app), smokePlan: smoke, smokeProject: guard.projectId })
             : file.data,
       });
     }
@@ -272,13 +278,18 @@ export function deployFiles(
         // `c2c smoke --confirm` plans. Route keys come from the generated
         // functions exactly as routes.json assembles them.
         const smoke = planSmoke(app, { routes: routeTable(generated.filter((f) => f.path.startsWith('functions/'))), model: ui.model, schema });
-        files.push({ path: file.path, data: slateConfigSource({ apiBase: opts.apiBase, auth: true, appTimeZone: appTimeZone(app), smokePlan: smoke, smokeProject: guard.projectId }) });
+        files.push({ path: file.path, data: slateConfigSource({ apiBase: opts.apiBase, auth: true, authBridge: authBridgeUrl(opts.apiBase), appTimeZone: appTimeZone(app), smokePlan: smoke, smokeProject: guard.projectId }) });
         continue;
       }
       files.push({ path: file.path, data: file.data });
     }
   }
   const verifiedFrom = mail.from && mail.verifiedSenders.includes(mail.from) ? mail.from : undefined;
+  // The auth bridge function: a Slate page cannot mint a functions token (its
+  // init.js leaves api_domain empty, so /baas calls 404 on the Slate origin).
+  // c2c_auth serves the bridge page on the function origin, where the Web SDK
+  // works first-party, and hands the token back in a state-bound fragment.
+  files.push(...authBridgeFiles(guard.dc, slateOriginOf(opts.slateDomain)));
   files.push(
     ...functionDir(generated, {
       mode: opts.mode ?? 'dry-run',
@@ -378,7 +389,7 @@ function catalystJson(guard: GuardOk, mail: MailConfig) {
     project_id: guard.projectId,
     org_id: guard.org,
     environment: guard.environment,
-    functions: { targets: [API_FUNCTION], ignore: [], source: 'functions' },
+    functions: { targets: [API_FUNCTION, AUTH_FUNCTION], ignore: [], source: 'functions' },
     slate: [],
     mail: { enabled: mail.enabled, allowlist: mail.allowlist },
   };
