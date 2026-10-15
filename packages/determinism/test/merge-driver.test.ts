@@ -59,9 +59,22 @@ test('merge driver and installer are executable and parse under bash', () => {
   const installer = readFileSync(INSTALLER, 'utf8');
   assert.match(installer, /merge\.c2c-generated\.driver .*%O %A %B %P/);
   const driver = readFileSync(DRIVER, 'utf8');
-  for (const path of ['docs/determinism-status.md', 'docs/decimal-audit.md', 'docs/quality-gate.md', 'docs/coverage-gate.md']) {
+  for (const path of ['docs/determinism-status.md', 'docs/decimal-audit.md', 'docs/quality-gate.md']) {
     const branch = driver.slice(driver.indexOf(`  ${path})`));
     assert.match(branch.split('\n  *)')[0] ?? '', /C2C_MERGE_REGENERATE:-\}.*= "1"/, `${path} must require explicit regeneration opt-in`);
+  }
+});
+
+test('the merge driver never runs repo code during an ordinary merge', () => {
+  const driver = readFileSync(DRIVER, 'utf8');
+  const body = driver.slice(driver.indexOf('case "$path"'));
+  for (const branch of body.split(/^  (?=\S)/m).slice(1)) {
+    if (!/\bnode\b/.test(branch)) continue;
+    assert.match(
+      branch,
+      /C2C_MERGE_REGENERATE:-\}.*= "1"/,
+      `driver branch runs node without the C2C_MERGE_REGENERATE=1 opt-in: ${branch.split(')')[0]})`,
+    );
   }
 });
 
@@ -96,6 +109,8 @@ test('git merge resolves generated files through the driver without conflict mar
     );
     writeFileSync(join(dir, 'generated.txt'), 'head\nmid\ntail\n');
     writeFileSync(join(dir, 'packages/determinism/test/manifests/app.sha256'), `${'a'.repeat(64)}  p\n${'b'.repeat(64)}  q\n`);
+    const untouched = `${'e'.repeat(64)}  z\n`;
+    writeFileSync(join(dir, 'packages/determinism/test/manifests/untouched.sha256'), untouched);
     git(dir, ['init', '-b', 'main']);
     git(dir, ['config', 'merge.c2c-generated.driver', 'bash tools/merge-generated.sh %O %A %B %P']);
     git(dir, ['add', '-A']);
@@ -117,6 +132,11 @@ test('git merge resolves generated files through the driver without conflict mar
     const manifest = readFileSync(join(dir, 'packages/determinism/test/manifests/app.sha256'), 'utf8');
     assert.ok(manifest.includes('c'.repeat(64)) && manifest.includes('d'.repeat(64)), `union keeps both manifest lines: ${manifest}`);
     assert.doesNotMatch(manifest, /<{7}|>{7}/);
+    assert.equal(
+      readFileSync(join(dir, 'packages/determinism/test/manifests/untouched.sha256'), 'utf8'),
+      untouched,
+      'the driver must not rewrite generated files beyond the merge result',
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
