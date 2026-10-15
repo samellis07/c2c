@@ -552,7 +552,8 @@ function embeddedComponents(template: string, app: App): { template: string; com
     const kind = linkKind === 'view' || linkKind === 'report' ? 'report' : linkKind;
     const name = linkEntry?.[1] ?? '';
     const known = SAFE_COMPONENT_NAME.test(name) && (kind === 'form' ? app.forms.some((form) => form.name === name) : kind === 'report' ? app.reports.some((report) => report.name === name) : false);
-    if (known && ![...attrs.keys()].some((key) => ZC_PARAMS.test(key))) {
+    const hostile = [...attrs.keys()].some((key) => /^on/i.test(key)) || [...attrs.values()].some((value) => /(?:javascript:|data:text\/html)/i.test(value));
+    if (known && !hostile && ![...attrs.keys()].some((key) => ZC_PARAMS.test(key))) {
       const component = { kind: kind as 'form' | 'report', name };
       components.push(component);
       return tag.replace(/>$/, ` data-zml="component-${component.kind}:${component.name}">`);
