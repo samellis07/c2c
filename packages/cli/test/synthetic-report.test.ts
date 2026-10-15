@@ -43,6 +43,21 @@ const WIDGET_MANIFEST = `{
 
 const WIDGET_HTML = '<!DOCTYPE html><html><head><title>Route map</title></head><body><p>Route map</p></body></html>\n';
 
+const RESIDUAL_DS = `application "Residual_App"
+{
+	functions
+	{
+		Deluge
+		{
+			void helpers.logNote()
+			{
+				note = "hello".toFile("note.txt");
+			}
+		}
+	}
+}
+`;
+
 function tree(): string {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-synthetic-list-'));
   const put = (rel: string, body: string = MINI) => {
@@ -128,6 +143,17 @@ test('runSyntheticApp lists a widget sidecar as a manual blocker, never migrates
   writeFileSync(join(widget, 'plugin-manifest.json'), WIDGET_MANIFEST);
   const appRow = await runSyntheticApp({ n: 1, rel: 'app.ds', file: join(dir, 'app.ds') }, { root: dir, dc: 'us' });
   assert.deepEqual(appRow.manual, [{ severity: 'blocker', check: 'widget Route_Map', count: 1 }]);
+  assert.equal(verdictOf(appRow), 'manual-items');
+});
+
+test('runSyntheticApp lists a non-widget analyze blocker as a manual item, never migrates', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-synthetic-residual-'));
+  t.after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  writeFileSync(join(dir, 'app.ds'), RESIDUAL_DS);
+  const appRow = await runSyntheticApp({ n: 1, rel: 'app.ds', file: join(dir, 'app.ds') }, { root: dir, dc: 'us' });
+  assert.ok(appRow.manual.some((item) => item.severity === 'blocker' && item.check.includes('helpers.logNote')));
   assert.equal(verdictOf(appRow), 'manual-items');
 });
 

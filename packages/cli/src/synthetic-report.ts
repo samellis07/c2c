@@ -113,10 +113,11 @@ export function summarizeManual(findings: readonly { severity: 'blocker' | 'warn
 
 /**
  * An app migrates when it is deterministic, has no manual blocker (a precheck
- * blocker means Creator rejects the source; a widget package is rebuilt by
- * hand) and every offline stage builds. Otherwise it must list its manual
- * items (precheck findings, widget packages or unresolved TODOs). Anything
- * else is a FAIL row.
+ * blocker means Creator rejects the source; an analyze blocker is work that
+ * stays manual: an unconverted feature, a residual hole, a widget package
+ * rebuilt by hand) and every offline stage builds. Otherwise it must list
+ * its manual items (precheck findings, analyze blockers or unresolved
+ * TODOs). Anything else is a FAIL row.
  */
 export function verdictOf(row: SyntheticRow): SyntheticVerdict {
   const blocked = row.manual.some((item) => item.severity === 'blocker');
@@ -162,7 +163,7 @@ export function formatSyntheticReport(rows: readonly SyntheticRow[], opts: { lab
     `Plan data centre: ${opts.dc}. Rows are numbered in corpus path order and name no app.`,
     '',
     'Columns: compiles is the static gate over the generated tree (yes/no);',
-    'manual items are the precheck findings and widget packages grouped by severity and check;',
+    'manual items are the precheck findings and analyze blockers grouped by severity and check;',
     'unresolved TODOs are the analyze residual with per-construct counts;',
     'plan errors are the first line of each failing stage (parse, quality, ui, plan, deploy), or none;',
     'verdict is migrates (deterministic, no manual blocker, every offline stage clean),',
@@ -262,14 +263,13 @@ export async function runSyntheticApp(
 
   const report = precheck(ir, source);
   const analyzed = analyze(ir);
-  // Widget packages sit beside the export (html + json, not `.ds`), so they
-  // reach the row as analyze blockers rather than precheck findings. List
-  // them with the manual items so a widget-only app cannot read as migrates.
+  // Every analyze blocker is manual work: matrix features with no converter,
+  // residual holes in scripts or UI stubs, and widget packages that sit
+  // beside the export (html + json, not `.ds`). List them all with the
+  // precheck findings so a blocker can never read as migrates.
   const manual = summarizeManual([
     ...report.findings,
-    ...analyzed.blockers
-      .filter((blocker) => blocker.label.startsWith('widget '))
-      .map((blocker) => ({ severity: 'blocker' as const, check: blocker.label })),
+    ...analyzed.blockers.map((blocker) => ({ severity: 'blocker' as const, check: blocker.label })),
   ]);
 
   let compiles: 'yes' | 'no' = 'no';
