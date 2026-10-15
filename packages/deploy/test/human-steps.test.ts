@@ -95,6 +95,14 @@ test('the checklist is one numbered list: slate start, admin invite, sign in, se
   assert.match(printed, /^human checklist:\n1\. .*Start Exploring[\s\S]*2\. .*invite[\s\S]*3\. .*[Ss]ign in[\s\S]*4\. .*sender/);
 });
 
+test('the live-run guide quotes every implemented checklist item', () => {
+  const guide = readFileSync(join(process.cwd(), 'docs/user/live-runs-human-steps.md'), 'utf8');
+  for (const item of humanChecklist({ slate: true, sendsMail: true })) {
+    assert.ok(guide.includes(`“${item}”`), `guide is missing the runtime checklist wording: ${item}`);
+  }
+  assert.match(guide, /“in-app check \+ paste code” step is \*\*not implemented\*\*/);
+});
+
 test('a re-run after Slate started drops the Slate start and keeps numbering contiguous', () => {
   const items = humanChecklist({ slate: true, sendsMail: true, slateStarted: true });
   assert.equal(items.length, 3);
