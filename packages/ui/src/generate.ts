@@ -1791,6 +1791,7 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
     'A live reply carries only the fields the caller may read, plus the row id and system columns.',
     'Policy file: functions/access-policy.json. This module embeds it as access.',
     'When functions/c2c-deploy.json mode is "live" and a datastore is injected, accepted values are written after validate and before on-success scripts. Dry run does not write and does not run those scripts. On success sees the inserted row, including ID (the stored ROWID) and system fields. If an on-success script throws after the write, the row stays: a Deluge runtime or refused-connection error reports its text; any other failure replies 500 request failed.',
+    'A live edit captures Catalyst MODIFIEDTIME while preparing the row, then re-reads ROWID/MODIFIEDTIME once immediately before updateRows. A change is refused as c2c code C2C_STALE_WRITE (409). This is c2c\'s stale check and one extra bounded read; Data Store itself has no optimistic lock.',
     'Creator runs On Success after the record is submitted (https://help.zoho.com/portal/en/kb/creator/developer-guide/workflows/create-and-manage-on-success-action/articles/understand-on-success-action): "The actions that you define in the On success event will be executed when a new record is successfully submitted to the database or when an existing record is updated or deleted from the database." Whether Creator rolls that row back when On Success throws is unverified; this port leaves the row.',
     ...(deferSuccess
       ? ['Async on-success opt-in: in live mode this endpoint validates and stores the row, then replies without running the on-success modules. The after-commit event function (functions/events/after-commit.mjs) runs them when the record trigger fires; a failure dead-letters to C2CEventDeadLetter for the sweep Job (docs/event-deadletter.md).']
@@ -1925,6 +1926,10 @@ ${flowCommit}${deferSuccess
     // the field, plus a structured log line); anything else stays a
     // sanitized 500 with dryRun of the real mode.
     if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;
+    if (err && err.code === "C2C_STALE_WRITE") {
+      send(res, 409, { dryRun: !live, wrote: false, code: "C2C_STALE_WRITE", error: err.message });
+      return;
+    }
     fail(res, err, live);
   }
 }

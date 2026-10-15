@@ -26,6 +26,11 @@ test('duplicate maps 409 and names the field', () => {
   assert.doesNotMatch(message, /Please give a different value/, 'Catalyst text never reaches the caller');
 });
 
+test('the c2c stale-write refusal never classifies as a Catalyst store error', () => {
+  const err = Object.assign(new Error('c2c stale write: Purchase_Order changed after it was read'), { code: 'C2C_STALE_WRITE' });
+  assert.equal(classifyStoreError(err), null);
+});
+
 test('missing mandatory maps 422 (store 403) and names the field', () => {
   const err = sdkError('Column Vendor is mandatory and cannot be empty', 403, 'MANDATORY_MISSING');
   assert.deepEqual(classifyStoreError(err), { code: 'MANDATORY_MISSING', field: 'Vendor' });
