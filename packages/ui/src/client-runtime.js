@@ -632,12 +632,12 @@ function styleAttr(el) {
  * host: [a-z0-9.-] only, no '%', userinfo, port, or non-ASCII bytes.
  */
 function embedRawAuthority(rawUrl) {
-  const match = /^https:\/\/([^/?#]*)/i.exec(rawUrl);
+  const match = /^https:\/\/([^/?#]*)/.exec(rawUrl);
   return match ? match[1] : '';
 }
 
 function embedAuthorityHasUserinfo(rawUrl) {
-  const match = /^https:\/\/([^/?#]*)/i.exec(rawUrl);
+  const match = /^https:\/\/([^/?#]*)/.exec(rawUrl);
   return !!match && match[1].includes('@');
 }
 
@@ -649,6 +649,9 @@ function embedAuthorityHasUserinfo(rawUrl) {
  * exactly (a suffix such as maps.google.com.evil.example does not).
  */
 function embedLinkOutKind(rawUrl, parsed) {
+  // The parser strips tabs/newlines and trims edge whitespace; any such byte
+  // in the raw text means it is not the canonical form the parser produced.
+  if (/\s/.test(rawUrl)) return '';
   const written = embedRawAuthority(rawUrl);
   if (!/^[a-z0-9.-]+$/.test(written) || written !== parsed.hostname || written.endsWith('.')) return '';
   if (written.split('.').some((label) => label.startsWith('xn--'))) return '';
