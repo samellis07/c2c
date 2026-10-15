@@ -6,7 +6,7 @@
  * Offline: the observation is fake, the Catalyst CLI and REST are stubbed.
  */
 import assert from 'node:assert/strict';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -287,6 +287,7 @@ test('evidence state: the signing key is 0600 outside the workspace; a weak or m
   assert.equal((await observe(env)).code, 0);
   const key = mcpStateKeyPath(env);
   assert.ok(!key.startsWith(dir));
+  // fs-race-allow: the test inspects the key it just created; nothing else writes it.
   assert.equal(statSync(key).mode & 0o777, 0o600);
   assert.equal(statSync(join(key, '..')).mode & 0o777, 0o700);
   assert.doesNotMatch(readFileSync(mcpStatePath(dir), 'utf8'), new RegExp(readFileSync(key).toString('hex')));
@@ -307,6 +308,24 @@ test('evidence state: the signing key is 0600 outside the workspace; a weak or m
   assert.equal(run.code, 0, run.out + run.err);
   assert.match(run.err, /MCP evidence not kept for later runs: the signing key directory is inside the workspace/);
   assert.equal(existsSync(mcpStatePath(inner.dir)), false);
+});
+
+test('evidence state: a signing key that is a symlink or a directory is refused, never followed', async () => {
+  const { dir, env } = workspace();
+  assert.equal((await observe(env)).code, 0);
+  const key = mcpStateKeyPath(env);
+  assert.equal(loadMcpEvidence(dir, SCOPE, { env }).status, 'reused');
+  // The same key bytes behind a symlink: the open does not follow it.
+  const real = `${key}.real`;
+  renameSync(key, real);
+  symlinkSync(real, key);
+  assert.deepEqual(loadMcpEvidence(dir, SCOPE, { env }), { status: 'rejected', reason: 'the signing key is not a regular file' });
+  rmSync(key);
+  mkdirSync(key, { mode: 0o700 });
+  assert.deepEqual(loadMcpEvidence(dir, SCOPE, { env }), { status: 'rejected', reason: 'the signing key is not a regular file' });
+  rmSync(key, { recursive: true });
+  renameSync(real, key);
+  assert.equal(loadMcpEvidence(dir, SCOPE, { env }).status, 'reused');
 });
 
 test('mcpCarryRefusal: one rule — same version, exact scope, inside the 12 h window', () => {

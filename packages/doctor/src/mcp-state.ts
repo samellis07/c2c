@@ -27,10 +27,11 @@
  * After that the doctor asks for a new observation (`c2c doctor --mcp-begin`).
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, writeFileSync } from 'node:fs';
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { EvidenceRejected, parseEvidence, schemaDigest, type McpEvidence } from './evidence.js';
+import { NO_FOLLOW_READ_FLAGS, isSymlinkRefusedError, isUnopenableError } from '../../core/src/fs-kind.js';
 import type { Observed } from './observed.js';
 import { c2cVersion } from './report.js';
 
@@ -102,11 +103,9 @@ function stateKey(env: Env, workspace: string, create: boolean): { key: Buffer }
   }
   let fd: number | undefined;
   try {
-    const link = lstatSync(path);
-    if (!link.isFile()) return { refused: 'the signing key is not a regular file' };
-    fd = openSync(path, 'r');
+    fd = openSync(path, NO_FOLLOW_READ_FLAGS);
     const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.ino !== link.ino) return { refused: 'the signing key is not a regular file' };
+    if (!stat.isFile()) return { refused: 'the signing key is not a regular file' };
     if ((stat.mode & 0o077) !== 0) return { refused: 'the signing key is readable by other users' };
     if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return { refused: 'the signing key is owned by another user' };
     if (stat.size !== KEY_BYTES) return { refused: 'the signing key has the wrong length' };
@@ -114,6 +113,7 @@ function stateKey(env: Env, workspace: string, create: boolean): { key: Buffer }
     if (readSync(fd, key, 0, KEY_BYTES, 0) !== KEY_BYTES) return { refused: 'the signing key has the wrong length' };
     return { key };
   } catch (err) {
+    if (isSymlinkRefusedError(err) || isUnopenableError(err)) return { refused: 'the signing key is not a regular file' };
     return { refused: (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'no signing key' : 'the signing key cannot be read' };
   } finally {
     if (fd !== undefined) closeSync(fd);
