@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { constants as osConstants, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { entryKind, isSymlinkRefusedError, isUnopenableError, openKind } from '../src/fs-kind.js';
@@ -54,6 +54,24 @@ function widgetNamesInJson(text: string): string[] {
   return names;
 }
 
+// Reads through one descriptor opened without following links, so the size
+// cap and the text come from the same file (no stat-then-read of the path).
+function widgetNamesInFile(p: string): string[] {
+  let fd: number;
+  try {
+    fd = openSync(p, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | fsConstants.O_NOFOLLOW);
+  } catch {
+    return [];
+  }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.size > WIDGET_JSON_CAP) return [];
+    return widgetNamesInJson(readFileSync(fd, 'utf8'));
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function packageFlags(dir: string): { html: boolean; json: boolean; names: string[] } {
   let html = false;
   let json = false;
@@ -79,8 +97,7 @@ function packageFlags(dir: string): { html: boolean; json: boolean; names: strin
       if (lower.endsWith('.html') || lower.endsWith('.htm')) html = true;
       if (!lower.endsWith('.json')) continue;
       json = true;
-      if (st.size > WIDGET_JSON_CAP) continue;
-      names.push(...widgetNamesInJson(readFileSync(p, 'utf8')));
+      names.push(...widgetNamesInFile(p));
     }
   };
   walk(dir);
