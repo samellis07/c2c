@@ -196,6 +196,7 @@ Values below are [UNVERIFIED] unless the registry says otherwise. The schema reg
 | Data Store write rate | `datastore.write_requests_per_minute` | 100 | requests/minute | false |
 | Data Store concurrency (Development) | `datastore.concurrency_dev` | 15 | concurrent requests | false |
 | Function concurrency (Development) | `function.concurrency_dev` | 10 | concurrent executions | false |
+| Data Store table name length | `table-name-length-unverified` | unstated | characters | false |
 | URL throttle | `url.throttle` | unstated | requests | false |
 | Function timeout | `function.timeout_seconds` | 30 | seconds | false |
 | Job timeout | `job.timeout_minutes` | 15 | minutes | false |
