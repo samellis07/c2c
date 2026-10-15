@@ -5,16 +5,8 @@
 
 import type { App, Report, ReportView } from '../../../core/src/ir.js';
 import { phoneColumns, reportColumnLabel } from '../../../core/src/phone-columns.js';
-import type { UiModel, UiReport } from '../model.js';
+import type { UiModel, UiReport, UiReportDetailBlock } from '../model.js';
 import { reportFieldLabel } from './labels.js';
-
-interface ReportDetailBlock {
-  title: string;
-  relatedField?: string;
-  fields: { field: string; label: string }[];
-}
-
-type ViewReport = UiReport & { detailBlocks?: ReportDetailBlock[] };
 
 function isModel(value: unknown): value is UiModel {
   return !!value && typeof value === 'object' && (value as UiModel).dryRun === true && Array.isArray((value as UiModel).reports);
@@ -41,7 +33,7 @@ function fieldsOf(view: ReportView): { field: string; label?: string }[] {
   return out;
 }
 
-function blocksOf(view: ReportView, app: App, source: Report): ReportDetailBlock[] {
+function blocksOf(view: ReportView, app: App, source: Report): UiReportDetailBlock[] {
   const form = source.form ? app.forms.find((item) => item.name === source.form) : undefined;
   return view.blocks.map((block) => ({
     title: block.title || block.name,
@@ -104,7 +96,7 @@ function applyReportViews(model: UiModel, app: App): void {
       report.columns = merged;
     }
     const detail = pickView(source, 'detailview');
-    if (detail && detail.blocks.length) (report as ViewReport).detailBlocks = blocksOf(detail, app, source);
+    if (detail && detail.blocks.length) report.detailBlocks = blocksOf(detail, app, source);
   }
 }
 

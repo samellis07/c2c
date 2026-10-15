@@ -121,6 +121,13 @@ test('the report spec carries the view options: sort, filters, grouping, detail,
   assert.equal(report.groupField, 'Status');
   assert.equal(report.detail, true);
   assert.equal(report.form, 'Order');
+  assert.deepEqual(report.detailBlocks, [{
+    title: 'Overview',
+    fields: [
+      { field: 'Title', label: 'Title' },
+      { field: 'Status', label: 'Status' },
+    ],
+  }]);
   const formats = report.conditionalFormats!;
   assert.equal(formats.length, 1);
   assert.equal(formats[0]!.name, 'Big');
@@ -174,6 +181,8 @@ test('the report view queries with the server sort, search and filter, and wires
   assert.match(view, /Pagination/);
   assert.match(view, /data-action/);
   assert.match(view, /onSortChange/);
+  assert.match(view, /data-detail-block/);
+  assert.match(view, /Array\.isArray\(related\)/);
 });
 
 test('the report criteria matcher paints conditional formats and names unmigrated ones', () => {

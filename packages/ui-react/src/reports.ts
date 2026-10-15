@@ -81,6 +81,11 @@ export function reportSpec(app: App, ui: UiReport, forms: UiForm[] = []): Report
     groupBy: ui.groupBy.map((g) => ({ field: g.field })),
     ...(ui.groupField ? { groupField: ui.groupField } : {}),
     detail: ui.detail,
+    ...(ui.detailBlocks?.length ? { detailBlocks: ui.detailBlocks.map((block) => ({
+      title: block.title,
+      ...(block.relatedField ? { relatedField: block.relatedField } : {}),
+      fields: block.fields.map((field) => ({ field: field.field, label: field.label })),
+    })) } : {}),
     ...(ui.titleField ? { titleField: ui.titleField } : {}),
     ...(ui.startField ? { startField: ui.startField } : {}),
     ...(ui.endField ? { endField: ui.endField } : {}),

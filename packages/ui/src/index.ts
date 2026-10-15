@@ -14,6 +14,7 @@ export type {
   UiNav,
   UiPage,
   UiReport,
+  UiReportDetailBlock,
   UiSummary,
   UiTodo,
   Widget,

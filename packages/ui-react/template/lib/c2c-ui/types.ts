@@ -177,6 +177,8 @@ export interface ReportSpec {
   groupField?: string;
   /** A detail layout exists: the first column opens `#/report/<name>/row/<ROWID>`. */
   detail: boolean;
+  /** Configured Creator detail view sections, in export order. */
+  detailBlocks?: { title: string; relatedField?: string; fields: ColumnSpec[] }[];
   /** Kanban card or calendar entry title. */
   titleField?: string;
   /** Calendar and timeline placement columns. */
