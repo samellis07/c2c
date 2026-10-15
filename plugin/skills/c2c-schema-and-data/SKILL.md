@@ -7,6 +7,8 @@ metadata:
 
 # Schema and data
 
+Use `plugin/references/facts/limits.md` as the limits ledger. Platform numbers marked `[UNVERIFIED]` remain planning assumptions; only claims with an existing public test or run record may be presented as `[TESTED]`. The ledger's generation behavior must match `packages/schema/src/limits.ts`.
+
 Load `catalyst-datastore` for ZCQL and SDK syntax and `catalyst-stratus` for buckets/objects. This skill adds the migration decisions.
 
 ZCQL schema, planning, and data-load rules are indexed in `plugin/references/facts/zcql.md`: [ZC-05], [ZC-06], [ZC-08], [ZC-10], [ZC-12] (with write rules [ZC-09], [ZC-11]).

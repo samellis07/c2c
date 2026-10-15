@@ -7,6 +7,8 @@ metadata:
 
 # Provision and deploy
 
+Before planning resources, consult `plugin/references/facts/limits.md` and its index at `plugin/references/limits.md`. Follow the evidence label: `[UNVERIFIED]` is a planning assumption, and `[TESTED]` requires an existing public test or run record. Doctor D-F1 uses the documented 50-project cap `[DOC]` from the Catalyst CLI docs.
+
 Requires a **green doctor** for this DC/org/project (the CLI refuses with exit 5 otherwise). Load `catalyst-basics` (projects, CLI), `catalyst-functions` and `catalyst-slate` for platform details, and `references/route-map.md` for the route of every resource.
 
 ## Principles

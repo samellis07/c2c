@@ -1,6 +1,6 @@
 # Limits
 
-Budget every plan against the numbers below. `<dc>` comes from config. Never hard-code a data centre. Placeholders are `<org-id>` and `<project-id>`. A token call uses host `https://api.catalyst.<dc>` and header names Authorization, Accept, X-CATALYST-Environment, and CATALYST-ORG. Set Accept to `application/vnd.catalyst.v2+json`. There is no limits endpoint: a GET of `/limits`, `/quota`, or `/usage` returns `404 INVALID_URL_PATTERN` [TESTED]. c2c plan counts local schema and c2c doctor counts live resources before a create.
+Budget every plan against the numbers below. `<dc>` comes from config. Never hard-code a data centre. Placeholders are `<org-id>` and `<project-id>`. A token call uses host `https://api.catalyst.<dc>` and header names Authorization, Accept, X-CATALYST-Environment, and CATALYST-ORG. Set Accept to `application/vnd.catalyst.v2+json`. There is no limits endpoint: a GET of `/limits`, `/quota`, or `/usage` returns `404 INVALID_URL_PATTERN` [UNVERIFIED]. c2c plan counts local schema and c2c doctor counts live resources before a create.
 
 See also: https://docs.catalyst.zoho.com/en/cloud-scale/help/zcql/syntax-exceptions/
 
@@ -20,7 +20,7 @@ Recipe: Same column list as the columns-per-table rule. Count columns whose data
 
 ### Varchar length
 
-Rule: Size each varchar to its max_length, and assume a max_length of at most 255 [TESTED]. A REST insert or update returns HTTP 200 and stores only the first max_length characters. A ZCQL INSERT or UPDATE of a longer value returns 400 and writes nothing. c2c plan maps a single-line field longer than 255 to text, and the writer checks length before the call.
+Rule: Size each varchar to its max_length, and assume a max_length of at most 255 [UNVERIFIED]. A REST insert or update returns HTTP 200 and stores only the first max_length characters. A ZCQL INSERT or UPDATE of a longer value returns 400 and writes nothing. c2c plan maps a single-line field longer than 255 to text, and the writer checks length before the call.
 
 Recipe: POST /baas/v1/project/<project-id>/table/<table-id>/row with a JSON array of row objects. Read the row back. Success for a safe value is an exact match. A ZCQL overflow returns `400` and `'…' data too long for column '…'`.
 
@@ -32,7 +32,7 @@ Recipe: POST /baas/v1/project/<project-id>/table/<table-id>/row. Success is a re
 
 ### Unique varchar columns
 
-Rule: At most 2 columns per table may be data_type varchar with is_unique true [TESTED]. Unique int and unique bigint do not use that budget. A text column cannot be unique. `email` and bare `encrypted` are not valid column data_type names; store an email as text with an app-side email check, and store an encrypted value as `encrypted text`. c2c plan checks the unique-varchar count and keeps database uniqueness on at most two fields; the handler enforces the rest. Prefer a unique bigint for an integer source id. Keep `c2c_source_id` nullable and not unique.
+Rule: At most 2 columns per table may be data_type varchar with is_unique true [UNVERIFIED]. Unique int and unique bigint do not use that budget. A text column cannot be unique. `email` and bare `encrypted` are not valid column data_type names; store an email as text with an app-side email check, and store an encrypted value as `encrypted text`. c2c plan checks the unique-varchar count and keeps database uniqueness on at most two fields; the handler enforces the rest. Prefer a unique bigint for an integer source id. Keep `c2c_source_id` nullable and not unique.
 
 Recipe: POST /baas/v1/project/<project-id>/table/<table-id>/column with a JSON array body. A third unique varchar returns `403 INVALID_OPERATION` and `Reached max number of columns of Unique varchar type`. The whole column batch is refused. Unique int or bigint returns 200. Unique text returns `400` and `Text column cannot be Unique`. data_type `email` or bare `encrypted` returns `400 PATTERN_NOT_MATCHED` even when is_unique is set. Use a valid data_type. Do not drop is_unique to clear that error.
 
@@ -44,25 +44,25 @@ Recipe: POST /baas/v1/project/<project-id>/table/<table-id>/column with a JSON a
 
 ### No decimal column type
 
-Rule: Do not send data_type decimal, numeric, currency, percent, float, bigdecimal, or number [TESTED]. Store a value of at most 15 digits and 2 decimal places as double with max_length 15 and decimal_digits 2. Store a wider or finer value as varchar, with an optional double shadow column.
+Rule: Do not send data_type decimal, numeric, currency, percent, float, bigdecimal, or number [UNVERIFIED]. Store a value of at most 15 digits and 2 decimal places as double with max_length 15 and decimal_digits 2. Store a wider or finer value as varchar, with an optional double shadow column.
 
 Recipe: POST /baas/v1/project/<project-id>/table/<table-id>/column with a one-element JSON array. Any of those data_type names returns `400 PATTERN_NOT_MATCHED`. double with decimal_digits 2 returns 200.
 
 ### Double rounding
 
-Rule: Round a double HALF_UP to its decimal_digits before every write [TESTED]. A REST or ZCQL write that skips this stores a shorter value and still returns 200. `0.105` is stored as `0.1`, `-0.015` as `-0.01`, and `0.125` as `0.12`. c2c plan checks that the writer rounds before insert, update, and bulk write.
+Rule: Round a double HALF_UP to its decimal_digits before every write [UNVERIFIED]. A REST or ZCQL write that skips this stores a shorter value and still returns 200. `0.105` is stored as `0.1`, `-0.015` as `-0.01`, and `0.125` as `0.12`. c2c plan checks that the writer rounds before insert, update, and bulk write.
 
 Recipe: POST /baas/v1/project/<project-id>/table/<table-id>/row, then GET the row. Success is a stored value equal to the HALF_UP value, not merely HTTP 200.
 
 ### Date values on write
 
-Rule: Send dates only as `yyyy-MM-dd` and datetimes only as `yyyy-MM-dd HH:mm:ss` [TESTED]. Omit a blank date or send null. Never send an empty string. A REST write returns 200 and stores a different calendar date for a day-month-year string or an impossible date (`05-10-2026` stores as `0011-04-18`, `2026-13-45` as `2027-02-14`, `2026-02-30` as `2026-03-02`). c2c plan checks that every date is normalised before write.
+Rule: Send dates only as `yyyy-MM-dd` and datetimes only as `yyyy-MM-dd HH:mm:ss` [UNVERIFIED]. Omit a blank date or send null. Never send an empty string. A REST write returns 200 and stores a different calendar date for a day-month-year string or an impossible date (`05-10-2026` stores as `0011-04-18`, `2026-13-45` as `2027-02-14`, `2026-02-30` as `2026-03-02`). c2c plan checks that every date is normalised before write.
 
 Recipe: POST or PUT /baas/v1/project/<project-id>/table/<table-id>/row, then read the row back. Success is an exact date match. `10/05/2026`, `abc`, and `1e400` return `400 INVALID_INPUT`.
 
 ### Identifier width
 
-Rule: Keep ROWID, CREATORID, int, and bigint as strings end to end [TESTED]. ZCQL returns them as JSON strings. A 19-digit integer does not fit in a JavaScript number. Parse only doubles as numbers, and keep a double as a string when it has more than 15 digits.
+Rule: Keep ROWID, CREATORID, int, and bigint as strings end to end [UNVERIFIED]. ZCQL returns them as JSON strings. A 19-digit integer does not fit in a JavaScript number. Parse only doubles as numbers, and keep a double as a string when it has more than 15 digits.
 
 Recipe: POST /baas/v1/project/<project-id>/query with body `{"query":"SELECT ROWID, <bigint-column> FROM <table>"}`. Success is string JSON for those fields. Do not Number() them.
 
@@ -70,7 +70,7 @@ Recipe: POST /baas/v1/project/<project-id>/query with body `{"query":"SELECT ROW
 
 ### Tables per organisation
 
-Rule: No organisation table limit is published — neither the number nor its window appears in the docs, the console, or an API [TESTED]. Treat `403 API_LIMIT_REACHED` with `… API Limit for table` as an org-wide limit on table creates, shared by every project and environment, not a fixed count cap: the refusal has fired at a visible count above and below 200, and has persisted right after project deletes, so it behaves like a per-period create quota or a count that still includes tables whose purge has not run. On the refusal, stop creating tables and keep what was created; table-free work (redeploys, data loads, smoke) can continue. Back off and re-measure — retry the create after 30 minutes, then 60, then 120. Deleting a project may not free capacity immediately. c2c doctor counts tables with CatalystbyZoho_List_All_Tables (or GET /baas/v1/project/<project-id>/table on each project) to report headroom; no count predicts the refusal.
+Rule: No organisation table limit is published — neither the number nor its window appears in the docs, the console, or an API [UNVERIFIED]. Treat `403 API_LIMIT_REACHED` with `… API Limit for table` as an org-wide limit on table creates, shared by every project and environment, not a fixed count cap: the refusal has fired at a visible count above and below 200, and has persisted right after project deletes, so it behaves like a per-period create quota or a count that still includes tables whose purge has not run. On the refusal, stop creating tables and keep what was created; table-free work (redeploys, data loads, smoke) can continue. Back off and re-measure — retry the create after 30 minutes, then 60, then 120. Deleting a project may not free capacity immediately. c2c doctor counts tables with CatalystbyZoho_List_All_Tables (or GET /baas/v1/project/<project-id>/table on each project) to report headroom; no count predicts the refusal.
 
 Recipe: MCP CatalystbyZoho_List_All_Tables with headers Catalyst-org and Environment and path_variables.projectId. Success is a reported count plus creates that succeed; a `403 API_LIMIT_REACHED` on POST /table is the stop signal, and success on retry comes after a backoff window, not straight after a delete.
 
@@ -88,7 +88,7 @@ Recipe: POST /baas/v1/project/<project-id>/table/<table-id>/row with X-CATALYST-
 
 ### Row insert batch
 
-Rule: Send at most 200 rows per insert call [TESTED]. c2c migrate-data checks the batch length and splits above 200.
+Rule: Send at most 200 rows per insert call [UNVERIFIED]. c2c migrate-data checks the batch length and splits above 200.
 
 Recipe: POST /baas/v1/project/<project-id>/table/<table-id>/row with a JSON array of at most 200 objects. Path ends in `/row`, never `/rows`. Success is HTTP 200 and a `data` array as long as the batch. Read-back: `SELECT COUNT(ROWID) FROM <table>`.
 
@@ -118,13 +118,13 @@ Recipe: Use the bulk-read API with a page of at most 200000 rows. Success is a f
 
 ### Unique constraints under parallel inserts
 
-Rule: Do not use is_unique as a lock [TESTED]. Parallel inserts of the same unique value can all return a mix of 200, 409, and 429 and still persist duplicates. `UPDATE <table> SET <col> = <col> + 1` is accepted and is not atomic. c2c plan checks that id allocation is a claimed range or a single writer, not a unique column.
+Rule: Do not use is_unique as a lock [UNVERIFIED]. Parallel inserts of the same unique value can all return a mix of 200, 409, and 429 and still persist duplicates. `UPDATE <table> SET <col> = <col> + 1` is accepted and is not atomic. c2c plan checks that id allocation is a claimed range or a single writer, not a unique column.
 
 Recipe: POST /baas/v1/project/<project-id>/table/<table-id>/row. After a parallel burst, `SELECT COUNT(ROWID)` for that value. Success is a count of 1. A count above 1 means the unique column did not hold. Serialise the counter in one Job function.
 
 ### No multi-statement transaction
 
-Rule: One call is atomic [TESTED]. Nothing groups two calls. c2c plan checks that a multi-table write is a sequence of idempotent steps with a checkpoint file, and generated code must not assume a transaction.
+Rule: One call is atomic [UNVERIFIED]. Nothing groups two calls. c2c plan checks that a multi-table write is a sequence of idempotent steps with a checkpoint file, and generated code must not assume a transaction.
 
 Recipe: There is no transaction path. Success for a two-table write is both rows present on read-back and a checkpoint that names the last finished step.
 
@@ -144,7 +144,7 @@ Recipe: POST /baas/v1/project/<project-id>/query with `{"query":"SELECT ROWID FR
 
 ### ZCQL SELECT width
 
-Rule: Plan for 20 columns in one SELECT [DOC]. c2c plan checks the select list and rejects a wider projection, including SELECT *. The observed wide-query refusal is `More than 30 select columns are not allowed` [TESTED]; stay at the documented 20.
+Rule: Plan for 20 columns in one SELECT [DOC]. c2c plan checks the select list and rejects a wider projection, including SELECT *. The observed wide-query refusal is `More than 30 select columns are not allowed` [UNVERIFIED]; stay at the documented 20.
 
 Recipe: POST /baas/v1/project/<project-id>/query. Success is HTTP 200 for a list of at most 20 columns. Split a wider read into two queries.
 
@@ -156,25 +156,25 @@ Recipe: POST /baas/v1/project/<project-id>/query with at most four JOINs. Succes
 
 ### ZCQL OFFSET
 
-Rule: LIMIT offset is 1-based [TESTED]. LIMIT 0,n returns the same rows as LIMIT 1,n. Add 1 to a zero-based offset. Prefer the keyset in the rows-returned rule. c2c plan checks that generated LIMIT offsets start at 1.
+Rule: LIMIT offset is 1-based [UNVERIFIED]. LIMIT 0,n returns the same rows as LIMIT 1,n. Add 1 to a zero-based offset. Prefer the keyset in the rows-returned rule. c2c plan checks that generated LIMIT offsets start at 1.
 
 Recipe: POST /baas/v1/project/<project-id>/query `ORDER BY ROWID LIMIT 1,2` returns the first two rows; `LIMIT 2,2` returns the next two. Success is that shift. An offset of 0 is not an error.
 
 ### ZCQL LIKE wildcards
 
-Rule: In LIKE, `*` matches any run, `?` matches one character, and `_` is literal [TESTED]. `%` matches nothing and returns zero rows with HTTP 200. c2c plan checks that contains, starts-with, and ends-with emit `*` and that a literal percent is not sent as a wildcard.
+Rule: In LIKE, `*` matches any run, `?` matches one character, and `_` is literal [UNVERIFIED]. `%` matches nothing and returns zero rows with HTTP 200. c2c plan checks that contains, starts-with, and ends-with emit `*` and that a literal percent is not sent as a wildcard.
 
 Recipe: POST /baas/v1/project/<project-id>/query with `LIKE '*term*'`. Success is the matching rows. The same predicate with `%` returning zero rows is a bad pattern, not an empty table.
 
 ### ZCQL UPDATE and DELETE batch
 
-Rule: One ZCQL UPDATE or DELETE changes at most 300 rows and returns HTTP 200 either way [TESTED]. Loop while the returned row count or `DELETED_ROWS_COUNT` is 300. c2c plan checks that a bulk mutation uses this loop and then a COUNT.
+Rule: One ZCQL UPDATE or DELETE changes at most 300 rows and returns HTTP 200 either way [UNVERIFIED]. Loop while the returned row count or `DELETED_ROWS_COUNT` is 300. c2c plan checks that a bulk mutation uses this loop and then a COUNT.
 
 Recipe: POST /baas/v1/project/<project-id>/query with the UPDATE or DELETE. Success for a drained set is a last response whose count is below 300 and a COUNT of the remaining predicate equal to 0.
 
 ### ZCQL subqueries
 
-Rule: `WHERE <col> IN (SELECT <col> FROM <table> WHERE …)` is valid [TESTED]. Use it for a non-join filter. Joins still need a foreign key and stay inside the JOIN budget.
+Rule: `WHERE <col> IN (SELECT <col> FROM <table> WHERE …)` is valid [UNVERIFIED]. Use it for a non-join filter. Joins still need a foreign key and stay inside the JOIN budget.
 
 Recipe: POST /baas/v1/project/<project-id>/query with that IN (SELECT …) shape. Success is HTTP 200 and a count equal to the same filter run directly.
 
@@ -186,7 +186,7 @@ Recipe: POST /baas/v1/project/<project-id>/query. Success is HTTP 200 inside the
 
 ### ZCQL write after a bad date
 
-Rule: A ZCQL INSERT of a bad date can return `400` with `For input string: "nu"` after the row is already stored [TESTED]. A varchar overflow returns 400 and does not write. After any ZCQL write error, read the row back before retrying.
+Rule: A ZCQL INSERT of a bad date can return `400` with `For input string: "nu"` after the row is already stored [UNVERIFIED]. A varchar overflow returns 400 and does not write. After any ZCQL write error, read the row back before retrying.
 
 Recipe: POST /baas/v1/project/<project-id>/query. On HTTP 400, SELECT the key. Success for a retry is at most one row, whether the failed call stored it or not.
 
@@ -230,7 +230,7 @@ Recipe: MCP CatalystbyZoho_Create_Bucket body bucket_name and bucket_meta. Read-
 
 ### Slate entry cache
 
-Rule: `/` and `/index.html` are served with `cache-control: public, max-age=31536000` [TESTED]. Hash every asset file name and version the service worker. c2c plan checks that index.html references hashed assets only.
+Rule: `/` and `/index.html` are served with `cache-control: public, max-age=31536000` [UNVERIFIED]. Hash every asset file name and version the service worker. c2c plan checks that index.html references hashed assets only.
 
 Recipe: `curl -I https://<app>.onslate.<dc>/` and the same for `/index.html`. Success is a later deploy whose HTML points at new hashed names. Do not expect a redeploy to refresh an unhashed index.html.
 
@@ -238,7 +238,7 @@ Recipe: `curl -I https://<app>.onslate.<dc>/` and the same for `/index.html`. Su
 
 ### Advanced I/O time
 
-Rule: An Advanced I/O request must finish in well under 30 seconds [DOC]. A handler that sleeps about 35 seconds returns `408 EXECUTION_TIME_EXCEEDED` [TESTED]. Posting a configuration body with timeout or execution_timeout returns 200 and does not raise the cap. c2c plan checks every request path and moves work that can pass 25 seconds to a Job function.
+Rule: An Advanced I/O request must finish in well under 30 seconds [DOC]. A handler that sleeps about 35 seconds returns `408 EXECUTION_TIME_EXCEEDED` [UNVERIFIED]. Posting a configuration body with timeout or execution_timeout returns 200 and does not raise the cap. c2c plan checks every request path and moves work that can pass 25 seconds to a Job function.
 
 Recipe: Invoke the function. Success is HTTP 200. On `408 EXECUTION_TIME_EXCEEDED`, stop retrying on the request path and submit a job.
 
@@ -262,7 +262,7 @@ Recipe: Submit at most 10 overlapping invocations. Success is every call HTTP 20
 
 ### Function memory
 
-Rule: Assume function memory stays at the value GET /function/<function-id> returns [TESTED]. A configuration body that sets memory is not a reliable change. c2c doctor reads that value before a memory-heavy job and streams a large payload to Stratus instead of buffering it.
+Rule: Assume function memory stays at the value GET /function/<function-id> returns [UNVERIFIED]. A configuration body that sets memory is not a reliable change; this behavior has no cited public test or run record. c2c doctor reads that value before a memory-heavy job and streams a large payload to Stratus instead of buffering it.
 
 Recipe: GET /baas/v1/project/<project-id>/function/<function-id>. Success is reading `configuration` memory and planning under it. Do not claim a raise from a POST that only returns 200.
 
@@ -322,7 +322,7 @@ Recipe: On `Throttle Limit Reached`, stop every automated sign-in and wait. Succ
 
 ### No quota read
 
-Rule: Do not call a limits or quota URL [TESTED]. c2c doctor counts projects, tables, columns, and users directly, and c2c plan applies the budgets in this file before the first create.
+Rule: Do not call a limits or quota URL [UNVERIFIED]. c2c doctor counts projects, tables, columns, and users directly, and c2c plan applies the budgets in this file before the first create.
 
 Recipe: GET /baas/v1/project/<project-id>/limits, `/quota`, `/usage`, `/table/<table-id>/limits`, `/datastore/limits`, and GET /baas/v1/limits each return `404 INVALID_URL_PATTERN`. Success is not calling them.
 

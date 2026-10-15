@@ -96,10 +96,10 @@ Rule: [UNVERIFIED] `DELETE /baas/v1/project/<project-id>` → `200`; while the P
 
 ### A project still 'Importing' is skipped and not written to
 
-Rule: Assume a project whose `project_type` stays `Importing` keeps holding its name, and assume `DELETE /baas/v1/project/<project-id>` keeps failing `400 INVALID_OPERATION` ("Your project is importing. Kindly wait for some time") for as long as the import does [UNVERIFIED]. c2c does not call that delete [TESTED].
+Rule: Assume a project whose `project_type` stays `Importing` keeps holding its name, and assume `DELETE /baas/v1/project/<project-id>` keeps failing `400 INVALID_OPERATION` ("Your project is importing. Kindly wait for some time") for as long as the import does [UNVERIFIED]. c2c does not call that delete [UNVERIFIED].
 
-- Before posting an import, c2c lists the org's projects and skips every name a listed project still shows as `Importing`. The next suffix (`<name>-2`, `<name>-3`, …) is tried instead of colliding [TESTED].
-- A provision step refuses a project still `Importing` when the known age is at least 6 hours, and when the age cannot be read [TESTED]. Deploy and resume call that same guard before a write [TESTED]. At least 6 hours is treated as stuck — the run prints one guided step (check the project in the Catalyst console; if it stays Importing, contact Catalyst support) and stops that branch [TESTED]. If the age is unknown, writes remain stopped with neutral guidance to check its status in the Catalyst console and re-run later; doctor warns instead of failing [TESTED]. A known age under 6 hours is refused before any write as well [UNVERIFIED].
+- Before posting an import, c2c lists the org's projects and skips every name a listed project still shows as `Importing`. The next suffix (`<name>-2`, `<name>-3`, …) is tried instead of colliding [TESTED] (public test: `packages/deploy/test/provision.test.ts`, “a name held by a still-Importing project is skipped for the next suffix”).
+- A provision step refuses a project still `Importing` when the known age is at least 6 hours, and when the age cannot be read [TESTED] (public tests: `packages/deploy/test/provision.test.ts`, “a project still Importing with known age past the stuck bound”; “an Importing project with unknown age stops writes with neutral guidance”). Deploy and resume call that same guard before a write [TESTED] (public test: `packages/deploy/test/provision.test.ts`, “an Importing project with unknown age stops writes with neutral guidance”). At least 6 hours is treated as stuck — the run prints one guided step (check the project in the Catalyst console; if it stays Importing, contact Catalyst support) and stops that branch [TESTED] (public test: `packages/deploy/test/provision.test.ts`, “a project still Importing with known age past the stuck bound”). If the age is unknown, writes remain stopped with neutral guidance to check its status in the Catalyst console and re-run later; doctor warns instead of failing [TESTED] (public test: `packages/deploy/test/provision.test.ts`, “an Importing project with unknown age stops writes with neutral guidance”). A known age under 6 hours is refused before any write as well [UNVERIFIED].
 
 ### Tear down only on request, or before the first console step
 
@@ -146,8 +146,8 @@ Rule: [UNVERIFIED] Catalyst does not keep your source. Web Client Hosting downlo
 
 ### Budget quotas yourself — there is no limits API
 
-Rule: [TESTED] the account project cap is the Projects per account rule in `references/facts/limits.md`
-([L-PROJECTS](references/limits.md#l-projects-projects-per-account)) [DOC]; table creates are capped org-wide across projects by a limit whose number and window are not published [TESTED]
+Rule: [UNVERIFIED] the account project cap is the Projects per account rule in `references/facts/limits.md`
+([L-PROJECTS](references/limits.md#l-projects-projects-per-account)) [DOC]; table creates are capped org-wide across projects by a limit whose number and window are not published [UNVERIFIED]
 ([L-TABLE-CREATES](references/limits.md#l-table-creates-table-creates-per-org)), so `API_LIMIT_REACHED` for table is the signal, not a count. `c2c doctor`/`c2c plan` counts projects via `GET /baas/v1/project` and tables via `List_All_Tables` before creating either, and warns on that refusal rather than near a guessed cap. The plausible quota endpoints answer `404 INVALID_URL_PATTERN` — do not probe for one. Never create burner projects to measure quota.
 
 ### Probe service availability per DC — there is no availability API
@@ -160,7 +160,7 @@ Rule: [UNVERIFIED] never assume a component exists in the customer's DC; `c2c do
 
 ### Console first-use gates are one checklist line plus a read c2c verifies
 
-Rule: [TESTED] no API or CLI command opens a service on a project ("Start Exploring") — the console's enable action answers `401 AUTHENTICATION_FAILURE` to the CLI token, and IaC has no component for it. Each gate is therefore one guided console line, and c2c then runs the gate's documented GET itself. Only an open answer lets provision, deploy or the seed load continue; a closed or unrecognised answer stops before any write and prints the line. A result file never closes a gate.
+Rule: [UNVERIFIED] no API or CLI command opens a service on a project ("Start Exploring") — the console's enable action answers `401 AUTHENTICATION_FAILURE` to the CLI token, and IaC has no component for it. Each gate is therefore one guided console line, and c2c then runs the gate's documented GET itself. Only an open answer lets provision, deploy or the seed load continue; a closed or unrecognised answer stops before any write and prints the line. A result file never closes a gate.
 
 | Gate | When | Console line | Probe c2c runs | Closed answer | Open answer |
 |---|---|---|---|---|---|
@@ -185,7 +185,7 @@ Rule: [UNVERIFIED] never depend on APM or alerts in generated code or plans — 
 
 ### Link and deploy the Slate app through the CLI only
 
-Rule: [TESTED] Slate has no create/deploy REST or MCP route — `catalyst slate:link` records the app, `catalyst deploy slate` publishes it.
+Rule: [UNVERIFIED] Slate has no create/deploy REST or MCP route — `catalyst slate:link` records the app, `catalyst deploy slate` publishes it.
 
 - In `catalyst.json`, `slate` must be an array (`"slate": []` before linking). If the key holds an object, `slate:link` crashes with `TypeError: existingSlates.findIndex is not a function` — fix the JSON and retry.
 - `slate:link` writes the build path as an absolute `source` in `catalyst.json` — rewrite it to a relative path before the tree leaves the machine.
@@ -193,13 +193,13 @@ Rule: [TESTED] Slate has no create/deploy REST or MCP route — `catalyst slate:
 
 ### Capture the app URL from the deployment API, not from deploy output
 
-Rule: [TESTED] after `catalyst deploy slate`, read `GET /slate/v1/project/<project-id>/app/<app>/deployment` (the CLI token works) → `app_details.app_url`, or MCP `List_All_Slate_Apps` / `Get_Slate_App`.
+Rule: [UNVERIFIED] after `catalyst deploy slate`, read `GET /slate/v1/project/<project-id>/app/<app>/deployment` (the CLI token works) → `app_details.app_url`, or MCP `List_All_Slate_Apps` / `Get_Slate_App`.
 
 - Deploy stdout can be discarded, and a trailing `404` "No such app with the given id exists" can follow a live build — treat that combination as success-with-warning: verify the URL serves (`curl -I` on `*.onslate.<dc>`) and record it in `c2c-deploy.json`.
 
 ### Serve content-hashed assets — the index document is cached for a year
 
-Rule: [TESTED] `*.onslate.<dc>` serves `/` and `/index.html` with `cache-control: public, max-age=31536000`
+Rule: [UNVERIFIED] `*.onslate.<dc>` serves `/` and `/index.html` with `cache-control: public, max-age=31536000`
 ([L-SLATE-CACHE](references/limits.md#l-slate-cache-slate-indexhtml-cache)) — effectively immutable for a year.
 
 - Every asset URL must carry a content hash; fetch runtime config and API responses network-first; version the service worker.

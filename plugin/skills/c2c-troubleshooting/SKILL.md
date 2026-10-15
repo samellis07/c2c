@@ -7,6 +7,8 @@ metadata:
 
 # Troubleshooting
 
+For limits and quota failures, use the evidence labels in `plugin/references/facts/limits.md`; `[UNVERIFIED]` is a planning assumption, while `[TESTED]` must link to an existing public test or run record. Do not infer a numeric cap from an error code alone.
+
 ## Method (never guess)
 
 1. **Get the exact text.** The full error line, the command or tool that produced it, the step id, and the HTTP status. For a CLI crash that says "contact Catalyst support", re-run the same command with `--verbose` (global CLI flag) and read the debug lines; the real error is there (e.g. `TypeError: existingSlates.findIndex is not a function`).
