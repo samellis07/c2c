@@ -383,105 +383,12 @@ function main(argv: string[]): number {
     process.stderr.write(`c2c ${cmd}: ${unknown.join('; ')}\n`);
     return 2;
   }
-  if (cmd === '--verify-vendor') {
-    return verifyVendorCli(restAll, defaultDoctorIo());
-  }
-  if (cmd === 'doctor') {
-    doctorCli(restAll, defaultDoctorIo()).then(
-      (code) => {
-        process.exitCode = code;
-      },
-      (err: unknown) => {
-        const message = err instanceof Error ? err.message : 'doctor failed';
-        process.stderr.write(`c2c: ${message}\n`);
-        process.exitCode = 1;
-      },
-    );
-    return 0;
-  }
-  if (cmd === 'deploy') {
-    const refusal = doctorGateRefusal(restAll);
-    if (refusal !== undefined) return refusal;
-    deployCli(restAll, defaultIo()).then(
-      (code) => {
-        process.exitCode = code;
-      },
-      (err: unknown) => {
-        const message = err instanceof Error ? err.message : 'deploy failed';
-        process.stderr.write(`c2c: ${message}\n`);
-        process.exitCode = 1;
-      },
-    );
-    return 0;
-  }
-  if (cmd === 'edit') {
-    // --apply --confirm records a drop in the edits log deploy replays against
-    // the live store, so it is gated like every other --confirm write.
-    const refusal = restAll.includes('--apply') ? doctorGateRefusal(restAll) : undefined;
-    if (refusal !== undefined) return refusal;
-    return editCli(restAll, defaultIo());
-  }
-  if (cmd === 'plan') {
-    planCli(restAll, defaultIo()).then(
-      (code) => {
-        process.exitCode = code;
-      },
-      (err: unknown) => {
-        const message = err instanceof Error ? err.message : 'plan failed';
-        process.stderr.write(`c2c: ${message}\n`);
-        process.exitCode = 1;
-      },
-    );
-    return 0;
-  }
-  if (cmd === 'provision') {
-    // The import step mints the project, so its gate is the org-scoped doctor
-    // (dc + org, no project). Every other provision step names its project.
-    const refusal = doctorGateRefusal(restAll, { createsProject: provisionCreatesProject(restAll) });
-    if (refusal !== undefined) return refusal;
-    provisionCli(restAll, defaultIo()).then(
-      (code) => {
-        process.exitCode = code;
-      },
-      (err: unknown) => {
-        const message = err instanceof Error ? err.message : 'provision failed';
-        process.stderr.write(`c2c: ${message}\n`);
-        process.exitCode = 1;
-      },
-    );
-    return 0;
-  }
-  if (cmd === 'users') {
-    const refusal = doctorGateRefusal(restAll);
-    if (refusal !== undefined) return refusal;
-    usersCli(restAll, defaultIo()).then(
-      (code) => {
-        process.exitCode = code;
-      },
-      (err: unknown) => {
-        const message = err instanceof Error ? err.message : 'users failed';
-        process.stderr.write(`c2c: ${message}\n`);
-        process.exitCode = 1;
-      },
-    );
-    return 0;
-  }
-  if (cmd === 'smoke') {
-    const refusal = doctorGateRefusal(restAll);
-    if (refusal !== undefined) return refusal;
-    smokeCli(restAll, defaultIo()).then(
-      (code) => {
-        process.exitCode = code;
-      },
-      (err: unknown) => {
-        const message = err instanceof Error ? err.message : 'smoke failed';
-        process.stderr.write(`c2c: ${message}\n`);
-        process.exitCode = 1;
-      },
-    );
-    return 0;
-  }
-  if (cmd === 'sync-delta' || cmd === 'rollback-export') {
+  const [target, ...rest] = restAll;
+  const flag = (name: string) => {
+    const i = rest.indexOf(name);
+    return i >= 0 ? (rest[i + 1] ?? '') : undefined;
+  };
+  const syncDeltaOrRollback = (): number => {
     // --confirm writes to the live project, so it is gated like deploy and migrate-data.
     const refusal = doctorGateRefusal(restAll);
     if (refusal !== undefined) return refusal;
@@ -496,29 +403,8 @@ function main(argv: string[]): number {
       },
     );
     return 0;
-  }
-  if (cmd === 'verify') {
-    try {
-      return verifyCli(restAll, defaultIo());
-    } catch (err) {
-      process.stderr.write(`c2c: ${err instanceof Error ? err.message : 'verify failed'}\n`);
-      return 1;
-    }
-  }
-  if (cmd === 'status') {
-    statusCli(restAll, defaultIo()).then(
-      (code) => {
-        process.exitCode = code;
-      },
-      (err: unknown) => {
-        const message = err instanceof Error ? err.message : 'status failed';
-        process.stderr.write(`c2c: ${message}\n`);
-        process.exitCode = 1;
-      },
-    );
-    return 0;
-  }
-  if (cmd === 'cutover-checklist' || cmd === 'proof') {
+  };
+  const cutoverChecklistOrProof = (): number => {
     const io = { stdout: (text: string) => process.stdout.write(text), stderr: (text: string) => process.stderr.write(text) };
     try {
       return cutoverCli(restAll, io, cmd === 'proof' ? 'proof' : 'checklist');
@@ -526,453 +412,589 @@ function main(argv: string[]): number {
       process.stderr.write(`c2c: ${err instanceof Error ? err.message : `${cmd} failed`}\n`);
       return 1;
     }
-  }
-  if (cmd === 'fill-todos') {
-    fillTodosMain(restAll).then(
-      (code) => {
-        process.exitCode = code;
-      },
-      (err: unknown) => {
-        const message = err instanceof Error ? err.message : 'fill-todos failed';
-        process.stderr.write(`c2c: ${message}\n`);
-        process.exitCode = 1;
-      },
-    );
-    return 0;
-  }
-  if (cmd === 'migrate-data') {
-    const refusal = doctorGateRefusal(restAll);
-    if (refusal !== undefined) return refusal;
-    if (restAll.includes('--source-backup')) {
-      sourceBackupCli(restAll, defaultIo()).then(
-        (code) => {
-          process.exitCode = code;
-        },
-        (err: unknown) => {
-          const message = err instanceof Error ? err.message : 'migrate failed';
-          process.stderr.write(`c2c: ${message}\n`);
-          process.exitCode = 1;
-        },
-      );
-      return 0;
-    }
-    if (restAll.includes('--source-csv') || restAll.includes('--source-json')) {
-      sourceCsvCli(restAll, defaultIo()).then(
-        (code) => {
-          process.exitCode = code;
-        },
-        (err: unknown) => {
-          const message = err instanceof Error ? err.message : 'migrate failed';
-          process.stderr.write(`c2c: ${message}\n`);
-          process.exitCode = 1;
-        },
-      );
-      return 0;
-    }
-    if (restAll.includes('--seed')) {
-      seedMigrateCli(restAll, defaultIo()).then(
-        (code) => {
-          process.exitCode = code;
-        },
-        (err: unknown) => {
-          const message = err instanceof Error ? err.message : 'migrate failed';
-          process.stderr.write(`c2c: ${message}\n`);
-          process.exitCode = 1;
-        },
-      );
-      return 0;
-    }
-    migrateCli(restAll).then(
-      (code) => {
-        process.exitCode = code;
-      },
-      (err: unknown) => {
-        const message = err instanceof Error ? err.message : 'migrate failed';
-        process.stderr.write(`c2c: ${message}\n`);
-        process.exitCode = 1;
-      },
-    );
-    return 0;
-  }
-  const [target, ...rest] = restAll;
-  if (!target) usage();
-  const flag = (name: string) => {
-    const i = rest.indexOf(name);
-    return i >= 0 ? (rest[i + 1] ?? '') : undefined;
   };
-  if (cmd === 'analyze') {
-    const { ir, locked } = loadIrOrLocked(target);
-    if (locked) return 2;
-    if (!ir) return 1;
-    const lockPath = flag('--lock');
-    if (rest.includes('--lock') && !lockPath) {
-      process.stderr.write('c2c: needs a value\n');
-      return 2;
-    }
-    if (lockPath !== undefined && !statSync(lockPath, { throwIfNoEntry: false })?.isFile()) {
-      process.stderr.write(`c2c: no such lock file: ${lockPath}\n`);
-      return 2;
-    }
-    const report = analyze(ir, lockPath !== undefined ? { lock: readLock(lockPath) } : undefined);
-    if (rest.includes('--quality')) {
-      analyzeQuality(ir, report).then(
-        (q) => {
-          process.stdout.write(rest.includes('--json') ? stampedJson(analyzeAsJson(q)) : `${qualityAsText(q)}\n`);
-        },
-        (err: unknown) => {
-          process.stderr.write(`c2c: ${err instanceof Error ? err.message : 'quality gate failed'}\n`);
-          process.exitCode = 1;
-        },
-      );
-      return 0;
-    }
-    process.stdout.write(rest.includes('--json') ? stampedJson(analyzeAsJson(report)) : `${analyzeAsText(report)}\n`);
-    return 0;
-  }
-  if (cmd === 'precheck') {
-    if (rest.some((arg) => arg !== '--json')) usage();
-    const st = statSync(target, { throwIfNoEntry: false });
-    if (!st) {
-      process.stderr.write(`c2c: no such file or directory: ${target}\n`);
-      return PRECHECK_EXIT.missing;
-    }
-    if (!st.isFile()) {
-      process.stderr.write('c2c: precheck needs one .ds file\n');
-      return 2;
-    }
-    let parsed: { source: string; file: ReturnType<typeof parseFile> };
-    try {
-      parsed = { source: decode(readFileSync(target)).text, file: parseFile(target) };
-    } catch (err) {
-      if (err instanceof LockedExportError) {
-        process.stderr.write(`c2c: ${err.message}\n`);
-        return 2;
-      }
-      process.stderr.write(`c2c: cannot parse ${target}: ${err instanceof Error ? err.message : String(err)}\n`);
-      return PRECHECK_EXIT.unparsable;
-    }
-    // A file with no `application "<name>" { ... }` block is not a Creator export; never certify it clean.
-    if (!parsed.file.ir.name || parsed.file.ir.dialect === 'snippet') {
-      process.stderr.write(`c2c: ${target} is not a Creator .ds application export (no application block)\n`);
-      return PRECHECK_EXIT.unparsable;
-    }
-    // A truncated or unbalanced .ds is a parse failure, not a clean app.
-    if (parsed.file.cst.errors.length) {
-      const first = parsed.file.cst.errors[0]!;
-      process.stderr.write(`c2c: cannot parse ${target}: ${first.message}${parsed.file.cst.errors.length > 1 ? ` (+${parsed.file.cst.errors.length - 1} more)` : ''}\n`);
-      return PRECHECK_EXIT.unparsable;
-    }
-    const { ir } = parsed.file;
-    const { source } = parsed;
-    const report = precheck(ir, source);
-    process.stdout.write(rest.includes('--json') ? stampedJson(precheckAsJson(report)) : `${precheckAsText(report)}\n`);
-    return report.counts.blocker > 0 ? PRECHECK_EXIT.blockers : PRECHECK_EXIT.clean;
-  }
-  if (cmd === 'migration-report') {
-    const st = statSync(target, { throwIfNoEntry: false });
-    if (!st?.isDirectory()) {
-      process.stderr.write('c2c: migration-report needs an apps directory\n');
-      return 2;
-    }
-    const report = migrationReportForDir(target, flag('--label') ?? 'corpus');
-    writeOut(rest.includes('--json') ? migrationReportAsJson(report) : `${migrationReportAsText(report)}\n`, flag('--out'));
-    return 0;
-  }
-  if (cmd === 'parse') {
-    let ir: App;
-    let ok = true;
-    try {
-      const p = parseFileOrProjectWithSidecars(target);
-      ir = p.ir;
-      ok = p.files.every((f) => roundTrips(f));
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT' || code === 'ENOTDIR') {
-        process.stderr.write(`c2c: no such file or directory: ${target}\n`);
+  // The dispatch table: every verb the CLI accepts is a key here,
+  // so anything that lists c2c commands reads the same source dispatch does.
+  const dispatch: Record<string, (target: string | undefined) => number> = {
+    '--verify-vendor': () => verifyVendorCli(restAll, defaultDoctorIo()),
+    doctor: () => {
+          doctorCli(restAll, defaultDoctorIo()).then(
+            (code) => {
+              process.exitCode = code;
+            },
+            (err: unknown) => {
+              const message = err instanceof Error ? err.message : 'doctor failed';
+              process.stderr.write(`c2c: ${message}\n`);
+              process.exitCode = 1;
+            },
+          );
+          return 0;
+    },
+    deploy: () => {
+          const refusal = doctorGateRefusal(restAll);
+          if (refusal !== undefined) return refusal;
+          deployCli(restAll, defaultIo()).then(
+            (code) => {
+              process.exitCode = code;
+            },
+            (err: unknown) => {
+              const message = err instanceof Error ? err.message : 'deploy failed';
+              process.stderr.write(`c2c: ${message}\n`);
+              process.exitCode = 1;
+            },
+          );
+          return 0;
+    },
+    edit: () => {
+          // --apply --confirm records a drop in the edits log deploy replays against
+          // the live store, so it is gated like every other --confirm write.
+          const refusal = restAll.includes('--apply') ? doctorGateRefusal(restAll) : undefined;
+          if (refusal !== undefined) return refusal;
+          return editCli(restAll, defaultIo());
+    },
+    plan: () => {
+          planCli(restAll, defaultIo()).then(
+            (code) => {
+              process.exitCode = code;
+            },
+            (err: unknown) => {
+              const message = err instanceof Error ? err.message : 'plan failed';
+              process.stderr.write(`c2c: ${message}\n`);
+              process.exitCode = 1;
+            },
+          );
+          return 0;
+    },
+    provision: () => {
+          // The import step mints the project, so its gate is the org-scoped doctor
+          // (dc + org, no project). Every other provision step names its project.
+          const refusal = doctorGateRefusal(restAll, { createsProject: provisionCreatesProject(restAll) });
+          if (refusal !== undefined) return refusal;
+          provisionCli(restAll, defaultIo()).then(
+            (code) => {
+              process.exitCode = code;
+            },
+            (err: unknown) => {
+              const message = err instanceof Error ? err.message : 'provision failed';
+              process.stderr.write(`c2c: ${message}\n`);
+              process.exitCode = 1;
+            },
+          );
+          return 0;
+    },
+    users: () => {
+          const refusal = doctorGateRefusal(restAll);
+          if (refusal !== undefined) return refusal;
+          usersCli(restAll, defaultIo()).then(
+            (code) => {
+              process.exitCode = code;
+            },
+            (err: unknown) => {
+              const message = err instanceof Error ? err.message : 'users failed';
+              process.stderr.write(`c2c: ${message}\n`);
+              process.exitCode = 1;
+            },
+          );
+          return 0;
+    },
+    smoke: () => {
+          const refusal = doctorGateRefusal(restAll);
+          if (refusal !== undefined) return refusal;
+          smokeCli(restAll, defaultIo()).then(
+            (code) => {
+              process.exitCode = code;
+            },
+            (err: unknown) => {
+              const message = err instanceof Error ? err.message : 'smoke failed';
+              process.stderr.write(`c2c: ${message}\n`);
+              process.exitCode = 1;
+            },
+          );
+          return 0;
+    },
+    'sync-delta': syncDeltaOrRollback,
+    'rollback-export': syncDeltaOrRollback,
+    verify: () => {
+      try {
+        return verifyCli(restAll, defaultIo());
+      } catch (err) {
+        process.stderr.write(`c2c: ${err instanceof Error ? err.message : 'verify failed'}\n`);
         return 1;
       }
-      if (err instanceof NotFileError) {
-        process.stderr.write(`c2c: ${err.message}\n`);
-        return 1;
-      }
-      if (err instanceof LockedExportError) {
-        process.stderr.write(`c2c: ${err.message}\n`);
-        return 2;
-      }
-      throw err;
-    }
-    if (rest.includes('--json')) process.stdout.write(JSON.stringify(ir, null, 2) + '\n');
-    else process.stdout.write(`${summarize(ir)}\nround-trip: ${ok ? 'OK' : 'FAIL'}\n`);
-    return ok ? 0 : 1;
-  }
-  if (cmd === 'corpus') {
-    const s = runCorpus(target);
-    const md = formatSummary(flag('--label') ?? 'corpus', s, Number(flag('--top') ?? 20) || 20);
-    const out = flag('--out');
-    if (out) writeFileSync(out, md);
-    process.stdout.write(md + '\n');
-    return s.roundTripFail === 0 ? 0 : 1;
-  }
-  if (cmd === 'features') {
-    const apps: { name: string; ir: App }[] = [];
-    if (flag('--unit') === 'file') {
-      for (const p of listDsFiles(target)) apps.push({ name: relative(target, p), ir: parseFile(p).ir });
-    } else {
-      for (const name of readdirSync(target).sort()) {
-        const p = join(target, name);
-        const st = statSync(p, { throwIfNoEntry: false });
-        if (st?.isDirectory() && listDsFiles(p).length) apps.push({ name, ir: parseProject(p).ir });
-        else if (st?.isFile() && name.toLowerCase().endsWith('.ds')) apps.push({ name: basename(name), ir: parseFile(p).ir });
-      }
-    }
-    const names = rest.includes('--names');
-    const labelled = apps.map((a, i) => ({ name: names ? a.name : `app ${i + 1}`, ir: a.ir }));
-    const r = featureReport(labelled);
-    const md = formatFeatures(flag('--label') ?? 'corpus', r);
-    const out = flag('--out');
-    if (out) writeFileSync(out, md);
-    else process.stdout.write(md + '\n');
-    const appsOut = flag('--apps');
-    if (appsOut) writeFileSync(appsOut, formatApps(r));
-    return 0;
-  }
-  if (cmd === 'schema') {
-    const { ir, locked } = loadIrOrLocked(target);
-    if (locked) return 2;
-    if (!ir) return 1;
-    const srcBackup = flag('--source-backup');
-    const srcCsv = flag('--source-csv');
-    const srcJson = flag('--source-json');
-    if ([srcBackup, srcCsv, srcJson].filter((dir) => dir !== undefined).length > 1) {
-      process.stderr.write('c2c: pass at most one of --source-backup, --source-csv, or --source-json\n');
-      return 2;
-    }
-    const allowEmpty = rest.includes('--allow-empty');
-    const source =
-      srcBackup !== undefined
-        ? readSourceBackup(srcBackup, ir, allowEmpty).sourceData
-        : srcCsv !== undefined
-          ? (hasReportJson(srcCsv, ir) ? readSourceJson(srcCsv, ir, allowEmpty) : readSourceCsv(srcCsv, ir, allowEmpty)).sourceData
-          : srcJson !== undefined
-            ? readSourceJson(srcJson, ir, allowEmpty).sourceData
-            : undefined;
-    const plan = generateSchema(ir, source ? { source } : undefined);
-    const text = rest.includes('--json') ? stampedJson(schemaAsJson(plan)) : rest.includes('--iac') ? projectTemplateJson(plan) : schemaAsReport(plan);
-    writeOut(text, flag('--out'));
-    return 0;
-  }
-  if (cmd === 'iac-drift') {
-    const exported = rest[0];
-    if (!exported) usage();
-    let report;
-    try {
-      report = diffTemplate(JSON.parse(readFileSync(target, 'utf8')), JSON.parse(readFileSync(exported, 'utf8')));
-    } catch (err) {
-      process.stderr.write(`c2c iac-drift: ${err instanceof Error ? err.message : String(err)}\n`);
-      return 3;
-    }
-    process.stdout.write(formatDrift(report));
-    return report.exitCode;
-  }
-  if (cmd === 'schema-corpus') {
-    const md = schemaCorpusMarkdown(target, { label: flag('--label') ?? 'corpus', date: new Date().toISOString().slice(0, 10) });
-    writeOut(md, flag('--out'));
-    return 0;
-  }
-  if (cmd === 'seed') {
-    const { ir, locked } = loadIrOrLocked(target);
-    if (locked) return 2;
-    if (!ir) return 1;
-    const n = flag('--n');
-    const parsedN = n === undefined ? undefined : Number(n);
-    const problem = seedArgsProblem(rest);
-    if (problem) {
-      process.stderr.write(`${problem}\n`);
-      return 2;
-    }
-    const out = flag('--out') as string;
-    if (rest.includes('--creator-import')) {
-      const rowsArg = flag('--rows') ?? n;
-      const rows = rowsArg === undefined ? undefined : Number(rowsArg);
-      if (rows !== undefined && (!Number.isInteger(rows) || rows < 0)) {
-        process.stderr.write('c2c seed: --rows must be a non-negative integer\n');
-        return 2;
-      }
-      const result = generateCreatorImport(ir, { rows, seed: flag('--seed') });
-      mkdirSync(out, { recursive: true });
-      for (const file of result.files) writeFileSync(join(out, file.fileName), file.csv);
-      for (const manual of result.manual) writeFileSync(join(out, manual.fileName), manual.body);
-      writeFileSync(join(out, 'IMPORT_ORDER.txt'), result.orderText);
-      writeFileSync(join(out, 'README.md'), result.readme);
-      process.stdout.write(`creator-import seed ${result.seed} rows=${result.rows} forms=${result.files.length} skipped=${result.skipped.length} manual=${result.manual.length}\n`);
-      for (const file of result.files) process.stdout.write(`${file.form}: ${file.rowCount} rows\n`);
-      for (const manual of result.manual) process.stdout.write(`${manual.form}: manual worksheet ${manual.fileName}\n`);
-      for (const s of result.skipped) process.stdout.write(`${s.form}: skipped (${s.reason})\n`);
-      for (const w of result.warnings) process.stdout.write(`warning ${w.form}${w.field ? `/${w.field}` : ''}: ${w.message}\n`);
-      return 0;
-    }
-    const result = generateSeed(ir, { n: parsedN, seed: flag('--seed') });
-    mkdirSync(out, { recursive: true });
-    for (const file of result.files) writeFileSync(join(out, file.fileName), file.csv);
-    for (const file of result.fixtureFiles) {
-      if (file.name !== basename(file.name) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(file.name)) {
-        process.stderr.write('c2c seed: fixture name is not a file name\n');
-        return 2;
-      }
-      writeFileSync(join(out, file.name), file.bytes);
-    }
-    writeFileSync(join(out, 'seed.json'), canonicalSeedJson(result.tables, result.blockers));
+    },
+    status: () => {
+          statusCli(restAll, defaultIo()).then(
+            (code) => {
+              process.exitCode = code;
+            },
+            (err: unknown) => {
+              const message = err instanceof Error ? err.message : 'status failed';
+              process.stderr.write(`c2c: ${message}\n`);
+              process.exitCode = 1;
+            },
+          );
+          return 0;
+    },
+    'cutover-checklist': cutoverChecklistOrProof,
+    'proof': cutoverChecklistOrProof,
+    'fill-todos': () => {
+          fillTodosMain(restAll).then(
+            (code) => {
+              process.exitCode = code;
+            },
+            (err: unknown) => {
+              const message = err instanceof Error ? err.message : 'fill-todos failed';
+              process.stderr.write(`c2c: ${message}\n`);
+              process.exitCode = 1;
+            },
+          );
+          return 0;
+    },
+    'migrate-data': () => {
+          const refusal = doctorGateRefusal(restAll);
+          if (refusal !== undefined) return refusal;
+          if (restAll.includes('--source-backup')) {
+            sourceBackupCli(restAll, defaultIo()).then(
+              (code) => {
+                process.exitCode = code;
+              },
+              (err: unknown) => {
+                const message = err instanceof Error ? err.message : 'migrate failed';
+                process.stderr.write(`c2c: ${message}\n`);
+                process.exitCode = 1;
+              },
+            );
+            return 0;
+          }
+          if (restAll.includes('--source-csv') || restAll.includes('--source-json')) {
+            sourceCsvCli(restAll, defaultIo()).then(
+              (code) => {
+                process.exitCode = code;
+              },
+              (err: unknown) => {
+                const message = err instanceof Error ? err.message : 'migrate failed';
+                process.stderr.write(`c2c: ${message}\n`);
+                process.exitCode = 1;
+              },
+            );
+            return 0;
+          }
+          if (restAll.includes('--seed')) {
+            seedMigrateCli(restAll, defaultIo()).then(
+              (code) => {
+                process.exitCode = code;
+              },
+              (err: unknown) => {
+                const message = err instanceof Error ? err.message : 'migrate failed';
+                process.stderr.write(`c2c: ${message}\n`);
+                process.exitCode = 1;
+              },
+            );
+            return 0;
+          }
+          migrateCli(restAll).then(
+            (code) => {
+              process.exitCode = code;
+            },
+            (err: unknown) => {
+              const message = err instanceof Error ? err.message : 'migrate failed';
+              process.stderr.write(`c2c: ${message}\n`);
+              process.exitCode = 1;
+            },
+          );
+          return 0;
+    },
+    analyze: (target) => {
+          if (!target) usage();
+          const { ir, locked } = loadIrOrLocked(target);
+          if (locked) return 2;
+          if (!ir) return 1;
+          const lockPath = flag('--lock');
+          if (rest.includes('--lock') && !lockPath) {
+            process.stderr.write('c2c: needs a value\n');
+            return 2;
+          }
+          if (lockPath !== undefined && !statSync(lockPath, { throwIfNoEntry: false })?.isFile()) {
+            process.stderr.write(`c2c: no such lock file: ${lockPath}\n`);
+            return 2;
+          }
+          const report = analyze(ir, lockPath !== undefined ? { lock: readLock(lockPath) } : undefined);
+          if (rest.includes('--quality')) {
+            analyzeQuality(ir, report).then(
+              (q) => {
+                process.stdout.write(rest.includes('--json') ? stampedJson(analyzeAsJson(q)) : `${qualityAsText(q)}\n`);
+              },
+              (err: unknown) => {
+                process.stderr.write(`c2c: ${err instanceof Error ? err.message : 'quality gate failed'}\n`);
+                process.exitCode = 1;
+              },
+            );
+            return 0;
+          }
+          process.stdout.write(rest.includes('--json') ? stampedJson(analyzeAsJson(report)) : `${analyzeAsText(report)}\n`);
+          return 0;
+    },
+    precheck: (target) => {
+          if (!target) usage();
+          if (rest.some((arg) => arg !== '--json')) usage();
+          const st = statSync(target, { throwIfNoEntry: false });
+          if (!st) {
+            process.stderr.write(`c2c: no such file or directory: ${target}\n`);
+            return PRECHECK_EXIT.missing;
+          }
+          if (!st.isFile()) {
+            process.stderr.write('c2c: precheck needs one .ds file\n');
+            return 2;
+          }
+          let parsed: { source: string; file: ReturnType<typeof parseFile> };
+          try {
+            parsed = { source: decode(readFileSync(target)).text, file: parseFile(target) };
+          } catch (err) {
+            if (err instanceof LockedExportError) {
+              process.stderr.write(`c2c: ${err.message}\n`);
+              return 2;
+            }
+            process.stderr.write(`c2c: cannot parse ${target}: ${err instanceof Error ? err.message : String(err)}\n`);
+            return PRECHECK_EXIT.unparsable;
+          }
+          // A file with no `application "<name>" { ... }` block is not a Creator export; never certify it clean.
+          if (!parsed.file.ir.name || parsed.file.ir.dialect === 'snippet') {
+            process.stderr.write(`c2c: ${target} is not a Creator .ds application export (no application block)\n`);
+            return PRECHECK_EXIT.unparsable;
+          }
+          // A truncated or unbalanced .ds is a parse failure, not a clean app.
+          if (parsed.file.cst.errors.length) {
+            const first = parsed.file.cst.errors[0]!;
+            process.stderr.write(`c2c: cannot parse ${target}: ${first.message}${parsed.file.cst.errors.length > 1 ? ` (+${parsed.file.cst.errors.length - 1} more)` : ''}\n`);
+            return PRECHECK_EXIT.unparsable;
+          }
+          const { ir } = parsed.file;
+          const { source } = parsed;
+          const report = precheck(ir, source);
+          process.stdout.write(rest.includes('--json') ? stampedJson(precheckAsJson(report)) : `${precheckAsText(report)}\n`);
+          return report.counts.blocker > 0 ? PRECHECK_EXIT.blockers : PRECHECK_EXIT.clean;
+    },
+    'migration-report': (target) => {
+          if (!target) usage();
+          const st = statSync(target, { throwIfNoEntry: false });
+          if (!st?.isDirectory()) {
+            process.stderr.write('c2c: migration-report needs an apps directory\n');
+            return 2;
+          }
+          const report = migrationReportForDir(target, flag('--label') ?? 'corpus');
+          writeOut(rest.includes('--json') ? migrationReportAsJson(report) : `${migrationReportAsText(report)}\n`, flag('--out'));
+          return 0;
+    },
+    parse: (target) => {
+          if (!target) usage();
+          let ir: App;
+          let ok = true;
+          try {
+            const p = parseFileOrProjectWithSidecars(target);
+            ir = p.ir;
+            ok = p.files.every((f) => roundTrips(f));
+          } catch (err) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code === 'ENOENT' || code === 'ENOTDIR') {
+              process.stderr.write(`c2c: no such file or directory: ${target}\n`);
+              return 1;
+            }
+            if (err instanceof NotFileError) {
+              process.stderr.write(`c2c: ${err.message}\n`);
+              return 1;
+            }
+            if (err instanceof LockedExportError) {
+              process.stderr.write(`c2c: ${err.message}\n`);
+              return 2;
+            }
+            throw err;
+          }
+          if (rest.includes('--json')) process.stdout.write(JSON.stringify(ir, null, 2) + '\n');
+          else process.stdout.write(`${summarize(ir)}\nround-trip: ${ok ? 'OK' : 'FAIL'}\n`);
+          return ok ? 0 : 1;
+    },
+    corpus: (target) => {
+          if (!target) usage();
+          const s = runCorpus(target);
+          const md = formatSummary(flag('--label') ?? 'corpus', s, Number(flag('--top') ?? 20) || 20);
+          const out = flag('--out');
+          if (out) writeFileSync(out, md);
+          process.stdout.write(md + '\n');
+          return s.roundTripFail === 0 ? 0 : 1;
+    },
+    features: (target) => {
+          if (!target) usage();
+          const apps: { name: string; ir: App }[] = [];
+          if (flag('--unit') === 'file') {
+            for (const p of listDsFiles(target)) apps.push({ name: relative(target, p), ir: parseFile(p).ir });
+          } else {
+            for (const name of readdirSync(target).sort()) {
+              const p = join(target, name);
+              const st = statSync(p, { throwIfNoEntry: false });
+              if (st?.isDirectory() && listDsFiles(p).length) apps.push({ name, ir: parseProject(p).ir });
+              else if (st?.isFile() && name.toLowerCase().endsWith('.ds')) apps.push({ name: basename(name), ir: parseFile(p).ir });
+            }
+          }
+          const names = rest.includes('--names');
+          const labelled = apps.map((a, i) => ({ name: names ? a.name : `app ${i + 1}`, ir: a.ir }));
+          const r = featureReport(labelled);
+          const md = formatFeatures(flag('--label') ?? 'corpus', r);
+          const out = flag('--out');
+          if (out) writeFileSync(out, md);
+          else process.stdout.write(md + '\n');
+          const appsOut = flag('--apps');
+          if (appsOut) writeFileSync(appsOut, formatApps(r));
+          return 0;
+    },
+    schema: (target) => {
+          if (!target) usage();
+          const { ir, locked } = loadIrOrLocked(target);
+          if (locked) return 2;
+          if (!ir) return 1;
+          const srcBackup = flag('--source-backup');
+          const srcCsv = flag('--source-csv');
+          const srcJson = flag('--source-json');
+          if ([srcBackup, srcCsv, srcJson].filter((dir) => dir !== undefined).length > 1) {
+            process.stderr.write('c2c: pass at most one of --source-backup, --source-csv, or --source-json\n');
+            return 2;
+          }
+          const allowEmpty = rest.includes('--allow-empty');
+          const source =
+            srcBackup !== undefined
+              ? readSourceBackup(srcBackup, ir, allowEmpty).sourceData
+              : srcCsv !== undefined
+                ? (hasReportJson(srcCsv, ir) ? readSourceJson(srcCsv, ir, allowEmpty) : readSourceCsv(srcCsv, ir, allowEmpty)).sourceData
+                : srcJson !== undefined
+                  ? readSourceJson(srcJson, ir, allowEmpty).sourceData
+                  : undefined;
+          const plan = generateSchema(ir, source ? { source } : undefined);
+          const text = rest.includes('--json') ? stampedJson(schemaAsJson(plan)) : rest.includes('--iac') ? projectTemplateJson(plan) : schemaAsReport(plan);
+          writeOut(text, flag('--out'));
+          return 0;
+    },
+    'iac-drift': (target) => {
+          if (!target) usage();
+          const exported = rest[0];
+          if (!exported) usage();
+          let report;
+          try {
+            report = diffTemplate(JSON.parse(readFileSync(target, 'utf8')), JSON.parse(readFileSync(exported, 'utf8')));
+          } catch (err) {
+            process.stderr.write(`c2c iac-drift: ${err instanceof Error ? err.message : String(err)}\n`);
+            return 3;
+          }
+          process.stdout.write(formatDrift(report));
+          return report.exitCode;
+    },
+    'schema-corpus': (target) => {
+          if (!target) usage();
+          const md = schemaCorpusMarkdown(target, { label: flag('--label') ?? 'corpus', date: new Date().toISOString().slice(0, 10) });
+          writeOut(md, flag('--out'));
+          return 0;
+    },
+    seed: (target) => {
+          if (!target) usage();
+          const { ir, locked } = loadIrOrLocked(target);
+          if (locked) return 2;
+          if (!ir) return 1;
+          const n = flag('--n');
+          const parsedN = n === undefined ? undefined : Number(n);
+          const problem = seedArgsProblem(rest);
+          if (problem) {
+            process.stderr.write(`${problem}\n`);
+            return 2;
+          }
+          const out = flag('--out') as string;
+          if (rest.includes('--creator-import')) {
+            const rowsArg = flag('--rows') ?? n;
+            const rows = rowsArg === undefined ? undefined : Number(rowsArg);
+            if (rows !== undefined && (!Number.isInteger(rows) || rows < 0)) {
+              process.stderr.write('c2c seed: --rows must be a non-negative integer\n');
+              return 2;
+            }
+            const result = generateCreatorImport(ir, { rows, seed: flag('--seed') });
+            mkdirSync(out, { recursive: true });
+            for (const file of result.files) writeFileSync(join(out, file.fileName), file.csv);
+            for (const manual of result.manual) writeFileSync(join(out, manual.fileName), manual.body);
+            writeFileSync(join(out, 'IMPORT_ORDER.txt'), result.orderText);
+            writeFileSync(join(out, 'README.md'), result.readme);
+            process.stdout.write(`creator-import seed ${result.seed} rows=${result.rows} forms=${result.files.length} skipped=${result.skipped.length} manual=${result.manual.length}\n`);
+            for (const file of result.files) process.stdout.write(`${file.form}: ${file.rowCount} rows\n`);
+            for (const manual of result.manual) process.stdout.write(`${manual.form}: manual worksheet ${manual.fileName}\n`);
+            for (const s of result.skipped) process.stdout.write(`${s.form}: skipped (${s.reason})\n`);
+            for (const w of result.warnings) process.stdout.write(`warning ${w.form}${w.field ? `/${w.field}` : ''}: ${w.message}\n`);
+            return 0;
+          }
+          const result = generateSeed(ir, { n: parsedN, seed: flag('--seed') });
+          mkdirSync(out, { recursive: true });
+          for (const file of result.files) writeFileSync(join(out, file.fileName), file.csv);
+          for (const file of result.fixtureFiles) {
+            if (file.name !== basename(file.name) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(file.name)) {
+              process.stderr.write('c2c seed: fixture name is not a file name\n');
+              return 2;
+            }
+            writeFileSync(join(out, file.name), file.bytes);
+          }
+          writeFileSync(join(out, 'seed.json'), canonicalSeedJson(result.tables, result.blockers));
 
-    if (rest.includes('--json')) {
-      const output = {
-        seed: result.seed,
-        n: result.n,
-        forms: result.files.length,
-        files: result.files.map(f => {
-          const lines = f.csv.trimEnd() === '' ? [] : f.csv.trimEnd().split('\n');
-          return { form: f.form, rows: lines.length > 0 ? lines.length - 1 : 0 };
-        }),
-        warnings: result.warnings,
-        blockers: result.blockers || []
-      };
-      process.stdout.write(JSON.stringify(output, null, 2) + '\n');
-      return (result.blockers && result.blockers.length > 0) ? 1 : 0;
-    }
+          if (rest.includes('--json')) {
+            const output = {
+              seed: result.seed,
+              n: result.n,
+              forms: result.files.length,
+              files: result.files.map(f => {
+                const lines = f.csv.trimEnd() === '' ? [] : f.csv.trimEnd().split('\n');
+                return { form: f.form, rows: lines.length > 0 ? lines.length - 1 : 0 };
+              }),
+              warnings: result.warnings,
+              blockers: result.blockers || []
+            };
+            process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+            return (result.blockers && result.blockers.length > 0) ? 1 : 0;
+          }
 
-    process.stdout.write(`seed ${result.seed} n=${result.n} forms=${result.files.length}\n`);
-    for (const file of result.files) {
-      const lines = file.csv.trimEnd() === '' ? [] : file.csv.trimEnd().split('\n');
-      const rows = lines.length > 0 ? lines.length - 1 : 0;
-      process.stdout.write(`${file.form}: ${rows} rows\n`);
-    }
-    for (const w of result.warnings) process.stdout.write(`warning ${w.form}${w.field ? `/${w.field}` : ''}: ${w.message}\n`);
-    for (const b of result.blockers || []) process.stdout.write(`blocker ${b.form}${b.field ? `/${b.field}` : ''}: ${b.message}\n`);
-    if (result.blockers && result.blockers.length > 0) return 1;
-    return 0;
-  }
-  if (cmd === 'deluge') {
-    const numbers = emptyNumbers();
-    if (flag('--unit') === 'file') {
-      for (const p of listDsFiles(target)) accumulate(parseFile(p).ir, numbers);
-    } else {
-      let any = false;
-      for (const name of readdirSync(target).sort()) {
-        const p = join(target, name);
-        const st = statSync(p, { throwIfNoEntry: false });
-        if (st?.isDirectory() && listDsFiles(p).length) {
-          accumulate(parseProject(p).ir, numbers);
-          any = true;
-        } else if (st?.isFile() && name.toLowerCase().endsWith('.ds')) {
-          accumulate(parseFile(p).ir, numbers);
-          any = true;
-        }
-      }
-      if (!any && statSync(target, { throwIfNoEntry: false })?.isDirectory() && listDsFiles(target).length) {
-        accumulate(parseProject(target).ir, numbers);
-      }
-    }
-    const md = formatCorpus(flag('--label') ?? 'corpus', numbers, Number(flag('--top') ?? 20) || 20);
-    const out = flag('--out');
-    if (out) writeFileSync(out, md);
-    process.stdout.write(md + '\n');
-    return 0;
-  }
-  if (cmd === 'ui') {
-    const { ir, locked } = loadIrOrLocked(target);
-    if (locked) return 2;
-    if (!ir) return 1;
-    const out = flag('--out');
-    if (!out) {
-      process.stderr.write('c2c ui: --out directory is required\n');
-      return 2;
-    }
-    const bundle = buildUi(ir);
-    for (const file of bundle.files) {
-      const dest = join(out, file.path);
-      mkdirSync(dirname(dest), { recursive: true });
-      writeFileSync(dest, file.data);
-    }
-    const summary = bundle.summary;
-    process.stdout.write(
-      `ui dry-run forms ${summary.formsGenerated}/${summary.forms} reports ${summary.reportsGenerated}/${summary.reports} pages ${summary.pagesGenerated}/${summary.pages} todos ${summary.todos.length}\n`,
-    );
-    return 0;
-  }
-  if (cmd === 'score-ui') {
-    const { ir, locked } = loadIrOrLocked(target);
-    if (locked) return 2;
-    if (!ir) return 1;
-    const uiDir = flag('--ui');
-    let bundle;
-    try {
-      bundle = uiDir ? bundleFromDir(uiDir) : bundleFromFiles(buildUi(ir).files);
-    } catch (err) {
-      process.stderr.write(`c2c score-ui: ${err instanceof Error ? err.message : 'unreadable bundle'}\n`);
-      return 2;
-    }
-    const write = flag('--write');
-    scoreUi(ir, bundle).then(
-      (result) => {
-        if (write) {
-          mkdirSync(dirname(write), { recursive: true });
-          writeFileSync(write, `${JSON.stringify(scoreFileOf(result), null, 2)}\n`);
-        }
-        process.stdout.write(rest.includes('--json') ? `${JSON.stringify(result, null, 2)}\n` : uiScoreAsText(result));
-        process.exitCode = result.pass ? 0 : 1;
-      },
-      (err: unknown) => {
-        process.stderr.write(`c2c score-ui: ${err instanceof Error ? err.message : 'scoring failed'}\n`);
-        process.exitCode = 2;
-      },
-    );
-    return 0;
-  }
-  if (cmd === 'ui-react') {
-    const { ir, locked } = loadIrOrLocked(target);
-    if (locked) return 2;
-    if (!ir) return 1;
-    const out = flag('--out');
-    if (!out) {
-      process.stderr.write('c2c ui-react: --out directory is required\n');
-      return 2;
-    }
-    const apiBase = flag('--api-base');
-    const files = generateReactApp(ir, { ...(apiBase ? { apiBase } : {}), auth: !rest.includes('--no-auth') });
-    try {
-      const result = writeReactApp(out, files, { upgradePlatform: rest.includes('--upgrade-platform'), force: rest.includes('--force') });
-      process.stdout.write(`ui-react files ${files.length} written ${result.written.length} kept ${result.kept.length} removed ${result.removed.length}\n`);
-    } catch (err) {
-      if (err instanceof HandEditedError) {
-        process.stderr.write(`c2c ui-react: ${err.message}\n`);
-        return 1;
-      }
-      throw err;
-    }
-    return 0;
-  }
-  if (cmd === 'auth') {
-    const { ir, locked } = loadIrOrLocked(target);
-    if (locked) return 2;
-    if (!ir) return 1;
-    const plan = authPlan(ir);
-    const out = rest.includes('--apply') ? authApplyReport(authApplyPlan(plan)) : rest.includes('--json') ? authAsJson(plan) : authAsReport(plan);
-    writeOut(out, flag('--out'));
-    return 0;
-  }
-  if (cmd === 'ui-corpus') {
-    const numbers = uiCorpus(target);
-    const md = formatUiReport(numbers, { label: flag('--label') ?? 'corpus', date: new Date().toISOString().slice(0, 10) });
-    const out = flag('--out');
-    if (out) writeFileSync(out, md.endsWith('\n') ? md : `${md}\n`);
-    else process.stdout.write(md.endsWith('\n') ? md : `${md}\n`);
-    process.stdout.write(
-      `ui-corpus apps=${numbers.apps} buildOk=${numbers.buildOk} buildFail=${numbers.buildFail} forms ${numbers.formsGenerated} generated / ${numbers.formsTodo} todo reports ${numbers.reportsGenerated} generated / ${numbers.reportsTodo} todo pages ${numbers.pagesGenerated} generated / ${numbers.pagesTodo} todo\n`,
-    );
-    return numbers.buildFail === 0 ? 0 : 1;
-  }
-  usage();
+          process.stdout.write(`seed ${result.seed} n=${result.n} forms=${result.files.length}\n`);
+          for (const file of result.files) {
+            const lines = file.csv.trimEnd() === '' ? [] : file.csv.trimEnd().split('\n');
+            const rows = lines.length > 0 ? lines.length - 1 : 0;
+            process.stdout.write(`${file.form}: ${rows} rows\n`);
+          }
+          for (const w of result.warnings) process.stdout.write(`warning ${w.form}${w.field ? `/${w.field}` : ''}: ${w.message}\n`);
+          for (const b of result.blockers || []) process.stdout.write(`blocker ${b.form}${b.field ? `/${b.field}` : ''}: ${b.message}\n`);
+          if (result.blockers && result.blockers.length > 0) return 1;
+          return 0;
+    },
+    deluge: (target) => {
+          if (!target) usage();
+          const numbers = emptyNumbers();
+          if (flag('--unit') === 'file') {
+            for (const p of listDsFiles(target)) accumulate(parseFile(p).ir, numbers);
+          } else {
+            let any = false;
+            for (const name of readdirSync(target).sort()) {
+              const p = join(target, name);
+              const st = statSync(p, { throwIfNoEntry: false });
+              if (st?.isDirectory() && listDsFiles(p).length) {
+                accumulate(parseProject(p).ir, numbers);
+                any = true;
+              } else if (st?.isFile() && name.toLowerCase().endsWith('.ds')) {
+                accumulate(parseFile(p).ir, numbers);
+                any = true;
+              }
+            }
+            if (!any && statSync(target, { throwIfNoEntry: false })?.isDirectory() && listDsFiles(target).length) {
+              accumulate(parseProject(target).ir, numbers);
+            }
+          }
+          const md = formatCorpus(flag('--label') ?? 'corpus', numbers, Number(flag('--top') ?? 20) || 20);
+          const out = flag('--out');
+          if (out) writeFileSync(out, md);
+          process.stdout.write(md + '\n');
+          return 0;
+    },
+    ui: (target) => {
+          if (!target) usage();
+          const { ir, locked } = loadIrOrLocked(target);
+          if (locked) return 2;
+          if (!ir) return 1;
+          const out = flag('--out');
+          if (!out) {
+            process.stderr.write('c2c ui: --out directory is required\n');
+            return 2;
+          }
+          const bundle = buildUi(ir);
+          for (const file of bundle.files) {
+            const dest = join(out, file.path);
+            mkdirSync(dirname(dest), { recursive: true });
+            writeFileSync(dest, file.data);
+          }
+          const summary = bundle.summary;
+          process.stdout.write(
+            `ui dry-run forms ${summary.formsGenerated}/${summary.forms} reports ${summary.reportsGenerated}/${summary.reports} pages ${summary.pagesGenerated}/${summary.pages} todos ${summary.todos.length}\n`,
+          );
+          return 0;
+    },
+    'score-ui': (target) => {
+          if (!target) usage();
+          const { ir, locked } = loadIrOrLocked(target);
+          if (locked) return 2;
+          if (!ir) return 1;
+          const uiDir = flag('--ui');
+          let bundle;
+          try {
+            bundle = uiDir ? bundleFromDir(uiDir) : bundleFromFiles(buildUi(ir).files);
+          } catch (err) {
+            process.stderr.write(`c2c score-ui: ${err instanceof Error ? err.message : 'unreadable bundle'}\n`);
+            return 2;
+          }
+          const write = flag('--write');
+          scoreUi(ir, bundle).then(
+            (result) => {
+              if (write) {
+                mkdirSync(dirname(write), { recursive: true });
+                writeFileSync(write, `${JSON.stringify(scoreFileOf(result), null, 2)}\n`);
+              }
+              process.stdout.write(rest.includes('--json') ? `${JSON.stringify(result, null, 2)}\n` : uiScoreAsText(result));
+              process.exitCode = result.pass ? 0 : 1;
+            },
+            (err: unknown) => {
+              process.stderr.write(`c2c score-ui: ${err instanceof Error ? err.message : 'scoring failed'}\n`);
+              process.exitCode = 2;
+            },
+          );
+          return 0;
+    },
+    'ui-react': (target) => {
+          if (!target) usage();
+          const { ir, locked } = loadIrOrLocked(target);
+          if (locked) return 2;
+          if (!ir) return 1;
+          const out = flag('--out');
+          if (!out) {
+            process.stderr.write('c2c ui-react: --out directory is required\n');
+            return 2;
+          }
+          const apiBase = flag('--api-base');
+          const files = generateReactApp(ir, { ...(apiBase ? { apiBase } : {}), auth: !rest.includes('--no-auth') });
+          try {
+            const result = writeReactApp(out, files, { upgradePlatform: rest.includes('--upgrade-platform'), force: rest.includes('--force') });
+            process.stdout.write(`ui-react files ${files.length} written ${result.written.length} kept ${result.kept.length} removed ${result.removed.length}\n`);
+          } catch (err) {
+            if (err instanceof HandEditedError) {
+              process.stderr.write(`c2c ui-react: ${err.message}\n`);
+              return 1;
+            }
+            throw err;
+          }
+          return 0;
+    },
+    auth: (target) => {
+          if (!target) usage();
+          const { ir, locked } = loadIrOrLocked(target);
+          if (locked) return 2;
+          if (!ir) return 1;
+          const plan = authPlan(ir);
+          const out = rest.includes('--apply') ? authApplyReport(authApplyPlan(plan)) : rest.includes('--json') ? authAsJson(plan) : authAsReport(plan);
+          writeOut(out, flag('--out'));
+          return 0;
+    },
+    'ui-corpus': (target) => {
+          if (!target) usage();
+          const numbers = uiCorpus(target);
+          const md = formatUiReport(numbers, { label: flag('--label') ?? 'corpus', date: new Date().toISOString().slice(0, 10) });
+          const out = flag('--out');
+          if (out) writeFileSync(out, md.endsWith('\n') ? md : `${md}\n`);
+          else process.stdout.write(md.endsWith('\n') ? md : `${md}\n`);
+          process.stdout.write(
+            `ui-corpus apps=${numbers.apps} buildOk=${numbers.buildOk} buildFail=${numbers.buildFail} forms ${numbers.formsGenerated} generated / ${numbers.formsTodo} todo reports ${numbers.reportsGenerated} generated / ${numbers.reportsTodo} todo pages ${numbers.pagesGenerated} generated / ${numbers.pagesTodo} todo\n`,
+          );
+          return numbers.buildFail === 0 ? 0 : 1;
+    },
+  };
+  const handler = dispatch[cmd];
+  if (!handler) usage();
+  return handler(target);
 }
-
 // Directory readers (features, deluge, corpus, migration-report, schema-corpus,
 // ui-corpus) parse every .ds they walk. A locked Marketplace page throws here
 // so the process refuses with exit 2 instead of an uncaught stack.

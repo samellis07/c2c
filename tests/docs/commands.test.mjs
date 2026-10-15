@@ -2,9 +2,13 @@
  * Every command a public doc tells the reader to copy must be real: an
  * `npm run <script>` names a package.json script, a `node dist/<p>.js` maps
  * to a source file under packages/, a `tools/` or `scripts/` path exists,
- * and a `c2c <verb> --flag` names a verb this CLI has (and, for a verb with
- * an argument contract in packages/cli/src/argv.ts, a flag that contract
- * accepts). Only fenced code blocks and inline `code spans` are scanned —
+ * and a `c2c <verb> --flag` names a verb this CLI has and a flag that verb's
+ * contract accepts. The verb list is the dispatch table in
+ * packages/cli/src/c2c.ts itself — the same keys main() dispatches on — so
+ * any verb the CLI accepts is a verb this check knows. A verb's contract is
+ * its ARGV_SPEC entry in packages/cli/src/argv.ts plus the flags on its own
+ * usage() lines; a flag on a verb with no contract fails, never passes
+ * silently. Only fenced code blocks and inline `code spans` are scanned —
  * prose mentioning "c2c" is not a command a reader copies.
  */
 import assert from 'node:assert/strict';
@@ -27,7 +31,36 @@ function sliceBalanced(text, openIdx) {
   throw new Error('unbalanced braces');
 }
 
-/** `{ verbToFlags: Map<string, Set<string>|undefined>, rootVerbs: Set<string> }` from the CLI source. */
+/**
+ * A verb's usage-line flags plus those of every verb it defers to via
+ * `[same options as <other>]`. A malformed alias is a defect in the CLI's
+ * usage text, not a partial contract: deferring to a verb main() does not
+ * dispatch on throws naming that verb, and an alias cycle throws naming the
+ * cycle — the check fails loudly rather than accepting incomplete flags.
+ */
+function resolveUsageFlags(verb, usageFlags, usageAlias, rootVerbs) {
+  const flags = new Set(usageFlags.get(verb) ?? []);
+  const chain = [verb];
+  const seen = new Set(chain);
+  let ref = usageAlias.get(verb);
+  while (ref !== undefined) {
+    if (!rootVerbs.has(ref)) {
+      throw new Error(
+        `packages/cli/src/c2c.ts usage(): 'c2c ${chain[chain.length - 1]}' defers to 'same options as ${ref}', but '${ref}' is not a dispatched verb`,
+      );
+    }
+    if (seen.has(ref)) {
+      throw new Error(`packages/cli/src/c2c.ts usage(): 'same options as' alias cycle: ${[...chain, ref].join(' -> ')}`);
+    }
+    chain.push(ref);
+    seen.add(ref);
+    for (const f of usageFlags.get(ref) ?? []) flags.add(f);
+    ref = usageAlias.get(ref);
+  }
+  return flags;
+}
+
+/** `{ verbToFlags: Map<string, Set<string>>, rootVerbs: Set<string>, speclessVerbs: string[] }` from the CLI source. */
 function loadCliCommands() {
   const argvSrc = readFileSync(path.join(repoRoot, 'packages/cli/src/argv.ts'), 'utf8');
   const scopeDecl = /const SCOPE:[^=]*=\s*(\{)/.exec(argvSrc);
@@ -36,7 +69,7 @@ function loadCliCommands() {
 
   const specDecl = /export const ARGV_SPEC:[^=]*=\s*(\{)/.exec(argvSrc);
   const specBlock = sliceBalanced(argvSrc, specDecl.index + specDecl[0].length - 1);
-  const verbToFlags = new Map();
+  const specFlags = new Map();
   const entryRe = /\n\s{2}(?:'([a-zA-Z0-9-]+)'|([a-zA-Z0-9-]+)):\s*\{/g;
   let m;
   while ((m = entryRe.exec(specBlock))) {
@@ -45,14 +78,51 @@ function loadCliCommands() {
     const block = sliceBalanced(specBlock, openIdx);
     const flags = new Set(block.includes('...SCOPE') ? scopeFlags : []);
     for (const fm of block.matchAll(/'(--[a-zA-Z0-9-]+)'/g)) flags.add(fm[1]);
-    verbToFlags.set(name, flags);
+    specFlags.set(name, flags);
   }
 
   const c2cSrc = readFileSync(path.join(repoRoot, 'packages/cli/src/c2c.ts'), 'utf8');
-  const rootVerbs = new Set(verbToFlags.keys());
-  for (const vm of c2cSrc.matchAll(/cmd === '([^']+)'/g)) rootVerbs.add(vm[1]);
 
-  return { verbToFlags, rootVerbs };
+  // The verbs main() dispatches on are the keys of its `dispatch` table —
+  // the one source of truth for what the CLI accepts.
+  const dispatchDecl = /const dispatch:[^;]*?=\s*(\{)/.exec(c2cSrc);
+  const dispatchBlock = sliceBalanced(c2cSrc, dispatchDecl.index + dispatchDecl[0].length - 1);
+  const rootVerbs = new Set();
+  const keyRe = /\n {4}(?:'([a-zA-Z0-9-]+)'|([a-zA-Z0-9-]+))\s*:/g;
+  while ((m = keyRe.exec(dispatchBlock))) rootVerbs.add(m[1] || m[2]);
+
+  // The flags usage() prints for each verb: every `c2c <verb> ...` line in
+  // the usage text contributes the `--flags` it names.
+  const usageDecl = /function usage\(\)[^{]*(\{)/.exec(c2cSrc);
+  const usageBlock = sliceBalanced(c2cSrc, usageDecl.index + usageDecl[0].length - 1);
+  const usageFlags = new Map();
+  const usageAlias = new Map();
+  for (const lm of usageBlock.matchAll(/'([^'\n]*)'/g)) {
+    for (const line of lm[1].split('\\n')) {
+      const verbMatch = /\bc2c (--verify-vendor|[a-zA-Z][a-zA-Z0-9-]*)/.exec(line);
+      if (!verbMatch) continue;
+      const verb = verbMatch[1];
+      if (!usageFlags.has(verb)) usageFlags.set(verb, new Set());
+      for (const fm of line.slice(verbMatch.index + verbMatch[0].length).matchAll(/--[a-zA-Z][a-zA-Z0-9-]*/g)) {
+        usageFlags.get(verb).add(fm[0]);
+      }
+      // `c2c <verb> ... [same options as <other>]` inherits <other>'s flags.
+      const alias = /\bsame\s+[a-zA-Z -]*\bas\s+([a-zA-Z][a-zA-Z0-9-]*)/.exec(line);
+      if (alias) usageAlias.set(verb, alias[1]);
+    }
+  }
+  // A verb's usage flags plus the flags of any verb its line defers to.
+  const resolvedUsageFlags = (verb) => resolveUsageFlags(verb, usageFlags, usageAlias, rootVerbs);
+
+  // A verb's contract is its ARGV_SPEC entry plus its usage-line flags; a
+  // verb with neither has no contract and documented flags on it fail.
+  const verbToFlags = new Map();
+  for (const verb of rootVerbs) {
+    if (!specFlags.has(verb) && !usageFlags.has(verb)) continue;
+    verbToFlags.set(verb, new Set([...(specFlags.get(verb) ?? []), ...resolvedUsageFlags(verb)]));
+  }
+  const speclessVerbs = [...rootVerbs].filter((verb) => !verbToFlags.has(verb));
+  return { verbToFlags, rootVerbs, speclessVerbs };
 }
 
 /** Fenced-code-block bodies and inline `code span` bodies of a markdown doc, as separate regions. */
@@ -123,10 +193,14 @@ function checkMarkdown(relPath, text, { scripts, rootVerbs, verbToFlags }) {
           problems.push(`${relPath}: c2c ${verb} is not a known command`);
           continue;
         }
-        const spec = verbToFlags.get(verb);
-        if (!spec) continue;
         const start = matches[i].index + matches[i][0].length;
         const end = i + 1 < matches.length ? matches[i + 1].index : normalized.length;
+        const spec = verbToFlags.get(verb);
+        if (!spec) {
+          const firstFlag = normalized.slice(start, end).match(FLAG)?.[0];
+          if (firstFlag) problems.push(`${relPath}: c2c ${verb} ${firstFlag} has no argument contract to be checked against`);
+          continue;
+        }
         for (const fm of normalized.slice(start, end).matchAll(FLAG)) {
           if (!spec.has(fm[0])) problems.push(`${relPath}: c2c ${verb} ${fm[0]} is not in its argument contract`);
         }
@@ -153,13 +227,15 @@ function docTargets() {
 function loadContext() {
   const pkg = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
   const scripts = new Set(Object.keys(pkg.scripts ?? {}));
-  const { verbToFlags, rootVerbs } = loadCliCommands();
-  return { scripts, rootVerbs, verbToFlags };
+  const { verbToFlags, rootVerbs, speclessVerbs } = loadCliCommands();
+  return { scripts, rootVerbs, verbToFlags, speclessVerbs };
 }
 
 test('every command named in docs/**, README.md and CONTRIBUTING.md exists', () => {
   const ctx = loadContext();
-  const problems = [];
+  const problems = ctx.speclessVerbs.map(
+    (verb) => `packages/cli/src/c2c.ts: c2c ${verb} is dispatched but has no argument contract (no ARGV_SPEC entry or usage() line)`,
+  );
   for (const file of docTargets()) {
     const rel = path.relative(repoRoot, file);
     problems.push(...checkMarkdown(rel, readFileSync(file, 'utf8'), ctx));
@@ -167,13 +243,19 @@ test('every command named in docs/**, README.md and CONTRIBUTING.md exists', () 
   assert.deepEqual(problems, []);
 });
 
-test('the checker rejects a planted bad npm script, node path, verb and flag', () => {
+test('the checker rejects a planted bad npm script, node path, tools path, scripts path, verb and flag', () => {
   const ctx = loadContext();
   const bad = [
     '```sh\nnpm run totally-not-a-script\n```',
     '```sh\nnode dist/cli/src/does-not-exist.js\n```',
+    '```sh\nnode tools/no-such-tool.mjs\n```',
+    '```sh\nnode scripts/no-such-script.sh\n```',
+    '`tools/no-such-tool.mjs`',
+    '`scripts/no-such-script.sh`',
     '`c2c teleport <file>`',
     '`c2c deploy --teleport`',
+    '`c2c parse --teleport`',
+    '`c2c proof app.ds --teleport`',
   ];
   for (const sample of bad) {
     const problems = checkMarkdown('fixture.md', sample, ctx);
@@ -186,6 +268,7 @@ test('the checker passes real commands and does not flag prose that merely menti
   const good = [
     '```sh\nnpm run build\nnode dist/cli/src/c2c.js deploy <ds> --project <id> --org <org> --confirm\n```',
     '`c2c smoke --confirm`',
+    '`c2c proof app.ds --smoke smoke.json`',
     '`tools/matrix-check.mjs`',
     'the **c2c plugin** is the migration toolkit',
     'c2c never writes a token anywhere',
@@ -193,4 +276,47 @@ test('the checker passes real commands and does not flag prose that merely menti
   for (const sample of good) {
     assert.deepEqual(checkMarkdown('fixture.md', sample, ctx), [], `expected no problem for: ${sample}`);
   }
+});
+
+test('a cycle in "same options as" aliases fails, naming the cycle', () => {
+  const usageFlags = new Map([
+    ['alias-a', new Set(['--alpha'])],
+    ['alias-b', new Set(['--beta'])],
+  ]);
+  const usageAlias = new Map([
+    ['alias-a', 'alias-b'],
+    ['alias-b', 'alias-a'],
+  ]);
+  const rootVerbs = new Set(['alias-a', 'alias-b']);
+  assert.throws(
+    () => resolveUsageFlags('alias-a', usageFlags, usageAlias, rootVerbs),
+    /alias cycle: alias-a -> alias-b -> alias-a/,
+  );
+});
+
+test('a "same options as" alias to an unknown verb fails, naming the verb', () => {
+  const usageFlags = new Map([['alias-a', new Set(['--alpha'])]]);
+  const usageAlias = new Map([['alias-a', 'ghost-verb']]);
+  const rootVerbs = new Set(['alias-a']);
+  assert.throws(
+    () => resolveUsageFlags('alias-a', usageFlags, usageAlias, rootVerbs),
+    /same options as ghost-verb'.*not a dispatched verb/,
+  );
+});
+
+test('a two-step "same options as" alias chain resolves to the union of flags', () => {
+  const usageFlags = new Map([
+    ['alias-a', new Set(['--alpha'])],
+    ['alias-b', new Set(['--beta'])],
+    ['alias-c', new Set(['--gamma'])],
+  ]);
+  const usageAlias = new Map([
+    ['alias-a', 'alias-b'],
+    ['alias-b', 'alias-c'],
+  ]);
+  const rootVerbs = new Set(['alias-a', 'alias-b', 'alias-c']);
+  assert.deepEqual(
+    [...resolveUsageFlags('alias-a', usageFlags, usageAlias, rootVerbs)].sort(),
+    ['--alpha', '--beta', '--gamma'],
+  );
 });

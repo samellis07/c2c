@@ -280,7 +280,8 @@ browser. A criterion's points are its weight times the share of its checks that
 pass; the total is rounded down to one decimal.
 
 \`\`\`
-c2c score-ui <file|dir> [--ui <c2c ui --out dir>] [--json] [--write score.json]
+c2c score-ui <file|dir> [--ui <bundle dir>] [--json] [--write score.json]
+(--ui reads a directory written by c2c ui --out)
 C2C_FIXTURES_DIR=<fixtures-dir> npm run score-ui:gallery -- --out docs/ui-scores.md
 \`\`\`
 

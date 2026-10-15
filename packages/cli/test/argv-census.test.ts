@@ -19,7 +19,7 @@ import { ARGV_SPEC, argvProblems, argvShapeProblems } from '../src/argv.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
-/** Each command's entry functions; c2c.ts's own `if (cmd === ...)` block is added for every command. */
+/** Each command's entry functions; c2c.ts's own dispatch-table handler body is added for every command. */
 const ROOTS: Record<string, string[]> = {
   deploy: ['doctorGateForArgs', 'deployCli'],
   provision: ['doctorGateForArgs', 'provisionCreatesProject', 'provisionCli'],
@@ -48,12 +48,34 @@ function functionBodies(): Map<string, string> {
   return bodies;
 }
 
+/** Balanced `{...}` slice of `text` starting at the `{` at openIdx. */
+function sliceBalanced(text: string, openIdx: number): string {
+  let depth = 0;
+  for (let i = openIdx; i < text.length; i++) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}') {
+      depth--;
+      if (depth === 0) return text.slice(openIdx, i + 1);
+    }
+  }
+  throw new Error('unbalanced braces');
+}
+
+/** The handler body for `cmd` in c2c.ts's dispatch table (aliases resolve to their shared function). */
 function dispatchBlock(cmd: string): string {
   const text = readFileSync(path.join(repo, 'packages', 'cli', 'src', 'c2c.ts'), 'utf8');
-  const start = text.indexOf(`  if (cmd === '${cmd}') {`);
-  assert.ok(start >= 0, `c2c.ts dispatches ${cmd}`);
-  const end = text.indexOf('\n  }\n', start);
-  return text.slice(start, end);
+  const decl = /const dispatch:[^;]*?=\s*\{/.exec(text);
+  assert.ok(decl, 'c2c.ts has a dispatch table');
+  const table = sliceBalanced(text, decl.index + decl[0].length - 1);
+  const key = cmd.includes('-') ? `'${cmd}'` : cmd;
+  const entry = new RegExp(`\\n {4}${key.replace(/[-]/g, '\\$&')}: (\\w+|\\([^)]*\\) => \\{)`).exec(table);
+  assert.ok(entry, `c2c.ts dispatches ${cmd}`);
+  if (entry[1].endsWith('{')) {
+    return sliceBalanced(table, entry.index + entry[0].length - 1);
+  }
+  const alias = new RegExp(`const ${entry[1]} = \\(\\): number => \\{`).exec(text);
+  assert.ok(alias, `c2c.ts defines shared handler ${entry[1]}`);
+  return sliceBalanced(text, alias.index + alias[0].length - 1);
 }
 
 function census(cmd: string, bodies: Map<string, string>): Set<string> {
