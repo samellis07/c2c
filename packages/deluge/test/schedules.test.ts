@@ -430,9 +430,9 @@ async function liveSweep(): Promise<void> {
     assert.equal(first.report.schedules[0].fired, 1);
     await sweeper.sweep!({});
     assert.deepEqual(tables.get('Log')!.map((r) => r.Note), ['nightly', 'due'], 'paid is filtered, later is not due, nothing refires');
-    // One checkpoint row and one fired mark for the 'due' record.
+    // One checkpoint row; the fired mark was pruned when the window closed.
     const jobKeys = tables.get('C2CJobCheckpoint')!.map((r) => r.Job_Key).sort();
-    assert.deepEqual(jobKeys, ['c2c_Due_Reminder', 'fired|c2c_Due_Reminder|1000']);
+    assert.deepEqual(jobKeys, ['c2c_Due_Reminder']);
   } finally {
     delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
     rmSync(root, { recursive: true, force: true });

@@ -316,6 +316,15 @@ export function mockDatastore(schema: MockSchema) {
       }
       return rows;
     },
+    async delete(form: string, rowIds: readonly unknown[]) {
+      const list = tables.get(form) ?? [];
+      const ids = new Set(rowIds.map(String));
+      tables.set(
+        form,
+        list.filter((row) => !ids.has(String(row.ROWID))),
+      );
+      return rowIds.length;
+    },
     async query(form: string, where: string, limit: number, offset = 0, orderBy = '') {
       if (limit > 300) throw new Error(`zcql-mock: LIMIT ${limit} exceeds 300`);
       calls.push({ form, where, limit, offset, orderBy });
