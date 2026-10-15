@@ -98,6 +98,14 @@ function checksRecomputeGreen(checks: DoctorFile['checks']): boolean {
   return true;
 }
 
+/** The required check ids that are missing or not pass/warn. */
+function requiredCheckGaps(checks: DoctorFile['checks']): string[] {
+  return GATE_REQUIRED_CHECKS.filter((id) => {
+    const entries = checks.filter((c) => c?.id === id);
+    return entries.length === 0 || entries.some((e) => e.status !== 'pass' && e.status !== 'warn');
+  });
+}
+
 /** Exact dc/org/project equality: a missing field never matches a present one. */
 function scopeEquals(a: GateScope, b: GateScope): boolean {
   return SCOPE_KEYS.every((key) => a[key] === b[key]);
@@ -149,7 +157,10 @@ export function evaluateGate(input: {
     if (missing.length) return { ok: false, status: 'scope-missing', missingScope: missing, ...base };
     if (!scopeEquals(fileScope, input.scope)) return { ok: false, status: 'scope-mismatch', ...base };
   }
-  if (!checksRecomputeGreen(file.checks)) return { ok: false, status: 'checks', ...base };
+  if (!checksRecomputeGreen(file.checks)) {
+    const gaps = Array.isArray(file.checks) ? requiredCheckGaps(file.checks) : [...GATE_REQUIRED_CHECKS];
+    return { ok: false, status: 'checks', ...(gaps.length ? { reason: `required checks not pass/warn: ${gaps.join(', ')}` } : {}), ...base };
+  }
   if (!file.mcp) return { ok: false, status: 'no-mcp', ...base };
   // The D-B record is bound to the scope it was recorded for. A record with
   // no scope — a pre-binding file, or one edited by hand — is a refusal,
@@ -191,7 +202,9 @@ const STATUS_LABEL: Record<GateStatus, string> = {
 /** The refusal line, spec-shaped: names the command scope and the last doctor state. */
 export function gateRefusalMessage(verdict: GateVerdict, scope: GateScope): string {
   const where = `${scope.dc ?? '?'}/${scope.org ?? '?'}/${scope.project ?? '?'}`;
-  const last = verdict.lastAt ? `${verdict.lastAt} ${verdict.lastGreen ? 'green' : STATUS_LABEL[verdict.status]}` : 'never run';
+  // The verdict's own status, never the stored boolean: a file that says
+  // green but fails the gate must not be reported as "last: green".
+  const last = verdict.lastAt ? `${verdict.lastAt} ${STATUS_LABEL[verdict.status]}` : 'never run';
   const reason = verdict.scopeError
     ? `: ${verdict.scopeError}`
     : verdict.missingScope?.length
@@ -240,4 +253,31 @@ export function doctorStamp(input: { workspace: string; version?: string; now?: 
     ...(file ? { at: file.at, c2c: file.c2c } : {}),
     scope: { ...(scope.dc !== undefined ? { dc: scope.dc } : {}), ...(scope.org !== undefined ? { org: scope.org } : {}), ...(scope.project !== undefined ? { project: scope.project } : {}) },
   };
+}
+
+/** The doctor.json rows that come from the MCP record (agent half): D-A3, D-B*, D-V*. */
+export function isMcpCheckId(id: string): boolean {
+  return id === 'D-A3' || id.startsWith('D-B') || id.startsWith('D-V');
+}
+
+/**
+ * The MCP record a run without new evidence carries forward, so a bare
+ * `c2c doctor` shows the same D-B verdict the gate reads: a failed
+ * observation stays red until a new one is recorded, and a verified one
+ * keeps the gate open until it ages out. Only a record from the same c2c
+ * version, bound to exactly this dc/org/project and less than 12 h old is
+ * carried; anything else is dropped and D-B reports not recorded.
+ */
+export function carriedMcpRecord(input: { workspace: string; scope: GateScope; version?: string; now?: Date }): { mcp: NonNullable<DoctorFile['mcp']>; checks: CheckResult[] } | undefined {
+  const file = readGateFile(input.workspace);
+  if (file === undefined || file === 'invalid' || !file.mcp || !Array.isArray(file.checks)) return undefined;
+  if (file.c2c !== (input.version ?? c2cVersion())) return undefined;
+  const bound = file.mcp.scope;
+  if (!bound || typeof bound !== 'object' || missingScopeFields(input.scope).some((key) => key !== 'project') || !scopeEquals(bound, input.scope)) return undefined;
+  const now = (input.now ?? new Date()).getTime();
+  const mcpAt = Date.parse(file.mcp.at ?? '');
+  if (!Number.isFinite(mcpAt) || now - mcpAt > DOCTOR_MAX_AGE_MS || now - mcpAt < 0) return undefined;
+  const checks = file.checks.filter((c) => c && typeof c.id === 'string' && isMcpCheckId(c.id) && CHECK_STATUSES.has(c.status));
+  if (!checks.some((c) => c.id.startsWith('D-B'))) return undefined;
+  return { mcp: file.mcp, checks: checks.map(({ id, status, detail, fix }) => ({ id, status, detail, fix })) };
 }

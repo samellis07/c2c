@@ -11,10 +11,12 @@
  *   - `Create_Bucket` is an MCP-only write — the CLI token answers
  *     `POST /bucket` with `401 OAUTH_SCOPE_MISMATCH` (jobs-and-files.md,
  *     surface-decision-table.md).
- *   - `GET /baas/v1/project/<project-id>/bucket/<name>` with the CLI token
- *     returns the bucket row inside the Catalyst `data` envelope —
- *     `{ data: [{ bucket_name, bucket_url, ... }] }` — or 404 when absent
- *     (stratus-bucket.ts, packages/deploy/test/seed-bucket.test.ts).
+ *   - `GET /baas/v1/project/<project-id>/bucket` (the bucket list) with the
+ *     CLI token returns every bucket inside the Catalyst `data` envelope —
+ *     `{ data: [{ bucket_name, bucket_url, ... }] }`. The specific-bucket
+ *     route `GET .../bucket/<name>` is not used: it answered
+ *     `404 INVALID_URL_PATTERN` in one DC while the list route worked
+ *     (jobs-and-files.md, [UNVERIFIED]).
  *   - There is no documented token delete: cleanup is
  *     `CatalystbyZoho_Delete_Bucket` by `query_params.bucket_name`
  *     (errors.md), instructed for the session and re-printed while a pending
@@ -75,52 +77,75 @@ export interface ProbeResult {
   detail: string;
 }
 
+/** Page-token fields a list answer may carry; the read-back follows one as the same-named query parameter. */
+const PAGE_TOKEN_KEYS = ['next_token', 'continuation_token', 'next_continuation_token'] as const;
+/** A read-back never walks more pages than this. */
+export const PROBE_LIST_MAX_PAGES = 50;
+
 /**
  * Read the probe bucket back through the Catalyst REST API. `verified` means
  * the selected project really holds the nonce-named bucket — the connector
  * that wrote it is bound to the CLI's org/DC/project. Anything else never
  * counts the submitted call result.
+ *
+ * The read-back uses the bucket LIST route and matches `bucket_name`
+ * exactly: the documented specific-bucket GET answered
+ * `404 INVALID_URL_PATTERN` for every bucket in one DC while the list route
+ * listed them all (facts/jobs-and-files.md, [UNVERIFIED]). A page token in
+ * the answer is followed; a list that says it has more rows but names no
+ * token cannot prove absence.
  */
 export async function verifyProbe(rest: RestFn, target: ProbeTarget, name: string): Promise<ProbeResult> {
   const base = { kind: 'bucket' as const, name };
   if (!target.org || !/^[0-9]+$/.test(target.org) || !target.project || !/^[0-9]+$/.test(target.project)) {
     return { ...base, status: 'unresolved', detail: 'no org/project is selected, so the REST read-back has no target' };
   }
-  let res;
-  try {
-    res = await rest({ method: 'GET', path: `/baas/v1/project/${target.project}/bucket/${encodeURIComponent(name)}` });
-  } catch (err) {
-    return { ...base, status: 'unverifiable', detail: `the REST read-back failed: ${err instanceof Error ? err.message : String(err)}` };
-  }
-  if (res.status >= 200 && res.status < 300) {
+  const listPath = `/baas/v1/project/${target.project}/bucket`;
+  const seenTokens = new Set<string>();
+  let path = listPath;
+  for (let page = 0; page < PROBE_LIST_MAX_PAGES; page++) {
+    let res;
+    try {
+      res = await rest({ method: 'GET', path });
+    } catch (err) {
+      return { ...base, status: 'unverifiable', detail: `the REST read-back failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+    if (res.status < 200 || res.status >= 300) {
+      return { ...base, status: 'unverifiable', detail: `the REST bucket list answered HTTP ${res.status}; Stratus may not be enabled in this project` };
+    }
     let body: unknown = res.body;
     if (typeof body === 'string') {
       try {
         body = JSON.parse(body) as unknown;
       } catch {
-        return { ...base, status: 'unverifiable', detail: `the REST read-back returned malformed JSON; bucket ${name} could not be verified` };
+        return { ...base, status: 'unverifiable', detail: `the REST bucket list returned malformed JSON; bucket ${name} could not be verified` };
       }
     }
-    // The specific-bucket GET answers the row inside the Catalyst `data`
-    // envelope, the same array shape the seed bucket read-back uses
-    // (stratus-bucket.ts, packages/deploy/test/seed-bucket.test.ts).
-    const data = typeof body === 'object' && body !== null ? (body as { data?: unknown }).data : undefined;
-    if (!Array.isArray(data) || data.length !== 1 || typeof data[0] !== 'object' || data[0] === null) {
-      return { ...base, status: 'unverifiable', detail: `the REST read-back did not return a single bucket row; bucket ${name} could not be verified` };
+    // The list answers the rows inside the Catalyst `data` envelope.
+    const record = typeof body === 'object' && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : undefined;
+    const data = record?.data;
+    if (!Array.isArray(data)) {
+      return { ...base, status: 'unverifiable', detail: `the REST bucket list did not return a data list; bucket ${name} could not be verified` };
     }
-    const row = data[0] as { bucket_name?: unknown };
-    if (typeof row.bucket_name !== 'string') {
-      return { ...base, status: 'unverifiable', detail: `the REST read-back row did not contain a bucket_name; bucket ${name} could not be verified` };
+    // Exact name match only: a prefix or substring of the probe name is another bucket.
+    if (data.some((row) => typeof row === 'object' && row !== null && (row as { bucket_name?: unknown }).bucket_name === name)) {
+      return { ...base, status: 'verified', detail: `probe bucket ${name} found in project ${target.project} over the Catalyst REST API` };
     }
-    if (row.bucket_name !== name) {
-      return { ...base, status: 'unverifiable', detail: `the REST read-back returned bucket_name ${row.bucket_name}, not the expected probe bucket ${name}` };
+    const tokenKey = PAGE_TOKEN_KEYS.find((key) => typeof record?.[key] === 'string' && record[key] !== '');
+    if (tokenKey === undefined) {
+      if (record?.more_records === true) {
+        return { ...base, status: 'unverifiable', detail: `the REST bucket list has more rows but no page token; bucket ${name} could not be ruled out` };
+      }
+      return { ...base, status: 'absent', detail: `probe bucket ${name} is not in project ${target.project}: the MCP write never landed in the selected org/DC/project` };
     }
-    return { ...base, status: 'verified', detail: `probe bucket ${name} found in project ${target.project} over the Catalyst REST API` };
+    const token = record![tokenKey] as string;
+    if (seenTokens.has(token)) {
+      return { ...base, status: 'unverifiable', detail: `the REST bucket list repeated a page token; bucket ${name} could not be verified` };
+    }
+    seenTokens.add(token);
+    path = `${listPath}?${tokenKey}=${encodeURIComponent(token)}`;
   }
-  if (res.status === 404) {
-    return { ...base, status: 'absent', detail: `probe bucket ${name} is not in project ${target.project}: the MCP write never landed in the selected org/DC/project` };
-  }
-  return { ...base, status: 'unverifiable', detail: `the REST read-back answered HTTP ${res.status}; Stratus may not be enabled in this project` };
+  return { ...base, status: 'unverifiable', detail: `the REST bucket list ran past ${PROBE_LIST_MAX_PAGES} pages; bucket ${name} could not be verified` };
 }
 
 export interface PendingCleanup {

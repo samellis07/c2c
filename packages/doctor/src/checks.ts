@@ -48,6 +48,8 @@ export interface DoctorContext {
   evidence?: McpEvidence;
   /** Evidence origin matters: local transports are trusted only from the nonce-bound observed flow. */
   evidenceSource?: 'observed' | 'operator';
+  /** The D-A3/D-B/D-V rows of the last recorded MCP observation for this scope, when no evidence is merged this run. */
+  carried?: { checks: CheckResult[]; at: string };
   /** CLI login-store readers; injectable for tests. */
   cliDc?: () => string | undefined;
   cliOrg?: () => string | undefined;
@@ -1187,6 +1189,9 @@ export async function runDoctorChecks(ctx: DoctorContext): Promise<DoctorRun> {
     checks.push(checkA3(ctx));
     checks.push(...checkB(ctx, ctx.evidence, cliProjects));
     checks.push(...checkV(ctx, ctx.evidence));
+  } else if (ctx.carried) {
+    // The same rows the gate reads: a failed observation stays red until a new one is recorded.
+    checks.push(...ctx.carried.checks);
   } else {
     checks.push(skip('D-A3', 'agent half not recorded yet'));
     checks.push(skip('D-B', 'agent half not recorded yet (run c2c doctor --mcp-begin; the agent makes the MCP calls it names and pipes the results into c2c doctor --mcp-observed -)'));
