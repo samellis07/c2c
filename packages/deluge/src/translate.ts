@@ -4324,6 +4324,9 @@ function callExpr(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fals
       return mergeFx(call, fieldName ? [q] : [q, ...args], {
         shim: true,
         serverOnly: true,
+        // sum/avg/min/max/median of a decimal, percent or currency column is an
+        // exact decimal, so later arithmetic stays on shim.decimal.
+        decimal: fn !== 'count' && fn !== 'distinct' && !!fieldName && scope.decimalFields.has(fieldName),
         list: fn === 'distinct',
         rowReads: aggregateRowRead(obj, fn, field, call, scope),
       });
@@ -4636,6 +4639,7 @@ function namedCall(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fal
         return mergeFx(call, [q], {
           shim: true,
           serverOnly: true,
+          decimal: fn !== 'count' && fn !== 'distinct' && !!fieldName && scope.decimalFields.has(fieldName),
           list: fn === 'distinct',
           rowReads: aggregateRowRead(objAst, fn, fieldCode, call, scope),
         });
