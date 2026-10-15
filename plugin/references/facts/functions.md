@@ -17,8 +17,8 @@ Rule: `catalyst deploy --only functions:<name> -ni` is the only route that ships
 Rule: every env write replaces the whole set — merge before writing, every time.
 
 - `POST /baas/v1/project/<project-id>/function/<function-id>/configuration` body `{"variables":{...}}` replaces every existing variable.
-- `catalyst deploy` replaces env vars with `catalyst-config.json`'s `env_variables` only when that key is present — generate configs without `env_variables` so deploys preserve live values.
-- `c2c deploy <ds> --function-env <file>` reads the live set (`GET …/function/<function-id>` → `data.configuration.environment.variables`), merges the user's local file and writes the full set once. The user types the values; they never enter the repo, the plan or the chat.
+- `catalyst deploy` replaces env vars with `catalyst-config.json`'s `env_variables` only when that key is present — so the generated `env_variables` must carry every key already live, or the key is erased.
+- `c2c deploy <ds> --function-env <file>` writes non-secret values into `env_variables` and secret-named keys (token/secret/key/password/credential, case-insensitive) as name-only `""` entries — generated files are often committed, so no secret value may appear in them. Right after the functions deploy, `c2c deploy --confirm` re-reads the live set (`GET …/function/<function-id>` → `data.configuration.environment.variables`) and POSTs the merged set with the real secret values to `…/function/<function-id>/configuration` [UNVERIFIED — exercised against stubs only]. The user types the values; they never enter the repo, the plan or the chat.
 - MCP tools: `List_All_Env_Variables`, `Create_Env_Variables`, `Update_Environment_Variable`, `Delete_Environment_Variable`.
 
 ## Execution limits

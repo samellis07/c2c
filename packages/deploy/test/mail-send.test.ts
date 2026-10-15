@@ -194,10 +194,11 @@ test('the kept console env (--function-env) and the verified sender (--mail-from
     return JSON.parse(String(config?.data ?? '{}')).deployment.env_variables;
   };
   const sent = buildDeploy(appOf(MAIL_DS), guardFor('Mailer', '1001'), true, false, undefined, env, { from: OWNER, verified: true }, undefined, [OWNER]);
-  assert.deepEqual(envOf(sent), { C2C_DEPLOY_MODE: 'dry-run', C2C_MAIL_FROM: OWNER, C2C_OWNER_APPROVAL_TOKEN: 'tok' });
+  // A secret name reaches env_variables without its value; the deploy sets it on the live function over the env API.
+  assert.deepEqual(envOf(sent), { C2C_DEPLOY_MODE: 'dry-run', C2C_MAIL_FROM: OWNER, C2C_OWNER_APPROVAL_TOKEN: '' });
   // No verified sender named: the console value is kept, not erased.
   const kept = buildDeploy(appOf(MAIL_DS), guardFor('Mailer', '1001'), true, false, undefined, env);
-  assert.deepEqual(envOf(kept), { C2C_DEPLOY_MODE: 'dry-run', C2C_MAIL_FROM: 'old@example.test', C2C_OWNER_APPROVAL_TOKEN: 'tok' });
+  assert.deepEqual(envOf(kept), { C2C_DEPLOY_MODE: 'dry-run', C2C_MAIL_FROM: 'old@example.test', C2C_OWNER_APPROVAL_TOKEN: '' });
 });
 
 test('the delivery log table is planned only for an app that sends mail with mail on', () => {
