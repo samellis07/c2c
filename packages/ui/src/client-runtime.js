@@ -624,20 +624,16 @@ function styleAttr(el) {
   return parts.length ? ` style="${escapeHtml(parts.join(';'))}"` : '';
 }
 
-/** Host text from an https authority, with userinfo and a numeric port removed. */
-function embedHostAsWritten(rawUrl) {
+/**
+ * Authority text from an https URL exactly as written: the run between '//'
+ * and the first '/', '?', or '#'. The URL parser canonicalises percent
+ * escapes, Unicode dot separators, and case in the host, so a link-out is
+ * only allowed when this raw text is already a canonical lowercase ASCII
+ * host: [a-z0-9.-] only, no '%', userinfo, port, or non-ASCII bytes.
+ */
+function embedRawAuthority(rawUrl) {
   const match = /^https:\/\/([^/?#]*)/i.exec(rawUrl);
-  if (!match) return '';
-  let authority = match[1];
-  const at = authority.lastIndexOf('@');
-  if (at !== -1) authority = authority.slice(at + 1);
-  if (authority.startsWith('[')) {
-    const end = authority.indexOf(']');
-    return end === -1 ? authority : authority.slice(0, end + 1);
-  }
-  const colon = authority.lastIndexOf(':');
-  if (colon !== -1 && /^[0-9]+$/.test(authority.slice(colon + 1))) return authority.slice(0, colon);
-  return authority;
+  return match ? match[1] : '';
 }
 
 function embedAuthorityHasUserinfo(rawUrl) {
@@ -646,14 +642,15 @@ function embedAuthorityHasUserinfo(rawUrl) {
 }
 
 /**
- * 'pdf' or 'map' only for a canonical https URL. The host text must already
- * equal the parsed hostname, so uppercase, a trailing dot, and an IDN the
+ * 'pdf' or 'map' only for a canonical https URL. The raw authority must be
+ * plain lowercase ASCII and equal the parsed hostname, so percent-encoded,
+ * Unicode-dot, uppercase, trailing-dot, ported, userinfo, and IDN hosts the
  * parser rewrites are not link-outs. Map hosts match the provider list
  * exactly (a suffix such as maps.google.com.evil.example does not).
  */
 function embedLinkOutKind(rawUrl, parsed) {
-  const written = embedHostAsWritten(rawUrl);
-  if (written !== parsed.hostname || !written || written.endsWith('.')) return '';
+  const written = embedRawAuthority(rawUrl);
+  if (!/^[a-z0-9.-]+$/.test(written) || written !== parsed.hostname || written.endsWith('.')) return '';
   if (written.split('.').some((label) => label.startsWith('xn--'))) return '';
   const pdf = /\.pdf$/i.test(parsed.pathname);
   const host = parsed.hostname;
