@@ -132,6 +132,14 @@ function rowStyles(report: ReportSpec, row: Row): Map<number, CSSProperties> {
 }
 
 export function ReportView({ report, row }: { report: ReportSpec; row?: string }) {
+  const { spec } = useEnv();
+  // A page can embed a report its caller may not open (a hidden-section
+  // target): the router only gates the report's own route, so the embed
+  // refuses it here, before any rows request — the same denied state, in
+  // place, with the rest of the page untouched.
+  if (spec.denied?.includes(report.name)) {
+    return <p data-access-status="403">This page is not available.</p>;
+  }
   if (row && report.detail) return <RecordDetail report={report} rowId={row} />;
   if (report.view !== 'list') return <ViewStub report={report} />;
   return <ReportList report={report} />;
