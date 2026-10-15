@@ -493,10 +493,27 @@ test('HTML snippets drop slash, uppercase, and entity-encoded handlers', () => {
       // Credential URLs and non-HTTPS schemes are dropped. Canonical PDFs and
       // exact map hosts link out. Lookalike, uppercase, trailing-dot, and IDN
       // hosts stay in a locked sandbox and never become a link-out.
-      const linkOuts: { url: string; label: string; name?: string }[] = [
+      const linkOuts: { url: string; label: string; name?: string; href?: string }[] = [
         { url: 'https://example.com/manual.pdf?download=1', label: 'Open PDF' },
         { url: 'https://www.google.com/maps/embed?pb=abc', name: 'City Map', label: 'City Map' },
         { url: 'https://maps.google.com/maps/embed?pb=ok', label: 'Open map' },
+        // URL schemes are case-insensitive; the parser normalises the scheme
+        // to lowercase in the link-out href.
+        {
+          url: 'HTTPS://maps.google.com/maps/embed?pb=x',
+          href: 'https://maps.google.com/maps/embed?pb=x',
+          label: 'Open map',
+        },
+        {
+          url: 'HtTpS://www.google.com/maps/embed?pb=abc',
+          href: 'https://www.google.com/maps/embed?pb=abc',
+          label: 'Open map',
+        },
+        {
+          url: 'HTTPS://example.com/manual.pdf',
+          href: 'https://example.com/manual.pdf',
+          label: 'Open PDF',
+        },
         // Encoded '@' in the path is a genuine canonical escape, not userinfo.
         { url: 'https://example.com/manual%40.pdf', label: 'Open PDF' },
         // A lookalike host inside the query is data, not the authority.
@@ -519,9 +536,10 @@ test('HTML snippets drop slash, uppercase, and entity-encoded handlers', () => {
         'https://maps.google.com/maps/embed?pb=x ',
         ' https://example.com/manual.pdf',
         'https://example.com/manual.pdf\t',
-        // An uppercase scheme is not the canonical 'https:' the parser yields.
-        'HTTPS://maps.google.com/maps/embed?pb=x',
+        // The scheme is case-insensitive but an uppercase host is still not
+        // the canonical lowercase authority the parser yields.
         'HTTPS://EXAMPLE.COM/manual.pdf',
+        'HTTPS://MAPS.GOOGLE.COM/maps/embed?pb=x',
         'https://maps.google.com.evil.example/maps/embed?pb=x',
         'https://www.google.com.evil.example/maps/embed?pb=abc',
         'https://WWW.GOOGLE.COM/maps/embed?pb=abc',
@@ -548,6 +566,9 @@ test('HTML snippets drop slash, uppercase, and entity-encoded handlers', () => {
         'http://example.com/insecure',
         'http://example.com/manual.pdf',
         'http://maps.google.com/maps/embed?pb=x',
+        // An uppercase non-HTTPS scheme is still dropped, not linked out.
+        'HTTP://maps.google.com/maps/embed?pb=x',
+        'HTTP://example.com/manual.pdf',
         'javascript:alert(1)',
         'data:text/html,hi',
         'data:application/pdf,AAAA',
@@ -555,6 +576,7 @@ test('HTML snippets drop slash, uppercase, and entity-encoded handlers', () => {
         'https://user:@maps.google.com/maps/embed?pb=x',
         'https://user:pass@example.com/manual.pdf',
         'https://user@example.com/manual.pdf',
+        'HTTPS://user@example.com/manual.pdf',
         // Protocol-relative URLs have no scheme the parser can resolve without
         // a base, and a space inside the authority fails to parse at all.
         '//maps.google.com/maps/embed?pb=x',
@@ -583,7 +605,10 @@ test('HTML snippets drop slash, uppercase, and entity-encoded handlers', () => {
       );
       const esc = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       for (const item of linkOuts) {
-        assert.match(embedded, new RegExp(`<a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">${item.label}</a>`));
+        assert.match(
+          embedded,
+          new RegExp(`<a href="${esc(item.href ?? item.url)}" target="_blank" rel="noopener noreferrer">${item.label}</a>`),
+        );
       }
       assert.equal((embedded.match(/<a /g) || []).length, linkOuts.length, 'only canonical PDF and map embeds link out');
       for (const url of locked) {
