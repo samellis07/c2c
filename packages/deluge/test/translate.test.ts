@@ -4618,3 +4618,38 @@ test('a loop-row condition that reads a local bound to an app function is not re
   assert.doesNotMatch(t.prefetch, /thisapp\.call/);
   assert.doesNotMatch(t.client, /thisapp\.call/);
 });
+
+test('a criteria field that shares a name with a local compares the fetched form field it names', async () => {
+  const fields = { formFields: { Orders: ['ID', 'State'] } };
+  const src = ['State = "Done";', 'names = "";', 'for each r in Orders[State == "Open" && ID != input.Ref]', '{', 'names = names + r.ID + ",";', '}', 'return names;'].join('\n');
+  const t = translate(src, fields);
+  assert.equal(t.todos.some((item) => item.construct === 'criteria-dynamic'), false);
+  assert.match(stripComments(t.server), /{ op: "==", field: "State", value: "Open" }/);
+  for (const leaf of ['rows = Orders[State == "Open"];', 'rows = Orders[State is null];', 'rows = Orders[State not in {"a"}];', 'rows = Orders[State.contains("a")];', 'rows = Orders[!(State == "a")];']) {
+    const other = translate(`State = "Done";\n${leaf}`, fields);
+    assert.equal(other.todos.some((item) => item.construct === 'criteria-dynamic'), false, leaf);
+    assert.match(stripComments(other.server), /field: "State"/, leaf);
+  }
+  const seed = { Orders: [{ ROWID: 'a', State: 'Open' }, { ROWID: 'b', State: 'Done' }, { ROWID: 'c', State: 'Open' }] };
+  const runtime = createRuntime({ dryRun: true, seed });
+  assert.equal(await body(t.server)(runtime.shim, runtime.context({ record: { Ref: 'c' } })), 'a,');
+
+  // The local stays a counted todo when the fetched form does not declare it,
+  // when no form fields are known, on a member path rooted at the local, and
+  // as the bare boolean shorthand.
+  const keptCases: [string, Parameters<typeof translate>[1]][] = [
+    ['State = "Done";\nrows = Orders[State == "Open"];', {}],
+    ['State = "Done";\nrows = Orders[State == "Open"];', { formFields: { Orders: ['ID'], Other: ['State'] } }],
+    ['rec = Orders[ID == input.Ref];\nrows = Orders[rec.State == "Open"];', fields],
+    ['ID = 1;\nFlag = true;\nrows = Orders[Flag && ID == 2];', { formFields: { Orders: ['ID', 'Flag'] } }],
+  ];
+  for (const [src2, opts] of keptCases) {
+    const kept = translate(src2, opts);
+    assert.equal(kept.todos.some((item) => item.construct === 'criteria-dynamic'), true, src2);
+  }
+});
+
+test('report criteria on the application owner stay counted: no owner address is bound at deploy', () => {
+  assert.deepEqual(reportCriteria('Members.Email == zoho.adminuserid'), { op: 'todo', construct: 'criteria-dynamic' });
+  assert.deepEqual(reportCriteria('Members.Email == zoho.loginuserid'), { op: '==', field: 'Members.Email', value: { __bind: 'loginUserId' } });
+});

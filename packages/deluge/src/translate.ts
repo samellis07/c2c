@@ -3097,7 +3097,7 @@ interface QueryBits {
 function asQuery(target: Expr, scope: Scope): QueryBits {
   if (target.kind === 'criteria') {
     const form = staticName(target.object) ?? '';
-    const c = criteria(target.criteria, scope);
+    const c = criteria(target.criteria, scope, form);
     const constructs = [...c.constructs];
     if (!form) constructs.push('form-dynamic');
     let extra = '';
@@ -3275,12 +3275,12 @@ function literalValue(e: Expr): unknown | undefined {
   return undefined;
 }
 
-function criteria(e: Expr, scope: Scope): Fx {
-  if (e.kind === 'paren') return criteria(e.expr, scope);
+function criteria(e: Expr, scope: Scope, form?: string): Fx {
+  if (e.kind === 'paren') return criteria(e.expr, scope, form);
   if (e.kind === 'name' && e.name === 'true') return fx({ code: '{ op: "true" }' });
   if (e.kind === 'binary' && (e.op === '&&' || e.op === 'and' || e.op === '||' || e.op === 'or')) {
-    const l = criteria(e.left, scope);
-    const r = criteria(e.right, scope);
+    const l = criteria(e.left, scope, form);
+    const r = criteria(e.right, scope, form);
     const op = e.op === '||' || e.op === 'or' ? 'or' : 'and';
     return mergeFx(`{ op: ${JSON.stringify(op)}, args: [${l.code}, ${r.code}] }`, [l, r]);
   }
@@ -3288,31 +3288,31 @@ function criteria(e: Expr, scope: Scope): Fx {
     const rel = relativeRef(e.right);
     // `is today` and `is this week` are markers. The query binds them. `is now` stays IS NULL.
     if (rel && rel.role !== 'instant') {
-      const field = fieldPath(e.left, scope);
+      const field = comparedField(e.left, scope, form);
       if (!field) return fx({ code: '{ op: "todo", construct: "criteria-dynamic" }', todo: true, constructs: ['criteria-dynamic'] });
       return fx({ code: JSON.stringify(relativeMembership(e.op, field, rel.role === 'day' ? { spec: rel.spec, role: 'day' } : { spec: rel.spec, role: 'period' })) });
     }
-    const field = fieldPath(e.left, scope);
+    const field = comparedField(e.left, scope, form);
     if (!field) return fx({ code: '{ op: "todo", construct: "criteria-dynamic" }', todo: true, constructs: ['criteria-dynamic'] });
     const op = e.op === 'is' ? 'isNull' : 'notNull';
     return fx({ code: `{ op: ${JSON.stringify(op)}, field: ${JSON.stringify(field)} }` });
   }
   if (e.kind === 'binary' && e.op === 'not in') {
     // `Field not in list` — the negated membership test, not a dynamic leaf.
-    const field = fieldPath(e.left, scope);
+    const field = comparedField(e.left, scope, form);
     const right = expr(e.right, scope);
     if (!field) return mergeFx('{ op: "todo", construct: "criteria-dynamic" }', [right], { todo: true, constructs: ['criteria-dynamic'] });
     return mergeFx(`{ op: "not", arg: { op: "in", field: ${JSON.stringify(field)}, value: ${right.code} } }`, [right]);
   }
   if (e.kind === 'binary') {
-    const field = fieldPath(e.left, scope);
+    const field = comparedField(e.left, scope, form);
     const right = expr(e.right, scope);
     if (!field) return mergeFx('{ op: "todo", construct: "criteria-dynamic" }', [right], { todo: true, constructs: ['criteria-dynamic'] });
     const op = e.op === '=' ? '==' : e.op;
     return mergeFx(`{ op: ${JSON.stringify(op)}, field: ${JSON.stringify(field)}, value: ${right.code} }`, [right]);
   }
   if (e.kind === 'call' && e.callee.kind === 'member') {
-    const field = fieldPath(e.callee.object, scope);
+    const field = comparedField(e.callee.object, scope, form);
     const method = e.callee.property;
     const arg = e.args[0] ? expr(e.args[0], scope) : undefined;
     if (field && arg) {
@@ -3320,7 +3320,7 @@ function criteria(e: Expr, scope: Scope): Fx {
     }
   }
   if (e.kind === 'unary' && (e.op === '!' || e.op === 'not')) {
-    const inner = criteria(e.expr, scope);
+    const inner = criteria(e.expr, scope, form);
     return mergeFx(`{ op: "not", arg: ${inner.code} }`, [inner]);
   }
   // A bare field name in criteria is Creator shorthand for `field == true`.
@@ -3331,6 +3331,18 @@ function criteria(e: Expr, scope: Scope): Fx {
     if (field) return fx({ code: `{ op: "==", field: ${JSON.stringify(field)}, value: true }` });
   }
   return fx({ code: '{ op: "todo", construct: "criteria-dynamic" }', todo: true, constructs: ['criteria-dynamic'] });
+}
+
+/**
+ * The left operand of a criteria comparison. Deluge reads it against the
+ * fetched form, so a bare name that is also a local (`State = "x";` then
+ * `Form[State == "y"]`) is the field when that form declares it. A local the
+ * form does not declare, a member path and the bare boolean shorthand keep the
+ * local rule of {@link fieldPath}.
+ */
+function comparedField(e: Expr, scope: Scope, form?: string): string | null {
+  if (e.kind === 'name' && scope.local.has(e.name) && form && scope.formFields.get(form)?.has(e.name)) return literalField(e);
+  return fieldPath(e, scope);
 }
 
 function fieldPath(e: Expr, scope: Scope): string | null {
@@ -5038,7 +5050,7 @@ function criteriaExpr(e: Extract<Expr, { kind: 'criteria' }>, scope: Scope): Fx 
     criteriaLeaves(e.criteria, scope, leaves);
     sink.queries.push({ form: form ?? '', leaves, ...(e.sort ? { sort: e.sort.field } : {}) });
   }
-  const c = criteria(e.criteria, scope);
+  const c = criteria(e.criteria, scope, form ?? undefined);
   const opts: string[] = [];
   if (e.sort) {
     const fields = e.sort.fields
