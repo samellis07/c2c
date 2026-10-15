@@ -856,6 +856,9 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     // leaves the sender unverified, so the blocker refuses the deploy. Only a
     // dry run reads the persisted record, and only when it was observed
     // against the same project.
+    if (rest.includes('--mail-sender-verified') || deployConfig?.mail?.verified === true) {
+      io.stderr('warning: --mail-sender-verified attests the sender only; verification still requires the live Catalyst read-back\n');
+    }
     let mailVerified = false;
     if (mailFrom && rest.includes('--mail')) {
       if (confirm) {

@@ -86,6 +86,11 @@ test('doctor check catalogue matches the documented specification', async () => 
   });
   // A --local vanilla run without evidence emits the --local skip ids.
   await collect({ io: hostIo(env, join(dir, 'npm-cache')).io, workspace: dir, scope: vanilla, local: true });
+  // D-M1 is emitted only for an app that sends mail.
+  const mailDs = join(dir, 'Mailer.ds');
+  writeFileSync(mailDs, MAIL_APP_SRC);
+  writeFileSync(join(dir, 'c2c-deploy.json'), JSON.stringify({ mail: { from: 'sender@example.com', verified: true } }));
+  await collect({ io: hostIo(env, join(dir, 'npm-cache')).io, workspace: dir, scope: vanilla, local: true, appPath: mailDs });
 
   assert.deepEqual([...emitted].sort(), [...documented].sort());
 });
@@ -178,7 +183,7 @@ test('doctor offline coverage: conditional and warning checks return their docum
   assert.match(production!.fix!, /set "env": "Development"/);
 });
 
-const MAIL_APP = deriveIr(parse(`/*
+const MAIL_APP_SRC = `/*
  * Author       : synthetic
  * Generated on : 01-Jan-2025 12:00:00
  * Version      : 1.0
@@ -234,7 +239,9 @@ application "Mailer"
 			}
 		}
 	}
-}`));
+}`;
+
+const MAIL_APP = deriveIr(parse(MAIL_APP_SRC));
 
 test('doctor reports the sender verified only from the recorded live read-back', () => {
   const dir = tmp('c2c-doctor-mail-');
