@@ -186,7 +186,7 @@ async function runtimeScanners(): Promise<RuntimeScanners> {
   return (await import(pathToFileURL(join(process.cwd(), 'packages/ui/src/client-runtime.js')).href)) as RuntimeScanners;
 }
 
-const REGEX_CALC_ARGS = /^\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?(?:\s*[-+*/]\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:%|[a-z]{1,4})?)*\s*$/i;
+const REGEX_CALC_ARGS = /^\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|[a-z]{1,4})?(?:\s*[-+*/]\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:%|[a-z]{1,4})?)*\s*$/i;
 const REGEX_COMMENT = /\/\*[\s\S]*?\*\//g;
 const REGEX_CALL = /([-a-z0-9]*)\(([^()]*)\)/gi;
 
