@@ -259,7 +259,7 @@ test('each decoration runs and the page shows a form and a report', async () => 
       status: 200,
       json: async () => record ? { record } : { rows },
     };
-  })) as unknown as typeof fetch;
+  }) as unknown as typeof fetch;
   await runtime.boot(model, reportWin.document);
   // The decoration pass runs on a timer scheduled after the rows' fetch
   // resolves: a few timer turns, not a wall-clock wait.
