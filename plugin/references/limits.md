@@ -42,7 +42,7 @@ Every row below has a stable limit id (`L-…`). Skills cite the id of each limi
 
 ### L-COLUMNS: Columns per table (Development)
 
-Hard cap: 250 columns per table [UNVERIFIED]. Default: 100 columns [UNVERIFIED]. Behaviour: warn above the default; refuse above 250 and split overflow fields into 1:1 side tables. Probe: P-COLS.
+Raised cap: 250 columns per table [UNVERIFIED]. Default: 100 columns [UNVERIFIED]. Behaviour: `c2c plan` warns above the default and splits Creator form overflow above 250 into 1:1 side tables (or blocks a field group that cannot fit); `c2c doctor` refuses a live table above 250 before create. Probe: P-COLS.
 
 ### L-UNIQUE-VARCHAR: Unique varchar columns per table
 
