@@ -66,7 +66,7 @@ project: new — provision/plan.json creates it with one IaC import (provision/i
 ## Required MCP tools (doctor D-B5)
 
 - base (16): CatalystbyZoho_List_All_Organizations, CatalystbyZoho_List_All_Tables, CatalystbyZoho_List_All_Columns, CatalystbyZoho_Execute_Query, CatalystbyZoho_Get_Table_Permissions, CatalystbyZoho_Update_Table_Permissions, CatalystbyZoho_Get_Table_Scopes, CatalystbyZoho_Update_Table_Scopes, CatalystbyZoho_Get_Authentication_Configurations, CatalystbyZoho_List_All_Roles, CatalystbyZoho_List_All_CORS_Domains, CatalystbyZoho_List_All_Project_Users, CatalystbyZoho_List_All_Functions, CatalystbyZoho_List_All_Env_Variables, CatalystbyZoho_List_All_Slate_Apps, CatalystbyZoho_Get_Logs
-- plan (8): CatalystbyZoho_Create_Bucket, CatalystbyZoho_Create_Job_Pool, CatalystbyZoho_Create_Upload_Signature, CatalystbyZoho_Get_All_Buckets, CatalystbyZoho_Head_Bucket, CatalystbyZoho_List_All_Crons, CatalystbyZoho_List_All_Jobpools, CatalystbyZoho_Update_Authentication_Configuration
+- plan (7): CatalystbyZoho_Create_Bucket, CatalystbyZoho_Create_Job_Pool, CatalystbyZoho_Create_Upload_Signature, CatalystbyZoho_Get_All_Buckets, CatalystbyZoho_Head_Bucket, CatalystbyZoho_List_All_Crons, CatalystbyZoho_List_All_Jobpools
 
 ## Probes (scratch resources prefixed c2c_probe_, deleted afterwards)
 
