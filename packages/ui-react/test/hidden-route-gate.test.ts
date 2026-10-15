@@ -312,7 +312,7 @@ test('a denied embedded report renders no rows or report query', { skip: SKIP },
 }`;
   const ir = app(source);
   const { JSDOM } = await import('jsdom');
-  const dom = new JSDOM('<!doctype html><html></html>');
+  const dom = new JSDOM('<!doctype html><html></html>') as unknown as { window: Window & { close(): void; document: Document } };
   const priorDocument = globalThis.document;
   Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true });
   t.after(() => { Object.defineProperty(globalThis, 'document', { value: priorDocument, configurable: true }); dom.window.close(); });
