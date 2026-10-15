@@ -2420,3 +2420,165 @@ test('shim.list.get bounds and type behaviour (mutation proof target)', () => {
   assert.equal(shim.list.get('hello', 0), null);
   assert.equal(shim.list.get('hello', 'e'), null);
 });
+test('matchRow NULL and blank handling characterization', () => {
+  const tests = [
+    { rowVal: 'NULL', field: 'TextField', op: '==', targetVal: 'NULL', expected: true },
+    { rowVal: 'NULL', field: 'TextField', op: '!=', targetVal: 'NULL', expected: false },
+    { rowVal: 'NULL', field: 'TextField', op: 'in', targetVal: 'NULL', expected: true },
+    { rowVal: 'NULL', field: 'TextField', op: 'not in', targetVal: 'NULL', expected: false },
+    { rowVal: 'NULL', field: 'TextField', op: 'isNull', targetVal: 'NULL', expected: true },
+    { rowVal: 'NULL', field: 'TextField', op: 'notNull', targetVal: 'NULL', expected: false },
+    { rowVal: 'NULL', field: 'TextField', op: '==', targetVal: 'BLANK', expected: false },
+    { rowVal: 'NULL', field: 'TextField', op: '!=', targetVal: 'BLANK', expected: true },
+    { rowVal: 'NULL', field: 'TextField', op: 'in', targetVal: 'BLANK', expected: false },
+    { rowVal: 'NULL', field: 'TextField', op: 'not in', targetVal: 'BLANK', expected: true },
+    { rowVal: 'NULL', field: 'TextField', op: '==', targetVal: 'REAL', expected: false },
+    { rowVal: 'NULL', field: 'TextField', op: '!=', targetVal: 'REAL', expected: true },
+    { rowVal: 'NULL', field: 'TextField', op: 'in', targetVal: 'REAL', expected: false },
+    { rowVal: 'NULL', field: 'TextField', op: 'not in', targetVal: 'REAL', expected: true },
+    { rowVal: 'NULL', field: 'NumberField', op: '==', targetVal: 'NULL', expected: true },
+    { rowVal: 'NULL', field: 'NumberField', op: '!=', targetVal: 'NULL', expected: false },
+    { rowVal: 'NULL', field: 'NumberField', op: 'in', targetVal: 'NULL', expected: true },
+    { rowVal: 'NULL', field: 'NumberField', op: 'not in', targetVal: 'NULL', expected: false },
+    { rowVal: 'NULL', field: 'NumberField', op: 'isNull', targetVal: 'NULL', expected: true },
+    { rowVal: 'NULL', field: 'NumberField', op: 'notNull', targetVal: 'NULL', expected: false },
+    { rowVal: 'NULL', field: 'NumberField', op: '==', targetVal: 'BLANK', expected: false },
+    { rowVal: 'NULL', field: 'NumberField', op: '!=', targetVal: 'BLANK', expected: true },
+    { rowVal: 'NULL', field: 'NumberField', op: 'in', targetVal: 'BLANK', expected: false },
+    { rowVal: 'NULL', field: 'NumberField', op: 'not in', targetVal: 'BLANK', expected: true },
+    { rowVal: 'NULL', field: 'NumberField', op: '==', targetVal: 'REAL', expected: false },
+    { rowVal: 'NULL', field: 'NumberField', op: '!=', targetVal: 'REAL', expected: true },
+    { rowVal: 'NULL', field: 'NumberField', op: 'in', targetVal: 'REAL', expected: false },
+    { rowVal: 'NULL', field: 'NumberField', op: 'not in', targetVal: 'REAL', expected: true },
+    { rowVal: 'NULL', field: 'DateField', op: '==', targetVal: 'NULL', expected: true },
+    { rowVal: 'NULL', field: 'DateField', op: '!=', targetVal: 'NULL', expected: false },
+    { rowVal: 'NULL', field: 'DateField', op: 'in', targetVal: 'NULL', expected: true },
+    { rowVal: 'NULL', field: 'DateField', op: 'not in', targetVal: 'NULL', expected: false },
+    { rowVal: 'NULL', field: 'DateField', op: 'isNull', targetVal: 'NULL', expected: true },
+    { rowVal: 'NULL', field: 'DateField', op: 'notNull', targetVal: 'NULL', expected: false },
+    { rowVal: 'NULL', field: 'DateField', op: '==', targetVal: 'BLANK', expected: false },
+    { rowVal: 'NULL', field: 'DateField', op: '!=', targetVal: 'BLANK', expected: true },
+    { rowVal: 'NULL', field: 'DateField', op: 'in', targetVal: 'BLANK', expected: false },
+    { rowVal: 'NULL', field: 'DateField', op: 'not in', targetVal: 'BLANK', expected: true },
+    { rowVal: 'NULL', field: 'DateField', op: '==', targetVal: 'REAL', expected: false },
+    { rowVal: 'NULL', field: 'DateField', op: '!=', targetVal: 'REAL', expected: true },
+    { rowVal: 'NULL', field: 'DateField', op: 'in', targetVal: 'REAL', expected: false },
+    { rowVal: 'NULL', field: 'DateField', op: 'not in', targetVal: 'REAL', expected: true },
+    { rowVal: 'BLANK', field: 'TextField', op: '==', targetVal: 'NULL', expected: false },
+    { rowVal: 'BLANK', field: 'TextField', op: '!=', targetVal: 'NULL', expected: true },
+    { rowVal: 'BLANK', field: 'TextField', op: 'in', targetVal: 'NULL', expected: false },
+    { rowVal: 'BLANK', field: 'TextField', op: 'not in', targetVal: 'NULL', expected: true },
+    { rowVal: 'BLANK', field: 'TextField', op: 'isNull', targetVal: 'NULL', expected: false },
+    { rowVal: 'BLANK', field: 'TextField', op: 'notNull', targetVal: 'NULL', expected: true },
+    { rowVal: 'BLANK', field: 'TextField', op: '==', targetVal: 'BLANK', expected: true },
+    { rowVal: 'BLANK', field: 'TextField', op: '!=', targetVal: 'BLANK', expected: false },
+    { rowVal: 'BLANK', field: 'TextField', op: 'in', targetVal: 'BLANK', expected: true },
+    { rowVal: 'BLANK', field: 'TextField', op: 'not in', targetVal: 'BLANK', expected: false },
+    { rowVal: 'BLANK', field: 'TextField', op: '==', targetVal: 'REAL', expected: false },
+    { rowVal: 'BLANK', field: 'TextField', op: '!=', targetVal: 'REAL', expected: true },
+    { rowVal: 'BLANK', field: 'TextField', op: 'in', targetVal: 'REAL', expected: false },
+    { rowVal: 'BLANK', field: 'TextField', op: 'not in', targetVal: 'REAL', expected: true },
+    { rowVal: 'BLANK', field: 'NumberField', op: '==', targetVal: 'NULL', expected: false },
+    { rowVal: 'BLANK', field: 'NumberField', op: '!=', targetVal: 'NULL', expected: true },
+    { rowVal: 'BLANK', field: 'NumberField', op: 'in', targetVal: 'NULL', expected: false },
+    { rowVal: 'BLANK', field: 'NumberField', op: 'not in', targetVal: 'NULL', expected: true },
+    { rowVal: 'BLANK', field: 'NumberField', op: 'isNull', targetVal: 'NULL', expected: false },
+    { rowVal: 'BLANK', field: 'NumberField', op: 'notNull', targetVal: 'NULL', expected: true },
+    { rowVal: 'BLANK', field: 'NumberField', op: '==', targetVal: 'BLANK', expected: true },
+    { rowVal: 'BLANK', field: 'NumberField', op: '!=', targetVal: 'BLANK', expected: false },
+    { rowVal: 'BLANK', field: 'NumberField', op: 'in', targetVal: 'BLANK', expected: true },
+    { rowVal: 'BLANK', field: 'NumberField', op: 'not in', targetVal: 'BLANK', expected: false },
+    { rowVal: 'BLANK', field: 'NumberField', op: '==', targetVal: 'REAL', expected: false },
+    { rowVal: 'BLANK', field: 'NumberField', op: '!=', targetVal: 'REAL', expected: true },
+    { rowVal: 'BLANK', field: 'NumberField', op: 'in', targetVal: 'REAL', expected: false },
+    { rowVal: 'BLANK', field: 'NumberField', op: 'not in', targetVal: 'REAL', expected: true },
+    { rowVal: 'BLANK', field: 'DateField', op: '==', targetVal: 'NULL', expected: false },
+    { rowVal: 'BLANK', field: 'DateField', op: '!=', targetVal: 'NULL', expected: true },
+    { rowVal: 'BLANK', field: 'DateField', op: 'in', targetVal: 'NULL', expected: false },
+    { rowVal: 'BLANK', field: 'DateField', op: 'not in', targetVal: 'NULL', expected: true },
+    { rowVal: 'BLANK', field: 'DateField', op: 'isNull', targetVal: 'NULL', expected: false },
+    { rowVal: 'BLANK', field: 'DateField', op: 'notNull', targetVal: 'NULL', expected: true },
+    { rowVal: 'BLANK', field: 'DateField', op: '==', targetVal: 'BLANK', expected: true },
+    { rowVal: 'BLANK', field: 'DateField', op: '!=', targetVal: 'BLANK', expected: false },
+    { rowVal: 'BLANK', field: 'DateField', op: 'in', targetVal: 'BLANK', expected: true },
+    { rowVal: 'BLANK', field: 'DateField', op: 'not in', targetVal: 'BLANK', expected: false },
+    { rowVal: 'BLANK', field: 'DateField', op: '==', targetVal: 'REAL', expected: false },
+    { rowVal: 'BLANK', field: 'DateField', op: '!=', targetVal: 'REAL', expected: true },
+    { rowVal: 'BLANK', field: 'DateField', op: 'in', targetVal: 'REAL', expected: false },
+    { rowVal: 'BLANK', field: 'DateField', op: 'not in', targetVal: 'REAL', expected: true },
+    { rowVal: 'REAL', field: 'TextField', op: '==', targetVal: 'NULL', expected: false },
+    { rowVal: 'REAL', field: 'TextField', op: '!=', targetVal: 'NULL', expected: true },
+    { rowVal: 'REAL', field: 'TextField', op: 'in', targetVal: 'NULL', expected: false },
+    { rowVal: 'REAL', field: 'TextField', op: 'not in', targetVal: 'NULL', expected: true },
+    { rowVal: 'REAL', field: 'TextField', op: 'isNull', targetVal: 'NULL', expected: false },
+    { rowVal: 'REAL', field: 'TextField', op: 'notNull', targetVal: 'NULL', expected: true },
+    { rowVal: 'REAL', field: 'TextField', op: '==', targetVal: 'BLANK', expected: false },
+    { rowVal: 'REAL', field: 'TextField', op: '!=', targetVal: 'BLANK', expected: true },
+    { rowVal: 'REAL', field: 'TextField', op: 'in', targetVal: 'BLANK', expected: false },
+    { rowVal: 'REAL', field: 'TextField', op: 'not in', targetVal: 'BLANK', expected: true },
+    { rowVal: 'REAL', field: 'TextField', op: '==', targetVal: 'REAL', expected: true },
+    { rowVal: 'REAL', field: 'TextField', op: '!=', targetVal: 'REAL', expected: false },
+    { rowVal: 'REAL', field: 'TextField', op: 'in', targetVal: 'REAL', expected: true },
+    { rowVal: 'REAL', field: 'TextField', op: 'not in', targetVal: 'REAL', expected: false },
+    { rowVal: 'REAL', field: 'NumberField', op: '==', targetVal: 'NULL', expected: false },
+    { rowVal: 'REAL', field: 'NumberField', op: '!=', targetVal: 'NULL', expected: true },
+    { rowVal: 'REAL', field: 'NumberField', op: 'in', targetVal: 'NULL', expected: false },
+    { rowVal: 'REAL', field: 'NumberField', op: 'not in', targetVal: 'NULL', expected: true },
+    { rowVal: 'REAL', field: 'NumberField', op: 'isNull', targetVal: 'NULL', expected: false },
+    { rowVal: 'REAL', field: 'NumberField', op: 'notNull', targetVal: 'NULL', expected: true },
+    { rowVal: 'REAL', field: 'NumberField', op: '==', targetVal: 'BLANK', expected: false },
+    { rowVal: 'REAL', field: 'NumberField', op: '!=', targetVal: 'BLANK', expected: true },
+    { rowVal: 'REAL', field: 'NumberField', op: 'in', targetVal: 'BLANK', expected: false },
+    { rowVal: 'REAL', field: 'NumberField', op: 'not in', targetVal: 'BLANK', expected: true },
+    { rowVal: 'REAL', field: 'NumberField', op: '==', targetVal: 'REAL', expected: true },
+    { rowVal: 'REAL', field: 'NumberField', op: '!=', targetVal: 'REAL', expected: false },
+    { rowVal: 'REAL', field: 'NumberField', op: 'in', targetVal: 'REAL', expected: true },
+    { rowVal: 'REAL', field: 'NumberField', op: 'not in', targetVal: 'REAL', expected: false },
+    { rowVal: 'REAL', field: 'DateField', op: '==', targetVal: 'NULL', expected: false },
+    { rowVal: 'REAL', field: 'DateField', op: '!=', targetVal: 'NULL', expected: true },
+    { rowVal: 'REAL', field: 'DateField', op: 'in', targetVal: 'NULL', expected: false },
+    { rowVal: 'REAL', field: 'DateField', op: 'not in', targetVal: 'NULL', expected: true },
+    { rowVal: 'REAL', field: 'DateField', op: 'isNull', targetVal: 'NULL', expected: false },
+    { rowVal: 'REAL', field: 'DateField', op: 'notNull', targetVal: 'NULL', expected: true },
+    { rowVal: 'REAL', field: 'DateField', op: '==', targetVal: 'BLANK', expected: false },
+    { rowVal: 'REAL', field: 'DateField', op: '!=', targetVal: 'BLANK', expected: true },
+    { rowVal: 'REAL', field: 'DateField', op: 'in', targetVal: 'BLANK', expected: false },
+    { rowVal: 'REAL', field: 'DateField', op: 'not in', targetVal: 'BLANK', expected: true },
+    { rowVal: 'REAL', field: 'DateField', op: '==', targetVal: 'REAL', expected: true },
+    { rowVal: 'REAL', field: 'DateField', op: '!=', targetVal: 'REAL', expected: false },
+    { rowVal: 'REAL', field: 'DateField', op: 'in', targetVal: 'REAL', expected: true },
+    { rowVal: 'REAL', field: 'DateField', op: 'not in', targetVal: 'REAL', expected: false },
+  ];
+
+  const rows: any = {
+    NULL: { TextField: null, NumberField: null, DateField: null },
+    BLANK: { TextField: '', NumberField: '', DateField: '' },
+    REAL: { TextField: 'real_val', NumberField: 123, DateField: '2026-10-11' }
+  };
+  const targetValues: any = {
+    NULL: null,
+    BLANK: '',
+    REAL: { TextField: 'real_val', NumberField: 123, DateField: '2026-10-11' }
+  };
+
+  for (const t of tests) {
+    const row = rows[t.rowVal];
+    let criteria: any;
+    
+    if (t.op === 'isNull' || t.op === 'notNull') {
+      criteria = { op: t.op, field: t.field };
+    } else {
+      let val = t.targetVal === 'REAL' ? targetValues.REAL[t.field] : targetValues[t.targetVal];
+      if (t.op === 'in') {
+        criteria = { op: 'in', field: t.field, value: [val] };
+      } else if (t.op === 'not in') {
+        criteria = { op: 'not', arg: { op: 'in', field: t.field, value: [val] } };
+      } else {
+        criteria = { op: t.op, field: t.field, value: val };
+      }
+    }
+    
+    const actual = matchRow(row, criteria);
+    assert.equal(actual, t.expected, `${t.rowVal} ${t.field} ${t.op} ${t.targetVal}`);
+  }
+});
