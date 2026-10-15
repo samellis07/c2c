@@ -192,7 +192,7 @@ function buildFixtureRepo(files) {
     fs.writeFileSync(refFile, `${sha}\n`);
   }
   const configPath = path.join(gitDir, 'config');
-  const config = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
+  const config = readFixtureConfig(configPath);
   if (!config.includes('[remote "origin"]')) {
     fs.appendFileSync(configPath, `\n[remote "origin"]\n\turl = ${FIXTURE_ORIGIN}\n`);
   }
@@ -202,6 +202,31 @@ function buildFixtureRepo(files) {
   }
   return { repo, sha, env, gitDir };
 }
+
+/** The fixture git config text, '' when it is missing; a directory still throws EISDIR. */
+function readFixtureConfig(configPath) {
+  try {
+    return fs.readFileSync(configPath, 'utf8');
+  } catch (err) {
+    if (err?.code !== 'ENOENT' && err?.code !== 'ENOTDIR' && err?.code !== 'ELOOP') throw err;
+    return '';
+  }
+}
+
+test('readFixtureConfig: missing config is empty, a directory throws, a file is read', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'matrix-config-'));
+  try {
+    assert.equal(readFixtureConfig(path.join(dir, 'config')), '');
+    fs.writeFileSync(path.join(dir, 'file'), 'x');
+    assert.equal(readFixtureConfig(path.join(dir, 'file', 'config')), '');
+    fs.mkdirSync(path.join(dir, 'config'));
+    assert.throws(() => readFixtureConfig(path.join(dir, 'config')), { code: 'EISDIR' });
+    fs.writeFileSync(path.join(dir, 'real'), '[core]\n');
+    assert.equal(readFixtureConfig(path.join(dir, 'real')), '[core]\n');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 function fixtureBytes(rel) {
   return fs.readFileSync(path.join(repoRoot, rel));

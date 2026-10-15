@@ -5,7 +5,7 @@
  * Imports compiled dist/, so `npm run build` must have run first.
  * The case catalog is the committed tests/golden/cases.json.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
@@ -16,6 +16,17 @@ import { createRuntime, DRY_RUN_ADMIN_USER_ID } from '../../dist/shims/src/runti
 import { DEFAULT_SUCCESS_BANNER } from '../../packages/ui/src/client-runtime.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
+
+/** One read of an optional file: a missing path returns null; a directory still throws EISDIR. */
+export function readTextIfPresent(file) {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch (err) {
+    const code = err?.code;
+    if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP') return null;
+    throw err;
+  }
+}
 
 /** The committed golden case catalog (tests/golden/cases.json). */
 export const cases = JSON.parse(readFileSync(join(root, 'tests/golden/cases.json'), 'utf8')).cases;
@@ -346,33 +357,40 @@ export function loadVectorBundle(rootDir = root, env = process.env) {
   const fixturesDir = resolveFixturesDir(rootDir, env);
   const committedFile = join(rootDir, 'tests/golden/vectors.json');
   const localFile = fixturesDir ? join(fixturesDir, 'golden/vectors.json') : null;
-  const useLocal = Boolean(localFile && existsSync(localFile));
+  const localText = localFile ? readTextIfPresent(localFile) : null;
+  const useLocal = localText !== null;
   const baseFile = useLocal ? localFile : committedFile;
-  const baseText = readFileSync(baseFile, 'utf8');
+  const baseText = useLocal ? localText : readFileSync(baseFile, 'utf8');
   const recaptureFile = fixturesDir ? join(fixturesDir, 'golden/recapture.json') : null;
   const residualFile = fixturesDir ? join(fixturesDir, 'golden/residual.json') : null;
   const submitFile = fixturesDir ? join(fixturesDir, 'golden/submit.json') : null;
   let text = baseText;
   /** @type {{ file: string, count: number } | null} */
   let recapture = null;
-  if (recaptureFile && existsSync(recaptureFile)) {
-    const recText = readFileSync(recaptureFile, 'utf8');
-    text = mergeRecaptureText(text, recText);
-    recapture = { file: recaptureFile, count: caseCount(recText) };
+  if (recaptureFile) {
+    const recText = readTextIfPresent(recaptureFile);
+    if (recText !== null) {
+      text = mergeRecaptureText(text, recText);
+      recapture = { file: recaptureFile, count: caseCount(recText) };
+    }
   }
   /** @type {{ file: string, count: number } | null} */
   let residual = null;
-  if (residualFile && existsSync(residualFile)) {
-    const residualText = readFileSync(residualFile, 'utf8');
-    text = mergeRecaptureText(text, residualText);
-    residual = { file: residualFile, count: caseCount(residualText) };
+  if (residualFile) {
+    const residualText = readTextIfPresent(residualFile);
+    if (residualText !== null) {
+      text = mergeRecaptureText(text, residualText);
+      residual = { file: residualFile, count: caseCount(residualText) };
+    }
   }
   /** @type {{ file: string, count: number } | null} */
   let submit = null;
-  if (submitFile && existsSync(submitFile)) {
-    const submitText = readFileSync(submitFile, 'utf8');
-    text = mergeRecaptureText(text, submitText);
-    submit = { file: submitFile, count: caseCount(submitText) };
+  if (submitFile) {
+    const submitText = readTextIfPresent(submitFile);
+    if (submitText !== null) {
+      text = mergeRecaptureText(text, submitText);
+      submit = { file: submitFile, count: caseCount(submitText) };
+    }
   }
   return {
     text,
@@ -427,10 +445,11 @@ export function readBaseline(text) {
   return ids;
 }
 
-export function loadBaselineIds() {
-  const file = join(root, BASELINE_FILE);
-  if (!existsSync(file)) return [];
-  return readBaseline(readFileSync(file, 'utf8'));
+export function loadBaselineIds(rootDir = root) {
+  const file = join(rootDir, BASELINE_FILE);
+  const text = readTextIfPresent(file);
+  if (text === null) return [];
+  return readBaseline(text);
 }
 
 export function formatBaseline(ids) {
