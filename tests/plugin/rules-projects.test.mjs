@@ -17,7 +17,7 @@ const factsDir = path.join(repo, 'plugin', 'references', 'facts');
 const file = path.join(factsDir, 'projects.md');
 
 const PUBLIC_EVIDENCE = /\[(?:DOC|CLI|MCP-LISTED|TESTED|UNVERIFIED)\]/g;
-const PUBLIC_FACT_ID = /\[L-PROJECTS\]/g;
+const PUBLIC_FACT_ID = /\[L-[A-Z0-9-]+\]/g;
 const EVIDENCE_LABEL = /\[[A-Z][A-Z0-9 -]{1,14}\]/;
 const FIELD_LABEL = /^\s*[-*]?\s*\*{0,2}(status|evidence|verified|source|date)\s*\*{0,2}\s*:/im;
 const ISO_DATE = /\b20\d\d-\d\d-\d\d\b/;
