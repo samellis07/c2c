@@ -29,7 +29,7 @@ On each tick the sweeper does this for every form schedule:
 3. Fire `handle(ctx)` with `ctx.record = row` for each row whose exact fire instant is in (watermark, until].
 4. Save the cursor after each page. Save the watermark when the window ends.
 
-A run stops after 4 minutes. That is below the 5-minute period, so two sweeps never overlap. The next tick resumes the pending window. A crash inside a page can refire that page, so delivery is at-least-once per page. A first run with no checkpoint looks back one period and does not backfill.
+A run stops after 4 minutes. That is below the 5-minute period, so two sweeps never overlap. The next tick resumes the pending window. After a row fires, the sweep marks its due occurrences in the checkpoint table (per schedule and record), so a crash inside a page resumes without refiring the rows already fired; only a crash between a fire and its mark can refire that one row. A first run with no checkpoint looks back one period and does not backfill.
 
 ## Live switch
 

@@ -7,12 +7,12 @@
   "dcSource": "--dc",
   "doctor": "not-run",
   "counts": {
-    "tables": 8,
-    "dataStoreTables": 8,
-    "columns": 89,
+    "tables": 9,
+    "dataStoreTables": 9,
+    "columns": 95,
     "nosqlTables": 0,
     "functions": 0,
-    "schedules": 1,
+    "schedules": 2,
     "reports": 7,
     "pages": 1,
     "roles": 4,
@@ -90,6 +90,15 @@
       "columns": 4,
       "uniqueVarchar": 0,
       "fks": 2
+    },
+    {
+      "name": "C2CJobCheckpoint",
+      "form": "C2CJobCheckpoint",
+      "role": "system",
+      "nosql": false,
+      "columns": 6,
+      "uniqueVarchar": 1,
+      "fks": 0
     }
   ],
   "fieldGaps": [
@@ -527,6 +536,24 @@
       "detail": "table Booking__Gear_Refs: 2/15 foreign keys"
     },
     {
+      "id": "columns",
+      "table": "C2CJobCheckpoint",
+      "status": "pass",
+      "detail": "table C2CJobCheckpoint: 6/250 columns"
+    },
+    {
+      "id": "unique-varchar",
+      "table": "C2CJobCheckpoint",
+      "status": "pass",
+      "detail": "table C2CJobCheckpoint: 1/2 unique varchar columns"
+    },
+    {
+      "id": "fk",
+      "table": "C2CJobCheckpoint",
+      "status": "pass",
+      "detail": "table C2CJobCheckpoint: 0/15 foreign keys"
+    },
+    {
       "id": "select-width",
       "table": "Booking",
       "status": "pass",
@@ -540,7 +567,7 @@
     {
       "id": "org-tables",
       "status": "pass",
-      "detail": "this app creates 8 Data Store table(s); an org-wide limit on table creates refuses a create with 403 API_LIMIT_REACHED \"API Limit for table\" — on that refusal stop creates, keep created tables, and retry after 30/60/120 minutes; a project delete may not free capacity at once"
+      "detail": "this app creates 9 Data Store table(s); an org-wide limit on table creates refuses a create with 403 API_LIMIT_REACHED \"API Limit for table\" — on that refusal stop creates, keep created tables, and retry after 30/60/120 minutes; a project delete may not free capacity at once"
     },
     {
       "id": "dev-row-cap",
@@ -624,7 +651,8 @@
           "Booking",
           "Guest",
           "Media_Kit",
-          "Booking__Gear_Refs"
+          "Booking__Gear_Refs",
+          "C2CJobCheckpoint"
         ]
       },
       "readBack": {
@@ -639,7 +667,8 @@
             "Booking",
             "Guest",
             "Media_Kit",
-            "Booking__Gear_Refs"
+            "Booking__Gear_Refs",
+            "C2CJobCheckpoint"
           ]
         }
       }
@@ -696,6 +725,11 @@
             "path_variables": {
               "id": "<id:Booking__Gear_Refs>"
             }
+          },
+          {
+            "path_variables": {
+              "id": "<id:C2CJobCheckpoint>"
+            }
           }
         ],
         "note": "the IaC import set these grants; this step only proves them — a mismatch means the import did not apply them"
@@ -750,6 +784,11 @@
             {
               "path_variables": {
                 "id": "<id:Booking__Gear_Refs>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:C2CJobCheckpoint>"
               }
             }
           ]
@@ -963,6 +1002,32 @@
             "Studio_Crew": [
               "SELECT"
             ]
+          },
+          "<id:C2CJobCheckpoint>": {
+            "App Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "App User": [
+              "SELECT"
+            ],
+            "Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "Desk_Staff": [
+              "SELECT"
+            ],
+            "Studio_Lead": [
+              "SELECT"
+            ],
+            "Studio_Crew": [
+              "SELECT"
+            ]
           }
         }
       }
@@ -1019,6 +1084,11 @@
             "path_variables": {
               "id": "<id:Booking__Gear_Refs>"
             }
+          },
+          {
+            "path_variables": {
+              "id": "<id:C2CJobCheckpoint>"
+            }
           }
         ],
         "note": "the IaC import set these scopes; this step only proves them"
@@ -1073,6 +1143,11 @@
             {
               "path_variables": {
                 "id": "<id:Booking__Gear_Refs>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:C2CJobCheckpoint>"
               }
             }
           ]
@@ -1219,6 +1294,26 @@
             ]
           },
           "<id:Booking__Gear_Refs>": {
+            "App Administrator": [
+              "GLOBAL"
+            ],
+            "App User": [
+              "GLOBAL"
+            ],
+            "Administrator": [
+              "GLOBAL"
+            ],
+            "Desk_Staff": [
+              "GLOBAL"
+            ],
+            "Studio_Lead": [
+              "GLOBAL"
+            ],
+            "Studio_Crew": [
+              "GLOBAL"
+            ]
+          },
+          "<id:C2CJobCheckpoint>": {
             "App Administrator": [
               "GLOBAL"
             ],
@@ -1476,7 +1571,7 @@
       "command": "c2c provision --confirm --run crons (crons are created disabled; the user enables each in the console)",
       "args": {
         "plan": "provision/crons.json",
-        "schedules": 1,
+        "schedules": 2,
         "enabled": false
       },
       "readBack": {
@@ -1484,7 +1579,8 @@
         "tool": "CatalystbyZoho_List_All_Crons",
         "match": {
           "cron_name": [
-            "daily_sweep"
+            "daily_sweep",
+            "session_reminder"
           ]
         }
       }
