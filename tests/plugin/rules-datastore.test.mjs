@@ -4,7 +4,7 @@
  * signal, error codes) and passes the generic hygiene scan.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -88,3 +88,107 @@ test('datastore.md: a 5xx on a schema write is re-read before re-sending', () =>
   assert.ok(text.includes('5xx'), 'must name the 5xx case');
   assert.match(text, /re-read the table or column list\s+before re-sending/, 'must require a re-read before retry');
 });
+
+function skillFiles(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return skillFiles(full);
+    return entry.isFile() && entry.name === 'SKILL.md' ? [full] : [];
+  });
+}
+
+const INTERNAL_ONLY_MARKER = /^(?:Internal-only:(?:\s*\S+)?|<!--\s*internal-only\s*-->)/im;
+
+function isInternalOnly(body) {
+  return INTERNAL_ONLY_MARKER.test(body);
+}
+
+function findUnreferencedFacts(ledger, skillText) {
+  const factHeads = [...ledger.matchAll(/^### \[(DS-\d+)\] (.+)$/gm)];
+  return factHeads.filter(([, id]) => {
+    const heading = `### [${id}]`;
+    const start = ledger.indexOf(heading);
+    const next = ledger.indexOf('\n### ', start + heading.length);
+    const body = ledger.slice(start, next === -1 ? ledger.length : next);
+    return !skillText.includes(id) && !isInternalOnly(body);
+  }).map(([, id, heading]) => `${id} ${heading}`);
+}
+
+function findInternalOnlyViolations(ledger, skillText) {
+  const factHeads = [...ledger.matchAll(/^### \[(DS-\d+)\] (.+)$/gm)];
+  return factHeads.filter(([, id]) => {
+    const heading = `### [${id}]`;
+    const start = ledger.indexOf(heading);
+    const next = ledger.indexOf('\n### ', start + heading.length);
+    const body = ledger.slice(start, next === -1 ? ledger.length : next);
+    return skillText.includes(id) && isInternalOnly(body);
+  }).map(([, id, heading]) => `${id} ${heading}`);
+}
+
+test('every datastore fact is referenced by a skill or marked internal-only', () => {
+  const ledger = readFileSync(file, 'utf8');
+  const factHeads = [...ledger.matchAll(/^### \[(DS-\d+)\] (.+)$/gm)];
+  assert.ok(factHeads.length > 0, 'datastore fact headings need stable IDs');
+  assert.equal(new Set(factHeads.map((match) => match[1])).size, factHeads.length, 'fact IDs must be unique');
+
+  const skills = skillFiles(path.join(repo, 'plugin/skills'));
+  const skillText = skills.map((skill) => readFileSync(skill, 'utf8')).join('\n');
+  const unreferenced = findUnreferencedFacts(ledger, skillText);
+  assert.deepEqual(unreferenced, [], `unreferenced datastore facts:\n${unreferenced.join('\n')}`);
+  const markedWhileReferenced = findInternalOnlyViolations(ledger, skillText);
+  assert.deepEqual(
+    markedWhileReferenced,
+    [],
+    `datastore facts referenced by a skill must not be marked internal-only:\n${markedWhileReferenced.join('\n')}`,
+  );
+});
+
+test('datastore parity negative control: prose mentioning internal-only still requires a citation', () => {
+  const mockLedger = [
+    '### [DS-90] Incidental prose fact',
+    '',
+    'Rule: this behavior is not internal-only; client code relies on it.',
+    '',
+    'Recipe: calls to internal-only endpoints return 401.',
+  ].join('\n');
+  const unreferenced = findUnreferencedFacts(mockLedger, 'no citations here');
+  assert.deepEqual(
+    unreferenced,
+    ['DS-90 Incidental prose fact'],
+    'prose mentioning internal-only must not exempt an unreferenced fact from citation',
+  );
+});
+
+test('datastore parity: explicit internal-only marker exempts unreferenced fact', () => {
+  const mockLedger = [
+    '### [DS-91] Explicit internal-only fact',
+    '',
+    'Internal-only: this storage sizing detail is not part of the supported migration workflow.',
+    '',
+    'Rule: do not expose to migration planning.',
+  ].join('\n');
+  const unreferenced = findUnreferencedFacts(mockLedger, 'no citations here');
+  assert.deepEqual(unreferenced, [], 'explicit internal-only marker must exempt unreferenced fact');
+});
+
+test('datastore parity: comment tag exempts unreferenced fact', () => {
+  const mockLedger = [
+    '### [DS-92] Tagged internal-only fact',
+    '',
+    '<!-- internal-only -->',
+    'Rule: platform maintenance detail only.',
+  ].join('\n');
+  const unreferenced = findUnreferencedFacts(mockLedger, 'no citations here');
+  assert.deepEqual(unreferenced, [], 'comment tag must exempt unreferenced fact');
+});
+
+test('datastore parity negative control rejects an unreferenced fact', () => {
+  const mockLedger = [
+    '### [DS-99] Unreferenced sample fact',
+    '',
+    'Rule: this rule is missing from skills.',
+  ].join('\n');
+  const unreferenced = findUnreferencedFacts(mockLedger, 'no citations here');
+  assert.deepEqual(unreferenced, ['DS-99 Unreferenced sample fact']);
+});
+

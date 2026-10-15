@@ -4,7 +4,9 @@ Data Store is the relational store behind Creator form data. Every rule
 below is an imperative recipe: method, path, headers, body, polling,
 success signal, and the exact error codes with the action for each.
 
-Token call envelope. Recipe: send HTTPS calls to
+### [DS-01] Token call envelope
+
+Recipe: [UNVERIFIED] send HTTPS calls to
 `https://api.catalyst.<dc>` with headers `Authorization`,
 `Accept: application/vnd.catalyst.v2+json`, and
 `X-CATALYST-Environment` plus `CATALYST-ORG`. `<dc>` is the data centre
@@ -13,7 +15,7 @@ from the customer config file; never hard-code it. `<org-id>` and
 
 ## Tables and columns
 
-### Create tables, then diff against the list on re-runs
+### [DS-02] Create tables, then diff against the list on re-runs
 
 Recipe: [UNVERIFIED] `POST /baas/v1/project/<project-id>/table` creates a table;
 success is HTTP 200 with the new table id in the body. Read back with
@@ -24,7 +26,7 @@ Rule: [UNVERIFIED] c2c plan diffs the desired tables against the live list, so a
 re-run creates nothing new. A mid-batch failure can leave a half-built
 table; fix the cause and re-run the diff rather than recreating by hand.
 
-### Re-read after a 5xx before re-sending a schema write
+### [DS-03] Re-read after a 5xx before re-sending a schema write
 
 Recipe: [UNVERIFIED] a table or column create can answer `5xx` and still have
 applied; the error means the response was lost, not that the write
@@ -35,7 +37,7 @@ Rule: [UNVERIFIED] on a `5xx` from `POST .../table` or
 before re-sending. A blind retry can create a duplicate name error or
 leave a half-built object to reconcile.
 
-### Create columns with a JSON array body
+### [DS-04] Create columns with a JSON array body
 
 Recipe: [UNVERIFIED] `POST /baas/v1/project/<project-id>/table/<table-id>/column`
 with the column definition wrapped in a single-element JSON array.
@@ -43,7 +45,7 @@ with the column definition wrapped in a single-element JSON array.
 Rule: [UNVERIFIED] always send the array form. A plain JSON object is rejected with
 `400 JSON_PARSE_ERROR` ("Check if the input json is proper").
 
-### 250-column hard cap and 100-column default
+### [DS-05] 250-column hard cap and 100-column default
 
 Rule: [DOC] the documented default is 100 columns per table in
 Development
@@ -58,7 +60,7 @@ same cap and default; it does not read live tables. Assume at most 130
 text-type (varchar plus text) columns per table [UNVERIFIED]; `c2c plan`
 warns past that count and moves overflow text to Stratus before any write.
 
-### Assume varchar stores at most 255 characters and truncates silently
+### [DS-06] Assume varchar stores at most 255 characters and truncates silently
 
 Recipe: [TESTED] `POST /baas/v1/project/<project-id>/table/<table-id>/row`
 returns HTTP 200 while storing only the leading characters of an
@@ -70,14 +72,14 @@ the column definition carries none) before any write, and read back
 byte-exact after the write. Never treat a 200 as "stored what was
 sent".
 
-### Assume text stores at most 10,000 characters and is not searchable
+### [DS-07] Assume text stores at most 10,000 characters and is not searchable
 
 Rule: [UNVERIFIED] assume a text column holds at most 10,000 characters and cannot
 be search-indexed. Keep searchable strings in varchar; move longer
 rich text to a Stratus object and store the key. `c2c plan` warns when
 a mapped field exceeds the budget.
 
-### At most 2 unique varchar columns per table; unique int and bigint are free
+### [DS-08] At most 2 unique varchar columns per table; unique int and bigint are free
 
 Recipe: [TESTED] `POST .../table/<table-id>/column` with a unique varchar as the
 third such column returns `403 INVALID_OPERATION` ("Reached max number
@@ -94,7 +96,7 @@ Rule: [TESTED] model the migration idempotency key (numeric Creator ids fit in
 int64) as a unique bigint. `c2c plan` fails closed when more than two
 unique text fields are required and enforces the rest at app level.
 
-### Assume at most 15 foreign-key columns per table
+### [DS-09] Assume at most 15 foreign-key columns per table
 
 Recipe: [TESTED] `POST .../table/<table-id>/column` with body
 `[{"column_name": ..., "data_type": "foreign key", "parent_table":
@@ -113,7 +115,7 @@ declared key.
 
 ## Rows
 
-### Insert rows in batches of at most 200 per call
+### [DS-10] Insert rows in batches of at most 200 per call
 
 Recipe: [TESTED] `POST /baas/v1/project/<project-id>/table/<table-id>/row`
 accepts an array body; send at most 200 rows per call
@@ -138,7 +140,7 @@ fields to the parent ROWID before insert, convert `dd-MMM-yyyy` to
 `true`/`false` — a manual `/row` load with those transforms stores
 every row and a ZCQL join resolves the remapped keys.
 
-### Take migrated rows from the JSON report export — it always carries record ids
+### [DS-11] Take migrated rows from the JSON report export — it always carries record ids
 
 Recipe: [UNVERIFIED] a Creator report exported as JSON carries each record's `ID`;
 the same report's CSV export carries it only when the export includes
@@ -156,7 +158,7 @@ subform columns into child-table rows under an explicit splitting rule
 per subform. Refuse to map a lookup whose display value matches more
 than one parent row — a display value is not a key.
 
-### Validate every value client-side; the store coerces silently
+### [DS-12] Validate every value client-side; the store coerces silently
 
 Recipe: [TESTED] the following inputs all return HTTP 200 with a mutated stored
 value ([L-DATE-WRITE](references/limits.md#l-date-write-date-strictness),
@@ -180,7 +182,7 @@ round every double with HALF_UP to the column's decimal digits, bound
 doubles to `max_length`, and clamp every varchar before any write.
 Read back after the write.
 
-### Set column default_value and also send defaults in the payload
+### [DS-13] Set column default_value and also send defaults in the payload
 
 Recipe: [UNVERIFIED] REST inserts apply a column's `default_value` when the column
 was created with one. A blank stored value means the column create
@@ -189,7 +191,7 @@ omitted `default_value`, not that the insert path ignored it.
 Rule: [UNVERIFIED] set `default_value` on the column at creation and also send the
 value in the mover payload.
 
-### Surface duplicate and mandatory failures with field name and status
+### [DS-14] Surface duplicate and mandatory failures with field name and status
 
 Recipe: [UNVERIFIED] inserting a duplicate unique value returns `409
 DUPLICATE_VALUE` ("Duplicate value for ..."); omitting a mandatory
@@ -199,7 +201,7 @@ cannot be empty").
 Rule: [UNVERIFIED] surface both shapes in the handler with the field name and the
 original status code. Never collapse them into one opaque 500.
 
-### Keep ids and integers as strings end to end
+### [DS-15] Keep ids and integers as strings end to end
 
 Recipe: [UNVERIFIED] `ROWID`, `CREATORID`, `int`, and `bigint` columns arrive as
 JSON strings; `double` arrives as a JSON number; `boolean` arrives as
@@ -213,7 +215,7 @@ inside 15 digits.
 admin-scope write stamps the admin, and a `scope:'user'` SDK init
 without a signed-in app user fails `no user credentials present`.
 
-### Read CREATEDTIME and MODIFIEDTIME as project-zone strings
+### [DS-16] Read CREATEDTIME and MODIFIEDTIME as project-zone strings
 
 Recipe: [UNVERIFIED] system columns are stored and compared in the project time
 zone as `yyyy-MM-dd HH:mm:ss:SSS` (colon before milliseconds). The
@@ -223,7 +225,7 @@ function runtime itself is UTC; the project zone arrives in
 Rule: [UNVERIFIED] format and parse both with the project zone; a UTC literal
 misses a row in a non-UTC window.
 
-### There is no decimal, currency, or percent column type
+### [DS-17] There is no decimal, currency, or percent column type
 
 Recipe: [UNVERIFIED] `POST .../column` with `data_type` of `decimal`, `numeric`,
 `currency`, `percent`, `float`, `bigdecimal`, or `number` returns 400
@@ -236,7 +238,7 @@ shadow column for values beyond 15 digits or 4 decimal places.
 
 ## Permissions and environments
 
-### Grant App User writes per table in the console
+### [DS-18] Grant App User writes per table in the console
 
 Rule: [UNVERIFIED] the App User role carries SELECT by default; enable INSERT,
 UPDATE, and DELETE per table under Table Scopes and Permissions for
@@ -246,7 +248,7 @@ scope write routes answer the automation token with 401, so set them
 in the console; custom-role grants go in the greenfield import
 template or the console.
 
-### Plan schema against Development only; load rows anywhere
+### [DS-19] Plan schema against Development only; load rows anywhere
 
 Recipe: [UNVERIFIED] under the `X-CATALYST-Environment: Production` header, row
 inserts and all reads return 200 while `POST /table` and
@@ -259,7 +261,7 @@ promotion instead.
 
 ## Concurrency, rate, and quota
 
-### Never rely on unique columns or read-modify-write under concurrency
+### [DS-20] Never rely on unique columns or read-modify-write under concurrency
 
 Recipe: [TESTED] parallel inserts of one unique value store duplicates with a
 mix of 200, 409, and 429 responses
@@ -276,7 +278,7 @@ writer. Treat unique columns as best-effort with a reconciler.
 - The Cache offers no put-if-absent — parallel `put`s on one key all
 succeed — so a cache key cannot be a mutex either.
 
-### There is no multi-call transaction; design resumable steps
+### [DS-21] There is no multi-call transaction; design resumable steps
 
 Rule: [UNVERIFIED] atomicity covers one call only; no endpoint groups calls. Build
 the mover as idempotent, resumable per-call steps with a journal, and
@@ -287,14 +289,14 @@ assumption in generated code.
 date) fails the whole batch with the row's own status and nothing is
 written. Rows written by an earlier call are never rolled back.
 
-### Assume about 100 writes per minute per table; back off on 429
+### [DS-22] Assume about 100 writes per minute per table; back off on 429
 
 Rule: [UNVERIFIED] assume roughly 100 write requests per minute per table. Send
 bulk loads through bulk write, bound client concurrency to 10 or
 fewer, honour `Retry-After`, and retry 429s idempotently. Never write
 rows from the browser in bursts; go through a function or a batch.
 
-### There is no quota read endpoint; surface limit codes raw
+### [DS-23] There is no quota read endpoint; surface limit codes raw
 
 Recipe: [TESTED] guessed quota paths (`/limits`, `/quota`, `/usage`,
 per-table limits) all return `404 INVALID_URL_PATTERN`.
@@ -310,7 +312,7 @@ number or window can refuse a create at any visible count [TESTED]
 ([L-TABLE-CREATES](references/limits.md#l-table-creates-table-creates-per-org));
 rehearse full-volume loads outside Development.
 
-### NoSQL tables are console-only; prefer child tables
+### [DS-24] NoSQL tables are console-only; prefer child tables
 
 Recipe: [UNVERIFIED] `POST /baas/v1/project/<project-id>/nosqltable` answers
 `401 OAUTH_SCOPE_MISMATCH` ("invalid oauth scope to access this URL")
