@@ -923,6 +923,9 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     // Secret --function-env values ride with the deploy but land on the live
     // function through the env API after the functions deploy, not in a file.
     const secretsToApply = secretEnvValues(functionEnv);
+    const functionConfig = bundle.files.find((file) => file.path === `${FUNCTION_DIR}/catalyst-config.json`);
+    const deployedEnv = functionConfig ? JSON.parse(String(functionConfig.data))?.deployment?.env_variables as Record<string, unknown> : {};
+    const deployedEnvKeys = Object.keys(deployedEnv);
     let secretsApplied = false;
     const childEnv = scrubCatalystEnv(io.env);
     const probe = await spawnWithRetry(
@@ -1225,7 +1228,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
       // (facts: functions.md "Manage env vars as one replace-only set").
       if (command.id === 'functions' && !secretsApplied && Object.keys(secretsToApply).length) {
         try {
-          const applied = await applyFunctionEnvSecrets(restFn, guard.projectId, secretsToApply, retry);
+          const applied = await applyFunctionEnvSecrets(restFn, guard.projectId, secretsToApply, deployedEnvKeys, retry);
           secretsApplied = true;
           io.stdout(`function env: set ${applied.length} secret variable(s) on ${API_FUNCTION}; the values never entered the generated files\n`);
         } catch (err) {
