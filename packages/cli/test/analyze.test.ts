@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +13,7 @@ const fixtures = path.join(root, 'fixtures/redistributable');
 const goldenDir = path.join(root, 'packages/cli/test/golden');
 
 function load(target: string): App {
-  return statSync(target).isDirectory() ? parseProject(target).ir : parseFile(target).ir;
+  return target.endsWith('.ds') ? parseFile(target).ir : parseProject(target).ir;
 }
 
 const cases = [
@@ -380,8 +380,7 @@ test('relative report criteria compile while unsupported relative comparisons fa
 
 const galleryRoot = process.env.C2C_FIXTURES_DIR;
 const galleryDir = galleryRoot ? path.join(galleryRoot, 'gallery') : '';
-const galleryReady = !!galleryRoot && existsSync(galleryDir);
-const gallerySkip = galleryReady ? false : 'C2C_FIXTURES_DIR/gallery is not available';
+const gallerySkip = galleryDir ? false : 'C2C_FIXTURES_DIR/gallery is not available';
 
 /**
  * The exact counts below were measured on one export of each app. The gallery
@@ -400,7 +399,13 @@ const GALLERY_SHA256: Record<string, string> = {
 function galleryFixtureSkip(...files: string[]): string | false {
   for (const rel of files) {
     const file = path.join(galleryDir, rel);
-    const digest = existsSync(file) ? createHash('sha256').update(readFileSync(file)).digest('hex') : undefined;
+    let content: Buffer | undefined;
+    try {
+      content = readFileSync(file);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    const digest = content ? createHash('sha256').update(content).digest('hex') : undefined;
     if (digest !== GALLERY_SHA256[rel]) {
       return `gallery fixture ${rel} differs from the export these expectations were measured on`;
     }
