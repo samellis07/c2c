@@ -259,10 +259,12 @@ test('a Slate client adds a slate-enable console step; Data Store and Functions 
   assert.deepEqual(activation.map((step) => step.id), ['cloudscale-enable', 'slate-enable']);
   rmSync(out, { recursive: true, force: true });
 
-  const noPage = mkdtempSync(join(tmpdir(), 'c2c-plan-noslate-'));
+  // An app with no Creator pages still deploys a Slate client (its forms and
+  // reports), so its plan carries the same Slate gate.
+  const noPage = mkdtempSync(join(tmpdir(), 'c2c-plan-nopage-'));
   assert.equal(await planCli([writeDs(), '--out', noPage, '--dc', 'in'], offlineIo({}).io), 0);
   const plain = (readJson(join(noPage, 'provision/plan.json')) as { steps: ProvisionStep[] }).steps;
-  assert.equal(plain.some((step) => step.id === 'slate-enable'), false);
+  assert.equal(plain.some((step) => step.id === 'slate-enable'), true);
   rmSync(noPage, { recursive: true, force: true });
 });
 
@@ -377,10 +379,12 @@ test('a Slate client adds a slate-enable console step; Data Store and Functions 
   assert.deepEqual(activation.map((step) => step.id), ['cloudscale-enable', 'slate-enable']);
   rmSync(out, { recursive: true, force: true });
 
-  const noPage = mkdtempSync(join(tmpdir(), 'c2c-plan-noslate-'));
+  // An app with no Creator pages still deploys a Slate client (its forms and
+  // reports), so its plan carries the same Slate gate.
+  const noPage = mkdtempSync(join(tmpdir(), 'c2c-plan-nopage-'));
   assert.equal(await planCli([writeDs(), '--out', noPage, '--dc', 'in'], offlineIo({}).io), 0);
   const plain = (readJson(join(noPage, 'provision/plan.json')) as { steps: ProvisionStep[] }).steps;
-  assert.equal(plain.some((step) => step.id === 'slate-enable'), false);
+  assert.equal(plain.some((step) => step.id === 'slate-enable'), true);
   rmSync(noPage, { recursive: true, force: true });
 });
 
