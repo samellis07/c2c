@@ -675,6 +675,36 @@ const FIXTURES = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// deep nesting (seeded fuzzing: `'{' * 4000` overflowed the recursive print)
+
+test('print: deeply nested brackets round-trip without throwing', () => {
+  for (const src of ['{'.repeat(20000), '{'.repeat(10000) + 'x = 1;' + '}'.repeat(10000)]) {
+    const doc = parse(src);
+    assert.equal(print(doc), src);
+  }
+});
+
+test('parse: deeply nested brackets report located unclosed-bracket errors', () => {
+  const src = '{'.repeat(20000);
+  const doc = parse(src);
+  assert.ok(doc.errors.length > 0);
+  for (const e of doc.errors) {
+    assert.equal(e.code, 'unclosed-bracket');
+    assert.ok(e.offset >= 0 && e.offset <= src.length);
+  }
+});
+
+test('deriveIr + walkStatements: deeply nested brackets do not throw', () => {
+  const doc = parse('{'.repeat(20000));
+  deriveIr(doc);
+  let count = 0;
+  walkStatements(doc, () => {
+    count++;
+  });
+  assert.ok(count >= 0);
+});
+
 for (const fx of FIXTURES) {
   test(`fixture round-trips byte for byte: ${fx.path}`, () => {
     const f = parseFile(fx.path);

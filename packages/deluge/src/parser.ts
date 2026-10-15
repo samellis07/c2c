@@ -110,6 +110,28 @@ export function parseExpression(src: string, relative = false): Expr {
 class Parser {
   private i = 0;
 
+  /**
+   * Nesting depth of statements and expressions. Past this the input is
+   * pathological (real scripts nest a handful deep); failing into an
+   * `unknown` node keeps the no-throw contract instead of overflowing the
+   * call stack (fuzz: `'(' * 1500`).
+   */
+  private static readonly MAX_DEPTH = 200;
+  private depth = 0;
+
+  /** Run `fn` one nesting level deeper, failing with `reason` when too deep. */
+  private nest<T>(fn: () => T, reason: 'too-deeply-nested'): T {
+    if (++this.depth > Parser.MAX_DEPTH) {
+      this.depth--;
+      this.fail(reason);
+    }
+    try {
+      return fn();
+    } finally {
+      this.depth--;
+    }
+  }
+
   /** Used by `parseExpression`. */
   topExpr(): Expr {
     return this.expr(0, {});
@@ -169,7 +191,7 @@ class Parser {
   private statement(): Stmt {
     const startI = this.i;
     try {
-      const s = this.statementInner();
+      const s = this.nest(() => this.statementInner(), 'too-deeply-nested');
       if (this.i === startI) this.fail('no-progress');
       this.eat('punct', ';');
       return s;
@@ -635,6 +657,10 @@ class Parser {
   }
 
   expr(min: number, opts: ExprOpts): Expr {
+    return this.nest(() => this.binary(min, opts), 'too-deeply-nested');
+  }
+
+  private binary(min: number, opts: ExprOpts): Expr {
     let left = this.unary(opts);
     for (;;) {
       const op = this.infix(opts);
@@ -689,12 +715,16 @@ class Parser {
   }
 
   private unary(opts: ExprOpts): Expr {
-    if (this.is('op', '!') || this.is('op', '-') || this.is('ident', 'not')) {
-      const tok = this.t[this.i++]!;
-      const expr = this.unary(opts);
-      return { kind: 'unary', op: tok.text, expr, span: this.span(tok.start, expr.span.end) };
+    // Iterative: the recursive form overflowed the call stack on long prefix
+    // runs (fuzz: `'!' * 5000`). Collect the prefixes, parse one operand, fold.
+    const ops: Token[] = [];
+    while (this.is('op', '!') || this.is('op', '-') || this.is('ident', 'not')) ops.push(this.t[this.i++]!);
+    let out = this.postfix(this.primary(), opts);
+    for (let k = ops.length - 1; k >= 0; k--) {
+      const tok = ops[k]!;
+      out = { kind: 'unary', op: tok.text, expr: out, span: this.span(tok.start, out.span.end) };
     }
-    return this.postfix(this.primary(), opts);
+    return out;
   }
 
   /**

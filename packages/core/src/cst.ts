@@ -93,16 +93,29 @@ export function nodeEnd(n: Node): number {
 
 export function print(n: Document | Node): string {
   const parts: string[] = [];
-  const walk = (x: Node) => {
+  // Iterative walk with an explicit stack: recursion here overflowed the call
+  // stack on pathologically nested input (fuzz: `'{' * 4000`).
+  interface Frame {
+    children: Node[];
+    index: number;
+    close: Token | null;
+  }
+  const roots: Node[] = (n as Document).type === 'document' ? (n as Document).children : [n as Node];
+  const stack: Frame[] = [{ children: roots, index: 0, close: null }];
+  while (stack.length > 0) {
+    const f = stack[stack.length - 1]!;
+    if (f.index >= f.children.length) {
+      if (f.close) parts.push(f.close.text);
+      stack.pop();
+      continue;
+    }
+    const x = f.children[f.index++]!;
     if (isToken(x)) parts.push(x.text);
     else if (isGroup(x)) {
       parts.push(x.open.text);
-      x.children.forEach(walk);
-      if (x.close) parts.push(x.close.text);
-    } else x.children.forEach(walk);
-  };
-  if ((n as Document).type === 'document') (n as Document).children.forEach(walk);
-  else walk(n as Node);
+      stack.push({ children: x.children, index: 0, close: x.close });
+    } else stack.push({ children: x.children, index: 0, close: null });
+  }
   return parts.join('');
 }
 
