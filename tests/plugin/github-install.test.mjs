@@ -7,8 +7,9 @@
  * npm test builds first, so dist/ exists before these run.
  */
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -65,6 +66,23 @@ function c2c(pluginDir, args, extra) {
     encoding: 'utf8',
   });
   return res;
+}
+
+/** Async c2c for tests that serve answers from this process (spawnSync would deadlock). */
+function c2cAsync(pluginDir, args, extra) {
+  const workspace = mkdtempSync(path.join(temp, 'ws-'));
+  return new Promise((resolve, reject) => {
+    const child = spawn(path.join(pluginDir, 'bin/c2c'), args, {
+      cwd: workspace,
+      env: cleanEnv({ C2C_WORKSPACE: workspace, ...extra }),
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => (stdout += chunk));
+    child.stderr.on('data', (chunk) => (stderr += chunk));
+    child.on('error', reject);
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
 }
 
 before(() => {
@@ -182,6 +200,77 @@ test('a tampered runtime archive fails its checksum and is not unpacked', () => 
   assert.equal(res.status, 6, res.stdout);
   assert.match(res.stderr, /failed its checksum/);
   assert.equal(existsSync(path.join(cache, lock.sha256)), false);
+});
+
+test('8 parallel first runs share one install, 4 rounds, never exit 6', async () => {
+  const fetcher = path.join(clone, 'plugin/runtime/fetch-runtime.mjs');
+  const run = (env) =>
+    new Promise((resolve) => {
+      const child = spawn(node, [fetcher], { env: cleanEnv(env), encoding: 'utf8' });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk) => (stdout += chunk));
+      child.stderr.on('data', (chunk) => (stderr += chunk));
+      child.on('close', (status) => resolve({ status, stdout, stderr }));
+    });
+  for (let round = 0; round < 4; round++) {
+    const cache = path.join(temp, `race-${round}`);
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => run({ C2C_RUNTIME_DIR: cache, C2C_RUNTIME_ARCHIVE: archiveFile })),
+    );
+    const runtime = path.join(cache, lock.sha256, 'c2c');
+    for (const res of results) {
+      assert.equal(res.status, 0, `round ${round}: exit ${res.status}\nstderr=${res.stderr}`);
+      assert.equal(res.stdout.trim(), runtime);
+    }
+    assert.equal(existsSync(path.join(runtime, 'MANIFEST.sha256')), true);
+    // The install ran once; no staging or lock debris remains.
+    assert.deepEqual(readdirSync(cache), [lock.sha256]);
+    // The installed runtime actually runs.
+    const doctor = c2c(path.join(clone, 'plugin'), ['doctor', '--local'], { C2C_RUNTIME_DIR: cache });
+    assert.ok(doctor.status === 0 || doctor.status === 1, `round ${round}: exit ${doctor.status}\nstderr=${doctor.stderr}`);
+  }
+});
+
+test('a lock left by a dead process is reclaimed and the install proceeds', () => {
+  const cache = path.join(temp, 'stale-lock');
+  const lockDir = path.join(cache, lock.sha256);
+  mkdirSync(cache, { recursive: true });
+  const dead = spawnSync(node, ['-e', '']);
+  assert.equal(dead.status, 0);
+  writeFileSync(`${lockDir}.lock`, JSON.stringify({ pid: dead.pid ?? 0, time: Date.now() }));
+  const res = spawnSync(node, [path.join(clone, 'plugin/runtime/fetch-runtime.mjs')], {
+    env: cleanEnv({ C2C_RUNTIME_DIR: cache, C2C_RUNTIME_ARCHIVE: archiveFile }),
+    encoding: 'utf8',
+  });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stdout.trim(), path.join(lockDir, 'c2c'));
+  assert.equal(existsSync(path.join(lockDir, 'c2c/MANIFEST.sha256')), true);
+});
+
+test('an unpublished runtime asset (HTTP 404) names the release page and the source build', async () => {
+  const server = createServer((req, res) => {
+    res.writeHead(404).end('not found');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/releases/download/v${lock.version}/${lock.asset}`;
+    const res = await c2cAsync(path.join(clone, 'plugin'), ['doctor', '--local'], {
+      C2C_RUNTIME_DIR: path.join(temp, 'missing-asset-cache'),
+      C2C_RUNTIME_URL: url,
+    });
+    assert.equal(res.status, 6, res.stdout);
+    assert.match(res.stderr, /is not published at .* \(HTTP 404\)/);
+    assert.match(res.stderr, new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace('/releases/download/.*', '/releases')));
+    assert.match(res.stderr, /npm ci && npm run build && node scripts\/vendor-plugin\.mjs --pack/);
+    assert.match(res.stderr, /C2C_RUNTIME_ARCHIVE=/);
+    assert.equal(existsSync(path.join(temp, 'missing-asset-cache', lock.sha256)), false);
+    // It is not misreported as an offline hint.
+    assert.doesNotMatch(res.stderr, /If this machine is offline/);
+  } finally {
+    server.close();
+    server.closeAllConnections?.();
+  }
 });
 
 test('the committed runtime.json pins the archive this tree builds', (t) => {

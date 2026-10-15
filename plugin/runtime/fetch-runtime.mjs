@@ -19,9 +19,9 @@
  *
  * Exit 0 prints the runtime directory; exit 6 prints one `c2c: ...` line.
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,8 +29,14 @@ import { gunzipSync } from 'node:zlib';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ENV_EXIT = 6;
+// An install holder that is dead or this old can only have crashed; a live
+// install takes seconds, never minutes.
+const LOCK_STALE_MS = 10 * 60 * 1000;
+const LOCK_POLL_MS = 120;
 
 class RuntimeError extends Error {}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function cacheRoot(env) {
   if (env.C2C_RUNTIME_DIR) return path.resolve(env.C2C_RUNTIME_DIR);
@@ -56,20 +62,39 @@ function offlineHint(lock) {
   return `If this machine is offline, download ${lock.asset} (${lock.url}) on a connected machine, then run c2c with C2C_RUNTIME_ARCHIVE=<path to ${lock.asset}>.`;
 }
 
+/** The repository the pinned release asset belongs to, for fallback hints. */
+function repoUrl(url) {
+  const marker = '/releases/download/';
+  const base = String(url).split(marker)[0];
+  return base === url ? undefined : base;
+}
+
+function notPublished(url, lock) {
+  const repo = repoUrl(url);
+  const where = repo ? `${repo}/releases` : 'the release page';
+  const steps = repo
+    ? `git clone ${repo} && cd ${path.basename(repo)} && npm ci && npm run build && node scripts/vendor-plugin.mjs --pack`
+    : 'npm ci && npm run build && node scripts/vendor-plugin.mjs --pack';
+  return new RuntimeError(`c2c: the c2c ${lock.version} runtime asset ${lock.asset} is not published at ${url} (HTTP 404). The pinned runtime for this checkout has no release asset; check ${where}. To run from this checkout anyway, build the archive from source: ${steps} — then run c2c with C2C_RUNTIME_ARCHIVE=<path to ${lock.asset}>.`);
+}
+
 /** curl first (it honours proxy settings), then Node's fetch. */
 async function download(url, lock) {
   const curl = spawnSync('curl', ['-fsSL', '--retry', '2', '--connect-timeout', '20', url], { maxBuffer: 1 << 30 });
   if (!curl.error && curl.status === 0) return curl.stdout;
+  let status = Number(String(curl.stderr).match(/returned error: (\d{3})/)?.[1]);
   let reason = curl.error ? undefined : `curl exit ${curl.status}: ${String(curl.stderr).trim().split('\n').pop()}`;
   if (curl.error) {
     try {
       const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(120_000) });
       if (res.ok) return Buffer.from(await res.arrayBuffer());
+      status = res.status;
       reason = `HTTP ${res.status}`;
     } catch (error) {
       reason = error instanceof Error ? (error.cause?.code ?? error.message) : 'network error';
     }
   }
+  if (status === 404) throw notPublished(url, lock);
   throw new RuntimeError(`c2c: could not download the c2c ${lock.version} runtime from ${url} (${reason}). c2c needs this one-time download on first run. ${offlineHint(lock)}`);
 }
 
@@ -116,50 +141,128 @@ function unpack(tar, dest) {
   }
 }
 
+function manifestPresent(installed) {
+  return lstatSync(path.join(installed, 'c2c', 'MANIFEST.sha256'), { throwIfNoEntry: false })?.isFile();
+}
+
+/** Read the lock holder; {} when the file is gone or not yet fully written. */
+function lockHolder(lockPath) {
+  try {
+    const holder = JSON.parse(readFileSync(lockPath, 'utf8'));
+    return typeof holder?.pid === 'number' ? holder : {};
+  } catch {
+    return {};
+  }
+}
+
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+}
+
+/**
+ * Exclusive install lock: an O_EXCL lock file beside the runtime. Only the
+ * holder fetches and unpacks; everyone else waits and then uses the finished
+ * install. A lock left by a crashed run (dead pid, or older than
+ * LOCK_STALE_MS) is reclaimed by the next caller.
+ */
+async function acquireInstallLock(lockPath, isReady) {
+  for (;;) {
+    mkdirSync(path.dirname(lockPath), { recursive: true });
+    let fd;
+    try {
+      fd = openSync(lockPath, 'wx');
+    } catch (error) {
+      if (error.code !== 'EEXIST') {
+        throw new RuntimeError(`c2c: could not create the runtime install lock ${lockPath} (${error.message}). Set C2C_RUNTIME_DIR to a writable directory.`);
+      }
+      if (isReady()) return false;
+      const stat = lstatSync(lockPath, { throwIfNoEntry: false });
+      if (!stat) continue; // the holder finished and released
+      const holder = lockHolder(lockPath);
+      const age = Date.now() - stat.mtimeMs;
+      // Stale only when positively identified: a readable dead pid, or any
+      // holder (even one still being written) older than LOCK_STALE_MS.
+      const stale = holder.pid ? !pidAlive(holder.pid) || age > LOCK_STALE_MS : age > LOCK_STALE_MS;
+      if (stale) {
+        // Reclaim only the stale file we inspected, not a fresh lock.
+        try {
+          if (JSON.stringify(lockHolder(lockPath)) === JSON.stringify(holder)) rmSync(lockPath, { force: true });
+        } catch { /* raced; retry */ }
+        continue;
+      }
+      await sleep(LOCK_POLL_MS);
+      continue;
+    }
+    try {
+      writeFileSync(fd, JSON.stringify({ pid: process.pid, time: Date.now() }));
+    } finally {
+      closeSync(fd);
+    }
+    return true;
+  }
+}
+
 export async function ensureRuntime(env = process.env) {
   const lock = readLock();
   const root = cacheRoot(env);
   const installed = path.join(root, lock.sha256);
   const runtime = path.join(installed, 'c2c');
-  if (lstatSync(path.join(runtime, 'MANIFEST.sha256'), { throwIfNoEntry: false })?.isFile()) return runtime;
+  if (manifestPresent(installed)) return runtime;
 
-  const bytes = await archiveBytes(lock, env);
-  const got = createHash('sha256').update(bytes).digest('hex');
-  if (got !== lock.sha256) {
-    throw new RuntimeError(`c2c: the c2c ${lock.version} runtime archive failed its checksum (expected sha256 ${lock.sha256}, got ${got}). It is corrupt or not ${lock.asset}. ${offlineHint(lock)}`);
-  }
-  let tar;
+  const lockPath = `${installed}.lock`;
+  const held = await acquireInstallLock(lockPath, () => manifestPresent(installed));
+  if (!held) return runtime; // a concurrent run finished the install
+  const staging = `${installed}.partial-${process.pid}-${randomBytes(4).toString('hex')}`;
   try {
-    tar = gunzipSync(bytes);
-  } catch {
-    throw new RuntimeError(`c2c: the c2c ${lock.version} runtime archive is not a gzip file. Reinstall the c2c plugin.`);
-  }
-  const staging = `${installed}.partial-${process.pid}`;
-  try {
-    rmSync(staging, { recursive: true, force: true });
-    mkdirSync(staging, { recursive: true });
-    unpack(tar, staging);
-    // A directory left by an interrupted older run has no manifest; replace it.
-    if (lstatSync(installed, { throwIfNoEntry: false })) rmSync(installed, { recursive: true, force: true });
+    if (manifestPresent(installed)) return runtime;
+    const bytes = await archiveBytes(lock, env);
+    const got = createHash('sha256').update(bytes).digest('hex');
+    if (got !== lock.sha256) {
+      throw new RuntimeError(`c2c: the c2c ${lock.version} runtime archive failed its checksum (expected sha256 ${lock.sha256}, got ${got}). It is corrupt or not ${lock.asset}. ${offlineHint(lock)}`);
+    }
+    let tar;
     try {
+      tar = gunzipSync(bytes);
+    } catch {
+      throw new RuntimeError(`c2c: the c2c ${lock.version} runtime archive is not a gzip file. Reinstall the c2c plugin.`);
+    }
+    try {
+      rmSync(staging, { recursive: true, force: true });
+      mkdirSync(staging, { recursive: true });
+      unpack(tar, staging);
+      if (manifestPresent(installed)) return runtime; // never delete a complete install
+      if (lstatSync(installed, { throwIfNoEntry: false })) {
+        // A directory left by an interrupted older run has no manifest; move it
+        // aside first so a reader never sees a half-deleted tree.
+        const stale = `${installed}.stale-${process.pid}`;
+        renameSync(installed, stale);
+        rmSync(stale, { recursive: true, force: true });
+      }
       renameSync(staging, installed);
     } catch (error) {
-      // Another c2c finished first; keep its copy.
-      if (!lstatSync(path.join(runtime, 'MANIFEST.sha256'), { throwIfNoEntry: false })?.isFile()) throw error;
+      if (error instanceof RuntimeError) throw error;
+      throw new RuntimeError(`c2c: could not unpack the c2c runtime into ${root} (${error instanceof Error ? error.message : error}). Set C2C_RUNTIME_DIR to a writable directory.`);
     }
-  } catch (error) {
-    if (error instanceof RuntimeError) throw error;
-    throw new RuntimeError(`c2c: could not unpack the c2c runtime into ${root} (${error instanceof Error ? error.message : error}). Set C2C_RUNTIME_DIR to a writable directory.`);
+    return runtime;
   } finally {
     rmSync(staging, { recursive: true, force: true });
+    rmSync(lockPath, { force: true });
   }
-  return runtime;
 }
 
-ensureRuntime().then(
-  (dir) => process.stdout.write(`${dir}\n`),
-  (error) => {
-    process.stderr.write(`${error instanceof RuntimeError ? error.message : `c2c: runtime setup failed (${error instanceof Error ? error.message : error})`}\n`);
-    process.exit(ENV_EXIT);
-  },
-);
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  ensureRuntime().then(
+    (dir) => process.stdout.write(`${dir}\n`),
+    (error) => {
+      process.stderr.write(`${error instanceof RuntimeError ? error.message : `c2c: runtime setup failed (${error instanceof Error ? error.message : error})`}\n`);
+      process.exit(ENV_EXIT);
+    },
+  );
+}
+
+export { unpack };
