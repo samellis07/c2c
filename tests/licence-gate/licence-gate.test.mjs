@@ -401,3 +401,45 @@ test('a dev:true entry reached from production dependencies is audited like any 
   assert.ok(transitive.problems.some((p) => /hidden@1\.0\.0.*GPL-3\.0-only.*not on the project allowlist/.test(p)), transitive.problems.join('\n'));
   assert.deepEqual(transitive.packages.map((p) => p.name), ['hidden', 'top']);
 });
+
+test('peer dependencies are audited, including dev-flagged peers, while absent optional peers are ignored', (t) => {
+  const dir = fixtureTree(t, {
+    deps: { parent: '1.0.0' },
+    lockEntries: {
+      'node_modules/parent': {
+        version: '1.0.0',
+        integrity: VALID_SHA512,
+        resolved: registryUrl('parent'),
+        license: 'MIT',
+        peerDependencies: { peer: '1.0.0', 'optional-peer': '1.0.0' },
+        peerDependenciesMeta: { 'optional-peer': { optional: true } },
+      },
+      'node_modules/peer': { version: '1.0.0', dev: true, license: 'GPL-3.0-only' },
+    },
+  });
+  const result = auditLockfile({ root: dir, dir: '.', label: 'fixture' });
+  assert.ok(result.problems.some((p) => /node_modules\/peer \(1\.0\.0\) has no integrity hash/.test(p)), result.problems.join('\n'));
+  assert.ok(result.problems.some((p) => /peer@1\.0\.0 licence GPL-3\.0-only is not on the project allowlist/.test(p)), result.problems.join('\n'));
+  assert.ok(result.problems.every((p) => !/optional-peer/.test(p)), result.problems.join('\n'));
+  assert.deepEqual(result.packages.map((p) => p.name), ['parent', 'peer']);
+});
+
+test('an installed optional peer is included in the licence report', (t) => {
+  const dir = fixtureTree(t, {
+    deps: { parent: '1.0.0' },
+    lockEntries: {
+      'node_modules/parent': {
+        version: '1.0.0',
+        integrity: VALID_SHA512,
+        resolved: registryUrl('parent'),
+        license: 'MIT',
+        peerDependencies: { 'optional-peer': '1.0.0' },
+        peerDependenciesMeta: { 'optional-peer': { optional: true } },
+      },
+      'node_modules/optional-peer': { version: '1.0.0', integrity: VALID_SHA512, resolved: registryUrl('optional-peer'), license: 'MIT' },
+    },
+  });
+  const result = auditLockfile({ root: dir, dir: '.', label: 'fixture' });
+  assert.deepEqual(result.problems, []);
+  assert.deepEqual(result.packages.map((p) => p.name), ['optional-peer', 'parent']);
+});

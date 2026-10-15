@@ -163,7 +163,11 @@ export function auditLockfile({ root = repoRoot, dir, label, deps } = {}) {
     const definitionKey = linkedDefinitionKey(key);
     if (definitionKey !== undefined) reachable.add(definitionKey);
     const entry = definitionKey !== undefined && packages[definitionKey] ? { ...packages[definitionKey], ...packages[key] } : packages[key];
-    for (const dep of Object.keys({ ...entry.dependencies, ...entry.optionalDependencies })) reach(dep, key);
+    const optionalPeers = entry.peerDependenciesMeta ?? {};
+    for (const dep of Object.keys({ ...entry.dependencies, ...entry.optionalDependencies, ...entry.peerDependencies })) {
+      if (optionalPeers[dep]?.optional === true && resolveKey(packages, dep, key) === undefined) continue;
+      reach(dep, key);
+    }
   };
   for (const name of Object.keys(deps ?? manifest.dependencies ?? {})) reach(name, '');
   // An inBundle entry is covered only when its nearest non-bundled ancestor is a verified
@@ -244,7 +248,11 @@ export function auditLockfile({ root = repoRoot, dir, label, deps } = {}) {
       record.verdict = 'ok';
     }
     results.push(record);
-    for (const dep of Object.keys({ ...entry.dependencies, ...entry.optionalDependencies })) visit(dep, key);
+    const optionalPeers = entry.peerDependenciesMeta ?? {};
+    for (const dep of Object.keys({ ...entry.dependencies, ...entry.optionalDependencies, ...entry.peerDependencies })) {
+      if (optionalPeers[dep]?.optional === true && resolveKey(packages, dep, key) === undefined) continue;
+      visit(dep, key);
+    }
   };
   for (const name of Object.keys(deps ?? manifest.dependencies ?? {})) visit(name, '');
   results.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
