@@ -29,7 +29,7 @@ There is no `c2c probe` CLI command yet. The probe rows below describe checks th
 | P-COLS | columns per table by type on a scratch table | raised cap 250 [UNVERIFIED]; default 100 [UNVERIFIED] |
 | P-401 | private route without a session → `401 NO_ACCESS`; run credential-free — `curl -s -o /dev/null -w '%{http_code}' <function-url>` prints `401` | Functions are public/`optional` by default [TESTED]; a signed-in session passes the gateway, so only a no-session probe proves the rule (`is_authenticated` is the only readable signal) |
 | P-BULK | bulk write with `fk_mapping` from a CSV in the bucket | Before any bulk load |
-| P-RATE | sustained writes/min on a scratch table | ~100/min/table [UNVERIFIED] |
+| P-RATE | sustained writes/min on a scratch table | 100 requests/minute (`datastore.write_requests_per_minute`) [UNVERIFIED]; the mover does not pace writes |
 | P-SVC | Job Scheduling / Stratus usable on a fresh project with no "Start Exploring" | [UNVERIFIED] |
 | P-MAIL | one send from the verified sender to the user's own address | Sends real mail: explicit OK only |
 

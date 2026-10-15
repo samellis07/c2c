@@ -16,7 +16,7 @@ Every row below has a stable limit id (`L-…`). Skills cite the id of each limi
 | [L-ZCQL-OFFSET](#l-zcql-offset-zcql-offset) | ZCQL offset | split |
 | [L-ZCQL-LIKE](#l-zcql-like-zcql-like) | ZCQL LIKE | map |
 | [L-ZCQL-JOINS](#l-zcql-joins-zcql-joins) | ZCQL JOINs | refuse + split |
-| [L-ZCQL-WIDTH](#l-zcql-width-zcql-select-columns) | ZCQL SELECT columns | refuse |
+| [L-ZCQL-WIDTH](#l-zcql-width-zcql-select-columns) | ZCQL SELECT columns | split |
 | [L-ZCQL-WRITE-BATCH](#l-zcql-write-batch-zcql-updatedelete) | ZCQL UPDATE/DELETE | batch |
 | [L-ZCQL-SUBQUERIES](#l-zcql-subqueries-zcql-subqueries-in-where) | ZCQL subqueries in WHERE | allow |
 | [L-ZCQL-WRITE-VERIFY](#l-zcql-write-verify-zcql-insert-error-after-write) | ZCQL INSERT error-after-write | verify |
@@ -27,7 +27,7 @@ Every row below has a stable limit id (`L-…`). Skills cite the id of each limi
 | [L-REQUEST-TIME](#l-request-time-advanced-io--appsail-request) | Advanced I/O / AppSail request | split |
 | [L-JOB-TIME](#l-job-time-job-function) | Job function | split |
 | [L-FUNCTION-CONCURRENCY](#l-function-concurrency-function-concurrency) | Function concurrency | cap |
-| [L-WRITE-RATE](#l-write-rate-data-store-write-rate) | Data Store write rate | cap |
+| [L-WRITE-RATE](#l-write-rate-data-store-write-rate) | Data Store write rate | note |
 | [L-DEV-ROW-CAP](#l-dev-row-cap-dev-per-table-row-cap) | Dev per-table row cap | warn |
 | [L-TABLE-CREATES](#l-table-creates-table-creates-per-org) | Table creates per org | warn + retry |
 | [L-PROJECTS](#l-projects-projects-per-account) | Projects per account | refuse |
@@ -84,7 +84,7 @@ Value: 4 (raise is per environment). Label: [DOC]. Behaviour: refuse — `c2c pl
 
 ### L-ZCQL-WIDTH: ZCQL SELECT columns
 
-Value: 20. Label: [DOC]; not yet confirmed. Behaviour: refuse — project at most 20 until probed. Probe: P-WIDTH.
+Value: 30. Label: [UNVERIFIED]. Behaviour: split — `c2c plan` stages a wider projection into statements of at most 30 columns. Probe: P-WIDTH.
 
 ### L-ZCQL-SUBQUERIES: ZCQL subqueries in WHERE
 
@@ -138,7 +138,7 @@ Value: duplicates persisted; lost updates. Label: [TESTED]. Behaviour: refuse �
 
 ### L-WRITE-RATE: Data Store write rate
 
-Value: ~100 writes/min/table. Label: [UNVERIFIED]. Behaviour: cap — mover rate cap with `Retry-After`. Probe: P-RATE.
+Value: 100 requests/minute. Label: [UNVERIFIED]. Behaviour: report — reported only unless a generated batch already exceeds it; the mover does not pace writes. Probe: P-RATE.
 
 ### L-DEV-ROW-CAP: Dev per-table row cap
 
@@ -158,7 +158,7 @@ Value: 25. Label: [DOC]; a higher effective cap is [UNVERIFIED]. Behaviour: warn
 
 ### L-DEV-API-CALLS: Dev API calls
 
-Value: 200k per application. Label: [DOC]. Behaviour: warn — with the mover's call estimate. Probe: none.
+Value: 200000 per application. Label: [UNVERIFIED]; not currently listed in the limits registry. Behaviour: warn — warn at or above the limit using the mover estimate. Probe: none.
 
 ## Files and UI
 
@@ -175,3 +175,28 @@ Value: `cache-control: public, max-age=31536000`. Label: [TESTED]. Behaviour: ve
 ### L-CREATOR-EGRESS: Creator API from Catalyst
 
 Value: 429 at ~1 req/min. Label: [UNVERIFIED]. Behaviour: queue — run the mover on the customer machine; queue with backoff. Probe: none.
+
+## Registry values
+
+Values below are [UNVERIFIED] unless the registry says otherwise. The schema registry (`packages/schema/src/limits.ts`, `CATALYST_LIMITS`) is the source of truth for every numeric value, unit, and verification flag.
+
+| Limit | Key | Value | Unit | Verified |
+|---|---|---:|---|---|
+| Columns per table (generation cap) | `datastore.columns_per_table` | 250 | columns | false |
+| Columns per table (default) | `datastore.columns_per_table_default` | 100 | columns | false |
+| Columns per table (stated ceiling) | `datastore.columns_per_table_ceiling` | 325 | columns | false |
+| Text-type columns per table | `datastore.text_columns` | 130 | columns | false |
+| Varchar length (stated) | `datastore.varchar_chars` | 250 | characters | false |
+| Text length | `datastore.text_chars` | 10000 | characters | false |
+| Unique text columns | `datastore.unique_text_columns` | 2 | columns | false |
+| Foreign keys per table | `datastore.fk_columns` | 15 | columns | false |
+| Tables per organisation | `datastore.tables_per_org` | unstated | tables | false |
+| ZCQL JOINs | `zcql.joins` | 4 | joins | false |
+| ZCQL SELECT columns | `zcql.select_columns` | 30 | columns | false |
+| Data Store write rate | `datastore.write_requests_per_minute` | 100 | requests/minute | false |
+| Data Store concurrency (Development) | `datastore.concurrency_dev` | 15 | concurrent requests | false |
+| Function concurrency (Development) | `function.concurrency_dev` | 10 | concurrent executions | false |
+| URL throttle | `url.throttle` | unstated | requests | false |
+| Function timeout | `function.timeout_seconds` | 30 | seconds | false |
+| Job timeout | `job.timeout_minutes` | 15 | minutes | false |
+| Bulk rows per call | `bulk.rows_per_call` | unstated | rows | false |
