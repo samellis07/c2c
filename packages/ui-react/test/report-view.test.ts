@@ -225,6 +225,9 @@ async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: 
 
   const { ReportView } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/report/ReportView.js')).href)) as { ReportView: (props: { report: ReportSpec }) => unknown };
   const { EnvContext } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/runtime/env.js')).href)) as { EnvContext: { Provider: unknown } };
+  // Like the app shell: the screen renders inside a ScreenBoundary so a 403
+  // throw from useAccessDenied lands on DeniedScreen instead of unmounting.
+  const { ScreenBoundary } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/shell/ScreenBoundary.js')).href)) as { ScreenBoundary: (props: unknown) => unknown };
 
   // The fake endpoint applies the posted sort like the report endpoint: the
   // decimal-shadow order for number-family columns, varchar order otherwise,
@@ -263,7 +266,13 @@ async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: 
   const env = { view, doc: view.document, spec, api };
   const flush = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
   await act(async () => {
-    root.render(React.createElement(EnvContext.Provider, { value: env }, React.createElement(ReportView, { report, ...(rowId ? { row: rowId } : {}) })));
+    root.render(
+      React.createElement(
+        EnvContext.Provider,
+        { value: env },
+        React.createElement(ScreenBoundary, { screen: report.name, route: 'report' }, React.createElement(ReportView, { report, ...(rowId ? { row: rowId } : {}) })),
+      ),
+    );
   });
   await flush();
 
@@ -464,8 +473,10 @@ test('record detail gives a clear error for denied and missing records', { skip:
   for (const status of [403, 404]) {
     const view = await mount(out, report, [], new Set(), '907', async () => ({ ok: false, status }));
     assert.equal(view.container.querySelector('[data-state="loading"]'), null, `${status} clears loading`);
-    if (status === 403) assert.match(view.container.textContent ?? '', /don't have access to this screen/i);
-    else assert.match(view.container.textContent ?? '', /record could not be loaded/i);
+    if (status === 403) {
+      assert.ok(view.container.querySelector('[data-access-denied]'), `${status} renders the access-denied screen`);
+      assert.match(view.container.textContent ?? '', /don't have access to/i);
+    } else assert.match(view.container.textContent ?? '', /record could not be loaded/i);
   }
 });
 
@@ -475,7 +486,7 @@ test('record detail shows a retryable network error', { skip: SKIP }, async (t) 
   const report = { ...base, detail: true, recordEndpoint: '/forms/Order/record' };
   const view = await mount(out, report, [], new Set(), '907', async () => ({ ok: false, status: 0 }));
   assert.equal(view.container.querySelector('[data-state="loading"]'), null);
-  assert.match(view.container.textContent ?? '', /could not be loaded/i);
+  assert.match(view.container.textContent ?? '', /could not be reached/i);
   assert.ok(view.byRole('button', 'Retry'));
 });
 
