@@ -56,6 +56,12 @@ after Slate started lists three items for a mail app and two without mail.
 Even with all services active (Slate, mail, and connection secrets), total
 human steps remain <= 5.
 
-The checklist text lives in `packages/deploy/src/human-steps.ts`
-(`humanChecklist`, `formatHumanChecklist`) so `deploy`, `provision --status`
-on an all-done plan, and `provision`'s done reply all print the same list.
+The printed wording is `CUSTOMER_STEPS` in
+`packages/deploy/src/customer-steps.ts`. For a provision plan,
+`planCustomerSteps` picks the items from the plan's steps: `c2c plan` lists
+them in `plan.md` under *Human steps*, and `provision --status` on an all-done
+plan and `provision`'s done reply print the same items. Slate start is the
+plan's `slate-enable` step, so it is closed before that list prints. A
+confirmed `deploy` prints the same wording; the deploy report's
+`humanChecklist` field uses the item text in
+`packages/deploy/src/human-steps.ts` (`humanChecklist`).
