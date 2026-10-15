@@ -2080,3 +2080,100 @@ test('D-A1: a SKILL.md that is a directory or a FIFO is not a skill, never a han
     assert.match(out(), /FAIL D-A1/);
   }
 });
+
+// ---------- skill-dir listings and deploy-config reads ----------
+
+/** The D-A1 searched list for a home whose only skills sit behind a symlink at `link`. */
+async function searchedThroughLink(build: (home: string, real: string) => void): Promise<string> {
+  const dir = tmp();
+  const home = join(dir, 'home');
+  const real = join(dir, 'real');
+  mkdirSync(home, { recursive: true });
+  build(home, real);
+  writeConfig(dir);
+  const { io, out } = fakeIo({ HOME: home, C2C_WORKSPACE: dir }, greenCatalyst);
+  assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 1);
+  assert.match(out(), /FAIL D-A1/);
+  return out();
+}
+
+test('D-A1: a symlinked plugin cache root is not listed', async () => {
+  const out = await searchedThroughLink((home, real) => {
+    writeSkills(join(real, 'official', 'catalyst-by-zoho', '0.0.2'));
+    mkdirSync(join(home, '.claude', 'plugins'), { recursive: true });
+    symlinkSync(real, join(home, '.claude', 'plugins', 'cache'));
+  });
+  assert.match(out, /cache\/\*\/catalyst-by-zoho\/\*\/skills/);
+  assert.doesNotMatch(out, /cache\/official/);
+});
+
+test('D-A1: a symlinked marketplace, plugin or version directory in the cache is not listed', async () => {
+  const layouts: [string, (home: string, real: string) => void][] = [
+    ['marketplace', (home, real) => {
+      writeSkills(join(real, 'catalyst-by-zoho', '0.0.2'));
+      mkdirSync(join(home, '.claude', 'plugins', 'cache'), { recursive: true });
+      symlinkSync(real, join(home, '.claude', 'plugins', 'cache', 'official'));
+    }],
+    ['plugin', (home, real) => {
+      writeSkills(join(real, '0.0.2'));
+      mkdirSync(join(home, '.claude', 'plugins', 'cache', 'official'), { recursive: true });
+      symlinkSync(real, join(home, '.claude', 'plugins', 'cache', 'official', 'catalyst-by-zoho'));
+    }],
+    ['version', (home, real) => {
+      writeSkills(real);
+      mkdirSync(join(home, '.claude', 'plugins', 'cache', 'official', 'catalyst-by-zoho'), { recursive: true });
+      symlinkSync(real, join(home, '.claude', 'plugins', 'cache', 'official', 'catalyst-by-zoho', '0.0.2'));
+    }],
+  ];
+  for (const [name, build] of layouts) {
+    const out = await searchedThroughLink(build);
+    assert.doesNotMatch(out, /0\.0\.2\/skills/, name);
+  }
+});
+
+test('D-A1: a symlinked ~/.claude/skills or catalyst-* entry is not listed', async () => {
+  const rootLink = await searchedThroughLink((home, real) => {
+    writeSkills(join(real, 'catalyst-repo'));
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    symlinkSync(real, join(home, '.claude', 'skills'));
+  });
+  assert.doesNotMatch(rootLink, /catalyst-repo/);
+  const entryLink = await searchedThroughLink((home, real) => {
+    writeSkills(real);
+    mkdirSync(join(home, '.claude', 'skills'), { recursive: true });
+    symlinkSync(real, join(home, '.claude', 'skills', 'catalyst-repo'));
+  });
+  assert.doesNotMatch(entryLink, /catalyst-repo/);
+});
+
+test('scope: a c2c-deploy.json that is a directory or a FIFO is refused by the read, never parsed or blocked on', () => {
+  for (const make of [(path: string) => mkdirSync(path), fifo]) {
+    const dir = tmp();
+    make(join(dir, DEPLOY_CONFIG));
+    assert.throws(() => resolveScope({ cwd: dir, flags: {}, hooks: NO_HOOKS }), /c2c-deploy\.json is not a file/);
+    const app = join(dir, 'app');
+    mkdirSync(app);
+    make(join(app, DEPLOY_CONFIG));
+    assert.throws(() => resolveScope({ cwd: tmp(), appPath: app, flags: {}, hooks: NO_HOOKS }), /app\/c2c-deploy\.json is not a file/);
+  }
+});
+
+test('scope: --config that is a directory or a FIFO is not a file; an absent or dangling one does not exist', () => {
+  for (const make of [(path: string) => mkdirSync(path), fifo]) {
+    const path = join(tmp(), 'deploy.json');
+    make(path);
+    assert.throws(() => resolveScope({ cwd: tmp(), flags: { config: path }, hooks: NO_HOOKS }), /deploy\.json is not a file/);
+  }
+  const dir = tmp();
+  const dangling = join(dir, 'dangling.json');
+  symlinkSync(join(dir, 'gone.json'), dangling);
+  for (const path of [join(dir, 'absent.json'), dangling]) {
+    assert.throws(() => resolveScope({ cwd: dir, flags: { config: path }, hooks: NO_HOOKS }), /does not exist/);
+  }
+  // A config reached through a symlink to a file still reads, as before.
+  const target = join(dir, 'target.json');
+  writeFileSync(target, JSON.stringify({ dc: 'in' }));
+  const linked = join(dir, 'linked.json');
+  symlinkSync(target, linked);
+  assert.equal(resolveScope({ cwd: dir, flags: { config: linked }, hooks: NO_HOOKS }).configPath, linked);
+});
