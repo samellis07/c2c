@@ -152,7 +152,7 @@ function normalizeErrorBody(body, responseStatus) {
     // Handler response bodies can contain runtime messages, stacks, query
     // fragments, or record values. Keep them in the server log only.
     console.error(`c2c_api: handler returned ${responseStatus} correlationId=${correlationId} body=${JSON.stringify(body)}`);
-    return { code: 'INTERNAL_ERROR', message: 'Internal server error', correlationId };
+    return { code: 'INTERNAL_ERROR', message: 'Internal server error', correlationId, ...(body.wrote === true ? { wrote: true } : {}) };
   }
   const out = { ...body };
   const oldMessage = typeof out.message === 'string' ? out.message : typeof out.error === 'string' ? out.error : '';
