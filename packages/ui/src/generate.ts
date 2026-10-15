@@ -1341,7 +1341,12 @@ function filterCriteria(filter, readable) {
   if (!filter || typeof filter !== "object" || Array.isArray(filter)) return null;
   const field = filter.field;
   if (typeof field !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(field) || !readableField(field, readable)) return null;
-  return { op: "==", field, value: filter.value };
+  // A caller filter value is a scalar only: marker objects ({__rows}, {__bind},
+  // {__rel}) may come solely from the report's own generated criteria. An
+  // object from the body would name a sub-query or bind the client chose.
+  const value = filter.value;
+  if (value !== null && typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") return null;
+  return { op: "==", field, value };
 }
 
 function combineCriteria(base, extras) {
@@ -1438,19 +1443,40 @@ function alwaysRows() {
 const LOOKUP_POSITIVE_OPS = new Set(["==", "<", ">", "<=", ">=", "contains", "startsWith", "endsWith", "in", "isNull", "notNull"]);
 const LOOKUP_PARENT_PAGE_CAP = 1000;
 
-// The value a Form[criteria].field comparison reads: the first matching
-// row's field, queried under the caller's record-access scope on that form
-// (the same scope lookupParentIds applies, so a refused or failing read keeps
-// the leaf closed). undefined means no comparable value. A bare Form[criteria]
-// fetch is the row's id; a lookup cell resolves to its stored id.
+// Every field name a criteria tree compares on, so the inner read can be
+// checked against the caller's field grant the same way the value path is.
+function criteriaFields(criteria, out) {
+  if (!criteria || typeof criteria !== "object") return out;
+  if ((criteria.op === "and" || criteria.op === "or") && Array.isArray(criteria.args)) {
+    for (const arg of criteria.args) criteriaFields(arg, out);
+    return out;
+  }
+  if (criteria.op === "not") return criteriaFields(criteria.arg, out);
+  if (typeof criteria.field === "string") out.push(criteria.field);
+  return out;
+}
+
+// The value a Form[criteria].field comparison reads: the first matching row's
+// field, queried under the caller's record-access scope on that form (the same
+// scope lookupParentIds applies, so a refused or failing read keeps the leaf
+// closed). undefined means no comparable value. A bare Form[criteria] fetch is
+// the row's id; a lookup cell resolves to its stored id. A hidden form, or a
+// path or inner-criteria field outside the caller's field grant, never yields
+// a value: the sub-query must not leak what FieldPermissions hide.
 async function recordQueryValue(datastore, spec, principal) {
   const form = spec && typeof spec.form === "string" ? spec.form : "";
   const inner = spec && spec.criteria && typeof spec.criteria === "object" ? spec.criteria : null;
   const path = spec && Array.isArray(spec.path) ? spec.path : [];
-  if (!form || !inner || path.some((key) => typeof key !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))) return undefined;
+  if (!form || !inner || isHidden(form) || path.length > 1 || path.some((key) => typeof key !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))) return undefined;
   let rows;
   try {
     const scoped = authorizeRead(access, principal, form, inner);
+    // The grant's field allowlist binds the sub-query too: a path or an inner
+    // criteria on a hidden field would read what FieldPermissions deny.
+    if (Array.isArray(scoped.fields)) {
+      if (path.length && !readableField(path[0], scoped.fields)) return undefined;
+      if (criteriaFields(inner, []).some((field) => !readableField(field, scoped.fields))) return undefined;
+    }
     rows = await readScoped(datastore, form, scoped.criteria, 0, 1);
   } catch (err) {
     return undefined;

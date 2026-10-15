@@ -51,7 +51,7 @@ import {
 import { connectionArgIndex, resolveConnectionArgument, walk, type DeclaredConnection } from './connections.js';
 import { parse, parseExpression } from './parser.js';
 import { lex } from './lexer.js';
-import { criteriaHasTodo, type Criteria } from '../../shims/src/criteria.js';
+import { criteriaHasRecordQuery, criteriaHasTodo, type Criteria } from '../../shims/src/criteria.js';
 import type { SchemaPlan } from '../../schema/src/generator.js';
 import { plainRecordStages } from '../../schema/src/limits.js';
 
@@ -3439,8 +3439,14 @@ function recordQuery(e: Expr, fns: readonly CriteriaFunction[] | undefined, dept
   if (cur.kind === 'criteria') {
     const form = staticName(cur.object);
     if (!form) return null;
+    // A multi-hop path (Form[..].a.b) reads raw row cells where a lookup is a
+    // stored id: the walk can only end in undefined, so the leaf is always
+    // empty. Keep it counted rather than translate a shape that never matches.
+    if (path.length > 1) return null;
     const inner = criteriaValue(cur.criteria, fns, depth + 1);
-    if (criteriaHasTodo(inner)) return null;
+    // A nested record query inside the inner criteria fails closed at runtime
+    // (authorizeRead refuses it): the read is always empty, not translated.
+    if (criteriaHasTodo(inner) || criteriaHasRecordQuery(inner)) return null;
     return { form, criteria: inner, path };
   }
   if (cur.kind !== 'call' || path.length !== 0 || cur.callee.kind !== 'member' || cur.args.length !== 0) return null;
@@ -3449,7 +3455,9 @@ function recordQuery(e: Expr, fns: readonly CriteriaFunction[] | undefined, dept
   const fn = fns?.find((f) => f.name === callee.property);
   const body = fn?.deluge?.length === 1 ? fn.deluge[0]!.text : '';
   const returned = /^\s*return\b([\s\S]*?);?\s*$/.exec(body)?.[1]?.trim();
-  if (!returned) return null;
+  // Only a single-statement `return <expr>` inlines. A `;` or newline inside
+  // the captured text means the body runs more than the return.
+  if (!returned || /[;\r\n]/.test(returned)) return null;
   return recordQuery(parseExpression(returned, true), fns, depth + 1);
 }
 
