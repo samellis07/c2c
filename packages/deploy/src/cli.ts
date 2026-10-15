@@ -1708,9 +1708,10 @@ export async function sourceCsvCli(args: readonly string[], io: Io): Promise<num
       const refusalSummary = overLength.length
         ? `refused ${missing.length} missing mandatory value(s) and ${overLength.length} over-length value(s) before any write`
         : `refused ${missing.length} missing mandatory value(s) before any write`;
+      const names = [...new Set(missing.map((item) => `${item.table}.${item.column}`))].join(', ');
       const refusalMessage = overLength.length
         ? `c2c: refused: ${missing.length} missing mandatory value(s) and ${overLength.length} over-length value(s); nothing was written. Fill required values, shorten over-length values, or re-provision the column as text\n`
-        : `c2c: refused: ${missing.length} mandatory value(s) missing; nothing was written. Fix the source or re-provision the column without the constraint\n`;
+        : `c2c: refused: ${missing.length} mandatory value(s) missing; nothing was written. ${names} is store-mandatory; fix the source or re-provision the column without the constraint\n`;
       writeLoaderReport(reportDir, integrity);
       writeFidelityReport(reportDir, {
         ok: false,

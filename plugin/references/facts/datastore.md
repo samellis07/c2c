@@ -65,7 +65,7 @@ returns HTTP 200 while storing only the leading characters of an
 over-length varchar value
 ([L-VARCHAR-LENGTH](references/limits.md#l-varchar-length-varchar-length)).
 
-Rule: [DOC] refuse every varchar value longer than its `max_length` (assume
+Rule: [TESTED] refuse every varchar value longer than its `max_length` (assume
 255 when the column definition carries none) before any write; never
 clamp it, which is the same silent loss. Map any field that can hold
 more than 255 characters (multi line, rich text, single line with a
