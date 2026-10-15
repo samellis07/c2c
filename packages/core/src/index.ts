@@ -3,6 +3,7 @@ export * from './cst.js';
 export * from './ir.js';
 export * from './source.js';
 export * from './parse.js';
+export * from './fs-kind.js';
 export * from './corpus.js';
 export * from './coverage.js';
 export * from './zml.js';

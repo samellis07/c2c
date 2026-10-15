@@ -1,5 +1,6 @@
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readFileSync, readdirSync, type Dirent } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
+import { NO_FOLLOW_READ_FLAGS, entryKind, isAbsentError, isSymlinkRefusedError, isUnopenableError, openKind } from './fs-kind.js';
 import { parseCst, print, type Document, type Statement } from './cst.js';
 import type { Dialect } from './dialect.js';
 import { deriveIr, emptyApp, linkDeviceViews, type App, type WidgetSidecar } from './ir.js';
@@ -80,17 +81,35 @@ export function roundTrips(file: ParsedFile, original: Uint8Array = readFileSync
   return encode(print(file.cst), file.encoding).equals(Buffer.from(original));
 }
 
+/**
+ * True when `path` opens as a directory. Symlinks are not followed: a link is
+ * false. One open and an fstat of that descriptor, so no stat can be raced by
+ * a swap. A missing path, or a path under a file (ENOENT/ENOTDIR), is false;
+ * a socket or FIFO is false; any other error is thrown.
+ */
+export function isDirectoryPath(path: string): boolean {
+  return openKind(path) === 'directory';
+}
+
+/** Directory entries sorted by name (code-unit order, as `Array#sort` on names). */
+function sortedEntries(dir: string): Dirent[] {
+  return readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
 /** All `.ds` files under a directory, sorted, as absolute paths. Symlinks are not followed. */
 export function listDsFiles(dir: string): string[] {
   const out: string[] = [];
   const walk = (d: string) => {
-    for (const name of readdirSync(d).sort()) {
-      if (name === 'node_modules' || name === '.git') continue;
-      const p = join(d, name);
-      const st = lstatSync(p, { throwIfNoEntry: false });
-      if (!st) continue;
-      if (st.isDirectory()) walk(p);
-      else if (st.isFile() && name.toLowerCase().endsWith('.ds') && !name.toLowerCase().endsWith('.exported.ds')) out.push(p);
+    for (const ent of sortedEntries(d)) {
+      if (ent.name === 'node_modules' || ent.name === '.git') continue;
+      const p = join(d, ent.name);
+      const kind = entryKind(ent);
+      if (kind === 'directory') {
+        walk(p);
+        continue;
+      }
+      const lower = ent.name.toLowerCase();
+      if (kind === 'file' && lower.endsWith('.ds') && !lower.endsWith('.exported.ds')) out.push(p);
     }
   };
   walk(dir);
@@ -140,28 +159,42 @@ function packageFlags(dir: string): { html: boolean; json: boolean; names: strin
   let json = false;
   const names: string[] = [];
   const walk = (d: string) => {
-    let entries: string[];
+    let entries: Dirent[];
     try {
-      entries = readdirSync(d).sort();
+      entries = sortedEntries(d);
     } catch {
       return;
     }
-    for (const name of entries) {
-      if (name === 'node_modules' || name === '.git') continue;
-      const p = join(d, name);
-      const st = lstatSync(p, { throwIfNoEntry: false });
-      if (!st) continue;
-      if (st.isDirectory()) {
+    for (const ent of entries) {
+      if (ent.name === 'node_modules' || ent.name === '.git') continue;
+      const p = join(d, ent.name);
+      const kind = entryKind(ent);
+      if (kind === 'directory') {
         walk(p);
         continue;
       }
-      if (!st.isFile()) continue;
-      const lower = name.toLowerCase();
+      if (kind !== 'file') continue;
+      const lower = ent.name.toLowerCase();
       if (lower.endsWith('.html') || lower.endsWith('.htm')) html = true;
       if (!lower.endsWith('.json')) continue;
-      json = true;
-      if (st.size > WIDGET_JSON_CAP) continue;
-      names.push(...widgetNamesInJson(readFileSync(p, 'utf8')));
+      // One descriptor: its fstat decides regular-file and size, and the
+      // same descriptor is read, so a swap of the path cannot redirect it.
+      let fd: number;
+      try {
+        fd = openSync(p, NO_FOLLOW_READ_FLAGS);
+      } catch (err) {
+        if (isAbsentError(err) || isUnopenableError(err) || isSymlinkRefusedError(err)) continue;
+        throw err;
+      }
+      try {
+        const st = fstatSync(fd);
+        if (!st.isFile()) continue;
+        json = true;
+        if (st.size > WIDGET_JSON_CAP) continue;
+        names.push(...widgetNamesInJson(readFileSync(fd, 'utf8')));
+      } finally {
+        closeSync(fd);
+      }
     }
   };
   walk(dir);
@@ -177,32 +210,30 @@ function packageFlags(dir: string): { html: boolean; json: boolean; names: strin
 export function listWidgetSidecars(dir: string): WidgetSidecar[] {
   const out: WidgetSidecar[] = [];
   const walk = (d: string, rel: string[]) => {
-    let names: string[];
+    let entries: Dirent[];
     try {
-      names = readdirSync(d).sort();
+      entries = sortedEntries(d);
     } catch {
       return;
     }
     if (rel.length >= 2 && rel[rel.length - 2] === 'sidecars' && rel[rel.length - 1] === 'widgets') {
-      for (const name of names) {
-        if (name.startsWith('.')) continue;
-        const p = join(d, name);
-        const st = lstatSync(p, { throwIfNoEntry: false });
-        if (!st?.isDirectory()) continue;
+      for (const ent of entries) {
+        if (ent.name.startsWith('.')) continue;
+        const p = join(d, ent.name);
+        if (entryKind(ent) !== 'directory') continue;
         const flags = packageFlags(p);
-        const path = [...rel, name].join('/');
-        for (const widgetName of [...new Set([name, ...flags.names])].sort(compareEnUs)) {
+        const path = [...rel, ent.name].join('/');
+        for (const widgetName of [...new Set([ent.name, ...flags.names])].sort(compareEnUs)) {
           out.push({ name: widgetName, path, html: flags.html, json: flags.json });
         }
       }
       return;
     }
-    for (const name of names) {
-      if (name === 'node_modules' || name === '.git' || name.startsWith('.')) continue;
-      const p = join(d, name);
-      const st = lstatSync(p, { throwIfNoEntry: false });
-      if (!st?.isDirectory()) continue;
-      walk(p, [...rel, name]);
+    for (const ent of entries) {
+      if (ent.name === 'node_modules' || ent.name === '.git' || ent.name.startsWith('.')) continue;
+      const p = join(d, ent.name);
+      if (entryKind(ent) !== 'directory') continue;
+      walk(p, [...rel, ent.name]);
     }
   };
   walk(dir, []);

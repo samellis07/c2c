@@ -18,12 +18,13 @@ export {
   fillKey,
   loadApp,
   readLock,
+  readLockIfPresent,
   reportLock,
   shimAllowlist,
   vectorCoverage,
   writeLock,
 } from './fill-todos.js';
-export type { FillLock, FillTask, LockEntry, StaleFill } from './fill-todos.js';
+export type { FillLock, FillTask, LockEntry, LockFileFs, StaleFill } from './fill-todos.js';
 export { accumulate, countSpans, emptyNumbers, formatCorpus } from './corpus.js';
 export type { CorpusNumbers } from './corpus.js';
 export type { Expr, Param, Script, Span, Stmt } from './ast.js';
