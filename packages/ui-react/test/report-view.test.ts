@@ -440,6 +440,7 @@ test('record detail draws configured sections and related rows from the authoriz
   const base = reactAppSpec(appOf()).reports.Orders!;
   const report = {
     ...base,
+    detail: true,
     recordEndpoint: '/forms/Order/record',
     detailBlocks: [
       { title: 'Overview', fields: [{ field: 'Memo', label: 'Private Memo' }] },
