@@ -976,7 +976,7 @@ function stageReportSource(source: string, queries: readonly string[]): string {
   // record filter twice and project dotted lookup keys off the row.
   const decimalOpt = source.includes('export const decimalColumns') ? '\n        decimalColumns: { [formName]: decimalColumns },' : '';
   const stagedLive = `      const offset = page * pageSize;
-      const chosenSort = Array.isArray(body.sort) && body.sort.length ? body.sort[0] : (Array.isArray(reportSort) && reportSort.length ? reportSort[0] : null);
+      const chosenSort = Array.isArray(requestSort) && requestSort.length ? requestSort[0] : (Array.isArray(reportSort) && reportSort.length ? reportSort[0] : null);
       let sort = null;
       if (chosenSort && typeof chosenSort.field === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(chosenSort.field)) {
         const raw = String(chosenSort.order || chosenSort.dir || "").toLowerCase();
@@ -1148,8 +1148,8 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
   const liveQuery = exact
     ? `const resolved = await resolveLookupCriteria(datastore, ${criteriaRef}, principal);
       const where = zcqlPredicate(compileCriteria(resolved, undefined, decimalColumns));
-      const sort = sortOf(body.sort);
-      const orderBy = orderByOf(body.sort);
+      const sort = sortOf(requestSort);
+      const orderBy = orderByOf(requestSort);
       const offset = page * pageSize;
       const queried = needsExactRead(resolved, sort || undefined, decimalColumns)
         ? await queryExact((form, w, limit, off, ob) => datastore.query(form, w, limit, off, ob, projection), formName, where, {
@@ -1161,7 +1161,7 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
         : await datastore.query(formName, where, pageSize, offset, orderBy, projection);`
     : `const resolved = await resolveLookupCriteria(datastore, ${criteriaRef}, principal);
       const where = zcqlPredicate(compileCriteria(resolved));
-      const orderBy = orderByOf(body.sort);
+      const orderBy = orderByOf(requestSort);
       const offset = page * pageSize;
       const queried = needsExactRead(resolved, undefined, decimalColumns)
         ? await queryExact((form, w, limit, off, ob) => datastore.query(form, w, limit, off, ob, projection), formName, where, {
@@ -1281,6 +1281,7 @@ ${indent}}
     ...(stage.modules.length ? ['Blueprint field settings drop the fields each row\'s own stage does not show, the same rule the record read applies.'] : []),
     'A live query runs only when functions/c2c-deploy.json mode is "live", body.op is "query", and a datastore adapter is installed.',
     'body.filter is a predefined filter label. It applies only when that label was baked in from the report. A field-only filter has no criteria and does not filter. An unknown string is ignored and is not compiled as criteria.',
+    'body.q, body.filter and body.sort use only fields the caller\'s profile reads; a hidden field is ignored, so no condition or order reveals its values.',
     'A criteria that did not migrate fails closed: zero rows and notice "filter not migrated", never an unfiltered read.',
     ...(wantsRelative
       ? ['A relative date is evaluated when the report is read, in the application time zone. A week starts on Sunday (https://www.zoho.com/deluge/help/functions/datetime/getweekofyear.html). today is 00:00:00 (https://www.zoho.com/deluge/help/functions/datetime/today.html). A missing time zone fails closed.']
@@ -1317,7 +1318,20 @@ ${relativePrelude}function searchCriteria(q, fields) {
   return { op: "or", args };
 }
 
-function filterCriteria(filter) {
+// A caller filters, searches and sorts only by fields its profile reads: a
+// condition on a hidden field would tell, row by row, what that field holds.
+// readable is the grant's field list; none means every field is readable.
+function readableField(field, readable) {
+  return field === "ROWID" || field === "ID" || !Array.isArray(readable) || readable.includes(field);
+}
+
+/** body.sort, or undefined (the report's own sort) when it names a field the caller cannot read. */
+function readableSort(bodySort, readable) {
+  const chosen = Array.isArray(bodySort) && bodySort.length ? bodySort[0] : null;
+  return chosen && typeof chosen.field === "string" && !readableField(chosen.field, readable) ? undefined : bodySort;
+}
+
+function filterCriteria(filter, readable) {
   if (typeof filter === "string") {
     const label = filter.trim();
     if (!label) return null;
@@ -1326,7 +1340,7 @@ function filterCriteria(filter) {
   }
   if (!filter || typeof filter !== "object" || Array.isArray(filter)) return null;
   const field = filter.field;
-  if (typeof field !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) return null;
+  if (typeof field !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(field) || !readableField(field, readable)) return null;
   return { op: "==", field, value: filter.value };
 }
 
@@ -1526,7 +1540,12 @@ ${requirePrincipal()}
       }
       const page = pageOf(body.page);
       const pageSize = pageSizeOf(body.pageSize);
-      const criteria = combineCriteria(baseCriteria, [searchCriteria(body.q, columnFields), filterCriteria(body.filter)]);
+      const readableFields = authorizeRead(access, principal, formName, { op: "true" }).fields;
+      const requestSort = readableSort(body.sort, readableFields);
+      const criteria = combineCriteria(baseCriteria, [
+        searchCriteria(body.q, columnFields.filter((field) => readableField(field, readableFields))),
+        filterCriteria(body.filter, readableFields),
+      ]);
       const scoped = authorizeRead(access, principal, formName, criteria);
       if (criteriaHasTodo(scoped.criteria)) {
         send(res, 200, {

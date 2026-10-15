@@ -218,27 +218,41 @@ async function readBody(req) {
   if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS' && requestMediaType(req) !== 'application/json') {
     throw Object.assign(new Error('content type must be application/json'), { status: 415 });
   }
-  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) return req.body;
+  // Every body is a JSON object: an array, a string or a number is a 400, never
+  // read as an empty body. A body a runtime already read is held to the same
+  // byte cap as a streamed one.
+  const notObject = () => Object.assign(new Error('request body must be a JSON object'), { status: 400 });
+  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+    if (Array.isArray(req.body)) throw notObject();
+    return req.body;
+  }
+  const tooLarge = () => Object.assign(new Error('request body too large'), { status: 413 });
   let raw = '';
-  if (typeof req.body === 'string') raw = req.body;
-  else if (Buffer.isBuffer(req.body)) raw = req.body.toString('utf8');
-  else {
+  if (typeof req.body === 'string') {
+    if (Buffer.byteLength(req.body, 'utf8') > MAX_BODY_BYTES) throw tooLarge();
+    raw = req.body;
+  } else if (Buffer.isBuffer(req.body)) {
+    if (req.body.length > MAX_BODY_BYTES) throw tooLarge();
+    raw = req.body.toString('utf8');
+  } else {
     let size = 0;
     const chunks = [];
     for await (const chunk of req) {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) throw Object.assign(new Error('request body too large'), { status: 413 });
+      if (size > MAX_BODY_BYTES) throw tooLarge();
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
     raw = Buffer.concat(chunks).toString('utf8');
   }
   if (!raw.trim()) return {};
+  let parsed;
   try {
-    const parsed = JSON.parse(quoteUnsafeIntegers(raw));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    parsed = JSON.parse(quoteUnsafeIntegers(raw));
   } catch {
     throw Object.assign(new Error('request body is not JSON'), { status: 400 });
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw notObject();
+  return parsed;
 }
 
 async function load(spec) {

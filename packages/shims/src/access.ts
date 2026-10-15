@@ -493,7 +493,9 @@ function screenObject(
   const accepted: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(values)) {
     const dotted = prefix ? `${prefix}.${key}` : key;
-    if (systemDenied(key, depth)) {
+    // A parsed "__proto__" key is an own key; accepted[key] = value would set the
+    // prototype of the accepted values instead of writing a field.
+    if (key === '__proto__' || systemDenied(key, depth)) {
       throw new RecordAccessError(`record access: ${form}.${dotted} is not client-writable`);
     }
     const rule = ruleDenialAt(dotted, denied);
