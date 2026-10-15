@@ -207,10 +207,10 @@ test('a pair with no translation on either form stays a hole, and a different fu
   for (const src of [
     'return now();',
     'return today();',
-    'return edate("2020-01-01", 1);',
-    'return "2020-01-01".edate(1);',
-    'return subBusinessDay("2020-01-01", 1);',
-    'return toHex(255);',
+    'return proper("abc");',
+    'return "abc".proper();',
+    'return endsWithIgnoreCase("abc", "C");',
+    'return getOccurenceCount("abab", "a");',
     'return Average();',
   ]) {
     assert.equal(shape(src).todo, true, src);
