@@ -58,6 +58,8 @@ export interface DoctorContext {
   carried?: { checks: CheckResult[]; at: string };
   /** Reused or expired earlier evidence: shown on D-B1 (reused) or the D-B skip (expired). */
   evidenceNote?: string;
+  /** Probe bucket names the doctor still owes a Delete_Bucket instruction for (mcp-cleanup.json). */
+  pendingCleanup?: readonly string[];
   /** CLI login-store readers; injectable for tests. */
   cliDc?: () => string | undefined;
   cliOrg?: () => string | undefined;
@@ -1372,12 +1374,24 @@ export async function runDoctorChecks(ctx: DoctorContext): Promise<DoctorRun> {
   } else if (ctx.carried) {
     // The same rows the gate reads: a failed observation stays red until a new one is recorded.
     // Only failed rows are carried without a signed record, so D-A3/D-B may have no row left.
-    if (!ctx.carried.checks.some((c) => c.id === 'D-A3')) checks.push(skip('D-A3', 'agent half not recorded yet'));
-    if (!ctx.carried.checks.some((c) => c.id.startsWith('D-B'))) checks.push(skip('D-B', ctx.evidenceNote ?? 'agent half not recorded yet (run c2c doctor --mcp-begin; the agent makes the MCP calls it names and pipes the results into c2c doctor --mcp-observed -)'));
-    checks.push(...ctx.carried.checks);
+    // D-B8 reports live workspace state, so a carried row for it would be stale.
+    const carried = ctx.carried.checks.filter((c) => c.id !== 'D-B8');
+    if (!carried.some((c) => c.id === 'D-A3')) checks.push(skip('D-A3', 'agent half not recorded yet'));
+    if (!carried.some((c) => c.id.startsWith('D-B'))) checks.push(skip('D-B', ctx.evidenceNote ?? 'agent half not recorded yet (run c2c doctor --mcp-begin; the agent makes the MCP calls it names and pipes the results into c2c doctor --mcp-observed -)'));
+    checks.push(...carried);
   } else {
     checks.push(skip('D-A3', 'agent half not recorded yet'));
     checks.push(skip('D-B', ctx.evidenceNote ?? 'agent half not recorded yet (run c2c doctor --mcp-begin; the agent makes the MCP calls it names and pipes the results into c2c doctor --mcp-observed -)'));
+  }
+
+  // Cleanup is owed but never downgrades the binding rows: a probe bucket the
+  // doctor could not prove deleted warns until a REST read-back shows it
+  // gone. Only c2cprobe* names are ever tracked, so a bucket the probe did
+  // not create is never targeted.
+  if (ctx.pendingCleanup?.length) {
+    checks.push(warn('D-B8', `probe bucket ${ctx.pendingCleanup.join(', ')} may still exist in the project; remove it — call the CatalystbyZoho_Delete_Bucket the doctor printed under cleanup`));
+  } else if (ctx.evidence || ctx.carried) {
+    checks.push(pass('D-B8', 'no probe bucket cleanup is pending'));
   }
 
   const green = checks.every((c) => c.status !== 'fail');

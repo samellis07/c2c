@@ -425,7 +425,8 @@ async function assertNoPassingCarry(dir: string, env: NodeJS.ProcessEnv): Promis
   assert.doesNotMatch(out(), /PASS D-B[12] /);
   assert.match(out(), /SKIP D-B /);
   const after = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
-  assert.ok(!after.checks.some((c) => c.id.startsWith('D-B') && c.status !== 'skip'), JSON.stringify(after.checks));
+  // D-B8 is emitted fresh from the live pending-cleanup file, never carried.
+  assert.ok(!after.checks.some((c) => c.id.startsWith('D-B') && c.id !== 'D-B8' && c.status !== 'skip'), JSON.stringify(after.checks));
   assert.equal(evaluateGate({ workspace: dir, scope: SCOPE }).ok, false);
 }
 
@@ -540,6 +541,73 @@ test('mcp-observed: cleanup is re-printed while the probe may still exist, and c
   assert.equal(second.code, 0, second.out + second.err);
   assert.ok(!existsSync(join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json')));
   assert.doesNotMatch(second.out, /cleanup still pending/);
+});
+
+test('mcp-observed: an observation may report the Delete_Bucket cleanup call', async () => {
+  const { dir, env } = workspace();
+  const { request } = await begin(env);
+  const probe = `c2cprobe${request}`;
+  const run = await observe(
+    env,
+    observation(request, {
+      calls: [
+        { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(probe) },
+        { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG]) },
+        { tool: 'CatalystbyZoho_Delete_Bucket', result: { content: [{ type: 'text', text: JSON.stringify({ status: 'success' }) }] } },
+      ],
+    }),
+    [],
+    NO_HOOKS,
+    fakeRest({ [probe]: { data: [{ bucket_name: probe }] } }),
+  );
+  assert.equal(run.code, 0, run.out + run.err);
+  const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
+  assert.deepEqual(file.mcp?.observed?.calls.map((c) => c.tool), ['Create_Bucket', 'List_All_Organizations', 'Delete_Bucket']);
+});
+
+test('mcp-observed: cleanup owed warns on D-B8 without downgrading D-B1/D-B2', async () => {
+  const { dir, env } = workspace();
+  const { request } = await begin(env);
+  const probe = `c2cprobe${request}`;
+  const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: {} }));
+  assert.equal(run.code, 0, run.out + run.err);
+  assert.match(run.out, /PASS D-B1 .*bound by the probe write/);
+  assert.match(run.out, /PASS D-B2/);
+  assert.match(run.out, new RegExp(`WARN D-B8 .*${probe}`));
+  const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as DoctorFile;
+  assert.equal(file.checks.find((c) => c.id === 'D-B8')?.status, 'warn');
+  // Once the read-back shows the probe gone, the next run's row is green.
+  const next = await begin(env);
+  const probe2 = `c2cprobe${next.request}`;
+  const run2 = await observe(env, observation(next.request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe2]: {} }));
+  assert.equal(run2.code, 0, run2.out + run2.err);
+  assert.match(run2.out, new RegExp(`WARN D-B8 .*${probe2}`));
+  assert.doesNotMatch(run2.out, new RegExp(`WARN D-B8 .*${probe}`));
+  // No pending cleanup at all: D-B8 reports pass, never a leftover warning.
+  const third = await begin(env);
+  const probe3 = `c2cprobe${third.request}`;
+  const seen: { path: string }[] = [];
+  const run3 = await observe(env, observation(third.request), [], NO_HOOKS, fakeRest({}, seen));
+  assert.equal(run3.code, 0, run3.out + run3.err);
+  assert.match(run3.out, /PASS D-B8/);
+  assert.doesNotMatch(run3.out, /WARN D-B8/);
+});
+
+test('mcp-observed: a bucket the probe did not create is never targeted for cleanup', async () => {
+  const { dir, env } = workspace();
+  const cleanupDir = join(dir, 'c2c-out', '.c2c');
+  mkdirSync(cleanupDir, { recursive: true });
+  writeFileSync(
+    join(cleanupDir, 'mcp-cleanup.json'),
+    JSON.stringify([
+      { name: 'customer-data', org: ORG, project: PROJECT, at: new Date().toISOString() },
+      { name: 'c2cprobe-not-hex', org: ORG, project: PROJECT, at: new Date().toISOString() },
+    ]),
+  );
+  const { out } = await begin(env);
+  assert.doesNotMatch(out, /customer-data/);
+  // The probe-prefix record is still owed: only `c2cprobe*` names are tracked.
+  assert.match(out, /c2cprobe-not-hex/);
 });
 
 test('mcp-observed: a second probe never orphans the first — both are tracked, reminded, and cleared', async () => {
