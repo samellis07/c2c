@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -383,6 +383,26 @@ test('--sites inside the repo tree is refused before the gallery is scanned', ()
   assert.equal(main(['--dir', fixtures, '--out', doc, '--sites', inRepo]), 2);
   assert.equal(existsSync(doc), false, 'no doc written when --sites is refused');
   assert.equal(existsSync(inRepo), false);
+});
+
+test('--sites refuses hard links to repo files without changing their contents', () => {
+  const fixtures = join(root, 'fixtures/redistributable');
+  const tmp = mkdtempSync(join(tmpdir(), 'c2c-sites-'));
+  const doc = join(tmp, 'doc.md');
+  const source = join(root, 'docs/sites-hardlink-probe.json');
+  const hardlink = join(tmp, 'sites.json');
+  const original = '{"unchanged":true}\n';
+  writeFileSync(source, original);
+  try {
+    linkSync(source, hardlink);
+    assert.equal(main(['--dir', fixtures, '--out', doc, '--sites', hardlink]), 2);
+    assert.equal(readFileSync(source, 'utf8'), original);
+    assert.equal(existsSync(doc), false);
+  } finally {
+    // The probe is outside version control and is removed even on assertion failure.
+    try { unlinkSync(hardlink); } catch { /* absent */ }
+    try { unlinkSync(source); } catch { /* absent */ }
+  }
 });
 
 test('committed status doc equals a fresh gallery computation', { skip: !statusDir() && 'needs C2C_FIXTURES_DIR or C2C_GALLERY_DIR' }, () => {
