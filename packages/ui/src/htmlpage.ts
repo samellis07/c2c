@@ -511,6 +511,63 @@ function assignsCriteriaField(target: Expr): boolean {
   return cur.kind === 'criteria';
 }
 
+/** Root name of a member/index chain (`r.Sub[0].Field` → `r`), else null. */
+function chainRoot(e: Expr): string | null {
+  let cur: Expr = e;
+  while (cur.kind === 'member' || cur.kind === 'index' || cur.kind === 'paren') {
+    cur = cur.kind === 'paren' ? cur.expr : cur.object;
+  }
+  return cur.kind === 'name' ? cur.name : null;
+}
+
+/**
+ * `r = Form[…]` (or a member/index/alias of such a binding) holds a fetched
+ * record or collection; writing through it changes stored data.
+ */
+function bindsRecord(e: Expr, bound: ReadonlySet<string>): boolean {
+  if (e.kind === 'criteria') return true;
+  const root = chainRoot(e);
+  return root !== null && bound.has(root);
+}
+
+/**
+ * True when the statements write a field of a record/collection binding:
+ * `r.X =`, `r.X.Y =`, `rows[i].X =`, or the same through a `for each` row
+ * variable over a fetched collection. Plain AST kind checks cannot see these:
+ * the parser renders them as ordinary assignments.
+ */
+function boundFieldWrite(stmts: Stmt[], bound: Set<string>): boolean {
+  for (const s of stmts) {
+    switch (s.kind) {
+      case 'assign':
+        if (s.target.kind !== 'name') {
+          const root = chainRoot(s.target);
+          if (root !== null && bound.has(root)) return true;
+        } else if (s.op === '=' && bindsRecord(s.value, bound)) {
+          bound.add(s.target.name);
+        }
+        break;
+      case 'block':
+        if (boundFieldWrite(s.body, bound)) return true;
+        break;
+      case 'if':
+        if (boundFieldWrite([s.then], bound)) return true;
+        for (const elif of s.elifs) if (boundFieldWrite([elif.body], bound)) return true;
+        if (s.else && boundFieldWrite([s.else], bound)) return true;
+        break;
+      case 'forEach': {
+        const inner = new Set(bound);
+        if (!s.iteratesIndex && bindsRecord(s.collection, bound)) inner.add(s.name);
+        if (boundFieldWrite([s.body], inner)) return true;
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return false;
+}
+
 function stmtOk(s: Stmt): boolean {
   if (!ALLOWED_STMTS.has(s.kind)) return false;
   switch (s.kind) {
@@ -1548,7 +1605,9 @@ export function compileHtmlpage(
   }
   // A write or external action on render (`insert into`, `update`, `sendmail`,
   // `invokeUrl`, ...) is never read-only, whatever else the island holds.
-  if (hasEffectNode(ast.body)) return fail('island is not a read-only render');
+  if (hasEffectNode(ast.body) || boundFieldWrite(ast.body, new Set())) {
+    return fail('island is not a read-only render');
+  }
   if (!ast.body.every(stmtOk)) return fail('island outside the handled classes');
 
   let tr;
