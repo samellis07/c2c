@@ -250,11 +250,13 @@ function memoryDatastore() {
 
 async function withLive<T>(datastore: unknown, fn: () => Promise<T>): Promise<T> {
   process.env.C2C_DEPLOY_MODE = 'live';
+  process.env.C2C_APP_TIMEZONE = 'Asia/Kolkata';
   (globalThis as Record<string, unknown>).__c2cDatastore = datastore;
   try {
     return await fn();
   } finally {
     delete process.env.C2C_DEPLOY_MODE;
+    delete process.env.C2C_APP_TIMEZONE;
     delete (globalThis as Record<string, unknown>).__c2cDatastore;
   }
 }
