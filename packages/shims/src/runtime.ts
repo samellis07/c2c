@@ -287,6 +287,15 @@ export interface RuntimeOptions {
    */
   splits?: Readonly<Record<string, TableSplitLayout>>;
   mail?: (message: Record<string, unknown>) => Promise<unknown>;
+  /**
+   * Set when `mail` is the generated guarded sender (c2cGuardedMail): it
+   * applies the deploy allowlist and verified-sender check itself and reports
+   * a declined send as an outcome object, so the org-internal messaging guard
+   * is not run ahead of it — a refused `sendmail` must not throw out of a
+   * script whose row write already committed. A raw mail adapter omits this
+   * flag and stays behind the guard.
+   */
+  mailGuarded?: boolean;
   http?: (request: Record<string, unknown>) => Promise<unknown>;
   /**
    * Live adapter for the legacy `getUrl` task (shim.http.getUrl). The
@@ -3360,7 +3369,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         const sent = { ...message, from };
         note({ op: 'sendmail', message: sent, performed: false, dryRun });
         if (!dryRun && options.mail) {
-          guardMessage('sendmail', zohoAdapters.mailDestinations(sent));
+          if (!options.mailGuarded) guardMessage('sendmail', zohoAdapters.mailDestinations(sent));
           return options.mail(sent);
         }
         refuseLive('sendmail');

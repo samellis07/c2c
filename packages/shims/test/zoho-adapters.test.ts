@@ -370,6 +370,35 @@ test('messaging guard: live mail goes to internal recipients only; a mixed to/cc
   }
 });
 
+test('messaging guard: a self-guarded mail adapter decides the send; refusal is an outcome, not a throw', async () => {
+  const seen: Record<string, unknown>[] = [];
+  const mail = async (message: Record<string, unknown>) => {
+    seen.push(message);
+    return { performed: false, status: 'refused', reason: 'no test recipients configured' };
+  };
+  // No org-internal config at all: the guarded adapter still answers, so a
+  // sendmail after a committed write does not throw the submit into a 500.
+  const unconfigured = createRuntime({ dryRun: false, appTimeZone: 'Asia/Kolkata', mail, mailGuarded: true });
+  assert.deepEqual(await unconfigured.shim.mail.send(unconfigured.context({ record: {} }), { to: 'member@example.test', subject: 's', message: 'm' }), {
+    performed: false,
+    status: 'refused',
+    reason: 'no test recipients configured',
+  });
+  // Even with orgInternal configured, the guarded adapter's own allowlist is
+  // the policy — the org guard does not run ahead of it.
+  const configured = createRuntime({
+    dryRun: false,
+    appTimeZone: 'Asia/Kolkata',
+    mail,
+    mailGuarded: true,
+    zohoConnections: { orgInternal: ORG },
+  });
+  await configured.shim.mail.send(configured.context({ record: {} }), { to: 'leak@outside.example.test', subject: 's', message: 'm' });
+  assert.equal(seen.length, 2);
+  assert.ok(unconfigured.transcript.some((e) => e.op === 'sendmail'));
+  assert.ok(!unconfigured.transcript.some((e) => e.op === 'live-refused'));
+});
+
 // invokeurl / http writes are classified deny-by-default: a Zoho Mail send is
 // messaging (recipients from toAddress/ccAddress/bccAddress), and any Zoho
 // write c2c does not classify needs the owner's token.
