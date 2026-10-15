@@ -54,18 +54,20 @@ test('committed fixtures carry the deterministic flag', () => {
   const lib = report.apps.find((app) => app.app === 'library-application-system');
   assert.ok(ff && lib);
   assert.equal(ff.deterministic, false);
-  assert.equal(ff.todoCount, 14);
+  assert.equal(ff.todoCount, 23);
+  // Client statements the browser runtime cannot run are counted, not emitted.
+  assert.equal(ff.todoKinds.find((kind) => kind.construct === 'client-shim-unsupported')?.count, 7);
   assert.equal(ff.fillLockEntries, 0);
   assert.equal(ff.uiTodoCount, 1);
   assert.equal(
     ff.todoKinds.reduce((sum, kind) => sum + kind.count, 0),
-    14,
+    23,
   );
   assert.equal(lib.deterministic, true);
   assert.equal(lib.todoCount, 0);
   assert.deepEqual(lib.todoKinds, []);
   assert.equal(report.aggregate.deterministicApps, 1);
-  assert.equal(report.aggregate.todoTotal, 14);
+  assert.equal(report.aggregate.todoTotal, 23);
 });
 
 test('aggregate counts only deterministic apps toward the 95%/100% targets', () => {

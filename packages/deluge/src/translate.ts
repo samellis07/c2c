@@ -50,6 +50,7 @@ import {
 } from './dispatch.js';
 import { connectionArgIndex, resolveConnectionArgument, walk, type DeclaredConnection } from './connections.js';
 import { parse, parseExpression } from './parser.js';
+import { unsupportedClientShims } from './client-shim.js';
 import { lex } from './lexer.js';
 import type { Criteria } from '../../shims/src/criteria.js';
 import type { SchemaPlan } from '../../schema/src/generator.js';
@@ -85,6 +86,18 @@ export interface TranslateResult {
   nextSlot: number;
   stats: TranslateStats;
   todos: TodoItem[];
+  /**
+   * Statements whose client part was dropped because it needs a shim the
+   * browser runtime does not implement. Not in `todos` or `stats`: only an
+   * emitter that ships the client part counts them (`client-shim-unsupported`).
+   */
+  clientGaps: ClientGap[];
+}
+
+/** One dropped client statement and the stats bucket it was counted in. */
+export interface ClientGap {
+  todo: TodoItem;
+  bucket: 'translated' | 'shimmed' | 'todo';
 }
 
 export interface TranslateOptions {
@@ -417,6 +430,8 @@ interface Scope {
   elementCollections: Map<string, string>;
   /** Per-element slots emitted into `prefetch` (client round trips). */
   elementSlots: number;
+  /** Client statements dropped by gateClientShims. */
+  clientGaps: ClientGap[];
   declaredServer: Set<string>;
   declaredClient: Set<string>;
   /** Form fields that a bare name reads via `input`. */
@@ -583,7 +598,9 @@ function clientExpr(value: Fx, scope: Scope, todoConstruct = 'client-condition-u
   if (value.appFunction || value.todo) {
     return { code: `await shim.todo(ctx, ${JSON.stringify(todoConstruct)})`, todo: true, shim: true };
   }
-  if (!value.serverOnly || value.clientReady) return { code: value.code, todo: false, shim: false };
+  // A shim the browser runtime does not implement is evaluated like a server
+  // read: the prefetch computes it and the client reads the slot.
+  if ((!value.serverOnly || value.clientReady) && !unsupportedClientShims(value.code).length) return { code: value.code, todo: false, shim: false };
   // A non-record loop element is client data the client can send back:
   // the prefetch endpoint evaluates the server part for that one element.
   // A same-app function call never runs this way. Two elements, or a record
@@ -2023,6 +2040,7 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     elementVars: new Set(),
     elementCollections: new Map(),
     elementSlots: 0,
+    clientGaps: [],
     clock: { seq: 0, flow: 1 },
     flowStack: [0],
     loops: [],
@@ -2058,7 +2076,7 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
   const prefetch = scope.deferred.length
     ? `if (ctx.rangeSlot) {\n${scope.deferred.join('\n')}\n}${eager.trim() ? ` else {\n${eager}\n}` : ''}`
     : eager;
-  return { server: out.server, client: out.client, prefetch, usesElement: scope.elementSlots > 0, nextSlot: scope.slot, stats, todos };
+  return { server: out.server, client: out.client, prefetch, usesElement: scope.elementSlots > 0, nextSlot: scope.slot, stats, todos, clientGaps: scope.clientGaps };
 }
 
 /** Line-start offsets of lines that directly follow a `//` comment-only line. */
@@ -2138,12 +2156,15 @@ function stmts(list: Stmt[], scope: Scope, stats: TranslateStats, todos: TodoIte
   let alertText: string | null = null;
   for (const s of list) {
     if (s.kind === 'alert') alertText = s.value.kind === 'string' ? s.value.value : null;
+    const before = { ...stats };
+    const declared = new Set(scope.declaredClient);
     const o =
       s.kind === 'cancelDelete'
         ? cancelDeleteOut(s, alertText, stats, todos)
         : s.kind === 'cancelSubmit'
           ? cancelSubmitOut(s, alertText, stats, todos)
           : statement(s, scope, stats, todos);
+    gateClientShims(s, o, scope, stats, before, declared);
     if (s.kind !== 'block') {
       const comment = delugeComment(s, scope.src);
       if (comment) {
@@ -2155,6 +2176,38 @@ function stmts(list: Stmt[], scope: Scope, stats: TranslateStats, todos: TodoIte
     if (o.client.trim()) client.push(o.client);
   }
   return { server: server.join('\n'), client: client.join('\n') };
+}
+
+/**
+ * Client code the browser cannot run is not emitted. A statement whose client
+ * part references a shim the browser runtime does not implement
+ * (`unsupportedClientShims`) keeps its server part, loses its client part, and
+ * is recorded in `clientGaps` for the emitter that ships the client part to
+ * count as a `client-shim-unsupported` todo. A block's statements were
+ * gated one by one already, so what is left on a compound statement comes
+ * from its own condition or collection. Names the dropped code declared or
+ * wrote read server-bound from here, like any other server-only write: a
+ * later client condition on them is prefetched, or is its own counted todo.
+ * A dropped simple statement with no client effect beyond those local
+ * values (no action, no field write, no round trip) is therefore not a gap.
+ */
+const COMPOUND_KINDS = new Set<Stmt['kind']>(['if', 'forEach', 'while', 'try']);
+/** Client code with an effect outside its own locals: a queued action, a field or row write, a server round trip, an early return. */
+const CLIENT_EFFECT = /\bactions\.push\(|\bshim\.(?:input|record|old)\.set\(|\bshim\.client\.|\breturn\b/;
+
+function gateClientShims(s: Stmt, o: Out, scope: Scope, stats: TranslateStats, before: TranslateStats, declared: ReadonlySet<string>): void {
+  if (s.kind === 'block' || s.kind === 'fn') return;
+  const dropped = o.client;
+  if (!unsupportedClientShims(dropped).length) return;
+  o.client = '';
+  for (const name of [...scope.declaredClient]) if (!declared.has(name)) scope.declaredClient.delete(name);
+  const written = assignedNames(s);
+  const root = s.kind === 'assign' ? rootName(s.target) : null;
+  if (root) written.add(root);
+  for (const name of [...written].sort()) if (scope.local.has(name)) scope.serverOnly.add(name);
+  if (!COMPOUND_KINDS.has(s.kind) && !CLIENT_EFFECT.test(dropped)) return;
+  const bucket = stats.todo > before.todo ? 'todo' : stats.shimmed > before.shimmed ? 'shimmed' : stats.translated > before.translated ? 'translated' : 'todo';
+  scope.clientGaps.push({ todo: { construct: 'client-shim-unsupported', start: s.span.start, end: s.span.end }, bucket });
 }
 
 function statement(s: Stmt, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {

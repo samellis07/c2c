@@ -2282,6 +2282,405 @@ function clientEach(value) {
   throw err;
 }
 
+/*
+ * Creator list and map operations for client code: a port of the pure
+ * functions in packages/shims/src/list.ts (same dispatch by runtime shape,
+ * same results and error messages). The translator emits only the methods
+ * listed in packages/deluge/src/client-shim.ts into client code.
+ */
+const CLIENT_UNSAFE_MAP_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const CLIENT_INTEGER = /^\s*[+-]?\d+\s*$/;
+const CLIENT_NUMERIC = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
+
+function clientListError(message) {
+  const err = new Error(message);
+  err.name = 'DelugeRuntimeError';
+  return err;
+}
+
+function clientIsPlain(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if ('__query' in value) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function clientAsBigInt(value) {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number') return Number.isInteger(value) ? BigInt(value) : null;
+  if (typeof value === 'string' && CLIENT_INTEGER.test(value)) return BigInt(value.trim());
+  return null;
+}
+
+/** Same rule as sameId in packages/shims/src/ids.ts: a bigint matches its integer text or number. */
+function clientSameId(left, right) {
+  if (typeof left === typeof right) return left === right;
+  if (typeof left !== 'bigint' && typeof right !== 'bigint') return left === right;
+  const a = clientAsBigInt(left);
+  const b = clientAsBigInt(right);
+  return a !== null && b !== null && a === b;
+}
+
+function clientShownIndex(index) {
+  if (typeof index === 'number' || typeof index === 'string') return String(index);
+  return String(Number(index));
+}
+
+function clientAsIndex(index) {
+  return typeof index === 'number' ? index : Number(index);
+}
+
+function clientIndexError(index) {
+  return clientListError(`Given index ${clientShownIndex(index)} is greater than the list size`);
+}
+
+function clientEmptyToNull(value) {
+  return value === '' ? null : value;
+}
+
+function clientListCompare(a, b) {
+  if (typeof a === 'number' && typeof b === 'number') return a < b ? -1 : a > b ? 1 : 0;
+  const as = a == null ? '' : String(a);
+  const bs = b == null ? '' : String(b);
+  return as < bs ? -1 : as > bs ? 1 : 0;
+}
+
+function clientReadField(row, field) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+  const values = '__row' in row ? row.values : undefined;
+  const rec = values && typeof values === 'object' && !Array.isArray(values) ? values : row;
+  if (field === 'ID' && !Object.hasOwn(rec, 'ID')) return rec.ROWID ?? rec.rowid ?? null;
+  return Object.hasOwn(rec, field) ? (rec[field] ?? null) : null;
+}
+
+export function clientListMethods() {
+  const contains = (value, needle) => {
+    if (Array.isArray(value)) return value.some((item) => clientSameId(item, needle));
+    if (value == null) return false;
+    return String(value).includes(needle == null ? '' : String(needle));
+  };
+  const containsKey = (value, key) => {
+    if (!clientIsPlain(value) || key == null) return false;
+    return Object.prototype.hasOwnProperty.call(value, String(key));
+  };
+  const distinct = (value) => {
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    for (const item of value) if (!out.some((seen) => seen === item)) out.push(item);
+    return out;
+  };
+  return {
+    get(value, index) {
+      if (Array.isArray(value)) {
+        const i = clientAsIndex(index);
+        if (!Number.isInteger(i) || i < 0 || i >= value.length) throw clientIndexError(index);
+        return value[i];
+      }
+      if (clientIsPlain(value)) {
+        if (index == null) return null;
+        const key = String(index);
+        return Object.prototype.hasOwnProperty.call(value, key) ? value[key] : null;
+      }
+      return null;
+    },
+    put(value, key, val) {
+      if (clientIsPlain(value)) {
+        if (key != null && !CLIENT_UNSAFE_MAP_KEYS.has(String(key))) value[String(key)] = val ?? null;
+        return value;
+      }
+      if (Array.isArray(value)) {
+        const i = clientAsIndex(key);
+        if (Number.isInteger(i) && i >= 0) value[i] = val ?? null;
+      }
+      return value;
+    },
+    remove(value, a, b) {
+      if (Array.isArray(value)) {
+        if (value.length === 0) throw clientListError('emptyList');
+        const i = clientAsIndex(a);
+        if (!Number.isInteger(i) || i < 0 || i >= value.length) throw clientIndexError(a);
+        return value.splice(i, 1)[0];
+      }
+      if (value == null) return null;
+      const s = String(value);
+      if (typeof a === 'number' && typeof b === 'number') return clientEmptyToNull(s.slice(0, a) + s.slice(b));
+      const needle = a == null ? '' : String(a);
+      if (needle === '') return clientEmptyToNull(s);
+      return clientEmptyToNull(s.split(needle).join(''));
+    },
+    removeAll(value, drop) {
+      if (!Array.isArray(value)) return value;
+      const ban = Array.isArray(drop) ? drop : [drop];
+      const next = value.filter((item) => !ban.some((x) => x === item));
+      value.length = 0;
+      value.push(...next);
+      return value;
+    },
+    removeElement(value, item) {
+      if (!Array.isArray(value)) return value;
+      const at = value.findIndex((x) => x === item);
+      if (at >= 0) value.splice(at, 1);
+      return value;
+    },
+    distinct,
+    sort(value, asc) {
+      if (!Array.isArray(value)) return [];
+      const dir = asc === false ? -1 : 1;
+      value.sort((a, b) => clientListCompare(a, b) * dir);
+      return value;
+    },
+    intersect(left, right) {
+      if (!Array.isArray(left) || !Array.isArray(right)) return [];
+      const out = [];
+      for (const item of left) {
+        if (right.some((x) => x === item) && !out.some((seen) => seen === item)) out.push(item);
+      }
+      return out;
+    },
+    indexOf(value, needle, from) {
+      const start = from == null ? 0 : Number(from);
+      if (Array.isArray(value)) {
+        for (let i = Number.isFinite(start) ? start : 0; i < value.length; i++) {
+          if (clientSameId(value[i], needle)) return i;
+        }
+        return -1;
+      }
+      const s = value == null ? '' : String(value);
+      return s.indexOf(needle == null ? '' : String(needle), Number.isFinite(start) ? start : 0);
+    },
+    lastIndexOf(value, needle) {
+      if (Array.isArray(value)) {
+        for (let i = value.length - 1; i >= 0; i--) if (clientSameId(value[i], needle)) return i;
+        return -1;
+      }
+      const s = value == null ? '' : String(value);
+      return s.lastIndexOf(needle == null ? '' : String(needle));
+    },
+    length(value) {
+      return typeof value === 'string' ? value.length : null;
+    },
+    size(value) {
+      if (Array.isArray(value)) return value.length;
+      if (clientIsPlain(value)) return Object.keys(value).length;
+      if (typeof value === 'string') return value.length;
+      return null;
+    },
+    add(value, ...items) {
+      if (!Array.isArray(value)) return value;
+      value.push(...items);
+      return value;
+    },
+    addAll(value, extra) {
+      if (!Array.isArray(value)) return value;
+      if (Array.isArray(extra)) value.push(...extra);
+      return value;
+    },
+    contains,
+    containsKey,
+    containsValue(value, val) {
+      // determinism-allow: browser runtime, never generated bytes; map order is insertion order, as in packages/shims/src/list.ts
+      if (clientIsPlain(value)) return Object.values(value).some((item) => clientSameId(item, val));
+      if (Array.isArray(value)) return value.some((item) => clientSameId(item, val));
+      return false;
+    },
+    notContains(value, needle) {
+      if (Array.isArray(value)) return !contains(value, needle);
+      if (clientIsPlain(value)) return !containsKey(value, needle);
+      return !contains(value, needle);
+    },
+    clear(value) {
+      if (Array.isArray(value)) {
+        value.length = 0;
+        return value;
+      }
+      // determinism-allow: browser runtime, never generated bytes; map order is insertion order, as in packages/shims/src/list.ts
+      if (clientIsPlain(value)) for (const key of Object.keys(value)) delete value[key];
+      return value;
+    },
+    insert(value, a, b) {
+      if (!Array.isArray(value)) return value;
+      if (typeof a === 'number' && arguments.length >= 3) {
+        value.splice(a < 0 ? 0 : a > value.length ? value.length : a, 0, b);
+        return value;
+      }
+      value.push(a);
+      return value;
+    },
+    insertAll(value, a, b) {
+      if (!Array.isArray(value)) return value;
+      let index;
+      let extra = a;
+      if (typeof a === 'number' && arguments.length >= 3) {
+        index = a < 0 ? 0 : a > value.length ? value.length : a;
+        extra = b;
+      }
+      const items = Array.isArray(extra) ? extra : [extra];
+      if (index !== undefined) value.splice(index, 0, ...items);
+      else value.push(...items);
+      return value;
+    },
+    putAll(value, extra) {
+      if (clientIsPlain(value) && clientIsPlain(extra)) {
+        // determinism-allow: browser runtime, never generated bytes; map order is insertion order, as in packages/shims/src/list.ts
+        for (const key of Object.keys(extra)) if (!CLIENT_UNSAFE_MAP_KEYS.has(key)) value[key] = extra[key];
+      }
+      return value;
+    },
+    keys(value) {
+      // determinism-allow: browser runtime, never generated bytes; map order is insertion order, as in packages/shims/src/list.ts
+      return clientIsPlain(value) ? Object.keys(value) : [];
+    },
+    values(value) {
+      // determinism-allow: browser runtime, never generated bytes; map order is insertion order, as in packages/shims/src/list.ts
+      if (clientIsPlain(value)) return Object.values(value);
+      if (Array.isArray(value)) return value.slice();
+      return [];
+    },
+    update(value, a, b) {
+      if (clientIsPlain(value)) {
+        if (a != null) value[String(a)] = b ?? null;
+        return value;
+      }
+      if (Array.isArray(value)) {
+        const i = clientAsIndex(a);
+        if (!Number.isInteger(i) || i < 0 || i >= value.length) throw clientIndexError(a);
+        value[i] = b ?? null;
+      }
+      return value;
+    },
+    subList(value, start, end) {
+      if (!Array.isArray(value)) throw clientListError('subList: receiver is not a list');
+      const a = clientAsIndex(start);
+      const b = end === undefined || end === null ? value.length : clientAsIndex(end);
+      if (!Number.isInteger(a) || a < 0) throw clientListError(`Given index ${clientShownIndex(start)} is invalid`);
+      if (!Number.isInteger(b) || b > value.length) throw clientIndexError(end);
+      if (a > b) throw clientListError('Start index cannot be greater than the end index');
+      return value.slice(a, b);
+    },
+    column(rows, field) {
+      const name = field == null ? '' : String(field);
+      if (Array.isArray(rows)) return rows.map((row) => clientReadField(row, name));
+      if (rows && typeof rows === 'object') return [clientReadField(rows, name)];
+      return [];
+    },
+    deleteKey(value, key) {
+      if (clientIsPlain(value)) {
+        if (key != null) delete value[String(key)];
+      } else if (Array.isArray(value)) {
+        const i = clientAsIndex(key);
+        if (!Number.isInteger(i) || i < 0 || i >= value.length) throw clientIndexError(key);
+        value.splice(i, 1);
+      }
+      return value;
+    },
+    deleteKeys(value, keysList) {
+      if (!Array.isArray(keysList)) return value;
+      if (clientIsPlain(value)) {
+        for (const k of keysList) if (k != null) delete value[String(k)];
+      } else if (Array.isArray(value)) {
+        const indices = [];
+        for (const k of keysList) {
+          const i = clientAsIndex(k);
+          if (Number.isInteger(i) && i >= 0 && i < value.length) indices.push(i);
+        }
+        indices.sort((a, b) => b - a);
+        for (const i of indices) value.splice(i, 1);
+      }
+      return value;
+    },
+    getKey(value, val) {
+      if (clientIsPlain(value)) {
+        // determinism-allow: browser runtime, never generated bytes; map order is insertion order, as in packages/shims/src/list.ts
+        for (const [k, v] of Object.entries(value)) if (clientSameId(v, val)) return k;
+      } else if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) if (clientSameId(value[i], val)) return i;
+      }
+      return Array.isArray(value) ? -1 : null;
+    },
+    getLastKey(value, val) {
+      if (clientIsPlain(value)) {
+        // determinism-allow: browser runtime, never generated bytes; map order is insertion order, as in packages/shims/src/list.ts
+        const keys = Object.keys(value);
+        for (let i = keys.length - 1; i >= 0; i--) if (clientSameId(value[keys[i]], val)) return keys[i];
+      } else if (Array.isArray(value)) {
+        for (let i = value.length - 1; i >= 0; i--) if (clientSameId(value[i], val)) return i;
+      }
+      return Array.isArray(value) ? -1 : null;
+    },
+    deleteItem(value, item) {
+      if (Array.isArray(value)) {
+        const i = value.findIndex((x) => clientSameId(x, item));
+        if (i >= 0) value.splice(i, 1);
+      }
+      return value;
+    },
+    deleteAll(value, item) {
+      if (Array.isArray(value)) {
+        let i = 0;
+        while (i < value.length) {
+          if (clientSameId(value[i], item)) value.splice(i, 1);
+          else i++;
+        }
+      }
+      return value;
+    },
+    duplicate(value) {
+      if (Array.isArray(value)) return value.slice();
+      if (clientIsPlain(value)) return { ...value };
+      return value;
+    },
+    sortKey(value) {
+      if (!clientIsPlain(value)) return value;
+      const out = {};
+      for (const k of Object.keys(value).sort()) out[k] = value[k];
+      return out;
+    },
+  };
+}
+
+/** `shim.list(type)` is a new list; `shim.list.<method>` is a list or map operation. */
+function clientListApi() {
+  const methods = clientListMethods();
+  return new Proxy(function list() {
+    return [];
+  }, {
+    get(target, prop, receiver) {
+      if (typeof prop === 'string' && Object.prototype.hasOwnProperty.call(methods, prop)) return methods[prop];
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+}
+
+/** Null and blank tests and `ifNull`: the same rules as the server runtime (runtime.ts, text.ts, number.ts). */
+const clientValueTests = {
+  isBlank(value) {
+    if (value == null) return true;
+    if (typeof value === 'string') return value.trim() === '';
+    return false;
+  },
+  isNull(value) {
+    return value == null || value === '';
+  },
+  isEmpty(value) {
+    if (value == null) return true;
+    if (typeof value === 'string') return value.length === 0;
+    if (Array.isArray(value)) return value.length === 0;
+    if (clientIsPlain(value)) return Object.keys(value).length === 0;
+    return false;
+  },
+  isNumber(value) {
+    if (value == null || typeof value === 'boolean') return null;
+    if (typeof value === 'number') return Number.isFinite(value);
+    if (typeof value === 'bigint') return true;
+    if (typeof value === 'string') return CLIENT_NUMERIC.test(value.trim());
+    return false;
+  },
+  ifnull(value, replacement) {
+    const chosen = value == null ? replacement : value;
+    return chosen === '' ? null : chosen;
+  },
+};
+
 /** `Field == literal` on the client: same id/label member compare as the server shim's compare.eq. */
 function clientCompareScalars(value) {
   const flat = value && typeof value === 'object' && '__row' in value ? value.values : value;
@@ -2448,6 +2847,25 @@ function clientSetPath(root, parts, value) {
   return true;
 }
 
+/** Per-element round trips in one handler run (LIMITS.clientElementRoundTrips in packages/shims). */
+const CLIENT_ELEMENT_ROUND_TRIPS = 100;
+const CLIENT_BLOCKED = 'Prefetch is stale or failed; client action blocked.';
+
+/** The error that makes a generated handler discard its queued actions. */
+function clientBlocked(body) {
+  const message = body && typeof body.message === 'string' ? body.message : body && typeof body.error === 'string' ? body.error : CLIENT_BLOCKED;
+  return Object.assign(new Error(message), { c2cElementBlocked: true });
+}
+
+/** The generated call route for one read-only `thisapp` callee (clientCallPath in packages/shims/src/runtime.ts). */
+function clientCallRoute(path) {
+  const segment = String(path)
+    .replace(/[^A-Za-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+  return `/functions/${segment || 'handler'}/call`;
+}
+
 export function browserShim(fetchImpl) {
   const call = fetchImpl || globalThis.fetch;
   let seq = 0;
@@ -2499,7 +2917,61 @@ export function browserShim(fetchImpl) {
       }
       return { ok: false, rows: [], retried: true, message: 'prefetch is stale' };
     },
+    /**
+     * One read-only `thisapp` call on the function's generated call route
+     * (clientCallPath in packages/shims/src/runtime.ts). A refused, stale, or
+     * failed call throws `c2cElementBlocked`: the handler discards the actions
+     * it queued instead of deciding on an unproven value.
+     */
+    async call(ctx, path, args) {
+      if (!ctx.formNonce) client.touch(ctx);
+      const nonce = ctx.formNonce;
+      const body = await postJson(clientCallRoute(path), { nonce, args: Array.isArray(args) ? args : [] });
+      if (!body || body.ok !== true || body.nonce !== nonce || ctx.formNonce !== nonce) throw clientBlocked(body);
+      return body.value;
+    },
+    /**
+     * One loop element's slot from the handler's prefetch endpoint, which
+     * evaluates the slot for `{ name, value }` only. Same refusals as the
+     * server runtime's client.element: over the round-trip cap, no prefetch
+     * path, a refused reply, a missing slot, or a dry-run placeholder.
+     */
+    async element(ctx, name, value, slot) {
+      const used = (ctx.elementCalls || 0) + 1;
+      ctx.elementCalls = used;
+      if (used > CLIENT_ELEMENT_ROUND_TRIPS || typeof ctx.prefetchPath !== 'string') throw clientBlocked(null);
+      const nonce = ctx.formNonce;
+      const body = await postJson(ctx.prefetchPath, {
+        record: ctx.record || {},
+        nonce,
+        element: { name, value },
+        ...(ctx.subformRow ? { subformRow: ctx.subformRow } : {}),
+        ...(Array.isArray(ctx.args) ? { args: ctx.args } : {}),
+      });
+      const slots = body && body.slots;
+      if (!body || body.ok === false || body.nonce !== nonce || ctx.formNonce !== nonce || !slots || typeof slots !== 'object' || Array.isArray(slots)) throw clientBlocked(body);
+      if (!Object.prototype.hasOwnProperty.call(slots, slot)) throw clientBlocked(null);
+      const got = slots[slot];
+      if (got !== null && typeof got === 'object' && (got.ok === false || got.dryRun === true || got.performed === false)) throw clientBlocked(null);
+      return got;
+    },
   };
+  /** POST JSON and read the reply, or null when the request failed. */
+  async function postJson(path, payload) {
+    if (typeof call !== 'function') return null;
+    try {
+      const res = await apiCall(call, globalThis, path, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload, jsonReplacer),
+      });
+      if (!res.ok) return null;
+      return await responseJson(res);
+    } catch {
+      return null;
+    }
+  }
+  const listApi = clientListApi();
   function stub() {
     const target = function stubCall() {
       return stub();
@@ -2512,6 +2984,9 @@ export function browserShim(fetchImpl) {
         if (prop === 'set') return clientIndexSet;
         if (prop === 'todo') return async () => undefined;
         if (prop === 'each') return (_ctx, value) => clientEach(value);
+        if (prop === 'list') return listApi;
+        if (prop === 'map') return () => ({});
+        if (typeof prop === 'string' && Object.prototype.hasOwnProperty.call(clientValueTests, prop)) return clientValueTests[prop];
         if (prop === 'decimal') return clientDecimal();
         if (prop === 'compare') return { eq: clientCompareEq, ne: (a, b) => !clientCompareEq(a, b) };
         if (prop === 'date') {

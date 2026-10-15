@@ -16,14 +16,15 @@ App: Freight Forwarding and Feeder Solution
 
 ## TODO counts
 
-14
+23
 
-- 13 client-condition-uses-server
+- 15 client-condition-uses-server
+- 7 client-shim-unsupported
 - 1 Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.
 
 ## Manual steps
 
-- 13 warning converter-gap
+- 22 warning converter-gap
 - 12 warning duplicate-name
 - 1 warning pivot-analytics
 - 1 warning sendmail-sender

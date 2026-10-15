@@ -34,6 +34,7 @@ import {
   approvalEventGap,
   approvalScriptOptions,
   approverGap,
+  clientGuardGap,
   emittedFieldRuleConditionFor,
   functionScriptOptions,
   generate,
@@ -47,6 +48,7 @@ import {
   type FlowSpec,
 } from './generate.js';
 import type { SchedulePlan } from './schedules.js';
+import { unsupportedClientShims } from './client-shim.js';
 import type { TodoItem, TranslateOptions } from './translate.js';
 
 export const TRANSLATOR_VERSION = '1';
@@ -655,6 +657,8 @@ interface Fragment {
   client: WalkCall[];
   prefetch: WalkCall[];
   todos: TodoItem[];
+  /** Client statements the browser cannot run; counted only where the client part ships. */
+  clientGaps: TodoItem[];
   serverText: string;
   clientText: string;
   prefetchText: string;
@@ -1039,6 +1043,11 @@ function pushForm(state: WalkState, app: App, workflow: Workflow): void {
         app,
       )
     : emptyFragment(workflowIr(workflow, workflow.span));
+  pushClientGapNotes(state, fragment);
+  const guard = actionGuardFor(app, workflow);
+  if (!guard.todo && clientGuardGap(fragment.clientText, guard.code)) {
+    pushNoteDraft(state, 'client-shim-unsupported', workflow.span, workflow.actionCondition ?? '', workflowIr(workflow, workflow.span), 'client-shim');
+  }
   const { fragment: gated, suppressed } = gateFragment(state, app, workflow, fragment, true);
   if (suppressed) pushGateNote(state, workflow);
   const rules = fieldRuleCalls(state, app, workflow);
@@ -1047,6 +1056,20 @@ function pushForm(state: WalkState, app: App, workflow: Workflow): void {
   state.flat.push(...gated.client);
   state.drafts.push(...draftsOf(gated));
   state.drafts.push(...fieldRuleDrafts(app, workflow, rules));
+  for (const rule of workflow.fieldRules ?? []) {
+    if (!rule.condition) continue;
+    const emitted = emittedFieldRuleConditionFor(app, workflow.form, rule.condition);
+    if (emitted.startsWith('await shim.todo(') || !unsupportedClientShims(emitted).length) continue;
+    pushNoteDraft(state, 'client-shim-unsupported', rule.span, rule.condition, workflowIr(workflow, rule.span), 'client-shim');
+  }
+}
+
+/** The generator's `client-shim-unsupported` todos for one fragment's dropped client statements. */
+function pushClientGapNotes(state: WalkState, fragment: Fragment): void {
+  for (const gap of fragment.clientGaps) {
+    const span = { start: fragment.blockStart + gap.start, end: fragment.blockStart + gap.end };
+    pushNoteDraft(state, gap.construct, span, fragment.text.slice(gap.start, gap.end), fragment.ir, 'client-shim');
+  }
 }
 
 function pushFunction(state: WalkState, app: App, fn: FunctionDef): void {
@@ -1080,6 +1103,7 @@ function pushFunction(state: WalkState, app: App, fn: FunctionDef): void {
   for (const fragment of fragments) state.flat.push(...fragment.prefetch);
   for (const fragment of fragments) state.flat.push(...fragment.client);
   for (const fragment of fragments) state.drafts.push(...draftsOf(fragment));
+  for (const fragment of fragments) pushClientGapNotes(state, fragment);
 }
 
 /**
@@ -1127,6 +1151,7 @@ function translateFragment(state: WalkState, text: string, blockStart: number, i
     client: tagCalls(translated.client, id, 'client'),
     prefetch: tagCalls(translated.prefetch, id, 'prefetch'),
     todos: translated.todos,
+    clientGaps: translated.clientGaps.map((gap) => gap.todo),
     serverText: translated.server,
     clientText: translated.client,
     prefetchText: translated.prefetch,
@@ -1134,7 +1159,7 @@ function translateFragment(state: WalkState, text: string, blockStart: number, i
 }
 
 function emptyFragment(ir: IrNode): Fragment {
-  return { ir, text: '', blockStart: ir.blockStart, server: [], client: [], prefetch: [], todos: [], serverText: '', clientText: '', prefetchText: '' };
+  return { ir, text: '', blockStart: ir.blockStart, server: [], client: [], prefetch: [], todos: [], clientGaps: [], serverText: '', clientText: '', prefetchText: '' };
 }
 
 /**

@@ -5467,10 +5467,10 @@ test('loop variables and locals named like generated bindings rename, so every m
     deluge: [
       {
         text: [
-          'for each actions in "a,b".toList(",") { info actions; }',
-          'for each slots in "a,b".toList(",") { info slots; }',
-          'for each shim in "a,b".toList(",") { info shim; }',
-          'for each index i ctx in "a,b".toList(",") { info ctx; }',
+          'for each actions in {"a","b"} { info actions; }',
+          'for each slots in {"a","b"} { info slots; }',
+          'for each shim in {"a","b"} { info shim; }',
+          'for each index i ctx in {"a","b"} { info ctx; }',
           'record = "r";',
           'principal = "p";',
           'runtime = "t";',
@@ -5516,7 +5516,7 @@ test('a for-each loop variable named row does not collide with the subform row b
           name: 'Qty',
           form: 'BOM',
           event: 'on user input of Parts.Quantity',
-          deluge: { text: 'for each index i row in "a,b".toList(",") { x = row; }', span: Z },
+          deluge: { text: 'for each index i row in {"a","b"} { x = row; }', span: Z },
         }),
       ],
     }),

@@ -1292,10 +1292,25 @@
   "deluge": {
     "units": 54,
     "statements": 553,
-    "translated": 59,
-    "shimmed": 481,
-    "todo": 14,
+    "translated": 56,
+    "shimmed": 475,
+    "todo": 23,
     "todoLocations": [
+      {
+        "location": "function Convert:148",
+        "construct": "client-shim-unsupported",
+        "scope": "unit"
+      },
+      {
+        "location": "function Convert:32",
+        "construct": "client-shim-unsupported",
+        "scope": "unit"
+      },
+      {
+        "location": "function Convert:65",
+        "construct": "client-shim-unsupported",
+        "scope": "unit"
+      },
       {
         "location": "function Zoho_Books_Cus_Updt2:6",
         "construct": "client-condition-uses-server",
@@ -1304,6 +1319,36 @@
       {
         "location": "function Zoho_Books_Cus_Updt2:9",
         "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow auto_pop_vol:31",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow auto_pop_vol:41",
+        "construct": "client-condition-uses-server",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow updt_total12:5",
+        "construct": "client-shim-unsupported",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow updt_total13:5",
+        "construct": "client-shim-unsupported",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow updt_total14:5",
+        "construct": "client-shim-unsupported",
+        "scope": "unit"
+      },
+      {
+        "location": "workflow Updt_Valid_Till_Date:5",
+        "construct": "client-shim-unsupported",
         "scope": "unit"
       },
       {
@@ -1371,6 +1416,24 @@
   "blockers": [
     {
       "kind": "deluge",
+      "label": "function Convert:148",
+      "detail": "client-shim-unsupported",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "function Convert:32",
+      "detail": "client-shim-unsupported",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "function Convert:65",
+      "detail": "client-shim-unsupported",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
       "label": "function Zoho_Books_Cus_Updt2:6",
       "detail": "client-condition-uses-server",
       "scope": "unit"
@@ -1379,6 +1442,42 @@
       "kind": "deluge",
       "label": "function Zoho_Books_Cus_Updt2:9",
       "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow auto_pop_vol:31",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow auto_pop_vol:41",
+      "detail": "client-condition-uses-server",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow updt_total12:5",
+      "detail": "client-shim-unsupported",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow updt_total13:5",
+      "detail": "client-shim-unsupported",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow updt_total14:5",
+      "detail": "client-shim-unsupported",
+      "scope": "unit"
+    },
+    {
+      "kind": "deluge",
+      "label": "workflow Updt_Valid_Till_Date:5",
+      "detail": "client-shim-unsupported",
       "scope": "unit"
     },
     {
@@ -1456,12 +1555,16 @@
   ],
   "determinism": {
     "deterministic": false,
-    "todoCount": 14,
+    "todoCount": 23,
     "fillLockEntries": 0,
     "todoKinds": [
       {
         "construct": "client-condition-uses-server",
-        "count": 13
+        "count": 15
+      },
+      {
+        "construct": "client-shim-unsupported",
+        "count": 7
       },
       {
         "construct": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
@@ -1471,14 +1574,14 @@
     "uiTodoCount": 1
   },
   "score": {
-    "readiness": 78,
+    "readiness": 77,
     "band": "needs-work",
     "features": 75,
-    "deluge": 80
+    "deluge": 79
   },
   "effort": {
     "estimate": true,
-    "hours": 190.1,
+    "hours": 198.5,
     "weights": {
       "hoursPerFeature": {
         "supported": 0,
