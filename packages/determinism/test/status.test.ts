@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, linkSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -359,6 +359,7 @@ test('--sites writes per-app attribution; the rendered doc is byte-identical wit
   assert.equal(readFileSync(docWith, 'utf8'), readFileSync(docWithout, 'utf8'));
   const attribution = JSON.parse(readFileSync(sites, 'utf8')) as SiteAttribution;
   assert.equal(attribution.schema, 'c2c-determinism-sites/1');
+  assert.equal(statSync(sites).mode & 0o777, 0o600);
   const report = migrationReportForDir(fixtures, 'gallery');
   assert.equal(attribution.apps.length, report.apps.length);
   for (const app of attribution.apps) {
@@ -426,6 +427,62 @@ test('--sites atomically replaces a destination swapped to a repo symlink after 
     delete hookHost.__c2cBeforeSitesWrite;
     try { unlinkSync(sites); } catch { /* absent */ }
     try { unlinkSync(protectedFile); } catch { /* absent */ }
+  }
+});
+
+test('--sites refuses a parent directory replaced by a repo symlink during the scan', () => {
+  const fixtures = join(root, 'fixtures/redistributable');
+  const tmp = mkdtempSync(join(tmpdir(), 'c2c-sites-'));
+  const doc = join(tmp, 'doc.md');
+  const out = join(tmp, 'out');
+  mkdirSync(out);
+  const sites = join(out, 'sites-parent-swap-probe.json');
+  const leaked = join(root, 'docs/sites-parent-swap-probe.json');
+  const hookHost = globalThis as typeof globalThis & { __c2cBeforeSitesWrite?: (path: string) => void };
+  hookHost.__c2cBeforeSitesWrite = (path) => {
+    assert.equal(path, sites);
+    renameSync(out, join(tmp, 'out.old'));
+    symlinkSync(join(root, 'docs'), out);
+  };
+  try {
+    assert.equal(main(['--dir', fixtures, '--out', doc, '--sites', sites]), 2);
+    assert.equal(existsSync(doc), true, 'the scan finished before the write was refused');
+    assert.equal(existsSync(leaked), false);
+    assert.equal(existsSync(join(tmp, 'out.old', 'sites-parent-swap-probe.json')), false);
+  } finally {
+    delete hookHost.__c2cBeforeSitesWrite;
+    try { unlinkSync(leaked); } catch { /* absent */ }
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('--sites refuses an ancestor directory replaced by a repo symlink during the scan', () => {
+  const fixtures = join(root, 'fixtures/redistributable');
+  const tmp = mkdtempSync(join(tmpdir(), 'c2c-sites-'));
+  const doc = join(tmp, 'doc.md');
+  const probeName = 'sites-ancestor-swap-probe';
+  const probe = join(root, 'docs', probeName);
+  mkdirSync(probe);
+  const ancestor = join(tmp, 'a');
+  const parent = join(ancestor, probeName);
+  mkdirSync(parent, { recursive: true });
+  const sites = join(parent, 'r2-anc.json');
+  const leaked = join(probe, 'r2-anc.json');
+  const hookHost = globalThis as typeof globalThis & { __c2cBeforeSitesWrite?: (path: string) => void };
+  hookHost.__c2cBeforeSitesWrite = () => {
+    renameSync(ancestor, join(tmp, 'a.old'));
+    symlinkSync(join(root, 'docs'), ancestor);
+  };
+  try {
+    assert.equal(main(['--dir', fixtures, '--out', doc, '--sites', sites]), 2);
+    assert.equal(existsSync(doc), true, 'the scan finished before the write was refused');
+    assert.equal(existsSync(leaked), false);
+    assert.equal(existsSync(join(tmp, 'a.old', probeName, 'r2-anc.json')), false);
+  } finally {
+    delete hookHost.__c2cBeforeSitesWrite;
+    try { unlinkSync(leaked); } catch { /* absent */ }
+    rmSync(probe, { recursive: true, force: true });
+    rmSync(tmp, { recursive: true, force: true });
   }
 });
 
