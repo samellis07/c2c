@@ -12,6 +12,7 @@ import {
   parseFile,
   parseHeader,
   parseProject,
+  detectShape,
   print,
   roundTrips,
   tokenize,
@@ -697,12 +698,29 @@ test('parse: deeply nested brackets report located unclosed-bracket errors', () 
 
 test('deriveIr + walkStatements: deeply nested brackets do not throw', () => {
   const doc = parse('{'.repeat(20000));
-  deriveIr(doc);
+  // A brace run is one settings-fragment group. detectShape returns 'C' before
+  // the semicolon scan, so the assertion is that result.
+  assert.equal(detectShape(doc, undefined), 'C');
+  const app = deriveIr(doc);
+  assert.equal(app.shape, 'C');
+  assert.equal(app.statementCount, 1);
+  assert.equal(app.unknown.length, 0);
   let count = 0;
   walkStatements(doc, () => {
     count++;
   });
-  assert.ok(count >= 0);
+  assert.equal(count, 1);
+});
+
+test('detectShape: a deep paren value is unknown without throwing', () => {
+  // A bare `'(' * 20000` is structured recursively and never reaches the scan.
+  // A property value stays flat, and a sibling word is not a settings fragment,
+  // so the semicolon scan walks the paren spine. The recursive scan threw.
+  const doc = parse('foo\nx = ' + '('.repeat(20000));
+  assert.equal(detectShape(doc, undefined), 'unknown');
+  const app = deriveIr(doc);
+  assert.equal(app.shape, 'unknown');
+  assert.equal(app.statementCount, 2);
 });
 
 for (const fx of FIXTURES) {

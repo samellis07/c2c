@@ -74,7 +74,14 @@ const CRITERIA_METHODS = new Set([
 
 const ASSIGN_OPS = new Set(['=', '+=', '-=', '*=', '/=', '%=']);
 
-class Fail extends Error {}
+class Fail extends Error {
+  /** Source offset of the token where parsing gave up. */
+  readonly at: number;
+  constructor(reason: string, at = 0) {
+    super(reason);
+    this.at = at;
+  }
+}
 
 interface ExprOpts {
   /** Treat a following `[ ident = … ]` as not part of this expression (update field blocks). */
@@ -94,6 +101,8 @@ export function parse(src: string): Script {
 
 /**
  * Parse one expression. Unknown input becomes an `unknown` expr rather than throwing.
+ * A nesting-cap failure keeps reason `too-deeply-nested` and the offset where it tripped.
+ * `RangeError` is rethrown: a stack overflow is a bug, not bad input.
  * `relative` is for report criteria and for a criteria bracket: multi-word dates
  * (`this month`, `last 7 days`) become one phrase. A free script expression
  * leaves those words as separate tokens.
@@ -102,7 +111,12 @@ export function parseExpression(src: string, relative = false): Expr {
   const p = new Parser(src, lex(src), relative);
   try {
     return p.topExpr();
-  } catch {
+  } catch (e) {
+    if (e instanceof RangeError) throw e;
+    if (e instanceof Fail && e.message === 'too-deeply-nested') {
+      const at = Math.min(Math.max(0, e.at), src.length);
+      return { kind: 'unknown', text: src.trim(), reason: 'too-deeply-nested', span: { start: at, end: src.length } };
+    }
     return { kind: 'unknown', text: src.trim(), reason: 'expr', span: { start: 0, end: src.length } };
   }
 }
@@ -162,7 +176,7 @@ class Parser {
   }
 
   private fail(reason: string): never {
-    throw new Fail(reason);
+    throw new Fail(reason, this.peek().start);
   }
 
   private span(start: number, end: number): Span {
@@ -716,9 +730,13 @@ class Parser {
 
   private unary(opts: ExprOpts): Expr {
     // Iterative: the recursive form overflowed the call stack on long prefix
-    // runs (fuzz: `'!' * 5000`). Collect the prefixes, parse one operand, fold.
+    // runs (`'!' * 5000`). Collect the prefixes, parse one operand, fold.
+    // The fold still counts toward MAX_DEPTH. A 5k-deep unary AST parses, then
+    // translate() overflows on the walk, so an over-limit run is the same
+    // located `too-deeply-nested` unknown as a paren run.
     const ops: Token[] = [];
     while (this.is('op', '!') || this.is('op', '-') || this.is('ident', 'not')) ops.push(this.t[this.i++]!);
+    if (this.depth + ops.length > Parser.MAX_DEPTH) this.fail('too-deeply-nested');
     let out = this.postfix(this.primary(), opts);
     for (let k = ops.length - 1; k >= 0; k--) {
       const tok = ops[k]!;

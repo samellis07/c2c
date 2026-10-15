@@ -150,12 +150,15 @@ export function connectionArgIndex(path: readonly string[], argCount: number): n
 }
 
 export function memberChain(e: Expr): string[] | null {
-  if (e.kind === 'name') return [e.name];
-  if (e.kind === 'member') {
-    const head = memberChain(e.object);
-    return head ? [...head, e.property] : null;
+  const props: string[] = [];
+  let cur: Expr = e;
+  while (cur.kind === 'member') {
+    props.push(cur.property);
+    cur = cur.object;
   }
-  return null;
+  if (cur.kind !== 'name') return null;
+  props.reverse();
+  return [cur.name, ...props];
 }
 
 function literal(e: Expr | undefined): string | null {
@@ -167,10 +170,21 @@ function literal(e: Expr | undefined): string | null {
 
 /** Leading string of a `"https://…" + x` URL. */
 function urlPrefix(e: Expr | undefined, assigned: Map<string, Expr>): string | null {
-  if (!e) return null;
-  if (e.kind === 'string') return e.value;
-  if (e.kind === 'binary' && e.op === '+') return urlPrefix(e.left, assigned);
-  if (e.kind === 'name' && assigned.has(e.name)) return urlPrefix(assigned.get(e.name), new Map());
+  let cur = e;
+  let bound = assigned;
+  while (cur) {
+    if (cur.kind === 'string') return cur.value;
+    if (cur.kind === 'binary' && cur.op === '+') {
+      cur = cur.left;
+      continue;
+    }
+    if (cur.kind === 'name' && bound.has(cur.name)) {
+      cur = bound.get(cur.name);
+      bound = new Map();
+      continue;
+    }
+    return null;
+  }
   return null;
 }
 
@@ -187,17 +201,25 @@ function usesThisapp(e: Expr): boolean {
 }
 
 export function walk(node: unknown, visit: (n: { kind: string } & Record<string, unknown>) => void): void {
-  if (Array.isArray(node)) {
-    for (const item of node) walk(item, visit);
-    return;
-  }
-  if (!node || typeof node !== 'object') return;
-  const obj = node as { kind?: unknown } & Record<string, unknown>;
-  if (typeof obj.kind === 'string') visit(obj as { kind: string } & Record<string, unknown>);
-  // determinism-allow: AST key order is the parser's construction order, so the walk follows source order
-  for (const [key, value] of Object.entries(obj)) {
-    if (key === 'span') continue;
-    walk(value, visit);
+  // Iterative: a left-deep `a + a + …` or `.get()` chain is one frame per node
+  // and overflowed the call stack. Visit order matches the recursive walk.
+  const stack: unknown[] = [node];
+  while (stack.length > 0) {
+    const cur = stack.pop();
+    if (Array.isArray(cur)) {
+      for (let i = cur.length - 1; i >= 0; i--) stack.push(cur[i]);
+      continue;
+    }
+    if (!cur || typeof cur !== 'object') continue;
+    const obj = cur as { kind?: unknown } & Record<string, unknown>;
+    if (typeof obj.kind === 'string') visit(obj as { kind: string } & Record<string, unknown>);
+    // determinism-allow: AST key order is the parser's construction order, so the walk follows source order
+    const entries = Object.entries(obj);
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const [key, value] = entries[i]!;
+      if (key === 'span') continue;
+      stack.push(value);
+    }
   }
 }
 

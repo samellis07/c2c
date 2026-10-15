@@ -467,6 +467,8 @@ interface Scope {
   schema?: SchemaPlan;
   /** Declared connections for rewriting a display-name argument to its link name. */
   connections: DeclaredConnection[];
+  /** Live `expr()` depth. Past {@link EXPR_STACK_LIMIT} the walk returns a todo. */
+  exprDepth: number;
 }
 
 interface Out {
@@ -1984,6 +1986,7 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     commentTails: commentTails(src),
     schema: options.schema,
     connections: options.connections ?? [],
+    exprDepth: 0,
   };
   for (const n of scope.row) scope.local.add(n);
   const stats: TranslateStats = { statements: 0, translated: 0, shimmed: 0, todo: 0 };
@@ -3228,16 +3231,16 @@ function compareCriteria(op: string, field: string, value: unknown): Criteria {
 }
 
 function literalField(e: Expr): string | null {
-  if (e.kind === 'name') {
-    if (e.name === 'true' || e.name === 'false' || e.name === 'null') return null;
-    if (e.name === 'input' || e.name === 'old' || e.name === 'zoho' || e.name === 'thisapp' || e.name === 'row') return null;
-    return e.name;
+  const props: string[] = [];
+  let cur: Expr = e;
+  while (cur.kind === 'member') {
+    props.push(cur.property);
+    cur = cur.object;
   }
-  if (e.kind === 'member') {
-    const head = literalField(e.object);
-    return head ? `${head}.${e.property}` : null;
-  }
-  return null;
+  if (cur.kind !== 'name') return null;
+  if (cur.name === 'true' || cur.name === 'false' || cur.name === 'null') return null;
+  if (cur.name === 'input' || cur.name === 'old' || cur.name === 'zoho' || cur.name === 'thisapp' || cur.name === 'row') return null;
+  return [cur.name, ...props.reverse()].join('.');
 }
 
 function unsafeInteger(text: string): boolean {
@@ -3331,26 +3334,27 @@ function criteria(e: Expr, scope: Scope): Fx {
 }
 
 function fieldPath(e: Expr, scope: Scope): string | null {
-  if (e.kind === 'name') {
-    if (scope.local.has(e.name) || e.name === 'true' || e.name === 'false' || e.name === 'null') return null;
-    if (e.name === 'input' || e.name === 'old' || e.name === 'zoho' || e.name === 'thisapp' || e.name === 'row') return null;
-    return e.name;
+  const props: string[] = [];
+  let cur: Expr = e;
+  while (cur.kind === 'member') {
+    props.push(cur.property);
+    cur = cur.object;
   }
-  if (e.kind === 'member') {
-    const head = fieldPath(e.object, scope);
-    if (!head) return null;
-    return `${head}.${e.property}`;
-  }
-  return null;
+  if (cur.kind !== 'name') return null;
+  if (scope.local.has(cur.name) || cur.name === 'true' || cur.name === 'false' || cur.name === 'null') return null;
+  if (cur.name === 'input' || cur.name === 'old' || cur.name === 'zoho' || cur.name === 'thisapp' || cur.name === 'row') return null;
+  return [cur.name, ...props.reverse()].join('.');
 }
 
 function staticName(e: Expr): string | null {
-  if (e.kind === 'name') return e.name;
-  if (e.kind === 'member') {
-    const head = staticName(e.object);
-    return head ? `${head}.${e.property}` : null;
+  const props: string[] = [];
+  let cur: Expr = e;
+  while (cur.kind === 'member') {
+    props.push(cur.property);
+    cur = cur.object;
   }
-  return null;
+  if (cur.kind !== 'name') return null;
+  return [cur.name, ...props.reverse()].join('.');
 }
 
 
@@ -3382,7 +3386,35 @@ function tryApplyDuration(baseCode: string, durCode: string, ctxArg = 'ctx'): st
   return res;
 }
 
+/**
+ * `expr()` is recursive. Real scripts stay far under this (the parser's own
+ * cap is 200). Left-associative `+` chains and `.get()` chains are folded in
+ * loops, so they do not consume a frame per operand. Anything still deeper
+ * becomes a todo instead of throwing RangeError.
+ */
+const EXPR_STACK_LIMIT = 400;
+
+function tooDeepExpr(): Fx {
+  return fx({
+    code: 'await shim.todo(ctx, "too-deeply-nested")',
+    todo: true,
+    shim: true,
+    constructs: ['too-deeply-nested'],
+  });
+}
+
 function expr(e: Expr, scope: Scope): Fx {
+  const depth = scope.exprDepth + 1;
+  if (depth > EXPR_STACK_LIMIT) return tooDeepExpr();
+  scope.exprDepth = depth;
+  try {
+    return exprBody(e, scope);
+  } finally {
+    scope.exprDepth = depth - 1;
+  }
+}
+
+function exprBody(e: Expr, scope: Scope): Fx {
   switch (e.kind) {
     case 'number':
       if (/[.]|[eE]/.test(e.text)) return fx({ code: `shim.decimal.from(${JSON.stringify(e.text)})`, shim: true, decimal: true });
@@ -3687,51 +3719,93 @@ function relativeRef(e: Expr): { spec: string; role: 'day' | 'instant' | 'period
 }
 
 function binaryExpr(e: Extract<Expr, { kind: 'binary' }>, scope: Scope): Fx {
-  const day = e.op === 'is' || e.op === 'is not' ? relativeDay(e.right) : null;
-  if (day) {
-    const left = expr(e.left, scope);
-    const call = `shim.date.isDay(${left.code}, ${JSON.stringify(day)}, ctx)`;
-    return mergeFx(e.op === 'is not' ? `(!${call})` : call, [left], { shim: true });
+  // Left-associative chains (`a + a + …`) are a left spine. Walk it in a loop
+  // so a 10k-term sum does not recurse once per operand.
+  const spine: Array<Extract<Expr, { kind: 'binary' }>> = [];
+  let cur: Expr = e;
+  while (cur.kind === 'binary') {
+    spine.push(cur);
+    cur = cur.left;
   }
-  const out = binary(e.op, expr(e.left, scope), expr(e.right, scope));
-  auditArithmetic(e.op, e.left, e.right, out, scope);
-  return out;
+  let left = expr(cur, scope);
+  for (let i = spine.length - 1; i >= 0; i--) {
+    const node = spine[i]!;
+    const day = node.op === 'is' || node.op === 'is not' ? relativeDay(node.right) : null;
+    if (day) {
+      const call = `shim.date.isDay(${left.code}, ${JSON.stringify(day)}, ctx)`;
+      left = mergeFx(node.op === 'is not' ? `(!${call})` : call, [left], { shim: true });
+      continue;
+    }
+    const right = expr(node.right, scope);
+    const out = binary(node.op, left, right);
+    auditArithmetic(node.op, node.left, node.right, out, scope);
+    left = out;
+  }
+  return left;
 }
 
 /** Arithmetic ops; `+` on text is concatenation, not arithmetic. */
 const ARITHMETIC = new Set(['+', '-', '*', '/']);
 
 function hasText(e: Expr): boolean {
-  if (e.kind === 'string') return true;
-  if (e.kind === 'paren') return hasText(e.expr);
-  if (e.kind === 'binary' && e.op === '+') return hasText(e.left) || hasText(e.right);
+  const stack: Expr[] = [e];
+  while (stack.length > 0) {
+    const n = stack.pop()!;
+    if (n.kind === 'string') return true;
+    if (n.kind === 'paren') stack.push(n.expr);
+    else if (n.kind === 'binary' && n.op === '+') {
+      stack.push(n.left);
+      stack.push(n.right);
+    }
+  }
   return false;
 }
 
 /** True when `e` reads a decimal, currency, or percent field or a decimal local. Audit only. */
 function mentionsDecimal(e: Expr, scope: Scope): boolean {
-  switch (e.kind) {
-    case 'number':
-      return /[.]|[eE]/.test(e.text);
-    case 'name':
-      return scope.local.has(e.name) ? scope.decimal.has(e.name) : scope.decimalFields.has(e.name) || scope.decimal.has(e.name);
-    case 'member':
-      return scope.decimalFields.has(e.property);
-    case 'call':
-      if (e.callee.kind === 'member' && e.callee.property === 'get' && e.args[0]?.kind === 'string') return scope.decimalFields.has(e.args[0].value);
-      if (e.callee.kind === 'name' && (e.callee.name === IFNULL_FUNCTION || e.callee.name === 'toDecimal')) return e.callee.name === 'toDecimal' || e.args.some((a) => mentionsDecimal(a, scope));
-      return false;
-    case 'paren':
-      return mentionsDecimal(e.expr, scope);
-    case 'unary':
-      return mentionsDecimal(e.expr, scope);
-    case 'binary':
-      return ARITHMETIC.has(e.op) && (mentionsDecimal(e.left, scope) || mentionsDecimal(e.right, scope));
-    case 'ifExpr':
-      return mentionsDecimal(e.then, scope) || (!!e.else && mentionsDecimal(e.else, scope));
-    default:
-      return false;
+  const stack: Expr[] = [e];
+  while (stack.length > 0) {
+    const n = stack.pop()!;
+    switch (n.kind) {
+      case 'number':
+        if (/[.]|[eE]/.test(n.text)) return true;
+        break;
+      case 'name':
+        if (scope.local.has(n.name) ? scope.decimal.has(n.name) : scope.decimalFields.has(n.name) || scope.decimal.has(n.name)) return true;
+        break;
+      case 'member':
+        if (scope.decimalFields.has(n.property)) return true;
+        break;
+      case 'call':
+        if (n.callee.kind === 'member' && n.callee.property === 'get' && n.args[0]?.kind === 'string') {
+          if (scope.decimalFields.has(n.args[0].value)) return true;
+        } else if (n.callee.kind === 'name' && n.callee.name === 'toDecimal') {
+          return true;
+        } else if (n.callee.kind === 'name' && n.callee.name === IFNULL_FUNCTION) {
+          for (const a of n.args) stack.push(a);
+        }
+        break;
+      case 'paren':
+        stack.push(n.expr);
+        break;
+      case 'unary':
+        stack.push(n.expr);
+        break;
+      case 'binary':
+        if (ARITHMETIC.has(n.op)) {
+          stack.push(n.left);
+          stack.push(n.right);
+        }
+        break;
+      case 'ifExpr':
+        stack.push(n.then);
+        if (n.else) stack.push(n.else);
+        break;
+      default:
+        break;
+    }
   }
+  return false;
 }
 
 /** Records a raw JS arithmetic op on a decimal operand (see audit.ts). No effect on output. */
@@ -3782,11 +3856,14 @@ function memberPath(e: Expr): { root: string; path: string[] } | null {
 }
 
 function rootName(e: Expr): string | null {
-  if (e.kind === 'name') return e.name;
-  if (e.kind === 'member') return rootName(e.object);
-  if (e.kind === 'call') return rootName(e.callee);
-  if (e.kind === 'criteria') return rootName(e.object);
-  return null;
+  let cur: Expr = e;
+  for (;;) {
+    if (cur.kind === 'name') return cur.name;
+    if (cur.kind === 'member') cur = cur.object;
+    else if (cur.kind === 'call') cur = cur.callee;
+    else if (cur.kind === 'criteria') cur = cur.object;
+    else return null;
+  }
 }
 
 /** The row binding a form link name stands for, when it is not shadowed by a local. */
@@ -4153,7 +4230,35 @@ function zohoMember(path: string[], _scope: Scope): Fx {
   });
 }
 
+/**
+ * `.get().get()…` is a left spine of calls. Fold it in a loop. Argument
+ * expressions are still evaluated outer-first, matching the recursive walk.
+ * A single `.get()` stays on the ordinary path.
+ */
+function flattenGetChain(e: Expr): { base: Expr; steps: Expr[][] } | null {
+  const steps: Expr[][] = [];
+  let cur: Expr = e;
+  while (cur.kind === 'call' && cur.callee.kind === 'member' && canonicalBuiltin(cur.callee.property) === 'get') {
+    steps.push(cur.args);
+    cur = cur.callee.object;
+  }
+  if (steps.length < 2) return null;
+  return { base: cur, steps };
+}
+
+function translateGetChain(base: Expr, steps: Expr[][], scope: Scope): Fx {
+  const evaluated = steps.map((args) => args.map((a) => expr(a, scope)));
+  let recv = expr(base, scope);
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const args = evaluated[i]!;
+    recv = recv.todo ? untranslatedMethod('get', recv, args) : directMethod('get', recv, args)!;
+  }
+  return recv;
+}
+
 function callExpr(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = false): Fx {
+  const flat = flattenGetChain(e);
+  if (flat) return translateGetChain(flat.base, flat.steps, scope);
   if (e.callee.kind === 'name') return namedCall(e, scope, cross);
   if (e.callee.kind !== 'member') {
     const c = expr(e.callee, scope);
