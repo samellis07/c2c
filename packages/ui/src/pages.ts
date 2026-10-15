@@ -591,7 +591,7 @@ function imageActionTodos(actions: ZmlImageAction[], why?: string): UiElement[] 
       tag: element,
       kind: 'todo' as const,
       ...(a.fn ? { name: a.fn } : a.label ? { name: a.label } : {}),
-      siteId: a.siteId,
+      ...(a.siteId ? { siteId: a.siteId } : {}),
       todo: `${what} click action ${a.action}${call} is not generated; wire the click to the function by hand${reason}`,
       children: [],
     };

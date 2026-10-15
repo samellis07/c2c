@@ -1269,7 +1269,7 @@ function commentClose(input: string, from: number): number {
 export interface ZmlImageAction {
   action: string;
   /** Stable occurrence identifier within the source snippet. */
-  siteId: string;
+  siteId?: string;
   fn?: string;
   label?: string;
   element?: 'button';
