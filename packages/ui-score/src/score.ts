@@ -25,9 +25,9 @@
  *
  * Offline and deterministic: no network, no clock, no randomness.
  */
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { App, Field as IrField, Property } from '../../core/src/index.js';
+import { openKind, readRegularFileIfPresent, type App, type Field as IrField, type Property } from '../../core/src/index.js';
 import { phoneColumns, reportColumnLabel } from '../../core/src/phone-columns.js';
 import { fileURLToPath } from 'node:url';
 
@@ -88,11 +88,9 @@ export function bundleFromFiles(files: BundleFile[]): UiBundle {
 
 /** The bundle under a `c2c ui --out` directory, or its `slate/` directory itself. */
 export function bundleFromDir(dir: string): UiBundle {
-  const slate = statSync(join(dir, 'slate', 'index.html'), { throwIfNoEntry: false }) ? join(dir, 'slate') : dir;
-  const text = (rel: string): string | undefined => {
-    const path = join(slate, rel);
-    return statSync(path, { throwIfNoEntry: false })?.isFile() ? readFileSync(path, 'utf8') : undefined;
-  };
+  const slate = openKind(join(dir, 'slate', 'index.html')) ? join(dir, 'slate') : dir;
+  // One descriptor per file: a directory, FIFO or socket reads as absent and never blocks.
+  const text = (rel: string): string | undefined => readRegularFileIfPresent(join(slate, rel));
   const listJs = (): string[] => {
     const out: string[] = [];
     const walk = (rel: string): void => {

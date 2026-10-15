@@ -1,4 +1,4 @@
-import { closeSync, constants, fstatSync, openSync, type Dirent } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readFileSync, type Dirent } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 
 /** What a path is, as read from one descriptor or one directory entry. */
@@ -80,4 +80,25 @@ export function entryKind(entry: Dirent): PathKind {
   if (entry.isDirectory()) return 'directory';
   if (entry.isFile()) return 'file';
   return 'other';
+}
+
+/**
+ * The text of `path` when it is a regular file, through one
+ * {@link NO_FOLLOW_READ_FLAGS} open, an fstat and a read of that descriptor.
+ * Absent (ENOENT/ENOTDIR), a directory, a FIFO, a socket or a symlink is
+ * `undefined` and never blocks; any other error (EACCES) is thrown.
+ */
+export function readRegularFileIfPresent(path: string): string | undefined {
+  let fd: number;
+  try {
+    fd = openSync(path, NO_FOLLOW_READ_FLAGS);
+  } catch (err) {
+    if (isAbsentError(err) || isUnopenableError(err) || isSymlinkRefusedError(err) || errnoCode(err) === 'EISDIR') return undefined;
+    throw err;
+  }
+  try {
+    return fstatSync(fd).isFile() ? readFileSync(fd, 'utf8') : undefined;
+  } finally {
+    closeSync(fd);
+  }
 }

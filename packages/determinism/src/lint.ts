@@ -12,8 +12,9 @@
  * localeCompare() with no locale follows LANG. da, lt, et, and cs reorder
  * committed JSON. Use compareEnUs from packages/core/src/order.ts instead.
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { relative, join, sep } from 'node:path';
+import { entryKind, isAbsentError, openKind } from '../../core/src/index.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { EXTERNAL_ALLOW } from './allow.js';
 
@@ -60,10 +61,10 @@ export function lintCodegen(root = repoRoot()): Finding[] {
   const files: string[] = [];
   for (const rel of ROOTS) {
     const abs = join(root, rel);
-    const st = statSync(abs, { throwIfNoEntry: false });
-    if (!st) continue;
-    if (st.isDirectory()) walk(abs, files);
-    else files.push(abs);
+    // One no-follow open: an absent root is skipped, a linked or special root is not read.
+    const kind = openKind(abs);
+    if (kind === 'directory') walk(abs, files);
+    else if (kind === 'file') files.push(abs);
   }
   files.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const findings: Finding[] = [];
@@ -74,8 +75,15 @@ export function lintCodegen(root = repoRoot()): Finding[] {
   }
   for (const rel of LOCALE_FILES) {
     const abs = join(root, rel);
-    if (!statSync(abs, { throwIfNoEntry: false })) continue;
-    findings.push(...scanSource(rel, readFileSync(abs, 'utf8')).filter((f) => f.kind === 'locale'));
+    // Read in one step; only a missing file is skipped, a directory still throws EISDIR.
+    let src: string;
+    try {
+      src = readFileSync(abs, 'utf8');
+    } catch (err) {
+      if (isAbsentError(err)) continue;
+      throw err;
+    }
+    findings.push(...scanSource(rel, src).filter((f) => f.kind === 'locale'));
   }
   return findings;
 }
@@ -85,12 +93,14 @@ export function formatFindings(findings: readonly Finding[]): string {
 }
 
 function walk(dir: string, out: string[]): void {
-  for (const name of readdirSync(dir).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
+  for (const ent of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    const name = ent.name;
     if (name === 'node_modules') continue;
     const p = join(dir, name);
-    const st = statSync(p);
-    if (st.isDirectory()) walk(p, out);
-    else if (/\.(ts|js|mjs)$/.test(name) && !name.endsWith('.d.ts')) out.push(p);
+    // The entry kind comes from the directory read; a symlink is `other` and is skipped.
+    const kind = entryKind(ent);
+    if (kind === 'directory') walk(p, out);
+    else if (kind === 'file' && /\.(ts|js|mjs)$/.test(name) && !name.endsWith('.d.ts')) out.push(p);
   }
 }
 

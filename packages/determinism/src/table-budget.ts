@@ -20,10 +20,10 @@
  * which reads the gallery from `--dir`, `C2C_FIXTURES_DIR/gallery`, or
  * `C2C_GALLERY_DIR`, in that order.
  */
-import { statSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { App } from '../../core/src/ir.js';
-import { parseFile, parseProject } from '../../core/src/index.js';
+import { isDirectoryPath, parseFileOrProject } from '../../core/src/index.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { listReportApps } from '../../cli/src/migration-report.js';
 import type { GuardOk } from '../../deploy/src/guards.js';
@@ -87,7 +87,7 @@ export function appTableBudget(app: App): AppTableBudget {
 
 export function computeTableBudget(dir: string): AppTableBudget[] {
   return listReportApps(dir).map((entry) => {
-    const ir = statSync(entry.target).isDirectory() ? parseProject(entry.target).ir : parseFile(entry.target).ir;
+    const ir = parseFileOrProject(entry.target).ir;
     return appTableBudget(ir);
   });
 }
@@ -169,7 +169,7 @@ function main(argv: string[]): number {
     return 2;
   }
   const dir = resolveStatusDir(process.env, take('--dir'));
-  if (!dir || !statSync(dir, { throwIfNoEntry: false })?.isDirectory()) {
+  if (!dir || !isDirectoryPath(dir)) {
     process.stderr.write('tables:budget: gallery not found; pass --dir or set C2C_FIXTURES_DIR or C2C_GALLERY_DIR\n');
     return 1;
   }
