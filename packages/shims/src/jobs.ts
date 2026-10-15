@@ -11,11 +11,13 @@
  * - pages ZCQL 300 rows at a time (`ROWID > cursor ORDER BY ROWID`), narrowed by
  *   a date window on the field, the end field and the schedule criteria;
  * - fires every row whose fire instant lies in (watermark, until];
- * - saves the cursor after each page and the watermark after the window ends.
+ * - saves the cursor after each page and the watermark after the window ends;
+ * - after firing a row, marks its due occurrences in `fired` (per schedule +
+ *   ROWID), so a crash inside a page resumes without refiring the rows already
+ *   fired. Only a crash between a fire and its mark can refire that one row.
  *
  * A run that reaches its deadline saves the cursor and stops. The next tick
- * resumes the same window, so no row fires twice across runs. A crash inside a
- * page can refire the rows of that page (at-least-once per page).
+ * resumes the same window, so no row fires twice across runs.
  *
  * A first run with no checkpoint looks back one period. It does not backfill.
  * A repeating schedule that has several occurrences in one window fires once.
@@ -59,6 +61,17 @@ export interface CheckpointStore {
   put(key: string, value: SweepCheckpoint): Promise<void>;
 }
 
+/**
+ * The occurrence instants a schedule already fired for one record. Keyed by
+ * `fired|<schedule>|<ROWID>` inside the same table as the checkpoints, so a
+ * crash mid-page resumes without refiring the rows it fired. A repeating
+ * schedule keeps every fired instant, so the next period's occurrence fires.
+ */
+export interface FiredMarks {
+  get(key: string): Promise<number[] | undefined>;
+  put(key: string, instants: number[]): Promise<void>;
+}
+
 type Row = Record<string, unknown>;
 
 export interface SweepOptions {
@@ -77,6 +90,12 @@ export interface SweepOptions {
    * `now` never compares against a different clock's epoch.
    */
   clock?: () => number;
+  /**
+   * Per-record fired marks (see {@link FiredMarks}). With it, a resumed page
+   * skips the rows already fired; without it a crash mid-page can refire that
+   * page's rows. A row without a ROWID cannot be marked and fires untracked.
+   */
+  fired?: FiredMarks;
   fire(spec: FormScheduleSpec, row: Row): Promise<unknown>;
 }
 
@@ -134,32 +153,41 @@ export function fireInstant(spec: FormScheduleSpec, row: Row): number | null {
   return epochMillis(shifted, spec.timeZone) + spec.offset.amount * (MS[spec.offset.unit] ?? 0);
 }
 
-/** True when the row has a fire instant in (from, until]. */
-export function firesIn(spec: FormScheduleSpec, row: Row, from: number, until: number): boolean {
+/**
+ * Every occurrence instant of the row in (from, until]: one for a one-shot,
+ * all due occurrences of a repeat. Empty when the field is blank or nothing
+ * is due. The sweep fires a due row once and marks every returned instant.
+ */
+export function dueInstants(spec: FormScheduleSpec, row: Row, from: number, until: number): number[] {
   const first = fireInstant(spec, row);
-  if (first === null) return false;
-  if (!spec.repeat) return first > from && first <= until;
-  if (first > until) return false;
+  if (first === null || first > until) return [];
+  if (!spec.repeat) return first > from ? [first] : [];
   let endDay: number | null = null;
   if (spec.end) {
     let end: DelugeDate | null = null;
     try {
       end = asDate(row[spec.end]);
     } catch {
-      return false;
+      return [];
     }
     if (end) endDay = end.epochDay();
   }
   const start = new DelugeDate(...wall(first, spec.timeZone));
+  const out: number[] = [];
   let k = Math.max(0, Math.floor((from - first) / REPEAT_MS[spec.repeat]) - 2);
   for (let guard = 0; guard < 400; guard++, k++) {
     const occurrence = repeatShift(start, spec.repeat, k);
-    if (endDay !== null && occurrence.epochDay() > endDay) return false;
+    if (endDay !== null && occurrence.epochDay() > endDay) break;
     const at = epochMillis(occurrence, spec.timeZone);
-    if (at > until) return false;
-    if (at > from) return true;
+    if (at > until) break;
+    if (at > from) out.push(at);
   }
-  return false;
+  return out;
+}
+
+/** True when the row has a fire instant in (from, until]. */
+export function firesIn(spec: FormScheduleSpec, row: Row, from: number, until: number): boolean {
+  return dueInstants(spec, row, from, until).length > 0;
 }
 
 function wall(instant: number, zone: string): [number, number, number, number, number, number] {
@@ -221,9 +249,18 @@ export async function sweepFormSchedules(opts: SweepOptions): Promise<SweepRepor
       const page = await opts.query(spec.form, sweepWhere(spec, from, until, cursor), SWEEP_PAGE_ROWS, 0, 'ORDER BY ROWID');
       item.pages++;
       for (const row of page) {
-        if (!firesIn(spec, row, from, until)) continue;
+        const due = dueInstants(spec, row, from, until);
+        if (!due.length) continue;
         if (exact && !exact(row)) continue;
-        await opts.fire(spec, row);
+        if (opts.fired && row.ROWID != null) {
+          const key = `${spec.name}|${row.ROWID}`;
+          const done = await opts.fired.get(key);
+          if (done && due.every((instant) => done.includes(instant))) continue;
+          await opts.fire(spec, row);
+          await opts.fired.put(key, done ? [...new Set([...done, ...due])].sort((a, b) => a - b) : due);
+        } else {
+          await opts.fire(spec, row);
+        }
         item.fired++;
       }
       if (page.length < SWEEP_PAGE_ROWS) {
@@ -263,6 +300,36 @@ export function datastoreCheckpoints(
       const State = JSON.stringify(value);
       if (row) await datastore.update(table, [{ ROWID: row.ROWID, State }]);
       else await datastore.insert(table, [{ Job_Key: key, State }]);
+    },
+  };
+}
+
+/**
+ * Fired marks in the same Data Store table as the checkpoints, under
+ * `fired|<schedule>|<ROWID>` keys (`State` holds `{instants: number[]}`).
+ * Cron names never contain `|`, so a mark cannot collide with a checkpoint.
+ */
+export function datastoreFiredMarks(
+  datastore: {
+    query(form: string, where: string, limit: number, offset: number, orderBy: string): Promise<Row[]>;
+    insert(form: string, rows: Row[]): Promise<unknown>;
+    update(form: string, rows: Row[]): Promise<unknown>;
+  },
+  table: string,
+): FiredMarks {
+  const rowOf = async (key: string) => (await datastore.query(table, `Job_Key = '${`fired|${key}`.replace(/'/g, "''")}'`, 1, 0, 'ORDER BY ROWID'))[0];
+  return {
+    async get(key) {
+      const row = await rowOf(key);
+      if (!row || typeof row.State !== 'string') return undefined;
+      const instants = (JSON.parse(row.State) as { instants?: unknown }).instants;
+      return Array.isArray(instants) ? (instants as number[]) : undefined;
+    },
+    async put(key, instants) {
+      const row = await rowOf(key);
+      const State = JSON.stringify({ instants });
+      if (row) await datastore.update(table, [{ ROWID: row.ROWID, State }]);
+      else await datastore.insert(table, [{ Job_Key: `fired|${key}`, State }]);
     },
   };
 }

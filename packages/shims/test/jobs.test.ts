@@ -3,11 +3,14 @@ import { test } from 'node:test';
 import {
   SWEEP_PAGE_ROWS,
   datastoreCheckpoints,
+  datastoreFiredMarks,
+  dueInstants,
   fireInstant,
   firesIn,
   sweepFormSchedules,
   sweepWhere,
   type CheckpointStore,
+  type FiredMarks,
   type FormScheduleSpec,
   type SweepCheckpoint,
 } from '../src/jobs.js';
@@ -161,6 +164,113 @@ test('a run with an injected now is not stopped by a wall clock ahead of the dea
   assert.equal(report.done, true);
   assert.deepEqual(fired, ['due']);
   assert.deepEqual(checkpoints.saved.get(due.name), { watermark: now });
+});
+
+function memoryFired(): FiredMarks & { saved: Map<string, number[]> } {
+  const saved = new Map<string, number[]>();
+  return {
+    saved,
+    async get(key) {
+      return saved.get(key);
+    },
+    async put(key, instants) {
+      saved.set(key, [...instants]);
+    },
+  };
+}
+
+test('a crash mid-page marks fired rows, so the resumed window skips them', async () => {
+  const { datastore } = mockDatastore({ Invoice: ['ROWID'] });
+  await datastore.insert('Invoice', [
+    { Due_Date: '2026-10-10', Name: 'first' },
+    { Due_Date: '2026-10-10', Name: 'second' },
+    { Due_Date: '2026-10-10', Name: 'third' },
+  ]);
+  const checkpoints = memoryCheckpoints();
+  const fired = memoryFired();
+  const hits: string[] = [];
+  const now = at('2026-10-09T09:02:00Z');
+  const base = {
+    schedules: [due],
+    query: datastore.query,
+    checkpoints,
+    fired,
+    now,
+    periodMs: 300_000,
+    deadline: now + 240_000,
+    clock: () => now,
+  };
+  // Crash after the first row fired and was marked, before the page ends:
+  // no cursor saved, so the resume re-reads the page from the start.
+  let crashes = 1;
+  await assert.rejects(
+    sweepFormSchedules({
+      ...base,
+      fire: async (_s: FormScheduleSpec, row: Record<string, unknown>) => {
+        if (row.Name === 'second' && crashes-- > 0) throw new Error('crash');
+        hits.push(String(row.Name));
+      },
+    }),
+    /crash/,
+  );
+  assert.deepEqual(hits, ['first']);
+  const resumed = await sweepFormSchedules({
+    ...base,
+    fire: async (_s, row) => void hits.push(String(row.Name)),
+  });
+  assert.equal(resumed.done, true);
+  assert.deepEqual(hits, ['first', 'second', 'third'], 'the fired row is not refired');
+  assert.deepEqual(fired.saved.get(`${due.name}|1000`), [at('2026-10-09T09:00:00Z')]);
+  assert.equal(fired.saved.size, 3);
+});
+
+test('a repeat fires the next occurrence but never a marked one', async () => {
+  const daily: FormScheduleSpec = { ...due, offset: { amount: 0, unit: 'days' }, repeat: 'daily' };
+  const row = { ROWID: 7, Due_Date: '2026-10-10' };
+  const fired = memoryFired();
+  assert.deepEqual(dueInstants(daily, row, at('2026-10-10T09:00:00Z'), at('2026-10-11T09:00:00Z')), [at('2026-10-11T09:00:00Z')]);
+  await fired.put(`${daily.name}|7`, [at('2026-10-11T09:00:00Z')]);
+  const { datastore } = mockDatastore({ Invoice: ['ROWID'] });
+  await datastore.insert('Invoice', [{ Due_Date: '2026-10-10', Name: 'due' }]);
+  const checkpoints = memoryCheckpoints();
+  const hits: string[] = [];
+  const run = (now: number) =>
+    sweepFormSchedules({
+      schedules: [daily],
+      query: datastore.query,
+      checkpoints,
+      fired,
+      now,
+      periodMs: 300_000,
+      deadline: now + 240_000,
+      clock: () => now,
+      fire: async (_s, r) => void hits.push(String(r.Name)),
+    });
+  await run(at('2026-10-10T09:02:00Z'));
+  assert.deepEqual(hits, ['due']);
+  await run(at('2026-10-10T09:07:00Z'));
+  assert.deepEqual(hits, ['due'], 'the same occurrence is marked, not refired');
+  await run(at('2026-10-11T09:02:00Z'));
+  assert.deepEqual(hits, ['due', 'due'], 'the next daily occurrence fires once');
+  await run(at('2026-10-11T09:07:00Z'));
+  assert.deepEqual(hits, ['due', 'due'], 'and is marked in turn');
+});
+
+test('datastoreFiredMarks inserts once, then updates the same row under a fired| key', async () => {
+  const { datastore, tables } = mockDatastore({});
+  const marks = datastoreFiredMarks(datastore, 'C2CJobCheckpoint');
+  assert.equal(await marks.get('c2c_X|9'), undefined);
+  await marks.put('c2c_X|9', [1, 2]);
+  await marks.put('c2c_X|9', [1, 2, 3]);
+  assert.equal(tables.get('C2CJobCheckpoint')!.length, 1);
+  assert.equal(tables.get('C2CJobCheckpoint')![0]!.Job_Key, 'fired|c2c_X|9');
+  assert.deepEqual(await marks.get('c2c_X|9'), [1, 2, 3]);
+  // A checkpoint and a mark on the same table do not collide.
+  const checkpoints = datastoreCheckpoints(datastore, 'C2CJobCheckpoint');
+  assert.equal(await checkpoints.get('c2c_X'), undefined);
+  await checkpoints.put('c2c_X', { watermark: 5 });
+  assert.equal(tables.get('C2CJobCheckpoint')!.length, 2);
+  assert.deepEqual(await marks.get('c2c_X|9'), [1, 2, 3]);
 });
 
 test('datastoreCheckpoints inserts once, then updates the same row', async () => {

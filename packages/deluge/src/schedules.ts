@@ -7,7 +7,7 @@
  * - A form schedule (`form = X`, `start = before 1 days from Due_Date at "09:00:00"`)
  *   becomes a sweep spec. One sweeper Job per app runs every
  *   {@link SWEEP_PERIOD_MINUTES} minutes and fires the rows that came due
- *   (shims/jobs.ts: ZCQL paging, checkpoints).
+ *   (shims/jobs.ts: ZCQL paging, checkpoints, per-record fired marks).
  *
  * Names are deterministic: `c2c_<schedule>` with every run of characters other
  * than [A-Za-z0-9] as `_` (Catalyst cron and job names reject hyphens), deduped
@@ -290,11 +290,11 @@ export function sweeperModule(opts: { app: App; banner: (lines: string[]) => str
   return `${opts.banner([
     'Form-schedule sweeper (Catalyst Job function).',
     `A Periodic cron runs it every ${SWEEP_PERIOD_MINUTES} minutes. It pages ZCQL and fires each row that came due.`,
-    `Checkpoints live in the ${CHECKPOINT_TABLE} table, so a retry or the next tick never refires a finished page.`,
+    `Checkpoints and per-record fired marks live in the ${CHECKPOINT_TABLE} table, so a retry, a crash mid-page or the next tick never refires a fired record.`,
     `A run stops after ${SWEEP_BUDGET_MINUTES} minutes, below the period, so two sweeps never overlap.`,
     'Dry run unless deploy mode is live (c2c-deploy.json or C2C_DEPLOY_MODE) and a datastore is configured.',
     'This file is not an HTTP route. No client can call it.',
-  ])}${JOB_LIVE_IMPORTS}import { createRuntime, datastoreCheckpoints, sweepFormSchedules } from "creator-to-catalyst/shims";
+  ])}${JOB_LIVE_IMPORTS}import { createRuntime, datastoreCheckpoints, datastoreFiredMarks, sweepFormSchedules } from "creator-to-catalyst/shims";
 ${imports}
 
 export const jobPool = ${JSON.stringify(jobPool(opts.app))};
@@ -317,6 +317,7 @@ export async function sweep(jobRequest, req) {
     schedules: specs,
     query: (form, where, limit, offset, orderBy) => datastore.query(form, where, limit, offset, orderBy),
     checkpoints: datastoreCheckpoints(datastore, checkpointTable),
+    fired: datastoreFiredMarks(datastore, checkpointTable),
     now,
     periodMs: ${SWEEP_PERIOD_MINUTES * 60_000},
     deadline: now + ${SWEEP_BUDGET_MINUTES * 60_000},

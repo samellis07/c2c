@@ -4,7 +4,7 @@ dc: in (from --dc)
 doctor: not-run (plan is offline; provision and deploy need a green doctor)
 budgets: ok
 
-tables: 8 (89 columns)  functions: 0  schedules: 1  reports: 7  pages: 1  roles: 4  custom APIs: 0
+tables: 9 (95 columns)  functions: 0  schedules: 2  reports: 7  pages: 1  roles: 4  custom APIs: 0
 mail: none
 integrations: none
 files: 5 Stratus-backed fields
@@ -36,9 +36,12 @@ project: new — provision/plan.json creates it with one IaC import (provision/i
 - [PASS] (columns) Booking__Gear_Refs: table Booking__Gear_Refs: 4/250 columns
 - [PASS] (unique-varchar) Booking__Gear_Refs: table Booking__Gear_Refs: 0/2 unique varchar columns
 - [PASS] (fk) Booking__Gear_Refs: table Booking__Gear_Refs: 2/15 foreign keys
+- [PASS] (columns) C2CJobCheckpoint: table C2CJobCheckpoint: 6/250 columns
+- [PASS] (unique-varchar) C2CJobCheckpoint: table C2CJobCheckpoint: 1/2 unique varchar columns
+- [PASS] (fk) C2CJobCheckpoint: table C2CJobCheckpoint: 0/15 foreign keys
 - [PASS] (select-width) Booking: widest generated read of Booking selects 20 columns per statement (docs 20, unverified limit 30; confirm with P-WIDTH)
 - [PASS] (joins) generated reads are single-table (0/4 joins); lookup display needs one fetch per lookup (confirm with P-JOIN)
-- [PASS] (org-tables) this app creates 8 Data Store table(s); an org-wide limit on table creates refuses a create with 403 API_LIMIT_REACHED "API Limit for table" — on that refusal stop creates, keep created tables, and retry after 30/60/120 minutes; a project delete may not free capacity at once
+- [PASS] (org-tables) this app creates 9 Data Store table(s); an org-wide limit on table creates refuses a create with 403 API_LIMIT_REACHED "API Limit for table" — on that refusal stop creates, keep created tables, and retry after 30/60/120 minutes; a project delete may not free capacity at once
 - [WARN] (dev-row-cap) the per-table row estimate needs source row counts; Development's per-table row cap is a hidden value (datastore.rows_per_table_dev, the value is not published) — a load refused with 403 API_LIMIT_REACHED "API Limit for row" is the signal → re-run c2c plan with --source-backup, --source-csv or --source-json so the budget lists the largest tables; rehearse a large load on a different environment before cutover
 - [WARN] (varchar-length) source string values are unmeasured; a REST insert silently truncates past a varchar column's length (measured ceiling 255) — validate before write; counts are JavaScript code points — whether Catalyst counts emoji, multibyte characters or CRLF line endings the same way is unverified → re-run c2c plan with --source-backup, --source-csv or --source-json so the budget measures source string values against varchar column lengths
 - [WARN] (dev-api-calls) the mover's API-call estimate needs source row counts; Development allows 200000 API calls per application (api.calls_dev, docs figure) → re-run c2c plan with --source-backup, --source-csv or --source-json so the estimate counts the mover reads and writes

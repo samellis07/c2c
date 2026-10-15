@@ -567,6 +567,30 @@ application "Kitchen_Sink_Studio"
 					}
 				}
 			}
+			Session_Reminder as "Session reminder"
+			{
+				type = schedule
+				form = Booking[Status == "Held"]
+				start = before 1 days from Session_Date at "09:00:00"
+				frequency = daily
+				end = Starts_At
+				time zone = "Asia/Kolkata"
+				on start
+				{
+					actions
+					{
+					on load
+					(
+						insert into Session_Log
+						[
+							Added_User = zoho.adminuser
+							Entry = "Session reminder: " + input.Title
+							Logged_On = zoho.currenttime
+						];
+					)
+					}
+				}
+			}
 		}
 	}
 
