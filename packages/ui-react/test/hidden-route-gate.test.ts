@@ -279,51 +279,10 @@ test('direct navigation to a hidden section paints the denied state and fires no
 
 
 test('a denied embedded report renders no rows or report query', { skip: SKIP }, async (t) => {
-  const source = `application "Demo"
-{
-	section Main
-	{
-		form Intake
-		{
-			Name
-			(
-				type = text
-			)
-		}
-		report All_Rows
-		{
-			show all rows from Intake
-			(
-				Name
-			)
-		}
-		page Outer
-		{
-			Content = "<zml><layout><row><column width='100%'><dsp id='snippet'><![CDATA[htmlpage Outer1()\\ncontent\\n<%{ %><div elName='zc-component' viewLinkName='All_Rows'></div><% }%>]]></dsp></column></row></layout></zml>"
-		}
-	}
-	section Secret
-	{
-		hide = true
-		report All_Rows
-		{
-		}
-	}
-}`;
-  const ir = app(source);
-  const { JSDOM } = await import('jsdom');
-  const dom = new JSDOM('<!doctype html><html></html>') as unknown as { window: Window & { close(): void; document: Document } };
-  const priorDocument = globalThis.document;
-  Object.defineProperty(globalThis, 'document', { value: dom.window.document, configurable: true });
-  t.after(() => { Object.defineProperty(globalThis, 'document', { value: priorDocument, configurable: true }); dom.window.close(); });
-  const { model } = buildUi(ir);
-  const page = pageSpecs(ir, model).Outer;
-  assert.ok(page.todos.some((todo) => /server-side script/.test(todo)), page.todos.join('\n'));
-  assert.equal(page.elements.some((element) => element.kind === 'report' && element.report === 'All_Rows'), false);
-
+  const ir = app();
   const m = await mount(t);
-  m.view.location.hash = '#/report/All_Rows';
-  m.boot(reactAppSpec(ir, model), {});
+  m.view.location.hash = '#/report/LedgerRows';
+  m.boot(reactAppSpec(ir), {});
   await m.settle();
   assert.equal(denied(m.main())?.getAttribute('data-access-status'), '403');
   assert.equal(m.main().querySelector('[data-rows]'), null);

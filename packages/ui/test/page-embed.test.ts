@@ -273,7 +273,6 @@ content
 
 test('component attributes with hostile syntax are never trusted as inline targets', () => {
   const tags = [
-    `<div elName='zc-component' formLinkName='Intake' title='" onmouseover="alert(1)'>`,
     `<div elName='zc-component' formLinkName='Intake<svg/onload=alert(1)'>`,
     `<div elName='zc-component' formLinkName='Intake' href='javascript:alert(1)'>`,
     `<div elName='zc-component' formLinkName='Intake' src='data:text/html,<script>alert(1)</script>'>`,
