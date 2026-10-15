@@ -13,7 +13,7 @@
  *
  * Exit 0 green, 1 a FAIL check or rejected/stale evidence, 2 usage or a missing evidence file, 6 Node/vendor integrity.
  */
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { basename } from 'node:path';
 import { runDoctorChecks, type DoctorContext } from './checks.js';
@@ -25,6 +25,7 @@ import { catalystRestCall } from '../../deploy/src/rest.js';
 import { c2cVersion, detectHost, workspaceDir, writeDoctorFile } from './report.js';
 import { cliStoreHooks, resolveScope, type ScopeHooks } from './scope.js';
 import { verifyVendorDir } from './vendor.js';
+import { readRegularFile } from './read-file.js';
 import { GATE_EXIT, carriedMcpRecord, doctorStamp, evaluateGate, gateRefusalMessage, type GateScope } from './gate.js';
 import type { CheckResult, DoctorFile, DoctorIo, SpawnResult } from './types.js';
 
@@ -267,13 +268,14 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks):
   }
   if (parsed.recordMcp !== undefined && parsed.operator && evidence === undefined) {
     origin = { source: 'operator' };
-    const st = statSync(parsed.recordMcp, { throwIfNoEntry: false });
-    if (!st?.isFile()) {
+    // One open classifies and reads the file: absent, a directory or a FIFO is "no such evidence file".
+    const read = readRegularFile(parsed.recordMcp);
+    if (read.kind !== 'file') {
       io.stderr(`c2c doctor: no such evidence file: ${parsed.recordMcp}\n`);
       return 2;
     }
     try {
-      evidence = parseEvidence(readFileSync(parsed.recordMcp, 'utf8'));
+      evidence = parseEvidence(read.bytes.toString('utf8'));
     } catch (err) {
       if (err instanceof EvidenceStale) {
         io.stderr(`c2c doctor: ${err.message}\n`);

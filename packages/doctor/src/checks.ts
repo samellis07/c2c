@@ -15,10 +15,10 @@
  *   D-F6 rows    plan.json holds no planned row counts and the Dev row cap is
  *                [UNVERIFIED]
  */
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { constants, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { parseFile, type App } from '../../core/src/index.js';
+import { parseBytes, parseFile, type App } from '../../core/src/index.js';
 import { nodeSatisfies, REACT_BUILD_NODE_RANGE } from '../../core/src/toolchain.js';
 import { generateSchema, limitValue, type SchemaTable } from '../../schema/src/index.js';
 import compat from '../data/compat.json' with { type: 'json' };
@@ -26,6 +26,8 @@ import { MCP_TOOLS_GUIDANCE, REQUIRED_MCP_TOOLS } from './required-tools.js';
 import { dcOfCreatorHost, dcOfMcpHost, normalizeDc, type ResolvedScopeValues } from './scope.js';
 import { missingRequiredTools, shortToolName, type McpEvidence } from './evidence.js';
 import { verifyVendorDir, MANIFEST_NAME } from './vendor.js';
+import { isAbsentError, isSymlinkRefusedError } from '../../core/src/fs-kind.js';
+import { readRegularFile, type FileRead } from './read-file.js';
 import type { CheckResult, DoctorIo, SpawnResult } from './types.js';
 import { invalidTokenOutput, readWithNewerToken } from '../../deploy/src/retry.js';
 import { FIDELITY_JSON, LOADER_REPORT, hasReportJson } from '../../deploy/src/csv.js';
@@ -186,7 +188,10 @@ function isSafeSkillPath(filePath: string, rootDir: string, home: string): boole
 
 function readSkill(path: string, kind: SkillHit['kind'], rootDir: string, home: string): SkillHit | undefined {
   if (!isSafeSkillPath(path, rootDir, home)) return undefined;
-  const fm = frontmatter(readFileSync(path, 'utf8'));
+  // O_NOFOLLOW keeps the "not a symlink" check on the descriptor that is read.
+  const read = readRegularFile(path, constants.O_NOFOLLOW);
+  if (read.kind !== 'file') return undefined;
+  const fm = frontmatter(read.bytes.toString('utf8'));
   return { path, kind, ...fm };
 }
 
@@ -443,16 +448,18 @@ function checkC5(ctx: DoctorContext): CheckResult {
 function checkD1(ctx: DoctorContext): { result: CheckResult; ir?: App } {
   const target = ctx.appPath;
   if (!target) return { result: skip('D-D1', 'no --app given; the Creator export was not checked') };
-  const st = statSync(target, { throwIfNoEntry: false });
   const fix =
     'in Creator: app → Settings → Export (.ds); if the export is blank, run /c2c:analyze on any earlier export to find the broken component, fix it in Creator, export again';
-  if (!st?.isFile() || st.size === 0 || readFileSync(target).every((b) => b <= 0x20)) {
+  // One open classifies and reads the export; the parse uses those bytes.
+  const read = readRegularFile(target);
+  if (read.kind !== 'file' || read.bytes.length === 0 || read.bytes.every((b) => b <= 0x20)) {
     return { result: fail('D-D1', `${basename(target)} is empty or not a .ds export`, fix) };
   }
+  const bytes = read.bytes;
   let ir: App;
   let errors: number;
   try {
-    const file = parseFile(target);
+    const file = parseBytes(target, bytes);
     ir = file.ir;
     errors = file.cst.errors.length;
   } catch (err) {
@@ -461,7 +468,7 @@ function checkD1(ctx: DoctorContext): { result: CheckResult; ir?: App } {
   if (!ir.name || ir.dialect === 'snippet' || errors > 0) {
     return { result: fail('D-D1', `${basename(target)} is empty or not a .ds export`, fix) };
   }
-  return { result: pass('D-D1', `export: ${basename(target)} ${Math.round(st.size / 1024)} KB, shape ${ir.shape}, parses`), ir };
+  return { result: pass('D-D1', `export: ${basename(target)} ${Math.round(bytes.length / 1024)} KB, shape ${ir.shape}, parses`), ir };
 }
 
 function checkD2(ctx: DoctorContext): CheckResult {
@@ -499,11 +506,19 @@ function checkD3(ctx: DoctorContext): CheckResult {
     }
     return skip('D-D3', 'no data source given; the plan does not migrate data yet');
   }
-  const st = statSync(dir, { throwIfNoEntry: false });
   const fix =
     'export each report from Creator as JSON (preferred — it always carries record ids) or as CSV with the ID column, put them in exports/<app>-data/, and write counts.json with each report\u2019s record count';
-  if (!st?.isDirectory()) return fail('D-D3', `--source-csv ${dir} is not a directory`, fix);
-  const names = readdirSync(dir).filter((name) => !name.startsWith('.'));
+  // The listing is the directory check: ENOENT/ENOTDIR (absent, a file, a FIFO) is "not a directory".
+  let listing: string[];
+  try {
+    listing = readdirSync(dir);
+  } catch (err) {
+    if (isAbsentError(err)) {
+      return fail('D-D3', `--source-csv ${dir} is not a directory`, fix);
+    }
+    throw err;
+  }
+  const names = listing.filter((name) => !name.startsWith('.'));
   const csvs = names.filter((name) => name.toLowerCase().endsWith('.csv'));
   // The loader reads a --source-csv dir holding JSON report exports as JSON
   // (hasReportJson, deploy/src/csv.ts); doctor accepts the same input. With no
@@ -575,9 +590,9 @@ function checkE(ctx: DoctorContext): CheckResult[] {
   if (!vendor) {
     out.push(skip('D-E3', 'not running from a vendored plugin; nothing to verify'));
   } else {
-    const verdict = verifyVendorDir(vendor);
+    const verdict = verifyVendorDir(vendor.dir);
     if (verdict.ok) {
-      out.push(pass('D-E3', `vendor ok (${vendorName(vendor)})`));
+      out.push(pass('D-E3', `vendor ok (${vendor.name})`));
     } else if (verdict.error) {
       out.push(fail('D-E3', `the c2c plugin files are not intact (${verdict.error})`, 'reinstall the plugin (/plugin uninstall c2c, then install again)'));
     } else {
@@ -585,7 +600,7 @@ function checkE(ctx: DoctorContext): CheckResult[] {
       out.push(fail('D-E3', `the c2c plugin files were modified (${n} file${n === 1 ? '' : 's'} differ)`, 'reinstall the plugin (/plugin uninstall c2c, then install again)'));
     }
   }
-  const pluginRoot = vendor ? dirname(dirname(vendor)) : undefined;
+  const pluginRoot = vendor ? dirname(dirname(vendor.dir)) : undefined;
   const cwd = ctx.workspace;
   if (pluginRoot && (cwd === pluginRoot || cwd.startsWith(pluginRoot + sep))) {
     out.push(fail('D-E4', 'run c2c from your own workspace folder, not from the plugin folder', null));
@@ -604,24 +619,38 @@ function checkE(ctx: DoctorContext): CheckResult[] {
   return out;
 }
 
-/** Walk up from this module for a vendor root (MANIFEST.sha256 + VERSION). */
-function findVendorRoot(): string | undefined {
-  let dir = dirname(new URL(import.meta.url).pathname);
+/**
+ * Whether `path` is present, by one read rather than an existsSync check: any
+ * entry but an absent one (ENOENT/ENOTDIR) or a symlink loop counts, as with
+ * existsSync. A regular file's text is kept.
+ */
+function presentEntry(path: string): { present: boolean; text?: string } {
+  let read: FileRead;
+  try {
+    read = readRegularFile(path);
+  } catch (err) {
+    return { present: !isSymlinkRefusedError(err) };
+  }
+  if (read.kind === 'missing') return { present: false };
+  return read.kind === 'file' ? { present: true, text: read.bytes.toString('utf8') } : { present: true };
+}
+
+/**
+ * Walk up from this module for a vendor root (MANIFEST.sha256 + VERSION). The
+ * name is read from that same VERSION read; an unreadable VERSION names 'c2c'.
+ */
+export function findVendorRoot(start = dirname(new URL(import.meta.url).pathname)): { dir: string; name: string } | undefined {
+  let dir = start;
   for (let i = 0; i < 6; i++) {
-    if (existsSync(join(dir, MANIFEST_NAME)) && existsSync(join(dir, 'VERSION'))) return dir;
+    if (presentEntry(join(dir, MANIFEST_NAME)).present) {
+      const version = presentEntry(join(dir, 'VERSION'));
+      if (version.present) return { dir, name: version.text === undefined ? 'c2c' : `c2c ${version.text.trim()}` };
+    }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   return undefined;
-}
-
-function vendorName(dir: string): string {
-  try {
-    return `c2c ${readFileSync(join(dir, 'VERSION'), 'utf8').trim()}`;
-  } catch {
-    return 'c2c';
-  }
 }
 
 // ---------- D-R*: the React build prerequisites ----------
