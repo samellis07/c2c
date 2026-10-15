@@ -4676,3 +4676,47 @@ test('toText is toString without a format, formats a known date-time, and leaves
     assert.match(t.server, /shim\.todo\(ctx, "method:toText"\)/, src);
   }
 });
+
+test('for each over a bare form with sort by or range iterates every record in order', () => {
+  const sorted = translate('s = ""; for each r in Orders sort by Total desc { s = s + r.Name; }');
+  assert.deepEqual(sorted.todos, []);
+  assert.match(sorted.server, /shim\.datastore\.query\(ctx, "Orders", \{ op: "true" \}, \{ sort: \{ field: "Total", dir: "desc" \} \}\)/);
+  assert.doesNotMatch(sorted.server, /task:sort/);
+
+  const ranged = translate('s = ""; for each r in Orders sort by Total range from 1 to 3 { s = s + r.Name; }');
+  assert.deepEqual(ranged.todos, []);
+  assert.match(ranged.server, /\{ sort: \{ field: "Total" \}, range: \{ from: 1, to: 3 \} \}/);
+
+  const rangeOnly = translate('s = ""; for each r in Orders range from 2 to 4 { s = s + r.Name; }');
+  assert.deepEqual(rangeOnly.todos, []);
+  assert.match(rangeOnly.server, /shim\.datastore\.query\(ctx, "Orders", \{ op: "true" \}, \{ range: \{ from: 2, to: 4 \} \}\)/);
+
+  // A bracketed fetch keeps its criteria.
+  const bracketed = translate('s = ""; for each r in Orders[Total > 1] sort by Total { s = s + r.Name; }');
+  assert.match(bracketed.server, /\{ op: ">", field: "Total", value: 1 \}, \{ sort: \{ field: "Total" \} \}/);
+
+  // A list variable is not a form: `sort` after it stays an unknown task.
+  const list = translate('l = {3, 1}; for each v in l sort by v { info v; }');
+  assert.doesNotMatch(list.server + list.client, /datastore\.query/);
+});
+
+test('a bare-form loop range is a 1-based, inclusive record window', async () => {
+  // https://www.zoho.com/deluge/help/fetch-records/fetch-collection-records.html
+  // `range from 2 to 4` is the second through the fourth record; `0 to 2` and `1 to 3` are the first three.
+  const names = ['A', 'B', 'C', 'D', 'E'];
+  const rows = names.map((Name, index) => ({ ROWID: String(index + 1), Name }));
+  const runtime = createRuntime({
+    dryRun: false,
+    appTimeZone: 'UTC',
+    datastore: { query: async (_form: string, _where: string, limit: number, offset = 0) => rows.slice(offset, offset + limit) },
+  });
+  const run = async (from: number, to: number) => {
+    const t = translate(`s = ""; for each r in Orders range from ${from} to ${to} { s = s + r.Name; } return s;`);
+    const fn = new Function('shim', 'ctx', `return (async () => {\n${t.server}\n})();`) as (...a: unknown[]) => Promise<unknown>;
+    return fn(runtime.shim, runtime.context({}));
+  };
+  assert.equal(await run(2, 4), 'BCD');
+  assert.equal(await run(1, 3), 'ABC');
+  assert.equal(await run(0, 2), 'ABC');
+  assert.equal(await run(5, 5), 'E');
+});
