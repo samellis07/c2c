@@ -24,6 +24,8 @@ import { lex } from '../../deluge/src/lexer.js';
 import { parse } from '../../deluge/src/parser.js';
 import type { Expr, Stmt } from '../../deluge/src/ast.js';
 import { translateInApp } from '../../deluge/src/generate.js';
+import { reportCriteria } from '../../deluge/src/translate.js';
+import { criteriaHasRelative, criteriaHasTodo } from '../../shims/src/criteria.js';
 import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, sanitizeSnippet } from './pages.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { c2cUrlFunctionSource } from './url-policy.js';
@@ -1409,18 +1411,25 @@ export const EXECUTE_FUNCTION_BUTTON = 'ZML ExecuteFunction button';
  * URL's row id is still untrusted: the route uses the form's record endpoint,
  * which applies authorizeRead to that exact ROWID before returning fields.
  */
-export function rewriteRecordSummaryFrames(template: string): string {
+export function rewriteRecordSummaryFrames(template: string, app?: App): string {
   return String(template ?? '').replace(/<iframe\b((?:"[^"]*"|'[^']*'|[^>])*)>([\s\S]*?)<\/iframe\s*>/gi, (whole, attrs: string, inner: string) => {
     const src = /\bsrc\s*=\s*(["'])([\s\S]*?)\1/i.exec(attrs);
     if (!src) return whole;
     const match = /^<%=\s*zoho\.appuri\s*%>record-summary\/([A-Za-z_]\w*)\/<%=([\s\S]+?)%>$/i.exec(src[2]);
     if (!match) return whole;
-    const form = match[1];
+    const target = match[1];
+    const report = app?.reports.find((item) => item.name === target);
+    const form = report?.form ?? target;
+    if (app && (!app.forms.some((item) => item.name === form) || (!report && !app.forms.some((item) => item.name === target)))) return whole;
+    if (report) {
+      const criteria = reportCriteria(report.criteria?.trim() || 'true');
+      if (criteriaHasTodo(criteria) || criteriaHasRelative(criteria)) return whole;
+    }
     const idExpr = match[2].trim();
-    const read = new RegExp(`^${form}\\s*\\[[\\s\\S]+\\]\\s*\\.\\s*ID$`, 'i').test(idExpr);
+    const read = new RegExp(`^${form}\\s*\\[[^\\[\\]]+\\]\\s*\\.\\s*ID$`, 'i').test(idExpr);
     const param = /^input\.[A-Za-z_]\w*$/.test(idExpr);
     if (!read && !param) return whole;
-    const routed = `#/record/${form}/<%=${idExpr}%>`;
+    const routed = report ? `#/report/${report.name}/row/<%=${idExpr}%>` : `#/record/${form}/<%=${idExpr}%>`;
     const nextAttrs = attrs.slice(0, src.index) + `src=${src[1]}${routed}${src[1]}` + attrs.slice(src.index + src[0].length);
     const anchorAttrs = nextAttrs.replace(/\bsrc\s*=/i, 'href=');
     const label = inner.trim() || 'View record summary';
@@ -1519,7 +1528,7 @@ export function compileHtmlpage(
 ): HtmlpageCompiled {
   const fail = (reason: string): HtmlpageCompiled => ({ ok: false, reason });
   const head = splitTemplate(decoded);
-  head.template = rewriteRecordSummaryFrames(head.template);
+  head.template = rewriteRecordSummaryFrames(head.template, app);
   head.template = convertZmlSnippetToHtml(head.template);
   head.template = rewriteEmbedIframes(head.template, app);
   if (hasExecuteFunctionButton(head.template)) return fail(EXECUTE_FUNCTION_BUTTON);

@@ -6,14 +6,18 @@ import type { FormSpec } from '../types';
 type Row = Record<string, unknown>;
 type State = { status: 'loading' } | { status: 'ready'; row: Row } | { status: 'empty' } | { status: 'error'; code: number };
 
-function valueText(value: unknown): string {
+function valueText(value: unknown, field?: FormSpec['fields'][number]): string {
   if (value == null || value === '') return '–';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (Array.isArray(value)) return value.map(valueText).join(', ');
+  if (Array.isArray(value)) return value.map((item) => valueText(item, field)).join(', ');
   if (typeof value === 'object') {
     const obj = value as Record<string, unknown>;
     if (typeof obj.label === 'string') return obj.label;
-    return Object.values(obj).filter((item) => item != null && item !== '').map(valueText).join(', ') || '–';
+    if (field?.widget === 'subform') {
+      const visible = new Set((field.subfields ?? []).map((sub) => sub.name));
+      return Object.entries(obj).filter(([name]) => visible.has(name)).map(([, item]) => valueText(item)).filter(Boolean).join(', ') || '–';
+    }
+    return Object.values(obj).filter((item) => item != null && item !== '').map((item) => valueText(item)).join(', ') || '–';
   }
   return String(value);
 }
@@ -46,7 +50,7 @@ export function RecordSummary({ form, rowId }: { form: FormSpec; rowId?: string 
       {state.status === 'error' ? <Alert tone="danger" title={state.code === 403 ? 'This record is not available.' : 'This record could not be loaded.'} /> : null}
       {state.status === 'ready' ? (
         <table><tbody>{form.fields.filter((field) => Object.prototype.hasOwnProperty.call(state.row, field.name)).map((field) => (
-          <tr key={field.name}><th scope="row">{field.label || field.name}</th><td>{valueText(state.row[field.name])}</td></tr>
+          <tr key={field.name}><th scope="row">{field.label || field.name}</th><td>{valueText(state.row[field.name], field)}</td></tr>
         ))}</tbody></table>
       ) : null}
     </section>

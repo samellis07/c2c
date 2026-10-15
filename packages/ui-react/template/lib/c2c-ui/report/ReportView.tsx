@@ -483,7 +483,7 @@ function RecordDetail({ report, rowId }: { report: ReportSpec; rowId: string }) 
       setDetail({ state: 'error', status: 404 });
       return;
     }
-    api.post<{ record?: Row }>(report.recordEndpoint, { ROWID: rowId }).then(
+    api.post<{ record?: Row }>(report.recordEndpoint, { ROWID: rowId, REPORT: report.name }).then(
       (reply) => {
         if (!live) return;
         if (reply.ok && reply.body?.record && typeof reply.body.record === 'object') setDetail({ state: 'ready', record: reply.body.record });

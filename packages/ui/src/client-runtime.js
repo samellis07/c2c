@@ -1590,6 +1590,10 @@ export function renderRoute(appModel, route, doc) {
   }
   if (route.name === 'report') {
     const report = (appModel.reports || []).find((item) => item.name === route.id);
+    if (report && route.row && report.form) {
+      const form = (appModel.forms || []).find((item) => item.name === report.form);
+      return form ? `${renderReport(report)}<section class="record-summary" data-record-summary="${escapeHtml(form.name)}" data-record-report="${escapeHtml(report.name)}" data-record-id="${escapeHtml(route.row)}"><p>Loading record…</p></section>` : `<p class="todo">Unknown report form.</p>`;
+    }
     return report ? renderReport(report) : `<p class="todo">Unknown report.</p>`;
   }
   if (route.name === 'record') {
@@ -3954,7 +3958,11 @@ export function boot(appModel, doc) {
         if (filter) filter.addEventListener('change', () => loadLive(0));
       }
     }
-    if (route.name === 'record') loadRecordSummary(appModel, route, main, view);
+  if (route.name === 'record') loadRecordSummary(appModel, route, main, view);
+  else if (route.name === 'report' && route.row) {
+    const report = (appModel.reports || []).find((item) => item.name === route.id);
+    if (report && report.form) loadRecordSummary(appModel, { ...route, id: report.form, report: report.name }, main, view);
+  }
   };
   const paint = () => {
     if (!main) return Promise.resolve();
@@ -4225,7 +4233,7 @@ export function boot(appModel, doc) {
     if (!form || !section || !rowId || !form.recordEndpoint || typeof call !== 'function') return;
     const requestedHash = viewRef && viewRef.location ? viewRef.location.hash : '';
     apiCall(call, viewRef, form.recordEndpoint, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ROWID: rowId }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ROWID: rowId, ...(route.report ? { REPORT: route.report } : {}) }),
     }).then(async (res) => {
       if (viewRef && viewRef.location && viewRef.location.hash !== requestedHash) return;
       if (!res || res.status === 403) { section.innerHTML = '<p data-access-status="403">This record is not available.</p>'; return; }
@@ -4234,20 +4242,26 @@ export function boot(appModel, doc) {
       const body = await readJson(res);
       const row = body && body.record && typeof body.record === 'object' && !Array.isArray(body.record) ? body.record : null;
       if (!row) { section.innerHTML = '<p data-record-empty="">No record is available.</p>'; return; }
-      const fields = (form.fields || []).filter((field) => field && typeof field.name === 'string' && Object.prototype.hasOwnProperty.call(row, field.name));
-      const rows = fields.map((field) => `<tr><th scope="row">${escapeHtml(field.label || field.name)}</th><td>${escapeHtml(summaryValue(row[field.name]))}</td></tr>`).join('');
+      const report = route.report && (appModel.reports || []).find((item) => item.name === route.report);
+      const allowed = report ? new Set((report.columns || []).filter((column) => !column.action).map((column) => column.field)) : null;
+      const fields = (form.fields || []).filter((field) => field && typeof field.name === 'string' && (!allowed || allowed.has(field.name)) && Object.prototype.hasOwnProperty.call(row, field.name));
+      const rows = fields.map((field) => `<tr><th scope="row">${escapeHtml(field.label || field.name)}</th><td>${escapeHtml(summaryValue(row[field.name], field))}</td></tr>`).join('');
       section.innerHTML = `<table><tbody>${rows}</tbody></table>`;
     }).catch(() => {
       if (!viewRef || !viewRef.location || viewRef.location.hash === requestedHash) section.innerHTML = '<p data-record-error="">This record could not be loaded.</p>';
     });
   }
 
-  function summaryValue(value) {
+  function summaryValue(value, field) {
     if (value == null) return '';
     if (typeof value === 'object') {
-      if (Array.isArray(value)) return value.map(summaryValue).filter(Boolean).join(', ');
+      if (Array.isArray(value)) return value.map((item) => summaryValue(item, field)).filter(Boolean).join(', ');
       if (typeof value.label === 'string') return value.label;
-      return Object.values(value).map(summaryValue).filter(Boolean).join(', ');
+      if (field && field.widget === 'subform') {
+        const names = new Set((field.subfields || []).map((sub) => sub.name));
+        return Object.entries(value).filter(([name]) => names.has(name)).map(([, item]) => summaryValue(item)).filter(Boolean).join(', ');
+      }
+      return Object.values(value).map((item) => summaryValue(item)).filter(Boolean).join(', ');
     }
     return String(value);
   }

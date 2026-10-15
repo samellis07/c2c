@@ -159,11 +159,11 @@ test('addRole changes roles and no table or column', () => {
   assert.ok(delta.files.every((f) => f.path.startsWith('functions/') || f.path.startsWith('auth/')), JSON.stringify(delta.files));
 });
 
-test('addReportColumn touches the report handler and Slate model only', () => {
+test('addReportColumn updates report reads, record projection, and Slate model', () => {
   const { delta } = run(OPS[4]!.edits);
   assert.deepEqual(delta.columns, []);
   assert.ok(delta.files.length > 0);
-  assert.ok(delta.files.every((f) => f.path.startsWith('slate/') || f.path.includes('all-book-transactions')), JSON.stringify(delta.files));
+  assert.ok(delta.files.every((f) => f.path.startsWith('slate/') || f.path.includes('all-book-transactions') || f.path === 'functions/c2c_api/aio/book-transaction/record.mjs'), JSON.stringify(delta.files));
 });
 
 // ---------------------------------------------------------------------------
