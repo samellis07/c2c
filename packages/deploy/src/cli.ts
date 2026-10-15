@@ -756,7 +756,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
   const { target, rest } = targetOf(args);
   if (!target) {
     io.stderr(
-      'usage: c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address> --mail-sender-verified]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--subset-shims] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>]\n' +
+      'usage: c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address>]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--subset-shims] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>]\n' +
         '       c2c deploy <file|dir> --backfill-shadows [--confirm] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
         '       --source-* measures the Creator data so is_mandatory/is_unique are provisioned only where the records allow it\n' +
         '       org: --org, else c2c-deploy.json, else the project registry (--projects), else the Catalyst CLI login (active_org)\n' +
@@ -850,6 +850,10 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     const ui: DeployUi = uiFlag ?? deployConfig?.ui ?? 'react';
     const subsetShims = rest.includes('--subset-shims') || io.env.C2C_SUBSET_SHIMS === '1';
     const mailFrom = flag(rest, '--mail-from') ?? deployConfig?.mail?.from;
+    if (rest.includes('--mail-sender-verified')) {
+      io.stderr('c2c deploy: --mail-sender-verified is not taken as proof; pass --mail-from <address> only and verify the sender in Catalyst Mail\n');
+      return 1;
+    }
     // --mail-sender-verified / mail.verified records the owner's attestation
     // only: a sender counts as verified when the live Catalyst read-back lists
     // it VERIFIED. A confirmed deploy always reads back live and never falls
@@ -857,7 +861,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     // leaves the sender unverified, so the blocker refuses the deploy. Only a
     // dry run reads the persisted record, and only when it was observed
     // against the same project.
-    if (rest.includes('--mail-sender-verified') || deployConfig?.mail?.verified === true) {
+    if (deployConfig?.mail?.verified === true) {
       io.stderr('warning: --mail-sender-verified attests the sender only; verification still requires the live Catalyst read-back\n');
     }
     let mailVerified = false;
