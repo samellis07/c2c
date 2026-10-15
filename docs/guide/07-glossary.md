@@ -17,7 +17,7 @@ The words the AI will use, in plain language.
 | **Slate** | Catalyst's web-screen builder — your new app screens live here. |
 | **Data centre (DC)** | The region your Zoho account lives in (US, EU, India…). Everything must point at the same one. |
 | **Organisation (org)** | Your Zoho organisation account that owns the Catalyst project. |
-| **Development vs Production** | You migrate and test in Development; going live (Production) is a console click you do at cutover, after paying. |
+| **Development vs Production** | You migrate and test in Development; going live (Production) is console clicks you do at cutover — switching Production on, reviewing the difference, moving it over — after paying. |
 | **Admin invite** | The email that makes you the first administrator of the new app. |
 | **Authorised domain** | Your app's web address, registered so the browser lets the app and sign-in talk to each other. |
 | **Mail sender** | The "from" address your app sends mail as. Must be verified with a code (your step 5). |
