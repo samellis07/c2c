@@ -514,7 +514,7 @@ test('a table of 31 columns warns select-width, never fails: each generated read
   }
 });
 
-test('the columns budget warns over the unverified default and fails only over the raised cap', () => {
+test('the columns budget warns over the documented default and fails only over the raised cap', () => {
   const overhead = wideColumnCount(1) - 1;
   const app = wideApp(120 - overhead);
   const built = buildOfflinePlan(app, { dc: 'in', dcSource: '--dc', mail: false });
