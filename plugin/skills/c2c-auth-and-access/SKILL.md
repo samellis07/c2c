@@ -78,3 +78,5 @@ Every generated API call needs a signed-in Catalyst app user with role App Admin
 - Approval of the role/permission matrix.
 - "Please confirm the Catalyst invite email and sign in at <App URL>; tell me when done."
 - For each console-only item: the exact clicks, then "done?".
+
+- **Slate auth token = the c2c_auth bridge, not the Web SDK on Slate.** `init.js` on `*.onslate.*` serves `api_domain:""`, so `generateAuthToken()` on a Slate page hangs (its `/baas` calls 404). Deployed apps set `C2C_AUTH_BRIDGE` in `c2c-config.js` and fetch the token by a top-level trip to `<fn-host>/server/c2c_auth/bridge`, returned in a `#c2c_auth=` fragment bound to a tab-generated `state`. Public symptom text: "generateAuthToken hangs forever" / every API call `401 NO_ACCESS`. Live-verified on project 79208000000024001 (2026-10-15); gateway acceptance of the functions JWT is proven when the smoke POST logs 200.
