@@ -16,7 +16,7 @@ import { matchReadBack, provisionCli, redactEvidence, redactString, type Provisi
 import { PLAN_CLI_PATH, PLAN_EMITTED_CLI_PATHS, PLAN_STEP_TOOLS, STEP_KINDS, planCli } from '../src/offline-plan.js';
 import { resolveProvisionScope } from '../src/provision-config.js';
 import { assertDeployRedirectUrl, IAC_DEPLOY_REDIRECT_URL, zipStore } from '../src/iac-import.js';
-import { loadApp, type Io } from '../src/cli.js';
+import { type Io } from '../src/cli.js';
 import type { RestCall, RestResult } from '../src/tables.js';
 import { FIRST_USE_GATES, type FirstUseGateId } from '../src/first-use.js';
 
@@ -3589,7 +3589,7 @@ test('a failed import poll keeps the posted import recorded — the re-run re-po
 test('a failed deploy confirm keeps the posted import recorded — the re-run re-issues it from Staged', async () => {
   const out = writeImportPlan();
   // Run 1: the POST succeeds, the deploy confirm 503s.
-  const down: Io['fetch'] = async (url, init) => {
+  const down: Io['fetch'] = async (_url, init) => {
     if (init?.method === 'POST') return importRes(200, { status: 'success', data: { id: 'imp-1', status: 'Staged' } });
     return importRes(503, { status: 'failure', message: 'please try after some time' });
   };

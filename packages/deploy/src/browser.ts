@@ -248,7 +248,6 @@ export async function openOnOrigin(
 
 // ---- DevTools protocol over a hand-rolled websocket ------------------------
 
-const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 /** A hostile endpoint cannot grow these buffers past the caps. */
 const MAX_HTTP_HEAD = 64 * 1024;
 const MAX_WS_MESSAGE = 8 * 1024 * 1024;

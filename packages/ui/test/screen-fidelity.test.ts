@@ -62,7 +62,7 @@ interface DocEl {
   querySelectorAll(selector: string): ArrayLike<DocEl>;
 }
 
-function shell(hash: string): string {
+function shell(_hash: string): string {
   return `<!doctype html><html><body>
 <header class="topbar"><button id="menu-toggle" type="button">Menu</button><strong id="app-title"></strong><button id="install" hidden type="button">Install app</button></header>
 <div class="shell"><nav id="nav"></nav><main id="main"></main></div>

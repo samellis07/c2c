@@ -216,7 +216,7 @@ test('a signed-out visitor sees a clear sign-in prompt and the SDK gets the box'
   (globalThis as { CSS?: unknown }).CSS ??= { escape: (s: string) => s };
   const runtime = await loadRuntime();
   const signIns: [string, unknown][] = [];
-  const { win, doc } = authDom({
+  const { doc } = authDom({
     isUserAuthenticated: async () => {
       throw new Error('no session');
     },
@@ -370,7 +370,7 @@ test('a report route fills its table body with the rows the query returns', asyn
     { Item_Name: 'Widget Alpha', Is_Urgent: 'Yes' },
     { Item_Name: 'Widget Beta', Is_Urgent: '' },
   ];
-  const { win, doc, calls } = setup('#/report/R', { submitOk: true, rows });
+  const { doc, calls } = setup('#/report/R', { submitOk: true, rows });
   await runtime.boot(model, doc);
   await settle();
   const trs = Array.from(doc.querySelectorAll('[data-rows] tbody tr'));

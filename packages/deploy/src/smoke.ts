@@ -360,7 +360,7 @@ function routeSkipReason(path: string): string {
  * field plus its read-back, a query per report, skip lines for every other
  * generated route, then deletes in reverse creation order.
  */
-export function planSmoke(app: App, inputs: SmokeInputs): SmokeStep[] {
+export function planSmoke(_app: App, inputs: SmokeInputs): SmokeStep[] {
   const { routes, model, schema } = inputs;
   const tableByForm = new Map<string, string>();
   const renamedByForm = new Map<string, Record<string, string>>();

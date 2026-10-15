@@ -897,7 +897,7 @@ test('readStoreRows skips a row a shifted page boundary serves twice', async () 
   const sql: string[] = [];
   // A store whose ordering shifts mid-read can serve the row before a page
   // boundary again at the head of the next page.
-  const fetch: FetchLike = async (url, init) => {
+  const fetch: FetchLike = async (_url, init) => {
     const query = (JSON.parse(init?.body ?? '{}') as { query: string }).query;
     sql.push(query);
     const limit = /LIMIT (\d+), (\d+)/.exec(query)!;

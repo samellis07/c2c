@@ -5,7 +5,7 @@
  * It reads DOM state only — never cookies, storage, or tokens.
  */
 import assert from 'node:assert/strict';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -37,13 +37,6 @@ const DS = `application "Widget"
 }
 `;
 
-interface EvalResults {
-  state: () => string;
-  lines: () => string[];
-  json: () => string;
-  opened: string[];
-  closed: boolean;
-}
 
 /** A scripted page: each evaluate() call is matched by expression fragment. `redirectTo` reports another origin on every poll. */
 function fakeBrowser(script: { states: string[]; lines?: string[]; json?: unknown; redirectTo?: string }): SmokeBrowser & { opened: string[]; closed: boolean } {

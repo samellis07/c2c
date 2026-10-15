@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import vm from 'node:vm';
 import { inflateSync } from 'node:zlib';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
-import { buildSlate, generateUi, pwaServiceWorkerSource, serviceWorker, type OutFile } from '../src/index.js';
+import { buildSlate, generateUi, pwaServiceWorkerSource, serviceWorker } from '../src/index.js';
 
 function appOf(name: string, extra = ''): App {
   return deriveIr(

@@ -2056,7 +2056,7 @@ test('smoke redacts auth material from a thrown step error', async () => {
   const cookieValue = 'canary-ck-8b3d5f02aa';
   const cookie = `sesscan=${cookieValue}`;
   // A transport failure whose message embeds the request detail.
-  cap.io.fetch = async (url, init) => {
+  cap.io.fetch = async (_url, init) => {
     const headers = init?.headers ?? {};
     throw new Error(`upstream rejected authorization=${headers.authorization ?? ''} cookie=${headers.cookie ?? ''}`);
   };

@@ -11,7 +11,7 @@
  * file and not a `_run/` driver file.
  */
 
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { decode, parseFileWithSidecars, type App } from '../../core/src/index.js';

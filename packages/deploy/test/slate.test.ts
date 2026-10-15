@@ -146,7 +146,6 @@ test('a different name, a missing app and a refused list each carry a one-line n
 });
 
 test('the list call retries a transient 500 like every other read', async () => {
-  const base = '/slate/v1/project/1001';
   const calls: RestCall[] = [];
   let n = 0;
   const rest: RestFn = async (call) => {

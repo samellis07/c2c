@@ -195,7 +195,7 @@ test('the record view shows a Print button and the sheet fills from the record',
   win.print = () => {
     printed++;
   };
-  win.fetch = (async (url: string, init: { body: string }) => {
+  win.fetch = (async (_url: string, init: { body: string }) => {
     const body = JSON.parse(init.body) as Record<string, unknown>;
     if (body.op === 'query') return { ok: true, status: 200, json: async () => ({ rows }) };
     if (body.ROWID) return { ok: true, status: 200, json: async () => ({ record: rows[0] }) };

@@ -159,7 +159,7 @@ interface PageWin {
   location: { hash: string };
 }
 
-function shell(hash: string): string {
+function shell(_hash: string): string {
   return `<!doctype html><body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="topbar"><button id="menu-toggle" type="button">Menu</button><strong id="app-title"></strong></header>

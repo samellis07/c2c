@@ -14,7 +14,7 @@
  * Nothing here deploys or contacts Catalyst.
  */
 
-import { flowStatusColumn, formLink, isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleBranchWorkflow, isScheduleWorkflow, isUsersField, staticDefault, unquote, type App, type Field, type FieldRule, type Form, type FunctionDef, type ModulePermission, type Profile, type Property, type PropertyBlock, type RawDeluge, type Report, type Translation, type Workflow } from '../../core/src/ir.js';
+import { flowStatusColumn, formLink, isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleBranchWorkflow, isScheduleWorkflow, isUsersField, staticDefault, unquote, type App, type Field, type Form, type FunctionDef, type ModulePermission, type Profile, type Property, type PropertyBlock, type RawDeluge, type Report, type Translation, type Workflow } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { fieldTypeRow } from '../../schema/src/mapping.js';
@@ -842,7 +842,7 @@ function emitApproval(
       if (!level.approvers.some((item) => item.key === p.key && item.value === p.value)) level.approvers.push(p);
     }
   }
-  const translate = (deluge: RawDeluge, w: Workflow, name: string): string => {
+  const translate = (deluge: RawDeluge, w: Workflow, _name: string): string => {
     const translated = translateInApp(app, deluge.text, approvalScriptOptions());
     addStats(stats, translated.stats);
     todos.push(...shift(translated.todos, deluge));
@@ -2226,15 +2226,6 @@ function classifyRecordReceiver(code: string, base = 0, valueRoots?: number[]): 
   return 'none';
 }
 
-/**
- * `shim.input.root(ctx)` or `ctx.old`, under any number of `shim.convert.toMap`
- * wraps, `shim.ifnull` wraps, parentheses, and top-level `||`, `&&`, or `if()` / `?:`
- * receivers, as long as all value arms evaluate to the record.
- * A mixed receiver like `ifnull(input, m)` (where `m` is not the record) returns false.
- */
-function recordRootReceiver(code: string): boolean {
-  return classifyRecordReceiver(code) === 'root';
-}
 
 /** `code` with comments blanked and every string's contents blanked in place, so offsets still line up. */
 function maskCommentsAndStrings(code: string): string {
