@@ -234,3 +234,65 @@ test('env dumps in child stderr are skipped while a benign line is preserved and
   });
 });
 
+test('percent-encoded keys (single, double %2563, uppercase hex, malformed %), escaped quotes in JSON values, and nested JSON objects never leak in REST or token errors', async () => {
+  const cases: { line: string; canaries: string[]; preserved?: RegExp }[] = [
+    {
+      line: 'credential diagnostic: %63redential=CANARY-URLENCODED-KEY',
+      canaries: ['CANARY-URLENCODED-KEY'],
+    },
+    {
+      line: 'credential diagnostic: {"password":"part\\"CANARY-JSON-ESCAPED-QUOTE"}',
+      canaries: ['CANARY-JSON-ESCAPED-QUOTE', 'part"'],
+    },
+    {
+      line: 'credential diagnostic: {"password":"part\\\\"CANARY-JSON-ESCAPED-QUOTE"}',
+      canaries: ['CANARY-JSON-ESCAPED-QUOTE'],
+    },
+    {
+      line: 'credential diagnostic: %2563redential=CANARY-DOUBLE-ENCODED-KEY',
+      canaries: ['CANARY-DOUBLE-ENCODED-KEY'],
+    },
+    {
+      line: 'credential diagnostic: %25%36%33redential=CANARY-SPLIT-DOUBLE-ENCODED',
+      canaries: ['CANARY-SPLIT-DOUBLE-ENCODED'],
+    },
+    {
+      line: 'credential diagnostic: %43REDENTIAL=CANARY-UPPER-HEX-KEY&%2543redential=CANARY-DOUBLE-UPPER-HEX',
+      canaries: ['CANARY-UPPER-HEX-KEY', 'CANARY-DOUBLE-UPPER-HEX'],
+    },
+    {
+      line: 'credential diagnostic: %ZZ%63redential=CANARY-MALFORMED-PERCENT%ZZ%',
+      canaries: ['CANARY-MALFORMED-PERCENT'],
+    },
+    {
+      line: 'credential diagnostic: {"outer":{"inner":{"password":"part\\"CANARY-NESTED-JSON","%63redential":"CANARY-NESTED-PCT","%2563redential":"CANARY-NESTED-DBL"},"credential":{"leaf":"CANARY-SECRET-SUBTREE"},"status_code":404}}',
+      canaries: ['CANARY-NESTED-JSON', 'CANARY-NESTED-PCT', 'CANARY-NESTED-DBL', 'CANARY-SECRET-SUBTREE'],
+      preserved: /"status_code":404/,
+    },
+    {
+      line: 'HTTP 401 GET /baas/v1/project/123: error_code=INVALID_TOKEN %65rror_code=INVALID_INPUT password="part\\"CANARY-KV-ESCAPED"',
+      canaries: ['CANARY-KV-ESCAPED'],
+      preserved: /HTTP 401 GET \/baas\/v1\/project\/123: error_code=INVALID_TOKEN error_code=INVALID_INPUT/,
+    },
+  ];
+
+  for (const { line, canaries, preserved } of cases) {
+    const env = fakeCatalyst(
+      `'use strict';\nrequire('fs').writeSync(2, ${JSON.stringify(line + '\n')});\nprocess.kill(process.pid, 'SIGKILL');\n`,
+      mkdtempSync(join(tmpdir(), 'c2c-r3-redact-')),
+    );
+    for (const call of [
+      () => catalystRestCall(env, ORG, PROJECT, { method: 'GET', path: `/baas/v1/project/${PROJECT}` }),
+      () => readCliAccessToken(env, ORG, PROJECT),
+    ]) {
+      await assert.rejects(call, (err: Error) => {
+        for (const canary of canaries) {
+          assert.ok(!err.message.includes(canary), `stderr secret leaked (${canary}) for line ${line}: ${err.message}`);
+        }
+        if (preserved) assert.match(err.message, preserved);
+        return true;
+      });
+    }
+  }
+});
+
