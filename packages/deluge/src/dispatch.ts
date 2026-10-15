@@ -471,7 +471,15 @@ export const FILE_METHODS = new Set([
   'setFilePassword',
 ]);
 
-/** File methods with no equivalent on the stored key. Emitted as `file:<name>`. */
+/**
+ * File methods with no equivalent on the stored key. Emitted as `file:<name>`.
+ * Zoho documents getFileContent/getFileSize/getFileType for invokeUrl FILE
+ * values, while Creator upload fields use the separate `content` attribute.
+ * Creator file fields here are Stratus keys: bytes, byte length and MIME type
+ * are not present in the key or retained by the invokeUrl response adapter.
+ * Keep these as counted manual steps until a byte/metadata-aware file value is
+ * available; guessing from a filename would not implement the documented API.
+ */
 export const FILE_MANUAL = new Set([
   'getFileSize',
   'getFileType',
