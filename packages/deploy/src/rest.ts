@@ -448,11 +448,13 @@ const STDERR_KEEP = 4096;
 const STDERR_EXCERPT_MAX = 200;
 
 export const URL_RE = /\b[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s"'<>)\]}]+/g;
-export const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+// Bounded runs: an unanchored `+@` pattern backtracks over the whole tail at
+// every offset, which is quadratic on megabyte inputs.
+export const EMAIL_RE = /[A-Za-z0-9._%+-]{1,64}@(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,24}/g;
 /** xxx.yyy.zzz with base64url segments — a JWT. */
-export const JWT_RE = /\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g;
+export const JWT_RE = /\b[A-Za-z0-9_-]{8,2048}\.[A-Za-z0-9_-]{4,2048}\.[A-Za-z0-9_-]{4,2048}/g;
 export const AUTH_RE = /\b(?:Basic|Bearer|Zoho-oauthtoken)\s+[^\s"'<>)\]},;]+/gi;
-export const ZOHO_TOKEN_RE = /\b[0-9]{3,}\.[0-9a-zA-Z]{8,}[0-9a-zA-Z._-]*/g;
+export const ZOHO_TOKEN_RE = /\b[0-9]{3,16}\.[0-9a-zA-Z]{8,512}[0-9a-zA-Z._-]{0,512}/g;
 /**
  * A secret-named parameter value. The key may sit at the start of the text or
  * after whitespace, `?`, `&`, `#`, `;`, `,`, `:`, a quote, `=`, `+`, or a markup /
@@ -461,10 +463,10 @@ export const ZOHO_TOKEN_RE = /\b[0-9]{3,}\.[0-9a-zA-Z]{8,}[0-9a-zA-Z._-]*/g;
  * quotes (with backslash-escaped quotes inside): `client_secret="…"`, `"refresh_token=…"`.
  */
 export const PARAM_SECRET_RE =
-  /((?:^|["'=+?&#\s;,:<>)\]}]))((?:[^=\s&"'<>)\]}:]*)(?:secret|token|password|passwd|pwd|credentials?|authorization|auth|api[-_]?key|session|cookie|private[-_]?key|access[-_]?key|signature|key|sig|code|pw|otp|bearer|jwt)(?:[^=\s&"'<>)\]}:]*))(["']?)(\s*[:=]\s*)("(?:\\+["']|\\.|[^"\\])*"?|'(?:\\+["']|\\.|[^'\\])*'?|(?:\\+["']|[^&\s"'<>)\]},])+)/gi;
+  /((?:^|["'=+?&#\s;,:<>)\]}]))((?:[^=\s&"'<>)\]}:]{0,128})(?:secret|token|password|passwd|pwd|credentials?|authorization|auth|api[-_]?key|session|cookie|private[-_]?key|access[-_]?key|signature|key|sig|code|pw|otp|bearer|jwt)(?:[^=\s&"'<>)\]}:]{0,128}))(["']?)(\s*[:=]\s*)("(?:\\+["']|\\.|[^"\\])*"?|'(?:\\+["']|\\.|[^'\\])*'?|(?:\\+["']|[^&\s"'<>)\]},])+)/gi;
 /** Long hex, base64, or token-shaped credential runs. */
 export const HEX_B64_TOKEN_RE =
-  /\b(?:[A-Za-z0-9+/]{16,}={1,2}|(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{16,}|(?=[A-Za-z0-9._-]*[0-9])(?=[A-Za-z0-9._-]*[A-Za-z])[A-Za-z0-9._-]{20,}|(?=[A-Za-z0-9._-]*[0-9])[A-Za-z0-9._-]*(?:token|secret|passwd|password|apikey|oauth)[A-Za-z0-9._-]*)/gi;
+  /\b(?:[A-Za-z0-9+/]{16,512}={1,2}|(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{16,512}|(?=[A-Za-z0-9._-]*[0-9])(?=[A-Za-z0-9._-]*[A-Za-z])[A-Za-z0-9._-]{20,1024}|(?=[A-Za-z0-9._-]*[0-9])[A-Za-z0-9._-]{0,512}(?:token|secret|passwd|password|apikey|oauth)[A-Za-z0-9._-]{0,512})/gi;
 /** Diagnostic codes a caller reads to act on a failure — not secrets. */
 export const SAFE_CODE_KEY_RE = /^(?:error|status|exit|http|reason)[-_]?code$/i;
 const SECRET_KEY_TOKEN_RE =
@@ -560,23 +562,32 @@ function redactJsonNode(node: unknown, depth: number): { value: unknown; changed
   return { value: node, changed: false };
 }
 
+/** A single JSON fragment may span at most this many characters. */
+const JSON_FRAGMENT_MAX = 256 * 1024;
+/** Total characters the fragment scanner may inspect per call, across all attempts. */
+const JSON_SCAN_BUDGET = 2 * 1024 * 1024;
+
 /**
  * Scan for balanced `{...}` or `[...]` JSON fragments and redact secret keys
  * recursively via `JSON.parse` before falling back to key=value regexes.
+ * Fragment size, attempt count, and total scanned characters are all capped so
+ * the pass stays linear on inputs full of unbalanced openers.
  */
 function redactJsonFragments(input: string, depth: number): string {
   if (depth > 3 || (!input.includes('{') && !input.includes('['))) return input;
   let out = '';
   let cursor = 0;
   let attempts = 0;
-  for (let i = 0; i < input.length; i++) {
+  let scanBudget = JSON_SCAN_BUDGET;
+  for (let i = 0; i < input.length && scanBudget > 0; i++) {
     const startChar = input[i];
     if (startChar !== '{' && startChar !== '[') continue;
     if (++attempts > 64) break;
     const stack: string[] = [startChar === '{' ? '}' : ']'];
     let inString = false;
     let matchedEnd = -1;
-    for (let j = i + 1; j < input.length; j++) {
+    const limit = Math.min(input.length, i + 1 + JSON_FRAGMENT_MAX);
+    for (let j = i + 1; j < limit && scanBudget-- > 0; j++) {
       const ch = input[j];
       if (inString) {
         if (ch === '\\') {
@@ -636,15 +647,18 @@ function redactStringInner(value: string, depth: number): string {
       .replace(AUTH_RE, '<auth>'),
   );
   const stage2 = decodePercentBounded(stage1, false);
-  return redactParamSecrets(
+  let out = redactParamSecrets(
     redactJsonFragments(stage2, depth)
       .replace(URL_RE, '<url>')
       .replace(AUTH_RE, '<auth>'),
-  )
-    .replace(JWT_RE, '<token>')
-    .replace(EMAIL_RE, '<email>')
-    .replace(ZOHO_TOKEN_RE, '<token>')
-    .replace(HEX_B64_TOKEN_RE, '<token>');
+  ).replace(HEX_B64_TOKEN_RE, '<token>');
+  // These patterns all require a literal `.` or `@`; skip the scan when the
+  // trigger character is absent so plain text stays a single linear pass.
+  if (out.includes('.')) {
+    out = out.replace(JWT_RE, '<token>').replace(ZOHO_TOKEN_RE, '<token>');
+  }
+  if (out.includes('@')) out = out.replace(EMAIL_RE, '<email>');
+  return out;
 }
 
 export function redactString(value: string): string {

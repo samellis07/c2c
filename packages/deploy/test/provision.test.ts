@@ -2778,6 +2778,45 @@ test('redactString masks a secret parameter written after a colon', () => {
   assert.equal(redactString('status_code: 404'), 'status_code: 404');
 });
 
+test('redactString masks adversarial encodings: quad-%25 nesting, unbalanced JSON, \\u keys, array objects, Bearer forms', () => {
+  for (const [raw, canaries] of [
+    ['diag %2525252563redential=CANARY-QUAD-ENCODED', ['CANARY-QUAD-ENCODED']],
+    ['diag {"token":"CANARY-UNBALANCED","a":{', ['CANARY-UNBALANCED']],
+    ['diag {"\\u0074oken":"CANARY-UNICODE-KEY"}', ['CANARY-UNICODE-KEY']],
+    ['diag \\u0074oken=CANARY-UNICODE-KEY-RAW', ['CANARY-UNICODE-KEY-RAW']],
+    ['diag {"items":[{"secret":"CANARY-IN-ARRAY"},{"auth":"CANARY-IN-ARRAY-2"}]}', ['CANARY-IN-ARRAY', 'CANARY-IN-ARRAY-2']],
+    ['diag Authorization: Bearer CANARY-HEADER-TOKEN tail', ['CANARY-HEADER-TOKEN']],
+    ['diag authorization=bearer%20CANARY-ENCODED-BEARER tail', ['CANARY-ENCODED-BEARER']],
+  ] as [string, string[]][]) {
+    const redacted = redactString(raw);
+    for (const canary of canaries) assert.ok(!redacted.includes(canary), `redactString leaks ${canary}: ${redacted}`);
+  }
+});
+
+test('redactString stays linear on 1 MiB inputs of hostile shapes', () => {
+  const mib = 1024 * 1024;
+  for (const [label, make] of [
+    ['plain text', (n: number) => 'x'.repeat(n)],
+    ['repeated %25', (n: number) => '%25'.repeat(Math.ceil(n / 3)).slice(0, n)],
+    ['open braces', (n: number) => '{'.repeat(n)],
+    ['key=value runs', (n: number) => 'k=v&'.repeat(Math.ceil(n / 4)).slice(0, n)],
+  ] as [string, (n: number) => string][]) {
+    const small = make(256 * 1024);
+    const large = make(mib);
+    const t0 = performance.now();
+    redactString(small);
+    const smallMs = performance.now() - t0;
+    const t1 = performance.now();
+    redactString(large);
+    const largeMs = performance.now() - t1;
+    assert.ok(largeMs < 1000, `${label}: 1 MiB redaction took ${largeMs.toFixed(0)}ms`);
+    assert.ok(
+      largeMs < Math.max(250, smallMs * 6),
+      `${label}: not linear — 256 KiB took ${smallMs.toFixed(0)}ms, 1 MiB took ${largeMs.toFixed(0)}ms`,
+    );
+  }
+});
+
 const LIST_TABLES = 'CatalystbyZoho_List_All_Tables';
 const LIST_ROLES = 'CatalystbyZoho_List_All_Roles';
 const LIST_JOBPOOLS = 'CatalystbyZoho_List_All_Jobpools';
