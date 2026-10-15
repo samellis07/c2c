@@ -404,6 +404,7 @@ test('generated handlers hand the request to the mail module', () => {
   const handler = bundle.files.find((file) => String(file.data).includes('shim.mail.send('));
   assert.ok(handler);
   assert.match(String(handler.data), /mail: \(message\) => c2cGuardedMail\(message, typeof req === "undefined" \? undefined : req\)/);
+  assert.match(String(handler.data), /mailGuarded: true/);
 });
 
 interface FakeCall {

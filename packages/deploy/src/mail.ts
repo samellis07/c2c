@@ -501,7 +501,7 @@ export async function c2cGuardedMail(message, req) {
 
 export function patchMail(source: string, importSpec: string): string {
   if (!source.includes('createRuntime(') || source.includes('c2cGuardedMail')) return source;
-  const patched = source.replaceAll('createRuntime({', 'createRuntime({ mail: (message) => c2cGuardedMail(message, typeof req === "undefined" ? undefined : req), ');
+  const patched = source.replaceAll('createRuntime({', 'createRuntime({ mail: (message) => c2cGuardedMail(message, typeof req === "undefined" ? undefined : req), mailGuarded: true, ');
   const line = `import { c2cGuardedMail } from ${JSON.stringify(importSpec)};\n`;
   const at = patched.indexOf('import ');
   if (at < 0) return line + patched;
