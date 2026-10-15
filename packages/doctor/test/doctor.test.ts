@@ -818,10 +818,36 @@ test("D-A1: ~/.claude/skills is searched and reported as 'claude-skills'", async
   assert.equal(code, 0, out());
 });
 
-test('D-A1: C2C_CATALYST_SKILLS_DIR wins over ~/.claude/skills', async () => {
+test('D-A1: nested ~/.claude/skills/catalyst-*/skills/catalyst-by-zoho/SKILL.md resolves as claude-skills', async () => {
+  const dir = tmp();
+  const home = join(dir, 'home');
+  writeSkills(join(home, '.claude', 'skills', 'catalyst-repo'), '0.0.3');
+  writeConfig(dir);
+  const { io, out } = fakeIo({ HOME: home, C2C_WORKSPACE: dir }, greenCatalyst);
+  const code = await doctorCli([], io, { hooks: NO_HOOKS });
+  assert.match(out(), /PASS D-A1/);
+  assert.match(out(), /claude-skills v0\.0\.3/);
+  assert.equal(code, 0, out());
+});
+
+test('D-A1: plugin-cache is preferred over ~/.claude/skills', async () => {
+  const dir = tmp();
+  const home = join(dir, 'home');
+  writeSkills(join(home, '.claude', 'plugins', 'cache', 'official', 'catalyst-by-zoho', '0.0.2'), '0.0.2');
+  writeSkills(join(home, '.claude'), '9.9.9');
+  writeConfig(dir);
+  const { io, out } = fakeIo({ HOME: home, C2C_WORKSPACE: dir }, greenCatalyst);
+  const code = await doctorCli([], io, { hooks: NO_HOOKS });
+  assert.match(out(), /PASS D-A1/);
+  assert.match(out(), /plugin-cache v0\.0\.2/);
+  assert.equal(code, 0, out());
+});
+
+test('D-A1: C2C_CATALYST_SKILLS_DIR wins over plugin-cache and ~/.claude/skills', async () => {
   const dir = tmp();
   const home = join(dir, 'home');
   const envSkills = writeSkills(home, '1.2.3');
+  writeSkills(join(home, '.claude', 'plugins', 'cache', 'official', 'catalyst-by-zoho', '0.0.2'), '0.0.2');
   writeSkills(join(home, '.claude'), '9.9.9');
   writeConfig(dir);
   const { io, out } = fakeIo({ HOME: home, C2C_WORKSPACE: dir, C2C_CATALYST_SKILLS_DIR: envSkills }, greenCatalyst);
@@ -829,6 +855,73 @@ test('D-A1: C2C_CATALYST_SKILLS_DIR wins over ~/.claude/skills', async () => {
   assert.match(out(), /PASS D-A1/);
   assert.match(out(), /skills-dir v1\.2\.3/);
   assert.equal(code, 0, out());
+});
+
+test('D-A1: refuses group- or world-writable skill directories and files (mode 0777, 0775, 0666)', async () => {
+  for (const [which, mode] of [
+    ['skills-root', 0o777],
+    ['router-dir', 0o775],
+    ['skill-file', 0o666],
+  ] as const) {
+    const dir = tmp();
+    const home = join(dir, 'home');
+    const skillsRoot = writeSkills(join(home, '.claude'), '9.9.9');
+    const routerDir = join(skillsRoot, 'catalyst-by-zoho');
+    const skillFile = join(routerDir, 'SKILL.md');
+    const target = which === 'skills-root' ? skillsRoot : which === 'router-dir' ? routerDir : skillFile;
+    chmodSync(target, mode);
+    writeConfig(dir);
+    try {
+      const { io, out } = fakeIo({ HOME: home, C2C_WORKSPACE: dir }, greenCatalyst);
+      const code = await doctorCli([], io, { hooks: NO_HOOKS });
+      assert.equal(code, 1, `${which} mode ${mode.toString(8)} must fail D-A1:\n${out()}`);
+      assert.match(out(), /FAIL D-A1/);
+      assert.doesNotMatch(out(), /PASS D-A1/);
+    } finally {
+      chmodSync(target, which === 'skill-file' ? 0o644 : 0o755);
+    }
+  }
+});
+
+test('D-A1: refuses symlinks in skill directories or pointing outside expected roots', async () => {
+  // 1. Symlinked SKILL.md pointing outside ~/.claude/skills.
+  {
+    const dir = tmp();
+    const home = join(dir, 'home');
+    const outside = writeSkills(join(dir, 'outside'), '9.9.9');
+    const routerDir = join(home, '.claude', 'skills', 'catalyst-by-zoho');
+    mkdirSync(routerDir, { recursive: true });
+    symlinkSync(join(outside, 'catalyst-by-zoho', 'SKILL.md'), join(routerDir, 'SKILL.md'));
+    writeConfig(dir);
+    const { io, out } = fakeIo({ HOME: home, C2C_WORKSPACE: dir }, greenCatalyst);
+    assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 1, out());
+    assert.match(out(), /FAIL D-A1/);
+  }
+  // 2. Symlinked catalyst-by-zoho directory pointing outside the expected root.
+  {
+    const dir = tmp();
+    const home = join(dir, 'home');
+    const outside = writeSkills(join(dir, 'outside'), '9.9.9');
+    const skillsRoot = join(home, '.claude', 'skills');
+    mkdirSync(skillsRoot, { recursive: true });
+    symlinkSync(join(outside, 'catalyst-by-zoho'), join(skillsRoot, 'catalyst-by-zoho'));
+    writeConfig(dir);
+    const { io, out } = fakeIo({ HOME: home, C2C_WORKSPACE: dir }, greenCatalyst);
+    assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 1, out());
+    assert.match(out(), /FAIL D-A1/);
+  }
+  // 3. Symlinked ~/.claude/skills root pointing to an outside skills tree.
+  {
+    const dir = tmp();
+    const home = join(dir, 'home');
+    const outside = writeSkills(join(dir, 'outside'), '9.9.9');
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    symlinkSync(outside, join(home, '.claude', 'skills'));
+    writeConfig(dir);
+    const { io, out } = fakeIo({ HOME: home, C2C_WORKSPACE: dir }, greenCatalyst);
+    assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 1, out());
+    assert.match(out(), /FAIL D-A1/);
+  }
 });
 
 test('D-A1: when nothing is found the failure lists every searched path', async () => {
@@ -880,6 +973,7 @@ test('D-A1/D-A3/D-B3 fixes name the ~/.codex paths and commands', async () => {
     assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 1);
     assert.match(out(), /FAIL D-A1/);
     assert.ok(out().includes('~/.codex/skills'));
+    assert.ok(out().includes('[UNVERIFIED]'));
   }
   {
     // Skills on disk so D-A3 can run against recorded evidence.
