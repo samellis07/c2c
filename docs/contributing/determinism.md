@@ -51,3 +51,16 @@ Three layers enforce it, all run offline:
 it by hand (the status test fails when it is stale and the local corpus is
 present). The same applies to `docs/deluge-builtins.json` — see
 [deluge-builtin.md](deluge-builtin.md).
+
+## Known limits
+
+`determinism:status --sites <file>` pins the output directory before the
+gallery scan and writes through a child process that re-verifies the pinned
+inode before creating and renaming its temp file. One residual race remains:
+after the child's last directory check and before its `rename`, an active
+racer could rename the pinned directory itself into the repo tree, and the
+rename would still land there because it acts on the pinned inode (Node on
+macOS has no `renameat`, so the check and the rename cannot be one syscall).
+The window is microseconds and needs a racer already able to rename that
+directory; closing it would need a platform file-system primitive Node does
+not expose.
