@@ -18,6 +18,13 @@ import { GATE_DS } from './fixture-app.mjs';
 const dirs = [];
 let app;
 
+/**
+ * The gate serves the generated admin smoke endpoint in-process: it drives
+ * the enabled (cutover) endpoint, which answers only when
+ * C2C_SMOKE_ENABLED=1.
+ */
+process.env.C2C_SMOKE_ENABLED ??= '1';
+
 before(async () => {
   const core = await import(pathToFileURL(join(REPO_ROOT, 'dist/core/src/index.js')).href);
   app = core.deriveIr(core.parse(GATE_DS));

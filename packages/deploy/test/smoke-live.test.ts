@@ -43,6 +43,9 @@ const registry: ProjectRegistry = {
   projects: { 'c2c-widget': '1001' },
 };
 
+/** These suites run the full smoke flow against the enabled (cutover) endpoint (C2C_SMOKE_ENABLED=1). */
+process.env.C2C_SMOKE_ENABLED ??= '1';
+
 /** L1 shape: two forms, one mandatory lookup, one list report, an Administrator profile. */
 const L1_DS = `application "Widget"
 {

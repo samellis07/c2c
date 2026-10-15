@@ -27,6 +27,13 @@ import { repoRoot } from '../../core/src/toolchain.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from '../src/guards.js';
 import { deployFiles, writeDeployTree } from '../src/plan.js';
 
+/**
+ * The matrix serves the generated admin smoke endpoint in-process: it drives
+ * the enabled (cutover) endpoint, which answers only when
+ * C2C_SMOKE_ENABLED=1.
+ */
+process.env.C2C_SMOKE_ENABLED ??= '1';
+
 const root = repoRoot();
 const FAKE_SDK = join(root, 'tools/catalyst-harness/fake-zcatalyst-sdk-node.cjs');
 const KITCHEN_SINK = join(root, 'fixtures/synthetic/kitchen-sink/kitchen_sink.ds');

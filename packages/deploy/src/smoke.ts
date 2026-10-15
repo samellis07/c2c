@@ -840,6 +840,8 @@ export async function executeSmoke(steps: readonly SmokeStep[], opts: SmokeRunOp
                   ? 'session bootstrap: the smoke service denied this sign-in — it needs an Administrator profile'
                   : probe.status === 401
                     ? `session bootstrap: not signed in on the app domain — /admin/smoke answered 401; the browser holds no app-user session for ${base.origin} — sign in at the app's own sign-in page on that domain as a user registered on the project (a console sign-in is not an app session)`
+                  : probe.status === 404
+                    ? 'session bootstrap: the smoke endpoint is not enabled on this deployment — set C2C_SMOKE_ENABLED=1 on the function for cutover smoke, then remove it'
                     : `session bootstrap: not signed in — /admin/smoke answered ${probe.status} without the documented status shape`,
               );
               return { ok: false, notSignedIn: true, lines };

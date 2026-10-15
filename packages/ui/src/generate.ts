@@ -580,6 +580,13 @@ ${requirePrincipal()}
  *
  * The gate is principal.profile against the Administrator-preset names —
  * body, query and header values are never principals.
+ *
+ * The endpoint exists only when the function sets C2C_SMOKE_ENABLED=1
+ * (cutover smoke). Any other value answers every op with 404, the same
+ * reply an absent route gets, so production bundles carry no smoke
+ * surface. The marker column stays a dedicated single generated column
+ * per form (markerFields): a caller cannot nominate another column, and
+ * marker values never leave the server in a reply.
  */
 function smokeStub(app: App, model: UiModel, schema: ReturnType<typeof generateSchema>): string {
   const tables: Record<string, string> = {};
@@ -604,13 +611,14 @@ function smokeStub(app: App, model: UiModel, schema: ReturnType<typeof generateS
     'Administrator-preset profiles only. The row read goes through authorizeRead, the patch through',
     'authorizeWrite, and the delete through authorizeDelete, with functions/c2c-deploy.json mode',
     'deciding live effects. Replies carry statuses and booleans only — never record values,',
-    'tokens, or user data.',
+    'tokens, or user data. The endpoint answers only when C2C_SMOKE_ENABLED is "1"',
+    '(cutover smoke); otherwise every op is a 404, as if the route were absent.',
   ])}${policyPrelude('../access-policy.json', false, 'import { authorizeDelete } from "creator-to-catalyst/shims";\n')}
 export const endpoint = { type: "advancedio", method: "POST", path: "/admin/smoke", dryRun: true };
 const adminProfiles = ${JSON.stringify(administratorProfiles(app))};
 /** Form link name -> Data Store table (form tables only). */
 const tables = ${JSON.stringify(tables)};
-/** Form link name -> the field a smoke run tags ('c2c smoke <tag>'). */
+/** Form link name -> the dedicated run-owned marker column ('c2c smoke <tag>'). One generated column per form: the caller cannot nominate another, and marker values never leave the server in a reply. */
 const markerFields = ${JSON.stringify(markers)};
 /** Form link name -> the number field op "arith" writes and reads back. */
 const numberFields = ${JSON.stringify(numbers)};
@@ -624,7 +632,17 @@ function zcqlPredicate(where) {
   return text === "true" ? "" : text;
 }
 
+/** Cutover-only switch: C2C_SMOKE_ENABLED=1. Fail closed — anything else behaves as if the route were absent. */
+function smokeEnabled() {
+  const flag = typeof process !== "undefined" && process.env ? process.env.C2C_SMOKE_ENABLED : undefined;
+  return flag === "1";
+}
+
 export default async function handler(req, res) {
+  if (!smokeEnabled()) {
+    send(res, 404, { error: "no such endpoint" });
+    return;
+  }
   const principal = principalFromRequest(req);
   if (!principal?.profile) {
     send(res, 401, { dryRun: true, error: "authenticated caller required" });
