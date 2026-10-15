@@ -162,3 +162,14 @@ Checks omitted from this table currently emit no `FAIL` result: D-A4, D-B4, D-B6
 
 - The exact error text and what they were doing (if it happened in their browser or console).
 - Permission before any re-run that writes.
+
+## Error family routing
+
+Use the index section that matches the error source; its row links to the cause, read-only check, and fix.
+
+| Error family | Index section |
+|---|---|
+| MCP setup, sign-in, permissions, and doctor checks (`PERMISSION_NEEDED`, invalid MCP URL, missing URL) | [Agent host, MCP and the doctor](../../references/error-index.md#agent-host-mcp-and-the-doctor) |
+| Catalyst CLI crashes, config errors, and deployment messages (`bucket_name`, Slate activation, `ZCATALYST_CONFIG_PERMISSION_DENIED`) | [Catalyst CLI](../../references/error-index.md#catalyst-cli) |
+| Catalyst API responses (`400`, `401`, `403`, `404`, `409`, `429`, ZCQL and Data Store errors) | [Catalyst API](../../references/error-index.md#catalyst-api) |
+| Creator export and runtime errors (publish checks, corrupted workflows, argument and type errors) | [Creator export and runtime](../../references/error-index.md#creator-export-and-runtime) |
