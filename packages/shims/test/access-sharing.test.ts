@@ -131,3 +131,39 @@ test('an unconditional field rule refuses writes to the hidden or disabled field
   // Writable fields are unchanged.
   assert.deepEqual(authorizeWrite(rules, principal, 'Ticket', { Title: 't' }, schema, 'insert').values, { Title: 't' });
 });
+
+test('zoho.adminuser binds resolve from the deploy environment, sentinel by default', () => {
+  const principal = { profile: 'Filtered', loginUser: 'a@example.test' };
+  const admin = { op: '==' as const, field: 'Owner', value: { __bind: 'adminUserId' as const } };
+  const previous = process.env.C2C_ADMIN_USER_ID;
+  delete process.env.C2C_ADMIN_USER_ID;
+  try {
+    const scoped = authorizeRead(policy, principal, 'Ticket', admin);
+    const leaf = scoped.criteria.op === 'and' ? scoped.criteria.args[0] : scoped.criteria;
+    assert.deepEqual(leaf, { op: '==', field: 'Owner', value: '<c2c-dry-run:adminuserid>' });
+    process.env.C2C_ADMIN_USER_ID = 'owner@example.test';
+    const bound = authorizeRead(policy, principal, 'Ticket', admin);
+    const leaf2 = bound.criteria.op === 'and' ? bound.criteria.args[0] : bound.criteria;
+    assert.deepEqual(leaf2, { op: '==', field: 'Owner', value: 'owner@example.test' });
+  } finally {
+    if (previous === undefined) delete process.env.C2C_ADMIN_USER_ID;
+    else process.env.C2C_ADMIN_USER_ID = previous;
+  }
+});
+
+test('a dependent record query marker fails closed like an unmigrated criteria', () => {
+  const principal = { profile: 'Filtered', loginUser: 'a@example.test' };
+  const marker = { __rows: { form: 'Parent', criteria: { op: 'true' as const }, path: ['Field'] } };
+  assert.throws(
+    () => authorizeRead(policy, principal, 'Ticket', { op: '==', field: 'Ref', value: marker }),
+    /record filter for Ticket could not be applied/,
+  );
+  const filtered: AccessPolicy = {
+    roles: [],
+    profiles: { F: { Ticket: { recordFilter: { op: '==', field: 'Ref', value: marker } } } },
+  };
+  assert.throws(
+    () => authorizeRead(filtered, { profile: 'F' }, 'Ticket', { op: 'true' }),
+    /record filter for Ticket could not be applied/,
+  );
+});

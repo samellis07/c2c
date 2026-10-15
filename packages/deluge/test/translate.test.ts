@@ -4721,9 +4721,34 @@ test('a criteria field that shares a name with a local compares the fetched form
   }
 });
 
-test('report criteria on the application owner stay counted: no owner address is bound at deploy', () => {
-  assert.deepEqual(reportCriteria('Members.Email == zoho.adminuserid'), { op: 'todo', construct: 'criteria-dynamic' });
+test('report criteria on the application owner bind like the login user binds', () => {
+  assert.deepEqual(reportCriteria('Members.Email == zoho.adminuserid'), { op: '==', field: 'Members.Email', value: { __bind: 'adminUserId' } });
+  assert.deepEqual(reportCriteria('Added_User == zoho.adminuser'), { op: '==', field: 'Added_User', value: { __bind: 'adminUser' } });
   assert.deepEqual(reportCriteria('Members.Email == zoho.loginuserid'), { op: '==', field: 'Members.Email', value: { __bind: 'loginUserId' } });
+});
+
+test('a record fetch used as a report criteria value stays a { __rows } marker', () => {
+  assert.deepEqual(reportCriteria('Locations_list.ID == Add_Employee[Official_Email == zoho.loginuserid].Location.ID'), {
+    op: '==',
+    field: 'Locations_list.ID',
+    value: { __rows: { form: 'Add_Employee', criteria: { op: '==', field: 'Official_Email', value: { __bind: 'loginUserId' } }, path: ['Location', 'ID'] } },
+  });
+  // A zero-arg thisapp function whose body is one record-fetch return inlines
+  // as the same marker; a body that is anything else stays counted.
+  const fns = [
+    { name: 'get_employee_branch', deluge: [{ text: '\n return Add_Employee[Email == zoho.loginuserid].Branch;\n ' }] },
+    { name: 'other', deluge: [{ text: 'x = 1;' }] },
+  ];
+  assert.deepEqual(reportCriteria('Branch.ID == thisapp.get_employee_branch()', fns), {
+    op: '==',
+    field: 'Branch.ID',
+    value: { __rows: { form: 'Add_Employee', criteria: { op: '==', field: 'Email', value: { __bind: 'loginUserId' } }, path: ['Branch'] } },
+  });
+  assert.deepEqual(reportCriteria('Branch.ID == thisapp.other()', fns), { op: 'todo', construct: 'criteria-dynamic' });
+  // Without the function table the same call stays counted, never guessed.
+  assert.deepEqual(reportCriteria('Branch.ID == thisapp.get_employee_branch()'), { op: 'todo', construct: 'criteria-dynamic' });
+  // An inner criteria that does not translate keeps the whole leaf counted.
+  assert.deepEqual(reportCriteria('F.ID == Add_Employee[X == thisapp.missing()].Y', fns), { op: 'todo', construct: 'criteria-dynamic' });
 });
 
 test('replaceAllIgnoreCase and replaceFirstIgnoreCase emit their shims in both forms', () => {

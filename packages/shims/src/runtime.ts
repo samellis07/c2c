@@ -86,7 +86,7 @@ import {
   type Criteria,
   type DecimalColumns,
 } from './criteria.js';
-import { authorizeDelete, authorizeRead, authorizeWrite, expandCompositeWrites, isSystemWriteDenied, projectFields, RecordAccessError, type AccessPolicy, type Principal, type ReadIntent, type WriteSchema } from './access.js';
+import { authorizeDelete, authorizeRead, authorizeWrite, expandCompositeWrites, isSystemWriteDenied, projectFields, RecordAccessError, DRY_RUN_ADMIN_USER, DRY_RUN_ADMIN_USER_ID, type AccessPolicy, type Principal, type ReadIntent, type WriteSchema } from './access.js';
 import { isStoredFileKey } from './files.js';
 import { assertWritable, quantizeRow, WriteRuleError, type WriteRuleColumn } from './write-rules.js';
 import * as zohoAdapters from './zoho-adapters.js';
@@ -965,8 +965,8 @@ const SYSTEM_FIELD_KEYS: { name: string; keys: readonly string[] }[] = [
  */
 export const DRY_RUN_LOGIN_USER = '<c2c-dry-run:loginuser>';
 export const DRY_RUN_LOGIN_USER_ID = '<c2c-dry-run:loginuserid>';
-export const DRY_RUN_ADMIN_USER = '<c2c-dry-run:adminuser>';
-export const DRY_RUN_ADMIN_USER_ID = '<c2c-dry-run:adminuserid>';
+// Defined in access.ts, which also binds them inside record filters.
+export { DRY_RUN_ADMIN_USER, DRY_RUN_ADMIN_USER_ID };
 /** Creator notification sender used when `from` is zoho.adminuserid and no Catalyst sender is set. */
 export const CREATOR_DEFAULT_MAIL_FROM = 'notifications@zohocreatormail.example';
 

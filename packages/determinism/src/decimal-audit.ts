@@ -85,7 +85,7 @@ export function auditApp(app: App, counts: DecimalAuditCounts): void {
     const texts = [report.criteria, ...report.filters.map((f) => f.criteria)].filter((t): t is string => !!t?.trim());
     for (const text of texts) {
       const leaves: { op: string; field: string }[] = [];
-      criteriaLeaves(reportCriteria(text), leaves);
+      criteriaLeaves(reportCriteria(text, app.functions), leaves);
       const hits = leaves.filter((leaf) => COMPARISONS.has(leaf.op) && Object.hasOwn(decimals, leaf.field));
       if (!hits.length) continue;
       counts.reportCriteriaSites += 1;

@@ -1015,7 +1015,7 @@ function pushSchedule(state: WalkState, app: App, workflow: Workflow, plan: Sche
     : emptyFragment(workflowIr(workflow, workflow.span));
   const { fragment: gated, suppressed } = gateFragment(state, app, workflow, fragment, false);
   if (suppressed) pushGateNote(state, workflow);
-  if (!swept && scheduleCriteriaGap(workflow)) {
+  if (!swept && scheduleCriteriaGap(workflow, app.functions)) {
     // scheduleBody replaces the whole body with the workflow-action-condition
     // gap call; whether it counts an extra todo depends on the body text, and
     // draftsOf already collapses a matching todo either way.
