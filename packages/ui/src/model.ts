@@ -807,7 +807,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[]): UiReport {
   // and the report renders this notice instead of a table.
   if (report.criteria?.trim() && criteriaHasTodo(reportCriteria(report.criteria))) {
     status = 'todo';
-    todo = [todo, 'Filter not migrated: the report criteria could not be translated; the report returns no rows.'].filter(Boolean).join(' ');
+    todo = [todo, 'Filter not migrated: dynamic or unsupported criteria need manual translation; the report returns no rows.'].filter(Boolean).join(' ');
     // zoho.adminuserid is the application owner's email; the generated app
     // is not configured with one, so the comparison is left to the developer.
     if (/\bzoho\.adminuserid\b/i.test(report.criteria)) {
