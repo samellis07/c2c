@@ -196,7 +196,7 @@ interface Mounted {
 }
 
 /** Mount <ReportView> against a fake endpoint that applies the posted sort like the report endpoint. */
-async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: ReadonlySet<string>, rowId?: string): Promise<Mounted> {
+async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: ReadonlySet<string>, rowId?: string, recordReply?: () => Promise<{ ok: boolean; status: number; body?: unknown }>): Promise<Mounted> {
   const { JSDOM } = await import('jsdom');
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true });
   const view = dom.window as unknown as Record<string, unknown> & Window;
@@ -248,7 +248,7 @@ async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: 
     post: async (endpoint: string, body: Record<string, unknown>) => {
       calls.push(body);
       posted.push({ endpoint, body });
-      if (endpoint.endsWith('/record')) return { ok: true, status: 200, body: { record: { ROWID: String(body.ROWID), Memo: 'Read me', Lines: [{ ROWID: '2', Material: 'Bolt', Quantity: 3 }] } } };
+      if (endpoint.endsWith('/record')) return recordReply ? recordReply() : { ok: true, status: 200, body: { record: { ROWID: String(body.ROWID), Memo: 'Read me', Lines: [{ ROWID: '2', Material: 'Bolt', Quantity: 3 }] } } };
       if (endpoint.includes('/actions/')) return { ok: true, status: 200, body: { dryRun: true } };
       const ordered = order(rows, (body.sort ?? []) as { field: string; order?: string }[]);
       const page = typeof body.page === 'number' ? body.page : 0;
@@ -455,6 +455,28 @@ test('record detail draws configured sections and related rows from the authoriz
   assert.equal(view.container.querySelector('[data-detail-block="Overview"] dd')?.textContent, 'Read me');
   assert.deepEqual([...view.container.querySelectorAll('[data-detail-block="Items"] thead th')].map((el) => el.textContent), ['Material Name', 'Qty']);
   assert.deepEqual([...view.container.querySelectorAll('[data-detail-block="Items"] tbody td')].map((el) => el.textContent), ['Bolt', '3']);
+});
+
+test('record detail gives a clear error for denied and missing records', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'record-errors');
+  const base = reactAppSpec(appOf()).reports.Orders!;
+  const report = { ...base, detail: true, recordEndpoint: '/forms/Order/record' };
+  for (const status of [403, 404]) {
+    const view = await mount(out, report, [], new Set(), '907', async () => ({ ok: false, status }));
+    assert.equal(view.container.querySelector('[data-state="loading"]'), null, `${status} clears loading`);
+    if (status === 403) assert.match(view.container.textContent ?? '', /don't have access to this screen/i);
+    else assert.match(view.container.textContent ?? '', /record could not be loaded/i);
+  }
+});
+
+test('record detail shows a retryable network error', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'record-network-error');
+  const base = reactAppSpec(appOf()).reports.Orders!;
+  const report = { ...base, detail: true, recordEndpoint: '/forms/Order/record' };
+  const view = await mount(out, report, [], new Set(), '907', async () => ({ ok: false, status: 0 }));
+  assert.equal(view.container.querySelector('[data-state="loading"]'), null);
+  assert.match(view.container.textContent ?? '', /could not be loaded/i);
+  assert.ok(view.byRole('button', 'Retry'));
 });
 
 test('non-list reports keep their visible pending-view stub', { skip: SKIP }, async (t) => {

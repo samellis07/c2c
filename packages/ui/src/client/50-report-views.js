@@ -333,6 +333,7 @@ function drawList(doc, section, report) {
 function drawDetail(doc, section, report, id, row) {
   const blocks = report.detailBlocks || [];
   if (section.getAttribute('data-detail') === id && section.getAttribute('data-detail-ready') === '1') return;
+  if (section.getAttribute('data-detail') === id && section.hasAttribute('data-detail-error')) return;
   if (!row) {
     if (section.getAttribute('data-detail') === id && section.getAttribute('data-detail-loading') === '1') return;
     section.setAttribute('data-detail', id);
@@ -356,17 +357,31 @@ function drawDetail(doc, section, report, id, row) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ROWID: id }),
-    }).then((res) => res && res.ok && typeof readJson === 'function' ? readJson(res) : null)
-      .then((body) => {
+    }).then(async (res) => ({ res, body: res && res.ok && typeof readJson === 'function' ? await readJson(res) : null }))
+      .then(({ res, body }) => {
         const route = hashRoute(doc);
         const record = body && body.record;
-        if (route.row !== id || route.id !== report.name || !record || typeof record !== 'object' || Array.isArray(record)) return;
+        if (route.row !== id || route.id !== report.name) return;
+        if (!res || !res.ok || !record || typeof record !== 'object' || Array.isArray(record)) {
+          pending.textContent = res && (res.status === 403 || res.status === 404) ? "You can't open this record." : 'Unable to load this record. Try again.';
+          pending.setAttribute('data-detail-error', '');
+          pending.setAttribute('role', 'alert');
+          pending.setAttribute('data-detail-retry', '');
+          section.setAttribute('data-detail-error', '');
+          section.removeAttribute('data-detail-loading');
+          return;
+        }
         section.removeAttribute('data-detail-loading');
         drawDetail(doc, section, report, id, record);
       })
       .catch(() => {
-        if (section.getAttribute('data-detail') === id) {
-          pending.textContent = 'Unable to load this record.';
+        const route = hashRoute(doc);
+        if (section.getAttribute('data-detail') === id && route.row === id && route.id === report.name) {
+          pending.textContent = 'Unable to load this record. Try again.';
+          pending.setAttribute('data-detail-error', '');
+          pending.setAttribute('role', 'alert');
+          pending.setAttribute('data-detail-retry', '');
+          section.setAttribute('data-detail-error', '');
           section.removeAttribute('data-detail-loading');
         }
       });
@@ -432,6 +447,14 @@ function drawDetail(doc, section, report, id, row) {
   }
 }
 
+function retryDetail(doc, section, report, id) {
+  section.removeAttribute('data-detail-ready');
+  section.removeAttribute('data-detail-error');
+  section.removeAttribute('data-detail-loading');
+  section.removeAttribute('data-detail');
+  drawDetail(doc, section, report, id, null);
+}
+
 function enhance(doc) {
   if (enhancing || !viewsModel || !doc) return;
   enhancing = true;
@@ -458,6 +481,15 @@ function enhance(doc) {
 function onActivate(doc, event) {
   const target = event.target;
   if (!target || !target.closest) return;
+  const retry = target.closest('[data-detail-retry]');
+  if (retry) {
+    const section = retry.closest('section[data-report]');
+    const name = section && section.getAttribute('data-report');
+    const report = name ? reportOf(name) : null;
+    const route = hashRoute(doc);
+    if (section && report && route.id === name && route.row) retryDetail(doc, section, report, route.row);
+    return;
+  }
   if (target.closest('a, button, input, select, textarea, label')) return;
   const tr = target.closest('tr[data-row-id]');
   if (!tr) return;
