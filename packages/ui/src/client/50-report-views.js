@@ -330,21 +330,54 @@ function drawList(doc, section, report) {
   }
 }
 
-function drawDetail(doc, section, report, id) {
+function drawDetail(doc, section, report, id, row) {
   const blocks = report.detailBlocks || [];
-  if (section.getAttribute('data-detail') === id && section.querySelector('[data-block], [data-print-tools], [data-detail-list]')) return;
-  const rows = rowsByReport.get(report.name) || [];
-  let row = null;
-  for (let i = 0; i < rows.length; i++) {
-    if (rowId(rows[i]) === id) {
-      row = rows[i];
-      break;
+  if (section.getAttribute('data-detail') === id && section.getAttribute('data-detail-ready') === '1') return;
+  if (!row) {
+    if (section.getAttribute('data-detail') === id && section.getAttribute('data-detail-loading') === '1') return;
+    section.setAttribute('data-detail', id);
+    section.setAttribute('data-detail-loading', '1');
+    const pending = doc.createElement('p');
+    pending.setAttribute('data-detail-loading', '');
+    pending.textContent = 'Loading record…';
+    const oldHost = section.querySelector('[data-rows]') || section;
+    oldHost.textContent = '';
+    oldHost.appendChild(pending);
+    const form = (viewsModel.forms || []).find((item) => item && item.name === report.form);
+    const view = doc.defaultView || globalThis;
+    const call = (view && view.fetch) || globalThis.fetch;
+    const endpoint = form && form.recordEndpoint;
+    if (!endpoint || typeof call !== 'function' || typeof apiCall !== 'function') {
+      pending.textContent = 'Record detail is unavailable.';
+      section.removeAttribute('data-detail-loading');
+      return;
     }
+    apiCall(call, view, endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ROWID: id }),
+    }).then((res) => res && res.ok && typeof readJson === 'function' ? readJson(res) : null)
+      .then((body) => {
+        const route = hashRoute(doc);
+        const record = body && body.record;
+        if (route.row !== id || route.id !== report.name || !record || typeof record !== 'object' || Array.isArray(record)) return;
+        section.removeAttribute('data-detail-loading');
+        drawDetail(doc, section, report, id, record);
+      })
+      .catch(() => {
+        if (section.getAttribute('data-detail') === id) {
+          pending.textContent = 'Unable to load this record.';
+          section.removeAttribute('data-detail-loading');
+        }
+      });
+    return;
   }
   const host = section.querySelector('[data-rows]') || section;
   host.removeAttribute('data-grouped');
   host.textContent = '';
   section.setAttribute('data-detail', id);
+  section.setAttribute('data-detail-ready', '1');
+  section.removeAttribute('data-detail-loading');
   section.setAttribute('data-view', 'detail');
   if (report.printTemplate) {
     const tools = doc.createElement('div');
@@ -413,7 +446,7 @@ function enhance(doc) {
     const route = hashRoute(doc);
     const blocks = report.detailBlocks || [];
     if (route.row && route.id === name && (blocks.length || report.printTemplate)) {
-      drawDetail(doc, section, report, route.row);
+      drawDetail(doc, section, report, route.row, null);
       return;
     }
     drawList(doc, section, report);
