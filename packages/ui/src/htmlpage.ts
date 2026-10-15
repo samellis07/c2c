@@ -1324,6 +1324,23 @@ export function convertZmlSnippetToHtml(template: string): string {
 const CLIENT_PROJECTION_TODOS: ReadonlySet<string> = new Set(['client-condition-uses-server', 'client-loop-uses-server']);
 
 /**
+ * Compile refusal for a ZML `<button action='ExecuteFunction'>`. The button
+ * runs a Deluge function with the given parameters when clicked; the generated
+ * page has no endpoint for that call, and the sanitizer would keep an inert
+ * button, so the snippet stays a counted manual item with this reason.
+ */
+export const EXECUTE_FUNCTION_BUTTON = 'ZML ExecuteFunction button';
+
+/** True when the template holds a ZML button whose action calls a Deluge function. */
+function hasExecuteFunctionButton(template: string): boolean {
+  for (const m of template.matchAll(/<button\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi)) {
+    const action = parseZmlAttributes(m[1] ?? '').action ?? '';
+    if (action.replace(/\s+/g, '').toLowerCase() === 'executefunction') return true;
+  }
+  return false;
+}
+
+/**
  * Compile a decoded `htmlpage` template into a generated endpoint plus the
  * sanitized static shell. Returns `{ ok: false }` for anything outside the
  * handled classes; the caller keeps the same manual TODO as before.
@@ -1338,6 +1355,7 @@ export function compileHtmlpage(
   const fail = (reason: string): HtmlpageCompiled => ({ ok: false, reason });
   const head = splitTemplate(decoded);
   head.template = convertZmlSnippetToHtml(head.template);
+  if (hasExecuteFunctionButton(head.template)) return fail(EXECUTE_FUNCTION_BUTTON);
   const chunks = splitChunks(head.template);
   if (!chunks) return fail('malformed Deluge island');
   const rawIslands = chunks.filter((c) => c.kind !== 'static');
