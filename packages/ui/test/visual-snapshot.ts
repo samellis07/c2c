@@ -428,7 +428,14 @@ export async function snapshotApp(app: App, opts: SnapshotOptions = {}): Promise
     if (!hit) throw new Error(`visual snapshot: ${path} not generated`);
     return typeof hit.data === 'string' ? hit.data : hit.data.toString('utf8');
   };
-  const html = file('slate/index.html').replace(/<script[\s\S]*?<\/script>/g, '');
+  // Scripts run by calling boot() directly. The meta policy, the referrer meta
+  // and HTML comments are not layout; this snapshot records computed styles,
+  // and the CSP itself is asserted on the generated shell.
+  const html = file('slate/index.html')
+    .replace(/<script[\s\S]*?<\/script>/g, '')
+    .replace(/<meta\s+http-equiv="Content-Security-Policy"\b[^>]*>/gi, '')
+    .replace(/<meta\s+name="referrer"\b[^>]*>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
   const css = file('slate/assets/app.css');
   const runtime = await loadRuntime();
   const model = bundle.model;

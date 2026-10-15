@@ -126,7 +126,8 @@ function send(res, status, body, err) {
     if (!res.writableEnded) res.end();
     return;
   }
-  res.writeHead(status, { 'Content-Type': 'application/json' });
+  // JSON function replies can contain record data and must never be sniffed or cached.
+  res.writeHead(status, { 'Content-Type': 'application/json', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(body, jsonReplacer));
 }
 

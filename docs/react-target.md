@@ -67,6 +67,21 @@ Two Slate facts shape the build config:
 Slate sends `cache-control: public, max-age=31536000` on every file; the
 [offline](#offline-and-pwa) section covers how a redeploy still reaches users.
 
+Both generated shells include a meta Content-Security-Policy. `connect-src` is
+`'self'` plus the app's Advanced I/O function origin when that origin is known
+(the host Catalyst assigns, not every `catalystserverless` host). `script-src`
+allows only `'self'` and the pinned Catalyst SDK host. `style-src` allows
+`'unsafe-inline'` because the vanilla runtime sets style attributes and the
+React build injects CSS. Script inline execution and eval are not allowed.
+Object embedding is disabled, and the referrer policy is same-origin.
+Browsers ignore `frame-ancestors` in a meta policy, and no meta tag can set
+`X-Content-Type-Options` or `X-Frame-Options`. c2c found no per-file
+response-header setting for Slate [UNVERIFIED], so the static shells do not
+send those three controls. Manual step: if the Catalyst console offers
+response headers or iFrame whitelisting for the Slate app (Authentication ›
+Whitelisting › iFrame) [UNVERIFIED], restrict framing there to your own
+domains and add `X-Content-Type-Options: nosniff`.
+
 ## Packages
 
 | path | what | owner |

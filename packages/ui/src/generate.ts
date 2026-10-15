@@ -30,6 +30,7 @@ import { pwaFiles, pwaServiceWorkerSource } from './pwa.js';
 import { BASE_CSS, SHELL_BACKGROUND } from './styles.js';
 import { authPlan } from '../../auth/src/plan.js';
 import { authApplyFiles } from '../../auth/src/apply.js';
+import { functionOriginFromApiBase, shellContentSecurityPolicy } from './csp.js';
 
 export interface UiBundle {
   model: UiModel;
@@ -44,6 +45,12 @@ export interface UiGenerateOptions {
   schema?: SchemaPlan;
   /** Opt-in async on-success lane: emit the event function, dead-letter store and sweep Job (docs/event-deadletter.md). */
   asyncOnSuccess?: boolean;
+  /**
+   * Function base. A relative `/server/<name>` keeps connect-src at `'self'`.
+   * An absolute Advanced I/O URL adds that origin. `c2c deploy` rewrites the
+   * shell again once the CLI prints the function URL.
+   */
+  apiBase?: string;
 }
 
 /**
@@ -113,7 +120,7 @@ export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
     data: `import { model } from "@@asset:slate/assets/model.js@@";\n${clientRuntimeSource()}\nboot(model);\n`,
   });
   files.push({ path: 'slate/assets/app.css', data: css() });
-  files.push({ path: 'slate/index.html', data: indexHtml(model) });
+  files.push({ path: 'slate/index.html', data: indexHtml(model, opts.apiBase) });
   files.push(
     ...pwaFiles({
       name: model.name || 'App',
@@ -235,7 +242,7 @@ const policyPath = join(dirname(fileURLToPath(import.meta.url)), ${JSON.stringif
 export const access = JSON.parse(readFileSync(policyPath, "utf8"));
 
 function send(res, status, body) {
-  res.writeHead(status, { "Content-Type": "application/json" });
+  res.writeHead(status, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
   // A bigint (a toLong id) is sent as its digits; JSON.stringify would throw.
   res.end(JSON.stringify(body, jsonReplacer));
 }
@@ -3564,10 +3571,11 @@ export function siblingSpecs(files: GeneratedFile[], formName: string, kind: 'va
   return { add: [...new Set(add)].sort(byName), edit: [...new Set(edit)].sort(byName), del: [...new Set(del)].sort(byName) };
 }
 
-function indexHtml(model: UiModel): string {
+function indexHtml(model: UiModel, apiBase?: string): string {
   const title = model.name || 'App';
   const theme = model.theme || {};
   const palette = paletteFor(theme.theme);
+  const policy = shellContentSecurityPolicy(functionOriginFromApiBase(apiBase));
   const attrs =
     (theme.theme ? ` data-theme="${escapeText(theme.theme)}"` : '') +
     ` data-menu="${theme.menu === 'rail' ? 'rail' : 'list'}"` +
@@ -3578,6 +3586,9 @@ function indexHtml(model: UiModel): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Slate serves static files without configurable response headers. This meta CSP narrows the shell, but cannot enforce frame-ancestors. -->
+<meta http-equiv="Content-Security-Policy" content="${policy}">
+<meta name="referrer" content="same-origin">
 <title>${escapeText(title)}</title>
 <link rel="manifest" href="@@asset:slate/manifest.webmanifest@@">
 <link rel="stylesheet" href="@@asset:slate/assets/app.css@@">
