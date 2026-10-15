@@ -752,8 +752,12 @@ ${field('Locked', 'number')}
     assert.doesNotMatch(readFileSync(join(visible.dir, 'functions/aio/item/submit.mjs'), 'utf8'), /accepted:\s*true/);
     assert.equal((await invoke(submit.default, { body: { record: { Status: 'Open' } } })).status, 401);
     assert.equal((await invoke(submit.default, { ...stranger, body: { record: { Status: 'Open' } } })).status, 403);
-    assert.equal((await invoke(submit.default, { ...staff, body: { record: { Secret: 'x' } } })).status, 403);
-    assert.equal((await invoke(submit.default, { ...staff, body: { record: { Locked: 1 } } })).status, 403);
+    for (const [fieldName, value] of [['Secret', 'x'], ['Locked', 1]] as const) {
+      const denied = await invoke(submit.default, { ...staff, body: { record: { [fieldName]: value } } });
+      assert.equal(denied.status, 403);
+      assert.match(String(denied.body.error), new RegExp(`write(?: hidden)? Item\\.${fieldName}`));
+      assert.deepEqual(denied.body.values, undefined, 'a forbidden field is rejected, not returned as an accepted subset');
+    }
     const saved = await invoke(submit.default, { ...staff, body: { record: { Status: 'Open' } } });
     assert.equal(saved.status, 200);
     assert.deepEqual(saved.body.values, { Status: 'Open' });

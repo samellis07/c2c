@@ -5,7 +5,7 @@ import { EncryptedCriteriaError, compileCriteria, matchRow } from '../src/criter
 import { DEFAULT_APP_TIMEZONE, TimeZoneRequired, parseLiteral, requireZone, resolveAppTimeZone } from '../src/date.js';
 import { decimal } from '../src/decimal.js';
 import { RecordAccessError, authorizeWrite, expandCompositeWrites, principalFromRequest, type AccessPolicy } from '../src/access.js';
-import { DelugeRuntimeError, UntranslatedConstruct } from '../src/errors.js';
+import { DelugeRuntimeError, StaleWriteError, UntranslatedConstruct } from '../src/errors.js';
 import {
   DRY_RUN_ADMIN_USER,
   DRY_RUN_LOGIN_USER,
@@ -470,6 +470,37 @@ test('a live update drops the merged system columns and never writes Added_* bac
   assert.equal(last.Added_Time, undefined);
   assert.equal(last.modified_user, undefined);
   assert.equal(last.Modified_User, 'staff.user');
+});
+
+test('stale-write guard skips MODIFIEDTIME absent on both reads and rejects availability changes or edits', async () => {
+  const access = { profiles: { Staff: { Item: { write: true } } }, roles: [] as string[] };
+  async function attempt(expectedTime: string | undefined, currentTime: string | undefined) {
+    const table: Record<string, unknown>[] = [{ ROWID: '1', ...(expectedTime === undefined ? {} : { MODIFIEDTIME: expectedTime }) }];
+    const runtime = createRuntime({
+      dryRun: false,
+      appTimeZone: 'UTC',
+      access,
+      datastore: {
+        async query(_form, _where, limit, _offset = 0, _orderBy = '', columns?: readonly string[] | '*') {
+          // The stale-check re-read is the only read projecting exactly
+          // ROWID, MODIFIEDTIME; prepare and the update-target read see expectedTime.
+          if (columns?.length === 2) {
+            return [{ ROWID: '1', ...(currentTime === undefined ? {} : { MODIFIEDTIME: currentTime }) }];
+          }
+          return table.slice(0, limit).map((row) => ({ ...row }));
+        },
+        async update() { return { updated: 1 }; },
+      },
+    });
+    const ctx = runtime.context({ record: { Status: 'Closed' }, principal: { profile: 'Staff' }, rowId: '1' });
+    await runtime.shim.record.prepare(ctx, 'Item', 'update');
+    return runtime.shim.datastore.update(ctx, 'Item', { op: '==', field: 'ROWID', value: '1' }, ctx.record);
+  }
+
+  assert.deepEqual(await attempt(undefined, undefined), { updated: 1 });
+  await assert.rejects(() => attempt(undefined, '2026-10-14T00:00:00Z'), StaleWriteError);
+  await assert.rejects(() => attempt('2026-10-14T00:00:00Z', undefined), StaleWriteError);
+  await assert.rejects(() => attempt('before', 'after'), StaleWriteError);
 });
 
 test('authorizeWrite requires an editable form and rejects hidden or read-only fields', () => {

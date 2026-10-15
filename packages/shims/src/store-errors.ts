@@ -55,6 +55,7 @@ const C2C_CODES: ReadonlySet<string> = new Set([
   'ZOHO_CONNECTION_REFUSED',
   'COUNTER_CONTENTION',
   'COUNTER_VALUE',
+  'C2C_STALE_WRITE',
 ]);
 const C2C_NAMES: ReadonlySet<string> = new Set([
   'DelugeRuntimeError',
@@ -63,6 +64,7 @@ const C2C_NAMES: ReadonlySet<string> = new Set([
   'SubmitRefused',
   'CounterContention',
   'CounterValueError',
+  'StaleWriteError',
 ]);
 
 function isC2cError(err: unknown): boolean {
