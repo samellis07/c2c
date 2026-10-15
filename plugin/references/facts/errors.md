@@ -6,7 +6,7 @@ Match the first exact substring. Stop the step, apply the fix, then read the res
 
 ### `409 DUPLICATE_ENTRY` on project import
 
-Rule: On `409 DUPLICATE_ENTRY` the project name is already in use. Append a suffix to project_name and retry the greenfield import once. Import into an existing project is not supported; create a new one.
+Rule: On `409 DUPLICATE_ENTRY` the project name is already in use. Append a suffix to project_name (try `-2`, `-3` … `-5` suffixes, up to 5 names in all) and retry the greenfield import. Import into an existing project is not supported; create a new one.
 
 Cause: POST /baas/v1/project/import was sent with a project_name that already exists.
 
