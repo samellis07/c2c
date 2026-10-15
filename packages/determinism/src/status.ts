@@ -25,10 +25,12 @@
  * name, TODO kind, construct path with line, and a normalised signature — for
  * designers sizing patterns. The path must resolve outside the repo tree, so
  * private names can never be committed; the doc and summary are unchanged.
+ * The output directory is opened before the scan. If that directory's identity
+ * changes before the write, the attribution file is refused.
  */
-import { execFileSync } from 'node:child_process';
-import { closeSync, constants, existsSync, fsyncSync, lstatSync, openSync, readFileSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, readlinkSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { compareEnUs } from '../../core/src/order.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { analyze } from '../../cli/src/analyze.js';
@@ -346,9 +348,8 @@ function enclosingGitWorkTree(start: string): string | undefined {
   }
 }
 
-export function resolveSitesPath(path: string, root: string = repoRoot()): string {
-  const abs = resolve(path);
-  const candidate = canonicalSitesCandidate(abs);
+/** Repo or other work tree that contains `candidate`, if any. */
+function sitesLocationProblem(candidate: string, root: string): string | undefined {
   const protectedRoots = sitesProtectedRoots(root);
   const ignoreCase =
     protectedRoots.some((protectedRoot) => volumeIgnoresCase(protectedRoot)) || volumeIgnoresCase(dirname(candidate));
@@ -362,9 +363,16 @@ export function resolveSitesPath(path: string, root: string = repoRoot()): strin
   // Belt and braces: refuse any git work tree at all, not just this
   // repository's checkouts, so a nested or foreign repo is never committable.
   const workTree = hit ? undefined : enclosingGitWorkTree(candidate);
-  if (hit ?? workTree) {
+  return hit ?? workTree;
+}
+
+export function resolveSitesPath(path: string, root: string = repoRoot()): string {
+  const abs = resolve(path);
+  const candidate = canonicalSitesCandidate(abs);
+  const problem = sitesLocationProblem(candidate, root);
+  if (problem) {
     throw new Error(
-      `determinism:status: --sites path must be outside the repo tree: ${path} (resolves inside ${hit ?? workTree})`,
+      `determinism:status: --sites path must be outside the repo tree: ${path} (resolves inside ${problem})`,
     );
   }
   const parent = dirname(abs);
@@ -380,43 +388,180 @@ export function resolveSitesPath(path: string, root: string = repoRoot()): strin
   return abs;
 }
 
-/** Atomically replace an outside-repo target without following a swapped link. */
-function writeSitesFile(path: string, contents: string): void {
-  const requestedParent = dirname(path);
-  const parent = tryRealpath(requestedParent);
-  if (!parent) throw new Error(`determinism:status: --sites parent is unavailable: ${requestedParent}`);
-  const parentBefore = statSync(parent);
-  if (!parentBefore.isDirectory() || tryRealpath(requestedParent) !== parent) {
-    throw new Error(`determinism:status: --sites parent changed after validation: ${requestedParent}`);
-  }
-  const destination = join(parent, basename(path));
-  const existing = lstatSync(destination, { throwIfNoEntry: false });
-  if (existing && !existing.isSymbolicLink() && (!existing.isFile() || existing.nlink !== 1)) {
-    throw new Error(`determinism:status: --sites target must be a regular file with one link: ${destination}`);
-  }
-  const currentParent = statSync(parent);
-  if (currentParent.dev !== parentBefore.dev || currentParent.ino !== parentBefore.ino) {
-    throw new Error(`determinism:status: --sites parent changed after validation: ${parent}`);
-  }
-  const temp = join(parent, `.${basename(path)}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`);
+/** Directory pinned before the scan. `fd` stays open until the write finishes. */
+interface SitesAnchor {
+  requested: string;
+  realParent: string;
+  base: string;
+  fd: number;
+  dev: string;
+  ino: string;
+}
+
+function parentChanged(parent: string): Error {
+  return new Error(`determinism:status: --sites parent changed after validation: ${parent}`);
+}
+
+function singleSegment(name: string): boolean {
+  return name !== '' && name !== '.' && name !== '..' && !name.includes('/') && !name.includes('\0');
+}
+
+/**
+ * Open `dir` by walking each ancestor with O_DIRECTORY|O_NOFOLLOW.
+ * A symlink component fails the walk. The caller owns the returned fd.
+ */
+function openDirectoryNoFollow(dir: string): { fd: number; dev: string; ino: string } | undefined {
+  const rootPath = parse(dir).root;
   let fd: number | undefined;
   try {
-    fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-    writeFileSync(fd, contents, 'utf8');
-    fsyncSync(fd);
-    closeSync(fd);
-    fd = undefined;
-    if (tryRealpath(requestedParent) !== parent) throw new Error(`determinism:status: --sites parent changed after validation: ${requestedParent}`);
-    const afterWriteParent = statSync(parent);
-    if (afterWriteParent.dev !== parentBefore.dev || afterWriteParent.ino !== parentBefore.ino) {
-      throw new Error(`determinism:status: --sites parent changed after validation: ${parent}`);
+    fd = openSync(rootPath, constants.O_RDONLY | constants.O_DIRECTORY);
+    let acc = rootPath;
+    for (const part of dir.slice(rootPath.length).split(sep).filter(Boolean)) {
+      if (part === '.' || part === '..') return undefined;
+      const next = join(acc, part);
+      const listed = lstatSync(next, { bigint: true, throwIfNoEntry: false });
+      if (!listed || listed.isSymbolicLink() || !listed.isDirectory()) return undefined;
+      const nextFd = openSync(next, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      const pinned = fstatSync(nextFd, { bigint: true });
+      if (pinned.dev !== listed.dev || pinned.ino !== listed.ino || !pinned.isDirectory()) {
+        closeSync(nextFd);
+        return undefined;
+      }
+      closeSync(fd);
+      fd = nextFd;
+      acc = next;
     }
-    renameSync(temp, destination);
-  } catch (error) {
+    const finalStat = fstatSync(fd, { bigint: true });
+    if (!finalStat.isDirectory()) return undefined;
+    const opened = { fd, dev: finalStat.dev.toString(), ino: finalStat.ino.toString() };
+    fd = undefined;
+    return opened;
+  } catch {
+    return undefined;
+  } finally {
     if (fd !== undefined) closeSync(fd);
-    try { unlinkSync(temp); } catch { /* No temp file was created, or rename already consumed it. */ }
-    throw error;
   }
+}
+
+/** Pin the real parent of `absPath` before the gallery scan. */
+function openSitesAnchor(absPath: string, root: string = repoRoot()): SitesAnchor {
+  const parent = dirname(absPath);
+  const realParent = tryRealpath(parent);
+  const base = basename(absPath);
+  if (!realParent || !statSync(realParent, { throwIfNoEntry: false })?.isDirectory() || !singleSegment(base)) {
+    throw new Error(`determinism:status: --sites parent must exist as a directory: ${parent}`);
+  }
+  const problem = sitesLocationProblem(join(realParent, base), root);
+  if (problem) {
+    throw new Error(
+      `determinism:status: --sites path must be outside the repo tree: ${absPath} (resolves inside ${problem})`,
+    );
+  }
+  const opened = openDirectoryNoFollow(realParent);
+  if (!opened) throw new Error(`determinism:status: --sites parent must exist as a directory: ${parent}`);
+  return { requested: absPath, realParent, base, fd: opened.fd, dev: opened.dev, ino: opened.ino };
+}
+
+/** The pinned directory still has the same identity and still sits outside the repo. */
+function confirmAnchor(anchor: SitesAnchor, root: string = repoRoot()): void {
+  const held = fstatSync(anchor.fd, { bigint: true });
+  if (!held.isDirectory() || held.dev.toString() !== anchor.dev || held.ino.toString() !== anchor.ino) {
+    throw parentChanged(dirname(anchor.requested));
+  }
+  const walked = openDirectoryNoFollow(anchor.realParent);
+  if (!walked) throw parentChanged(dirname(anchor.requested));
+  try {
+    if (walked.dev !== anchor.dev || walked.ino !== anchor.ino) throw parentChanged(dirname(anchor.requested));
+  } finally {
+    closeSync(walked.fd);
+  }
+  const problem = sitesLocationProblem(join(anchor.realParent, anchor.base), root);
+  if (problem) {
+    throw new Error(
+      `determinism:status: --sites path must be outside the repo tree: ${anchor.requested} (resolves inside ${problem})`,
+    );
+  }
+}
+
+/**
+ * Write relative to a directory the child chdir'd into after checking its
+ * identity. Node on macOS has no renameat, so a parent that no longer names
+ * the pinned inode is refused instead of followed.
+ */
+const SITES_ANCHOR_CHILD = [
+  "const fs = require('node:fs');",
+  'const dev = process.argv[1];',
+  'const ino = process.argv[2];',
+  'const base = process.argv[3];',
+  'const temp = process.argv[4];',
+  'const payload = fs.readFileSync(0);',
+  'function fail(code) {',
+  '  if (/^\\.c2c-\\d+-[0-9a-f]+\\.tmp$/.test(temp)) {',
+  '    try { fs.unlinkSync(temp); } catch (err) {}',
+  '  }',
+  "  process.stderr.write(code + '\\n');",
+  '  process.exit(2);',
+  '}',
+  'function sameDirectory() {',
+  '  let fd;',
+  '  try {',
+  '    fd = fs.openSync(".", fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);',
+  '    const st = fs.fstatSync(fd, { bigint: true });',
+  '    return st.isDirectory() && st.dev.toString() === dev && st.ino.toString() === ino;',
+  '  } catch (err) {',
+  '    return false;',
+  '  } finally {',
+  '    if (fd !== undefined) fs.closeSync(fd);',
+  '  }',
+  '}',
+  "if (!base || base === '.' || base === '..' || base.includes('/') || base.includes('\\0')) fail('parent');",
+  "if (!/^\\.c2c-\\d+-[0-9a-f]+\\.tmp$/.test(temp)) fail('parent');",
+  "if (!sameDirectory()) fail('parent');",
+  'let out;',
+  'try {',
+  '  out = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);',
+  '  fs.writeFileSync(out, payload);',
+  '  fs.fsyncSync(out);',
+  '  fs.closeSync(out);',
+  '  out = undefined;',
+  '} catch (err) {',
+  '  if (out !== undefined) { try { fs.closeSync(out); } catch (closeErr) {} }',
+  "  fail('parent');",
+  '}',
+  "if (!sameDirectory()) fail('parent');",
+  'let existing;',
+  'try {',
+  '  existing = fs.lstatSync(base, { throwIfNoEntry: false });',
+  '} catch (err) {',
+  "  fail('parent');",
+  '}',
+  "if (existing && !existing.isSymbolicLink() && (!existing.isFile() || existing.nlink !== 1)) fail('target');",
+  'try {',
+  '  fs.renameSync(temp, base);',
+  '} catch (err) {',
+  "  fail('parent');",
+  '}',
+].join('\n');
+
+/** Replace the target inside the pinned directory, or refuse if that directory changed. */
+function writeSitesFile(anchor: SitesAnchor, contents: string): void {
+  if (!singleSegment(anchor.base)) throw parentChanged(dirname(anchor.requested));
+  confirmAnchor(anchor);
+  const temp = `.c2c-${process.pid}-${Math.random().toString(16).slice(2)}.tmp`;
+  const child = spawnSync(process.execPath, ['-e', SITES_ANCHOR_CHILD, anchor.dev, anchor.ino, anchor.base, temp], {
+    cwd: anchor.realParent,
+    input: contents,
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+  if (child.status === 0 && !child.error) return;
+  const reason = (child.stderr ?? '').trim();
+  if (reason === 'target') {
+    throw new Error(
+      `determinism:status: --sites target must be a regular file with one link: ${join(anchor.realParent, anchor.base)}`,
+    );
+  }
+  throw parentChanged(dirname(anchor.requested));
 }
 
 export function renderStatusDoc(status: DeterminismStatus, builtinCataloguePath?: string): string {
@@ -542,43 +687,51 @@ export function main(argv: string[]): number {
     return 2;
   }
   let sitesPath: string | undefined;
+  let anchor: SitesAnchor | undefined;
   const sitesArg = take('--sites');
   if (sitesArg !== undefined) {
     try {
       sitesPath = resolveSitesPath(sitesArg);
+      // Pin the directory before the scan. A parent swapped for a symlink
+      // while the gallery is read must not receive the attribution file.
+      anchor = openSitesAnchor(sitesPath);
     } catch (error) {
       process.stderr.write(`${(error as Error).message}\n`);
       return 2;
     }
   }
-  const dir = resolveStatusDir(process.env, take('--dir'));
-  if (!dir || !statSync(dir, { throwIfNoEntry: false })?.isDirectory()) {
-    process.stderr.write('determinism:status: gallery not found; pass --dir or set C2C_FIXTURES_DIR or C2C_GALLERY_DIR\n');
-    return 1;
-  }
-  const status = computeDeterminismStatus(dir);
-  if (status.totalApps === 0) {
-    process.stderr.write('determinism:status: no apps in the gallery directory\n');
-    return 1;
-  }
-  const out = take('--out') ?? join(repoRoot(), 'docs/determinism-status.md');
-  writeFileSync(out, renderStatusDoc(status));
-  if (sitesPath) {
-    try {
-      const contents = `${JSON.stringify(siteAttributionForDir(dir, 'gallery'), null, 2)}\n`;
-      const hook = (globalThis as typeof globalThis & { __c2cBeforeSitesWrite?: (path: string) => void }).__c2cBeforeSitesWrite;
-      hook?.(sitesPath);
-      writeSitesFile(sitesPath, contents);
-    } catch (error) {
-      process.stderr.write(`${(error as Error).message}\n`);
-      return 2;
+  try {
+    const dir = resolveStatusDir(process.env, take('--dir'));
+    if (!dir || !statSync(dir, { throwIfNoEntry: false })?.isDirectory()) {
+      process.stderr.write('determinism:status: gallery not found; pass --dir or set C2C_FIXTURES_DIR or C2C_GALLERY_DIR\n');
+      return 1;
     }
-    process.stderr.write(`determinism:status sites -> ${sitesPath}\n`);
+    const status = computeDeterminismStatus(dir);
+    if (status.totalApps === 0) {
+      process.stderr.write('determinism:status: no apps in the gallery directory\n');
+      return 1;
+    }
+    const out = take('--out') ?? join(repoRoot(), 'docs/determinism-status.md');
+    writeFileSync(out, renderStatusDoc(status));
+    if (anchor && sitesPath) {
+      try {
+        const contents = `${JSON.stringify(siteAttributionForDir(dir, 'gallery'), null, 2)}\n`;
+        const hook = (globalThis as typeof globalThis & { __c2cBeforeSitesWrite?: (path: string) => void }).__c2cBeforeSitesWrite;
+        hook?.(sitesPath);
+        writeSitesFile(anchor, contents);
+      } catch (error) {
+        process.stderr.write(`${(error as Error).message}\n`);
+        return 2;
+      }
+      process.stderr.write(`determinism:status sites -> ${sitesPath}\n`);
+    }
+    process.stdout.write(
+      `determinism:status apps=${status.totalApps} deterministic=${status.deterministicApps} todos=${status.todoTotal} kinds=${status.kinds.length} construct-sets=${status.perAppConstructSets.length} ui-todo-apps=${status.deterministicWithUiTodos.apps} ui-todos=${status.deterministicWithUiTodos.uiTodos}\n`,
+    );
+    return 0;
+  } finally {
+    if (anchor) closeSync(anchor.fd);
   }
-  process.stdout.write(
-    `determinism:status apps=${status.totalApps} deterministic=${status.deterministicApps} todos=${status.todoTotal} kinds=${status.kinds.length} construct-sets=${status.perAppConstructSets.length} ui-todo-apps=${status.deterministicWithUiTodos.apps} ui-todos=${status.deterministicWithUiTodos.uiTodos}\n`,
-  );
-  return 0;
 }
 
 const invoked = process.argv[1]?.endsWith('/status.js') ?? false;
