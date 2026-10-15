@@ -142,6 +142,8 @@ export interface WriteField {
   /** Link name as stored on the form or subform. */
   name: string;
   readOnly?: boolean;
+  /** The export hides the field on the form; a posted value for it is refused. */
+  hidden?: boolean;
   /**
    * `lookup` values accept only the exact keys `id` and `label`.
    * `subform` rows and `composite` (address / name) values accept only `fields`.
@@ -186,6 +188,8 @@ export interface WriteSchema {
    * writes need `fields`; a flat list cannot say which names exist at which depth.
    */
   fieldNames?: readonly string[];
+  /** Hidden field names for the flat `fieldNames` depth; `fields` marks them per field. */
+  hiddenFields?: readonly string[];
   /** Top-level fields of this form. Each depth allows only its own children. */
   fields?: readonly WriteField[];
   /**
@@ -377,10 +381,11 @@ export function authorizeWrite(
     throw new RecordAccessError(`record access: profile ${principal.profile} cannot edit ${form}`);
   }
   const readonlyList = schema?.readonlyFields ?? [];
+  const hiddenList = schema?.hiddenFields ?? [];
   const denied = ruleDeniedFor(schema?.ruleDenied, op);
-  const depth = depthOf(schema, grant, readonlyList);
+  const depth = depthOf(schema, grant, readonlyList, hiddenList);
   return {
-    values: screenObject(form, values ?? {}, '', depth, principal, grant, readonlyList, denied, true),
+    values: screenObject(form, values ?? {}, '', depth, principal, grant, readonlyList, hiddenList, denied, true),
   };
 }
 
@@ -439,6 +444,7 @@ export function authorizeDelete(policy: AccessPolicy, principal: Principal | und
 interface DepthField {
   name: string;
   readOnly: boolean;
+  hidden: boolean;
   kind?: WriteFieldKind;
   scalar?: WriteScalar;
   children: DepthField[];
@@ -450,7 +456,12 @@ interface Depth {
   fields: DepthField[];
 }
 
-function depthOf(schema: WriteSchema | undefined, grant: FormGrant, readonlyNames: readonly string[]): Depth {
+function depthOf(
+  schema: WriteSchema | undefined,
+  grant: FormGrant,
+  readonlyNames: readonly string[],
+  hiddenNames: readonly string[],
+): Depth {
   if (schema?.fields) {
     return { open: false, fields: schema.fields.map((field) => toDepth(field, readonlyNames)) };
   }
@@ -461,6 +472,7 @@ function depthOf(schema: WriteSchema | undefined, grant: FormGrant, readonlyName
     fields: names.map((name) => ({
       name,
       readOnly: readonlyNames.some((item) => item.toLowerCase() === name.toLowerCase()),
+      hidden: hiddenNames.some((item) => item.toLowerCase() === name.toLowerCase()),
       children: [],
     })),
   };
@@ -472,6 +484,7 @@ function toDepth(field: WriteField, readonlyNames: readonly string[]): DepthFiel
   return {
     name: field.name,
     readOnly,
+    hidden: !!field.hidden,
     ...(field.kind ? { kind: field.kind } : {}),
     ...(field.scalar ? { scalar: field.scalar } : {}),
     children: (field.fields ?? []).map((child) => toDepth(child, readonlyNames)),
@@ -489,7 +502,7 @@ function toDepth(field: WriteField, readonlyNames: readonly string[]): DepthFiel
 export function applyInitialValues(values: Record<string, unknown>, fields: readonly WriteField[] | undefined): void {
   if (!fields) return;
   for (const field of fields) {
-    if (field.readOnly) continue;
+    if (field.readOnly || field.hidden) continue;
     if (field.kind === 'subform') {
       const rows = values[field.name];
       if (Array.isArray(rows)) {
@@ -532,6 +545,7 @@ function screenObject(
   principal: Principal,
   grant: FormGrant,
   readonlyList: readonly string[],
+  hiddenList: readonly string[],
   denied: readonly FieldRuleDenial[],
   grantApplies: boolean,
 ): Record<string, unknown> {
@@ -551,6 +565,9 @@ function screenObject(
       if (readonlyList.some((name) => name.toLowerCase() === key.toLowerCase())) {
         throw new RecordAccessError(`record access: ${form}.${dotted} is read-only`);
       }
+      if (hiddenList.some((name) => name.toLowerCase() === key.toLowerCase())) {
+        throw new RecordAccessError(`record access: ${form}.${dotted} is hidden`);
+      }
       accepted[key] = screenScalar(form, dotted, value, principal);
       continue;
     }
@@ -559,7 +576,7 @@ function screenObject(
       throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
     }
     assertAllowed(form, dotted, field, principal, grant, readonlyList, grantApplies);
-    accepted[key] = screenFieldValue(form, dotted, field, value, principal, grant, readonlyList, denied);
+    accepted[key] = screenFieldValue(form, dotted, field, value, principal, grant, readonlyList, hiddenList, denied);
   }
   return accepted;
 }
@@ -588,6 +605,9 @@ function assertAllowed(
   readonlyList: readonly string[],
   grantApplies: boolean,
 ): void {
+  if (field.hidden) {
+    throw new RecordAccessError(`record access: ${form}.${dotted} is hidden`);
+  }
   if (field.readOnly || readonlyList.some((name) => name.toLowerCase() === field.name.toLowerCase())) {
     throw new RecordAccessError(`record access: ${form}.${dotted} is read-only`);
   }
@@ -612,6 +632,7 @@ function screenFieldValue(
   principal: Principal,
   grant: FormGrant,
   readonlyList: readonly string[],
+  hiddenList: readonly string[],
   denied: readonly FieldRuleDenial[],
 ): unknown {
   if (value == null) return value;
@@ -626,14 +647,14 @@ function screenFieldValue(
       if (!isPlainRecord(row)) {
         throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${path}`);
       }
-      return screenObject(form, row, path, { open: false, fields: field.children }, principal, grant, readonlyList, denied, true);
+      return screenObject(form, row, path, { open: false, fields: field.children }, principal, grant, readonlyList, hiddenList, denied, true);
     });
   }
   if (field.kind === 'composite') {
     if (!isPlainRecord(value)) {
       throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
     }
-    return screenObject(form, value, dotted, { open: false, fields: field.children }, principal, grant, readonlyList, denied, false);
+    return screenObject(form, value, dotted, { open: false, fields: field.children }, principal, grant, readonlyList, hiddenList, denied, false);
   }
   // A blank optional scalar is "no value", not "". The store rejects
   // "" for typed columns (400 INVALID_INPUT on date), so it becomes null.

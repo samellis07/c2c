@@ -171,6 +171,31 @@ test('editable report renders bounded bulk selection and selectable rows', async
   assert.match(runtime.renderReportRows(target, [{ ROWID: '17', Guest: 'A' }]), /data-bulk-select value="17"/);
 });
 
+test('the bulk picker omits hidden, read-only, unhandled and stage-limited fields', async () => {
+  const model = buildUi(appOf([FORM, report('list', 'Bookings', '')].join('\n'))).model;
+  const target = model.reports.find((item) => item.name === 'Bookings')!;
+  target.form = 'Booking';
+  target.rowActions = { edit: true, delete: false };
+  const form = model.forms.find((item) => item.name === 'Booking')!;
+  const extra = { required: false, unique: false, status: 'generated' as const, scan: false };
+  form.fields.push(
+    { ...extra, name: 'Internal', label: 'Internal', widget: 'text', readonly: false, visibility: false },
+    { ...extra, name: 'Locked', label: 'Locked', widget: 'text', readonly: true },
+    { ...extra, name: 'Attachment', label: 'Attachment', widget: 'file', readonly: false },
+  );
+  form.stageFields = [
+    { statusColumn: 'Status', stages: { Review: { hidden: ['Room'] }, Open: { readonly: ['Check_In'] } }, transitions: {} },
+  ];
+  const { doc } = await bootReport(model, 'Bookings', [{ ROWID: '7', Guest: 'A' }]);
+  const win = doc.defaultView!;
+  const box = doc.querySelector('input[data-bulk-select]') as HTMLInputElement;
+  box.checked = true;
+  box.dispatchEvent(new win.Event('change', { bubbles: true }));
+  doc.querySelector('button[data-bulk-edit]')!.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+  const options = Array.from(doc.querySelectorAll('select[name="field"] option')).map((option) => option.getAttribute('value'));
+  assert.deepEqual(options, ['Guest', 'Status', 'Product', 'Check_Out', 'Note']);
+});
+
 function lanes(doc: Document): { key: string | null; head: string; items: string[] }[] {
   return Array.from(doc.querySelectorAll('[data-board] [data-lane]')).map((lane) => ({
     key: lane.getAttribute('data-lane'),

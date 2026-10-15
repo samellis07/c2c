@@ -21,7 +21,7 @@ import ts from 'typescript';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { compareCells, compareDecimalCells } from '../../shims/src/criteria.js';
 import { TEMPLATE_DIR, reactAppSpec } from '../src/index.js';
-import type { ReportSpec } from '../template/lib/c2c-ui/types.js';
+import type { FormSpec, ReportSpec } from '../template/lib/c2c-ui/types.js';
 
 function source(): string {
   return `application "Shop"
@@ -196,7 +196,7 @@ interface Mounted {
 }
 
 /** Mount <ReportView> against a fake endpoint that applies the posted sort like the report endpoint. */
-async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: ReadonlySet<string>, rowId?: string, recordReply?: () => Promise<{ ok: boolean; status: number; body?: unknown }>): Promise<Mounted> {
+async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: ReadonlySet<string>, forms: Record<string, FormSpec> = {}, rowId?: string, recordReply?: () => Promise<{ ok: boolean; status: number; body?: unknown }>): Promise<Mounted> {
   const { JSDOM } = await import('jsdom');
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true });
   const view = dom.window as unknown as Record<string, unknown> & Window;
@@ -262,7 +262,7 @@ async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: 
 
   const container = view.document.getElementById('root') as HTMLElement;
   const root = createRoot(container);
-  const spec = { name: 'Shop', spec: 1 as const, theme: { accent: '#000000', accentInk: '#ffffff', menu: 'list' as const }, nav: [], forms: {}, reports: { [report.name]: report } };
+  const spec = { name: 'Shop', spec: 1 as const, theme: { accent: '#000000', accentInk: '#ffffff', menu: 'list' as const }, nav: [], forms, reports: { [report.name]: report } };
   const env = { view, doc: view.document, spec, api };
   const flush = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
   await act(async () => {
@@ -456,7 +456,7 @@ test('record detail draws configured sections and related rows from the authoriz
       { title: 'Items', relatedField: 'Lines', fields: [{ field: 'Material', label: 'Material Name' }, { field: 'Quantity', label: 'Qty' }] },
     ],
   };
-  const view = await mount(out, report, [], new Set(), '1');
+  const view = await mount(out, report, [], new Set(), {}, '1');
   const recordRead = view.posted.find((call) => call.endpoint.endsWith('/record'));
   assert.equal(recordRead?.endpoint, '/forms/Order/record');
   assert.deepEqual(recordRead?.body, { ROWID: '1', REPORT: 'Orders' });
@@ -471,7 +471,7 @@ test('record detail gives a clear error for denied and missing records', { skip:
   const base = reactAppSpec(appOf()).reports.Orders!;
   const report = { ...base, detail: true, recordEndpoint: '/forms/Order/record' };
   for (const status of [403, 404]) {
-    const view = await mount(out, report, [], new Set(), '907', async () => ({ ok: false, status }));
+    const view = await mount(out, report, [], new Set(), {}, '907', async () => ({ ok: false, status }));
     assert.equal(view.container.querySelector('[data-state="loading"]'), null, `${status} clears loading`);
     if (status === 403) {
       assert.ok(view.container.querySelector('[data-access-denied]'), `${status} renders the access-denied screen`);
@@ -484,10 +484,63 @@ test('record detail shows a retryable network error', { skip: SKIP }, async (t) 
   const out = await compileOnly(t, 'record-network-error');
   const base = reactAppSpec(appOf()).reports.Orders!;
   const report = { ...base, detail: true, recordEndpoint: '/forms/Order/record' };
-  const view = await mount(out, report, [], new Set(), '907', async () => ({ ok: false, status: 0 }));
+  const view = await mount(out, report, [], new Set(), {}, '907', async () => ({ ok: false, status: 0 }));
   assert.equal(view.container.querySelector('[data-state="loading"]'), null);
   assert.match(view.container.textContent ?? '', /could not be reached/i);
   assert.ok(view.byRole('button', 'Retry'));
+});
+
+test('a field the export hides is marked not-writable in the spec', () => {
+  const spec = reactAppSpec(
+    appOf(`application "Hidden"
+{
+	form Item
+	{
+		Name
+		(
+			type = text
+		)
+		Secret
+		(
+			type = text
+			visibility = false
+		)
+	}
+}
+`),
+  );
+  const fields = spec.forms.Item!.fields;
+  assert.equal(fields.find((f) => f.name === 'Secret')!.visibility, false);
+  assert.equal(fields.find((f) => f.name === 'Name')!.visibility, undefined);
+});
+
+test('the bulk picker omits hidden, read-only, unhandled and stage-limited fields', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'bulk-fields');
+  const spec = reactAppSpec(appOf());
+  const report = spec.reports.Orders!;
+  const leaf = { required: false, readonly: false, generated: true };
+  const form: FormSpec = {
+    name: 'Order',
+    label: 'Order',
+    layout: 'one',
+    submitEndpoint: '/forms/Order/submit',
+    editSubmitEndpoint: '/forms/Order/edit',
+    recordEndpoint: '/forms/Order/record',
+    buttons: { add: [], edit: [] },
+    fields: [
+      { ...leaf, name: 'Title', label: 'Title', widget: 'text' },
+      { ...leaf, name: 'Total', label: 'Total', widget: 'decimal' },
+      { ...leaf, name: 'Secret', label: 'Secret', widget: 'text', visibility: false },
+      { ...leaf, name: 'Locked', label: 'Locked', widget: 'text', readonly: true },
+      { ...leaf, name: 'Photo', label: 'Photo', widget: 'image' },
+      { ...leaf, name: 'Staged', label: 'Staged', widget: 'text' },
+      { ...leaf, name: 'Frozen', label: 'Frozen', widget: 'text' },
+    ],
+    stageFields: [{ statusColumn: 'Status', stages: { Review: { hidden: ['Staged'], readonly: ['Frozen'] } }, transitions: {} }],
+  };
+  const view = await mount(out, { ...report, form: 'Order', rowActions: { edit: true, delete: false } }, ROWS, new Set(), { Order: form });
+  const options = [...view.container.querySelectorAll('select[aria-label="Field to edit"] option')].map((option) => option.getAttribute('value'));
+  assert.deepEqual(options, ['', 'Title', 'Total']);
 });
 
 test('non-list reports keep their visible pending-view stub', { skip: SKIP }, async (t) => {
