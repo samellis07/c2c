@@ -142,7 +142,7 @@ function Element({ el }: { el: PageElement }): ReactNode {
 export function PageView({ page }: { page: PageSpec }) {
   return (
     <section className="c2c-card c2c-page" data-page={page.name}>
-      {page.scopedCss ? <style>{page.scopedCss.replace(/[<>]/g, '')}</style> : null}
+      {page.scopedCss ? <style>{page.scopedCss.replace(/</g, '')}</style> : null}
       <h1>{page.label}</h1>
       {page.todos.length ? (
         <details className="todo c2c-page-todos" data-todo-count={page.todos.length}>

@@ -397,7 +397,7 @@ export function cleanStyle(value: string): { style: string; dropped: string[] } 
 }
 
 /** Scan static CSS without regex parsing/backtracking. Unsupported constructs fail closed. */
-export function carryStaticStyle(css: string, scope: string): ScopedStyle {
+export function carryStaticStyle(css: string, scope: string, inMedia = false): ScopedStyle {
   const rules: string[] = [];
   let droppedRules = 0;
   let uncommented = '';
@@ -451,7 +451,9 @@ export function carryStaticStyle(css: string, scope: string): ScopedStyle {
       else if (ch === ';' && parens === 0 && css.slice(start, i).trim().startsWith('@')) break;
       else if (ch === '}' && parens === 0) break;
     }
-    if (i >= css.length || css[i] !== '{') {
+    if (i >= css.length) { droppedRules++; break; }
+    if (css[i] !== '{') {
+      if (css[i] === '}') { droppedRules++; i++; continue; }
       const statementEnd = css.indexOf(';', i);
       if (css.slice(start, i).trim().startsWith('@') && statementEnd >= 0) { droppedRules++; i = statementEnd + 1; continue; }
       droppedRules++; break;
@@ -480,8 +482,8 @@ export function carryStaticStyle(css: string, scope: string): ScopedStyle {
         } else conditionSafe = false;
       }
       if (conditionDepth !== 0) conditionSafe = false;
-      if (!conditionSafe) { droppedRules++; continue; }
-      const nested = carryStaticStyle(body, scope);
+      if (!conditionSafe || inMedia) { droppedRules++; continue; }
+      const nested = carryStaticStyle(body, scope, true);
       droppedRules += nested.droppedRules;
       if (nested.css) rules.push(`@media ${condition}{${nested.css}}`);
       continue;
@@ -643,6 +645,20 @@ function cssRuleCount(css: string): number {
   return count + (pending ? 1 : 0);
 }
 
+/** Mask `<% … %>` template islands in one pass; an unclosed `<%` stays. */
+function maskTemplateIslands(text: string, fill: string): string {
+  if (!text.includes('<%')) return text;
+  let out = '', i = 0;
+  for (;;) {
+    const open = text.indexOf('<%', i);
+    if (open < 0) return out + text.slice(i);
+    const close = text.indexOf('%>', open + 2);
+    if (close < 0) return out + text.slice(i);
+    out += text.slice(i, open) + fill;
+    i = close + 2;
+  }
+}
+
 /**
  * Static CSS rules inside the `<style>` elements of `raw`. The sanitizer drops
  * every `<style>` element whole, so this is the CSS a page loses. Template
@@ -656,7 +672,7 @@ export function droppedStyleRules(raw: string): number {
   const walk = (node: DomNode) => {
     if (node.nodeType !== 1) return;
     if ((node.tagName || '').toLowerCase() === 'style') {
-      rules += cssRuleCount((node.textContent ?? '').replace(/<%[\s\S]*?%>/g, 'x'));
+      rules += cssRuleCount(maskTemplateIslands(node.textContent ?? '', 'x'));
       return;
     }
     for (const child of listOf(node.childNodes)) walk(child);
@@ -673,7 +689,7 @@ export function carriedStyleRules(raw: string, scope: string): ScopedStyle {
   const walk = (node: DomNode) => {
     if (node.nodeType !== 1) return;
     if ((node.tagName || '').toLowerCase() === 'style') {
-      const result = carryStaticStyle((node.textContent ?? '').replace(/<%[\s\S]*?%>/g, ' '), scope);
+      const result = carryStaticStyle(maskTemplateIslands(node.textContent ?? '', ' '), scope);
       if (result.css) carried.push(result.css);
       droppedRules += result.droppedRules;
       return;

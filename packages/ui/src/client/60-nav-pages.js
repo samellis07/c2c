@@ -158,7 +158,7 @@ export function applyNavPages(model, doc) {
     if (page) {
       const heading = article.querySelector('h2');
       const title = heading && heading.textContent ? heading.textContent : page.label || page.name;
-      const pageStyle = typeof page.scopedCss === 'string' && page.scopedCss ? `<style>${page.scopedCss.replace(/[<>]/g, '')}</style>` : '';
+      const pageStyle = typeof page.scopedCss === 'string' && page.scopedCss ? `<style>${page.scopedCss.replace(/</g, '')}</style>` : '';
       article.innerHTML = `${pageStyle}<h2>${navEscape(title)}</h2>${(page.elements || [])
         .map((el) => renderElement(el, doc, undefined, model))
         .join('')}`;
