@@ -331,9 +331,10 @@ test('record subforms require a child-table read grant and project child fields'
     policy.profiles.Staff['Order__Lines'] = { fields: ['Item'] };
     writeFileSync(join(dir, policyPath), JSON.stringify(policy));
     const rec = await import(pathToFileURL(join(dir, 'functions/aio/order/record.mjs')).href);
-    const submit = await import(pathToFileURL(join(dir, 'functions/aio/order/submit.mjs')).href);
     const store = memoryDatastore();
-    await withLive(store, () => invoke(submit.default, { ...staff, body: { record: { ...record, Lines: [{ Item: 'Bolt', Secret: 'hidden' }] } } }));
+    store.tables.set('Order', [{ ROWID: '1', Customer: 'Ann' }]);
+    store.tables.set('Order__Lines', [{ ROWID: '2', parent_id: '1', row_order: 0, Item: 'Bolt', Secret: 'hidden' }]);
+    store.tables.set('Order__Notes', [{ ROWID: '3', parent_id: '1', row_order: 0, Body: 'no grant' }]);
     const parent = store.tables.get('Order')![0]!;
     const loaded = await withLive(store, () => invoke(rec.default, { ...staff, body: { ROWID: parent.ROWID } }));
     assert.equal(loaded.status, 200, JSON.stringify(loaded.body));

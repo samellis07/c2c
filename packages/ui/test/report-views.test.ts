@@ -564,8 +564,9 @@ async function bootDecorated(name: string, rows: Record<string, unknown>[], kind
   win.fetch = (async (url: string, init: { body: string }) => {
     const body = JSON.parse(init.body) as Record<string, unknown>;
     if (body.ROWID != null) recordReads.push({ url, body });
+    const matched = rows.find((row) => String(row.ROWID ?? '') === String(body.ROWID ?? ''));
     const payload = body.ROWID != null
-      ? { record: { ROWID: String(body.ROWID), Product: 'Off page record' } }
+      ? { record: matched ?? { ROWID: String(body.ROWID), Product: 'Off page record' } }
       : { rows: body.op === 'query' ? rows : [] };
     return { ok: true, status: 200, json: async () => payload };
   }) as unknown as typeof fetch;
