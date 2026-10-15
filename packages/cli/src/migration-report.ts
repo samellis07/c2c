@@ -12,11 +12,11 @@
  * or file names; do not commit this report when it names private exports.
  */
 
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { listDsFiles, parseFileWithSidecars, parseProject, type App } from '../../core/src/index.js';
+import { entryKind, listDsFiles, parseFileOrProjectWithSidecars, type App } from '../../core/src/index.js';
 import { compareEnUs } from '../../core/src/order.js';
-import { readLock, type FillLock } from '../../deluge/src/index.js';
+import { readLockIfPresent, type FillLock, type LockFileFs } from '../../deluge/src/index.js';
 import { analyze, type TodoKind } from './analyze.js';
 import type { FieldGap } from '../../schema/src/generator.js';
 import { MATRIX_SNAPSHOT, type MatrixSnapshot } from './feature-matrix.js';
@@ -62,16 +62,17 @@ export interface MigrationReport {
   };
 }
 
-/** Apps under a directory: each sub-folder with .ds files, or each .ds file. Sorted by name. */
+/** Apps under a directory: each sub-folder with .ds files, or each .ds file. Sorted by name. Symlinks are not followed. */
 export function listReportApps(dir: string): { name: string; target: string }[] {
-  const names = readdirSync(dir).sort((a, b) => compareEnUs(a, b));
+  const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => compareEnUs(a.name, b.name));
   const out: { name: string; target: string }[] = [];
-  for (const name of names) {
+  for (const ent of entries) {
+    const name = ent.name;
     if (name.startsWith('.')) continue;
     const target = join(dir, name);
-    const st = statSync(target, { throwIfNoEntry: false });
-    if (!st) continue;
-    if (st.isDirectory()) {
+    // The entry kind comes from the directory read; a symlink is skipped.
+    if (ent.isSymbolicLink()) continue;
+    if (entryKind(ent) === 'directory') {
       if (listDsFiles(target).length) out.push({ name, target });
     } else if (name.toLowerCase().endsWith('.ds')) {
       out.push({ name: basename(name), target });
@@ -80,17 +81,18 @@ export function listReportApps(dir: string): { name: string; target: string }[] 
   return out;
 }
 
-export function lockFor(target: string): FillLock | undefined {
-  const st = statSync(target, { throwIfNoEntry: false });
-  if (!st?.isDirectory()) return undefined;
-  const candidate = join(target, 'c2c.lock.json');
-  if (!statSync(candidate, { throwIfNoEntry: false })?.isFile()) return undefined;
-  return readLock(candidate);
+/**
+ * The app's c2c.lock.json, opened once without following a symlink. The read
+ * decides: a missing target (ENOENT), a file target (ENOTDIR), a symlinked
+ * lock or a lock that is not a regular file is no lock.
+ */
+export function lockFor(target: string, fsImpl?: LockFileFs): FillLock | undefined {
+  return readLockIfPresent(join(target, 'c2c.lock.json'), fsImpl);
 }
 
+/** A project directory or one `.ds` file with its widget sidecars, classified by the opened target. */
 export function loadIr(target: string): App {
-  const st = statSync(target);
-  return st.isDirectory() ? parseProject(target).ir : parseFileWithSidecars(target).ir;
+  return parseFileOrProjectWithSidecars(target).ir;
 }
 
 const byKind = (a: TodoKind, b: TodoKind) => b.count - a.count || compareEnUs(a.construct, b.construct);

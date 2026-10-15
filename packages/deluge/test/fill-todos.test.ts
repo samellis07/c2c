@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { closeSync, existsSync, fstatSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { closeSync, constants, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { constants as osConstants, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test as nodeTest, type TestContext } from 'node:test';
 import { deriveIr, parse } from '../../core/src/index.js';
@@ -23,6 +23,7 @@ import {
   fillLimitRefusal,
   loadApp,
   readLock,
+  readLockIfPresent,
   reportLock,
   shimAllowlist,
   vectorCoverage,
@@ -1320,6 +1321,142 @@ test('readLock still rejects malformed JSON and a wrong version', () => {
   try {
     assert.throws(() => readLock(malformed), { name: 'FillTodoError', message: 'lock file is not valid JSON' });
     assert.throws(() => readLock(wrongVersion), { name: 'FillTodoError', message: 'c2c.lock.json is not version 1' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function recordingLockFs(calls: string[]) {
+  return {
+    openSync(path: string, flags: number) {
+      calls.push(`open:${flags === (constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW) ? 'nofollow' : flags}`);
+      return openSync(path, flags);
+    },
+    fstatSync(fd: number) {
+      calls.push('fstat');
+      return fstatSync(fd);
+    },
+    readFileSync(fd: number, encoding: 'utf8') {
+      calls.push('read-fd');
+      return readFileSync(fd, encoding);
+    },
+    closeSync(fd: number) {
+      calls.push('close');
+      closeSync(fd);
+    },
+  };
+}
+
+test('readLockIfPresent opens the lock once without following links and reports present, absent, directory, under-a-file, FIFO and link', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-lock-present-'));
+  const lockPath = join(dir, 'c2c.lock.json');
+  writeFileSync(lockPath, '{"version":1,"entries":{"a":{"id":"a"}}}\n');
+  const fifo = join(dir, 'fifo.json');
+  spawnSync('mkfifo', [fifo]);
+  const calls: string[] = [];
+  const fsImpl = recordingLockFs(calls);
+  try {
+    assert.deepEqual(readLockIfPresent(lockPath, fsImpl), { version: 1, entries: { a: { id: 'a' } } });
+    assert.deepEqual(calls, ['open:nofollow', 'fstat', 'read-fd', 'close']);
+
+    calls.length = 0;
+    assert.equal(readLockIfPresent(join(dir, 'missing.json'), fsImpl), undefined);
+    assert.deepEqual(calls, ['open:nofollow']);
+
+    calls.length = 0;
+    assert.equal(readLockIfPresent(join(lockPath, 'c2c.lock.json'), fsImpl), undefined);
+    assert.deepEqual(calls, ['open:nofollow']);
+
+    calls.length = 0;
+    assert.equal(readLockIfPresent(dir, fsImpl), undefined);
+    assert.deepEqual(calls, ['open:nofollow', 'fstat', 'close']);
+
+    // A FIFO opens without blocking and is not a regular file: no lock, no read.
+    calls.length = 0;
+    assert.equal(readLockIfPresent(fifo, fsImpl), undefined);
+    assert.deepEqual(calls, ['open:nofollow', 'fstat', 'close']);
+
+    // A link to a valid lock is refused by the open (ELOOP), never read.
+    const link = join(dir, 'link.json');
+    symlinkSync(lockPath, link);
+    calls.length = 0;
+    assert.equal(readLockIfPresent(link, fsImpl), undefined);
+    assert.deepEqual(calls, ['open:nofollow']);
+
+    assert.equal(readLockIfPresent(join(dir, 'missing.json')), undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('readLockIfPresent throws open errors other than ENOENT, ENOTDIR and EISDIR, and still rejects bad JSON', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-lock-present-err-'));
+  const bad = join(dir, 'bad.json');
+  writeFileSync(bad, '{');
+  try {
+    const denied = {
+      ...recordingLockFs([]),
+      openSync(): number {
+        const err = new Error('denied') as NodeJS.ErrnoException;
+        err.code = 'EACCES';
+        throw err;
+      },
+    };
+    assert.throws(() => readLockIfPresent(join(dir, 'x.json'), denied), { code: 'EACCES' });
+    assert.throws(() => readLockIfPresent(bad), { name: 'FillTodoError', message: 'lock file is not valid JSON' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('readLock keeps its empty lock for absent and directory paths, gains FIFO, and throws ENOTDIR and ELOOP for a link', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-lock-read-'));
+  const file = join(dir, 'c2c.lock.json');
+  writeFileSync(file, '{"version":1,"entries":{}}\n');
+  const fifo = join(dir, 'fifo.json');
+  spawnSync('mkfifo', [fifo]);
+  mkdirSync(join(dir, 'sub'));
+  try {
+    assert.deepEqual(readLock(join(dir, 'missing.json')), { version: 1, entries: {} });
+    assert.deepEqual(readLock(join(dir, 'sub')), { version: 1, entries: {} });
+    assert.deepEqual(readLock(fifo), { version: 1, entries: {} });
+    assert.throws(() => readLock(join(file, 'c2c.lock.json')), { code: 'ENOTDIR' });
+    // A linked lock is neither followed nor taken as empty, so it is never rewritten through the link.
+    const link = join(dir, 'link.json');
+    symlinkSync(file, link);
+    assert.throws(() => readLock(link), { code: 'ELOOP' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a socket lock is no lock, matched by errno number; a link to one is refused without opening the socket', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-lock-sock-'));
+  try {
+    // Bind from `dir` so the socket path stays under the sun_path limit.
+    spawnSync(process.execPath, ['-e', "require('node:net').createServer().listen('s.sock', () => process.exit(0))"], { cwd: dir });
+    const link = join(dir, 'c2c.lock.json');
+    symlinkSync(join(dir, 's.sock'), link);
+    assert.equal(readLockIfPresent(join(dir, 's.sock')), undefined);
+    assert.equal(readLockIfPresent(link), undefined);
+    assert.deepEqual(readLock(join(dir, 's.sock')), { version: 1, entries: {} });
+    assert.throws(() => readLock(link), { code: 'ELOOP' });
+    // macOS names errno -102 'Unknown system error -102'; Linux says ENXIO.
+    for (const err of [
+      Object.assign(new Error('socket'), { code: 'Unknown system error -102', errno: -osConstants.errno.EOPNOTSUPP }),
+      Object.assign(new Error('socket'), { code: 'ENXIO', errno: -osConstants.errno.ENXIO }),
+    ]) {
+      const fsImpl = {
+        openSync(): number {
+          throw err;
+        },
+        fstatSync: fstatSync,
+        readFileSync: (fd: number, encoding: 'utf8') => readFileSync(fd, encoding),
+        closeSync: closeSync,
+      };
+      assert.equal(readLockIfPresent(link, fsImpl), undefined);
+      assert.deepEqual(readLock(link, fsImpl), { version: 1, entries: {} });
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -1,16 +1,19 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { chmodSync, closeSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { emptyApp, type App, type Workflow } from '../../core/src/ir.js';
-import { acceptTodo, collectTasks } from '../../deluge/src/index.js';
+import { compareEnUs } from '../../core/src/order.js';
+import { acceptTodo, collectTasks, readLock, type FillLock } from '../../deluge/src/index.js';
 import {
   buildMigrationReport,
   listReportApps,
+  loadIr,
+  lockFor,
   migrationReportAsText,
   migrationReportForDir,
 } from '../src/migration-report.js';
@@ -126,4 +129,190 @@ test('c2c migration-report and analyze --json print the flag from the CLI', () =
   assert.equal((JSON.parse(analyzed.stdout) as { determinism: { deterministic: boolean } }).determinism.deterministic, true);
   const notDir = spawnSync(process.execPath, [cli, 'migration-report', join(fixtures, 'missing')], { encoding: 'utf8' });
   assert.equal(notDir.status, 2);
+});
+
+// Oracles: the previous stat-based listing and lock lookup with lstat in
+// place of stat, so symlinks are not followed: a link entry is skipped and a
+// linked lock is no lock.
+function lstatListDsFiles(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string) => {
+    for (const name of readdirSync(d).sort()) {
+      if (name === 'node_modules' || name === '.git') continue;
+      const p = join(d, name);
+      const st = lstatSync(p, { throwIfNoEntry: false });
+      if (!st) continue;
+      if (st.isDirectory()) walk(p);
+      else if (st.isFile() && name.toLowerCase().endsWith('.ds') && !name.toLowerCase().endsWith('.exported.ds')) out.push(p);
+    }
+  };
+  walk(dir);
+  return out;
+}
+
+function lstatListReportApps(dir: string): { name: string; target: string }[] {
+  const names = readdirSync(dir).sort((a, b) => compareEnUs(a, b));
+  const out: { name: string; target: string }[] = [];
+  for (const name of names) {
+    if (name.startsWith('.')) continue;
+    const target = join(dir, name);
+    const st = lstatSync(target, { throwIfNoEntry: false });
+    if (!st || st.isSymbolicLink()) continue;
+    if (st.isDirectory()) {
+      if (lstatListDsFiles(target).length) out.push({ name, target });
+    } else if (name.toLowerCase().endsWith('.ds')) {
+      out.push({ name: basename(name), target });
+    }
+  }
+  return out;
+}
+
+function lstatLockFor(target: string): FillLock | undefined {
+  const st = statSync(target, { throwIfNoEntry: false });
+  if (!st?.isDirectory()) return undefined;
+  const candidate = join(target, 'c2c.lock.json');
+  if (!lstatSync(candidate, { throwIfNoEntry: false })?.isFile()) return undefined;
+  return readLock(candidate);
+}
+
+/** A Unix socket file at `dir/name`, bound by a child from `dir` (short sun_path) that exits without closing. */
+const mksock = (dir: string, name: string) =>
+  execFileSync(process.execPath, ['-e', `require('node:net').createServer().listen(${JSON.stringify(name)}, () => process.exit(0))`], { cwd: dir });
+
+function withAppsDir(fn: (dir: string, ds: string) => void): void {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-mig-fs-'));
+  try {
+    fn(dir, readFileSync(join(root, 'fixtures/dialects/d1-minimal.ds'), 'utf8'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('listReportApps reads Dirent kinds, follows no link, and matches the lstat listing for directory, link, dangling and FIFO entries', () => {
+  withAppsDir((dir, ds) => {
+    mkdirSync(join(dir, 'app-a'));
+    writeFileSync(join(dir, 'app-a', 'a.ds'), ds);
+    mkdirSync(join(dir, 'empty'));
+    writeFileSync(join(dir, 'b.ds'), ds);
+    writeFileSync(join(dir, 'notes.txt'), 'x');
+    mkdirSync(join(dir, '.hidden'));
+    writeFileSync(join(dir, '.hidden', 'h.ds'), ds);
+    symlinkSync(join(dir, 'app-a'), join(dir, 'linked-app'));
+    symlinkSync(join(dir, 'b.ds'), join(dir, 'linked.ds'));
+    symlinkSync(join(dir, 'gone.ds'), join(dir, 'dangling.ds'));
+    execFileSync('mkfifo', [join(dir, 'pipe.ds')]);
+    const got = listReportApps(dir);
+    assert.deepEqual(got, lstatListReportApps(dir));
+    assert.deepEqual(got.map((app) => app.name), ['app-a', 'b.ds', 'pipe.ds']);
+    assert.throws(() => listReportApps(join(dir, 'missing')), { code: 'ENOENT' });
+    assert.throws(() => listReportApps(join(dir, 'b.ds')), { code: 'ENOTDIR' });
+  });
+});
+
+test('lockFor opens c2c.lock.json once; absent target, file target, directory, FIFO and linked lock are no lock', () => {
+  withAppsDir((dir, ds) => {
+    const app = join(dir, 'app');
+    mkdirSync(app);
+    writeFileSync(join(app, 'c2c.lock.json'), '{"version":1,"entries":{"a":{"id":"a"}}}\n');
+    writeFileSync(join(dir, 'one.ds'), ds);
+    mkdirSync(join(dir, 'dir-lock', 'c2c.lock.json'), { recursive: true });
+    mkdirSync(join(dir, 'fifo-lock'));
+    execFileSync('mkfifo', [join(dir, 'fifo-lock', 'c2c.lock.json')]);
+    mkdirSync(join(dir, 'link-lock'));
+    symlinkSync(join(app, 'c2c.lock.json'), join(dir, 'link-lock', 'c2c.lock.json'));
+    const calls: string[] = [];
+    const fsImpl = {
+      openSync(p: string, flags: number) {
+        calls.push(`open:${p.slice(dir.length + 1)}`);
+        return openSync(p, flags);
+      },
+      fstatSync(fd: number) {
+        calls.push('fstat');
+        return fstatSync(fd);
+      },
+      readFileSync(fd: number, encoding: 'utf8') {
+        calls.push('read-fd');
+        return readFileSync(fd, encoding);
+      },
+      closeSync(fd: number) {
+        calls.push('close');
+        closeSync(fd);
+      },
+    };
+    assert.deepEqual(lockFor(app, fsImpl), { version: 1, entries: { a: { id: 'a' } } });
+    assert.deepEqual(calls, ['open:app/c2c.lock.json', 'fstat', 'read-fd', 'close']);
+    calls.length = 0;
+    assert.equal(lockFor(join(dir, 'no-such-app'), fsImpl), undefined);
+    assert.deepEqual(calls, ['open:no-such-app/c2c.lock.json']);
+    calls.length = 0;
+    assert.equal(lockFor(join(dir, 'one.ds'), fsImpl), undefined);
+    assert.deepEqual(calls, ['open:one.ds/c2c.lock.json']);
+    assert.equal(lockFor(join(dir, 'dir-lock')), undefined);
+    assert.equal(lockFor(join(dir, 'fifo-lock')), undefined);
+    calls.length = 0;
+    assert.equal(lockFor(join(dir, 'link-lock'), fsImpl), undefined);
+    assert.deepEqual(calls, ['open:link-lock/c2c.lock.json']);
+    assert.equal(lstatLockFor(join(dir, 'link-lock')), undefined);
+    writeFileSync(join(app, 'c2c.lock.json'), '{');
+    assert.throws(() => lockFor(app), { name: 'FillTodoError', message: 'lock file is not valid JSON' });
+  });
+});
+
+test('loadIr classifies the opened target: project, file, absent (ENOENT) and FIFO (NotFileError)', () => {
+  withAppsDir((dir, ds) => {
+    mkdirSync(join(dir, 'proj'));
+    writeFileSync(join(dir, 'proj', 'a.ds'), ds);
+    writeFileSync(join(dir, 'one.ds'), ds);
+    execFileSync('mkfifo', [join(dir, 'pipe.ds')]);
+    assert.deepEqual(loadIr(join(dir, 'proj')).files, ['a.ds']);
+    assert.equal(loadIr(join(dir, 'one.ds')).files, undefined);
+    assert.throws(() => loadIr(join(dir, 'missing')), { code: 'ENOENT' });
+    assert.throws(() => loadIr(join(dir, 'pipe.ds')), { name: 'NotFileError' });
+  });
+});
+
+test('listReportApps and lockFor match the lstat oracles for links to a socket and to an unreadable file or directory', { skip: process.getuid?.() === 0 }, () => {
+  withAppsDir((dir, ds) => {
+    mkdirSync(join(dir, 'app-a'));
+    writeFileSync(join(dir, 'app-a', 'a.ds'), ds);
+    mksock(dir, 's.sock');
+    symlinkSync(join(dir, 's.sock'), join(dir, 'sock-link.ds'));
+    symlinkSync(join(dir, 's.sock'), join(dir, 'sock-link'));
+    writeFileSync(join(dir, 'locked.ds'), ds);
+    symlinkSync(join(dir, 'locked.ds'), join(dir, 'locked-link.ds'));
+    mkdirSync(join(dir, 'sock-lock'));
+    mksock(join(dir, 'sock-lock'), 'c2c.lock.json');
+    chmodSync(join(dir, 'locked.ds'), 0o000);
+    try {
+      const got = listReportApps(dir);
+      assert.deepEqual(got, lstatListReportApps(dir));
+      assert.deepEqual(got.map((app) => app.name), ['app-a', 'locked.ds']);
+      assert.equal(lstatLockFor(join(dir, 'sock-lock')), undefined);
+      assert.equal(lockFor(join(dir, 'sock-lock')), undefined);
+    } finally {
+      chmodSync(join(dir, 'locked.ds'), 0o644);
+    }
+    // A link to an unreadable directory outside the apps dir is skipped, not walked.
+    const apps = join(dir, 'apps');
+    mkdirSync(join(apps, 'app-a'), { recursive: true });
+    writeFileSync(join(apps, 'app-a', 'a.ds'), ds);
+    mkdirSync(join(dir, 'locked-dir'));
+    symlinkSync(join(dir, 'locked-dir'), join(apps, 'locked-dir-link'));
+    chmodSync(join(dir, 'locked-dir'), 0o000);
+    try {
+      assert.deepEqual(listReportApps(apps), lstatListReportApps(apps));
+      assert.deepEqual(listReportApps(apps).map((app) => app.name), ['app-a']);
+    } finally {
+      chmodSync(join(dir, 'locked-dir'), 0o755);
+    }
+    // An unreadable app directory itself still throws, as before.
+    mkdirSync(join(apps, 'locked-app'));
+    chmodSync(join(apps, 'locked-app'), 0o000);
+    try {
+      assert.throws(() => lstatListReportApps(apps), { code: 'EACCES' });
+      assert.throws(() => listReportApps(apps), { code: 'EACCES' });
+    } finally {
+      chmodSync(join(apps, 'locked-app'), 0o755);
+    }
+  });
 });
