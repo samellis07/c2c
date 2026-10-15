@@ -59,7 +59,7 @@ export function readRecord(formEl: HTMLFormElement, form: FormSpec): FormRecord 
   const named = (name: string) => all.filter((el) => el.name === name);
   const record: FormRecord = {};
   for (const field of form.fields) {
-    if (field.readonly || NOT_SENT.has(field.widget)) continue;
+    if (field.readonly || field.visibility === false || NOT_SENT.has(field.widget)) continue;
     if (FILE_WIDGETS.has(field.widget)) {
       if (edit && named(`${field.name}_cleared`).length > 0) {
         const el = formEl.elements.namedItem(field.name);
@@ -142,7 +142,7 @@ const NUMBER = /^-?\d+(\.\d+)?$/;
 export function validate(form: FormSpec, record: FormRecord, files: Map<FieldSpec, File>): Record<string, string> {
   const errors: Record<string, string> = {};
   for (const field of form.fields) {
-    if (field.readonly || NOT_SENT.has(field.widget)) continue;
+    if (field.readonly || field.visibility === false || NOT_SENT.has(field.widget)) continue;
     const value = record[field.name];
     const empty = FILE_WIDGETS.has(field.widget) ? !files.has(field) : value === undefined || value === null || value === '' || value === false || (Array.isArray(value) && !value.length);
     if (field.required && empty) {

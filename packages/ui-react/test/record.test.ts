@@ -177,3 +177,18 @@ test('canonicalNumber keeps every digit and fixes the scale with string math', (
   assert.equal(canonicalNumber('1e21', null), null);
   assert.equal(toCanonicalDecimal(1e21, 0), '1000000000000000000000');
 });
+
+test('a visibility = false field never posts, even with a stray named control', () => {
+  const form = spec([field('Name', 'text'), field('Secret', 'text', { visibility: false })]);
+  // No <Field> mounts for a hidden spec field; a forged control is ignored anyway.
+  const { formEl } = jsdom('<input name="Name" value="Ada"><input name="Secret" value="s">', 'edit');
+  assert.deepEqual(readRecord(formEl, form), { Name: 'Ada' });
+});
+
+test('a required hidden field produces no validation error', () => {
+  const form = spec([field('Name', 'text'), field('Secret', 'text', { visibility: false, required: true })]);
+  const { formEl } = jsdom('<input name="Name" value="Ada">');
+  const record = readRecord(formEl, form);
+  assert.equal('Secret' in record, false);
+  assert.deepEqual(validate(form, record, chosenFiles(formEl, form)), {});
+});

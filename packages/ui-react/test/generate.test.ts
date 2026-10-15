@@ -196,6 +196,18 @@ test('the report template keeps vanilla parity: search, pagination, and headers 
   assert.match(headRule, /overflow-wrap:\s*anywhere/, 'a long header breaks inside its column');
 });
 
+test('a visibility = false field is never drawn in the generated form module', () => {
+  const src = source().replace(
+    field('Birthday', 'date'),
+    `${field('Birthday', 'date')}\n${field('Secret', 'text', '\t\t\tvisibility = false')}`,
+  );
+  const files = generateReactApp(appOf(src));
+  const formTsx = text(files, 'src/generated/forms/New_Contact.tsx');
+  const order = [...formTsx.matchAll(/<Field name="([^"]+)" \/>/g)].map((m) => m[1]);
+  assert.deepEqual(order, ['Full_Name', 'Email', 'Kind', 'Birthday', 'Owner_Ref']);
+  assert.doesNotMatch(formTsx, /Secret/);
+});
+
 test('generated modules: one per form and report, routes by key, Creator field order in the form JSX', () => {
   const files = generateReactApp(appOf());
   const formTsx = text(files, 'src/generated/forms/New_Contact.tsx');

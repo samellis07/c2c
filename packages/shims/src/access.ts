@@ -502,7 +502,7 @@ function toDepth(field: WriteField, readonlyNames: readonly string[]): DepthFiel
 export function applyInitialValues(values: Record<string, unknown>, fields: readonly WriteField[] | undefined): void {
   if (!fields) return;
   for (const field of fields) {
-    if (field.readOnly || field.hidden) continue;
+    if (field.readOnly) continue;
     if (field.kind === 'subform') {
       const rows = values[field.name];
       if (Array.isArray(rows)) {

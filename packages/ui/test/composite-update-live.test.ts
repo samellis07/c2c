@@ -172,7 +172,7 @@ test('a live update through the generated submit handler accepts a granted neste
   try {
     const submitPath = 'functions/aio/reserve-table/submit.mjs';
     const source = String(files.get(submitPath));
-    assert.match(source, /writeSchemas: \{ \[formName\]: \{ readonlyFields, hiddenFields, fieldNames, fields \} \}/, submitPath);
+    assert.match(source, /writeSchemas: \{ \[formName\]: \{ readonlyFields, fieldNames, fields: storeFields \} \}/, submitPath);
     const mod = await import(pathToFileURL(join(dir, submitPath)).href);
     const store = memoryDatastore();
 
