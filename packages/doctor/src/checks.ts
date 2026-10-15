@@ -123,7 +123,7 @@ function homeDir(ctx: DoctorContext): string {
 
 interface SkillHit {
   path: string;
-  kind: 'skills-dir' | 'plugin-cache' | 'marketplace' | 'codex';
+  kind: 'skills-dir' | 'claude-skills' | 'plugin-cache' | 'marketplace' | 'codex';
   name?: string;
   version?: string;
 }
@@ -158,13 +158,33 @@ function readSkill(path: string, kind: SkillHit['kind']): SkillHit | undefined {
 }
 
 /** Search order from the doctor spec, D-A1 (plugin/references/doctor-spec.md). An unreadable directory is a finding, not a crash. */
-function findCatalystSkill(ctx: DoctorContext): { hit: SkillHit | undefined; error?: string } {
+function findCatalystSkill(ctx: DoctorContext): { hit: SkillHit | undefined; error?: string; searched: string[] } {
   const home = homeDir(ctx);
   const skillsDir = ctx.io.env.C2C_CATALYST_SKILLS_DIR;
+  const searched: string[] = [];
   try {
     if (skillsDir) {
-      const hit = readSkill(join(skillsDir, 'catalyst-by-zoho', 'SKILL.md'), 'skills-dir');
-      if (hit) return { hit };
+      const candidate = join(skillsDir, 'catalyst-by-zoho', 'SKILL.md');
+      searched.push(candidate);
+      const hit = readSkill(candidate, 'skills-dir');
+      if (hit) return { hit, searched };
+    } else {
+      searched.push('$C2C_CATALYST_SKILLS_DIR (unset)');
+    }
+    const claudeSkillsRoot = join(home, '.claude', 'skills');
+    const claudeRouter = join(claudeSkillsRoot, 'catalyst-by-zoho', 'SKILL.md');
+    searched.push(claudeRouter);
+    const claudeDirect = readSkill(claudeRouter, 'claude-skills');
+    if (claudeDirect) return { hit: claudeDirect, searched };
+    const claudeSkillsDir = statSync(claudeSkillsRoot, { throwIfNoEntry: false });
+    if (claudeSkillsDir?.isDirectory()) {
+      for (const entry of readdirSync(claudeSkillsRoot).sort()) {
+        if (!entry.startsWith('catalyst-') || entry === 'catalyst-by-zoho') continue;
+        const candidate = join(claudeSkillsRoot, entry, 'skills', 'catalyst-by-zoho', 'SKILL.md');
+        searched.push(candidate);
+        const hit = readSkill(candidate, 'claude-skills');
+        if (hit) return { hit, searched };
+      }
     }
     const cacheRoot = join(home, '.claude', 'plugins', 'cache');
     const cacheDir = statSync(cacheRoot, { throwIfNoEntry: false });
@@ -173,17 +193,25 @@ function findCatalystSkill(ctx: DoctorContext): { hit: SkillHit | undefined; err
         const pluginDir = join(cacheRoot, marketplace, 'catalyst-by-zoho');
         if (!statSync(pluginDir, { throwIfNoEntry: false })?.isDirectory()) continue;
         for (const version of readdirSync(pluginDir).sort()) {
-          const hit = readSkill(join(pluginDir, version, 'skills', 'catalyst-by-zoho', 'SKILL.md'), 'plugin-cache');
-          if (hit) return { hit };
+          const candidate = join(pluginDir, version, 'skills', 'catalyst-by-zoho', 'SKILL.md');
+          searched.push(candidate);
+          const hit = readSkill(candidate, 'plugin-cache');
+          if (hit) return { hit, searched };
         }
       }
+    } else {
+      searched.push(join(cacheRoot, '*', 'catalyst-by-zoho', '*', 'skills', 'catalyst-by-zoho', 'SKILL.md'));
     }
-    const market = readSkill(join(home, '.claude', 'plugins', 'marketplaces', 'catalyst-by-zoho', 'skills', 'catalyst-by-zoho', 'SKILL.md'), 'marketplace');
-    if (market) return { hit: market };
+    const marketPath = join(home, '.claude', 'plugins', 'marketplaces', 'catalyst-by-zoho', 'skills', 'catalyst-by-zoho', 'SKILL.md');
+    searched.push(marketPath);
+    const market = readSkill(marketPath, 'marketplace');
+    if (market) return { hit: market, searched };
     const codexHome = ctx.io.env.CODEX_HOME || join(home, '.codex');
-    return { hit: readSkill(join(codexHome, 'skills', 'catalyst-by-zoho', 'SKILL.md'), 'codex') };
+    const codexPath = join(codexHome, 'skills', 'catalyst-by-zoho', 'SKILL.md');
+    searched.push(codexPath);
+    return { hit: readSkill(codexPath, 'codex'), searched };
   } catch (err) {
-    return { hit: undefined, error: err instanceof Error ? err.message : String(err) };
+    return { hit: undefined, error: err instanceof Error ? err.message : String(err), searched };
   }
 }
 
@@ -221,7 +249,8 @@ function checkA(ctx: DoctorContext): CheckResult[] {
   const hit = found.hit;
   if (!hit) {
     const note = found.error ? `; the plugin skills directories could not be read (${found.error}); set C2C_CATALYST_SKILLS_DIR to the installed Catalyst skills directory` : '';
-    return [fail('D-A1', `the official Catalyst skills are not installed${note}`, D_A1_FIX)];
+    const paths = found.searched.length > 0 ? ` (searched: ${found.searched.join('; ')})` : '';
+    return [fail('D-A1', `the official Catalyst skills are not installed${note}${paths}`, D_A1_FIX)];
   }
   const out = [pass('D-A1', `catalyst skills found: ${hit.kind} v${hit.version ?? 'unknown'}`)];
   const floor = compat.catalystPlugin.min;

@@ -33,12 +33,12 @@ Run:
 (OpenAI Codex/Cursor: `<plugin-root>/bin/c2c doctor …`.) It runs D-A1 (skills on disk), D-C1..C5 (CLI installed, ≥ 1.27.2, `catalyst whoami`, `catalyst --org <org> project:list`, DC), D-D1..D3 (Creator export/data), D-E1..E4 (Node >=20.20 <23, vendor integrity, workspace), D-F1/F2/F5/F6 (budgets from the plan if it exists).
 
 If `bin/c2c` exits 6, stop: Node or the plugin files are wrong; give the printed fix.
-If D-A1 reports the plugin skills directories could not be read (for example a sandboxed host), set `C2C_CATALYST_SKILLS_DIR` to the installed Catalyst skills directory and re-run.
+If D-A1 reports the plugin skills directories could not be read (for example a sandboxed host), set `C2C_CATALYST_SKILLS_DIR` to the installed Catalyst skills directory and re-run. D-A1 searches `C2C_CATALYST_SKILLS_DIR` first, then `~/.claude/skills/` (skills copied there directly), the plugin cache and marketplaces under `~/.claude/plugins/`, and `${CODEX_HOME:-~/.codex}/skills/`; a red D-A1 lists every path it searched.
 
 ### 3. Agent half (you, with host tools)
 
 **3a. Catalyst skills visible (D-A2, D-A3).**
-- Claude Code: run `claude plugin list --json`; find `catalyst-by-zoho` with `enabled: true`. Also confirm these skills are in your available-skills list: `catalyst-by-zoho`, `catalyst-zoho-mcp`, `catalyst-basics`, `catalyst-datastore`, `catalyst-functions`, `catalyst-slate`, `catalyst-authentication`, `catalyst-stratus`.
+- Claude Code: run `claude plugin list --json`; find `catalyst-by-zoho` with `enabled: true`. Skills copied straight into `~/.claude/skills/` (a `catalyst-by-zoho/` router plus its `catalyst-*` siblings) also satisfy D-A1. Also confirm these skills are in your available-skills list: `catalyst-by-zoho`, `catalyst-zoho-mcp`, `catalyst-basics`, `catalyst-datastore`, `catalyst-functions`, `catalyst-slate`, `catalyst-authentication`, `catalyst-stratus`.
 - OpenAI Codex: `ls ~/.codex/skills/catalyst-by-zoho/SKILL.md` and the seven others.
 - Cursor: `ls "$C2C_CATALYST_SKILLS_DIR"/catalyst-by-zoho/SKILL.md`.
 - If two copies of the plugin are installed (for example `@synced` and `@claude-plugins-official`), WARN and ask the user to disable one.
