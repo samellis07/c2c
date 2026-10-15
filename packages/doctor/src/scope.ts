@@ -10,8 +10,9 @@
  * printed, only the two selector keys.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { readRegularFile } from './read-file.js';
 
 export const DEPLOY_CONFIG = 'c2c-deploy.json';
 
@@ -117,25 +118,42 @@ interface DeployConfig {
   ui?: 'vanilla' | 'react';
 }
 
+/** A deploy config found by {@link findDeployConfig}: its path and the text of that one read. */
+export interface FoundDeployConfig {
+  path: string;
+  text: string;
+}
+
+/**
+ * Read `path` once as the deploy config: absent (ENOENT/ENOTDIR) is undefined,
+ * a directory, FIFO or socket throws. No exists check runs before the read.
+ */
+function readConfigText(path: string): FoundDeployConfig | undefined {
+  const read = readRegularFile(path);
+  if (read.kind === 'missing') return undefined;
+  if (read.kind === 'not-file') throw new Error(`${path} is not a file`);
+  return { path, text: read.bytes.toString('utf8') };
+}
+
 /** `--config`, else c2c-deploy.json beside the export, else in the cwd. */
-export function findDeployConfig(cwd: string, appPath: string | undefined, explicit: string | undefined): string | undefined {
+export function findDeployConfig(cwd: string, appPath: string | undefined, explicit: string | undefined): FoundDeployConfig | undefined {
   if (explicit !== undefined) {
-    if (!existsSync(explicit)) throw new Error(`--config ${explicit} does not exist`);
-    return explicit;
+    const found = readConfigText(explicit);
+    if (!found) throw new Error(`--config ${explicit} does not exist`);
+    return found;
   }
   if (appPath) {
     const st = statSync(appPath, { throwIfNoEntry: false });
-    const beside = join(st?.isDirectory() ? appPath : dirname(appPath), DEPLOY_CONFIG);
-    if (existsSync(beside)) return beside;
+    const beside = readConfigText(join(st?.isDirectory() ? appPath : dirname(appPath), DEPLOY_CONFIG));
+    if (beside) return beside;
   }
-  const here = join(cwd, DEPLOY_CONFIG);
-  return existsSync(here) ? here : undefined;
+  return readConfigText(join(cwd, DEPLOY_CONFIG));
 }
 
-function readDeployConfig(path: string): DeployConfig {
+function readDeployConfig({ path, text }: FoundDeployConfig): DeployConfig {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(path, 'utf8'));
+    parsed = JSON.parse(text);
   } catch {
     throw new Error(`${path} is not valid JSON`);
   }
@@ -237,18 +255,19 @@ export function resolveScope(input: {
   extraOrg?: { origin: string; value: string | undefined }[];
   extraProject?: { origin: string; value: string | undefined }[];
 }): ResolvedScopeValues {
-  const configPath = findDeployConfig(input.cwd, input.appPath, input.flags.config);
-  const config = configPath ? readDeployConfig(configPath) : undefined;
+  const found = findDeployConfig(input.cwd, input.appPath, input.flags.config);
+  const config = found ? readDeployConfig(found) : undefined;
+  const configPath = found?.path;
   let configProjectValue: string | undefined;
-  if (configPath) {
+  if (found) {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(readFileSync(configPath, 'utf8'));
+      parsed = JSON.parse(found.text);
     } catch {
       parsed = undefined;
     }
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      configProjectValue = configProject(parsed as Record<string, unknown>, input.flags.app, configPath);
+      configProjectValue = configProject(parsed as Record<string, unknown>, input.flags.app, found.path);
     }
   }
 

@@ -15,7 +15,7 @@
  *   D-F6 rows    plan.json holds no planned row counts and the Dev row cap is
  *                [UNVERIFIED]
  */
-import { constants, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { constants, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync, type Dirent } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parseBytes, parseFile, type App } from '../../core/src/index.js';
@@ -26,7 +26,7 @@ import { MCP_TOOLS_GUIDANCE, REQUIRED_MCP_TOOLS } from './required-tools.js';
 import { dcOfCreatorHost, dcOfMcpHost, normalizeDc, type ResolvedScopeValues } from './scope.js';
 import { missingRequiredTools, shortToolName, type McpEvidence } from './evidence.js';
 import { verifyVendorDir, MANIFEST_NAME } from './vendor.js';
-import { isAbsentError, isSymlinkRefusedError } from '../../core/src/fs-kind.js';
+import { entryKind, isAbsentError, isSymlinkRefusedError } from '../../core/src/fs-kind.js';
 import { readRegularFile, type FileRead } from './read-file.js';
 import type { CheckResult, DoctorIo, SpawnResult } from './types.js';
 import { invalidTokenOutput, readWithNewerToken } from '../../deploy/src/retry.js';
@@ -195,6 +195,26 @@ function readSkill(path: string, kind: SkillHit['kind'], rootDir: string, home: 
   return { path, kind, ...fm };
 }
 
+/**
+ * The sorted names of the real subdirectories of `dir`, from one listing: each
+ * entry is classified by its Dirent (entryKind), so a symlink, file, FIFO or
+ * socket is skipped and never followed. An absent `dir` lists nothing; any
+ * other listing error is thrown.
+ */
+function subdirs(dir: string): string[] {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    if (isAbsentError(err)) return [];
+    throw err;
+  }
+  return entries
+    .filter((entry) => entryKind(entry) === 'directory')
+    .map((entry) => entry.name)
+    .sort();
+}
+
 /** Search order from the doctor spec, D-A1 (plugin/references/doctor-spec.md). An unreadable directory is a finding, not a crash. */
 function findCatalystSkill(ctx: DoctorContext): { hit: SkillHit | undefined; error?: string; searched: string[] } {
   const home = homeDir(ctx);
@@ -209,13 +229,13 @@ function findCatalystSkill(ctx: DoctorContext): { hit: SkillHit | undefined; err
     } else {
       searched.push('$C2C_CATALYST_SKILLS_DIR (unset)');
     }
-    const cacheRoot = join(home, '.claude', 'plugins', 'cache');
-    const cacheDir = lstatSync(cacheRoot, { throwIfNoEntry: false });
-    if (cacheDir?.isDirectory()) {
-      for (const marketplace of readdirSync(cacheRoot).sort()) {
+    const pluginsRoot = join(home, '.claude', 'plugins');
+    const cacheRoot = join(pluginsRoot, 'cache');
+    if (subdirs(pluginsRoot).includes('cache')) {
+      for (const marketplace of subdirs(cacheRoot)) {
+        if (!subdirs(join(cacheRoot, marketplace)).includes('catalyst-by-zoho')) continue;
         const pluginDir = join(cacheRoot, marketplace, 'catalyst-by-zoho');
-        if (!lstatSync(pluginDir, { throwIfNoEntry: false })?.isDirectory()) continue;
-        for (const version of readdirSync(pluginDir).sort()) {
+        for (const version of subdirs(pluginDir)) {
           const candidate = join(pluginDir, version, 'skills', 'catalyst-by-zoho', 'SKILL.md');
           searched.push(candidate);
           const hit = readSkill(candidate, 'plugin-cache', cacheRoot, home);
@@ -235,9 +255,8 @@ function findCatalystSkill(ctx: DoctorContext): { hit: SkillHit | undefined; err
     searched.push(claudeRouter);
     const claudeDirect = readSkill(claudeRouter, 'claude-skills', claudeSkillsRoot, home);
     if (claudeDirect) return { hit: claudeDirect, searched };
-    const claudeSkillsDir = lstatSync(claudeSkillsRoot, { throwIfNoEntry: false });
-    if (claudeSkillsDir?.isDirectory()) {
-      for (const entry of readdirSync(claudeSkillsRoot).sort()) {
+    if (subdirs(join(home, '.claude')).includes('skills')) {
+      for (const entry of subdirs(claudeSkillsRoot)) {
         if (!entry.startsWith('catalyst-') || entry === 'catalyst-by-zoho') continue;
         const candidate = join(claudeSkillsRoot, entry, 'skills', 'catalyst-by-zoho', 'SKILL.md');
         searched.push(candidate);
