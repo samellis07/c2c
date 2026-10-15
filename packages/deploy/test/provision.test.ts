@@ -13,6 +13,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, sy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { matchReadBack, provisionCli, redactEvidence, redactString, type ProvisionState } from '../src/provision.js';
+import { JWT_RE, ZOHO_TOKEN_RE } from '../src/rest.js';
 import { PLAN_CLI_PATH, PLAN_EMITTED_CLI_PATHS, PLAN_STEP_TOOLS, STEP_KINDS, planCli } from '../src/offline-plan.js';
 import { resolveProvisionScope } from '../src/provision-config.js';
 import { assertDeployRedirectUrl, IAC_DEPLOY_REDIRECT_URL, zipStore } from '../src/iac-import.js';
@@ -2800,6 +2801,10 @@ test('redactString stays linear on 1 MiB inputs of hostile shapes', () => {
     ['repeated %25', (n: number) => '%25'.repeat(Math.ceil(n / 3)).slice(0, n)],
     ['open braces', (n: number) => '{'.repeat(n)],
     ['key=value runs', (n: number) => 'k=v&'.repeat(Math.ceil(n / 4)).slice(0, n)],
+    ['long key=value', (n: number) => 'k'.repeat(n - 2) + '=v'],
+    ['single JSON fragment', (n: number) => `{"pad":"${'x'.repeat(Math.max(0, n - 13))}"}`],
+    ['balanced JSON fragments', (n: number) => '{"a":1}'.repeat(Math.ceil(n / 7)).slice(0, n)],
+    ['JWT-shaped segments', (n: number) => `h.${'a'.repeat(n)}.t`],
   ] as [string, (n: number) => string][]) {
     const small = make(256 * 1024);
     const large = make(mib);
@@ -2815,6 +2820,59 @@ test('redactString stays linear on 1 MiB inputs of hostile shapes', () => {
       `${label}: not linear — 256 KiB took ${smallMs.toFixed(0)}ms, 1 MiB took ${largeMs.toFixed(0)}ms`,
     );
   }
+});
+
+test('redactString fails closed when the JSON fragment scan caps are exhausted', () => {
+  const mib = 1024 * 1024;
+  for (const [raw, canaries] of [
+    // The 2 MiB scan budget gives out mid-input: the unscanned tail — which can
+    // carry a JSON or key=value secret — must be withheld, never echoed.
+    ['{'.repeat(2 * mib) + '{"secret":"CANARY_AFTER_BUDGET"}', ['CANARY_AFTER_BUDGET']],
+    ['{'.repeat(2 * mib) + 'secret=CANARY_BUDGET', ['CANARY_BUDGET']],
+    // The 64-attempt cap fails closed the same way.
+    ['{'.repeat(65) + '{"secret":"CANARY_CAP64"}', ['CANARY_CAP64']],
+    ['{'.repeat(65) + 'secret=CANARY_CAP64_KV', ['CANARY_CAP64_KV']],
+    ['['.repeat(65) + '{"token":"CANARY_CAP64_ARRAY"}', ['CANARY_CAP64_ARRAY']],
+  ] as [string, string[]][]) {
+    const redacted = redactString(raw);
+    for (const canary of canaries) {
+      assert.ok(!redacted.includes(canary), `redactString leaks ${canary}: ${redacted.slice(-200)}`);
+    }
+  }
+  // Mutation check: a just-under-cap attempt count still scans and redacts.
+  assert.ok(!redactString('{'.repeat(63) + '{"secret":"CANARY_UNDER_CAP"}').includes('CANARY_UNDER_CAP'));
+});
+
+test('redactString masks a secret-named key longer than the old bounded prefix', () => {
+  for (const [raw, canaries] of [
+    ['x'.repeat(129) + 'secret=CANARY_LONGKEY', ['CANARY_LONGKEY']],
+    ['x'.repeat(4000) + 'secret=CANARY_LONGKEY_4K', ['CANARY_LONGKEY_4K']],
+    ['p=' + 'x'.repeat(200) + 'token=CANARY_LONGKEY_MID', ['CANARY_LONGKEY_MID']],
+    ['x'.repeat(129) + 'secret="CANARY_LONGKEY_QUOTED"', ['CANARY_LONGKEY_QUOTED']],
+  ] as [string, string[]][]) {
+    const redacted = redactString(raw);
+    for (const canary of canaries) {
+      assert.ok(!redacted.includes(canary), `redactString leaks ${canary}: ${redacted.slice(-200)}`);
+    }
+  }
+  // Non-secret keys and diagnostic codes still pass through untouched.
+  assert.equal(redactString('error_code=INVALID_INPUT'), 'error_code=INVALID_INPUT');
+  assert.equal(redactString('status_code: 404'), 'status_code: 404');
+  assert.equal(redactString('note=plain'), 'note=plain');
+});
+
+test('redactString masks JWT and Zoho-shaped tokens with segments beyond the old caps', () => {
+  const jwt = 'a'.repeat(4000) + '.' + 'b'.repeat(20) + '.' + 'c'.repeat(20);
+  const jwtOut = redactString(jwt);
+  for (const canary of ['a'.repeat(4000), 'b'.repeat(20), 'c'.repeat(20)]) {
+    assert.ok(!jwtOut.includes(canary), `JWT suffix survives: ${jwtOut.slice(-120)}`);
+  }
+  assert.match(JWT_RE.source, /\{8,\}/);
+  assert.ok(JWT_RE.test(jwt), 'JWT_RE must match a token with a 4000-char segment');
+  const zoho = '1234.' + 'd'.repeat(2000) + '.tail9';
+  const zohoOut = redactString(zoho);
+  assert.ok(!zohoOut.includes('d'.repeat(2000)), `Zoho token suffix survives: ${zohoOut.slice(-120)}`);
+  assert.ok(ZOHO_TOKEN_RE.test(zoho), 'ZOHO_TOKEN_RE must match a token with a 2000-char segment');
 });
 
 const LIST_TABLES = 'CatalystbyZoho_List_All_Tables';

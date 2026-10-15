@@ -27,7 +27,7 @@ import { assertLiveProject, flag, type Io } from './cli.js';
 import { resolveProvisionScope, type ProvisionScope } from './provision-config.js';
 import { CUSTOMER_STEPS } from './customer-steps.js';
 import { parseJsonExact } from './json-exact.js';
-import { AUTH_RE, catalystRestCall, EMAIL_RE, HEX_B64_TOKEN_RE, JWT_RE, listCatalystProjects, PARAM_SECRET_RE, readCliAccessToken, redactString, renewCliAccessToken, SAFE_CODE_KEY_RE, URL_RE, ZOHO_TOKEN_RE } from './rest.js';
+import { AUTH_RE, catalystRestCall, EMAIL_RE, hasParamSecret, HEX_B64_TOKEN_RE, JWT_RE, listCatalystProjects, PARAM_SECRET_RE, readCliAccessToken, redactString, renewCliAccessToken, SAFE_CODE_KEY_RE, URL_RE, ZOHO_TOKEN_RE } from './rest.js';
 export { redactString };
 import { catalystBaseFor, dcEndpoints } from './dc.js';
 import { catalystScopeArgs, scrubCatalystEnv } from './scope.js';
@@ -531,7 +531,7 @@ function projectEntryMatches(entry: Record<string, unknown>, target: { id?: stri
 
 /** Drop secret-named fields and token-shaped values at any depth of a kept entry. */
 function scrubProjectEntry(value: unknown): unknown {
-  if (typeof value === 'string') return SENSITIVE_VALUE_RE.test(value) ? undefined : value;
+  if (typeof value === 'string') return SENSITIVE_VALUE_RE.test(value) || hasParamSecret(value) ? undefined : value;
   if (Array.isArray(value)) {
     return value.map(scrubProjectEntry).filter((item) => item !== undefined);
   }
@@ -1052,7 +1052,7 @@ function learnIds(result: unknown, learned: ProvisionState['learned']): void {
     let id: string | undefined;
     for (const key of NAME_KEYS) {
       const raw = value[key];
-      if (typeof raw === 'string' && raw.trim() && !SENSITIVE_VALUE_RE.test(raw)) {
+      if (typeof raw === 'string' && raw.trim() && !SENSITIVE_VALUE_RE.test(raw) && !hasParamSecret(raw)) {
         name = raw;
         break;
       }

@@ -446,9 +446,9 @@ export const URL_RE = /\b[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s"'<>)\]}]+/g;
 // every offset, which is quadratic on megabyte inputs.
 export const EMAIL_RE = /[A-Za-z0-9._%+-]{1,64}@(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,24}/g;
 /** xxx.yyy.zzz with base64url segments — a JWT. */
-export const JWT_RE = /\b[A-Za-z0-9_-]{8,2048}\.[A-Za-z0-9_-]{4,2048}\.[A-Za-z0-9_-]{4,2048}/g;
+export const JWT_RE = /\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g;
 export const AUTH_RE = /\b(?:Basic|Bearer|Zoho-oauthtoken)\s+[^\s"'<>)\]},;]+/gi;
-export const ZOHO_TOKEN_RE = /\b[0-9]{3,16}\.[0-9a-zA-Z]{8,512}[0-9a-zA-Z._-]{0,512}/g;
+export const ZOHO_TOKEN_RE = /\b[0-9]{3,16}\.[0-9a-zA-Z]{8,}[0-9a-zA-Z._-]*/g;
 /**
  * A secret-named parameter value. The key may sit at the start of the text or
  * after whitespace, `?`, `&`, `#`, `;`, `,`, `:`, a quote, `=`, `+`, or a markup /
@@ -460,7 +460,7 @@ export const PARAM_SECRET_RE =
   /((?:^|["'=+?&#\s;,:<>)\]}]))((?:[^=\s&"'<>)\]}:]{0,128})(?:secret|token|password|passwd|pwd|credentials?|authorization|auth|api[-_]?key|session|cookie|private[-_]?key|access[-_]?key|signature|key|sig|code|pw|otp|bearer|jwt)(?:[^=\s&"'<>)\]}:]{0,128}))(["']?)(\s*[:=]\s*)("(?:\\+["']|\\.|[^"\\])*"?|'(?:\\+["']|\\.|[^'\\])*'?|(?:\\+["']|[^&\s"'<>)\]},])+)/gi;
 /** Long hex, base64, or token-shaped credential runs. */
 export const HEX_B64_TOKEN_RE =
-  /\b(?:[A-Za-z0-9+/]{16,512}={1,2}|(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{16,512}|(?=[A-Za-z0-9._-]*[0-9])(?=[A-Za-z0-9._-]*[A-Za-z])[A-Za-z0-9._-]{20,1024}|(?=[A-Za-z0-9._-]*[0-9])[A-Za-z0-9._-]{0,512}(?:token|secret|passwd|password|apikey|oauth)[A-Za-z0-9._-]{0,512})/gi;
+  /\b(?:[A-Za-z0-9+/]{16,}={1,2}|(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{16,}|(?=[A-Za-z0-9._-]*[0-9])(?=[A-Za-z0-9._-]*[A-Za-z])[A-Za-z0-9._-]{20,}|(?=[A-Za-z0-9._-]*[0-9])[A-Za-z0-9._-]*(?:token|secret|passwd|password|apikey|oauth)[A-Za-z0-9._-]*)/gi;
 /** Diagnostic codes a caller reads to act on a failure — not secrets. */
 export const SAFE_CODE_KEY_RE = /^(?:error|status|exit|http|reason)[-_]?code$/i;
 const SECRET_KEY_TOKEN_RE =
@@ -513,13 +513,136 @@ function isSecretKeyName(rawKey: string): boolean {
   return SECRET_KEY_TOKEN_RE.test(decoded);
 }
 
+/** Chars that may sit immediately before a secret-named key (or the start of the text). */
+const PARAM_SEP_CHARS = new Set([...`"'=+?&#;,:<>)]}`]);
+/** Chars that end a key run — everything else is a key char. */
+const PARAM_KEY_STOP_CHARS = new Set([...`=&"'<>)]}:`]);
+
+function isParamSep(ch: string | undefined): boolean {
+  return ch !== undefined && (PARAM_SEP_CHARS.has(ch) || /\s/.test(ch));
+}
+function isParamKeyChar(ch: string | undefined): boolean {
+  return ch !== undefined && !PARAM_KEY_STOP_CHARS.has(ch) && !/\s/.test(ch);
+}
+function isParamValueStop(ch: string): boolean {
+  return ch === '&' || ch === '"' || ch === "'" || ch === '<' || ch === '>' ||
+    ch === ')' || ch === ']' || ch === '}' || ch === ',' || /\s/.test(ch);
+}
+
+/**
+ * Scan the value that starts at `vStart`: a `"`/`'`-quoted run (backslash
+ * escapes honoured, closing quote optional) or an unquoted run that stops at
+ * `&`, whitespace, quotes, markup or bracket delimiters. A backslash followed
+ * by a quote is consumed as a unit. Linear in the value length.
+ */
+function scanParamValue(input: string, vStart: number): number {
+  const n = input.length;
+  const q = input[vStart];
+  if (q === '"' || q === "'") {
+    let m = vStart + 1;
+    while (m < n) {
+      const c = input[m];
+      if (c === q) {
+        m++;
+        break;
+      }
+      if (c === '\\') {
+        // `\\+["']`: a run of backslashes followed by a quote is one unit, so a
+        // quote right after backslashes never closes the value.
+        let e = m;
+        while (e < n && input[e] === '\\') e++;
+        if (e < n && (input[e] === '"' || input[e] === "'")) {
+          m = e + 1;
+        } else {
+          m += 2; // `\\.`
+        }
+      } else {
+        m++;
+      }
+    }
+    return m;
+  }
+  let m = vStart;
+  while (m < n) {
+    const c = input[m];
+    if (c === '\\' && m + 1 < n && (input[m + 1] === '"' || input[m + 1] === "'")) {
+      m += 2;
+    } else if (isParamValueStop(c)) {
+      break;
+    } else {
+      m++;
+    }
+  }
+  return m;
+}
+
+type ParamCandidate = { start: number; keyEnd: number; vStart: number; vEnd: number };
+
+/**
+ * Linear scan for `key<delim>value` pairs whose key is secret-named. The key
+ * may sit at the start of the text or right after a separator char — including
+ * `=`/`?`/`&` inside another pair's value, so `body: token=x` still yields
+ * `token`. There is no key-length bound: a >128-char secret-named key cannot
+ * slip past. The value span is only scanned once the key qualifies, so a long
+ * run of non-secret `k=v` pairs cannot force quadratic work. Scanning resumes
+ * past a masked value, or past the key when the pair does not qualify, so
+ * nested `key=value` pairs inside a non-secret value are still found.
+ */
+function* paramSecretCandidates(input: string): Generator<ParamCandidate> {
+  const n = input.length;
+  let i = 0;
+  while (i < n) {
+    if (!isParamKeyChar(input[i]) || (i !== 0 && !isParamSep(input[i - 1]))) {
+      i++;
+      continue;
+    }
+    let keyEnd = i;
+    while (keyEnd < n && isParamKeyChar(input[keyEnd])) keyEnd++;
+    let k = keyEnd;
+    if (input[k] === '"' || input[k] === "'") k++;
+    while (k < n && /\s/.test(input[k])) k++;
+    if (k >= n || (input[k] !== '=' && input[k] !== ':')) {
+      i = keyEnd;
+      continue;
+    }
+    k++;
+    while (k < n && /\s/.test(input[k])) k++;
+    const vStart = k;
+    const vFirst = input[vStart];
+    const hasValue =
+      vFirst !== undefined &&
+      (vFirst === '"' || vFirst === "'" || !isParamValueStop(vFirst));
+    if (!hasValue || !isSecretKeyName(input.slice(i, keyEnd))) {
+      i = keyEnd;
+      continue;
+    }
+    const vEnd = scanParamValue(input, vStart);
+    const val = input.slice(vStart, vEnd);
+    if (val === '<redacted>' || val === '"<redacted>"' || val === "'<redacted>'") {
+      i = vEnd;
+      continue;
+    }
+    yield { start: i, keyEnd, vStart, vEnd };
+    i = vEnd;
+  }
+}
+
+/** True when the text carries a `secret-named-key=value` pair. */
+export function hasParamSecret(input: string): boolean {
+  for (const _cand of paramSecretCandidates(input)) return true;
+  return false;
+}
+
 function redactParamSecrets(input: string): string {
-  return input.replace(PARAM_SECRET_RE, (full, sep: string, key: string, close: string, delim: string, val: string) => {
-    if (SAFE_CODE_KEY_RE.test(decodePercentBounded(key))) return full;
-    if (val === '<redacted>' || val === '"<redacted>"' || val === "'<redacted>'") return full;
+  let out = '';
+  let cursor = 0;
+  for (const cand of paramSecretCandidates(input)) {
+    const val = input.slice(cand.vStart, cand.vEnd);
     const quote = val.startsWith('"') && val.endsWith('"') ? '"' : val.startsWith("'") && val.endsWith("'") ? "'" : '';
-    return `${sep}${key}${close}${delim}${quote}<redacted>${quote}`;
-  });
+    out += input.slice(cursor, cand.vStart) + quote + '<redacted>' + quote;
+    cursor = cand.vEnd;
+  }
+  return cursor === 0 ? input : out + input.slice(cursor);
 }
 
 function redactJsonNode(node: unknown, depth: number): { value: unknown; changed: boolean } {
@@ -573,7 +696,8 @@ function redactJsonFragments(input: string, depth: number): string {
   let cursor = 0;
   let attempts = 0;
   let scanBudget = JSON_SCAN_BUDGET;
-  for (let i = 0; i < input.length && scanBudget > 0; i++) {
+  let i = 0;
+  for (; i < input.length && scanBudget > 0; i++) {
     const startChar = input[i];
     if (startChar !== '{' && startChar !== '[') continue;
     if (++attempts > 64) break;
@@ -620,6 +744,11 @@ function redactJsonFragments(input: string, depth: number): string {
         // Not valid JSON starting at `i`; continue scanning or fall back to regexes.
       }
     }
+  }
+  if (i < input.length) {
+    // The attempt count or scan budget ran out before the end of the input —
+    // fail closed rather than return text the scanner never inspected.
+    return out + '<redacted>';
   }
   return cursor === 0 ? input : out + input.slice(cursor);
 }
