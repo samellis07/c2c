@@ -36,7 +36,7 @@ import { dirname, join } from 'node:path';
 import { EvidenceRejected, EvidenceStale, entryIdOf, parseEvidence, shortToolName, type McpEvidence } from './evidence.js';
 import { NEVER_CALL_MCP_TOOLS } from './required-tools.js';
 import { dcOfCreatorHost, type Dc } from './scope.js';
-import { PROBE_CREATE_CALL, probeCreateCall, probeDeleteCall, probeNameOf, type ProbeTarget } from './mcp-probe.js';
+import { PROBE_CREATE_CALL, PROBE_DELETE_CALL, probeCreateCall, probeDeleteCall, probeNameOf, type ProbeTarget } from './mcp-probe.js';
 
 export const OBSERVATION_KIND = 'c2c-mcp-observation';
 export const OBSERVATION_SCHEMA = 1;
@@ -334,10 +334,11 @@ export function parseObservation(text: string, input: { workspace: string; now?:
       const listed = idsOfResult(result, ORGS_CALL);
       orgs = listed.ids;
       orgDcs = listed.orgDcs;
-    } else if (short === shortToolName(PROBE_CALL)) {
-      // The probe write is attested by the doctor's own REST read-back, never
-      // by this result: it is checked for an error envelope and digested.
-      rejectIfErrorFlag(result, PROBE_CALL);
+    } else if (short === shortToolName(PROBE_CALL) || short === shortToolName(PROBE_DELETE_CALL)) {
+      // The probe write and the cleanup delete are attested by the doctor's
+      // own REST read-back, never by this result: it is checked for an error
+      // envelope and digested.
+      rejectIfErrorFlag(result, short);
     } else throw new ObservationRejected(`calls[${index}] is not a call the MCP request asked for`);
     calls.push({ tool: short, digest: resultDigest(result) });
   }

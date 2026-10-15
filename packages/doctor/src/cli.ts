@@ -336,6 +336,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
     ...(origin ? { evidenceSource: origin.source } : {}),
     ...(carried ? { carried: { checks: carried.checks, at: carried.mcp.at ?? '' } } : {}),
     ...(reuseNote ? { evidenceNote: reuseNote } : {}),
+    pendingCleanup: readPendingCleanups(workspace).map((p) => p.name),
     cliDc: cliHooks.cliDc,
     cliOrg: cliHooks.cliOrg,
   };
