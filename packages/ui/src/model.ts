@@ -415,8 +415,12 @@ export function buildModel(app: App, delugeFiles: GeneratedFile[] = []): UiModel
   const forms = app.forms.map((form) => buildForm(form, todos, app));
   const reports = app.reports.map((report) => buildReport(app, report, todos));
   const snippetFiles: HtmlpageFile[] = [];
+  const componentViews = {
+    forms: new Set(forms.filter((form) => formStatus(form) === 'generated').map((form) => form.name)),
+    reports: new Set(reports.filter((report) => report.status === 'generated').map((report) => report.name)),
+  };
   const pages = app.pages.map((page) => {
-    const env: ZmlEnv = { app, page: page.name, emit: (file) => snippetFiles.push(file), seq: { n: 0 } };
+    const env: ZmlEnv = { app, page: page.name, emit: (file) => snippetFiles.push(file), seq: { n: 0 }, components: componentViews };
     return buildPage(page, todos, env);
   });
   const handlers = handlersFrom(delugeFiles);
