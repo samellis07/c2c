@@ -257,3 +257,94 @@ test('rows are numbered and carry no app names', () => {
   const clean = renderNoSilentDrop(3, [], 'example-audit');
   assert.match(clean, /No silent drops/);
 });
+
+/** coveredApp plus a payments workflow and a blueprint, so every workflow kind is present. */
+function everyKindApp(): App {
+  const base = coveredApp();
+  return app({
+    ...base,
+    workflows: [
+      ...base.workflows,
+      workflow({ name: 'Checkout payments', container: 'form', form: 'Orders', event: 'on success', deluge: { text: 'x = 1;', span: Z } }),
+    ],
+  });
+}
+
+/** The real outputs with every produced construct and every listing removed. */
+function bareOutputs(a: App): ReturnType<typeof collectOutputs> {
+  const out = collectOutputs(a);
+  return {
+    ...out,
+    schema: { ...out.schema, tables: [], fields: [], issues: [] },
+    model: { ...out.model, forms: [], reports: [], pages: [], todos: [] },
+    files: [],
+    todos: [],
+    schedules: new Map(),
+    specs: [],
+  };
+}
+
+test('a construct neither produced nor listed is a drop of its own kind', () => {
+  const a = everyKindApp();
+  assert.deepEqual(auditApp(a), [], 'the real outputs produce or list everything');
+  const drops = auditApp(a, bareOutputs(a));
+  assert.deepEqual(
+    drops.map((d) => `${d.kind}: ${d.name}`),
+    [
+      'form: Orders',
+      'field: Orders.Title',
+      'report: All_Orders',
+      'page: Home',
+      'workflow: Orders on load',
+      'schedule: Daily',
+      'approval: Sale approval',
+      'workflow: Checkout payments',
+    ],
+  );
+  for (const d of drops) assert.match(d.note, /Add one:/);
+});
+
+test('a fidelity note or todo lists each construct the generators did not produce', () => {
+  const a = everyKindApp();
+  const out = bareOutputs(a);
+  out.schema.issues = [{ severity: 'unsupported', form: 'Orders', message: 'not migrated' } as (typeof out.schema.issues)[number]];
+  out.schema.fields = [{ form: 'Orders', field: 'Title', status: 'unsupported' } as (typeof out.schema.fields)[number]];
+  out.model.todos = [
+    { area: 'report', name: 'All_Orders' } as (typeof out.model.todos)[number],
+    // A page is listed through one of its ZML snippets.
+    { area: 'zml', name: 'Home.panel1' } as (typeof out.model.todos)[number],
+  ];
+  // A todo inside a workflow's span lists that workflow's manual step.
+  out.todos = [{ construct: 'manual', start: 0, end: 0 }];
+  assert.deepEqual(auditApp(a, out), []);
+  // A ZML todo of another page whose name merely starts the same does not list Home.
+  out.model.todos = [{ area: 'report', name: 'All_Orders' } as (typeof out.model.todos)[number], { area: 'zml', name: 'Homepage.panel1' } as (typeof out.model.todos)[number]];
+  assert.deepEqual(auditApp(a, out).map((d) => `${d.kind}: ${d.name}`), ['page: Home']);
+});
+
+test('only a blank or fully commented script is vacuous', () => {
+  const one = (w: Workflow) => app({ workflows: [w] });
+  const kinds = (a: App) => auditApp(a, bareOutputs(a)).map((d) => d.kind);
+  // Whitespace only: nothing to migrate.
+  assert.deepEqual(kinds(one(workflow({ name: 'Blank', container: 'form', form: 'Orders', event: 'on load', deluge: { text: '  \n\t', span: Z } }))), []);
+  // An unparseable script parses to an unknown statement, so it is never vacuous: with no handler and no todo it is a drop.
+  assert.deepEqual(kinds(one(workflow({ name: 'Broken', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'if (', span: Z } }))), ['workflow']);
+  // Field rules are behaviour even without a script.
+  const ruled = workflow({ name: 'Rules', container: 'form', form: 'Orders', event: 'on load' });
+  ruled.fieldRules = [{ actions: [], span: Z }];
+  assert.deepEqual(kinds(one(ruled)), ['workflow']);
+});
+
+test('a translation block with several languages is named as a block and listed by any warning', () => {
+  const multi = app({ translations: [{ json: '{}', data: { de: {}, fr: {} }, span: Z }] });
+  const out = collectOutputs(multi);
+  out.warnings = [];
+  assert.deepEqual(auditApp(multi, out).map((d) => d.name), ['translation block']);
+  out.warnings = [{ construct: 'translation-not-migrated', name: 'translations' } as (typeof out.warnings)[number]];
+  assert.deepEqual(auditApp(multi, out), []);
+  // A single-language block needs a warning naming its language.
+  const de = app({ translations: [{ json: '{}', data: { de: {} }, span: Z }] });
+  const deOut = collectOutputs(de);
+  deOut.warnings = [{ construct: 'translation-not-migrated', name: 'translation fr' } as (typeof deOut.warnings)[number]];
+  assert.deepEqual(auditApp(de, deOut).map((d) => d.name), ['translation de']);
+});
