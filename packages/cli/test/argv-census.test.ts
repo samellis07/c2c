@@ -11,7 +11,7 @@
  * (the catalyst CLI's --org, a catalyst command's own --only) are not reads.
  */
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +20,7 @@ import { ARGV_SPEC, argvProblems, argvShapeProblems } from '../src/argv.js';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 /** Each command's entry functions; c2c.ts's own `if (cmd === ...)` block is added for every command. */
-const ROOTS: Record<string, string[]> = {
+const ENTRY_POINTS: Record<string, string[]> = {
   deploy: ['doctorGateForArgs', 'deployCli'],
   provision: ['doctorGateForArgs', 'provisionCreatesProject', 'provisionCli'],
   smoke: ['doctorGateForArgs', 'smokeCli'],
@@ -30,14 +30,28 @@ const ROOTS: Record<string, string[]> = {
   precheck: ['precheck'],
   status: ['statusCli'],
   verify: ['verifyCli'],
+  plan: ['planCli'],
+  edit: ['editCli'],
+  users: ['doctorGateForArgs', 'usersCli'],
+  'sync-delta': ['doctorGateForArgs', 'syncDeltaCli'],
+  'rollback-export': ['doctorGateForArgs', 'rollbackExportCli'],
+  'cutover-checklist': ['cutoverCli'],
+  proof: ['cutoverCli'],
+  'fill-todos': ['fillTodosMain'],
+  '--verify-vendor': ['verifyVendorCli'],
 };
 
-const READ = /(?:\b(?:flag|valueOf)\(\s*(?:[\w.]+,\s*)?|\b(?:args|rest|restAll)\.(?:includes|indexOf)\(|\b(?:args|rest)\[\w+(?: \+ 1)?\] [!=]== )'(--[a-z][a-z0-9-]*)'/g;
+const ROOTS: Record<string, string[]> = Object.fromEntries(
+  Object.keys(ARGV_SPEC).map((cmd) => [cmd, ENTRY_POINTS[cmd] ?? []]),
+);
+
+const READ = /(?:\b(?:flag|valueOf|take)\(\s*(?:[\w.]+,\s*)?|\b(?:args|rest|restAll)\.(?:includes|indexOf)\(|\b(?:args|rest)\[\w+(?: \+ 1)?\] [!=]== |\b(?:if\s*\(|else if\s*\(|case\s+)arg [!=]== )'(--[a-z][a-z0-9-]*)'/g;
 
 function functionBodies(): Map<string, string> {
   const bodies = new Map<string, string>();
-  for (const pkg of ['cli', 'deploy', 'doctor']) {
+  for (const pkg of ['cli', 'deploy', 'doctor', 'deluge']) {
     const dir = path.join(repo, 'packages', pkg, 'src');
+    if (!existsSync(dir)) continue;
     for (const file of readdirSync(dir).filter((name) => name.endsWith('.ts'))) {
       const text = readFileSync(path.join(dir, file), 'utf8');
       for (const match of text.matchAll(/^(?:export )?(?:async )?function (\w+)[\s\S]*?^}$/gm)) {
@@ -50,8 +64,10 @@ function functionBodies(): Map<string, string> {
 
 function dispatchBlock(cmd: string): string {
   const text = readFileSync(path.join(repo, 'packages', 'cli', 'src', 'c2c.ts'), 'utf8');
-  const start = text.indexOf(`  if (cmd === '${cmd}') {`);
-  assert.ok(start >= 0, `c2c.ts dispatches ${cmd}`);
+  const needle = `cmd === '${cmd}'`;
+  const pos = text.indexOf(needle);
+  assert.ok(pos >= 0, `c2c.ts dispatches ${cmd}`);
+  const start = text.lastIndexOf('\n  if (', pos) + 1;
   const end = text.indexOf('\n  }\n', start);
   return text.slice(start, end);
 }
@@ -62,7 +78,15 @@ function census(cmd: string, bodies: Map<string, string>): Set<string> {
   const queue = [...ROOTS[cmd]];
   const scan = (body: string) => {
     for (const match of body.matchAll(READ)) flags.add(match[1]);
-    for (const match of body.matchAll(/\b(\w+)\(/g)) if (bodies.has(match[1])) queue.push(match[1]);
+    if (body.includes('--source-${kind}')) {
+      flags.add('--source-backup');
+      flags.add('--source-csv');
+      flags.add('--source-json');
+    }
+    for (const match of body.matchAll(/(?<!\.)\b(\w+)\(/g)) {
+      if (cmd === 'edit' && match[1] === 'doctorGateRefusal') continue;
+      if (bodies.has(match[1])) queue.push(match[1]);
+    }
   };
   for (const root of ROOTS[cmd]) if (root.endsWith('Cli')) assert.ok(bodies.has(root), `${cmd}: entry function ${root} exists`);
   scan(dispatchBlock(cmd));
@@ -72,6 +96,7 @@ function census(cmd: string, bodies: Map<string, string>): Set<string> {
     seen.add(name);
     scan(bodies.get(name) as string);
   }
+  if (cmd === '--verify-vendor') flags.delete('--verify-vendor');
   return flags;
 }
 
