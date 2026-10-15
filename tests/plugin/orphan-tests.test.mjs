@@ -6,14 +6,15 @@
  * 2. Every *.test.mjs under tests/
  * 3. Every *.test.mjs under tools/<tool>/test
  *
- * Any test file not reached by the `test` script in package.json must be listed
- * in the explicit allowlist with a reason and no wildcards.
+ * Any test file not reached by `scripts/test-files.txt` must be listed in the
+ * explicit allowlist with a reason and no wildcards.
  */
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { parseTestList } from '../../scripts/test-list.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -99,25 +100,9 @@ export function findCandidateTests(repoRoot = root) {
 }
 
 export function getTestScriptTargets(repoRoot = root) {
-  const pkgJsonPath = path.join(repoRoot, 'package.json');
-  const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf8'));
-  const testScript = pkg.scripts?.test ?? '';
-
-  const commands = testScript.split('&&').map((c) => c.trim());
-  const runTestsCmd = commands.find((c) => c.includes('run-tests.mjs'));
-  if (!runTestsCmd) {
-    throw new Error('Could not find run-tests.mjs invocation in package.json test script');
-  }
-
-  const match = runTestsCmd.match(/run-tests\.mjs\s+([^;&|]+)/);
-  if (!match) {
-    throw new Error('Could not parse targets from run-tests.mjs invocation');
-  }
-
-  return match[1]
-    .trim()
-    .split(/\s+/)
-    .map((target) => normalize(target.replace(/^\.\//, '').replace(/\/+$/, '')));
+  const rel = 'scripts/test-files.txt';
+  const text = readFileSync(path.join(repoRoot, rel), 'utf8');
+  return parseTestList(text, rel).map((entry) => normalize(entry.path));
 }
 
 export function isReached(distPath, targets) {
@@ -155,7 +140,7 @@ test('every test file in packages/*/test, tests/, and tools/*/test is reached by
   if (orphans.length > 0) {
     const list = orphans.map((o) => `  - ${o.source} (mapped: ${o.dist})`).join('\n');
     assert.fail(
-      `Found ${orphans.length} orphan test file(s) not reached by npm test:\n${list}\n\nAdd them to the test script in package.json or to the allowlist with an explicit reason.`
+      `Found ${orphans.length} orphan test file(s) not reached by npm test:\n${list}\n\nAdd them to scripts/test-files.txt (one path per line) or to the allowlist with an explicit reason.`
     );
   }
 });

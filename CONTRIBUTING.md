@@ -53,6 +53,12 @@ iteration. A codegen lint in `npm test` enforces that in the pipeline code.
 A test that genuinely needs the network sits behind an env flag so the default
 run stays offline.
 
+`npm test` runs the paths in `scripts/test-files.txt`. Add a test there, one
+path per line, in sorted order. A blank line is ignored, and a line whose
+first non-space character is `#` is a comment. A directory path runs every
+test file under it. Each `tests/plugin/*.test.mjs` file is listed on its own
+line; a new plugin test is a new line in that file.
+
 ## Fixtures
 
 There are two kinds of test input, and only one of them belongs in git.
