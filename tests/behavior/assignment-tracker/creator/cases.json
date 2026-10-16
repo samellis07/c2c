@@ -1,0 +1,1714 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Assignment Tracker",
+  "source": {
+    "file": "Assignment_Tracker.ds",
+    "origin": "Creator gallery app assignment-tracker, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-students",
+      "steps": [
+        {
+          "op": "report",
+          "report": "Students",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "baseline-all-assignments",
+      "steps": [
+        {
+          "op": "report",
+          "report": "All_Assignments",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "baseline-submissions",
+      "steps": [
+        {
+          "op": "report",
+          "report": "Submissions",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "add-assignment-type-setup-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Data Added Successfully!"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Assignment_Type": [
+            {
+              "Type": "Type bravo 109"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-class-setup-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Data Added Successfully!"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Class": [
+            {
+              "Name": "Name north 700"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-student-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "Harbor",
+              "last_name": "Fable"
+            },
+            "Email": "email.467@example.com",
+            "Phone_Number": "+1555015802",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "creator": {
+            "code": 3000,
+            "error": [
+              "Error details: Error in executing On Add - On Success script com.zoho.creator.metaobject.MetaException: Customer portal not found for application ID: <id> Line:(1)"
+            ],
+            "message": "Data Added Successfully!"
+          },
+          "bind": {
+            "r_add_student_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          },
+          "tags": [
+            "env-artifact:no-customer-portal"
+          ]
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Student": [
+            {
+              "Email": "email.467@example.com",
+              "Student_ID": "Student_ID bravo 459",
+              "Phone_Number": "+1555015802",
+              "Class": "<ref:r_add_class_setup_submit>",
+              "Name_first_name": "Harbor",
+              "Name_last_name": "Fable"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "env-artifact:no-customer-portal"
+      ],
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "add-student-invalid-duplicate-student-id",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "Harbor",
+              "last_name": "Fable"
+            },
+            "Email": "email.467@example.com",
+            "Phone_Number": "+1555015802",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "bind": {
+            "r_add_student_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "North",
+              "last_name": "Alpha"
+            },
+            "Email": "email.593@example.com",
+            "Phone_Number": "+1555016027",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Student_ID": "This value already exists. Enter a unique value."
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Student": [
+            {
+              "Email": "email.467@example.com",
+              "Student_ID": "Student_ID bravo 459",
+              "Phone_Number": "+1555015802",
+              "Class": "<ref:r_add_class_setup_submit>",
+              "Name_first_name": "Harbor",
+              "Name_last_name": "Fable"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "add-subject-setup-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "Harbor",
+              "last_name": "Fable"
+            },
+            "Email": "email.467@example.com",
+            "Phone_Number": "+1555015802",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "bind": {
+            "r_add_student_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Name juniper 891",
+            "Code": "Code ivory 647",
+            "Type": "Theory"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Data Added Successfully!"
+          },
+          "bind": {
+            "r_add_subject_setup_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Subject": [
+            {
+              "Type": "Theory",
+              "Code": "Code ivory 647",
+              "Name": "Name juniper 891"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-teacher-setup-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "Harbor",
+              "last_name": "Fable"
+            },
+            "Email": "email.467@example.com",
+            "Phone_Number": "+1555015802",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "bind": {
+            "r_add_student_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Name juniper 891",
+            "Code": "Code ivory 647",
+            "Type": "Theory"
+          },
+          "bind": {
+            "r_add_subject_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "Teacher_ID lumen 103",
+            "Name": {
+              "first_name": "Bravo",
+              "last_name": "Alpha"
+            },
+            "Email": "email.292@example.com",
+            "Phone_Number": "+1555018638"
+          },
+          "creator": {
+            "code": 3000,
+            "error": [
+              "Error details: Error in executing On Add - On Success script User Limit Reached Line:(1)"
+            ],
+            "message": "Data Added Successfully!"
+          },
+          "bind": {
+            "r_add_teacher_setup_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          },
+          "tags": [
+            "env-artifact:trial-user-limit"
+          ]
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Teacher": [
+            {
+              "Email": "email.292@example.com",
+              "Teacher_ID": "Teacher_ID lumen 103",
+              "Phone_Number": "+1555018638",
+              "Name_first_name": "Bravo",
+              "Name_last_name": "Alpha"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "env-artifact:trial-user-limit"
+      ]
+    },
+    {
+      "id": "create-assignment-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "Harbor",
+              "last_name": "Fable"
+            },
+            "Email": "email.467@example.com",
+            "Phone_Number": "+1555015802",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "bind": {
+            "r_add_student_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Name juniper 891",
+            "Code": "Code ivory 647",
+            "Type": "Theory"
+          },
+          "bind": {
+            "r_add_subject_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "Teacher_ID lumen 103",
+            "Name": {
+              "first_name": "Bravo",
+              "last_name": "Alpha"
+            },
+            "Email": "email.292@example.com",
+            "Phone_Number": "+1555018638"
+          },
+          "bind": {
+            "r_add_teacher_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Create_Assignment",
+          "record": {
+            "Title": "Title juniper 739",
+            "Subject_field": "<ref:r_add_subject_setup_submit>",
+            "Assignment_Type": "<ref:r_add_assignment_type_setup_submit>",
+            "Class": "<ref:r_add_class_setup_submit>",
+            "Issued_Date": "26-Oct-2026",
+            "Due_Date": "16-Oct-2026",
+            "Priority": "Low",
+            "Faculty": "<ref:r_add_teacher_setup_submit>",
+            "Allocated_To": [
+              "<ref:r_add_student_valid_submit>"
+            ],
+            "Status": "Active",
+            "Submissions": "Sample Submissions note 836 generated for capture."
+          },
+          "creator": {
+            "code": 3001,
+            "error": [
+              {
+                "task": "alert",
+                "alert_message": [
+                  "Please specify the correct date!"
+                ]
+              },
+              {
+                "task": "cancel_submit",
+                "message": "Failed to add data."
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Create_Assignment": []
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "create-assignment-invalid-rule-0",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "Harbor",
+              "last_name": "Fable"
+            },
+            "Email": "email.467@example.com",
+            "Phone_Number": "+1555015802",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "bind": {
+            "r_add_student_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Name juniper 891",
+            "Code": "Code ivory 647",
+            "Type": "Theory"
+          },
+          "bind": {
+            "r_add_subject_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "Teacher_ID lumen 103",
+            "Name": {
+              "first_name": "Bravo",
+              "last_name": "Alpha"
+            },
+            "Email": "email.292@example.com",
+            "Phone_Number": "+1555018638"
+          },
+          "bind": {
+            "r_add_teacher_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Create_Assignment",
+          "record": {
+            "Title": "Title prairie 308",
+            "Subject_field": "<ref:r_add_subject_setup_submit>",
+            "Assignment_Type": "<ref:r_add_assignment_type_setup_submit>",
+            "Class": "<ref:r_add_class_setup_submit>",
+            "Issued_Date": "20-Oct-2026",
+            "Due_Date": "10-Oct-2026",
+            "Priority": "Low",
+            "Faculty": "<ref:r_add_teacher_setup_submit>",
+            "Allocated_To": [
+              "<ref:r_add_student_valid_submit>"
+            ],
+            "Status": "Active",
+            "Submissions": "Sample Submissions note 921 generated for capture."
+          },
+          "creator": {
+            "code": 3001,
+            "error": [
+              {
+                "task": "alert",
+                "alert_message": [
+                  "Please specify the correct date!"
+                ]
+              },
+              {
+                "task": "cancel_submit",
+                "message": "Failed to add data."
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Create_Assignment": []
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "create-assignment-update-submissions",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "Harbor",
+              "last_name": "Fable"
+            },
+            "Email": "email.467@example.com",
+            "Phone_Number": "+1555015802",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "bind": {
+            "r_add_student_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Name juniper 891",
+            "Code": "Code ivory 647",
+            "Type": "Theory"
+          },
+          "bind": {
+            "r_add_subject_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "Teacher_ID lumen 103",
+            "Name": {
+              "first_name": "Bravo",
+              "last_name": "Alpha"
+            },
+            "Email": "email.292@example.com",
+            "Phone_Number": "+1555018638"
+          },
+          "bind": {
+            "r_add_teacher_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Assignments",
+          "where": {
+            "Title": "Title juniper 739"
+          },
+          "record": {
+            "Submissions": "Submissions updated 976"
+          },
+          "expect": {
+            "body": {
+              "matched": 0,
+              "updated": 0,
+              "refused": 0
+            }
+          },
+          "creator": {
+            "code": 3100,
+            "message": "No Data Available"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Create_Assignment": []
+        }
+      }
+    },
+    {
+      "id": "submit-assignment-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "Harbor",
+              "last_name": "Fable"
+            },
+            "Email": "email.467@example.com",
+            "Phone_Number": "+1555015802",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "bind": {
+            "r_add_student_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Name juniper 891",
+            "Code": "Code ivory 647",
+            "Type": "Theory"
+          },
+          "bind": {
+            "r_add_subject_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "Teacher_ID lumen 103",
+            "Name": {
+              "first_name": "Bravo",
+              "last_name": "Alpha"
+            },
+            "Email": "email.292@example.com",
+            "Phone_Number": "+1555018638"
+          },
+          "bind": {
+            "r_add_teacher_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Assignments",
+          "where": {
+            "Title": "Title juniper 739"
+          },
+          "record": {
+            "Submissions": "Submissions updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Submit_Assignment",
+          "record": {
+            "recID": 71,
+            "Submitted_By": "submitted-by.656@example.com",
+            "Student": "<ref:r_add_student_valid_submit>",
+            "Assignment": "Title juniper 739",
+            "Submission_On": "17-Oct-2026 06:43:00",
+            "Description": "Sample Description note 436 generated for capture.",
+            "Note": "Sample Note note 567 generated for capture.",
+            "Status": "Submitted",
+            "Reviewer": "<ref:r_add_teacher_setup_submit>",
+            "Remarks": "Sample Remarks note 385 generated for capture.",
+            "Marks": "Marks sable 531",
+            "Reviewed_On": "17-Oct-2026 18:39:00"
+          },
+          "creator": {
+            "code": 3001,
+            "error": [
+              "Invalid column value \"Title juniper 739\" specified"
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Submit_Assignment": []
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "submit-assignment-update-description",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "Harbor",
+              "last_name": "Fable"
+            },
+            "Email": "email.467@example.com",
+            "Phone_Number": "+1555015802",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "bind": {
+            "r_add_student_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Name juniper 891",
+            "Code": "Code ivory 647",
+            "Type": "Theory"
+          },
+          "bind": {
+            "r_add_subject_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "Teacher_ID lumen 103",
+            "Name": {
+              "first_name": "Bravo",
+              "last_name": "Alpha"
+            },
+            "Email": "email.292@example.com",
+            "Phone_Number": "+1555018638"
+          },
+          "bind": {
+            "r_add_teacher_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Assignments",
+          "where": {
+            "Title": "Title juniper 739"
+          },
+          "record": {
+            "Submissions": "Submissions updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Submissions",
+          "where": {
+            "Submitted_By": "submitted-by.656@example.com"
+          },
+          "record": {
+            "Description": "Description updated 767"
+          },
+          "expect": {
+            "body": {
+              "matched": 0,
+              "updated": 0,
+              "refused": 0
+            }
+          },
+          "creator": {
+            "code": 3100,
+            "message": "No Data Available"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Submit_Assignment": []
+        }
+      }
+    },
+    {
+      "id": "submit-assignment-invalid-edit-rule-0",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "Harbor",
+              "last_name": "Fable"
+            },
+            "Email": "email.467@example.com",
+            "Phone_Number": "+1555015802",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "bind": {
+            "r_add_student_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Name juniper 891",
+            "Code": "Code ivory 647",
+            "Type": "Theory"
+          },
+          "bind": {
+            "r_add_subject_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "Teacher_ID lumen 103",
+            "Name": {
+              "first_name": "Bravo",
+              "last_name": "Alpha"
+            },
+            "Email": "email.292@example.com",
+            "Phone_Number": "+1555018638"
+          },
+          "bind": {
+            "r_add_teacher_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Assignments",
+          "where": {
+            "Title": "Title juniper 739"
+          },
+          "record": {
+            "Submissions": "Submissions updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Submissions",
+          "where": {
+            "Submitted_By": "submitted-by.656@example.com"
+          },
+          "record": {
+            "Description": "Description updated 767"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Submissions",
+          "where": {
+            "Submitted_By": "submitted-by.656@example.com"
+          },
+          "record": {
+            "Status": "Reviewed"
+          },
+          "expect": {
+            "body": {
+              "matched": 0,
+              "updated": 0,
+              "refused": 0
+            }
+          },
+          "creator": {
+            "code": 3100,
+            "message": "No Data Available"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Submit_Assignment": []
+        }
+      }
+    },
+    {
+      "id": "create-assignment-boundary-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "Harbor",
+              "last_name": "Fable"
+            },
+            "Email": "email.467@example.com",
+            "Phone_Number": "+1555015802",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "bind": {
+            "r_add_student_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Name juniper 891",
+            "Code": "Code ivory 647",
+            "Type": "Theory"
+          },
+          "bind": {
+            "r_add_subject_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "Teacher_ID lumen 103",
+            "Name": {
+              "first_name": "Bravo",
+              "last_name": "Alpha"
+            },
+            "Email": "email.292@example.com",
+            "Phone_Number": "+1555018638"
+          },
+          "bind": {
+            "r_add_teacher_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Assignments",
+          "where": {
+            "Title": "Title juniper 739"
+          },
+          "record": {
+            "Submissions": "Submissions updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Submissions",
+          "where": {
+            "Submitted_By": "submitted-by.656@example.com"
+          },
+          "record": {
+            "Description": "Description updated 767"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Submissions",
+          "where": {
+            "Submitted_By": "submitted-by.656@example.com"
+          },
+          "record": {
+            "Status": "Reviewed"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Create_Assignment",
+          "record": {
+            "Title": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+            "Subject_field": "<ref:r_add_subject_setup_submit>",
+            "Assignment_Type": "<ref:r_add_assignment_type_setup_submit>",
+            "Class": "<ref:r_add_class_setup_submit>",
+            "Issued_Date": "26-Oct-2026",
+            "Due_Date": "16-Oct-2026",
+            "Priority": "Low",
+            "Faculty": "<ref:r_add_teacher_setup_submit>",
+            "Allocated_To": [
+              "<ref:r_add_student_valid_submit>"
+            ],
+            "Status": "Active",
+            "Submissions": "Sample Submissions note 836 generated for capture."
+          },
+          "creator": {
+            "code": 3001,
+            "error": [
+              {
+                "task": "alert",
+                "alert_message": [
+                  "Please specify the correct date!"
+                ]
+              },
+              {
+                "task": "cancel_submit",
+                "message": "Failed to add data."
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Create_Assignment": []
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "post-students",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "Harbor",
+              "last_name": "Fable"
+            },
+            "Email": "email.467@example.com",
+            "Phone_Number": "+1555015802",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "bind": {
+            "r_add_student_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Name juniper 891",
+            "Code": "Code ivory 647",
+            "Type": "Theory"
+          },
+          "bind": {
+            "r_add_subject_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "Teacher_ID lumen 103",
+            "Name": {
+              "first_name": "Bravo",
+              "last_name": "Alpha"
+            },
+            "Email": "email.292@example.com",
+            "Phone_Number": "+1555018638"
+          },
+          "bind": {
+            "r_add_teacher_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Assignments",
+          "where": {
+            "Title": "Title juniper 739"
+          },
+          "record": {
+            "Submissions": "Submissions updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Submissions",
+          "where": {
+            "Submitted_By": "submitted-by.656@example.com"
+          },
+          "record": {
+            "Description": "Description updated 767"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Submissions",
+          "where": {
+            "Submitted_By": "submitted-by.656@example.com"
+          },
+          "record": {
+            "Status": "Reviewed"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Students",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_Student": [
+            {
+              "Email": "email.467@example.com",
+              "Student_ID": "Student_ID bravo 459",
+              "Phone_Number": "+1555015802",
+              "Class": "<ref:r_add_class_setup_submit>",
+              "Name_last_name": "Fable",
+              "Name_first_name": "Harbor"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-all-assignments",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "Harbor",
+              "last_name": "Fable"
+            },
+            "Email": "email.467@example.com",
+            "Phone_Number": "+1555015802",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "bind": {
+            "r_add_student_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Name juniper 891",
+            "Code": "Code ivory 647",
+            "Type": "Theory"
+          },
+          "bind": {
+            "r_add_subject_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "Teacher_ID lumen 103",
+            "Name": {
+              "first_name": "Bravo",
+              "last_name": "Alpha"
+            },
+            "Email": "email.292@example.com",
+            "Phone_Number": "+1555018638"
+          },
+          "bind": {
+            "r_add_teacher_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Assignments",
+          "where": {
+            "Title": "Title juniper 739"
+          },
+          "record": {
+            "Submissions": "Submissions updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Submissions",
+          "where": {
+            "Submitted_By": "submitted-by.656@example.com"
+          },
+          "record": {
+            "Description": "Description updated 767"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Submissions",
+          "where": {
+            "Submitted_By": "submitted-by.656@example.com"
+          },
+          "record": {
+            "Status": "Reviewed"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "All_Assignments",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "post-submissions",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Assignment_Type",
+          "record": {
+            "Type": "Type bravo 109"
+          },
+          "bind": {
+            "r_add_assignment_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Class",
+          "record": {
+            "Name": "Name north 700"
+          },
+          "bind": {
+            "r_add_class_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Student",
+          "record": {
+            "Student_ID": "Student_ID bravo 459",
+            "Name": {
+              "first_name": "Harbor",
+              "last_name": "Fable"
+            },
+            "Email": "email.467@example.com",
+            "Phone_Number": "+1555015802",
+            "Class": "<ref:r_add_class_setup_submit>"
+          },
+          "bind": {
+            "r_add_student_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Subject",
+          "record": {
+            "Name": "Name juniper 891",
+            "Code": "Code ivory 647",
+            "Type": "Theory"
+          },
+          "bind": {
+            "r_add_subject_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Teacher",
+          "record": {
+            "Teacher_ID": "Teacher_ID lumen 103",
+            "Name": {
+              "first_name": "Bravo",
+              "last_name": "Alpha"
+            },
+            "Email": "email.292@example.com",
+            "Phone_Number": "+1555018638"
+          },
+          "bind": {
+            "r_add_teacher_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Assignments",
+          "where": {
+            "Title": "Title juniper 739"
+          },
+          "record": {
+            "Submissions": "Submissions updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Submissions",
+          "where": {
+            "Submitted_By": "submitted-by.656@example.com"
+          },
+          "record": {
+            "Description": "Description updated 767"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Submissions",
+          "where": {
+            "Submitted_By": "submitted-by.656@example.com"
+          },
+          "record": {
+            "Status": "Reviewed"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Submissions",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    }
+  ]
+}
