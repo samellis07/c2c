@@ -72,19 +72,41 @@ function memoryStore() {
   };
 }
 
-async function run(dir: string, req: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
+async function run(dir: string, req: unknown): Promise<{ status: number; body: Record<string, unknown>; logged: Record<string, unknown>[] }> {
   (await import(pathToFileURL(join(dir, 'functions/c2c-store.mjs')).href)).setDatastore(memoryStore());
   const handler = (await import(pathToFileURL(join(dir, HANDLER)).href)).default as (req: unknown, res: unknown) => unknown;
   let status = 0;
   let raw = '';
-  await handler(req, { writeHead: (code: number) => (status = code), end: (body: string) => (raw = body) });
-  return { status, body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {} };
+  const logged: Record<string, unknown>[] = [];
+  const realError = console.error;
+  console.error = (line: unknown) => {
+    try {
+      logged.push(JSON.parse(String(line)) as Record<string, unknown>);
+    } catch {
+      /* not a structured line */
+    }
+  };
+  try {
+    await handler(req, { writeHead: (code: number) => (status = code), end: (body: string) => (raw = body) });
+  } finally {
+    console.error = realError;
+  }
+  return { status, body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {}, logged };
+}
+
+/** A post-commit refusal: the row stays, the reply is 200 with a warning, and the log names the refusal code. */
+function assertPostCommitWarning(res: { status: number; body: Record<string, unknown>; logged: Record<string, unknown>[] }, code: string): void {
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.wrote, true, 'the row is persisted before the script runs');
+  assert.equal((res.body.warning as { code?: unknown } | undefined)?.code, 'POST_COMMIT_FAILED');
+  assert.equal(Object.hasOwn(res.body, 'error'), false);
+  assert.deepEqual(res.logged.filter((line) => line.event === 'post-commit-failed').map((line) => line.code), [code]);
 }
 
 test('generated handlers wire outboundHttp only when an invokeurl has no connection (others are byte-unchanged)', () => {
   const generated = files(outboundApp());
   const src = generated.get(HANDLER)!;
-  assert.match(src, /import \{ authorizeRead, authorizeWrite, applyInitialValues, compileCriteria, createRuntime, outboundHttp, principalFromRequest, projectFields, projectReadable, replyStoreError \} from "creator-to-catalyst\/shims";/);
+  assert.match(src, /import \{ authorizeRead, authorizeWrite, applyInitialValues, compileCriteria, createRuntime, outboundHttp, postCommitWarning, principalFromRequest, projectFields, projectReadable, replyStoreError \} from "creator-to-catalyst\/shims";/);
   assert.match(generated.get('functions/aio/_lib.mjs')!, /import \{ jsonReplacer \} from "creator-to-catalyst\/shims";[\s\S]*JSON\.stringify\(body, jsonReplacer\)/);
   assert.match(src, /\.\.\.\(live \? \{ http: outboundHttp\(outboundConfig\(req\)\) \} : \{\}\),/);
   assert.match(src, /parsed\.outboundHosts/);
@@ -132,8 +154,7 @@ test('generated live getUrl: unlisted host refused before any request; listed ho
   const req = { user: { profile: 'Administrator' }, headers: {}, body: { record: { Rest_Verb: 'GET', Rest_Last_Name: 'C2C-G1' } } };
   try {
     const refused = await run(writeTree(app, { mode: 'live', appTimeZone: 'Asia/Kolkata' }), req);
-    assert.equal(refused.status, 500, JSON.stringify(refused.body));
-    assert.match(String(refused.body.error), /getUrl host api\.example\.com is not in c2c-deploy\.json outboundHosts/);
+    assertPostCommitWarning(refused, 'ZOHO_CONNECTION_REFUSED');
     assert.equal(seen.length, 0);
 
     const ok = await run(writeTree(app, { mode: 'live', appTimeZone: 'Asia/Kolkata', outboundHosts: ['api.example.com'] }), req);
@@ -189,8 +210,7 @@ test('generated live invokeurl: unlisted host refused before any request; listed
   const req = { user: { profile: 'Administrator' }, headers: { 'idempotency-key': 'submit-42' }, body: { record: { Rest_Verb: 'POST', Rest_Last_Name: 'C2C-O1' } } };
   try {
     const refused = await run(writeTree(app, { mode: 'live', appTimeZone: 'Asia/Kolkata' }), req);
-    assert.equal(refused.status, 500, JSON.stringify(refused.body));
-    assert.match(String(refused.body.error), /live-refused: invokeurl host api\.example\.com is not in c2c-deploy\.json outboundHosts/);
+    assertPostCommitWarning(refused, 'ZOHO_CONNECTION_REFUSED');
     assert.equal(seen.length, 0);
 
     const ok = await run(writeTree(app, { mode: 'live', appTimeZone: 'Asia/Kolkata', outboundHosts: ['api.example.com'] }), req);
@@ -233,9 +253,7 @@ test('generated live invokeurl to an allowlisted URL carrying userinfo: refused 
   try {
     const res = await run(writeTree(app, { mode: 'live', appTimeZone: 'Asia/Kolkata', outboundHosts: ['api.example.com'] }), req);
     assert.equal(fetches, 0, 'refused before fetch was called');
-    assert.equal(res.status, 500, JSON.stringify(res.body));
-    assert.equal(res.body.wrote, true, 'the row is persisted before the script runs');
-    assert.match(String(res.body.error), /userinfo/);
+    assertPostCommitWarning(res, 'ZOHO_CONNECTION_REFUSED');
     assert.doesNotMatch(JSON.stringify(res.body), CANARIES, 'error, values and transcript carry no credential');
   } finally {
     globalThis.fetch = realFetch;

@@ -39,10 +39,12 @@ export {
   classifyStoreError,
   logStoreError,
   newRequestId,
+  postCommitWarning,
   replyStoreError,
   storeErrorMessage,
   storeErrorStatus,
   type ClassifiedStoreError,
+  type PostCommitWarning,
   type StoreErrorCode,
   type StoreReplyOptions,
 } from './store-errors.js';

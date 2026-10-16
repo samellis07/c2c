@@ -56,9 +56,32 @@ export function apiBase(view: AppWindow): string {
 /** Exact loopback names — a host that only starts with one (`127.0.0.1.evil.test`) is not loopback. */
 export const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 
+/**
+ * `window.location` throws once the window is gone — a realm teardown, a
+ * closed tab — and deferred work (a scheduled render, a promise continuation)
+ * can land after that point. Read the address defensively instead of letting
+ * the getter's throw escape into an async callback.
+ */
+export function pageHref(view: AppWindow): string {
+  try {
+    return typeof view.location?.href === 'string' ? view.location.href : '';
+  } catch {
+    return '';
+  }
+}
+
+/** The route hash, `''` once the window can no longer answer it. */
+export function pageHash(view: AppWindow): string {
+  try {
+    return typeof view.location?.hash === 'string' ? view.location.hash : '';
+  } catch {
+    return '';
+  }
+}
+
 /** The page's own address — the origin a relative endpoint belongs to. */
 function pageUrl(view: AppWindow): URL {
-  const href = typeof view.location?.href === 'string' ? view.location.href : '';
+  const href = pageHref(view);
   try {
     return new URL(href || 'https://localhost/');
   } catch {
@@ -365,7 +388,7 @@ function sessionStore(view: AppWindow): Storage | null {
 
 /** The hosted sign-in page, returning to the page the user is on. */
 export function loginUrl(view: AppWindow): string {
-  const href = typeof view.location?.href === 'string' && view.location.href ? view.location.href : '/';
+  const href = pageHref(view) || '/';
   return `/__catalyst/auth/login?service_url=${encodeURIComponent(href)}`;
 }
 
@@ -393,10 +416,10 @@ export function goToSignIn(view: AppWindow, login: string = loginUrl(view)): voi
   } catch {
     // storage refused: the redirect still happens
   }
-  const location = view.location as Location & { assign?: (url: string) => void };
   try {
-    if (typeof location.assign === 'function') location.assign(login);
-    else location.href = login;
+    const location = view.location as Location & { assign?: (url: string) => void } | null;
+    if (location && typeof location.assign === 'function') location.assign(login);
+    else if (location) location.href = login;
   } catch {
     // a host that refuses navigation keeps the prompt on screen
   }
@@ -510,7 +533,11 @@ export function createApi(view: AppWindow, extraHeaders?: HeaderHook): Api {
     // The server's text for 401, 403 and 5xx never reaches a screen: each
     // status has the app's own copy (failureText), so the body is dropped here.
     const masked = res.status === 401 || res.status === 403 || res.status >= 500;
-    return { ok: res.ok, status: res.status, body: masked ? undefined : ((await readBody(res)) as T | undefined) };
+    if (!masked) return { ok: res.ok, status: res.status, body: (await readBody(res)) as T | undefined };
+    // A 5xx that says wrote true still stored the row: only that flag crosses.
+    const raw = res.status >= 500 ? await readBody(res) : undefined;
+    const wrote = !!raw && typeof raw === 'object' && (raw as { wrote?: unknown }).wrote === true;
+    return { ok: res.ok, status: res.status, body: wrote ? ({ wrote: true } as T) : undefined };
   }
   async function send<T>(method: 'GET' | 'POST', endpoint: string, body?: unknown): Promise<ApiReply<T>> {
     // Resolve and check the target before the token is even requested: a

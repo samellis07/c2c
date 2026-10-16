@@ -147,7 +147,7 @@ test('a ResizeObserver-less realm cannot let one control unmount the whole app',
   const require = createRequire(join(out, 'lib', 'loader.cjs'));
   const React = require('react') as { createElement: (type: unknown, props: unknown, child?: unknown) => unknown };
   const { bootApp } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/boot.js')).href)) as {
-    bootApp: (spec: unknown, doc: Document | undefined, routes: Record<string, () => unknown>, custom: Record<string, unknown>) => void;
+    bootApp: (spec: unknown, doc: Document | undefined, routes: Record<string, () => unknown>, custom: Record<string, unknown>) => () => void;
   };
   const { FormView } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/form/FormView.js')).href)) as { FormView: unknown };
   const { Field } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/form/fields.js')).href)) as { Field: unknown };
@@ -158,7 +158,7 @@ test('a ResizeObserver-less realm cannot let one control unmount the whole app',
     'form/Order': () => React.createElement(FormView, { form: spec.forms.Order!, edit: undefined }, React.createElement(Field, { name: 'Paid' })),
     'report/Orders': () => React.createElement(ReportView, { report: spec.reports.Orders!, row: undefined }),
   };
-  bootApp(spec, view.document, routes, {});
+  const unmount = bootApp(spec, view.document, routes, {});
 
   const settle = async (): Promise<void> => {
     for (let i = 0; i < 8; i++) await new Promise((resolve) => view.setTimeout(resolve, 0));
@@ -174,4 +174,9 @@ test('a ResizeObserver-less realm cannot let one control unmount the whole app',
   await settle();
   const section = main().querySelector('[data-report="Orders"]');
   assert.ok(section, 'the report route still renders after a control hit the missing ResizeObserver');
+
+  assert.equal(typeof unmount, 'function', 'boot hands back the unmount');
+  unmount();
+  await settle();
+  assert.equal(view.document.getElementById('root')?.childElementCount, 0, 'the unmount empties #root');
 });

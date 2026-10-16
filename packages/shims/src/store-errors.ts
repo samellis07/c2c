@@ -222,3 +222,42 @@ export function replyStoreError(
   res.end(JSON.stringify(body, jsonReplacer));
   return true;
 }
+
+/** Caller-facing warning of a submit whose row committed but whose post-commit work failed. */
+export interface PostCommitWarning {
+  code: 'POST_COMMIT_FAILED';
+  message: string;
+  requestId: string;
+}
+
+/**
+ * The row is stored; an on-success script, mail, or other post-commit step
+ * failed after it. The submit still answers 200 with this warning: replying
+ * with a failure would tell the caller nothing was saved, and a retry would
+ * then insert a second row or hit a unique column. The function log gets one
+ * structured line (table, error code and name, request id); the warning
+ * carries a fixed message, never the error text or record values.
+ */
+export function postCommitWarning(err: unknown, detail: { table: string }): PostCommitWarning {
+  const requestId = newRequestId();
+  const raw = err && typeof err === 'object' ? (err as { code?: unknown; name?: unknown }) : {};
+  const own = typeof raw.code === 'string' && /^[A-Z0-9_]{1,64}$/.test(raw.code) ? raw.code : null;
+  const code = own ?? classifyStoreError(err)?.code ?? null;
+  const name = typeof raw.name === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(raw.name) ? raw.name : 'Error';
+  console.error(
+    JSON.stringify({
+      level: 'warn',
+      component: 'c2c-submit',
+      event: 'post-commit-failed',
+      table: detail.table,
+      code,
+      name,
+      requestId,
+    }),
+  );
+  return {
+    code: 'POST_COMMIT_FAILED',
+    message: 'The record was saved. An action after the save did not complete.',
+    requestId,
+  };
+}

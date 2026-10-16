@@ -54,6 +54,7 @@ import { generateSchema } from '../../schema/src/index.js';
 import { catalystFailure, catalystRows, quirkRowServer, rowEndpoint, ROW_PATH } from '../../data/test/catalyst-row-fake.js';
 import { c2cVersion, GATE_REQUIRED_CHECKS } from '../../doctor/src/index.js';
 import { generateUi } from '../../ui/src/generate.js';
+import { repoRoot } from '../../core/src/toolchain.js';
 
 // Older fakes model writes as { rows } → { ids }; rowEndpoint checks the real /row shape around them.
 const migrateCsv: typeof migrateCsvReal = (opts) => migrateCsvReal({ ...opts, fetch: rowEndpoint(opts.fetch) });
@@ -2010,6 +2011,60 @@ test('a submit that writes then fails still tracks the row for cleanup', async (
   const deletes = calls.filter((call) => (call.body ?? '').includes('DELETE FROM Vendor'));
   assert.equal(deletes.length, 1, 'the written row is deleted, not orphaned');
   assert.equal((store.Vendor ?? []).length, 0);
+});
+
+test('a committed submit answered 200 with a post-commit warning is tracked, named, and deleted', async () => {
+  const ds = writeDs(undefined, SMOKE_DS);
+  const live = capture();
+  const store: Record<string, Record<string, string>[]> = {};
+  const calls: { method: string; url: string; headers?: Record<string, string>; body?: string }[] = [];
+  const base = smokeFetch(store, calls);
+  live.io.fetch = async (url, init) => {
+    if (url.endsWith('/forms/Vendor/submit')) {
+      const record = JSON.parse(init?.body ?? '{}').record ?? {};
+      const row = { ...record, ROWID: '999002' };
+      (store.Vendor ??= []).push(row);
+      return response({ dryRun: false, wrote: true, values: row, warning: { code: 'POST_COMMIT_FAILED', message: 'The record was saved. An action after the save did not complete.', requestId: 'r1' } });
+    }
+    return base(url, init);
+  };
+  await smokeCli([...baseArgs(ds), '--confirm', '--url', 'https://app.example.test/server/c2c_api', '--session-cookie', 'sess=abc123'], live.io);
+  assert.match(live.stdout(), /submit Vendor: 200 wrote 999002 \(warning POST_COMMIT_FAILED/);
+  const deletes = calls.filter((call) => (call.body ?? '').includes('DELETE FROM Vendor'));
+  assert.equal(deletes.length, 1, 'the written row is deleted, not orphaned');
+  assert.equal((store.Vendor ?? []).length, 0);
+});
+
+test('the smoke plan deletes every form it submits into (redistributable fixtures and the smoke apps)', () => {
+  const sources: [string, string][] = [
+    ['SMOKE_DS', SMOKE_DS],
+    ['CALLS_DS', CALLS_DS],
+  ];
+  const fixtures = join(repoRoot(), 'fixtures/redistributable');
+  for (const dir of readdirSync(fixtures).sort()) {
+    for (const file of readdirSync(join(fixtures, dir)).filter((name) => name.endsWith('.ds')).sort()) sources.push([`${dir}/${file}`, readFileSync(join(fixtures, dir, file), 'utf8')]);
+  }
+  assert.ok(sources.some(([name]) => name.startsWith('library-application-system/')), 'the library fixture is covered');
+  // Each app gets its own registry row so the guard accepts its project name.
+  const inputsFor = (app: ReturnType<typeof deriveIr>) => {
+    const guard = checkGuards({ org: SCOPE.org, projectId: '1001', appLink: app.name ?? '', credentialPath: SECRET, registry: { ...registry, projects: { [catalystProjectName(app.name ?? '')]: '1001' } } });
+    const { files, schema } = deployFiles(app, guard, false, { mode: 'dry-run' });
+    const routes = JSON.parse(String(files.find((file) => file.path === 'functions/c2c_api/routes.json')!.data)) as Record<string, string>;
+    return { routes, model: generateUi(app).model, schema };
+  };
+  for (const [name, source] of sources) {
+    const app = deriveIr(parse(source));
+    const steps = planSmoke(app, inputsFor(app));
+    const submitted = steps.filter((step) => step.kind === 'submit').map((step) => step.form);
+    assert.ok(submitted.length > 0, `${name}: the plan submits at least one form`);
+    const cleaned = steps.filter((step) => step.kind === 'cleanup').map((step) => step.form);
+    for (const form of submitted) assert.ok(cleaned.includes(form), `${name}: ${form} is submitted but never deleted`);
+    const lastSubmit = Math.max(...steps.map((step, index) => (step.kind === 'submit' ? index : -1)));
+    assert.ok(steps.every((step, index) => step.kind !== 'cleanup' || index > lastSubmit), `${name}: deletes run after every submit`);
+  }
+  const library = deriveIr(parse(readFileSync(join(fixtures, 'library-application-system/library_application.ds'), 'utf8')));
+  const memberCleanup = planSmoke(library, inputsFor(library)).find((step) => step.kind === 'cleanup' && step.form === 'Member_Info');
+  assert.equal(memberCleanup?.table, 'Member_Info', 'the Member_Info row the smoke writes is deleted by table');
 });
 
 test('smoke never relays the token or cookie when a server error echoes them', async () => {
