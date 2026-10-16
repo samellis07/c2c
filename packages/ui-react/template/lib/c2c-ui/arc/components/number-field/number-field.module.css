@@ -42,7 +42,8 @@
    (the digits, or the draft mirror while typing), so the value keeps one weight and position whether it is rolling or being edited. */
 .number { position: relative; display: inline-grid; align-items: center; }
 .display { display: inline-flex; grid-area: 1 / 1; }
-.display[data-hidden] { position: absolute; top: 0; left: 0; visibility: hidden; }
+/* Hidden only to the eye: it keeps its grid slot, so the cell — and the input stretched over it — never collapses to a zero-size box. */
+.display[data-hidden] { visibility: hidden; }
 .mirror { grid-area: 1 / 1; white-space: pre; }
 .input { position: absolute; z-index: 1; top: 0; left: 0; width: calc(100% + 1em); height: 100%; margin: 0; border: 0; padding: 0; background: transparent; color: transparent; caret-color: var(--foreground); font: inherit; font-variant-numeric: inherit; letter-spacing: inherit; line-height: inherit; text-align: left; outline: none; }
 .input:focus-visible { outline: none; }

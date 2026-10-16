@@ -300,6 +300,52 @@ test('a stored zero still posts as zero', async () => {
   assert.deepEqual(readRecord(rendered.formEl, spec(fields)), { Qty: '0', Ratio: '0.00' });
 });
 
+test('an empty number field is a real text control: focusable, and typing submits the value', async () => {
+  const fields = [field('Qty', 'number'), field('Ratio', 'decimal', { decimalPlaces: 2 })];
+  const rendered = await render({}, fields);
+  const input = rendered.box.querySelector('[data-field="Qty"] input[role="spinbutton"]') as HTMLInputElement;
+  assert.ok(input, 'number field renders its input');
+  assert.equal(input.type, 'text', 'a plain text control keeps grouping and decimal formatting exact');
+  assert.equal(input.inputMode, 'numeric');
+  assert.equal(input.disabled, false);
+  input.focus();
+  assert.equal(rendered.box.activeElement, input, 'the input can take keyboard focus');
+  type(rendered, '[data-field="Qty"] input[role="spinbutton"]', '1985');
+  await rendered.flush();
+  assert.equal(readRecord(rendered.formEl, spec(fields)).Qty, '1985');
+  const hidden = rendered.box.querySelector('input[type="hidden"][name="Qty"]') as HTMLInputElement;
+  assert.equal(hidden?.value, '1985', 'the typed value reaches the hidden carrier input');
+});
+
+test('a pasted grouped or fractional number posts its exact canonical value', async () => {
+  const fields = [field('Qty', 'number'), field('Ratio', 'decimal', { decimalPlaces: 2 })];
+  const rendered = await render({}, fields);
+  type(rendered, '[data-field="Qty"] input[role="spinbutton"]', '1,985');
+  type(rendered, '[data-field="Ratio"] input[role="spinbutton"]', '1985.5');
+  await rendered.flush();
+  const record = readRecord(rendered.formEl, spec(fields));
+  assert.equal(record.Qty, '1985');
+  assert.equal(record.Ratio, '1985.50');
+});
+
+test('the number input never sits over a collapsed cell: the hidden digit display keeps its grid slot', async () => {
+  const rendered = await render({}, [field('Qty', 'number')]);
+  const kit = await bundle();
+  const style = rendered.box.createElement('style');
+  style.textContent = kit.css;
+  rendered.box.head.appendChild(style);
+  const rules = Array.from(style.sheet?.cssRules ?? []).filter(
+    (rule): rule is CSSStyleRule => 'selectorText' in rule,
+  );
+  const hidden = rules.filter((rule) => rule.selectorText.includes('[data-hidden]'));
+  assert.ok(hidden.length, 'the bundle ships the hidden display rule');
+  for (const rule of hidden) {
+    assert.notEqual(rule.style.position, 'absolute', `${rule.selectorText} must not remove the display from the grid — the overlaid input would collapse to zero size`);
+  }
+  const displays = Array.from(rendered.box.querySelectorAll('[data-field="Qty"] [data-hidden]'));
+  assert.ok(displays.length, 'an empty field still renders its (invisible) digit display');
+});
+
 test('signature and richtext controls have accessible names, required state, keyboard support, and focusable surfaces', async () => {
   const fields = [
     field('Sig', 'signature', { required: true }),
