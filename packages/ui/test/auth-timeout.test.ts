@@ -104,6 +104,15 @@ test('a never-resolving current-user fetch shows the stall message and Retry sig
       generateAuthToken: async () => ({ access_token: 'token' }),
     },
   };
+  // Deadline timer first, fetch-abort timer second, same delay. Hold the second
+  // back: Node 20 can paint the stall before that later timer aborts the fetch.
+  const nativeSetTimeout = view.setTimeout.bind(view);
+  let scheduled = 0;
+  view.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+    scheduled += 1;
+    const delay = scheduled === 2 ? Number(timeout ?? 0) + 1000 : timeout;
+    return nativeSetTimeout(handler, delay, ...args);
+  }) as typeof view.setTimeout;
   const started = Date.now();
   await runtime.boot(model, doc);
   await until(() => doc.querySelector('[data-sign-in-retry]') != null, 'sign-in stall');
