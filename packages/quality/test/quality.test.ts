@@ -194,6 +194,19 @@ test('Q2 bites: a client module that reads a Node-only global fails (it throws i
   }
 });
 
+test('Q2: the generated prefetch loader may assign ctx.slots for browser zoho reads', async () => {
+  // clientModule emits `ctx.slots = slots` after the nonce check so the
+  // browser shim's zoho.<env> reads resolve; the field must type-check.
+  const q2 = await checkCompiles(
+    clientTreeOf('ctx.slots = { "zoho.appUri": "u" };\n  actions.push({ op: "info", message: String(ctx.slots["zoho.appUri"]) });'),
+  );
+  assert.equal(q2.report.ok, true, JSON.stringify(q2.details));
+  // A name ShimContext does not declare still fails the gate.
+  const bad = await checkCompiles(clientTreeOf('ctx.noSuchField = 1;'));
+  assert.equal(bad.report.ok, false);
+  assert.equal(bad.report.typeByCode.TS2339, 1);
+});
+
 test('Q2: CommonJS wrapper names are allowed only in a server .js entry', () => {
   const cjs = "const { join } = require('node:path');\nmodule.exports = () => join(__dirname, __filename);\n";
   assert.deepEqual(freeIdentifiers(cjs, allowedGlobals('server', 'functions/c2c_api/index.js')), []);

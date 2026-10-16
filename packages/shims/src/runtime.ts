@@ -399,7 +399,7 @@ export interface FieldValueReader {
 
 /** Fields `Runtime.context` takes; `form` names the record's form for {@link RuntimeOptions.fieldValues}. */
 export type ContextInput = Partial<
-  Pick<ShimContext, 'record' | 'old' | 'row' | 'appTimeZone' | 'principal' | 'formNonce' | 'writeOp' | 'rowId' | 'subformRow' | 'args' | 'transition' | 'approver' | 'element' | 'prefetchPath' | 'rangeSlot' | 'rangeFrom' | 'rangeTo' | 'rangeEmpty'>
+  Pick<ShimContext, 'record' | 'old' | 'row' | 'appTimeZone' | 'principal' | 'formNonce' | 'writeOp' | 'rowId' | 'subformRow' | 'args' | 'transition' | 'approver' | 'element' | 'prefetchPath' | 'slots' | 'rangeSlot' | 'rangeFrom' | 'rangeTo' | 'rangeEmpty'>
 > & { form?: string };
 
 export interface ShimContext {
@@ -431,6 +431,12 @@ export interface ShimContext {
   formNonce?: string;
   /** Prefetch endpoint path the client handler loaded, set by the first prefetch call. */
   prefetchPath?: string;
+  /**
+   * The accepted prefetch's slots, assigned by the generated client handler
+   * after the nonce check. The browser shim answers `zoho.<env>` reads from
+   * `slots["zoho.<env>"]`; a missing key blocks the run like a stale prefetch.
+   */
+  slots?: Record<string, unknown>;
   /**
    * The loop element a per-element prefetch evaluates for: `{ name, value }`
    * from the request body. The name is the translated loop variable, the
