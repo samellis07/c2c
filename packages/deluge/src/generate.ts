@@ -987,6 +987,19 @@ function workflowButtonName(w: Workflow): string {
   return match?.[1] ?? '';
 }
 
+/**
+ * The `functions/aio/...` module a form-event workflow's script lands in. The
+ * leaf is the group's shared event slug or `<kind>-handlers`, never the
+ * workflow name, so same-named siblings share one module. Exported so the
+ * no-silent-drop audit derives the same path the generator puts; returns null
+ * for workflows the form-handler route does not cover.
+ */
+export function aioHandlerPath(app: App, w: Workflow): string | null {
+  if (!isHandlerWorkflow(w)) return null;
+  const form = w.form || 'form';
+  return `functions/aio/${slug(form)}/${handlerLeaf(handlerGroup(app, form, eventKind(w.event)))}`;
+}
+
 function emitFormHandler(
   app: App,
   group: readonly Workflow[],
