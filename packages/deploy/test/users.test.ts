@@ -1062,7 +1062,7 @@ test('role ids parsed from MCP/REST text stay exact strings; a rounded JSON numb
 });
 
 test('gmail dot and googlemail variants fold to the one invited mailbox', async () => {
-  const backup = backupWith('user-002', 'Crazy.Citizen+Ops@' + 'googlemail.com');
+  const backup = backupWith('user-002', 'Folded.Alias+Ops@' + 'googlemail.com');
   const ds = dsFile();
   const out = mkdtempSync(join(tmpdir(), 'c2c-users-gmail-'));
   const { io } = makeIo();
@@ -1081,7 +1081,7 @@ test('gmail dot and googlemail variants fold to the one invited mailbox', async 
   const sent = calls
     .filter((call) => call.method === 'POST' && call.path === `${BASE}/project-user`)
     .map((call) => (call.body as { user_details: { email_id: string } }).user_details.email_id);
-  assert.ok(sent.includes('crazycitizen@' + 'gmail.com'));
+  assert.ok(sent.includes('foldedalias@' + 'gmail.com'));
   assert.ok(!sent.some((identity) => identity.includes('+') || identity.includes('googlemail')));
 });
 
