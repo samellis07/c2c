@@ -71,10 +71,14 @@ export interface DoctorContext {
 const pass = (id: string, detail: string, extra: Partial<CheckResult> = {}): CheckResult => ({ id, status: 'pass', detail, fix: null, ...extra });
 const warn = (id: string, detail: string, fix: string | null = null): CheckResult => ({ id, status: 'warn', detail, fix });
 const fail = (id: string, detail: string, fix: string | null): CheckResult => ({ id, status: 'fail', detail, fix });
-const skip = (id: string, detail: string): CheckResult => ({ id, status: 'skip', detail, fix: null });
+const skip = (id: string, detail: string, fix: string | null = null): CheckResult => ({ id, status: 'skip', detail, fix });
 
 /** The fix for a recorded evidence field that is present but not the shape a check can read. */
 const RE_RECORD = 'run /c2c:doctor again so the evidence is collected fresh';
+
+/** The fix for a skipped agent-half row: no MCP observation was recorded this run. */
+const RECORD_MCP_FIX =
+  'run c2c doctor --mcp-begin; the agent makes the MCP calls it names and pipes the results into c2c doctor --mcp-observed -';
 
 /** A recorded list field: the strings, 'malformed' when present but not a list of strings, undefined when absent. */
 function recordedList(value: unknown): readonly string[] | 'malformed' | undefined {
@@ -335,7 +339,12 @@ function checkA(ctx: DoctorContext): CheckResult[] {
  */
 async function checkA2(ctx: DoctorContext): Promise<CheckResult> {
   const res = await runCmd(ctx, 'claude', ['plugin', 'list', '--json']);
-  if (res.code !== 0) return skip('D-A2', 'claude plugin list unavailable; plugin enablement not checked');
+  if (res.code !== 0)
+    return skip(
+      'D-A2',
+      'claude plugin list unavailable; plugin enablement not checked',
+      'enable catalyst-by-zoho in the host plugin manager (Claude Code: /plugin enable catalyst-by-zoho; other hosts: the host plugin setting), then re-run c2c doctor',
+    );
   let entries: Record<string, unknown>[];
   try {
     const parsed = JSON.parse(res.stdout) as unknown;
@@ -354,7 +363,12 @@ async function checkA2(ctx: DoctorContext): Promise<CheckResult> {
     const name = typeof e.name === 'string' ? e.name : typeof e.id === 'string' ? e.id : '';
     return name === 'catalyst-by-zoho' || name.startsWith('catalyst-by-zoho@');
   });
-  if (hits.length === 0) return skip('D-A2', 'catalyst-by-zoho is not in claude plugin list');
+  if (hits.length === 0)
+    return skip(
+      'D-A2',
+      'catalyst-by-zoho is not in claude plugin list',
+      'install or enable catalyst-by-zoho (Claude Code: /plugin enable catalyst-by-zoho), then re-run c2c doctor',
+    );
   const enabled = hits.filter((e) => e.enabled === true);
   if (enabled.length === 0) {
     return fail('D-A2', 'catalyst-by-zoho is installed but disabled', '/plugin enable catalyst-by-zoho@<marketplace>, then restart the session');
@@ -370,7 +384,7 @@ async function checkA2(ctx: DoctorContext): Promise<CheckResult> {
 function checkA3(ctx: DoctorContext): CheckResult {
   const visible = recordedList(ctx.evidence?.catalyst_skills_visible);
   if (visible === 'malformed') return fail('D-A3', 'the recorded skills list is not a list of names; re-record the evidence', RE_RECORD);
-  if (!visible) return skip('D-A3', 'skill visibility not recorded');
+  if (!visible) return skip('D-A3', 'skill visibility not recorded', RE_RECORD);
   const missing = REQUIRED_SKILLS.filter((name) => !visible.includes(name));
   if (missing.length) {
     return fail(
@@ -498,7 +512,14 @@ function exportDirTarget(dir: string): { kind: 'file'; path: string } | { kind: 
 
 function checkD1(ctx: DoctorContext): { result: CheckResult; ir?: App } {
   const target = ctx.appPath;
-  if (!target) return { result: skip('D-D1', 'no --app given; the Creator export was not checked') };
+  if (!target)
+    return {
+      result: skip(
+        'D-D1',
+        'no --app given; the Creator export was not checked',
+        'export the app in Creator (app → Settings → Export (.ds)), then re-run c2c doctor --app <export.ds>',
+      ),
+    };
   const fix =
     'in Creator: app → Settings → Export (.ds); if the export is blank, run /c2c:analyze on any earlier export to find the broken component, fix it in Creator, export again';
   // One open classifies and reads the export; the parse uses those bytes. A
@@ -1381,11 +1402,11 @@ export async function runDoctorChecks(ctx: DoctorContext): Promise<DoctorRun> {
     // Only failed rows are carried without a signed record, so D-A3/D-B may have no row left.
     // D-B8 reports live workspace state, so a carried row for it would be stale.
     const carried = ctx.carried.checks.filter((c) => c.id !== 'D-B8');
-    if (!carried.some((c) => c.id === 'D-A3')) checks.push(skip('D-A3', 'agent half not recorded yet'));
+    if (!carried.some((c) => c.id === 'D-A3')) checks.push(skip('D-A3', 'agent half not recorded yet', RECORD_MCP_FIX));
     if (!carried.some((c) => c.id.startsWith('D-B'))) checks.push(skip('D-B', ctx.evidenceNote ?? 'agent half not recorded yet (run c2c doctor --mcp-begin; the agent makes the MCP calls it names and pipes the results into c2c doctor --mcp-observed -)'));
     checks.push(...carried);
   } else {
-    checks.push(skip('D-A3', 'agent half not recorded yet'));
+    checks.push(skip('D-A3', 'agent half not recorded yet', RECORD_MCP_FIX));
     checks.push(skip('D-B', ctx.evidenceNote ?? 'agent half not recorded yet (run c2c doctor --mcp-begin; the agent makes the MCP calls it names and pipes the results into c2c doctor --mcp-observed -)'));
   }
 

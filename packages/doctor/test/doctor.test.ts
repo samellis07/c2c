@@ -1335,6 +1335,52 @@ test('D-A2 reads claude plugin list: enabled passes, disabled fails, absent skip
   }
 });
 
+test('doctor skips print a runnable fix: D-A2, D-A3, D-D1', async () => {
+  // A --local run without --app: D-A3 and D-D1 skip with the exact recovery command.
+  {
+    const { env } = greenWorkspace();
+    const { io, out } = fakeIo(env, greenCatalyst);
+    assert.equal(await doctorCli(['--local'], io, { hooks: NO_HOOKS }), 0, out());
+    assert.match(out(), /SKIP D-A3 +agent half not recorded yet/);
+    assert.match(out(), /fix: run c2c doctor --mcp-begin/);
+    assert.match(out(), /c2c doctor --mcp-observed -/);
+    assert.match(out(), /SKIP D-D1 +no --app given/);
+    assert.match(out(), /fix: .*c2c doctor --app <export\.ds>/);
+  }
+  // A full run where `claude plugin list` is unavailable: D-A2 skips with the manual fallback.
+  {
+    const { env } = greenWorkspace();
+    const { io, out } = fakeIo(env, (cmd, args) =>
+      cmd === 'claude' ? { code: 127, stdout: '', stderr: 'not found' } : greenCatalyst(cmd, args),
+    );
+    assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 0, out());
+    assert.match(out(), /SKIP D-A2 +claude plugin list unavailable/);
+    assert.match(out(), /fix: .*\/plugin enable catalyst-by-zoho/);
+  }
+  // A full run where the plugin list has no catalyst entry: D-A2 skips with the enable fix.
+  {
+    const { env } = greenWorkspace();
+    const { io, out } = fakeIo(env, (cmd, args) =>
+      cmd === 'claude' ? { code: 0, stdout: '[]', stderr: '' } : greenCatalyst(cmd, args),
+    );
+    assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 0, out());
+    assert.match(out(), /SKIP D-A2 +catalyst-by-zoho is not in claude plugin list/);
+    assert.match(out(), /fix: .*\/plugin enable catalyst-by-zoho/);
+  }
+  // Recorded evidence without the skills field: D-A3 skips with the re-record fix.
+  {
+    const { dir, env } = greenWorkspace();
+    const evidencePath = join(dir, 'evidence.json');
+    const rec = evidence();
+    delete rec.catalyst_skills_visible;
+    writeFileSync(evidencePath, JSON.stringify(rec));
+    const { io, out } = fakeIo(env, greenCatalyst);
+    await doctorCli(['--record-mcp', evidencePath, '--operator'], io, { hooks: NO_HOOKS });
+    assert.match(out(), /SKIP D-A3 +skill visibility not recorded/);
+    assert.match(out(), /fix: .*\/c2c:doctor/);
+  }
+});
+
 test('doctor output lists the deferred spec items', async () => {
   const { env } = greenWorkspace();
   const { io, out } = fakeIo(env, greenCatalyst);
