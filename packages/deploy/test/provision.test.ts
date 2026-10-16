@@ -193,13 +193,18 @@ function mcpRows(rows: Record<string, unknown>[]): unknown {
   return { status: 'success', data: { status: 'success', data: rows } };
 }
 
-/** The role rows Get_Table_Permissions/Scopes answer per call — role_name plus a grant field, never the table id. */
+/**
+ * The role rows Get_Table_Permissions/Scopes answer per call — role_name plus
+ * a grant field, never the table id — once the baseline is applied: App
+ * Administrator keeps its full default, every other role holds nothing at
+ * User scope.
+ */
 function roleRows(grantField: 'table_permissions' | 'table_scope'): Record<string, unknown>[] {
   const roles = ['App Administrator', 'App User', 'Member', 'Administrator', 'CEO'];
-  return roles.map((role_name) => ({
-    role_name,
-    [grantField]: grantField === 'table_scope' ? 'GLOBAL' : role_name === 'App User' ? ['SELECT'] : ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
-  }));
+  return roles.map((role_name) => {
+    const admin = role_name === 'App Administrator';
+    return { role_name, [grantField]: grantField === 'table_scope' ? (admin ? 'GLOBAL' : 'USER') : admin ? ['SELECT', 'INSERT', 'UPDATE', 'DELETE'] : [] };
+  });
 }
 
 /** The MCP read-back results a host agent would produce, read from the fake project. */
@@ -603,7 +608,7 @@ const FIXTURES = fixturesDir();
 const L1_DS = FIXTURES ? join(FIXTURES, 'synthetic', 's01-purchase-orders', 'L1', 'c2c-syn-po-l1.exported.ds') : '';
 const fixtureSkip = !FIXTURES || !statSync(L1_DS, { throwIfNoEntry: false })?.isFile() ? 'C2C_FIXTURES_DIR L1 fixture not available' : false;
 
-test('the generated plan: bucket reads back via Get_All_Buckets, custom roles stay console, permissions split by eligible role', { skip: fixtureSkip }, async () => {
+test('the generated plan: bucket reads back via Get_All_Buckets, custom roles stay console, the baseline splits by eligible role', { skip: fixtureSkip }, async () => {
   const l1 = L1_DS;
   const out = mkdtempSync(join(tmpdir(), 'c2c-prov-plan-'));
   const c = cap();
@@ -616,11 +621,15 @@ test('the generated plan: bucket reads back via Get_All_Buckets, custom roles st
   const roles = plan.steps.find((step) => step.id === 'custom-roles');
   assert.ok(roles, 'custom-roles step missing');
   assert.equal(roles.via, 'console');
-  // L1 grants are all on the custom "Administrator" role: no Update_Table_Permissions step.
+  // App User's baseline goes through Update_Table_Permissions; the custom
+  // roles' baseline stays a console step.
   const mcpGrants = plan.steps.filter((step) => step.tool === 'CatalystbyZoho_Update_Table_Permissions');
-  assert.equal(mcpGrants.length, 0, 'custom-role grants must not go through Update_Table_Permissions');
-  const consoleGrants = plan.steps.filter((step) => step.id.startsWith('table-permissions'));
-  assert.ok(consoleGrants.length > 0 && consoleGrants.every((step) => step.via === 'console'));
+  assert.equal(mcpGrants.length, 1);
+  for (const call of (mcpGrants[0]!.args as { calls: { body: Record<string, unknown> }[] }).calls) assert.deepEqual(call.body, { 'App User': [] });
+  const consoleGrants = plan.steps.find((step) => step.id === 'table-permissions-console');
+  assert.equal(consoleGrants?.via, 'console');
+  const grants = (consoleGrants!.args as { grants: { role: string; permissions: string[] }[] }).grants;
+  assert.ok(grants.length > 0 && grants.every((grant) => grant.role !== 'App User' && grant.permissions.length === 0));
   // Every MCP step emits the connector envelope.
   for (const step of plan.steps.filter((s) => s.via === 'mcp')) {
     const args = step.args as { path_variables?: { projectId?: string }; headers?: Record<string, string> };
@@ -2262,9 +2271,10 @@ test('a pre-row plan refuses --record too — a full-CRUD read-back never reache
 
 test('a plan from c2c plan loads under the grant-match gate and an exact read-back records', async () => {
   // A ds whose profile is literally named "App User" spells a built-in role —
-  // the auth plan renames it to the custom role "Creator App User", so the
-  // form grants are console steps (the mcp grant tools take built-ins only)
-  // with <id:Table> → {role: [set]} matches keyed by the custom name.
+  // the auth plan renames it to the custom role "Creator App User". Every
+  // non-admin role gets the least-privilege baseline (no table operation, User
+  // scope): App User through the mcp grant tools, the custom role through the
+  // console steps, with <id:Table> → {role: [set]} matches.
   const dir = mkdtempSync(join(tmpdir(), 'c2c-prov-ds-'));
   const ds = join(dir, 'app.ds');
   writeFileSync(
@@ -2325,11 +2335,14 @@ test('a plan from c2c plan loads under the grant-match gate and an exact read-ba
   }
   const perms = plan.steps.find((step) => step.id === 'table-permissions-console');
   const scopes = plan.steps.find((step) => step.id === 'table-scopes-console');
-  assert.ok(perms && scopes, "the colliding profile's grants produce the console grant steps on the custom role");
-  assert.deepEqual(perms.readBack.match, { '<id:Item>': { 'Creator App User': ['SELECT', 'UPDATE'] } });
-  assert.deepEqual(scopes.readBack.match, { '<id:Item>': { 'Creator App User': ['ORG'] } });
-  // The grant is never keyed by the built-in the profile name spells.
-  assert.equal(plan.steps.some((step) => step.id === 'table-permissions' || step.id === 'table-scopes'), false);
+  assert.ok(perms && scopes, "the colliding profile's baseline produces the console grant steps on the custom role");
+  assert.deepEqual(perms.readBack.match, { '<id:Item>': { 'Creator App User': [] } });
+  assert.deepEqual(scopes.readBack.match, { '<id:Item>': { 'Creator App User': ['USER'] } });
+  // The built-in App User carries the baseline, never the profile's Creator grant.
+  const mcpPerms = plan.steps.find((step) => step.id === 'table-permissions');
+  const mcpScopes = plan.steps.find((step) => step.id === 'table-scopes');
+  assert.deepEqual(mcpPerms?.readBack.match, { '<id:Item>': { 'App User': [] } });
+  assert.deepEqual(mcpScopes?.readBack.match, { '<id:Item>': { 'App User': ['USER'] } });
 
   // The generated plan loads under the gate.
   const status = cap();
@@ -2339,10 +2352,18 @@ test('a plan from c2c plan loads under the grant-match gate and an exact read-ba
   const c = cap();
   const tables = writeResult(out, 'tables', mcpRows([{ table_name: 'Item', table_id: '9000' }]));
   assert.equal(await provisionCli(['--out', out, '--record', 'tables', '--result', tables, ...SCOPE], c.io), 0, c.err());
-  const permRb = writeResult(out, 'perm-rb', [{ table_id: '9000', 'Creator App User': ['SELECT', 'UPDATE'] }]);
+  // The clone still holds its parent's SELECT: the baseline is not met.
+  const cloned = writeResult(out, 'perm-rb-cloned', mcpRows([{ role_name: 'Creator App User', table_permissions: ['SELECT'] }]));
+  assert.equal(await provisionCli(['--out', out, '--record', 'table-permissions-console', '--result', cloned, ...SCOPE], c.io), 1);
+  assert.equal(readState(out).steps['table-permissions-console'], undefined);
+  // A role row with no table_permissions field is not evidence of an empty grant.
+  const silent = writeResult(out, 'perm-rb-silent', mcpRows([{ role_name: 'Creator App User', role_id: '5101', users: [] }]));
+  assert.equal(await provisionCli(['--out', out, '--record', 'table-permissions-console', '--result', silent, ...SCOPE], c.io), 1);
+  assert.equal(readState(out).steps['table-permissions-console'], undefined);
+  const permRb = writeResult(out, 'perm-rb', mcpRows([{ role_name: 'App Administrator', table_permissions: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'] }, { role_name: 'Creator App User', table_permissions: [] }]));
   assert.equal(await provisionCli(['--out', out, '--record', 'table-permissions-console', '--result', permRb, ...SCOPE], c.io), 0, c.err());
   assert.equal(readState(out).steps['table-permissions-console']?.status, 'existing');
-  const scopeRb = writeResult(out, 'scope-rb', [{ table_id: '9000', 'Creator App User': ['ORG'] }]);
+  const scopeRb = writeResult(out, 'scope-rb', [{ table_id: '9000', 'Creator App User': ['USER'] }]);
   assert.equal(await provisionCli(['--out', out, '--record', 'table-scopes-console', '--result', scopeRb, ...SCOPE], c.io), 0, c.err());
   assert.equal(readState(out).steps['table-scopes-console']?.status, 'existing');
   rmSync(dir, { recursive: true, force: true });

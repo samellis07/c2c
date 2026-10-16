@@ -560,21 +560,22 @@ test('Datastore groups each table as table, columns, tableScope then tablePermis
   assert.deepEqual([...new Set(scopes)], ['App Administrator', 'App User', 'Staff', 'Administrator', 'CEO']);
 });
 
-test('a grant row carries the role type, the Catalyst verb order and the table dependency', () => {
+test('a grant row carries the role type, the baseline grant and the table dependency', () => {
   const ds = importDoc().components.Datastore;
   const staffPerm = item(ds, 'tablePermission', 'Item-Staff');
   assert.equal(staffPerm.properties.role_name, 'Staff');
   assert.equal(staffPerm.properties.type, 'Custom');
   assert.equal(staffPerm.properties.table_name, 'Item');
-  assert.deepEqual(staffPerm.properties.table_permissions, ['SELECT', 'UPDATE', 'INSERT', 'DELETE']);
+  assert.deepEqual(staffPerm.properties.table_permissions, []);
   assert.deepEqual(staffPerm.dependsOn, ['Datastore.table.Item']);
   const staffScope = item(ds, 'tableScope', 'Item-Staff');
-  assert.deepEqual(staffScope.properties, { role_name: 'Staff', table_scope: 'ORG', type: 'Custom', table_name: 'Item' });
+  assert.deepEqual(staffScope.properties, { role_name: 'Staff', table_scope: 'USER', type: 'Custom', table_name: 'Item' });
   assert.deepEqual(staffScope.dependsOn, ['Datastore.table.Item']);
-  // A Viewall grant is GLOBAL; an admin profile's grants keep the admin role type.
+  // An admin profile's role is still a custom role on the baseline.
   const adminScope = item(ds, 'tableScope', 'Item-Administrator');
-  assert.equal(adminScope.properties.table_scope, 'GLOBAL');
+  assert.equal(adminScope.properties.table_scope, 'USER');
   assert.equal(adminScope.properties.type, 'Custom');
+  assert.deepEqual(item(ds, 'tablePermission', 'Item-Administrator').properties.table_permissions, []);
 });
 
 test('a column with a static initial value carries default_value into the template', () => {
@@ -586,8 +587,8 @@ test('a column with a static initial value carries default_value into the templa
 });
 
 test('every role the template defines gets a scope and a permission row per table', () => {
-  // An ungranted role is not absent — the import writes the Catalyst default of
-  // its clone base, so a dropped grant is a verify mismatch, not a gap.
+  // An ungranted role is not absent — the import writes its grant explicitly,
+  // so a dropped grant is a verify mismatch, not a gap.
   const ds = importDoc().components.Datastore;
   const scopes = ds.filter((i) => i.type === 'tableScope');
   const perms = ds.filter((i) => i.type === 'tablePermission');
@@ -596,21 +597,18 @@ test('every role the template defines gets a scope and a permission row per tabl
   assert.deepEqual(perms.map((i) => i.name), roles.map((role) => `Item-${role}`));
   const scopeOf = (role: string) => item(scopes, 'tableScope', `Item-${role}`).properties.table_scope;
   const permOf = (role: string) => item(perms, 'tablePermission', `Item-${role}`).properties.table_permissions;
-  // The built-ins carry their Catalyst defaults (admin CRUD, user read).
+  // App Administrator keeps its Catalyst default (CRUD on every row).
   assert.deepEqual(permOf('App Administrator'), ['SELECT', 'UPDATE', 'INSERT', 'DELETE']);
   assert.equal(scopeOf('App Administrator'), 'GLOBAL');
-  assert.deepEqual(permOf('App User'), ['SELECT']);
-  assert.equal(scopeOf('App User'), 'GLOBAL');
-  // A role the auth plan grants keeps that grant (Staff: CRUD on ORG rows).
-  assert.deepEqual(permOf('Staff'), ['SELECT', 'UPDATE', 'INSERT', 'DELETE']);
-  assert.equal(scopeOf('Staff'), 'ORG');
-  // A role the auth plan leaves out gets its clone base's default: CEO clones
-  // App User, so it reads every row (GLOBAL) but cannot write.
-  assert.deepEqual(permOf('CEO'), ['SELECT']);
-  assert.equal(scopeOf('CEO'), 'GLOBAL');
+  // App User and every custom role, profile or hierarchy, get no table
+  // operation at User scope: the client reaches data only through c2c_api.
+  for (const role of ['App User', 'Staff', 'Administrator', 'CEO']) {
+    assert.deepEqual(permOf(role), [], role);
+    assert.equal(scopeOf(role), 'USER', role);
+  }
 });
 
-test('an ungranted role cloned from App Administrator defaults to the admin grant', () => {
+test('an ungranted role cloned from App Administrator, and a c2c table with no plan row, get the baseline', () => {
   const plan = planOf(form('Item', field('Name', 'text')));
   const template = importTemplate({
     plan,
@@ -618,8 +616,11 @@ test('an ungranted role cloned from App Administrator defaults to the admin gran
     tablePermissions: [],
   });
   const ds = template.components.Datastore;
-  assert.deepEqual(item(ds, 'tablePermission', 'Item-Boss').properties.table_permissions, ['SELECT', 'UPDATE', 'INSERT', 'DELETE']);
-  assert.equal(item(ds, 'tableScope', 'Item-Boss').properties.table_scope, 'GLOBAL');
+  assert.deepEqual(item(ds, 'tablePermission', 'Item-Boss').properties.table_permissions, []);
+  assert.equal(item(ds, 'tableScope', 'Item-Boss').properties.table_scope, 'USER');
+  assert.deepEqual(item(ds, 'tablePermission', 'Item-App User').properties.table_permissions, []);
+  assert.equal(item(ds, 'tableScope', 'Item-App User').properties.table_scope, 'USER');
+  assert.deepEqual(item(ds, 'tablePermission', 'Item-App Administrator').properties.table_permissions, ['SELECT', 'UPDATE', 'INSERT', 'DELETE']);
 });
 
 // --- the generated L1 template against the real project's re-export ------------
@@ -688,13 +689,9 @@ test('the generated L1 template writes a scope and a permission row for every ro
   }
   const permOf = (name: string) => item(generated.components.Datastore, 'tablePermission', name).properties.table_permissions;
   assert.deepEqual(permOf('Product-App Administrator'), ['SELECT', 'UPDATE', 'INSERT', 'DELETE']);
-  assert.deepEqual(permOf('Product-App User'), ['SELECT']);
-  assert.deepEqual(permOf('Product-Member'), ['SELECT']);
-  assert.deepEqual(permOf('Product-Administrator'), ['SELECT', 'UPDATE', 'INSERT', 'DELETE']);
-  // The auth plan grants CEO nothing: it gets its App User clone's default
-  // (read all rows). The real project's CEO CRUD is a manual grant beyond
-  // what the .ds export expresses — grant it through the auth plan when wanted.
-  assert.deepEqual(permOf('Product-CEO'), ['SELECT']);
+  // Every other role, the admin profile's custom role included, carries the
+  // no-access baseline: the real project's direct grants are what c2c closes.
+  for (const role of ['App User', 'Member', 'Administrator', 'CEO']) assert.deepEqual(permOf(`Product-${role}`), [], role);
 });
 
 test('SecurityRules requires authentication for c2c_api on every path and verb', () => {

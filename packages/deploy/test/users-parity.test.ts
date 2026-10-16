@@ -127,12 +127,16 @@ test('parity: every export profile becomes exactly one same-named Catalyst role'
   );
 });
 
-test('parity: table permissions match the export grant matrix exactly', () => {
+test('parity: table permissions are the least-privilege baseline, not the export grant matrix', () => {
+  // The matrix grants are enforced by c2c_api through the access policy (next
+  // tests); Catalyst grants would only open a direct Web SDK path around it.
   const plan = authPlan(libraryApp());
-  const expected = Object.values(MATRIX).flatMap((row) => row.grants.map((grant) => ({ ...grant, role: row.role })));
-  const sort = (rows: { table: string; role: string; permissions: Crud[]; scope: string }[]) =>
-    [...rows].map((row) => `${row.role}|${row.table}|${row.permissions.join('+')}|${row.scope}`).sort();
-  assert.deepEqual(sort(plan.tablePermissions), sort(expected));
+  const roles = ['App User', ...plan.roles.map((role) => role.role_name)];
+  const expected = FORMS.flatMap((table) => roles.map((role) => `${role}|${table}||USER`)).sort();
+  const actual = plan.tablePermissions.map((row) => `${row.role}|${row.table}|${row.permissions.join('+')}|${row.scope}`).sort();
+  assert.deepEqual(actual, expected);
+  // Every profile in the matrix has a role on the baseline.
+  for (const row of Object.values(MATRIX)) assert.ok(roles.includes(row.role), row.role);
 });
 
 test('parity: page access matches tab-enabled modules and preset all-pages', () => {

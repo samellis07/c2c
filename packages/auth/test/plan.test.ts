@@ -5,6 +5,11 @@ import { RecordAccessError, authorizeDelete, authorizeRead, authorizeWrite } fro
 import { createRuntime } from '../../shims/src/runtime.js';
 import { authAsJson, authAsReport, authPlan } from '../src/index.js';
 
+/** The least-privilege baseline: every role, every table, no operation at User scope. */
+function baseline(tables: string[], roles: string[]) {
+  return tables.flatMap((table) => roles.map((role) => ({ table, role, permissions: [], scope: 'USER' })));
+}
+
 function appOf(body: string) {
   return deriveIr(parse(`application "Demo"\n{\n${body}\n}\n`));
 }
@@ -92,11 +97,9 @@ test('profiles become cloned roles, portal users, and an access policy', () => {
   assert.equal(customers?.clone_role, 'App User');
   assert.equal(ceo?.source, 'hierarchy');
   assert.deepEqual(plan.portalUsers, [{ profile: 'Customers', catalystRole: 'Customers', action: 'app-user' }]);
-  const staffPerm = plan.tablePermissions.find((row) => row.role === 'Staff');
-  assert.deepEqual(staffPerm, { table: 'Item', role: 'Staff', permissions: ['SELECT', 'UPDATE'], scope: 'ORG' });
-  const portalPerm = plan.tablePermissions.find((row) => row.role === 'Customers');
-  assert.equal(portalPerm?.scope, 'GLOBAL');
-  assert.deepEqual(portalPerm?.permissions, ['SELECT']);
+  // Catalyst grants are the baseline for App User and every role; the profile
+  // grants live on the access policy c2c_api enforces.
+  assert.deepEqual(plan.tablePermissions, baseline(['Item'], ['App User', ...plan.roles.map((role) => role.role_name)]));
   const read = authorizeRead(plan.accessPolicy, { profile: 'Staff' }, 'Item', { op: 'true' });
   assert.deepEqual(read.fields, ['Qty']);
   assert.match(authAsReport(plan), /clone App User/);
@@ -171,15 +174,11 @@ test('profiles with no module blocks get the Creator predefined grants', async (
   }
   assert.deepEqual(plan.accessPolicy.profiles.Developer, {});
   assert.deepEqual(plan.accessPolicy.profiles.Stranger, {});
+  // Even an Administrator preset role gets no direct Data Store grant: it is a
+  // custom role, and its CRUD is on the access policy above.
   const admin = plan.tablePermissions.find((row) => row.role === 'Administrator' && row.table === 'Item');
-  assert.deepEqual(admin, { table: 'Item', role: 'Administrator', permissions: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'], scope: 'GLOBAL' });
-  const write = plan.tablePermissions.find((row) => row.role === 'Write' && row.table === 'Item');
-  assert.deepEqual(write, { table: 'Item', role: 'Write', permissions: ['SELECT', 'INSERT', 'UPDATE'], scope: 'ORG' });
-  const portal = plan.tablePermissions.find((row) => row.role === 'Customer' && row.table === 'Item');
-  assert.deepEqual(portal, { table: 'Item', role: 'Customer', permissions: ['SELECT', 'INSERT'], scope: 'ORG' });
-  const read = plan.tablePermissions.find((row) => row.role === 'Read' && row.table === 'Note');
-  assert.deepEqual(read, { table: 'Note', role: 'Read', permissions: ['SELECT'], scope: 'ORG' });
-  assert.equal(plan.tablePermissions.some((row) => row.role === 'Stranger' || row.role === 'Developer'), false);
+  assert.deepEqual(admin, { table: 'Item', role: 'Administrator', permissions: [], scope: 'USER' });
+  assert.equal(plan.tablePermissions.some((row) => row.permissions.length > 0 || row.scope !== 'USER'), false);
   assert.deepEqual(authorizeWrite(plan.accessPolicy, { profile: 'Administrator' }, 'Item', { Name: 'A' }).values, { Name: 'A' });
   assert.throws(() => authorizeWrite(plan.accessPolicy, { profile: 'Read' }, 'Item', { Name: 'A' }));
   assert.throws(() => authorizeWrite(plan.accessPolicy, { profile: 'Stranger' }, 'Item', { Name: 'A' }));
@@ -289,8 +288,8 @@ test('edit without delete is refused and delete without edit stays inside the re
   assert.equal(purgeGrant.recordFilter?.op, '==');
   const staffPerm = plan.tablePermissions.find((row) => row.role === 'Staff' && row.table === 'Item');
   const purgePerm = plan.tablePermissions.find((row) => row.role === 'Purge' && row.table === 'Item');
-  assert.deepEqual(staffPerm?.permissions, ['SELECT', 'UPDATE']);
-  assert.deepEqual(purgePerm?.permissions, ['SELECT', 'DELETE']);
+  assert.deepEqual(staffPerm?.permissions, []);
+  assert.deepEqual(purgePerm?.permissions, []);
   assert.throws(() => authorizeWrite(plan.accessPolicy, { profile: 'Purge' }, 'Item', { Status: 'Closed' }));
   authorizeDelete(plan.accessPolicy, { profile: 'Purge', loginUser: 'ada@example.test' }, 'Item');
   assert.throws(() => authorizeDelete(plan.accessPolicy, { profile: 'Staff', loginUser: 'ada@example.test' }, 'Item'), RecordAccessError);
@@ -414,28 +413,30 @@ test('a renamed built-in profile never lands on a name another profile already h
   }
 });
 
-test('a disabled module grants neither table permissions nor page access', () => {
+test('a disabled module grants nothing beyond the baseline and no page access', () => {
   const plan = authPlan(
     appOf(
       `${ITEM_FORM}\tshare_settings\n\t{\n${profileBlock('Staff', 'Users_Permissions', moduleBlock('Item', 'false', '{"View","Edit","Delete"}') + `\t\t\t\tDashboard\n\t\t\t\t{\n\t\t\t\t\tenabled = "False"\n\t\t\t\t}\n`)}\t}`,
     ),
   );
-  assert.deepEqual(plan.tablePermissions, []);
+  assert.deepEqual(plan.tablePermissions, baseline(['Item'], ['App User', 'Staff']));
   assert.deepEqual(plan.pageAccess, []);
 });
 
-test('write verbs without a read verb grant no table permission at all', () => {
+test('write verbs without a read verb grant nothing beyond the baseline', () => {
   const plan = authPlan(
     appOf(`${ITEM_FORM}\tshare_settings\n\t{\n${profileBlock('Clerk', 'Users_Permissions', moduleBlock('Item', 'true', '{"Add","Edit","Delete"}'))}\t}`),
   );
-  assert.deepEqual(plan.tablePermissions, []);
+  assert.deepEqual(plan.tablePermissions, baseline(['Item'], ['App User', 'Clerk']));
 });
 
-test('Create and View All module flags grant insert and a GLOBAL read', () => {
+test('Create and View All module flags never widen the Catalyst grant past the baseline', () => {
   const plan = authPlan(
     appOf(`${ITEM_FORM}\tshare_settings\n\t{\n${profileBlock('Lead', 'Users_Permissions', moduleBlock('Item', '{Create, Viewall, Bogus}', '{}'))}\t}`),
   );
-  assert.deepEqual(plan.tablePermissions, [{ table: 'Item', role: 'Lead', permissions: ['SELECT', 'INSERT'], scope: 'GLOBAL' }]);
+  assert.deepEqual(plan.tablePermissions, baseline(['Item'], ['App User', 'Lead']));
+  // The flags still reach the access policy c2c_api enforces.
+  assert.equal(plan.accessPolicy.profiles.Lead.Item.write, true);
 });
 
 test('nested hierarchy roles keep their parent and skip names a profile already owns', () => {
@@ -504,6 +505,7 @@ test('an untyped admin profile clones App Administrator and a module with no ena
     plan.roles.map(({ role_name, clone_role, portal }) => ({ role_name, clone_role, portal })),
     [{ role_name: 'Site Admins', clone_role: 'App Administrator', portal: false }],
   );
-  assert.deepEqual(plan.tablePermissions, [{ table: 'Item', role: 'Site Admins', permissions: ['SELECT'], scope: 'ORG' }]);
+  // An App Administrator clone is still a custom role: baseline, not admin CRUD.
+  assert.deepEqual(plan.tablePermissions, baseline(['Item'], ['App User', 'Site Admins']));
   assert.deepEqual(plan.pageAccess, [{ page: 'Dashboard', role: 'Site Admins' }]);
 });

@@ -1183,12 +1183,14 @@ test('the import verify steps expect the full grant set: every role on every tab
   assert.deepEqual(Object.keys(permMatch), ['<id:Item>']);
   assert.deepEqual(Object.keys(permMatch['<id:Item>']!).sort(), ['App Administrator', 'App User', 'Staff']);
   assert.deepEqual(permMatch['<id:Item>']!['App Administrator'], ['SELECT', 'UPDATE', 'INSERT', 'DELETE']);
-  assert.deepEqual(permMatch['<id:Item>']!['App User'], ['SELECT']);
-  assert.deepEqual(permMatch['<id:Item>']!['Staff'], ['SELECT', 'UPDATE']);
+  // App User and the custom role carry the least-privilege baseline.
+  assert.deepEqual(permMatch['<id:Item>']!['App User'], []);
+  assert.deepEqual(permMatch['<id:Item>']!['Staff'], []);
   assert.deepEqual(Object.keys(scopeMatch), ['<id:Item>']);
   assert.deepEqual(Object.keys(scopeMatch['<id:Item>']!).sort(), ['App Administrator', 'App User', 'Staff']);
-  assert.deepEqual(scopeMatch['<id:Item>']!['App User'], ['GLOBAL']);
-  assert.deepEqual(scopeMatch['<id:Item>']!['Staff'], ['ORG']);
+  assert.deepEqual(scopeMatch['<id:Item>']!['App Administrator'], ['GLOBAL']);
+  assert.deepEqual(scopeMatch['<id:Item>']!['App User'], ['USER']);
+  assert.deepEqual(scopeMatch['<id:Item>']!['Staff'], ['USER']);
   rmSync(out, { recursive: true, force: true });
 });
 

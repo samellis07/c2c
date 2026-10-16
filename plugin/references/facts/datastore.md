@@ -251,15 +251,18 @@ shadow column for values beyond 15 digits or 4 decimal places.
 
 ## Permissions and environments
 
-### Grant App User writes per table in the console
+### Give App User and custom roles no table grant
 
-Rule: [UNVERIFIED] the App User role carries SELECT by default; enable INSERT,
-UPDATE, and DELETE per table under Table Scopes and Permissions for
-every table app users must write. Never assign the App Administrator
-role to end users; it grants full access to all tables. Permission and
-scope write routes answer the automation token with 401, so set them
-in the console; custom-role grants go in the greenfield import
-template or the console.
+Rule: [UNVERIFIED] a new table gives App User SELECT at Global scope
+(observed once through MCP on a scratch table). c2c revokes it: App User and every custom role get no table operation at
+User scope, because the generated app reaches the Data Store only
+through `c2c_api` with the admin-scoped SDK, which enforces the Creator
+profile itself. Never assign the App Administrator role to end users;
+it grants full access to all tables. Permission and scope write routes
+answer the automation token with 401; write them with MCP
+`Update_Table_Permissions` / `Update_Table_Scopes`, the greenfield
+import template, or the console. Every function that touches a table
+initializes the SDK with `{scope:'admin'}`.
 
 ### Plan schema against Development only; load rows anywhere
 

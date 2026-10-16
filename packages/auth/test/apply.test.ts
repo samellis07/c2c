@@ -113,14 +113,15 @@ test('the apply plan turns roles, table permissions, and invites into ordered op
   assert.equal(ceo?.source, 'hierarchy');
 
   const perm = apply.tablePermissions.find((row) => row.role === 'Staff' && row.table === 'Item');
-  assert.deepEqual(perm?.permissions, ['SELECT', 'UPDATE']);
-  assert.equal(perm?.scope, 'ORG');
+  assert.deepEqual(perm?.permissions, []);
+  assert.equal(perm?.scope, 'USER');
   assert.deepEqual(
     perm?.calls.map((call) => call.path),
     ['/table/{table_id:Item}/permission', '/table/{table_id:Item}/scopes'],
   );
-  assert.deepEqual(perm?.calls[0].body, { Staff: ['SELECT', 'UPDATE'] });
-  assert.deepEqual(perm?.calls[1].body, { Staff: 'ORG' });
+  // An empty list revokes every table operation for the role.
+  assert.deepEqual(perm?.calls[0].body, { Staff: [] });
+  assert.deepEqual(perm?.calls[1].body, { Staff: 'USER' });
 
   assert.deepEqual(apply.invites, [{ profile: 'Customers', role: 'Customers', emails: [], via: 'console-or-mcp-add-user' }]);
   assert.equal(apply.customUserValidation.type, 'basicio');
@@ -130,21 +131,19 @@ test('the apply plan turns roles, table permissions, and invites into ordered op
   assert.ok(apply.steps.length >= 4);
 });
 
-test('a lower role gets no op for a permission it lacks, for every permission kind', () => {
+test('every non-admin role, hierarchy roles included, gets the no-access baseline and never a grant', () => {
   const apply = authApplyPlan(authPlan(appOf(DEMO)));
-  // Stranger has a role but no grants: no table op may reference it.
-  assert.equal(apply.tablePermissions.some((row) => row.role === 'Stranger'), false);
-  assert.equal(apply.tablePermissions.some((row) => row.role === 'CEO'), false);
-  // Every op hangs off a planned role.
-  const names = new Set(apply.roles.map((role) => role.role_name));
-  for (const row of apply.tablePermissions) assert.ok(names.has(row.role), row.role);
-  // Edit does not imply Delete: Staff's Item grant is SELECT+UPDATE only.
-  const staff = apply.tablePermissions.find((row) => row.role === 'Staff' && row.table === 'Item');
-  assert.equal(staff?.permissions.includes('DELETE'), false);
-  for (const call of staff?.calls ?? []) assert.equal(JSON.stringify(call.body).includes('DELETE'), false);
-  // Viewall became GLOBAL scope; nothing else did.
-  const portal = apply.tablePermissions.find((row) => row.role === 'Customers');
-  assert.equal(portal?.scope, 'GLOBAL');
+  // App User and every planned role carry an op on every table; App
+  // Administrator is never touched.
+  const roles = ['App User', ...apply.roles.map((role) => role.role_name)];
+  assert.deepEqual([...new Set(apply.tablePermissions.map((row) => row.role))], roles);
+  assert.equal(apply.tablePermissions.some((row) => row.role === 'App Administrator'), false);
+  for (const row of apply.tablePermissions) {
+    assert.deepEqual(row.permissions, [], row.role);
+    assert.equal(row.scope, 'USER', row.role);
+    assert.deepEqual(row.calls[0].body, { [row.role]: [] }, row.role);
+    assert.deepEqual(row.calls[1].body, { [row.role]: 'USER' }, row.role);
+  }
   // Invites never invent an email.
   for (const invite of apply.invites) assert.deepEqual(invite.emails, []);
 });
@@ -209,9 +208,9 @@ test('a profile whose name spells a built-in role plans a distinct custom role w
   const role = plan.roles.find((entry) => entry.role_name === 'Creator App Administrator');
   assert.equal(role?.profile, 'App Administrator');
   assert.equal(role?.clone_role, 'App User');
-  // The profile's grants hang off the custom role, never the built-in.
+  // The baseline hangs off the custom role, never the built-in.
   const grant = plan.tablePermissions.find((row) => row.role === 'Creator App Administrator' && row.table === 'Item');
-  assert.deepEqual(grant?.permissions, ['SELECT']);
+  assert.deepEqual(grant?.permissions, []);
   assert.equal(plan.tablePermissions.some((row) => row.role === 'App Administrator'), false);
   // The generated app maps the custom role back to the profile the export declared.
   const map = principalRoleMap(plan);
@@ -733,7 +732,8 @@ test('an export with no profiles plans no roles, no invites, and a validator tha
   const report = authApplyReport(apply);
   for (const line of [
     '## Roles\n- none\n',
-    '## Table permissions\n- none (a role with no rows here reads no tables)\n',
+    // App User still gets the baseline: a new table defaults it to SELECT.
+    '## Table permissions\n- Item / App User: no access @ USER — PUT /table/<id>/permission and /table/<id>/scopes\n',
     '## Invites\n- none (no portal profile in the export)\n',
     '- no portal role is planned, so the generated validator denies every signup\n',
   ]) {

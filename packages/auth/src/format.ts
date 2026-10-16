@@ -31,9 +31,9 @@ export function authAsReport(plan: AuthPlan): string {
   lines.push('');
   lines.push('## Table permissions');
   lines.push('');
-  if (!plan.tablePermissions.length) lines.push('No form grants with View.');
+  if (!plan.tablePermissions.length) lines.push('No app tables.');
   for (const row of plan.tablePermissions) {
-    lines.push(`- ${row.role} on ${row.table}: ${row.permissions.join(', ')} (${row.scope})`);
+    lines.push(`- ${row.role} on ${row.table}: ${row.permissions.join(', ') || 'no access'} (${row.scope})`);
   }
   lines.push('');
   lines.push('## Notes');

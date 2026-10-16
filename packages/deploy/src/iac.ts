@@ -17,6 +17,7 @@
  * listener or rule surfaces instead of passing silently), legacy Cron
  * (unstable shape).
  */
+import { BASELINE_GRANT } from '../../auth/src/plan.js';
 import type { SchemaPlan } from '../../schema/src/generator.js';
 import { API_FUNCTION, FUNCTION_STACK } from './function-dir.js';
 import { columnBody, tableCreatePlan, type ColumnCreate } from './tables.js';
@@ -165,7 +166,7 @@ export interface TemplateGrant {
   table: string;
   role: string;
   permissions: readonly string[];
-  scope: 'ORG' | 'GLOBAL';
+  scope: 'USER' | 'ORG' | 'GLOBAL';
 }
 
 export interface ImportTemplateInput {
@@ -199,31 +200,31 @@ function grantRoleOrder(grants: readonly { role: string }[], roles: readonly str
   return out;
 }
 
-/** The Catalyst default a role's clone base carries on a table: the admin base reads and writes, the user base reads. */
+/** App Administrator keeps the Catalyst default: it reads and writes every row. */
 const ADMIN_GRANT = ['SELECT', 'INSERT', 'UPDATE', 'DELETE'] as const;
-const READ_GRANT = ['SELECT'] as const;
 
 /**
  * The grants the import writes for one table — one row per role the template
  * defines, not only the roles the auth plan grants: the plan's grant where it
- * exists, else the Catalyst default of the role's clone base (an App
- * Administrator clone reads and writes every row; an App User clone reads every
- * row). An explicit row per role is what lets the verify steps catch a grant
- * the import dropped instead of treating a missing row as no grant.
+ * exists, else App Administrator's full default or, for App User and every
+ * custom role, the least-privilege baseline (no table operation, User scope).
+ * The generated client never reads the Data Store directly, so that also holds
+ * for c2c's own tables, which have no auth-plan row. An explicit row per role
+ * is what lets the verify steps catch a grant the import dropped instead of
+ * treating a missing row as no grant.
  */
 export function importTableGrants(
   table: string,
   roles: readonly { role_name: string; clone_role?: 'App User' | 'App Administrator' }[],
   planGrants: readonly { table: string; role: string; permissions: readonly string[]; scope: string }[],
 ): { table: string; role: string; permissions: string[]; scope: string }[] {
-  const cloneBase = new Map(roles.map((role) => [role.role_name, role.clone_role]));
   const roleNames = ['App Administrator', 'App User', ...roles.filter((role) => !BUILTIN_ROLES.has(role.role_name)).map((role) => role.role_name)];
   const tableGrants = planGrants.filter((grant) => grant.table === table);
   return grantRoleOrder(tableGrants, roleNames).map((role) => {
     const grant = tableGrants.find((row) => row.role === role);
-    const base = BUILTIN_ROLES.has(role) ? role : cloneBase.get(role) ?? 'App User';
-    const permissions: readonly string[] = grant ? grant.permissions : base === 'App Administrator' ? ADMIN_GRANT : READ_GRANT;
-    return { table, role, permissions: PERMISSION_ORDER.filter((verb) => permissions.includes(verb)), scope: grant ? grant.scope : 'GLOBAL' };
+    const admin = role === 'App Administrator';
+    const permissions: readonly string[] = grant ? grant.permissions : admin ? ADMIN_GRANT : BASELINE_GRANT.permissions;
+    return { table, role, permissions: PERMISSION_ORDER.filter((verb) => permissions.includes(verb)), scope: grant ? grant.scope : admin ? 'GLOBAL' : BASELINE_GRANT.scope };
   });
 }
 

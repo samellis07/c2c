@@ -31,14 +31,14 @@ Every generated API call needs a signed-in Catalyst app user with role App Admin
 
 ## Steps
 
-1. **Plan review** (`plan.md` → *Auth*): Creator profiles → Catalyst roles (custom roles cloned from App User or App Administrator), per-table permissions (SELECT/INSERT/UPDATE/DELETE) and scope, portal users count, SSO flags.
+1. **Plan review** (`plan.md` → *Auth*): Creator profiles → Catalyst roles (custom roles cloned from App User or App Administrator), the table-permission baseline (App User and every custom role: no table operation, User scope; App Administrator unchanged), portal users count, SSO flags. The profile's own table, field and record grants are on the access policy `c2c_api` enforces, not on Catalyst roles.
 2. **Ask for the first admin's email** (the user's own, usually). Note: inviting sends that address a real email.
 3. **Order** (each with the user's yes, each followed by its read-back):
    1. enable hosted, then embedded (public signup **off** unless the Creator app has open portal signup and the user asks for it);
    2. Authorized domain for the App URL host (needs the App URL from `c2c-ui`);
    3. read role ids (MCP);
    4. custom roles: console checklist item if any (exact path: Authentication → User Management → Roles → Add Role), then read back;
-   5. table permissions and scopes per role (MCP), read back;
+   5. table permissions and scopes per role (MCP), read back: every non-admin role must read back `[]` and `USER` — a role that still shows its cloned `SELECT` is a mismatch;
    6. invite the first admin (role App Administrator) with `redirect_url` = the Slate app URL — the Slate host must already exist (never invite without it), and the default lands the invitee on an unhosted `/app/` path (404) where the invite never completes. In the console path the form needs Platform = Web, Component = Slate, the Slate app and Deployment = `default` [TESTED];
    7. the **user** opens the invite email, confirms, sets a password, and signs in once on the App URL;
    8. read back `is_confirmed: true` (`GET /project-user`) and `project-user/current` → 200 from the page. Before sign-in the app shows a clear signed-out state, and the framed sign-in page renders the login form — if it shows the app shell, the service worker is answering `/accounts/`, `/__catalyst/`, `/baas/`, `/server/` or cross-origin navigations it must bypass. After sign-in the user lands on the app root — a landing on `/app/` (404) means the app's `signIn(elementId, …)` call is missing `{service_url:<app url>}`; Slate has no redirect field in `catalyst.json` (`login_redirect` is Web Client Hosting only).
@@ -50,7 +50,7 @@ Every generated API call needs a signed-in Catalyst app user with role App Admin
 - **Public signup:** off by default. Turning it on is the user's explicit decision.
 - **Creator portal users:** re-invited, never imported with passwords. Users missing in Catalyst must not fall back to a super admin silently; list them as pending.
 - **SSO (Zoho One / SAML):** no native equivalent [UNVERIFIED]. Offer hosted/embedded login with re-invites, or the documented third-party (custom token / JWT) path. Flag it as a decision in `decisions.json`.
-- **Field/report/action-level permissions:** Catalyst roles govern table CRUD and scope only. c2c enforces the finer rules in the handler middleware; say so.
+- **Field/report/action-level permissions:** Catalyst roles govern table CRUD and scope only. c2c enforces every profile rule (table CRUD included) in the handler middleware and gives non-admin roles no direct table grant, so the browser cannot reach the Data Store around it; say so.
 - **Redirect loops** can trip the per-project URL throttle for 10+ hours [UNVERIFIED]: generated auth redirects are capped; never script repeated sign-in attempts.
 - **Rule — default settings only (C2C.md rule 13).** Never drive a browser or console and never sign in for the user; every sign-in, consent and console click is a guided ask the user performs, verified by the named read-back.
 

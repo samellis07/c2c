@@ -312,9 +312,7 @@
               "INSERT",
               "DELETE"
             ],
-            "App User": [
-              "SELECT"
-            ]
+            "App User": []
           }
         }
       }
@@ -365,7 +363,7 @@
               "GLOBAL"
             ],
             "App User": [
-              "GLOBAL"
+              "USER"
             ]
           }
         }

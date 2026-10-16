@@ -3443,7 +3443,7 @@ function buildAccessPolicy(app: App): AccessPolicy {
     }
     const preset = profilePreset(profile);
     if (preset) {
-      // Same split as auth presetCrud: only Administrator may delete.
+      // Only Administrator may delete.
       const write = preset !== 'read';
       const canDelete = preset === 'administrator';
       for (const form of app.forms) {
@@ -3699,7 +3699,7 @@ function grantFor(
     .map((report) => reports.get(report.key))
     .filter((report): report is { form: string; criteria?: Criteria } => !!report && report.form === mod.component);
   const verbs = verbsOf(mod);
-  // Write verbs match crudFor's INSERT and UPDATE rows. `delete` is not one of them.
+  // Write verbs are edit and update. `delete` is not one of them.
   const canEdit = ['edit', 'update'].some((verb) => verbs.has(verb));
   // A boolean `enabled = true` names no Create flag: add follows the write verbs.
   const booleanForm = flags.size === 1 && flags.has('true');

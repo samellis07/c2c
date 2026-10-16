@@ -231,10 +231,10 @@ test('Acceptance 1: a fixture app with no third-party connections ends plan+prov
     if (code2 !== 0) console.error('TABLES ERR:', c2.err());
     assert.equal(code2, 0, c2.err());
 
-    const permsResult = writeResult(out, 'import-table-permissions', { '101': { 'App Administrator': ['SELECT', 'UPDATE', 'INSERT', 'DELETE'], 'App User': ['SELECT'] } });
+    const permsResult = writeResult(out, 'import-table-permissions', { '101': { 'App Administrator': ['SELECT', 'UPDATE', 'INSERT', 'DELETE'], 'App User': [] } });
     assert.equal(await provisionCli(['--out', out, '--record', 'import-table-permissions', '--result', permsResult, '--org', ORG, '--dc', 'in'], cap(sandbox).io), 0);
 
-    const scopesResult = writeResult(out, 'import-table-scopes', { '101': { 'App Administrator': ['GLOBAL'], 'App User': ['GLOBAL'] } });
+    const scopesResult = writeResult(out, 'import-table-scopes', { '101': { 'App Administrator': ['GLOBAL'], 'App User': ['USER'] } });
     assert.equal(await provisionCli(['--out', out, '--record', 'import-table-scopes', '--result', scopesResult, '--org', ORG, '--dc', 'in'], cap(sandbox).io), 0);
 
     const secResult = writeResult(out, 'import-security-rule', { c2c_api: { is_authenticated: true } });
@@ -284,10 +284,10 @@ test('Acceptance 2: a fixture with one connection yields exactly one checklist i
     const c2 = cap(sandbox, api.fetch);
     assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'tables', '--org', ORG, '--dc', 'in'], c2.io), 0, c2.err());
 
-    const permsResult = writeResult(out, 'import-table-permissions', { '101': { 'App Administrator': ['SELECT', 'UPDATE', 'INSERT', 'DELETE'], 'App User': ['SELECT'] } });
+    const permsResult = writeResult(out, 'import-table-permissions', { '101': { 'App Administrator': ['SELECT', 'UPDATE', 'INSERT', 'DELETE'], 'App User': [] } });
     assert.equal(await provisionCli(['--out', out, '--record', 'import-table-permissions', '--result', permsResult, '--org', ORG, '--dc', 'in'], cap(sandbox).io), 0);
 
-    const scopesResult = writeResult(out, 'import-table-scopes', { '101': { 'App Administrator': ['GLOBAL'], 'App User': ['GLOBAL'] } });
+    const scopesResult = writeResult(out, 'import-table-scopes', { '101': { 'App Administrator': ['GLOBAL'], 'App User': ['USER'] } });
     assert.equal(await provisionCli(['--out', out, '--record', 'import-table-scopes', '--result', scopesResult, '--org', ORG, '--dc', 'in'], cap(sandbox).io), 0);
 
     // Every app ships a Slate client; its domain and sign-in check close too.

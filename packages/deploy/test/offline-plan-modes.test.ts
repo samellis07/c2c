@@ -341,7 +341,7 @@ type = Developer
   // App Administrator is out of scope: never diffed, so it carries no row.
   assert.deepEqual(rowFor('App Administrator'), []);
   for (const role of ['App User', 'Read', 'Developer']) assert.equal(rowFor(role).length, 1, role);
-  assert.deepEqual(rowFor('Read')[0]!.permissions, ['SELECT']);
-  // The same rows the greenfield IaC template writes (clone-base default where the plan grants nothing).
-  assert.deepEqual(rowFor('App User')[0], { table: 'Item', role: 'App User', permissions: ['SELECT'], scope: 'GLOBAL' });
+  assert.deepEqual(rowFor('Read')[0]!.permissions, []);
+  // The same rows the greenfield IaC template writes (least-privilege baseline where the plan grants nothing).
+  assert.deepEqual(rowFor('App User')[0], { table: 'Item', role: 'App User', permissions: [], scope: 'USER' });
 });
