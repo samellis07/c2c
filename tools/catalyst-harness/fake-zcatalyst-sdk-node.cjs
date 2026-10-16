@@ -16,9 +16,20 @@
  *
  * Users: a request whose cookie carries c2c-harness-session=<token> is that
  * token's user (see setSession). Anything else has no current user.
+ *
+ * Unique columns: setUnique({ <table>: [<column>, ...] }) declares the columns
+ * the table plan creates with is_unique. insertRows/updateRows then refuse a
+ * row that repeats a stored non-empty value (or one earlier in the same call)
+ * with the Data Store answer: 409 DUPLICATE_VALUE, "Duplicate value for
+ * <column>. Please give a different value" (plugin/references/facts/errors.md).
+ * Nothing is written on a refusal. [UNVERIFIED] that the Node SDK error carries
+ * statusCode 409 and code DUPLICATE_VALUE, that a refused batch stores no row,
+ * that comparison is exact (case-sensitive) and that empty values never clash:
+ * confirm with a live check.
  */
 
 const tables = new Map();
+let uniqueColumns = new Map();
 const sessions = new Map();
 const calls = [];
 let nextRowId = 10000000000000001n;
@@ -28,8 +39,27 @@ function rowsOf(name) {
   return tables.get(name);
 }
 
-function sdkError(message, statusCode) {
-  return Object.assign(new Error(message), { statusCode, code: statusCode === 400 ? 'INVALID_INPUT' : 'ERROR' });
+function sdkError(message, statusCode, code) {
+  return Object.assign(new Error(message), { statusCode, code: code || (statusCode === 400 ? 'INVALID_INPUT' : 'ERROR') });
+}
+
+/**
+ * Refuse the first unique value that `next` (the rows after the call) repeats.
+ * Only rows in `changed` are checked, so a clash that predates setUnique stays.
+ */
+function assertUnique(name, next, changed) {
+  for (const column of uniqueColumns.get(name) || []) {
+    const seen = new Map();
+    for (const row of next) {
+      const value = row[column];
+      if (value == null || value === '') continue;
+      const key = String(value);
+      if (seen.has(key) && (changed.has(row) || changed.has(seen.get(key)))) {
+        throw sdkError(`Duplicate value for ${column}. Please give a different value`, 409, 'DUPLICATE_VALUE');
+      }
+      if (!seen.has(key)) seen.set(key, row);
+    }
+  }
 }
 
 function cookie(req, name) {
@@ -51,10 +81,13 @@ function table(name) {
     async insertRows(rows) {
       rows = wire(rows);
       calls.push(['insertRows', name, rows.length]);
+      let id = nextRowId;
       const out = rows.map((row) => {
-        nextRowId += 1n;
-        return stamp({ ...stringify(row), ROWID: String(nextRowId) });
+        id += 1n;
+        return stamp({ ...stringify(row), ROWID: String(id) });
       });
+      assertUnique(name, [...rowsOf(name), ...out], new Set(out));
+      nextRowId = id;
       rowsOf(name).push(...out);
       return out.map((row) => ({ ...row }));
     },
@@ -62,12 +95,19 @@ function table(name) {
       rows = wire(rows);
       calls.push(['updateRows', name, rows.length]);
       const store = rowsOf(name);
-      return rows.map((patch) => {
-        const at = store.findIndex((row) => row.ROWID === String(patch.ROWID));
+      const next = [...store];
+      const changed = new Set();
+      const out = [];
+      for (const patch of rows) {
+        const at = next.findIndex((row) => row.ROWID === String(patch.ROWID));
         if (at < 0) throw sdkError(`no row ${patch.ROWID} in ${name}`, 400);
-        store[at] = stamp({ ...store[at], ...stringify(patch), ROWID: store[at].ROWID });
-        return { ...store[at] };
-      });
+        next[at] = stamp({ ...next[at], ...stringify(patch), ROWID: next[at].ROWID });
+        changed.add(next[at]);
+        out.push({ ...next[at] });
+      }
+      assertUnique(name, next, changed);
+      store.splice(0, store.length, ...next);
+      return out;
     },
     async deleteRows(ids) {
       ids = wire(ids);
@@ -303,8 +343,13 @@ function setSession(token, user) {
   sessions.set(token, user);
 }
 
+/** Replace the unique-column declaration: { <table>: [<column>, ...] }. */
+function setUnique(declared) {
+  uniqueColumns = new Map(Object.entries(declared || {}).map(([name, columns]) => [name, [...columns]]));
+}
+
 function state() {
   return { tables: Object.fromEntries([...tables.entries()].sort()), calls: [...calls] };
 }
 
-module.exports = { initialize, setSession, state, executeZCQLQuery, __fake: true };
+module.exports = { initialize, setSession, setUnique, state, executeZCQLQuery, __fake: true };
