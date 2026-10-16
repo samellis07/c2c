@@ -547,13 +547,13 @@ test('provision env carries the app bucket and TABLE_* only for real tables', ()
       },
     ],
   } as unknown as ProvisionPlanFile;
-  const learned = {
+  const tableIds = {
     LineItems: '111111',
     Jobs: '222222',
     ConstructionManagement: '333333', // the job pool's name -> id
     'c2c-br-3': '444444', // the project name -> project id
   };
-  const env = buildFunctionEnv(provisionFunctionEnvInput({ out, plan, learned }));
+  const env = buildFunctionEnv(provisionFunctionEnvInput({ out, plan, tableIds }));
   assert.equal(env.C2C_STRATUS_BUCKET, 'c2c-fixture-app-abcd1234');
   assert.equal(env.STRATUS_BUCKET, 'c2c-fixture-app-abcd1234');
   assert.equal(env.TABLE_LINEITEMS_ID, '111111');
@@ -590,4 +590,88 @@ test('applyFunctionEnvSecrets with no secrets still asserts required deployed ke
   });
   assert.deepEqual(await applyFunctionEnvSecrets(complete.rest, '1001', {}, ['C2C_DEPLOY_MODE', 'C2C_STRATUS_BUCKET'], { tries: 1 }), []);
   assert.equal(complete.calls.some((call) => call.method === 'POST'), false);
+});
+
+// A table and a project, role or job pool can share a name. The flat learned
+// map keeps whichever was recorded last, so TABLE_* must come from table
+// observations only — in either record order.
+const COLLIDE = 'Jobs';
+const COLLIDE_STEPS = [
+  { id: 'project', via: 'console', command: 'Create project Jobs', args: { name: COLLIDE, environment: 'Development' }, readBack: { via: 'cli', command: 'c2c provision --record project', match: { project_name: COLLIDE, id: '<project>' } } },
+  { id: 'tables', via: 'cli', command: 'c2c provision --confirm --run tables', args: { plan: 'provision/tables.json', tables: [COLLIDE] }, readBack: { via: 'mcp', tool: 'CatalystbyZoho_List_All_Tables', match: { table_name: [COLLIDE] } } },
+  { id: 'jobpool', via: 'mcp', tool: 'CatalystbyZoho_Create_Job_Pool', args: { body: { name: COLLIDE, type: 'Function', capacity: { memory: '256' } } }, readBack: { via: 'mcp', tool: 'CatalystbyZoho_List_All_Jobpools', match: { name: COLLIDE } } },
+  { id: 'custom-roles', via: 'console', command: 'Create role Jobs', args: { roles: [COLLIDE] }, readBack: { via: 'mcp', tool: 'CatalystbyZoho_List_All_Roles', match: { role_name: [COLLIDE] } } },
+];
+const COLLIDERS: Array<[string, Record<string, unknown>, string]> = [
+  ['jobpool', { name: COLLIDE, jobpool_id: '222222' }, '222222'],
+  ['custom-roles', { role_name: COLLIDE, role_id: '333333' }, '333333'],
+  ['project', { project_name: COLLIDE, id: PROJECT }, PROJECT],
+];
+
+function collisionOut(): { out: string; record: (step: string, rows: unknown[]) => Promise<void>; tableEnv: () => string | undefined } {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-fenv-collide-'));
+  mkdirSync(join(out, 'provision'), { recursive: true });
+  writeFileSync(join(out, 'provision', 'plan.json'), JSON.stringify({ version: 1, app: 'JobsApp', dc: 'in', steps: COLLIDE_STEPS }));
+  writeFileSync(join(out, 'provision', 'tables.json'), JSON.stringify([{ table: COLLIDE, columns: [] }]));
+  const log: string[] = [];
+  const io = {
+    stdout: (s: string) => void log.push(s),
+    stderr: (s: string) => void log.push(s),
+    env: {},
+    spawn: async () => ({ code: 0, stdout: '', stderr: '' }),
+    fetch: async () => {
+      throw new Error('network forbidden');
+    },
+  } as unknown as Io;
+  const record = async (step: string, rows: unknown[]): Promise<void> => {
+    const result = join(out, `${step}-input.json`);
+    writeFileSync(result, JSON.stringify({ status: 'success', data: { status: 'success', data: rows } }));
+    const code = await provisionCli(['--out', out, '--record', step, '--result', result, '--project', PROJECT, '--org', ORG, '--dc', 'in'], io);
+    assert.equal(code, 0, log.join(''));
+  };
+  const tableEnv = (): string | undefined => (JSON.parse(readFileSync(join(out, 'function-env.json'), 'utf8')) as Record<string, string>).TABLE_JOBS_ID;
+  return { out, record, tableEnv };
+}
+
+for (const [step, row, otherId] of COLLIDERS) {
+  test(`TABLE_* keeps the table id when a same-named ${step} is recorded after the table`, async () => {
+    const { out, record, tableEnv } = collisionOut();
+    await record('tables', [{ table_name: COLLIDE, table_id: '111111' }]);
+    assert.equal(tableEnv(), '111111');
+    await record(step, [row]);
+    assert.equal(tableEnv(), '111111', `a ${step} id (${otherId}) never replaces the table id`);
+    rmSync(out, { recursive: true, force: true });
+  });
+
+  test(`TABLE_* takes the table id when a same-named ${step} was recorded before the table`, async () => {
+    const { out, record, tableEnv } = collisionOut();
+    await record(step, [row]);
+    assert.notEqual(tableEnv(), otherId, `a ${step} id is never a TABLE_* id`);
+    await record('tables', [{ table_name: COLLIDE, table_id: '111111' }]);
+    assert.equal(tableEnv(), '111111');
+    rmSync(out, { recursive: true, force: true });
+  });
+}
+
+test('a state.json without kinds re-learns table ids from its recorded evidence, not the flat map', async () => {
+  const { out, record, tableEnv } = collisionOut();
+  await record('tables', [{ table_name: COLLIDE, table_id: '111111' }]);
+  await record('jobpool', [{ name: COLLIDE, jobpool_id: '222222' }]);
+  // An older state: the flat map already holds the job pool's id under the table's name.
+  const statePath = join(out, 'provision', 'state.json');
+  const state = JSON.parse(readFileSync(statePath, 'utf8')) as { learned: { byName: Record<string, string>; byKind?: unknown } };
+  assert.equal(state.learned.byName[COLLIDE], '222222');
+  delete state.learned.byKind;
+  writeFileSync(statePath, JSON.stringify(state));
+  await record('custom-roles', [{ role_name: COLLIDE, role_id: '333333' }]);
+  assert.equal(tableEnv(), '111111', 'the migrated table id comes from the tables evidence');
+  // With the tables evidence gone, the id is unknown — never the flat entry.
+  const migrated = JSON.parse(readFileSync(statePath, 'utf8')) as { learned: { byKind?: unknown }; steps: Record<string, { result?: string }> };
+  rmSync(join(out, migrated.steps.tables!.result!));
+  rmSync(join(out, 'function-env.json'));
+  delete migrated.learned.byKind;
+  writeFileSync(statePath, JSON.stringify(migrated));
+  await record('custom-roles', [{ role_name: COLLIDE, role_id: '333333' }]);
+  assert.equal(tableEnv(), undefined, 'a kindless flat entry is never trusted as a table id');
+  rmSync(out, { recursive: true, force: true });
 });

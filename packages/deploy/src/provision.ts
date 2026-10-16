@@ -84,6 +84,14 @@ export interface ProvisionState {
     /** The in-project D-B1 re-probe, recorded once the org-scoped-created project read back the probe bucket. */
     inProjectProbe?: { name: string; projectId: string; at: string };
     byName: Record<string, string>;
+    /**
+     * name → id per resource kind (table, role, project, jobpool, …). byName is
+     * flat, so a later same-named project, role or job pool overwrites a
+     * table's entry there; a TABLE_* function env id is read only from
+     * byKind.table. A state written before byKind existed re-learns it from
+     * its own recorded evidence on load (never from the flat map).
+     */
+    byKind?: Record<string, Record<string, string>>;
   };
   steps: Record<string, StepRecord>;
 }
@@ -413,7 +421,32 @@ function readProvisionState(out: string): ProvisionState | undefined {
   if (!isRecord(parsed) || parsed.version !== 1 || !isRecord(parsed.steps)) {
     throw new Error('provision/state.json is not a version-1 provision state — delete it (or restore a backup)');
   }
-  return parsed as unknown as ProvisionState;
+  const state = parsed as unknown as ProvisionState;
+  if (isRecord(state.learned) && !isRecord(state.learned.byKind)) relearnKinds(out, state);
+  return state;
+}
+
+/**
+ * An older state.json has only the flat byName map, whose entries carry no
+ * kind — a table name there may already hold a job pool's or a project's id.
+ * Those entries are not trusted for kind: byKind is rebuilt from the recorded
+ * evidence files the state points at, the same observations a fresh record
+ * would learn. A missing or unreadable file just leaves that kind unknown.
+ */
+function relearnKinds(out: string, state: ProvisionState): void {
+  const byKind: Record<string, Record<string, string>> = {};
+  for (const [id, record] of Object.entries(state.steps)) {
+    const rel = isRecord(record) ? record.result : undefined;
+    if (typeof rel !== 'string' || !/^provision\/results\/[A-Za-z0-9._-]+\.json$/.test(rel) || rel.includes('..')) continue;
+    let evidence: unknown;
+    try {
+      evidence = JSON.parse(readFileSync(join(out, rel), 'utf8'));
+    } catch {
+      continue;
+    }
+    learnKinds(stripPersonFields(evidence), byKind, stepKind(id));
+  }
+  state.learned.byKind = byKind;
 }
 
 /** Atomic enough for a kill mid-write: tmp file in the same directory, then rename. */
@@ -1054,7 +1087,93 @@ function rememberName(map: Record<string, string>, name: string, id: string): vo
 const NAME_KEYS = ['name', 'table_name', 'role_name', 'bucket_name', 'domain', 'project_name', 'cron_name', 'pool_name', 'job_pool_name'];
 const ID_KEYS = ['id', 'table_id', 'role_id', 'project_id', 'bucket_id', 'jobpool_id', 'job_pool_id', 'cron_id', 'user_id', 'zaid'];
 
-function learnIds(result: unknown, learned: ProvisionState['learned']): void {
+/** The kind a name key names on its own; a bare `name` takes the recording step's kind. */
+const KIND_OF_NAME_KEY: Record<string, string> = {
+  table_name: 'table',
+  role_name: 'role',
+  bucket_name: 'bucket',
+  domain: 'domain',
+  project_name: 'project',
+  cron_name: 'cron',
+  pool_name: 'jobpool',
+  job_pool_name: 'jobpool',
+};
+
+const KIND_OF_STEP: Record<string, string> = {
+  tables: 'table',
+  'custom-roles': 'role',
+  project: 'project',
+  import: 'project',
+  jobpool: 'jobpool',
+  bucket: 'bucket',
+};
+
+/** A step id's resource kind: the known ones by name, anything else as `step:<id>` (never `table`). */
+function stepKind(stepId: string | undefined): string {
+  if (!stepId) return 'unknown';
+  return Object.hasOwn(KIND_OF_STEP, stepId) ? KIND_OF_STEP[stepId]! : `step:${stepId}`;
+}
+
+/** One name/id observation in a read-back record, with the name key it came from. */
+function observe(value: Record<string, unknown>): { key: string; name: string; id: string } | undefined {
+  let key: string | undefined;
+  let name: string | undefined;
+  let id: string | undefined;
+  for (const candidate of NAME_KEYS) {
+    const raw = value[candidate];
+    if (typeof raw === 'string' && raw.trim() && !SENSITIVE_VALUE_RE.test(raw) && !hasParamSecret(raw)) {
+      key = candidate;
+      name = raw;
+      break;
+    }
+  }
+  for (const candidate of ID_KEYS) {
+    const raw = value[candidate];
+    if (typeof raw === 'string' && /^[0-9]+$/.test(raw)) {
+      id = raw;
+      break;
+    }
+    if (typeof raw === 'number' && Number.isSafeInteger(raw)) {
+      id = String(raw);
+      break;
+    }
+  }
+  return key && name && id ? { key, name, id } : undefined;
+}
+
+/**
+ * A table observation is a record with its own table_name (real
+ * List_All_Tables rows are {table_name, table_id, …}); a bare `name` only
+ * counts as a table inside the tables step. Every other record lands under its
+ * own kind, so it can never replace a table id.
+ */
+function learnKinds(result: unknown, byKind: Record<string, Record<string, string>>, kind: string): void {
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item);
+      return;
+    }
+    if (!isRecord(value)) return;
+    const seen = observe(value);
+    if (seen) {
+      const keyKind = Object.hasOwn(KIND_OF_NAME_KEY, seen.key) ? KIND_OF_NAME_KEY[seen.key]! : undefined;
+      const recordKind = keyKind ?? kind;
+      const map = Object.hasOwn(byKind, recordKind) ? byKind[recordKind]! : (byKind[recordKind] = Object.create(null) as Record<string, string>);
+      rememberName(map, seen.name, seen.id);
+    }
+    for (const child of Object.values(value)) walk(child);
+  };
+  walk(result);
+}
+
+/** Learned table ids only — the source of every TABLE_* function env id. */
+export function learnedTableIds(learned: ProvisionState['learned']): Record<string, string> {
+  const tables = learned.byKind?.table;
+  return isRecord(tables) ? (tables as Record<string, string>) : {};
+}
+
+function learnIds(result: unknown, learned: ProvisionState['learned'], stepId?: string): void {
+  learnKinds(result, (learned.byKind ??= {}), stepKind(stepId));
   const walk = (value: unknown): void => {
     if (Array.isArray(value)) {
       for (const item of value) walk(item);
@@ -1355,6 +1474,7 @@ async function runImportStep(ctx: Ctx, args: Record<string, unknown>): Promise<{
     ctx.state.learned.importName = result.projectName;
     ctx.state.learned.projectId = result.projectId;
     rememberName(ctx.state.learned.byName, result.projectName, result.projectId);
+    rememberName(((ctx.state.learned.byKind ??= {}).project ??= Object.create(null) as Record<string, string>), result.projectName, result.projectId);
     (ctx.state.learned.imports ??= {})[result.projectName] = { importId: result.importId, status: 'completed' };
     updateFunctionEnvFromCtx(ctx);
     return {
@@ -1547,13 +1667,14 @@ function statusOf(state: ProvisionState, step: ProvisionStep): StepStatus {
 /**
  * The derivable function env a provision run knows: the app bucket name from
  * the bucket step's spec, and a TABLE_* id only for the plan's real tables.
- * learned.byName also holds project, role and job-pool names — none of them
- * are table ids, so they must never become TABLE_* keys.
+ * Ids come from the table-kind learned map only: learned.byName also holds
+ * project, role and job-pool names, and a same-named one recorded later
+ * overwrites the table's entry there.
  */
 export function provisionFunctionEnvInput(args: {
   out: string;
   plan: ProvisionPlanFile;
-  learned: Record<string, string>;
+  tableIds: Record<string, string>;
 }): { bucketName?: string; tables: { name: string; id?: string }[] } {
   const bucketStep = args.plan.steps.find((step) => step.id === 'bucket');
   const matchName = bucketStep?.readBack?.match?.bucket_name;
@@ -1578,7 +1699,7 @@ export function provisionFunctionEnvInput(args: {
   return {
     ...(bucketName ? { bucketName } : {}),
     tables: names.map((name) => {
-      const id = ownDecimalId(args.learned, name);
+      const id = ownDecimalId(args.tableIds, name);
       return id ? { name, id } : { name };
     }),
   };
@@ -1594,7 +1715,7 @@ function updateFunctionEnvFromCtx(ctx: Ctx): void {
       dc: ctx.scope.dc ?? ctx.plan.dc,
       projectId,
       appUrl,
-      ...provisionFunctionEnvInput({ out: ctx.out, plan: ctx.plan, learned: ctx.state.learned.byName }),
+      ...provisionFunctionEnvInput({ out: ctx.out, plan: ctx.plan, tableIds: learnedTableIds(ctx.state.learned) }),
       ...(secretKeys?.length
         ? { connectionSecrets: secretKeys.map((k) => ({ connectionName: '', propertyKey: '', envKey: k })) }
         : {}),
@@ -1896,7 +2017,7 @@ async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> 
     // The run's own output is first-party evidence — ids it reports feed the
     // learned map before the read-back match resolves, so <id:Table> tokens
     // can bind what this run just listed. Person rows can't seed the map.
-    learnIds(stripPersonFields(outcome.result), ctx.state.learned);
+    learnIds(stripPersonFields(outcome.result), ctx.state.learned, id);
     updateFunctionEnvFromCtx(ctx);
     const rel = storeResult(ctx.out, `${id}.run`, outcome.result);
     // A rerun that finds everything present must not erase the earlier
@@ -2065,7 +2186,7 @@ async function recordStep(ctx: Ctx, id: string, resultPath: string | undefined, 
     ctx.io.stderr(`c2c provision: read-back for ${id} does not match the plan — the step stays open:\n${check.missing.map((line) => `  - ${line}`).join('\n')}\n`);
     return 1;
   }
-  learnIds(stripPersonFields(evidence), ctx.state.learned);
+  learnIds(stripPersonFields(evidence), ctx.state.learned, step.id);
   updateFunctionEnvFromCtx(ctx);
   if ((step.id === 'project' || step.id === 'import') && typeof step.args.name === 'string') {
     // An import may have created a suffixed name — look the name the run used
@@ -2194,7 +2315,7 @@ export async function provisionCli(args: readonly string[], io: Io, opts: { now?
     io.stderr('c2c provision: provision/plan.json or a pinned side file (tables.json, crons.json, iac/*) changed since provision/state.json was written — re-run c2c plan into a fresh --out or delete provision/state.json\n');
     return 1;
   }
-  state ??= { version: 1, app: plan.app, planSha256: planSha, learned: { byName: {} }, steps: {} };
+  state ??= { version: 1, app: plan.app, planSha256: planSha, learned: { byName: {}, byKind: {} }, steps: {} };
   let scope: ProvisionScope;
   let inputs: ProvisionInputs;
   try {
