@@ -27,7 +27,7 @@ import { LIMITS, jobPoolName } from '../../shims/src/index.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
 import { blueprintFieldSpec, isConsumedPhaseProperty, isOwnerBlockName, isOwnerKey, isStageFieldProperty, phaseFieldKind, transitionOwnerProperties, type BlueprintFieldSpec } from './blueprint-rules.js';
 import { analyzeConnections, connectionsChecklist, declaredConnections } from './connections.js';
-import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, writeLiveSource } from './field-store.js';
+import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, writeLiveSource, type FieldStoreShape } from './field-store.js';
 import { applyFillLock, reportLock, type FillLock, type StaleFill } from './fill-todos.js';
 import { afterCommitModule, ASYNC_ON_SUCCESS_WARNING, assertAsyncSuccessDeferrable, deadLetterModule, EVENT_FUNCTION_MODULE, eventSweeperModule, successSpecs, type AsyncCandidate } from './events.js';
 import { EVENT_SWEEPER_MODULE, JOB_LIVE_IMPORTS, jobLiveHelpers, planSchedules, schedulingConfig, sweeperModule, SWEEPER_MODULE, type SchedulePlan } from './schedules.js';
@@ -3275,6 +3275,46 @@ function mergeInserted(record, result) {
 ${writeLive}`;
 }
 
+/**
+ * Write-back of On Success input assignments. The row is committed before the
+ * script runs, so a field it assigns is saved as one update of the fields that
+ * changed. Ids, platform columns, subform tables and file keys are skipped:
+ * they are not plain columns of this row. The update goes through the runtime
+ * like any script write, so the profile grant screens it; a form field rule
+ * hides or disables a field for the client, not for the app's own logic.
+ */
+function successSetsHelper(shape: FieldStoreShape): string {
+  const skip = ['ROWID', 'ID', 'id', 'CREATORID', 'CREATEDTIME', 'MODIFIEDTIME', 'Added_User', 'Added_Time', 'Modified_User', 'Modified_Time', ...shape.links.map((link) => link.field), ...shape.files];
+  return `const successSkip = new Set(${JSON.stringify(skip)});
+
+// A comparable text per field; a bigint (a Long from toLong()) is kept as digits.
+function successText(value) {
+  return JSON.stringify(value, (key, item) => (typeof item === "bigint" ? \`\${item}n\` : item));
+}
+
+function successSnapshot(record) {
+  const snap = {};
+  for (const key of Object.keys(record)) snap[key] = successText(record[key]);
+  return snap;
+}
+
+async function saveSuccessSets(ctx, targetForm, before) {
+  const changed = {};
+  for (const key of Object.keys(ctx.record).sort()) {
+    if (successSkip.has(key) || ctx.record[key] === undefined) continue;
+    if (Object.prototype.hasOwnProperty.call(before, key) && before[key] === successText(ctx.record[key])) continue;
+    changed[key] = ctx.record[key];
+  }
+  if (!Object.keys(changed).length) return;
+  const rowId = String(ctx.record.ROWID ?? ctx.rowId ?? "").trim();
+  if (!rowId) throw new Error("the committed row has no ROWID; On Success field values were not saved");
+  // The stale-write guard covered the client's edit; this update follows
+  // c2c's own commit of the same row.
+  delete ctx.__c2cModifiedTime;
+  await ctx.shim.datastore.update(ctx, targetForm, { op: "==", field: "ROWID", value: rowId }, changed);
+}`;
+}
+
 const INVOKEURL_CALL = 'shim.http.invokeurl(ctx, {';
 
 /**
@@ -3646,7 +3686,7 @@ export function securityFidelity(app: App): SecurityFidelity {
   }
   if (staticRuleDenials) {
     notes.push(
-      `${staticRuleDenials} field${staticRuleDenials === 1 ? ' is' : 's are'} unconditionally hidden or disabled by field rules and refused by authorizeWrite: a client in the covered record event could not have posted ${staticRuleDenials === 1 ? 'it' : 'them'}.`,
+      `Fields hidden or disabled in forms are enforced on the server: ${staticRuleDenials} field${staticRuleDenials === 1 ? ' is' : 's are'} unconditionally hidden or disabled by field rules, and authorizeWrite refuses a client value for ${staticRuleDenials === 1 ? 'it' : 'them'} (a client in the covered record event could not have posted ${staticRuleDenials === 1 ? 'it' : 'them'}). The Creator REST API accepts such values; the app's own On Validate and On Success scripts still set them.`,
     );
   }
   if (conditionalRules) {
@@ -4079,6 +4119,11 @@ function aioModule(opts: {
     lines.push(
       'Creator runs On Success after the record is submitted (https://help.zoho.com/portal/en/kb/creator/developer-guide/workflows/create-and-manage-on-success-action/articles/understand-on-success-action): "The actions that you define in the On success event will be executed when a new record is successfully submitted to the database or when an existing record is updated or deleted from the database." Whether Creator rolls that row back when On Success throws is unverified; this port leaves the row.',
     );
+    if (!opts.deferSuccess && /shim\.input\.(?:set|insert)\(/.test(opts.body)) {
+      lines.push(
+        'Input fields this script assigns are saved after it runs, as one update of the changed fields on the committed row (Creator stores On Success input assignments with the record). The update is a server-side write: the profile grant screens it, a form field rule does not. A refusal is a post-commit warning.',
+      );
+    }
     if (opts.deferSuccess) {
       lines.push(
         'Async on-success opt-in: in live mode this endpoint validates and stores the row, then replies without running the script. The after-commit event function (functions/events/after-commit.mjs) runs it when the record trigger fires; a failure dead-letters to C2CEventDeadLetter for the sweep Job (docs/event-deadletter.md). Dry run still executes the script inline.',
@@ -4123,7 +4168,12 @@ import { fileURLToPath } from "node:url";
   const usesGetUrl = !!opts.systemWrite && usesOutboundGetUrl(opts.body);
   const storeShape = opts.systemWrite ? fieldStoreShape(opts.app, opts.form) : { links: [], files: [] };
   const validatePick = opts.systemWrite === 'update' ? 'edit' : opts.systemWrite === 'insert' ? 'add' : 'either';
-  const liveHelpersBlock = opts.systemWrite ? `\n${aioLiveHelpers(opts.validateSpecs ?? { add: [], edit: [] }, validatePick, writeLiveSource(opts.form, storeShape))}${usesConnections ? `\n${connectionsLiveHelpers()}` : ''}${usesOutbound || usesGetUrl ? `\n${outboundLiveHelpers()}` : ''}${usesApp ? `\n${appUsersHelper(administratorProfiles(opts.app))}` : ''}\n` : '\n';
+  // On Success may assign input fields (input.Status = "..."). Creator saves
+  // them with the record; here the row is already committed, so the changed
+  // fields are written back after the script (successSetsHelper).
+  const savesSuccessSets = !!opts.systemWrite && !opts.deferSuccess && /shim\.input\.(?:set|insert)\(/.test(opts.body);
+  const successSetsBlock = savesSuccessSets ? `\n${successSetsHelper(storeShape)}` : '';
+  const liveHelpersBlock = opts.systemWrite ? `\n${aioLiveHelpers(opts.validateSpecs ?? { add: [], edit: [] }, validatePick, writeLiveSource(opts.form, storeShape))}${successSetsBlock}${usesConnections ? `\n${connectionsLiveHelpers()}` : ''}${usesOutbound || usesGetUrl ? `\n${outboundLiveHelpers()}` : ''}${usesApp ? `\n${appUsersHelper(administratorProfiles(opts.app))}` : ''}\n` : '\n';
   const zoneFields = `${timeZoneFields(opts.app)}${schemaRuntimeOptions(opts.app, opts.schema)}`;
   const runtimeSetup = opts.systemWrite
     ? `  const datastore = loadedStore || (live ? await liveDatastore() : null);
@@ -4150,9 +4200,9 @@ ${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' :
       await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
     }
     let result = null;
-    let warning = null;
+    let warning = null;${savesSuccessSets ? '\n    const committed = live && ctx.persisted ? successSnapshot(ctx.record) : null;' : ''}
     try {
-      result = ${opts.deferSuccess ? 'live ? { deferred: "after-commit event" } : await handle(ctx)' : 'await handle(ctx)'};
+      result = ${opts.deferSuccess ? 'live ? { deferred: "after-commit event" } : await handle(ctx)' : 'await handle(ctx)'};${savesSuccessSets ? '\n      if (committed) await saveSuccessSets(ctx, formName, committed);' : ''}
     } catch (err) {
       if (!ctx.persisted) throw err;
       // The row is committed. A failure after it (on-success script, mail, a
