@@ -6,6 +6,7 @@
  * --operator`) and never the default.
  */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -523,23 +524,22 @@ test('mcp-observed: a pre-created bucket without this run\'s nonce fails, a stal
   }
 });
 
-test('mcp-observed: a project-scoped request with no nonce does not accept the bucket', async () => {
+test('mcp-observed: a request file stripped to the legacy shape is refused, never answered by the bucket', async () => {
   const { dir, env } = workspace();
   const { request } = await begin(env);
   const path = join(dir, 'c2c-out', '.c2c', 'mcp-request.json');
   const open = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
-  // A nonce-less request is only reachable as an older file, which has no
-  // scope or digest to authenticate: a nonce removed from a current file
-  // breaks its digest and is refused as edited.
+  // The downgrade the request mac closes: stripping scope, nonce and mac
+  // yields the shape an older c2c wrote. It is refused outright — never
+  // answered by a fallback to the current scope's probe name, and a
+  // pre-created bucket can never satisfy it.
   writeFileSync(path, JSON.stringify({ schema: open.schema, request: open.request, at: open.at, probe: open.probe }));
   const seen: { path: string }[] = [];
   const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [PROBE]: {} }, seen));
   assert.equal(run.code, 1, run.out + run.err);
-  assert.match(run.out, /FAIL D-B2 .*probe write was not read back/);
-  const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
-  assert.equal(file.mcp?.binding?.status, 'unverifiable');
-  assert.match(file.mcp?.binding?.detail ?? '', /no per-run nonce/);
-  assert.equal(seen.length, 0);
+  assert.match(run.err, /older c2c/);
+  assert.equal(seen.length, 0, 'a refused request runs no REST read-back');
+  assert.ok(!existsSync(doctorJsonPath(dir)), 'a refused request must not write doctor.json');
 });
 
 test('mcp-observed: Create_Upload_Signature may be reported and an error on it is refused', async () => {
@@ -1167,6 +1167,17 @@ test('mcp-observed: a begin in one scope cannot be completed in another', async 
 });
 
 test('mcp-observed: an edited request file never completes', async () => {
+  // The canonical form and plain sha256 the old unkeyed digest used: a
+  // correctly recomputed digest is still refused — only the keyed mac counts.
+  const canon = (value: unknown): string => {
+    if (Array.isArray(value)) return `[${value.map(canon).join(',')}]`;
+    if (value && typeof value === 'object') {
+      const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined);
+      entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+      return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canon(v)}`).join(',')}}`;
+    }
+    return JSON.stringify(value) ?? 'null';
+  };
   const edits: ((open: Record<string, unknown>) => Record<string, unknown>)[] = [
     // A moved probe bucket.
     (open) => ({ ...open, probe: 'c2cprobe-p10000000000013003' }),
@@ -1179,24 +1190,41 @@ test('mcp-observed: an edited request file never completes', async () => {
       const { scope: _scope, ...rest } = open;
       return rest;
     },
-    // A dropped digest cannot strip the authentication.
+    // A dropped mac: the stripped file reads as an older-c2c file.
     (open) => {
-      const { digest: _digest, ...rest } = open;
+      const { mac: _mac, ...rest } = open;
       return rest;
+    },
+    // A dropped scope and mac together — the legacy downgrade pair.
+    (open) => {
+      const { scope: _scope, mac: _mac, ...rest } = open;
+      return rest;
+    },
+    // A dropped probe and nonce.
+    (open) => {
+      const { probe: _probe, nonce: _nonce, ...rest } = open;
+      return rest;
+    },
+    // A recomputed plain sha256 over the fields is not the keyed mac.
+    (open) => {
+      const { mac: _mac, ...rest } = open;
+      return { ...rest, digest: `sha256:${createHash('sha256').update(canon(rest)).digest('hex')}` };
     },
     // A re-pointed request id.
     (open) => ({ ...open, request: 'e'.repeat(32) }),
+    // A forged mac string.
+    (open) => ({ ...open, mac: `hmac-sha256:${'0'.repeat(64)}` }),
   ];
   for (const edit of edits) {
     const { dir, env } = workspace();
     const { request } = await begin(env);
     const path = mcpRequestPath(dir);
     const open = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
-    assert.match(open.digest as string, /^sha256:[0-9a-f]{64}$/);
+    assert.match(open.mac as string, /^hmac-sha256:[0-9a-f]{64}$/);
     writeFileSync(path, JSON.stringify(edit(open)));
     const run = await observe(env, observation(request));
     assert.equal(run.code, 1, run.out + run.err);
-    assert.match(run.err, /edited after --mcp-begin|did not issue/);
+    assert.match(run.err, /edited after --mcp-begin|older c2c|incomplete|did not issue/);
     assert.ok(!existsSync(doctorJsonPath(dir)), 'an edited request must not write doctor.json');
   }
 });
@@ -1213,12 +1241,9 @@ test('mcp-observed: a replayed observation is rejected once its request was used
 
 test('mcp-observed: a stale request fails as stale/incomplete', async () => {
   const { dir, env } = workspace();
-  const { request } = await begin(env);
-  const path = join(dir, 'c2c-out', '.c2c', 'mcp-request.json');
-  const open = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
-  // Age the request as an older file would carry it: moving `at` in a
-  // current file breaks its digest and is refused as edited.
-  writeFileSync(path, JSON.stringify({ schema: open.schema, request: open.request, at: new Date(Date.now() - 20 * 60 * 1000).toISOString(), probe: open.probe, nonce: open.nonce }));
+  // A signed request opened 20 minutes ago is already past its window;
+  // moving `at` in an existing file is impossible — the mac covers it.
+  const { request } = beginMcpRequest(dir, new Date(Date.now() - 20 * 60 * 1000), { org: ORG, project: PROJECT }, env);
   const run = await observe(env, observation(request));
   assert.equal(run.code, 1);
   assert.match(run.err, /MCP evidence is stale\/incomplete: .*re-record/);
@@ -1369,11 +1394,12 @@ test('mcp-observed: a request id stays single-use when a stale open file survive
   const { dir, env } = workspace();
   const { request } = await begin(env);
   const body = observation(request);
+  const path = join(dir, 'c2c-out', '.c2c', 'mcp-request.json');
+  const saved = readFileSync(path, 'utf8');
   assert.equal((await observe(env, body)).code, 0);
   // The loser of a validate/close race already read the open file; recreate
   // exactly what it read. The closed marker must still refuse the claim.
-  const path = join(dir, 'c2c-out', '.c2c', 'mcp-request.json');
-  writeFileSync(path, JSON.stringify({ schema: 1, request, at: new Date().toISOString() }));
+  writeFileSync(path, saved);
   const rerun = await observe(env, body);
   assert.equal(rerun.code, 1, rerun.out + rerun.err);
   assert.match(rerun.err, /already answered/);
@@ -1454,12 +1480,15 @@ test('mcp-observed: an unrequested call, or a missing orgs or probe call, is ref
 test('mcp request: closing the same request twice is refused (a racing second observation loses)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-observed-'));
   dirs.push(dir);
-  const { request } = beginMcpRequest(dir);
-  closeMcpRequest(dir, request);
+  const home = mkdtempSync(join(tmpdir(), 'c2c-observed-home-'));
+  dirs.push(home);
+  const env = { HOME: home };
+  const { request } = beginMcpRequest(dir, undefined, {}, env);
+  closeMcpRequest(dir, request, env);
   assert.ok(!existsSync(mcpRequestPath(dir)));
-  assert.throws(() => closeMcpRequest(dir, request), (err) => err instanceof ObservationRejected && /already answered/.test(err.message));
+  assert.throws(() => closeMcpRequest(dir, request, env), (err) => err instanceof ObservationRejected && /already answered/.test(err.message));
   // A fresh begin clears the closed marker of the old request.
-  const next = beginMcpRequest(dir);
+  const next = beginMcpRequest(dir, undefined, {}, env);
   assert.ok(existsSync(join(dir, 'c2c-out', '.c2c', `mcp-request.${request}.closed`)) === false);
-  closeMcpRequest(dir, next.request);
+  closeMcpRequest(dir, next.request, env);
 });

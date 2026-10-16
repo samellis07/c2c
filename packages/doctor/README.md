@@ -41,10 +41,11 @@ The plugin never asks the user for an evidence file. `/c2c:doctor` runs:
 
 1. `c2c doctor --mcp-begin` — opens a one-time request in
    `c2c-out/.c2c/mcp-request.json` (a random request id, when it was
-   issued, the probe bucket it named, and the scope it was opened under,
-   authenticated by a digest recomputed on read — a completion in a
-   different scope or an edited file is refused; it expires after
-   15 minutes) and
+   issued, the probe bucket it named, this run's nonce, and the scope it
+   was opened under, authenticated by an HMAC-SHA256 under the per-user
+   key kept outside the workspace — a completion in a different scope, an
+   edited file, or a request file written by an older c2c is refused; it
+   expires after 15 minutes) and
    prints the calls to make.
 2. The agent makes the calls the request names in the session — first
    `CatalystbyZoho_Create_Bucket`, the probe bucket (`c2cprobe-p<project-id>`
