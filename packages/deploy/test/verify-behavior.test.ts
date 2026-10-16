@@ -14,7 +14,7 @@ import { test } from 'node:test';
 import { deriveIr, parse } from '../../core/src/index.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { verifyBehaviorCli, type Io } from '../src/cli.js';
-import { assertGolden, formatBehaviorMarkdown, loadGoldens, runBehavior, startOfflineBackend } from '../src/verify-behavior.js';
+import { assertGolden, formatBehaviorMarkdown, loadGoldens, runBehavior, startOfflineBackend, textBoundaryEqual } from '../src/verify-behavior.js';
 
 const root = repoRoot();
 const APP_DS = join(root, 'tests/behavior/behavior-sample/app.ds');
@@ -262,4 +262,132 @@ test('markdown lists each finding as case + pointer + expected vs actual', async
   } finally {
     await backend.close();
   }
+});
+
+// ---------- capture-derived goldens: bind/ref, update, outcome, partial, tags, skip ----------
+
+function sampleApp() {
+  return deriveIr(parse(readFileSync(APP_DS, 'utf8')));
+}
+
+async function replay(cases: unknown[]) {
+  const app = sampleApp();
+  const golden = assertGolden({ version: 'c2c-behavior-golden/2', app: 'behavior-sample', cases });
+  const backend = await startOfflineBackend(app);
+  try {
+    return (await runBehavior(app, golden, backend, 'offline')).report;
+  } finally {
+    await backend.close();
+  }
+}
+
+const SAVE_DUNE = { op: 'submit', form: 'Book', record: { Title: 'Dune', Qty: 2 }, bind: { dune: 'body.values.ROWID' }, expect: { outcome: 'saved' } };
+
+test('the schema rejects malformed capture fields', () => {
+  const bad = (step: Record<string, unknown>, extra: Record<string, unknown> = {}) => () =>
+    assertGolden({ version: 'c2c-behavior-golden/2', cases: [{ id: 'a', steps: [step], ...extra }] });
+  assert.throws(bad({ op: 'report', report: 'R', expect: { status: '3xx' } }), /expect\.status/);
+  assert.throws(bad({ op: 'report', report: 'R', expect: { outcome: 'stored' } }), /expect\.outcome/);
+  assert.throws(bad({ op: 'report', report: 'R', expect: { outcome: 'saved', count: 1 } }), /count/);
+  assert.throws(bad({ op: 'submit', form: 'Book', record: {}, bind: { x: 'values.ROWID' } }), /bind/);
+  assert.throws(bad({ op: 'update', report: 'R', record: {} }), /update needs report \+ where \+ record/);
+  assert.throws(bad({ op: 'report', report: 'R' }, { skip: '' }), /skip/);
+  assert.throws(bad({ op: 'report', report: 'R', tags: [''] }), /tags/);
+  assert.throws(() => assertGolden({ version: 'c2c-behavior-golden/2', source: { origin: 'x' }, cases: [] }), /source/);
+});
+
+test('bind + ref, update-by-where and partial tables replay clean', async () => {
+  const report = await replay([
+    {
+      id: 'update-qty',
+      steps: [
+        SAVE_DUNE,
+        { op: 'submit', form: 'Book', record: { Title: 'Emma', Qty: 1 }, setup: true },
+        { op: 'update', report: 'All_Books', where: { Title: 'Dune' }, record: { Qty: 7 }, expect: { body: { matched: 1, updated: 1, refused: 0 } } },
+        { op: 'update', report: 'All_Books', where: { Title: 'Nope' }, record: { Qty: 9 }, expect: { body: { matched: 0, updated: 0, refused: 0 } }, creator: { code: 3100 } },
+        { op: 'report', report: 'All_Books', expect: { outcome: 'rows', count: 2 } },
+        { op: 'request', method: 'POST', path: '/reports/All_Books', body: { op: 'query' }, expect: { status: '2xx', partial: true, body: { rows: [{ ROWID: '<ref:dune>', Qty: '7' }, { Title: 'Emma' }] } } },
+      ],
+      expect: { partial: true, tables: { Book: [{ ROWID: '<ref:dune>', Title: 'Dune', Qty: 7 }, { Title: 'Emma', Qty: 1 }] } },
+    },
+  ]);
+  assert.equal(report.ok, true, JSON.stringify(report.findings));
+  assert.equal(report.summary.skipped, 0);
+});
+
+test('MUST-FAIL: outcome, update counts, partial values and unbound refs are findings', async () => {
+  const report = await replay([
+    {
+      id: 'wrong',
+      tags: ['creator-api-replay-unconfirmed'],
+      steps: [
+        { ...SAVE_DUNE, expect: { outcome: 'refused' } },
+        { op: 'submit', form: 'Book', record: { Qty: 1 }, expect: { outcome: 'saved' } },
+        { op: 'update', report: 'All_Books', where: { Title: 'Dune' }, record: { Qty: 7 }, expect: { body: { matched: 0, updated: 0, refused: 0 } } },
+        { op: 'report', report: 'All_Books', expect: { outcome: 'rows', count: 3 } },
+        { op: 'report', report: 'All_Books', expect: { status: '4xx' } },
+        { op: 'submit', form: 'Book', record: { Title: '<ref:ghost>' }, tags: ['lookup'], expect: { outcome: 'saved' } },
+      ],
+      expect: { partial: true, tables: { Book: [{ Title: 'Dune', Qty: '2.5' }, { Title: 'x' }] } },
+    },
+  ]);
+  const at = (pointer: string) => report.findings.find((f) => f.pointer === pointer);
+  assert.equal(report.ok, false);
+  assert.match(String(at('/forms/Book/submit outcome')?.actual), /^200 wrote/);
+  assert.ok(report.findings.some((f) => f.step === 2 && f.expected === 'saved' && /^422 .*MANDATORY_MISSING/.test(String(f.actual))));
+  assert.equal(at('body.matched')?.actual, 1);
+  assert.ok(report.findings.some((f) => f.pointer === '/reports/All_Books outcome' && f.expected === 'rows:3' && f.actual === '200 rows:1'));
+  assert.ok(report.findings.some((f) => f.pointer === '/reports/All_Books status' && f.expected === '4xx' && f.actual === 200));
+  const ghost = at('<ref:ghost>');
+  assert.equal(ghost?.actual, '(unbound)');
+  assert.deepEqual(ghost?.tags, ['creator-api-replay-unconfirmed', 'lookup']);
+  assert.ok(report.findings.some((f) => f.pointer === 'tables.Book[0].Qty' && f.expected === '2.5'));
+  assert.ok(report.findings.some((f) => f.pointer === 'tables.Book[1].Title'));
+});
+
+test('a skipped case is reported as skipped, never as passing; env-artifact steps run uncompared', async () => {
+  const report = await replay([
+    { id: 'unreachable', skip: 'unreachable via API: mandatory image field', tags: ['unreachable-via-api'], steps: [{ op: 'submit', form: 'Nope', record: {} }] },
+    {
+      id: 'artifact',
+      steps: [
+        { op: 'submit', form: 'Book', record: { Title: 'Dune' }, tags: ['env-artifact:trial-user-limit'], expect: { outcome: 'refused' }, creator: { code: 3001 } },
+      ],
+      expect: { partial: true, tables: { Book: [{ Title: 'Dune' }] } },
+    },
+  ]);
+  assert.equal(report.ok, true, JSON.stringify(report.findings));
+  assert.equal(report.summary.skipped, 1);
+  assert.deepEqual(report.skipped, [{ case: 'unreachable', reason: 'unreachable via API: mandatory image field' }]);
+  assert.deepEqual(report.envArtifacts, [{ case: 'artifact', step: 1, tags: ['env-artifact:trial-user-limit'] }]);
+  const md = formatBehaviorMarkdown(report);
+  assert.match(md, /skipped: 1/);
+  assert.match(md, /- unreachable: unreachable via API/);
+  assert.match(md, /- artifact step 1: env-artifact:trial-user-limit/);
+  // MUST-FAIL: without the tag the same refusal expectation is a finding.
+  const untagged = await replay([
+    { id: 'artifact', steps: [{ op: 'submit', form: 'Book', record: { Title: 'Dune' }, expect: { outcome: 'refused' } }] },
+  ]);
+  assert.equal(untagged.ok, false);
+});
+
+test('the text boundary: numbers by value, booleans as true/false text, strings strictly', async () => {
+  assert.equal(textBoundaryEqual('947.00', 947), true);
+  assert.equal(textBoundaryEqual(947, '947'), true);
+  assert.equal(textBoundaryEqual('true', true), true);
+  assert.equal(textBoundaryEqual(false, 'false'), true);
+  // MUST-FAIL: a different number, a non-numeric text, the other boolean, two strings.
+  assert.equal(textBoundaryEqual('947.5', 947), false);
+  assert.equal(textBoundaryEqual('947 units', 947), false);
+  assert.equal(textBoundaryEqual('false', true), false);
+  assert.equal(textBoundaryEqual('947.00', '947'), false);
+  // In a replay: report rows carry Qty as a number, the golden as Creator decimal text.
+  const ok = await replay([
+    { id: 'n', steps: [{ op: 'submit', form: 'Book', record: { Title: 'Dune', Qty: 2 } }, { op: 'request', method: 'POST', path: '/reports/All_Books', body: { op: 'query' }, expect: { partial: true, body: { rows: [{ Qty: '2.00' }] } } }] },
+  ]);
+  assert.equal(ok.ok, true, JSON.stringify(ok.findings));
+  const bad = await replay([
+    { id: 'n', steps: [{ op: 'submit', form: 'Book', record: { Title: 'Dune', Qty: 2 } }, { op: 'request', method: 'POST', path: '/reports/All_Books', body: { op: 'query' }, expect: { partial: true, body: { rows: [{ Qty: '2.5' }] } } }] },
+  ]);
+  assert.deepEqual(bad.findings.map((f) => f.pointer), ['body.rows[0].Qty']);
 });

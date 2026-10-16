@@ -41,8 +41,34 @@ export const REPORT_VERSION = 'c2c-behavior-report/1';
 /** Normalization markers an expected value may use (tests/behavior/SCHEMA.md). */
 export const MARKERS = ['<any>', '<id>', '<timestamp>'] as const;
 
+/** Status classes a step may expect instead of an exact code. */
+export const STATUS_CLASSES = ['2xx', '4xx', '5xx'] as const;
+
+/**
+ * Outcome classes a step may expect instead of an exact body — the shape a
+ * captured Creator reply maps to without pinning the c2c reply text:
+ * `saved` (2xx, wrote, no warning), `saved-with-warning` (2xx, wrote, a
+ * warning — Creator's code 3000 with an on-success error array), `refused`
+ * (4xx, nothing written), `rows` (2xx report rows; `count` pins how many).
+ */
+export const OUTCOMES = ['saved', 'saved-with-warning', 'refused', 'rows'] as const;
+export type Outcome = (typeof OUTCOMES)[number];
+
+/** Case/step tags the runner acts on; other tags are carried into findings. */
+export const ENV_ARTIFACT_TAG = /^env-artifact:/;
+
+/** `<ref:name>` — a value an earlier step bound with `bind`. */
+const REF = /<ref:([A-Za-z0-9_.-]+)>/g;
+
 export interface GoldenStepExpect {
-  status?: number;
+  /** Exact HTTP status, or a class (`2xx`, `4xx`, `5xx`). */
+  status?: number | (typeof STATUS_CLASSES)[number];
+  /** Outcome class (OUTCOMES); checked in addition to `status`. */
+  outcome?: Outcome;
+  /** With outcome `rows`: the number of report rows. */
+  count?: number;
+  /** Compare `body` objects as subsets: unlisted actual keys are not findings. */
+  partial?: boolean;
   /**
    * Recursive match against the JSON response body. Arrays compare in order;
    * set `unordered: true` to match them as multisets instead.
@@ -52,17 +78,46 @@ export interface GoldenStepExpect {
   unordered?: boolean;
 }
 
-export type GoldenStep =
-  | { op: 'submit'; form: string; record: Record<string, unknown>; expect?: GoldenStepExpect }
-  | { op: 'report'; report: string; body?: Record<string, unknown>; expect?: GoldenStepExpect }
-  | { op: 'call'; function: string; args?: Record<string, unknown>; expect?: GoldenStepExpect }
-  | { op: 'request'; method: string; path: string; body?: unknown; expect?: GoldenStepExpect };
+/** Fields every step may carry besides its op. */
+export interface GoldenStepCommon {
+  expect?: GoldenStepExpect;
+  /** name -> pointer into the reply (`body.values.ROWID`); later steps use `<ref:name>`. */
+  bind?: Record<string, string>;
+  /** A prerequisite: replayed and bound, its reply is not compared. */
+  setup?: boolean;
+  /** Tags carried into findings; `env-artifact:*` skips comparing this step's reply. */
+  tags?: string[];
+  /** The captured Creator reply (code, message, error) — documentation, not compared. */
+  creator?: Record<string, unknown>;
+}
+
+export type GoldenStep = GoldenStepCommon &
+  (
+    | { op: 'submit'; form: string; record: Record<string, unknown> }
+    | { op: 'report'; report: string; body?: Record<string, unknown> }
+    | { op: 'call'; function: string; args?: Record<string, unknown> }
+    | { op: 'request'; method: string; path: string; body?: unknown }
+    /**
+     * Creator's update-by-criteria: read the report, keep the rows whose
+     * fields equal every `where` value, and submit `record` as an edit of
+     * each. The reply compared is `{matched, updated, refused}`.
+     */
+    | { op: 'update'; report: string; where: Record<string, unknown>; record: Record<string, unknown> }
+  );
 
 export interface GoldenCase {
   id: string;
   name?: string;
+  /** Tags carried into this case's findings. */
+  tags?: string[];
+  /** Why this case is not replayed (e.g. unreachable via API); reported as skipped, never as a pass. */
+  skip?: string;
+  /** Free-text notes (lookup substitutions, capture caveats) — documentation. */
+  notes?: string[];
   steps: GoldenStep[];
   expect?: {
+    /** Compare `tables` rows as subsets: unlisted stored columns are not findings. */
+    partial?: boolean;
     /** Catalyst table -> complete expected contents; rows match in order unless `unordered`. */
     tables?: Record<string, Record<string, unknown>[]>;
     /** Match `tables` rows as multisets (opt-in; default is ordered). */
@@ -73,6 +128,11 @@ export interface GoldenCase {
 export interface GoldenFile {
   version: string;
   app?: string;
+  /**
+   * The Creator export the golden was captured against, when it is not
+   * committed as app.ds beside creator/ (not redistributable).
+   */
+  source?: { file: string; origin?: string; redistributable?: boolean; note?: string };
   cases: GoldenCase[];
 }
 
@@ -110,17 +170,45 @@ export function assertGolden(parsed: unknown): GoldenFile {
       if (step.op === 'report' && typeof step.report !== 'string') throw new Error(`${at2}: report needs report`);
       if (step.op === 'call' && typeof step.function !== 'string') throw new Error(`${at2}: call needs function`);
       if (step.op === 'request' && (typeof step.method !== 'string' || typeof step.path !== 'string')) throw new Error(`${at2}: request needs method + path`);
-      if (!['submit', 'report', 'call', 'request'].includes(step.op)) throw new Error(`${at2}: unknown op ${step.op}`);
+      if (step.op === 'update' && (typeof step.report !== 'string' || !isObject(step.where) || !isObject(step.record))) throw new Error(`${at2}: update needs report + where + record`);
+      if (!['submit', 'report', 'call', 'request', 'update'].includes(step.op)) throw new Error(`${at2}: unknown op ${step.op}`);
       const stepExpect = (step as { expect?: GoldenStepExpect }).expect;
       if (stepExpect?.unordered !== undefined && typeof stepExpect.unordered !== 'boolean') {
         throw new Error(`${at2}.expect.unordered must be a boolean`);
       }
+      if (stepExpect?.partial !== undefined && typeof stepExpect.partial !== 'boolean') throw new Error(`${at2}.expect.partial must be a boolean`);
+      const status = stepExpect?.status;
+      if (status !== undefined && !(Number.isInteger(status) || (STATUS_CLASSES as readonly unknown[]).includes(status))) {
+        throw new Error(`${at2}.expect.status must be an integer or one of ${STATUS_CLASSES.join(', ')}`);
+      }
+      if (stepExpect?.outcome !== undefined && !(OUTCOMES as readonly unknown[]).includes(stepExpect.outcome)) {
+        throw new Error(`${at2}.expect.outcome must be one of ${OUTCOMES.join(', ')}`);
+      }
+      if (stepExpect?.count !== undefined && (!Number.isInteger(stepExpect.count) || stepExpect.outcome !== 'rows')) {
+        throw new Error(`${at2}.expect.count must be an integer and needs outcome rows`);
+      }
+      if (step.bind !== undefined && (!isObject(step.bind) || !Object.values(step.bind).every((v) => typeof v === 'string' && /^body(\.|$)/.test(v)))) {
+        throw new Error(`${at2}.bind must map names to body pointers (body.values.ROWID)`);
+      }
+      if (step.setup !== undefined && typeof step.setup !== 'boolean') throw new Error(`${at2}.setup must be a boolean`);
+      assertTags(step.tags, `${at2}.tags`);
+      if (step.creator !== undefined && !isObject(step.creator)) throw new Error(`${at2}.creator must be an object`);
     }
     const expect = (entry as unknown as GoldenCase).expect;
     if (expect?.tables !== undefined && !isObject(expect.tables)) throw new Error(`${at}.expect.tables must be an object`);
     if (expect?.unordered !== undefined && typeof expect.unordered !== 'boolean') throw new Error(`${at}.expect.unordered must be a boolean`);
+    if (expect?.partial !== undefined && typeof expect.partial !== 'boolean') throw new Error(`${at}.expect.partial must be a boolean`);
+    assertTags(entry.tags, `${at}.tags`);
+    if (entry.skip !== undefined && (typeof entry.skip !== 'string' || !entry.skip)) throw new Error(`${at}.skip must be a non-empty reason`);
+    if (entry.notes !== undefined && !(Array.isArray(entry.notes) && entry.notes.every((n) => typeof n === 'string'))) throw new Error(`${at}.notes must be strings`);
   }
+  const source = parsed.source;
+  if (source !== undefined && (!isObject(source) || typeof source.file !== 'string' || !source.file)) throw new Error('golden source must name the Creator export file');
   return parsed as unknown as GoldenFile;
+}
+
+function assertTags(tags: unknown, at: string): void {
+  if (tags !== undefined && !(Array.isArray(tags) && tags.every((t) => typeof t === 'string' && t.length > 0))) throw new Error(`${at} must be non-empty strings`);
 }
 
 // ---------- normalized comparison ----------
@@ -143,6 +231,8 @@ export interface BehaviorFinding {
   pointer: string;
   expected: unknown;
   actual: unknown;
+  /** The case's and step's tags, when the golden declares any. */
+  tags?: string[];
 }
 
 /**
@@ -164,7 +254,7 @@ function isVolatile(value: unknown): boolean {
  * a literal. Returns true when actual satisfies expected; findings are
  * appended.
  */
-function matchValue(expected: unknown, actual: unknown, pointer: string, findings: Omit<BehaviorFinding, 'case'>[], unordered: boolean): boolean {
+function matchValue(expected: unknown, actual: unknown, pointer: string, findings: Omit<BehaviorFinding, 'case'>[], unordered: boolean, partial = false): boolean {
   if (typeof expected === 'string' && (MARKERS as readonly string[]).includes(expected)) {
     if (markerMatches(expected, actual)) return true;
     findings.push({ pointer, expected, actual });
@@ -179,7 +269,7 @@ function matchValue(expected: unknown, actual: unknown, pointer: string, finding
     if (unordered) {
       const used = new Set<number>();
       expected.forEach((want, i) => {
-        const at = actual.findIndex((got, j) => !used.has(j) && matchSilent(want, got, unordered));
+        const at = actual.findIndex((got, j) => !used.has(j) && matchSilent(want, got, unordered, partial));
         if (at < 0) {
           findings.push({ pointer: `${pointer}[${i}]`, expected: want, actual: 'no matching element' });
           ok = false;
@@ -190,7 +280,7 @@ function matchValue(expected: unknown, actual: unknown, pointer: string, finding
     } else {
       const count = Math.min(expected.length, actual.length);
       for (let i = 0; i < count; i++) {
-        if (!matchValue(expected[i], actual[i], `${pointer}[${i}]`, findings, unordered)) ok = false;
+        if (!matchValue(expected[i], actual[i], `${pointer}[${i}]`, findings, unordered, partial)) ok = false;
       }
       for (let i = count; i < expected.length; i++) {
         findings.push({ pointer: `${pointer}[${i}]`, expected: expected[i], actual: '(absent)' });
@@ -213,12 +303,12 @@ function matchValue(expected: unknown, actual: unknown, pointer: string, finding
       if (!(key in actual)) {
         findings.push({ pointer: `${pointer}.${key}`, expected: want, actual: '(absent)' });
         ok = false;
-      } else if (!matchValue(want, actual[key], `${pointer}.${key}`, findings, unordered)) {
+      } else if (!matchValue(want, actual[key], `${pointer}.${key}`, findings, unordered, partial)) {
         ok = false;
       }
     }
     for (const [key, got] of Object.entries(actual)) {
-      if (!(key in expected) && !isVolatile(got)) {
+      if (!partial && !(key in expected) && !isVolatile(got)) {
         findings.push({ pointer: `${pointer}.${key}`, expected: '(absent)', actual: got });
         ok = false;
       }
@@ -228,23 +318,39 @@ function matchValue(expected: unknown, actual: unknown, pointer: string, finding
   if (Object.is(expected, actual)) return true;
   // Normalization: a numeric cell compares equal across the text/number
   // boundary — Creator stores and exports text; Catalyst columns are typed.
-  if (typeof expected === 'string' && typeof actual === 'number' && expected === String(actual)) return true;
-  if (typeof expected === 'number' && typeof actual === 'string' && String(expected) === actual) return true;
+  if (textBoundaryEqual(expected, actual)) return true;
   findings.push({ pointer, expected, actual });
   return false;
 }
 
-/** Diff-free probe used by multiset array matching. */
-function matchSilent(expected: unknown, actual: unknown, unordered: boolean): boolean {
-  const scratch: Omit<BehaviorFinding, 'case'>[] = [];
-  return matchValue(expected, actual, '', scratch, unordered);
+const NUMERIC_TEXT = /^-?\d+(\.\d+)?$/;
+
+/**
+ * Creator cells are text; Catalyst columns are typed. A number equals its
+ * numeric text by value (`2` = `"2"`, `947` = `"947.00"`), and a boolean
+ * equals `"true"`/`"false"`. Two strings or two numbers still compare strictly.
+ */
+export function textBoundaryEqual(expected: unknown, actual: unknown): boolean {
+  const pair = [expected, actual];
+  const text = pair.find((v) => typeof v === 'string') as string | undefined;
+  if (text === undefined) return false;
+  const other = pair.find((v) => typeof v !== 'string');
+  if (typeof other === 'number') return NUMERIC_TEXT.test(text) && Number(text) === other;
+  if (typeof other === 'boolean') return text === String(other);
+  return false;
 }
 
-function matchRows(expectedRows: Record<string, unknown>[], actualRows: Record<string, unknown>[], pointer: string, findings: Omit<BehaviorFinding, 'case'>[], unordered: boolean): void {
+/** Diff-free probe used by multiset array matching. */
+function matchSilent(expected: unknown, actual: unknown, unordered: boolean, partial = false): boolean {
+  const scratch: Omit<BehaviorFinding, 'case'>[] = [];
+  return matchValue(expected, actual, '', scratch, unordered, partial);
+}
+
+function matchRows(expectedRows: Record<string, unknown>[], actualRows: Record<string, unknown>[], pointer: string, findings: Omit<BehaviorFinding, 'case'>[], unordered: boolean, partial = false): void {
   if (unordered) {
     const used = new Set<number>();
     expectedRows.forEach((want, i) => {
-      const at = actualRows.findIndex((got, j) => !used.has(j) && matchSilent(want, got, unordered));
+      const at = actualRows.findIndex((got, j) => !used.has(j) && matchSilent(want, got, unordered, partial));
       if (at < 0) {
         findings.push({ pointer: `${pointer}[${i}]`, expected: want, actual: 'no matching row' });
       } else {
@@ -259,7 +365,7 @@ function matchRows(expectedRows: Record<string, unknown>[], actualRows: Record<s
   }
   const count = Math.min(expectedRows.length, actualRows.length);
   for (let i = 0; i < count; i++) {
-    matchValue(expectedRows[i], actualRows[i], `${pointer}[${i}]`, findings, unordered);
+    matchValue(expectedRows[i], actualRows[i], `${pointer}[${i}]`, findings, unordered, partial);
   }
   for (let i = count; i < expectedRows.length; i++) {
     findings.push({ pointer: `${pointer}[${i}]`, expected: expectedRows[i], actual: '(absent)' });
@@ -428,7 +534,7 @@ export function liveBackend(opts: {
 
 // ---------- runner ----------
 
-function stepEndpoint(step: GoldenStep, model: UiModel): { method: string; path: string; body: unknown } {
+function stepEndpoint(step: Exclude<GoldenStep, { op: 'update' }>, model: UiModel): { method: string; path: string; body: unknown } {
   if (step.op === 'submit') {
     const form = model.forms.find((f) => f.name === step.form);
     if (!form) throw new Error(`no form ${step.form} in the migrated app`);
@@ -447,6 +553,7 @@ function stepEndpoint(step: GoldenStep, model: UiModel): { method: string; path:
 
 function stepLabel(step: GoldenStep): string {
   if (step.op === 'submit') return `submit ${step.form}`;
+  if (step.op === 'update') return `update ${step.report}`;
   if (step.op === 'report') return `report ${step.report}`;
   if (step.op === 'call') return `call ${step.function}`;
   return `${step.method} ${step.path}`;
@@ -463,41 +570,167 @@ export interface BehaviorReport {
   mode: 'offline' | 'live';
   ok: boolean;
   behaviorEquivalentApps: 0 | 1;
-  summary: { cases: number; steps: number; findings: number };
+  summary: { cases: number; steps: number; findings: number; skipped: number };
   findings: BehaviorFinding[];
+  /** Cases the golden marks `skip` (not replayed, never counted as passing). */
+  skipped?: { case: string; reason: string }[];
+  /** Steps tagged `env-artifact:*`: replayed, reply not compared. */
+  envArtifacts?: { case: string; step: number; tags: string[] }[];
+}
+
+/**
+ * Replace every `<ref:name>` with the value an earlier step bound. A value
+ * that is exactly one ref takes the bound value as is (number, string);
+ * a ref inside a longer string is spliced in as text. An unbound ref is
+ * left in place and reported once.
+ */
+function resolveRefs(value: unknown, refs: Map<string, unknown>, missing: Set<string>): unknown {
+  if (typeof value === 'string') {
+    const whole = /^<ref:([A-Za-z0-9_.-]+)>$/.exec(value);
+    if (whole) {
+      if (refs.has(whole[1]!)) return refs.get(whole[1]!);
+      missing.add(whole[1]!);
+      return value;
+    }
+    return value.replace(REF, (text, name: string) => {
+      if (refs.has(name)) return String(refs.get(name));
+      missing.add(name);
+      return text;
+    });
+  }
+  if (Array.isArray(value)) return value.map((item) => resolveRefs(item, refs, missing));
+  if (isObject(value)) return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, resolveRefs(v, refs, missing)]));
+  return value;
+}
+
+/** Read `body.values.ROWID`-style pointers out of a reply. */
+function readPointer(res: BehaviorCall, pointer: string): unknown {
+  let at: unknown = { body: res.body };
+  for (const part of pointer.split('.')) {
+    if (!isObject(at) && !Array.isArray(at)) return undefined;
+    at = (at as Record<string, unknown>)[part];
+  }
+  return at;
+}
+
+function statusMatches(want: number | string, actual: number): boolean {
+  if (typeof want === 'number') return want === actual;
+  return String(Math.floor(actual / 100)) === want[0];
+}
+
+/** Outcome diff: undefined when the reply has the expected outcome class. */
+function outcomeDiff(want: Outcome, count: number | undefined, res: BehaviorCall): unknown {
+  const body = isObject(res.body) ? res.body : {};
+  const ok2xx = res.status >= 200 && res.status < 300;
+  const said = [body.code, body.message ?? body.error].filter((part) => typeof part === 'string').join(' ');
+  const seen = `${res.status}${body.wrote === true ? ' wrote' : ''}${body.warning !== undefined ? ' warning' : ''}${Array.isArray(body.rows) ? ` rows:${body.rows.length}` : ''}${said ? ` (${said})` : ''}`;
+  let ok: boolean;
+  if (want === 'saved') ok = ok2xx && body.wrote === true && body.warning === undefined;
+  else if (want === 'saved-with-warning') ok = ok2xx && body.wrote === true && body.warning !== undefined;
+  else if (want === 'refused') ok = res.status >= 400 && res.status < 500 && body.wrote !== true;
+  else ok = ok2xx && Array.isArray(body.rows) && (count === undefined || body.rows.length === count);
+  return ok ? undefined : seen;
+}
+
+/** True when a report row's field equals the `where` value (text/number boundary, display objects). */
+function whereMatches(row: Record<string, unknown>, where: Record<string, unknown>): boolean {
+  return Object.entries(where).every(([field, want]) => {
+    const got = row[field];
+    if (got === want) return true;
+    if (got !== null && got !== undefined && want !== null && typeof got !== 'object' && String(got) === String(want)) return true;
+    return isObject(got) && (got.display_value === want || got.zc_display_value === want);
+  });
+}
+
+async function runUpdate(step: Extract<GoldenStep, { op: 'update' }>, model: UiModel, backend: BehaviorBackend): Promise<BehaviorCall> {
+  const report = model.reports.find((r) => r.name === step.report);
+  if (!report) throw new Error(`no report ${step.report} in the migrated app`);
+  const form = model.forms.find((f) => f.name === report.form);
+  if (!form) throw new Error(`report ${step.report} has no form to edit`);
+  const read = await backend.call('POST', report.queryEndpoint, { op: 'query', page: 0, pageSize: 300 });
+  const rows = isObject(read.body) && Array.isArray(read.body.rows) ? (read.body.rows as unknown[]).filter(isObject) : null;
+  if (read.status !== 200 || !rows) return { status: read.status, body: { error: 'report read failed', reply: read.body } };
+  const matched = rows.filter((row) => whereMatches(row, step.where));
+  let updated = 0;
+  let refused = 0;
+  for (const row of matched) {
+    const res = await backend.call('POST', form.editSubmitEndpoint ?? form.submitEndpoint, { ROWID: row.ROWID, record: step.record });
+    if (res.status >= 200 && res.status < 300 && isObject(res.body) && res.body.wrote === true) updated += 1;
+    else refused += 1;
+  }
+  return { status: 200, body: { matched: matched.length, updated, refused } };
 }
 
 export async function runBehavior(app: App, golden: GoldenFile, backend: BehaviorBackend, mode: 'offline' | 'live'): Promise<BehaviorRunResult> {
   const model = generateUi(app).model;
   const findings: BehaviorFinding[] = [];
+  const skipped: { case: string; reason: string }[] = [];
+  const envArtifacts: { case: string; step: number; tags: string[] }[] = [];
   let stepCount = 0;
   for (const kase of golden.cases) {
-    const at = (f: Omit<BehaviorFinding, 'case'>) => findings.push({ case: kase.id, ...f });
+    if (kase.skip) {
+      skipped.push({ case: kase.id, reason: kase.skip });
+      continue;
+    }
+    const caseTags = kase.tags ?? [];
+    const at = (f: Omit<BehaviorFinding, 'case'>, stepTags: string[] = []) => {
+      const tags = [...new Set([...caseTags, ...stepTags])];
+      findings.push({ case: kase.id, ...f, ...(tags.length ? { tags } : {}) });
+    };
+    const refs = new Map<string, unknown>();
     await backend.reset?.();
-    for (const [i, step] of kase.steps.entries()) {
+    for (const [i, raw] of kase.steps.entries()) {
       stepCount += 1;
       const stepNo = i + 1;
-      let endpoint: { method: string; path: string; body: unknown };
+      const stepTags = raw.tags ?? [];
+      const missing = new Set<string>();
+      const step = resolveRefs(raw, refs, missing) as GoldenStep;
+      const want = (resolveRefs(raw.expect ?? {}, refs, missing) as GoldenStepExpect);
+      for (const name of [...missing].sort()) at({ step: stepNo, pointer: `<ref:${name}>`, expected: 'a value bound by an earlier step', actual: '(unbound)' }, stepTags);
+      let res: BehaviorCall;
+      let path: string;
       try {
-        endpoint = stepEndpoint(step, model);
+        if (step.op === 'update') {
+          path = `update ${step.report}`;
+          res = await runUpdate(step, model, backend);
+        } else {
+          const endpoint = stepEndpoint(step, model);
+          path = endpoint.path;
+          res = await backend.call(endpoint.method, endpoint.path, endpoint.body);
+        }
       } catch (err) {
-        at({ step: stepNo, pointer: stepLabel(step), expected: 'a generated endpoint', actual: err instanceof Error ? err.message : 'unresolvable' });
+        at({ step: stepNo, pointer: stepLabel(step), expected: 'a generated endpoint', actual: err instanceof Error ? err.message : 'unresolvable' }, stepTags);
         continue;
       }
-      const res = await backend.call(endpoint.method, endpoint.path, endpoint.body);
-      const want = step.expect ?? {};
-      const wantStatus = want.status ?? 200;
-      if (res.status !== wantStatus) at({ step: stepNo, pointer: `${endpoint.path} status`, expected: wantStatus, actual: res.status });
+      for (const [name, pointer] of Object.entries(raw.bind ?? {})) {
+        const value = readPointer(res, pointer);
+        if (value === undefined || value === null) at({ step: stepNo, pointer: `bind ${name} <- ${pointer}`, expected: 'a value', actual: '(absent)' }, stepTags);
+        else refs.set(name, value);
+      }
+      if (raw.setup) continue;
+      if (stepTags.some((tag) => ENV_ARTIFACT_TAG.test(tag))) {
+        envArtifacts.push({ case: kase.id, step: stepNo, tags: stepTags.filter((tag) => ENV_ARTIFACT_TAG.test(tag)) });
+        continue;
+      }
+      const wantStatus = want.status ?? (want.outcome ? undefined : 200);
+      if (wantStatus !== undefined && !statusMatches(wantStatus, res.status)) at({ step: stepNo, pointer: `${path} status`, expected: wantStatus, actual: res.status }, stepTags);
+      if (want.outcome) {
+        const seen = outcomeDiff(want.outcome, want.count, res);
+        if (seen !== undefined) at({ step: stepNo, pointer: `${path} outcome`, expected: want.count === undefined ? want.outcome : `${want.outcome}:${want.count}`, actual: seen }, stepTags);
+      }
       if (want.body !== undefined) {
         const diffs: Omit<BehaviorFinding, 'case'>[] = [];
-        matchValue(want.body, res.body, 'body', diffs, want.unordered === true);
-        for (const d of diffs) at({ step: stepNo, ...d });
+        matchValue(want.body, res.body, 'body', diffs, want.unordered === true, want.partial === true);
+        for (const d of diffs) at({ step: stepNo, ...d }, stepTags);
       }
     }
-    for (const [table, expectedRows] of Object.entries(kase.expect?.tables ?? {})) {
+    const missing = new Set<string>();
+    const tables = resolveRefs(kase.expect?.tables ?? {}, refs, missing) as Record<string, Record<string, unknown>[]>;
+    for (const name of [...missing].sort()) at({ pointer: `tables <ref:${name}>`, expected: 'a value bound by an earlier step', actual: '(unbound)' });
+    for (const [table, expectedRows] of Object.entries(tables)) {
       const actualRows = await backend.tableRows(table);
       const diffs: Omit<BehaviorFinding, 'case'>[] = [];
-      matchRows(expectedRows, actualRows, `tables.${table}`, diffs, kase.expect?.unordered === true);
+      matchRows(expectedRows, actualRows, `tables.${table}`, diffs, kase.expect?.unordered === true, kase.expect?.partial === true);
       for (const d of diffs) at(d);
     }
   }
@@ -507,8 +740,10 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
     mode,
     ok: findings.length === 0,
     behaviorEquivalentApps: findings.length === 0 ? 1 : 0,
-    summary: { cases: golden.cases.length, steps: stepCount, findings: findings.length },
+    summary: { cases: golden.cases.length, steps: stepCount, findings: findings.length, skipped: skipped.length },
     findings,
+    ...(skipped.length ? { skipped } : {}),
+    ...(envArtifacts.length ? { envArtifacts } : {}),
   };
   return { report, findings };
 }
@@ -525,17 +760,27 @@ export function formatBehaviorMarkdown(report: BehaviorReport, goldenDir?: strin
     `# c2c verify-behavior — ${report.app}`,
     '',
     `mode: ${report.mode}${goldenDir ? ` · goldens: ${goldenDir}` : ''}`,
-    `cases: ${report.summary.cases} · steps: ${report.summary.steps} · findings: ${report.summary.findings}`,
+    `cases: ${report.summary.cases} · steps: ${report.summary.steps} · findings: ${report.summary.findings} · skipped: ${report.summary.skipped}`,
     '',
   ];
   if (report.findings.length) {
     lines.push('| case | step | at | expected | actual |', '| --- | --- | --- | --- | --- |');
     for (const f of report.findings) {
-      lines.push(`| ${f.case} | ${f.step ?? '—'} | ${f.pointer} | ${show(f.expected)} | ${show(f.actual)} |`);
+      lines.push(`| ${f.case}${f.tags ? ` (${f.tags.join(', ')})` : ''} | ${f.step ?? '—'} | ${f.pointer} | ${show(f.expected)} | ${show(f.actual)} |`);
     }
     lines.push('');
   } else {
     lines.push('No differences.', '');
+  }
+  if (report.skipped?.length) {
+    lines.push('Skipped (not replayed, not a pass):', '');
+    for (const s of report.skipped) lines.push(`- ${s.case}: ${s.reason}`);
+    lines.push('');
+  }
+  if (report.envArtifacts?.length) {
+    lines.push('Environment-artifact steps (replayed, reply not compared):', '');
+    for (const e of report.envArtifacts) lines.push(`- ${e.case} step ${e.step}: ${e.tags.join(', ')}`);
+    lines.push('');
   }
   lines.push(`behavior-equivalent apps: ${report.behaviorEquivalentApps}`);
   return `${lines.join('\n')}\n`;
