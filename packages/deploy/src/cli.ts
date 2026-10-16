@@ -47,7 +47,7 @@ import { ensureSeedBucket } from './stratus-bucket.js';
 import { assertSmokeCookie, assertSmokeUrl, describeSmokeAuth, executeSmoke, formatSmokePlan, planSmoke, type SmokeAuth } from './smoke.js';
 import { formatBehaviorJson, formatBehaviorMarkdown, liveBackend, loadGoldens, runBehavior, startOfflineBackend, type BehaviorBackend } from './verify-behavior.js';
 import { SMOKE_RESULT_MAX_AGE_MINUTES, verifySmokeResult } from './smoke-result.js';
-import { formatCustomerSteps } from './customer-steps.js';
+import { formatCustomerSteps, PORTAL_SIGNIN_STEP } from './customer-steps.js';
 import { cdpBrowser, openOnOrigin, pageFetch, runBrowserSmoke, type BrowserSmokeResult, type SmokeBrowser } from './browser.js';
 import { TablePlanError, applyTablePlan, formatMandatoryRelaxed, formatTableDiff, provisionedConstraints, type RestCall, type RestFn, type TableDiff } from './tables.js';
 import { appShadowColumns, backfillShadows, formatBackfill } from './shadows.js';
@@ -2410,6 +2410,7 @@ async function ownerSessionSmoke(input: {
   const blocked = (lines: string[]): number => {
     const blocker = `not-signed-in ${fnBase}`;
     io.stdout(`c2c-blocker: ${blocker}\n`);
+    io.stdout(`next step: ${PORTAL_SIGNIN_STEP}\n`);
     writeSmokeReport(reportPath, { version: 'c2c-smoke-report/1', ok: false, session: 'owner', blocker, lines });
     return SMOKE_BLOCKED_EXIT;
   };

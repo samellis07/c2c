@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { repoRoot } from '../../core/src/toolchain.js';
-import { CUSTOMER_STEPS, formatCustomerSteps } from '../src/customer-steps.js';
+import { CUSTOMER_STEPS, formatCustomerSteps, PORTAL_SIGNIN_STEP } from '../src/customer-steps.js';
 
 const EXACT = [
   'Accept invite: accept the app invite mail',
@@ -27,7 +27,17 @@ test('the customer steps are exactly the four, in order', () => {
     CUSTOMER_STEPS.map((step) => step.slice(0, step.indexOf(':'))),
     ['Accept invite', 'Sign in once', 'Run the in-app check and paste its code', 'Verify mail sender'],
   );
-  assert.equal(formatCustomerSteps(), EXACT.map((step, i) => `  ${i + 1}. ${step}\n`).join(''));
+  // Step 2 carries the per-project portal sign-in line under it: part of the
+  // sign-in step, not a new browser task, so the four steps stay four.
+  assert.equal(
+    PORTAL_SIGNIN_STEP,
+    'Open the deployed app and sign in once with your app-portal account; each Catalyst project has its own portal session.',
+  );
+  assert.equal(
+    formatCustomerSteps(),
+    EXACT.map((step, i) => `  ${i + 1}. ${step}\n${i === 1 ? `     ${PORTAL_SIGNIN_STEP}\n` : ''}`).join(''),
+  );
+  assert.equal(formatCustomerSteps().split('\n').filter((line) => /^  \d+\. /.test(line)).length, 4);
   assert.doesNotMatch(formatCustomerSteps(), /Start services|Start Exploring|Slate —/);
 });
 

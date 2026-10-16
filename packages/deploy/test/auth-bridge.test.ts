@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { AUTH_FUNCTION, authBridgeFiles, slateOriginOf } from '../src/auth-bridge.js';
+import { AUTH_FUNCTION, authBridgeFiles, BRIDGE_NOT_SIGNED_IN_MESSAGE, slateOriginOf } from '../src/auth-bridge.js';
 
 const STATE = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ'; // 43 chars
 assert.equal(STATE.length, 43);
@@ -263,7 +263,7 @@ test('GET /bridge/report logs an allowlisted client failure and answers 204', as
     assert.deepEqual(failures(logs), [
       { event: 'c2c_auth.bridge_failure', side: 'client', reason: 'signin_not_finished', status: 401, code: 'AUTHENTICATION_FAILURE', sdk: 'net-issue' },
     ]);
-    for (const reason of ['sdk_unavailable', 'no_token', 'token_failed']) {
+    for (const reason of ['sdk_unavailable', 'not_signed_in', 'no_token', 'token_failed']) {
       const more: string[] = [];
       const ok = await call(handler, `/server/${AUTH_FUNCTION}/bridge/report?reason=${reason}`, { C2C_SLATE_ORIGIN: SLATE }, { logs: more });
       assert.equal(ok.status, 204, reason);
@@ -346,17 +346,42 @@ async function runPage(
   return { fetched, message: msg.textContent, navigatedTo, marker: storage.get('c2c.bridge.login-at') ?? null };
 }
 
-test('the page reports a sign-in that did not finish with the current-user status and clears the marker', async () => {
+test('a 401 AUTHENTICATION_FAILURE after hosted login is "not signed in to this app", never a network issue', async () => {
   const { handler, dir } = loadHandler(SLATE);
   try {
     const page = await call(handler, `/server/${AUTH_FUNCTION}/bridge?state=${STATE}`, { C2C_SLATE_ORIGIN: SLATE }, { headers: { 'x-zc-projectid': '12345' } });
     const run = await runPage(page.body, { authenticated: false, marked: true });
-    assert.match(run.message, /Sign-in did not finish/);
+    assert.equal(run.message, BRIDGE_NOT_SIGNED_IN_MESSAGE);
+    assert.match(run.message, /^Sign in to this app/);
+    assert.match(run.message, /each Catalyst project has its own portal session/i);
+    assert.doesNotMatch(run.message, /network|did not finish/i);
     assert.deepEqual(run.navigatedTo, [], 'no redirect loop');
     assert.ok(run.fetched.includes('/baas/v1/project/12345/project-user/current'), 'probes the current user');
     const report = run.fetched.find((url) => url.includes('/bridge/report?'));
-    assert.equal(report, `/server/${AUTH_FUNCTION}/bridge/report?reason=signin_not_finished&status=401&code=AUTHENTICATION_FAILURE&sdk=net-issue`);
+    // The SDK's own code still reaches the log, but it no longer names the reason.
+    assert.equal(report, `/server/${AUTH_FUNCTION}/bridge/report?reason=not_signed_in&status=401&code=AUTHENTICATION_FAILURE&sdk=net-issue`);
     assert.equal(run.marker, null, 'a reload starts a fresh sign-in instead of failing again');
+    // Either signal alone is enough: a 401 without the code, or the code on another status.
+    for (const currentUser of [{ status: 401 }, { status: 400, error_code: 'AUTHENTICATION_FAILURE' }]) {
+      const other = await runPage(page.body, { authenticated: false, marked: true, currentUser });
+      assert.equal(other.message, BRIDGE_NOT_SIGNED_IN_MESSAGE, JSON.stringify(currentUser));
+      assert.ok(other.fetched.some((url) => url.includes('/bridge/report?reason=not_signed_in')), JSON.stringify(currentUser));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a sign-in that did not finish for another reason keeps signin_not_finished and its message', async () => {
+  const { handler, dir } = loadHandler(SLATE);
+  try {
+    const page = await call(handler, `/server/${AUTH_FUNCTION}/bridge?state=${STATE}`, { C2C_SLATE_ORIGIN: SLATE }, { headers: { 'x-zc-projectid': '12345' } });
+    const run = await runPage(page.body, { authenticated: false, marked: true, currentUser: { status: 403, error_code: 'NO_ACCESS' } });
+    assert.match(run.message, /Sign-in did not finish/);
+    assert.deepEqual(run.navigatedTo, []);
+    const report = run.fetched.find((url) => url.includes('/bridge/report?'));
+    assert.equal(report, `/server/${AUTH_FUNCTION}/bridge/report?reason=signin_not_finished&status=403&code=NO_ACCESS&sdk=net-issue`);
+    assert.equal(run.marker, null);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

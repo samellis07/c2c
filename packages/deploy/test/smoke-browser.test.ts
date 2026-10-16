@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { cdpBrowser, runBrowserSmoke, type SmokeBrowser } from '../src/browser.js';
 import { smokeCli, type Io } from '../src/cli.js';
+import { PORTAL_SIGNIN_STEP } from '../src/customer-steps.js';
 
 const DS = `application "Widget"
 {
@@ -554,6 +555,8 @@ test('smoke --owner-session: not signed in is a blocker (exit 4, c2c-blocker lin
       const code = await smokeCli(OWNER_ARGS(dir, report), cap.io, { browser, sleep: async () => {} });
       assert.equal(code, 4, cap.stdout() + cap.stderr());
       assert.match(cap.stdout(), new RegExp(`^c2c-blocker: not-signed-in ${FN_URL.replace(/[.]/g, '\\.')}$`, 'm'));
+      // The blocker names the one human action: each project has its own portal session.
+      assert.ok(cap.stdout().includes(`\nnext step: ${PORTAL_SIGNIN_STEP}\n`), cap.stdout());
       const written = JSON.parse(readFileSync(report, 'utf8')) as { ok: boolean; blocker: string };
       assert.equal(written.ok, false);
       assert.equal(written.blocker, `not-signed-in ${FN_URL}`);

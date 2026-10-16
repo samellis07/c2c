@@ -13,9 +13,18 @@ export const CUSTOMER_STEPS: readonly string[] = [
   'Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)',
 ];
 
-/** The steps still ahead, numbered as in the full list, one per line. */
+/**
+ * How the "Sign in once" step is done, printed under it after a deploy and
+ * when smoke stops at the sign-in blocker. App-portal sessions are per
+ * project: a session for one deployed app does not sign you in to another,
+ * so every new project needs this once. It is part of step 2, not a new step.
+ */
+export const PORTAL_SIGNIN_STEP =
+  'Open the deployed app and sign in once with your app-portal account; each Catalyst project has its own portal session.';
+
+/** The steps still ahead, numbered as in the full list, one per line; step 2 carries the portal sign-in line. */
 export function formatCustomerSteps(): string {
-  return CUSTOMER_STEPS.map((step, i) => `  ${i + 1}. ${step}\n`).join('');
+  return CUSTOMER_STEPS.map((step, i) => `  ${i + 1}. ${step}\n${step.startsWith('Sign in once:') ? `     ${PORTAL_SIGNIN_STEP}\n` : ''}`).join('');
 }
 
 /**

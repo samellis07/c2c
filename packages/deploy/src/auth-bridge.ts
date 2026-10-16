@@ -15,6 +15,15 @@ import { slateHost } from '../../auth/src/slate-host.js';
 export const AUTH_FUNCTION = 'c2c_auth';
 export const AUTH_FUNCTION_DIR = `functions/${AUTH_FUNCTION}`;
 
+/**
+ * What the bridge page shows when hosted login came back without a session
+ * for this project (current user 401 / AUTHENTICATION_FAILURE). App-portal
+ * sessions are per project, so a session for another deployed app does not
+ * count; the Web SDK reports this case as a network issue, which it is not.
+ */
+export const BRIDGE_NOT_SIGNED_IN_MESSAGE =
+  'Sign in to this app: reload to open its sign-in page and sign in once with your app-portal account. Each Catalyst project has its own portal session, so signing in to another app does not sign you in here.';
+
 export interface DeployFileLite {
   path: string;
   data: string | Buffer;
@@ -73,7 +82,8 @@ const { randomBytes } = require('node:crypto');
 const SDK = ${JSON.stringify(CATALYST_WEB_SDK)};
 const CONNECT_SRC = ${JSON.stringify(connect)};
 const STATE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-const CLIENT_REASONS = ['sdk_unavailable', 'signin_not_finished', 'no_token', 'token_failed'];
+const CLIENT_REASONS = ['sdk_unavailable', 'signin_not_finished', 'not_signed_in', 'no_token', 'token_failed'];
+const NOT_SIGNED_IN_MESSAGE = ${JSON.stringify(BRIDGE_NOT_SIGNED_IN_MESSAGE)};
 const CODE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const STATUS_PATTERN = /^[0-9]{1,3}$/;
 
@@ -161,8 +171,9 @@ function html(nonce, state, slate, action, project) {
     '.then(function(){return typeof auth.isUserAuthenticated==="function"?auth.isUserAuthenticated():Promise.reject(new Error("no auth"));})' +
     '.catch(function(err){' +
     'if(marked()){try{sessionStorage.removeItem("c2c.bridge.login-at");}catch(e){}' +
-    'fail("Sign-in did not finish. Reload to try again, or ask the app administrator to check your access.");' +
-    'currentUser().then(function(u){report("signin_not_finished",{status:u.status,code:u.code,sdk:sdkCode(err)});});' +
+    'currentUser().then(function(u){var out=u.status===401||u.code==="AUTHENTICATION_FAILURE";' +
+    'report(out?"not_signed_in":"signin_not_finished",{status:u.status,code:u.code,sdk:sdkCode(err)});' +
+    'fail(out?' + JSON.stringify(NOT_SIGNED_IN_MESSAGE) + ':"Sign-in did not finish. Reload to try again, or ask the app administrator to check your access.");});' +
     'return Promise.reject("stop");}' +
     'try{sessionStorage.setItem("c2c.bridge.login-at",String(Date.now()));}catch(e){}' +
     'location.assign("/__catalyst/auth/login?service_url="+encodeURIComponent(self));' +
