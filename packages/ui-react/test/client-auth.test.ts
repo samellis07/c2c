@@ -588,7 +588,7 @@ test('a committed submit whose on-success failed (200 + warning) shows the succe
   assert.doesNotMatch(banner, /not saved|Dry run/i);
 });
 
-test('a 5xx that says wrote true shows the success banner: the row is stored', { skip: SKIP }, async (t) => {
+test('a 5xx that says wrote true says the row is stored and names the failed step', { skip: SKIP }, async (t) => {
   const m = await mount(t, [500], { 500: JSON.stringify({ code: 'INTERNAL_ERROR', message: 'Internal server error', correlationId: 'c', wrote: true }) });
   await m.boot();
   await m.go('#/form/Order');
@@ -596,8 +596,8 @@ test('a 5xx that says wrote true shows the success banner: the row is stored', {
   m.click(submitButton(m));
   await m.settle();
   const banner = m.main().querySelector('.c2c-banner')?.textContent ?? '';
-  assert.match(banner, /Record added|Added Successfully/i, banner);
-  assert.doesNotMatch(banner, /Internal server error|went wrong|not saved/i);
+  assert.match(banner, /^The record was saved, but a step after saving failed\.$/, banner);
+  assert.doesNotMatch(banner, /Internal server error|not saved/i);
 });
 
 test('a retry after a failed submit reuses the idempotency key; a committed submit starts a new one', { skip: SKIP }, async (t) => {

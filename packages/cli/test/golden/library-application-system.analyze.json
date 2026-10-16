@@ -525,16 +525,109 @@
     "statements": 65,
     "translated": 5,
     "shimmed": 60,
-    "todo": 0,
-    "todoLocations": []
+    "todo": 6,
+    "todoLocations": [
+      {
+        "location": "report Book_Report",
+        "construct": "Custom action \"Mark as Featured\" is not migrated; its button is turned off.",
+        "scope": "ui"
+      },
+      {
+        "location": "report Book_Report",
+        "construct": "Custom action \"Publication year\" is not migrated; its button is turned off.",
+        "scope": "ui"
+      },
+      {
+        "location": "report All_Book_Transactions",
+        "construct": "Custom action \"Overdue Books Report\" is not migrated; its button is turned off.",
+        "scope": "ui"
+      },
+      {
+        "location": "report All_Book_Transactions",
+        "construct": "Custom action \"Group By  Member.\" is not migrated; its button is turned off.",
+        "scope": "ui"
+      },
+      {
+        "location": "report All_Book_Transactions",
+        "construct": "Custom action \"Mark as Lost\" is not migrated; its button is turned off.",
+        "scope": "ui"
+      },
+      {
+        "location": "report All_Book_Transactions",
+        "construct": "Custom action \"Overdue Books\" is not migrated; its button is turned off.",
+        "scope": "ui"
+      }
+    ]
   },
-  "blockers": [],
+  "blockers": [
+    {
+      "kind": "ui",
+      "label": "report All_Book_Transactions",
+      "detail": "Custom action \"Group By  Member.\" is not migrated; its button is turned off.",
+      "scope": "ui"
+    },
+    {
+      "kind": "ui",
+      "label": "report All_Book_Transactions",
+      "detail": "Custom action \"Mark as Lost\" is not migrated; its button is turned off.",
+      "scope": "ui"
+    },
+    {
+      "kind": "ui",
+      "label": "report All_Book_Transactions",
+      "detail": "Custom action \"Overdue Books Report\" is not migrated; its button is turned off.",
+      "scope": "ui"
+    },
+    {
+      "kind": "ui",
+      "label": "report All_Book_Transactions",
+      "detail": "Custom action \"Overdue Books\" is not migrated; its button is turned off.",
+      "scope": "ui"
+    },
+    {
+      "kind": "ui",
+      "label": "report Book_Report",
+      "detail": "Custom action \"Mark as Featured\" is not migrated; its button is turned off.",
+      "scope": "ui"
+    },
+    {
+      "kind": "ui",
+      "label": "report Book_Report",
+      "detail": "Custom action \"Publication year\" is not migrated; its button is turned off.",
+      "scope": "ui"
+    }
+  ],
   "determinism": {
-    "deterministic": true,
-    "todoCount": 0,
+    "deterministic": false,
+    "todoCount": 6,
     "fillLockEntries": 0,
-    "todoKinds": [],
-    "uiTodoCount": 0
+    "todoKinds": [
+      {
+        "construct": "Custom action \"Group By  Member.\" is not migrated; its button is turned off.",
+        "count": 1
+      },
+      {
+        "construct": "Custom action \"Mark as Featured\" is not migrated; its button is turned off.",
+        "count": 1
+      },
+      {
+        "construct": "Custom action \"Mark as Lost\" is not migrated; its button is turned off.",
+        "count": 1
+      },
+      {
+        "construct": "Custom action \"Overdue Books Report\" is not migrated; its button is turned off.",
+        "count": 1
+      },
+      {
+        "construct": "Custom action \"Overdue Books\" is not migrated; its button is turned off.",
+        "count": 1
+      },
+      {
+        "construct": "Custom action \"Publication year\" is not migrated; its button is turned off.",
+        "count": 1
+      }
+    ],
+    "uiTodoCount": 6
   },
   "score": {
     "readiness": 78,

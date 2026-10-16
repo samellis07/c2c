@@ -1295,7 +1295,7 @@
     "statements": 553,
     "translated": 56,
     "shimmed": 486,
-    "todo": 12,
+    "todo": 13,
     "todoLocations": [
       {
         "location": "workflow Zoho_Book_Customer_Update:13",
@@ -1355,6 +1355,11 @@
       {
         "location": "report Container_Movement_Tracking",
         "construct": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
+        "scope": "ui"
+      },
+      {
+        "location": "report Leads",
+        "construct": "Custom action \"Convert\" is not migrated; its button is turned off.",
         "scope": "ui"
       }
     ]
@@ -1431,11 +1436,17 @@
       "label": "report Container_Movement_Tracking",
       "detail": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
       "scope": "ui"
+    },
+    {
+      "kind": "ui",
+      "label": "report Leads",
+      "detail": "Custom action \"Convert\" is not migrated; its button is turned off.",
+      "scope": "ui"
     }
   ],
   "determinism": {
     "deterministic": false,
-    "todoCount": 12,
+    "todoCount": 13,
     "fillLockEntries": 0,
     "todoKinds": [
       {
@@ -1443,11 +1454,15 @@
         "count": 11
       },
       {
+        "construct": "Custom action \"Convert\" is not migrated; its button is turned off.",
+        "count": 1
+      },
+      {
         "construct": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
         "count": 1
       }
     ],
-    "uiTodoCount": 1
+    "uiTodoCount": 2
   },
   "score": {
     "readiness": 78,

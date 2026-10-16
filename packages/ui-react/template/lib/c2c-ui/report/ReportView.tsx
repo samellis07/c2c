@@ -14,6 +14,10 @@
  * screen; an ended session, an outage or a dropped network each get their own
  * line, and only the last two offer Retry. A row or header action that is
  * refused says so in the notice. The server's text is never shown.
+ *
+ * Delete asks first, as Creator does; Cancel sends nothing. A custom action
+ * whose endpoint is a dry-run stub renders turned off with a note naming it,
+ * never as a button that reports a run that saved nothing.
  */
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { RotateCw, Search } from 'lucide-react';
@@ -47,6 +51,14 @@ function LoadError({ status, what, onRetry }: { status: number; what: string; on
       </Alert>
     </div>
   );
+}
+
+/** Asked before a row's Delete posts; Cancel sends nothing. */
+export const DELETE_CONFIRM_TEXT = 'Are you sure you want to delete this record?';
+
+/** The note under the toolbar naming the custom actions that are turned off. */
+export function previewActionsNote(names: string[]): string {
+  return names.length ? `Not available yet, so turned off: ${names.join(', ')}.` : '';
 }
 
 /** The notice line for a refused or failed row/header action. */
@@ -193,7 +205,7 @@ function ViewStub({ report }: { report: ReportSpec }) {
 }
 
 function ReportList({ report }: { report: ReportSpec }) {
-  const { api, spec } = useEnv();
+  const { api, spec, view } = useEnv();
   const custom = useCustomization();
   const own = custom.reports?.[report.name];
   const [page, setPage] = useState(0);
@@ -288,6 +300,7 @@ function ReportList({ report }: { report: ReportSpec }) {
     (rowId: string) => {
       const endpoint = report.deleteEndpoint;
       if (!endpoint) return;
+      if (typeof view.confirm !== 'function' || view.confirm(DELETE_CONFIRM_TEXT) !== true) return;
       api.post(endpoint, { ROWID: rowId }).then(
         (reply) => {
           if (reply.status === 403) {
@@ -304,12 +317,14 @@ function ReportList({ report }: { report: ReportSpec }) {
         () => setActionNote('The record was not deleted.'),
       );
     },
-    [api, deny, report],
+    [api, deny, report, view],
   );
 
   const initialSort: SortState | undefined = report.sort[0]
     ? { key: report.sort[0].field, direction: /desc/i.test(report.sort[0].order ?? '') ? 'desc' : 'asc' }
     : undefined;
+  const previewEndpoints = new Set(report.customActions.filter((a) => a.preview).map((a) => a.endpoint));
+  const previewTitle = 'Not available yet: this action is turned off.';
   const actionNameFor = (endpoint: string, fallback: string) => report.customActions.find((a) => a.endpoint === endpoint)?.name ?? fallback;
   const recordCustomActions = report.customActions.filter(
     (action) => !action.header && !report.columns.some((c) => c.action === action.endpoint),
@@ -333,6 +348,7 @@ function ReportList({ report }: { report: ReportSpec }) {
             size="sm"
             data-action={column.action}
             aria-label={actionLabel}
+            {...(previewEndpoints.has(column.action) ? { disabled: true, title: previewTitle } : {})}
             onClick={() => runAction(column.label, column.action!, row.ROWID === undefined ? undefined : String(row.ROWID))}
           >
             {column.label}
@@ -421,6 +437,7 @@ function ReportList({ report }: { report: ReportSpec }) {
                 variant="secondary"
                 size="sm"
                 data-action={action.endpoint}
+                {...(action.preview ? { disabled: true, title: previewTitle } : {})}
                 onClick={() => runAction(action.name, action.endpoint, id || undefined)}
               >
                 {action.name}
@@ -476,7 +493,7 @@ function ReportList({ report }: { report: ReportSpec }) {
           />
         ) : null}
         {headerActions.map((action) => (
-          <Button key={action.name} type="button" variant="secondary" size="sm" data-action={action.endpoint} onClick={() => runAction(action.name, action.endpoint)}>
+          <Button key={action.name} type="button" variant="secondary" size="sm" data-action={action.endpoint} {...(action.preview ? { disabled: true, title: previewTitle } : {})} onClick={() => runAction(action.name, action.endpoint)}>
             {action.name}
           </Button>
         ))}
@@ -513,6 +530,7 @@ function ReportList({ report }: { report: ReportSpec }) {
           {actionNote}
         </p>
       ) : null}
+      {previewEndpoints.size ? <p className="todo" data-action-preview>{previewActionsNote(report.customActions.filter((a) => a.preview).map((a) => a.name.trim()))}</p> : null}
       {report.note ? <p className="todo" data-report-note>{report.note}</p> : null}
       {load.state === 'loading' ? (
         <p className="c2c-loading" data-state="loading" role="status">
