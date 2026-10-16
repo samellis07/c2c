@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import compat from '../../doctor/data/compat.json' with { type: 'json' };
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { nodeSatisfies, repoRoot, toolchain, toolchainHeader } from '../../core/src/toolchain.js';
 import { formatFindings, lintCodegen, maskNonCode, scanSource } from '../src/lint.js';
@@ -273,6 +273,92 @@ test('manifests --check passes on the committed tree', () => {
   });
   assert.equal(child.status, 0, child.stderr + child.stdout);
   assert.match(child.stdout, /manifests=current/);
+});
+
+// manifests.js accepts only --check and --update. repoRoot() is the directory
+// that contains the script, so a drift case is a copy of dist plus the assets
+// --check reads: the toolchain pin, the fixtures, the function runtime, the
+// client runtime, the React template, and a private copy of the manifest files.
+const CHECK_LINKED_ASSETS = [
+  '.nvmrc',
+  'node_modules',
+  'fixtures/redistributable',
+  'packages/deploy/fn',
+  'packages/ui/src/client-runtime.js',
+  'packages/ui/src/client',
+  'packages/ui-react/template',
+];
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function checkerTree(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-manifests-cli-'));
+  cpSync(join(root, 'dist'), join(dir, 'dist'), { recursive: true });
+  for (const rel of CHECK_LINKED_ASSETS) {
+    const to = join(dir, rel);
+    mkdirSync(dirname(to), { recursive: true });
+    symlinkSync(join(root, rel), to);
+  }
+  mkdirSync(dirname(join(dir, MANIFESTS_DIR)), { recursive: true });
+  cpSync(join(root, MANIFESTS_DIR), join(dir, MANIFESTS_DIR), { recursive: true });
+  return dir;
+}
+
+function runManifestCheck(dir: string): { status: number | null; output: string } {
+  const child = spawnSync(process.execPath, [join(dir, 'dist/determinism/src/manifests.js'), '--check'], {
+    encoding: 'utf8',
+    cwd: dir,
+  });
+  return { status: child.status, output: `${child.stderr}${child.stdout}` };
+}
+
+test('manifests --check names stale, missing, and extra files in a copied tree', () => {
+  const unchanged = checkerTree();
+  try {
+    const clean = runManifestCheck(unchanged);
+    assert.equal(clean.status, 0, clean.output);
+    assert.match(clean.output, /manifests=current/);
+  } finally {
+    rmSync(unchanged, { recursive: true, force: true });
+  }
+  const cases = [
+    {
+      label: 'stale hash',
+      mutate: (manifests: string) => {
+        const path = join(manifests, 'freight-forwarding.sha256');
+        const text = readFileSync(path, 'utf8');
+        writeFileSync(path, text.replace(/^([0-9a-f]{64})  (c2c-mail\.json)$/m, `${'f'.repeat(64)}  $2`));
+        return 'changed c2c-mail.json';
+      },
+    },
+    {
+      label: 'missing manifest',
+      mutate: (manifests: string) => {
+        rmSync(join(manifests, 'freight-forwarding.sha256'));
+        return 'freight-forwarding: fixture has no committed manifest';
+      },
+    },
+    {
+      label: 'extra manifest',
+      mutate: (manifests: string) => {
+        writeFileSync(join(manifests, 'unknown.sha256'), `${'a'.repeat(64)}  unknown.txt\n`);
+        return 'unknown: committed manifest has no fixture';
+      },
+    },
+  ];
+  for (const { label, mutate } of cases) {
+    const dir = checkerTree();
+    try {
+      const expected = mutate(join(dir, MANIFESTS_DIR));
+      const child = runManifestCheck(dir);
+      assert.notEqual(child.status, 0, `${label} unexpectedly passed\n${child.output}`);
+      assert.match(child.output, new RegExp(escapeRegExp(expected)), `${label} did not name the file`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
 });
 
 test('lint masks comments, strings and regexes inside template interpolations but still scans their code', () => {
