@@ -24,7 +24,7 @@ export interface AppWindow extends Window {
   C2C_SMOKE_PLAN?: unknown;
   /** The Catalyst project id the deploy targeted, for the smoke block's binding. */
   C2C_SMOKE_PROJECT?: string;
-  /** Bound on the auth-token wait — see authToken. Default 5000 ms. */
+  /** Bound on the auth-token wait — see authToken. Default 10000 ms, capped at 15000. */
   C2C_AUTH_TIMEOUT_MS?: number;
   /** Bound on the smoke page's access check — see smoke/run.ts. Default 30000 ms. */
   C2C_SMOKE_STATUS_TIMEOUT_MS?: number;
@@ -324,28 +324,202 @@ export function bridgeSignOut(view: AppWindow): boolean {
   }
 }
 
+/**
+ * Shown when a current-user or token call never answers. Step 3 is the
+ * customer's "Sign in once" setup step (packages/deploy/src/customer-steps.ts).
+ * Kept in lockstep with the vanilla runtime's AUTH_STALL_MESSAGE.
+ */
+export const AUTH_STALL_MESSAGE =
+  'Sign-in did not complete. Reload the page; if it keeps happening, the app administrator must finish setup step 3, "Sign in once: sign in to the deployed app once".';
+/** Default bound on auth/current-user/token calls. C2C_AUTH_TIMEOUT_MS overrides it, capped at 15s. */
+const AUTH_TIMEOUT_DEFAULT_MS = 10000;
+const AUTH_TIMEOUT_CAP_MS = 15000;
+/** Slate serves no /baas: these exchanges stay pending forever unless aborted. */
+const AUTH_EXCHANGE = /\/project-user\/(?:current|token)(?:[/?#]|$)|\/authentication\/(?:token|current)(?:[/?#]|$)/i;
+
+const authInflight = new WeakMap<AppWindow, number>();
+const authStallFlag = new WeakMap<AppWindow, true>();
+const wrappedAuthFetches = new WeakSet<Function>();
+
+function authTimeoutMs(scope: AppWindow): number {
+  const configured = typeof scope.C2C_AUTH_TIMEOUT_MS === 'number' && Number.isFinite(scope.C2C_AUTH_TIMEOUT_MS) && scope.C2C_AUTH_TIMEOUT_MS >= 0
+    ? scope.C2C_AUTH_TIMEOUT_MS
+    : AUTH_TIMEOUT_DEFAULT_MS;
+  return Math.min(configured, AUTH_TIMEOUT_CAP_MS);
+}
+
+function authTimeoutError(): Error {
+  const error = new Error(AUTH_STALL_MESSAGE);
+  error.name = 'AuthTimeoutError';
+  return error;
+}
+
+export function isAuthTimeout(error: unknown): boolean {
+  return !!error && typeof error === 'object' && ((error as { name?: string }).name === 'AuthTimeoutError' || (error as { message?: string }).message === AUTH_STALL_MESSAGE);
+}
+
+function authInflightCount(scope: AppWindow): number {
+  return authInflight.get(scope) ?? 0;
+}
+
+export function authExchangePending(scope: AppWindow): boolean {
+  return authStalled(scope) || authInflightCount(scope) > 0;
+}
+
+function markAuthStall(scope: AppWindow): void {
+  authStallFlag.set(scope, true);
+}
+
+export function clearAuthStall(scope: AppWindow): void {
+  authStallFlag.delete(scope);
+}
+
+export function authStalled(scope: AppWindow): boolean {
+  return authStallFlag.get(scope) === true;
+}
+
+/** A minified SDK throw is a single letter (live console: "t"). Log a sentence instead. */
+function logAuthFailure(scope: AppWindow, error: unknown, what: string): void {
+  const raw = error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string'
+    ? (error as { message: string }).message
+    : error == null ? '' : String(error);
+  const detail = !raw || raw.length <= 1 ? `${what} did not answer` : raw;
+  const line = detail === AUTH_STALL_MESSAGE ? AUTH_STALL_MESSAGE : `Sign-in did not complete: ${detail}`;
+  const sink = (scope as { console?: { error?: (...args: unknown[]) => void } }).console ?? globalThis.console;
+  if (sink && typeof sink.error === 'function') sink.error(line);
+}
+
+function timerFns(scope: AppWindow): { set: typeof setTimeout; clear: typeof clearTimeout } {
+  const set = typeof scope.setTimeout === 'function' ? scope.setTimeout.bind(scope) : setTimeout;
+  const clear = typeof scope.clearTimeout === 'function' ? scope.clearTimeout.bind(scope) : clearTimeout;
+  return { set: set as typeof setTimeout, clear: clear as typeof clearTimeout };
+}
+
+/** Race `work` against the auth budget and abort `controller` when the budget expires. */
+function withAuthDeadline<T>(scope: AppWindow, work: () => Promise<T>, controller: AbortController): Promise<T> {
+  const ms = authTimeoutMs(scope);
+  const timers = timerFns(scope);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = timers.set(() => {
+      if (settled) return;
+      try {
+        controller.abort();
+      } catch {
+        /* already aborted */
+      }
+      reject(authTimeoutError());
+    }, ms);
+  });
+  const task = Promise.resolve().then(work);
+  task.catch(() => {});
+  timeout.catch(() => {});
+  return Promise.race([task, timeout]).finally(() => {
+    settled = true;
+    if (timer !== undefined) timers.clear(timer);
+  });
+}
+
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.href;
+  return typeof input.url === 'string' ? input.url : '';
+}
+
+/**
+ * Abort current-user and token fetches that never answer. Other requests,
+ * including a 401 from a live auth host, are left alone.
+ */
+function bindAuthFetch(scope: AppWindow): void {
+  const current = scope.fetch;
+  if (typeof current !== 'function' || wrappedAuthFetches.has(current)) return;
+  const native = current;
+  const wrapped = function authBoundFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const url = requestUrl(input);
+    if (!AUTH_EXCHANGE.test(url)) return native.call(scope, input, init);
+    const controller = new AbortController();
+    const outer = init?.signal;
+    if (outer) {
+      if (outer.aborted) controller.abort();
+      else outer.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+    const nextInit: RequestInit = { ...init, signal: controller.signal };
+    authInflight.set(scope, authInflightCount(scope) + 1);
+    const timers = timerFns(scope);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = timers.set(() => {
+        timedOut = true;
+        try {
+          controller.abort();
+        } catch {
+          /* already aborted */
+        }
+        reject(authTimeoutError());
+      }, authTimeoutMs(scope));
+    });
+    const task = Promise.resolve().then(() => native.call(scope, input, nextInit));
+    task.catch(() => {});
+    timeout.catch(() => {});
+    return Promise.race([task, timeout])
+      .catch((error: unknown) => {
+        markAuthStall(scope);
+        logAuthFailure(scope, timedOut ? authTimeoutError() : error, 'the current-user call');
+        throw timedOut || isAuthTimeout(error) ? authTimeoutError() : error;
+      })
+      .finally(() => {
+        if (timer !== undefined) timers.clear(timer);
+        authInflight.set(scope, Math.max(0, authInflightCount(scope) - 1));
+      });
+  };
+  wrappedAuthFetches.add(wrapped);
+  try {
+    scope.fetch = wrapped as AppWindow['fetch'];
+  } catch {
+    /* fetch is sealed; the SDK-call deadline still applies */
+  }
+}
+
+/** Run one auth SDK call. A current-user fetch that does not settle rejects with AuthTimeoutError. */
+export function watchAuthCall<T>(scope: AppWindow, run: () => Promise<T>): Promise<T> {
+  bindAuthFetch(scope);
+  const controller = new AbortController();
+  return withAuthDeadline(scope, run, controller).catch((error: unknown) => {
+    const fetchStall = authStalled(scope) || authInflightCount(scope) > 0;
+    const minified = !!error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string' && (error as { message: string }).message.length === 1;
+    if (fetchStall || minified) {
+      markAuthStall(scope);
+      logAuthFailure(scope, error, 'the current-user call');
+      throw authTimeoutError();
+    }
+    if (isAuthTimeout(error)) {
+      logAuthFailure(scope, error, 'the current-user call');
+      throw error;
+    }
+    throw error;
+  });
+}
+
 async function authToken(view: AppWindow): Promise<string> {
   intakeBridgeFragment(view);
   if (bridgeConfigured(view)) return storedBridgeToken(view);
   const auth = view.catalyst?.auth;
   if (!auth || typeof auth.generateAuthToken !== 'function') return '';
   // The SDK token chain is best-effort: on a host where the SDK's auth
-  // endpoints are not served (e.g. a Slate domain, where the BaaS routes the
-  // SDK calls root-relative answer 404), generateAuthToken can stay pending
-  // forever — and awaiting it would hang every API call. Bound the wait and
-  // send the call without a token instead; the server still refuses or
-  // accepts on the session cookie.
-  const wait = typeof view.C2C_AUTH_TIMEOUT_MS === 'number' ? view.C2C_AUTH_TIMEOUT_MS : 5000;
+  // endpoints are not served (a Slate domain, where /baas stays pending),
+  // generateAuthToken can hang every API call. Bound the wait. A current-user
+  // fetch that does not settle is remembered so sign-in and the smoke page
+  // can stop; a hanging SDK method that never called the network still lets
+  // the request go out without a token.
   const generate = auth.generateAuthToken;
   try {
-    const token = await Promise.race([
-      (async () => {
-        // generateAuthToken needs a session; isUserAuthenticated fails fast without one.
-        if (typeof auth.isUserAuthenticated === 'function') await auth.isUserAuthenticated();
-        return (await generate.call(auth))?.access_token;
-      })(),
-      new Promise<unknown>((resolve) => setTimeout(() => resolve(''), wait)),
-    ]);
+    const token = await watchAuthCall(view, async () => {
+      // generateAuthToken needs a session; isUserAuthenticated fails fast without one.
+      if (typeof auth.isUserAuthenticated === 'function') await auth.isUserAuthenticated();
+      return (await generate.call(auth))?.access_token;
+    });
     return typeof token === 'string' ? token : '';
   } catch {
     return '';
