@@ -93,7 +93,7 @@ test('no developer wording reaches the end-user DOM of any form, report or page'
 
 test('a report that is not generated keeps its heading and a neutral line; a format rule that did not translate is not on screen', async (t) => {
   const logged = quiet(t);
-  const app = deriveIr(parse(`application "Desk"
+  const app = deriveIr(parse(`application "Orders"
 {
 	form Order
 	{
