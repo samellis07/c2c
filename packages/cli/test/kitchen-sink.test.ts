@@ -2,7 +2,7 @@
  * The synthetic kitchen-sink app (fixtures/synthetic/kitchen-sink) is the live
  * end-to-end input: one app that uses every mapped field type, every generated
  * workflow event kind, a report with criteria, a page, and roles. It must
- * analyze to only the counted Booking_Edit server-half TODO, regenerate
+ * analyze with no residual TODO, regenerate
  * byte-identically, and plan offline with no budget warning. A new field-type
  * row or storage kind in the schema mapping fails here until the fixture uses
  * it or it is listed as excluded with a reason.
@@ -89,10 +89,10 @@ test('kitchen sink parses losslessly with nothing unknown', () => {
   assert.deepEqual(app.unmodelled, []);
 });
 
-test('kitchen sink analyzes to the counted Booking_Edit server-half TODO and names settings the field model omits, deterministically', () => {
+test('kitchen sink analyzes with no residual TODO and names settings the field model omits, deterministically', () => {
   const r = analyze(load());
-  assert.equal(r.deluge.todo, 1);
-  assert.equal(r.determinism.todoCount, 1);
+  assert.equal(r.deluge.todo, 0);
+  assert.equal(r.determinism.todoCount, 0);
   assert.equal(r.determinism.deterministic, false);
   assert.equal(r.determinism.silentDrops, 5);
   assert.deepEqual(
@@ -103,7 +103,6 @@ test('kitchen sink analyzes to the counted Booking_Edit server-half TODO and nam
       { kind: 'deluge', label: 'silent drop field-property: Booking.Room_Ref property displayformat', detail: 'Field Booking.Room_Ref property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app' },
       { kind: 'deluge', label: 'silent drop field-property: Media_Kit.Booking_Ref property displayformat', detail: 'Field Media_Kit.Booking_Ref property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app' },
       { kind: 'deluge', label: 'silent drop field-property: Media_Kit.Total_Hours property value', detail: 'Field Media_Kit.Total_Hours property value is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app' },
-      { kind: 'deluge', label: 'workflow Booking_Edit:1', detail: 'form-event-server-uninvoked', scope: 'unit' },
     ],
   );
   assert.equal(analyzeAsJson(analyze(load())), analyzeAsJson(r));

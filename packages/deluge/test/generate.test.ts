@@ -10,7 +10,7 @@ import { deriveIr, emptyApp, headerWords, isGroup, parse, parseFile, parseProjec
 import { createRuntime, LIMITS } from '../../shims/src/runtime.js';
 import { RecordAccessError } from '../../shims/src/access.js';
 import { mockDatastore } from '../../shims/test/zcql-mock.js';
-import { aioLibraryModule, conditionalFieldRules, emittedFieldRuleCondition, fieldRuleDenials, generate, measureActionCriteria, workflowKind, type AlertDiagnostic } from '../src/generate.js';
+import { aioLibraryModule, conditionalFieldRules, emittedFieldRuleCondition, fieldRuleDenials, FORM_EVENT_SERVER_UNINVOKED, generate, measureActionCriteria, workflowKind, type AlertDiagnostic } from '../src/generate.js';
 import { mutatesParameters } from '../src/param-mutation.js';
 
 function stripComments(s: string) { return (s || '').replace(/^\s*\/\/ Deluge: .*\n?/gm, ''); }
@@ -5200,6 +5200,55 @@ test('a merged tail route runs only the script body.runEvent resolves through sc
   const all = await invoke(mod.default, { ...caller, body: { record: {} } });
   assert.equal(all.status, 200, JSON.stringify(all.body));
   assert.deepEqual(marks(all.body).sort(), ['Mark_A', 'Mark_B']);
+});
+
+test('a single server-only tail script runs through a guarded client run', async () => {
+  // One on-load workflow with a server-only body: the route carries no
+  // scriptEvents map (a null ctx.onlyScript runs its one script) and the
+  // generated client module is nothing but the guarded client run.
+  const g = generate(
+    app({
+      forms: [plainForm('Visitors', [plainField('Name')])],
+      profiles: [
+        {
+          name: 'Staff',
+          type: 'Users_Permissions',
+          properties: [],
+          modules: [grantModule('Visitors', 'create, viewall')],
+          span: Z,
+        },
+      ],
+      workflows: [
+        workflow({
+          name: 'Stamp',
+          form: 'Visitors',
+          event: 'on load',
+          deluge: { text: 'input.Name = "seen";', span: Z },
+        }),
+      ],
+    }),
+  );
+  const server = g.files.find((f) => f.path === 'functions/aio/visitors/on-load.mjs');
+  assert.ok(server, g.files.map((f) => f.path).join('\n'));
+  assert.doesNotMatch(server.source, /export const scriptEvents/);
+  const client = g.files.find((f) => f.path === 'client/handlers/visitors/on-load.mjs');
+  assert.ok(client);
+  assert.match(client.source, /shim\.client\.run\(ctx\)/);
+  assert.match(client.source, /ctx\.runPath = "\/forms\/Visitors\/load"/);
+  assert.doesNotMatch(client.source, /runEvent/);
+  check(server.source, 'single-run.mjs');
+  const mod = (await loadModule(server.source, 'single-run.mjs')) as unknown as {
+    default: (req: unknown, res: unknown) => unknown;
+  };
+  const caller = { user: { profile: 'Staff', loginUser: 's@t' } };
+  assert.equal((await invoke(mod.default, { body: { record: {} } })).status, 401);
+  const ok = await invoke(mod.default, { ...caller, body: { record: {} } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  const sets = (((ok.body.transcript as { op: string; path?: string[] }[]) ?? []).filter((e) => e.op === 'input.set').map((e) => (e.path ?? []).join('.')));
+  assert.deepEqual(sets, ['Name']);
+  const entry = g.coverage.find((c) => c.name === 'Stamp');
+  assert.equal(entry?.serverInvoked, true);
+  assert.equal(g.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED), false);
 });
 
 test('a merged client run without client.run blocks instead of skipping', async () => {

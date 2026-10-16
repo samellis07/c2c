@@ -16,11 +16,10 @@ App: Kitchen_Sink_Studio
 
 ## TODO counts
 
-1
+0
 
-- 1 form-event-server-uninvoked
+- none
 
 ## Manual steps
 
-- 1 warning converter-gap
 - 1 warning pivot-analytics
