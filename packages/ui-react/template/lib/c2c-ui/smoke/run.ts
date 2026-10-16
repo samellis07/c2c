@@ -6,7 +6,7 @@
  * tokens or record values — and cleanup deletes only rows that carry this
  * run's marker (the server re-checks the tag before deleting).
  */
-import { apiCall, LOOPBACK_HOSTS, type ApiResponse, type AppWindow } from '../runtime/api';
+import { AUTH_STALL_MESSAGE, apiCall, authExchangePending, authStalled, clearAuthStall, isAuthTimeout, LOOPBACK_HOSTS, type ApiResponse, type AppWindow } from '../runtime/api';
 
 /** The embedded plan steps, as smoke.ts's planSmoke writes them into c2c-config.js. */
 export interface SmokeFieldPlan {
@@ -243,6 +243,11 @@ export async function runSmokePlan(model: SmokeModel, plan: readonly SmokeStep[]
 
   for (const step of plan ?? []) {
     const label = step?.label || 'step';
+    if (authStalled(view)) {
+      failed = true;
+      push(label, AUTH_STALL_MESSAGE, false);
+      break;
+    }
     try {
       switch (step?.kind) {
         case 'session':
@@ -518,6 +523,11 @@ export async function runSmokePlan(model: SmokeModel, plan: readonly SmokeStep[]
           push(label, 'unknown step');
       }
     } catch (err) {
+      if (authStalled(view) || isAuthTimeout(err)) {
+        failed = true;
+        push(label, AUTH_STALL_MESSAGE, false);
+        break;
+      }
       failed = true;
       push(label, `failed — ${(err as Error)?.message || 'error'}`, false);
     }
@@ -702,63 +712,114 @@ export function mountSmoke(section: Element, model: SmokeModel, view: AppWindow)
   }
   // The access check must always settle: a dropped connection or an auth
   // SDK call that never resolves must not leave the page on "Checking
-  // access…" forever — report the stall instead.
+  // access…" or "Running the smoke contract…" forever.
   const statusWait = typeof view.C2C_SMOKE_STATUS_TIMEOUT_MS === 'number' ? view.C2C_SMOKE_STATUS_TIMEOUT_MS : 30000;
-  void Promise.race([
-    apiCall(view, '/admin/smoke', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ op: 'status' }),
-    }),
-    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('smoke status timeout')), statusWait)),
-  ])
-    .then(async (res) => {
-      // Authorization is the documented status shape — { ok: true, dryRun,
-      // mode, forms } — never a bare 2xx: a sign-in page or any HTML answer
-      // is 200 and is not authorization.
-      const status = res.status === 200 ? await readJson(res) : null;
-      const granted = status !== null && status.ok === true && typeof status.mode === 'string' && Number.isInteger(status.forms);
-      if (!granted) {
-        if (res.status === 403) {
-          setState('denied', 'The smoke service denied this sign-in — it needs an Administrator profile.');
-        } else {
-          setState('not-signed-in', `Not signed in or the smoke service did not answer its status shape (status ${res.status || '?'}). Sign in as an app administrator.`);
+  let active = false;
+  const showAuthFailure = () => {
+    setState('failed', AUTH_STALL_MESSAGE);
+    let button = section.querySelector('[data-smoke-retry]');
+    if (!button && doc) {
+      button = doc.createElement('button');
+      button.setAttribute('type', 'button');
+      button.setAttribute('data-smoke-retry', '');
+      button.textContent = 'Retry';
+      const anchor = section.querySelector('[data-smoke-state]');
+      if (anchor) anchor.insertAdjacentElement('afterend', button);
+      else section.appendChild(button);
+    }
+    if (!button) return;
+    (button as HTMLButtonElement).hidden = false;
+    (button as HTMLButtonElement).disabled = false;
+    (button as HTMLButtonElement).onclick = () => {
+      clearAuthStall(view);
+      (button as HTMLButtonElement).disabled = true;
+      run();
+    };
+  };
+  const run = () => {
+    if (active) return;
+    active = true;
+    const previous = section.querySelector('[data-smoke-retry]');
+    if (previous) (previous as HTMLElement).hidden = true;
+    setState('pending', 'Checking access…');
+    let statusTimer: ReturnType<typeof setTimeout> | undefined;
+    const statusDeadline = new Promise<never>((_resolve, reject) => {
+      statusTimer = setTimeout(() => reject(new Error('smoke status timeout')), statusWait);
+    });
+    statusDeadline.catch(() => {});
+    void Promise.race([
+      apiCall(view, '/admin/smoke', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ op: 'status' }),
+      }),
+      statusDeadline,
+    ])
+      .then(async (res) => {
+        if (authStalled(view)) {
+          showAuthFailure();
+          return;
         }
-        return;
-      }
-      setState('running', 'Running the smoke contract…');
-      const result = await runSmokePlan(model, plan as SmokeStep[], view);
-      if (tbody && doc) {
-        for (const line of result.lines) {
-          const tr = doc.createElement('tr');
-          const td = doc.createElement('td');
-          td.textContent = line;
-          tr.appendChild(td);
-          tbody.appendChild(tr);
+        // Authorization is the documented status shape — { ok: true, dryRun,
+        // mode, forms } — never a bare 2xx: a sign-in page or any HTML answer
+        // is 200 and is not authorization.
+        const status = res.status === 200 ? await readJson(res) : null;
+        const granted = status !== null && status.ok === true && typeof status.mode === 'string' && Number.isInteger(status.forms);
+        if (!granted) {
+          if (res.status === 403) {
+            setState('denied', 'The smoke service denied this sign-in — it needs an Administrator profile.');
+          } else {
+            setState('not-signed-in', `Not signed in or the smoke service did not answer its status shape (status ${res.status || '?'}). Sign in as an app administrator.`);
+          }
+          return;
         }
-        if (table) table.hidden = false;
-      }
-      const codeBox = section.querySelector('[data-smoke-code]');
-      const codeEl = section.querySelector('#c2c-smoke-code');
-      if (result.code && codeBox && codeEl) {
-        codeEl.textContent = result.code;
-        (codeBox as HTMLElement).hidden = false;
-        wireSmokeCopy(section, view);
-      }
-      if (pre) {
-        pre.textContent = JSON.stringify(result.json, null, 2);
-        (pre as HTMLElement).hidden = false;
-        const copy = section.querySelector('[data-smoke-copy]');
-        if (copy) (copy as HTMLElement).hidden = false;
-      }
-      setState(result.ok ? 'done' : 'failed', result.ok ? 'Done — every check passed.' : 'Failed — see the steps below.');
-    })
-    .catch((err) =>
-      setState(
-        'failed',
-        err instanceof Error && err.message === 'smoke status timeout'
-          ? 'Timed out checking access — the smoke service or sign-in did not answer. Reload to retry.'
-          : 'The smoke run failed to finish.',
-      ),
-    );
+        setState('running', 'Running the smoke contract…');
+        const result = await runSmokePlan(model, plan as SmokeStep[], view);
+        if (authStalled(view)) {
+          showAuthFailure();
+          return;
+        }
+        if (tbody && doc) {
+          for (const line of result.lines) {
+            const tr = doc.createElement('tr');
+            const td = doc.createElement('td');
+            td.textContent = line;
+            tr.appendChild(td);
+            tbody.appendChild(tr);
+          }
+          if (table) table.hidden = false;
+        }
+        const codeBox = section.querySelector('[data-smoke-code]');
+        const codeEl = section.querySelector('#c2c-smoke-code');
+        if (result.code && codeBox && codeEl) {
+          codeEl.textContent = result.code;
+          (codeBox as HTMLElement).hidden = false;
+          wireSmokeCopy(section, view);
+        }
+        if (pre) {
+          pre.textContent = JSON.stringify(result.json, null, 2);
+          (pre as HTMLElement).hidden = false;
+          const copy = section.querySelector('[data-smoke-copy]');
+          if (copy) (copy as HTMLElement).hidden = false;
+        }
+        setState(result.ok ? 'done' : 'failed', result.ok ? 'Done — every check passed.' : 'Failed — see the steps below.');
+      })
+      .catch((err: unknown) => {
+        if (authStalled(view) || isAuthTimeout(err) || (err instanceof Error && err.message === 'smoke status timeout' && authExchangePending(view))) {
+          showAuthFailure();
+          return;
+        }
+        setState(
+          'failed',
+          err instanceof Error && err.message === 'smoke status timeout'
+            ? 'Timed out checking access — the smoke service or sign-in did not answer. Reload to retry.'
+            : 'The smoke run failed to finish.',
+        );
+      })
+      .finally(() => {
+        active = false;
+        if (statusTimer !== undefined) clearTimeout(statusTimer);
+      });
+  };
+  run();
 }

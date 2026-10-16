@@ -3610,6 +3610,178 @@ export function bridgeSignOut(viewRef) {
   }
 }
 
+/**
+ * Shown when a current-user or token call never answers. Step 3 is the
+ * customer's "Sign in once" setup step (packages/deploy/src/customer-steps.ts).
+ */
+const AUTH_STALL_MESSAGE =
+  'Sign-in did not complete. Reload the page; if it keeps happening, the app administrator must finish setup step 3, "Sign in once: sign in to the deployed app once".';
+/** Default bound on auth/current-user/token calls. C2C_AUTH_TIMEOUT_MS overrides it, capped at 15s. */
+const AUTH_TIMEOUT_DEFAULT_MS = 10000;
+const AUTH_TIMEOUT_CAP_MS = 15000;
+/** Slate serves no /baas: these exchanges stay pending forever unless aborted. */
+const AUTH_EXCHANGE = /\/project-user\/(?:current|token)(?:[/?#]|$)|\/authentication\/(?:token|current)(?:[/?#]|$)/i;
+
+const authInflight = new WeakMap();
+const authStallFlag = new WeakMap();
+const wrappedAuthFetches = new WeakSet();
+
+function authTimeoutMs(scope) {
+  const configured = scope && typeof scope.C2C_AUTH_TIMEOUT_MS === 'number' && Number.isFinite(scope.C2C_AUTH_TIMEOUT_MS) && scope.C2C_AUTH_TIMEOUT_MS >= 0
+    ? scope.C2C_AUTH_TIMEOUT_MS
+    : AUTH_TIMEOUT_DEFAULT_MS;
+  return Math.min(configured, AUTH_TIMEOUT_CAP_MS);
+}
+
+function authTimeoutError() {
+  const error = new Error(AUTH_STALL_MESSAGE);
+  error.name = 'AuthTimeoutError';
+  return error;
+}
+
+function isAuthTimeout(error) {
+  return !!(error && (error.name === 'AuthTimeoutError' || (error.message && error.message === AUTH_STALL_MESSAGE)));
+}
+
+function authInflightCount(scope) {
+  return scope ? authInflight.get(scope) || 0 : 0;
+}
+
+function markAuthStall(scope) {
+  if (scope) authStallFlag.set(scope, true);
+}
+
+function clearAuthStall(scope) {
+  if (scope) authStallFlag.delete(scope);
+}
+
+function authStalled(scope) {
+  return !!(scope && authStallFlag.get(scope) === true);
+}
+
+/** A minified SDK throw is a single letter (live console: "t"). Log a sentence instead. */
+function logAuthFailure(scope, error, what) {
+  const raw = error && typeof error === 'object' && typeof error.message === 'string' ? error.message : error == null ? '' : String(error);
+  const detail = !raw || raw.length <= 1 ? `${what} did not answer` : raw;
+  const line = detail === AUTH_STALL_MESSAGE ? AUTH_STALL_MESSAGE : `Sign-in did not complete: ${detail}`;
+  const sink = (scope && scope.console) || (typeof console !== 'undefined' ? console : null);
+  if (sink && typeof sink.error === 'function') sink.error(line);
+}
+
+function timerFns(scope) {
+  return {
+    set: (scope && scope.setTimeout) || setTimeout,
+    clear: (scope && scope.clearTimeout) || clearTimeout,
+  };
+}
+
+/** Race `work` against the auth budget and abort `controller` when the budget expires. */
+function withAuthDeadline(scope, work, controller) {
+  const ms = authTimeoutMs(scope);
+  const timers = timerFns(scope);
+  let timer = 0;
+  let settled = false;
+  const timeout = new Promise((_, reject) => {
+    timer = timers.set(() => {
+      if (settled) return;
+      try {
+        if (controller) controller.abort();
+      } catch {
+        /* already aborted */
+      }
+      reject(authTimeoutError());
+    }, ms);
+  });
+  const task = Promise.resolve().then(work);
+  task.catch(() => {});
+  timeout.catch(() => {});
+  return Promise.race([task, timeout]).finally(() => {
+    settled = true;
+    timers.clear(timer);
+  });
+}
+
+function requestUrl(input) {
+  if (typeof input === 'string') return input;
+  if (input && typeof input.url === 'string') return input.url;
+  return '';
+}
+
+/**
+ * Abort current-user and token fetches that never answer. Other requests,
+ * including a 401 from a live auth host, are left alone.
+ */
+function bindAuthFetch(scope) {
+  const view = scope || globalThis;
+  const current = view && view.fetch;
+  if (typeof current !== 'function' || wrappedAuthFetches.has(current)) return;
+  const native = current;
+  const wrapped = function authBoundFetch(input, init) {
+    const url = requestUrl(input);
+    if (!AUTH_EXCHANGE.test(url)) return native.call(view, input, init);
+    const controller = new AbortController();
+    const outer = init && init.signal;
+    if (outer && typeof outer.aborted === 'boolean') {
+      if (outer.aborted) controller.abort();
+      else if (typeof outer.addEventListener === 'function') outer.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+    const nextInit = { ...(init || {}), signal: controller.signal };
+    authInflight.set(view, authInflightCount(view) + 1);
+    const timers = timerFns(view);
+    let timer = 0;
+    let timedOut = false;
+    const timeout = new Promise((_, reject) => {
+      timer = timers.set(() => {
+        timedOut = true;
+        try {
+          controller.abort();
+        } catch {
+          /* already aborted */
+        }
+        reject(authTimeoutError());
+      }, authTimeoutMs(view));
+    });
+    const task = Promise.resolve().then(() => native.call(view, input, nextInit));
+    task.catch(() => {});
+    timeout.catch(() => {});
+    return Promise.race([task, timeout])
+      .catch((error) => {
+        markAuthStall(view);
+        logAuthFailure(view, timedOut ? authTimeoutError() : error, 'the current-user call');
+        throw timedOut || isAuthTimeout(error) ? authTimeoutError() : error;
+      })
+      .finally(() => {
+        timers.clear(timer);
+        authInflight.set(view, Math.max(0, authInflightCount(view) - 1));
+      });
+  };
+  wrappedAuthFetches.add(wrapped);
+  try {
+    view.fetch = wrapped;
+  } catch {
+    /* fetch is sealed; the SDK-call deadline still applies */
+  }
+}
+
+function watchAuthCall(scope, run) {
+  bindAuthFetch(scope);
+  const controller = new AbortController();
+  return withAuthDeadline(scope, run, controller).catch((error) => {
+    const fetchStall = authStalled(scope) || authInflightCount(scope) > 0;
+    const minified = !!(error && typeof error.message === 'string' && error.message.length === 1);
+    if (fetchStall || minified) {
+      markAuthStall(scope);
+      logAuthFailure(scope, error, 'the current-user call');
+      throw authTimeoutError();
+    }
+    if (isAuthTimeout(error)) {
+      logAuthFailure(scope, error, 'the current-user call');
+      throw error;
+    }
+    throw error;
+  });
+}
+
 async function authToken(viewRef) {
   const scope = viewRef || globalThis;
   intakeBridgeFragment(scope);
@@ -3617,23 +3789,18 @@ async function authToken(viewRef) {
   const auth = scope && scope.catalyst && scope.catalyst.auth;
   if (!auth || typeof auth.generateAuthToken !== 'function') return '';
   // The SDK token chain is best-effort: on a host where the SDK's auth
-  // endpoints are not served (e.g. a Slate domain, where the BaaS routes the
-  // SDK calls root-relative answer 404), generateAuthToken can stay pending
-  // forever — and awaiting it would hang every API call. Bound the wait and
-  // send the call without a token instead; the server still refuses or
-  // accepts on the session cookie.
-  const timer = (scope && scope.setTimeout) || setTimeout;
-  const wait = typeof scope.C2C_AUTH_TIMEOUT_MS === 'number' ? scope.C2C_AUTH_TIMEOUT_MS : 5000;
+  // endpoints are not served (a Slate domain, where /baas stays pending),
+  // generateAuthToken can hang every API call. Bound the wait. A current-user
+  // fetch that does not settle is remembered so sign-in and the smoke page
+  // can stop; a hanging SDK method that never called the network still lets
+  // the request go out without a token.
   try {
-    const token = await Promise.race([
-      (async () => {
-        // generateAuthToken needs a session; isUserAuthenticated fails fast without one.
-        if (typeof auth.isUserAuthenticated === 'function') await auth.isUserAuthenticated();
-        const result = await auth.generateAuthToken();
-        return result && result.access_token;
-      })(),
-      new Promise((resolve) => timer(() => resolve(''), wait)),
-    ]);
+    const token = await watchAuthCall(scope, async () => {
+      // generateAuthToken needs a session; isUserAuthenticated fails fast without one.
+      if (typeof auth.isUserAuthenticated === 'function') await auth.isUserAuthenticated();
+      const result = await auth.generateAuthToken();
+      return result && result.access_token;
+    });
     return typeof token === 'string' ? token : '';
   } catch {
     return '';
@@ -4637,6 +4804,11 @@ export async function runSmokePlan(appModel, plan, view) {
 
   for (const step of plan || []) {
     const label = (step && step.label) || 'step';
+    if (authStalled(view)) {
+      failed = true;
+      push(label, AUTH_STALL_MESSAGE, false);
+      break;
+    }
     try {
       switch (step && step.kind) {
         case 'session':
@@ -4927,6 +5099,11 @@ export async function runSmokePlan(appModel, plan, view) {
           push(label, 'unknown step');
       }
     } catch (err) {
+      if (authStalled(view) || isAuthTimeout(err)) {
+        failed = true;
+        push(label, AUTH_STALL_MESSAGE, false);
+        break;
+      }
       failed = true;
       push(label, `failed — ${(err && err.message) || 'error'}`, false);
     }
@@ -5093,71 +5270,124 @@ function mountSmoke(appModel, main, view) {
   }
   // The access check must always settle: a dropped connection or an auth
   // SDK call that never resolves must not leave the page on "Checking
-  // access…" forever — report the stall instead.
+  // access…" or "Running the smoke contract…" forever.
   const timer = (view && view.setTimeout) || setTimeout;
+  const clearTimer = (view && view.clearTimeout) || clearTimeout;
   const statusWait = typeof (view && view.C2C_SMOKE_STATUS_TIMEOUT_MS) === 'number' ? view.C2C_SMOKE_STATUS_TIMEOUT_MS : 30000;
-  Promise.race([
-    apiCall(call, view, '/admin/smoke', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ op: 'status' }),
-    }),
-    new Promise((resolve, reject) => timer(() => reject(new Error('smoke status timeout')), statusWait)),
-  ])
-    .then(async (res) => {
-      // Authorization is the documented status shape — { ok: true, dryRun,
-      // mode, forms } — never a bare 2xx: a sign-in page or any HTML answer
-      // is 200 and is not authorization.
-      const status = res && res.status === 200 ? await readJson(res) : null;
-      const granted =
-        status !== null &&
-        typeof status === 'object' &&
-        status.ok === true &&
-        typeof status.mode === 'string' &&
-        Number.isInteger(status.forms);
-      if (!granted) {
-        if (res && res.status === 403) {
-          setState('denied', 'The smoke service denied this sign-in — it needs an Administrator profile.');
-        } else {
-          setState('not-signed-in', `Not signed in or the smoke service did not answer its status shape (status ${(res && res.status) || '?'}). Sign in as an app administrator.`);
+  let active = false;
+  const showAuthFailure = () => {
+    setState('failed', AUTH_STALL_MESSAGE);
+    let button = section.querySelector('[data-smoke-retry]');
+    if (!button && doc) {
+      button = doc.createElement('button');
+      button.type = 'button';
+      button.setAttribute('data-smoke-retry', '');
+      button.textContent = 'Retry';
+      const anchor = section.querySelector('[data-smoke-state]');
+      if (anchor && anchor.insertAdjacentElement) anchor.insertAdjacentElement('afterend', button);
+      else section.appendChild(button);
+    }
+    if (!button) return;
+    button.hidden = false;
+    button.disabled = false;
+    button.onclick = () => {
+      clearAuthStall(view);
+      button.disabled = true;
+      run();
+    };
+  };
+  const run = () => {
+    if (active) return;
+    active = true;
+    const previous = section.querySelector('[data-smoke-retry]');
+    if (previous) previous.hidden = true;
+    setState('pending', 'Checking access…');
+    let statusTimer = 0;
+    const statusDeadline = new Promise((resolve, reject) => {
+      statusTimer = timer(() => reject(new Error('smoke status timeout')), statusWait);
+    });
+    statusDeadline.catch(() => {});
+    Promise.race([
+      apiCall(call, view, '/admin/smoke', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ op: 'status' }),
+      }),
+      statusDeadline,
+    ])
+      .then(async (res) => {
+        if (authStalled(view)) {
+          showAuthFailure();
+          return;
         }
-        return;
-      }
-      setState('running', 'Running the smoke contract…');
-      const result = await runSmokePlan(appModel, plan, view);
-      if (tbody && doc) {
-        for (const line of result.lines) {
-          const tr = doc.createElement('tr');
-          const td = doc.createElement('td');
-          td.textContent = line;
-          tr.appendChild(td);
-          tbody.appendChild(tr);
+        // Authorization is the documented status shape — { ok: true, dryRun,
+        // mode, forms } — never a bare 2xx: a sign-in page or any HTML answer
+        // is 200 and is not authorization.
+        const status = res && res.status === 200 ? await readJson(res) : null;
+        const granted =
+          status !== null &&
+          typeof status === 'object' &&
+          status.ok === true &&
+          typeof status.mode === 'string' &&
+          Number.isInteger(status.forms);
+        if (!granted) {
+          if (res && res.status === 403) {
+            setState('denied', 'The smoke service denied this sign-in — it needs an Administrator profile.');
+          } else {
+            setState('not-signed-in', `Not signed in or the smoke service did not answer its status shape (status ${(res && res.status) || '?'}). Sign in as an app administrator.`);
+          }
+          return;
         }
-        if (table) table.hidden = false;
-      }
-      const codeBox = section.querySelector('[data-smoke-code]');
-      const codeEl = section.querySelector('#c2c-smoke-code');
-      if (result.code && codeBox && codeEl) {
-        codeEl.textContent = result.code;
-        codeBox.hidden = false;
-        wireSmokeCopy(section, view);
-      }
-      if (pre) {
-        pre.textContent = JSON.stringify(result.json, null, 2);
-        pre.hidden = false;
-        const copy = section.querySelector('[data-smoke-copy]');
-        if (copy) copy.hidden = false;
-      }
-      setState(result.ok ? 'done' : 'failed', result.ok ? 'Done — every check passed.' : 'Failed — see the steps below.');
-    })
-    .catch((err) =>
-      setState(
-        'failed',
-        err && err.message === 'smoke status timeout'
-          ? 'Timed out checking access — the smoke service or sign-in did not answer. Reload to retry.'
-          : 'The smoke run failed to finish.',
-      ),
-    );
+        setState('running', 'Running the smoke contract…');
+        const result = await runSmokePlan(appModel, plan, view);
+        if (authStalled(view)) {
+          showAuthFailure();
+          return;
+        }
+        if (tbody && doc) {
+          for (const line of result.lines) {
+            const tr = doc.createElement('tr');
+            const td = doc.createElement('td');
+            td.textContent = line;
+            tr.appendChild(td);
+            tbody.appendChild(tr);
+          }
+          if (table) table.hidden = false;
+        }
+        const codeBox = section.querySelector('[data-smoke-code]');
+        const codeEl = section.querySelector('#c2c-smoke-code');
+        if (result.code && codeBox && codeEl) {
+          codeEl.textContent = result.code;
+          codeBox.hidden = false;
+          wireSmokeCopy(section, view);
+        }
+        if (pre) {
+          pre.textContent = JSON.stringify(result.json, null, 2);
+          pre.hidden = false;
+          const copy = section.querySelector('[data-smoke-copy]');
+          if (copy) copy.hidden = false;
+        }
+        setState(result.ok ? 'done' : 'failed', result.ok ? 'Done — every check passed.' : 'Failed — see the steps below.');
+      })
+      .catch((err) => {
+        if (authStalled(view) || isAuthTimeout(err) || (err && err.message === 'smoke status timeout' && authInflightCount(view) > 0)) {
+          if (authInflightCount(view) > 0) markAuthStall(view);
+          showAuthFailure();
+          return;
+        }
+        setState(
+          'failed',
+          err && err.message === 'smoke status timeout'
+            ? 'Timed out checking access — the smoke service or sign-in did not answer. Reload to retry.'
+            : 'The smoke run failed to finish.',
+        );
+      })
+      .finally(() => {
+        active = false;
+        clearTimer(statusTimer);
+      });
+  };
+  run();
 }
 
 export function boot(appModel, doc) {
@@ -5231,42 +5461,75 @@ export function boot(appModel, doc) {
         return '/';
       }
     })();
-    Promise.resolve()
-      .then(() => auth.isUserAuthenticated())
-      .catch(() => {
-        if (typeof auth.signIn !== 'function') return;
-        login.hidden = false;
-        // A visible signed-out state — not the empty, silent page a bare frame gives.
-        note('data-sign-in', 'Sign in to continue.');
-        try {
-          auth.signIn('c2c-login', { service_url: serviceUrl });
-        } catch {
-          // The frame check below reports the box that never appeared.
+    const showSignedOut = () => {
+      if (typeof auth.signIn !== 'function') return;
+      login.hidden = false;
+      // A visible signed-out state — not the empty, silent page a bare frame gives.
+      note('data-sign-in', 'Sign in to continue.');
+      try {
+        auth.signIn('c2c-login', { service_url: serviceUrl });
+      } catch {
+        // The frame check below reports the box that never appeared.
+      }
+      // The SDK mounts an <iframe> into the box; a frame the browser refuses
+      // still mounts one (it renders blank), so the standing hint covers that
+      // case and the hard failure is the frame that never appears.
+      const waitMs = typeof view.C2C_LOGIN_WAIT_MS === 'number' ? view.C2C_LOGIN_WAIT_MS : 3000;
+      const timer = view.setTimeout || setTimeout;
+      timer(() => {
+        if (login.querySelector('iframe')) {
+          note(
+            'data-sign-in-hint',
+            'If the sign-in box stays blank, iFrame is off for this host — the app administrator can enable it under Authentication > Whitelisting > this host > Edit > iFrame on, then reload.',
+          );
+        } else {
+          note(
+            'data-sign-in-error',
+            'The sign-in box could not load — check the network and that iFrame is on for this host (Authentication > Whitelisting > this host > Edit > iFrame on), then reload.',
+          );
+          // Hosted login still reaches the user without the embedded frame.
+          const link = documentRef.createElement('a');
+          link.setAttribute('href', `/__catalyst/auth/login?service_url=${encodeURIComponent(view.location ? view.location.href : '/')}`);
+          link.textContent = 'Sign in';
+          login.appendChild(link);
         }
-        // The SDK mounts an <iframe> into the box; a frame the browser refuses
-        // still mounts one (it renders blank), so the standing hint covers that
-        // case and the hard failure is the frame that never appears.
-        const waitMs = typeof view.C2C_LOGIN_WAIT_MS === 'number' ? view.C2C_LOGIN_WAIT_MS : 3000;
-        const timer = view.setTimeout || setTimeout;
-        timer(() => {
-          if (login.querySelector('iframe')) {
-            note(
-              'data-sign-in-hint',
-              'If the sign-in box stays blank, iFrame is off for this host — the app administrator can enable it under Authentication > Whitelisting > this host > Edit > iFrame on, then reload.',
-            );
-          } else {
-            note(
-              'data-sign-in-error',
-              'The sign-in box could not load — check the network and that iFrame is on for this host (Authentication > Whitelisting > this host > Edit > iFrame on), then reload.',
-            );
-            // Hosted login still reaches the user without the embedded frame.
-            const link = documentRef.createElement('a');
-            link.setAttribute('href', `/__catalyst/auth/login?service_url=${encodeURIComponent(view.location ? view.location.href : '/')}`);
-            link.textContent = 'Sign in';
-            login.appendChild(link);
+      }, waitMs);
+    };
+    const showStall = () => {
+      login.hidden = false;
+      note('data-sign-in-error', AUTH_STALL_MESSAGE);
+      const line = login.querySelector('[data-sign-in-error]');
+      if (line) line.setAttribute('role', 'alert');
+      let button = login.querySelector('[data-sign-in-retry]');
+      if (!button) {
+        button = documentRef.createElement('button');
+        button.type = 'button';
+        button.setAttribute('data-sign-in-retry', '');
+        button.textContent = 'Retry';
+        button.addEventListener('click', () => {
+          clearAuthStall(view);
+          run();
+        });
+        login.appendChild(button);
+      }
+      button.disabled = false;
+    };
+    const run = () => {
+      const pending = login.querySelector('[data-sign-in-retry]');
+      if (pending) pending.disabled = true;
+      watchAuthCall(view, () => auth.isUserAuthenticated())
+        .then(() => {
+          login.hidden = true;
+        })
+        .catch((error) => {
+          if (isAuthTimeout(error) || authStalled(view)) {
+            showStall();
+            return;
           }
-        }, waitMs);
-      });
+          showSignedOut();
+        });
+    };
+    run();
   }
   if (nav) nav.innerHTML = renderNav(appModel);
   const tabbar = documentRef.getElementById('tabbar');

@@ -22,7 +22,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { Alert } from '../arc/components/alert/alert';
 import { Button } from '../arc/components/button/button';
 import type { FieldSpec, FormRecord, FormSpec, RecordValue } from '../types';
-import { SESSION_EXPIRED_EVENT, pageHash, type AppWindow } from '../runtime/api';
+import { SESSION_EXPIRED_EVENT, pageHash, watchAuthCall, type AppWindow } from '../runtime/api';
 import { useEnv } from '../runtime/env';
 import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
 import { Slot, useCustomization } from '../runtime/extend';
@@ -77,12 +77,13 @@ async function draftUserId(view: AppWindow): Promise<string> {
   const auth = view.catalyst?.auth;
   if (!auth) return '';
   try {
-    const detail =
+    const detail = await watchAuthCall(view, () =>
       typeof auth.getCurrentUser === 'function'
-        ? await auth.getCurrentUser()
+        ? auth.getCurrentUser()
         : typeof auth.isUserAuthenticated === 'function'
-          ? await auth.isUserAuthenticated()
-          : null;
+          ? auth.isUserAuthenticated()
+          : Promise.resolve(null),
+    );
     const boxed = detail && typeof detail === 'object' ? (detail as Record<string, unknown>) : null;
     const user = boxed && typeof boxed.content === 'object' ? boxed.content : typeof boxed?.user === 'object' ? boxed.user : boxed;
     const id = user && typeof user === 'object' ? (user as Record<string, unknown>) : null;

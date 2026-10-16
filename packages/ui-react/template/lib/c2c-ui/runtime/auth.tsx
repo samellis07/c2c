@@ -12,7 +12,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../arc/components/button/button';
-import { bridgeRedirect, goToSignIn, hasBridgeToken, SESSION_EXPIRED_EVENT, type SessionExpiredDetail } from './api';
+import { AUTH_STALL_MESSAGE, authStalled, bridgeRedirect, clearAuthStall, goToSignIn, hasBridgeToken, isAuthTimeout, SESSION_EXPIRED_EVENT, watchAuthCall, type SessionExpiredDetail } from './api';
 import { useEnv } from './env';
 
 /**
@@ -44,7 +44,7 @@ export function serviceUrl(location: Location): string {
   }
 }
 
-type AuthState = 'none' | 'checking' | 'signed-in' | 'signed-out';
+type AuthState = 'none' | 'checking' | 'signed-in' | 'signed-out' | 'stalled';
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const { view } = useEnv();
@@ -68,16 +68,22 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, [bridging, state, view]);
 
   useEffect(() => {
-    if (state !== 'checking' || !auth?.isUserAuthenticated) return;
+    // Bridge mode has no Web SDK on this origin — calling it would open
+    // project-user/current against a host that never answers.
+    if (bridging || state !== 'checking' || !auth?.isUserAuthenticated) return;
     let live = true;
-    auth.isUserAuthenticated().then(
+    const check = auth.isUserAuthenticated.bind(auth);
+    watchAuthCall(view, () => check()).then(
       () => live && setState('signed-in'),
-      () => live && setState('signed-out'),
+      (error: unknown) => {
+        if (!live) return;
+        setState(isAuthTimeout(error) || authStalled(view) ? 'stalled' : 'signed-out');
+      },
     );
     return () => {
       live = false;
     };
-  }, [auth, state]);
+  }, [auth, bridging, state, view]);
 
   useEffect(() => {
     if (state !== 'signed-out' || typeof auth?.signIn !== 'function') return;
@@ -95,6 +101,24 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (state === 'none' || state === 'signed-in') return <>{children}</>;
   if (state === 'checking') return <p className="c2c-auth-status" role="status">Checking your sign-in…</p>;
+  if (state === 'stalled') {
+    return (
+      <section className="c2c-login-card" aria-labelledby="c2c-login-title">
+        <h1 id="c2c-login-title">Sign-in did not complete</h1>
+        <p role="alert">{AUTH_STALL_MESSAGE}</p>
+        <Button
+          type="button"
+          variant="primary"
+          onClick={() => {
+            clearAuthStall(view);
+            setState('checking');
+          }}
+        >
+          Retry
+        </Button>
+      </section>
+    );
+  }
   if (bridging) {
     // The automatic trip was refused by the loop guard (the tab already came
     // back once without a token). The button is a deliberate second try.
