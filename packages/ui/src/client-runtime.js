@@ -741,6 +741,22 @@ function chartPanel(report, heading) {
   return `<section class="card" data-report="${escapeHtml(report.name)}" data-view="chart" data-endpoint="${escapeHtml(report.queryEndpoint || '')}" data-page-size="${report.pageSize || PAGE_SIZE}"><${heading}>${escapeHtml(report.label || report.name)}</${heading}><div class="report-tools" data-chart-tools><button type="button" data-chart-refresh>Refresh</button><button type="button" data-chart-sort>Sort</button></div><div data-state></div><div data-chart></div></section>`;
 }
 
+/**
+ * A custom action button. An action whose endpoint is a dry-run stub
+ * (`preview`) renders turned off: a click would report a run that saved nothing.
+ */
+function actionButtonHtml(report, endpoint, label) {
+  const preview = (report.customActions || []).some((action) => action && action.endpoint === endpoint && action.preview);
+  const off = preview ? ' disabled title="Not available yet: this action is turned off."' : '';
+  return `<button type="button" data-action="${escapeHtml(endpoint)}"${off}>${escapeHtml(label)}</button>`;
+}
+
+/** The note naming the custom actions that are turned off, or ''. */
+export function previewActionsNote(report) {
+  const names = (report.customActions || []).filter((action) => action && action.preview).map((action) => String(action.name).trim());
+  return names.length ? `<p class="todo" data-action-preview>${escapeHtml(`Not available yet, so turned off: ${names.join(', ')}.`)}</p>` : '';
+}
+
 export function renderReport(report) {
   if (report.status === 'todo') {
     // The screen keeps its heading and a neutral line; the reason is a
@@ -766,10 +782,7 @@ export function renderReport(report) {
   // Record-menu and `column header` actions are per-record, not header chrome.
   const actions = (report.customActions || [])
     .filter((action) => action.header === true)
-    .map(
-      (action) =>
-        `<button type="button" data-action="${escapeHtml(action.endpoint)}">${escapeHtml(action.name)}</button>`,
-    )
+    .map((action) => actionButtonHtml(report, action.endpoint, action.name))
     .join('');
   const filters = (report.filters || [])
     .map((filter) => {
@@ -793,7 +806,7 @@ export function renderReport(report) {
     : '';
   // Toolbar, grid, and pagination start hidden: the export's default controls
   // appear only after a successful non-empty load (see setReportChrome).
-  return `<section class="card" data-report="${escapeHtml(report.name)}" data-view="${escapeHtml(report.view)}" data-endpoint="${escapeHtml(report.queryEndpoint)}" data-page-size="${report.pageSize || PAGE_SIZE}"${detailAttr}${formAttr}><h1>${escapeHtml(report.label || report.name)}</h1>${viewNote}${bulk}<div class="report-tools" data-report-tools hidden><form data-report-search><input name="q" type="search" aria-label="Search"><button type="submit">Search</button></form>${filterSelect}${actions}</div><div data-state></div><div data-rows hidden>${rowsHtml}</div><nav data-pages aria-label="Report pages" hidden><button type="button" data-prev>Previous</button><span data-page-label>Page 1</span><button type="button" data-next>Next</button></nav></section>`;
+  return `<section class="card" data-report="${escapeHtml(report.name)}" data-view="${escapeHtml(report.view)}" data-endpoint="${escapeHtml(report.queryEndpoint)}" data-page-size="${report.pageSize || PAGE_SIZE}"${detailAttr}${formAttr}><h1>${escapeHtml(report.label || report.name)}</h1>${viewNote}${previewActionsNote(report)}${bulk}<div class="report-tools" data-report-tools hidden><form data-report-search><input name="q" type="search" aria-label="Search"><button type="submit">Search</button></form>${filterSelect}${actions}</div><div data-state></div><div data-rows hidden>${rowsHtml}</div><nav data-pages aria-label="Report pages" hidden><button type="button" data-prev>Previous</button><span data-page-label>Page 1</span><button type="button" data-next>Next</button></nav></section>`;
 }
 
 /** The model this page renders with: the boot argument, else the module import. */
@@ -1723,7 +1736,7 @@ function cardActionsHtml(report, id) {
   const items = actions
     .map((item) => {
       if (item.href) return `<a href="${escapeHtml(item.href)}">${escapeHtml(item.label)}</a>`;
-      if (item.action) return `<button type="button" data-action="${escapeHtml(item.action)}">${escapeHtml(item.label)}</button>`;
+      if (item.action) return actionButtonHtml(report, item.action, item.label);
       return `<button type="button" ${item.op}>${escapeHtml(item.label)}</button>`;
     })
     .join('');
@@ -1754,7 +1767,7 @@ export function renderReportRows(report, rows) {
           const style = css ? ` style="${escapeHtml(css)}"` : '';
           if (column.action) {
             // `column header` custom action: a per-record button, not a value.
-            return `<td${head}${primary}${numeric}${style}><button type="button" data-action="${escapeHtml(column.action)}">${escapeHtml(column.label || column.field)}</button></td>`;
+            return `<td${head}${primary}${numeric}${style}>${actionButtonHtml(report, column.action, column.label || column.field)}</td>`;
           }
           const text = column.multiValue ? multiValueItems(source[column.field]).join(', ') : source[column.field] != null ? String(source[column.field]) : '';
           if (report.detail && id && index === 0) {
@@ -1854,6 +1867,19 @@ export function renderRoute(appModel, route, doc) {
 
 /** Creator's banner after a successful submit when the success handler sets no `success message`. */
 export const DEFAULT_SUCCESS_BANNER = 'Data Added Successfully!';
+/** The banner after a saved edit: the form's `success message` names the add. */
+export const DEFAULT_UPDATE_BANNER = 'Data Updated Successfully!';
+/** Asked before a report row's Delete posts; Cancel sends nothing. */
+export const DELETE_CONFIRM_TEXT = 'Are you sure you want to delete this record?';
+
+/** The banner for a submit the server refused or failed: its own words, else the generic line. */
+export function submitFailureText(body) {
+  const server = body && (typeof body.message === 'string' ? body.message : typeof body.error === 'string' ? body.error : '');
+  // The row is stored; only a step after the write failed. A resubmit would add it twice.
+  // The generic "request failed" adds nothing; a Deluge runtime error's text does.
+  if (body && body.wrote === true) return `The record was saved, but a step after saving failed${server && server.trim() && server.trim() !== 'request failed' ? `: ${server.trim()}` : '.'}`;
+  return server && server.trim() ? server : 'The record was not saved.';
+}
 
 /**
  * Blueprint stage field settings as hide/disable actions for the edit screen:
@@ -5997,7 +6023,9 @@ export function boot(appModel, doc) {
           }
           const form = (appModel.forms || []).find((item) => item.name === report.form);
           const call = view.fetch || globalThis.fetch;
-          if (form && form.deleteEndpoint && typeof call === 'function') {
+          // Creator asks before deleting; Cancel (or no dialog at all) sends nothing.
+          const confirmed = typeof view.confirm === 'function' && view.confirm(DELETE_CONFIRM_TEXT) === true;
+          if (form && form.deleteEndpoint && typeof call === 'function' && confirmed) {
             apiCall(call, view, form.deleteEndpoint, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
@@ -6407,26 +6435,28 @@ export function boot(appModel, doc) {
       const answer = res ? await readJson(res) : {};
       // Every write answers with a dryRun flag; the toast preview sentence follows it.
       // An answer that says wrote true is a stored row even when a step after
-      // the save failed: it gets the success confirmation, never a failure.
-      if (!submitCommitted(res, answer)) {
+      // the save failed: it is committed for idempotency, but the banner names
+      // the failed step, never a clean save.
+      if (answer && answer.wrote === true) submitKey = newSubmitKey();
+      if (!res || !res.ok) {
         let failure = 'The record was not saved.';
         let live = false;
         if (res) {
           const body = answer;
           if (body && body.dryRun === false) live = true;
-          const server = body && (typeof body.message === 'string' ? body.message : typeof body.error === 'string' ? body.error : '');
-          if (server.trim()) failure = server;
+          failure = submitFailureText(body);
         }
         if (banner) banner.textContent = failure;
         if (formDoc) showToast(formDoc, 'failure', submitNotice({ ok: false, dryRun: !live, message: failure }));
         return;
       }
       const answerLive = !!answer && answer.dryRun === false;
-      if (answer && answer.wrote === true) submitKey = newSubmitKey();
       const successNotes = await run('success');
       if (!successNotes.includes('success')) {
-        if (banner) banner.textContent = form.successMessage || DEFAULT_SUCCESS_BANNER;
+        if (banner) banner.textContent = mode === 'edit' ? DEFAULT_UPDATE_BANNER : form.successMessage || DEFAULT_SUCCESS_BANNER;
       }
+      // A saved add clears the form for the next record; the banner stays.
+      if (mode !== 'edit' && answerLive && typeof formEl.reset === 'function') formEl.reset();
       if (answer && Array.isArray(answer.mail)) {
         for (const item of answer.mail) {
           const text = mailNoticeText(item);

@@ -54,27 +54,29 @@ test('committed fixtures carry the deterministic flag', () => {
   const lib = report.apps.find((app) => app.app === 'library-application-system');
   assert.ok(ff && lib);
   assert.equal(ff.deterministic, false);
-  assert.equal(ff.todoCount, 12);
+  assert.equal(ff.todoCount, 13);
   assert.equal(ff.fillLockEntries, 0);
-  assert.equal(ff.uiTodoCount, 1);
+  assert.equal(ff.uiTodoCount, 2);
   assert.equal(
     ff.todoKinds.reduce((sum, kind) => sum + kind.count, 0),
-    12,
+    13,
   );
+  // Each report custom action is a dry-run stub endpoint: one counted UI todo apiece.
   assert.equal(lib.deterministic, false);
-  assert.equal(lib.todoCount, 0);
-  assert.deepEqual(lib.todoKinds, []);
+  assert.equal(lib.todoCount, 6);
+  assert.equal(lib.uiTodoCount, 6);
+  assert.ok(lib.todoKinds.every((kind) => /^Custom action ".+" is not migrated; its button is turned off\.$/.test(kind.construct)), JSON.stringify(lib.todoKinds));
   assert.equal(lib.silentDrops, 21);
   assert.equal(ff.silentDrops, 269);
   assert.equal(report.aggregate.deterministicApps, 0);
   assert.equal(report.aggregate.silentDrops, 290);
-  assert.equal(report.aggregate.todoTotal, 12);
-  // lib has no todos but silent drops: it counts as a no-todo app, not a deterministic one.
-  assert.equal(report.aggregate.noTodoApps, 1);
+  assert.equal(report.aggregate.todoTotal, 19);
+  // Both apps carry residual todos now that lib's stub custom actions are counted.
+  assert.equal(report.aggregate.noTodoApps, 0);
   for (const app of [lib, ff]) assert.equal(app.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), app.silentDrops);
   assert.equal(report.aggregate.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), 290);
   const text = migrationReportAsText(report);
-  assert.match(text, /^apps with no residual todos: 1\/2$/m);
+  assert.match(text, /^apps with no residual todos: 0\/2$/m);
   assert.match(text, /^apps with no residual todos and no silent drops \(deterministic\): 0\/2$/m);
   assert.match(text, /^silent drops \(total\): 290$/m);
 });
