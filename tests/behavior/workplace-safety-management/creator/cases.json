@@ -536,7 +536,12 @@
             "outcome": "saved"
           },
           "tags": [
-            "env-artifact:trial-user-limit"
+            "env-artifact:trial-user-limit",
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
           ]
         }
       ],
@@ -666,7 +671,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -693,7 +705,14 @@
           },
           "expect": {
             "outcome": "refused"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         }
       ],
       "expect": {
@@ -819,7 +838,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -976,7 +1002,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -1033,7 +1066,13 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Employee_Status"
+          ]
         }
       ],
       "expect": {
@@ -1159,7 +1198,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -1210,7 +1256,13 @@
           "bind": {
             "r_employee_declaration_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Employee_Status"
+          ]
         },
         {
           "op": "submit",
@@ -1245,7 +1297,13 @@
           },
           "expect": {
             "outcome": "refused"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Employee_Status"
+          ]
         }
       ],
       "expect": {
@@ -1371,7 +1429,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -1422,7 +1487,13 @@
           "bind": {
             "r_employee_declaration_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Employee_Status"
+          ]
         },
         {
           "op": "update",
@@ -1570,7 +1641,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -1621,7 +1699,13 @@
           "bind": {
             "r_employee_declaration_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Employee_Status"
+          ]
         },
         {
           "op": "update",
@@ -1769,7 +1853,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -1820,7 +1911,13 @@
           "bind": {
             "r_employee_declaration_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Employee_Status"
+          ]
         },
         {
           "op": "update",
@@ -1873,7 +1970,13 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Building"
+          ]
         }
       ],
       "expect": {
@@ -2001,7 +2104,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -2052,7 +2162,13 @@
           "bind": {
             "r_employee_declaration_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Employee_Status"
+          ]
         },
         {
           "op": "update",
@@ -2099,7 +2215,13 @@
           "bind": {
             "r_new_maintenance_task_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Building"
+          ]
         },
         {
           "op": "update",
@@ -2260,7 +2382,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -2311,7 +2440,13 @@
           "bind": {
             "r_employee_declaration_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Employee_Status"
+          ]
         },
         {
           "op": "update",
@@ -2358,7 +2493,13 @@
           "bind": {
             "r_new_maintenance_task_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Building"
+          ]
         },
         {
           "op": "update",
@@ -2530,7 +2671,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -2581,7 +2729,13 @@
           "bind": {
             "r_employee_declaration_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Employee_Status"
+          ]
         },
         {
           "op": "update",
@@ -2628,7 +2782,13 @@
           "bind": {
             "r_new_maintenance_task_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Building"
+          ]
         },
         {
           "op": "update",
@@ -2811,7 +2971,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -2862,7 +3029,13 @@
           "bind": {
             "r_employee_declaration_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Employee_Status"
+          ]
         },
         {
           "op": "update",
@@ -2909,7 +3082,13 @@
           "bind": {
             "r_new_maintenance_task_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Building"
+          ]
         },
         {
           "op": "update",
@@ -2970,7 +3149,13 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Building"
+          ]
         }
       ],
       "expect": {
@@ -3107,7 +3292,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -3158,7 +3350,13 @@
           "bind": {
             "r_employee_declaration_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Employee_Status"
+          ]
         },
         {
           "op": "update",
@@ -3205,7 +3403,13 @@
           "bind": {
             "r_new_maintenance_task_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Building"
+          ]
         },
         {
           "op": "update",
@@ -3260,7 +3464,13 @@
           "bind": {
             "r_new_maintenance_task_boundary_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Building"
+          ]
         },
         {
           "op": "report",
@@ -3397,7 +3607,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -3448,7 +3665,13 @@
           "bind": {
             "r_employee_declaration_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Employee_Status"
+          ]
         },
         {
           "op": "update",
@@ -3495,7 +3718,13 @@
           "bind": {
             "r_new_maintenance_task_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Building"
+          ]
         },
         {
           "op": "update",
@@ -3550,7 +3779,13 @@
           "bind": {
             "r_new_maintenance_task_boundary_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Building"
+          ]
         },
         {
           "op": "report",
@@ -3680,7 +3915,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -3731,7 +3973,13 @@
           "bind": {
             "r_employee_declaration_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Employee_Status"
+          ]
         },
         {
           "op": "update",
@@ -3778,7 +4026,13 @@
           "bind": {
             "r_new_maintenance_task_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Building"
+          ]
         },
         {
           "op": "update",
@@ -3833,7 +4087,13 @@
           "bind": {
             "r_new_maintenance_task_boundary_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Building"
+          ]
         },
         {
           "op": "report",
@@ -3979,7 +4239,14 @@
           "bind": {
             "r_add_employee_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Entered_Office",
+            "Declaration_Notification_Status"
+          ]
         },
         {
           "op": "submit",
@@ -4030,7 +4297,13 @@
           "bind": {
             "r_employee_declaration_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Employee_Status"
+          ]
         },
         {
           "op": "update",
@@ -4077,7 +4350,13 @@
           "bind": {
             "r_new_maintenance_task_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Building"
+          ]
         },
         {
           "op": "update",
@@ -4132,7 +4411,13 @@
           "bind": {
             "r_new_maintenance_task_boundary_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Building"
+          ]
         },
         {
           "op": "report",
