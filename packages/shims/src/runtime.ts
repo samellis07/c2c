@@ -3645,8 +3645,15 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         }
         const entry = thisappEntry(name);
         if (!entry) {
-          note({ op: 'thisapp', path, args, performed: false, dryRun, error: `thisapp.${name}: no such function` });
-          throw new DelugeRuntimeError(`thisapp.${name}: no such function`);
+          // Creator's built-in namespaces (thisapp.permissions.assignUserInProfile,
+          // thisapp.portal.*) manage Creator users and portals; they are not app
+          // functions, and Catalyst users and roles are managed in Authentication.
+          const builtin = path.length > 1 && THISAPP_BUILTINS.has(path[0]!.toLowerCase());
+          const error = builtin
+            ? `thisapp.${name}: Creator built-in not run by c2c; manage the user's role in Catalyst Authentication`
+            : `thisapp.${name}: no such function`;
+          note({ op: 'thisapp', path, args, performed: false, dryRun, error });
+          throw new DelugeRuntimeError(error);
         }
         if (dryRun) {
           note({ op: 'thisapp', path, args, performed: false, dryRun });
@@ -4494,6 +4501,9 @@ function clonePlain(value: unknown): unknown {
 }
 
 /** Catalyst returns every Data Store value as a string. Decimal stays a decimal string. */
+/** Creator's built-in `thisapp.<ns>.*` namespaces: user and portal management, not app functions. */
+const THISAPP_BUILTINS: ReadonlySet<string> = new Set(['permissions', 'portal']);
+
 function stringifyValues(values: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(values)) {
