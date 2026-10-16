@@ -130,7 +130,7 @@ test('on success reads input.ID and the row just inserted', { timeout: 120000 },
   }
 });
 
-test('a throw in on success leaves the inserted row and reports the error', { timeout: 120000 }, async () => {
+test('a throw in on success leaves the inserted row and still shows the success confirmation', { timeout: 120000 }, async () => {
   // info makes a client handler, so Slate posts to the on-success Advanced I/O module.
   const app = adminApp(`\tforms
 \t{
@@ -180,10 +180,13 @@ test('a throw in on success leaves the inserted row and reports the error', { ti
       { op: 'fill', form: 'Echo', field: 'Name', value: 'Ada' },
       { op: 'click' },
     ], 'throw-after-insert');
+    // The Echo row committed: the failure after it is a warning, never a
+    // failed submit the user would retry into a second row.
     const banner = session.doc.querySelector('[data-banner]')?.textContent ?? '';
-    assert.match(banner, /boom insert refused/);
+    assert.doesNotMatch(banner, /boom insert refused|not saved/);
+    assert.match(banner, /Data Added Successfully!/);
     const echo = session.store.rowsOf('Echo').find((row) => row.Name === 'Ada');
-    assert.ok(echo, 'the Echo row was rolled back after on success threw');
+    assert.ok(echo, 'the Echo row stays after on success threw');
     assert.equal(session.store.rowsOf('Boom').length, 0);
   } finally {
     await session.close();

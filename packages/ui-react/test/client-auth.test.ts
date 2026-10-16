@@ -249,6 +249,33 @@ interface Mounted {
   boot: (routes?: Record<string, unknown>) => Promise<void>;
 }
 
+type FrameView = Window & Record<string, unknown>;
+
+/**
+ * One frame clock for the whole file, as a page has. motion-dom binds its
+ * frame loop to the global requestAnimationFrame when it is first imported;
+ * bound to the first test's window, every later frame would run on a closed
+ * window's timer after that test's teardown. Frames go to the mounted view;
+ * one requested between tests waits for the next view.
+ */
+let frameView: FrameView | null = null;
+let waitingFrames: FrameRequestCallback[] = [];
+const frameClock: Record<string, unknown> = {
+  requestAnimationFrame: (callback: FrameRequestCallback): number => {
+    if (frameView) return frameView.requestAnimationFrame(callback);
+    waitingFrames.push(callback);
+    return 0;
+  },
+  cancelAnimationFrame: (handle: number): void => frameView?.cancelAnimationFrame(handle),
+};
+
+function attachFrameClock(view: FrameView): void {
+  frameView = view;
+  const waiting = waitingFrames;
+  waitingFrames = [];
+  for (const callback of waiting) view.requestAnimationFrame(callback);
+}
+
 /**
  * A fresh jsdom document, a fake fetch answering the queued statuses, and the
  * app booted through bootApp with the real FormView/ReportView screens.
@@ -273,19 +300,28 @@ async function mount(t: TestContext, statuses: number[], bodies: Record<number, 
     pretendToBeVisual: true,
     virtualConsole,
   });
-  const view = dom.window as unknown as Window & Record<string, unknown>;
+  const view = dom.window as unknown as FrameView;
   const globals = ['window', 'document', 'navigator', 'HTMLElement', 'Element', 'Node', 'Event', 'MouseEvent', 'KeyboardEvent', 'CustomEvent', 'DocumentFragment', 'SVGElement', 'HTMLInputElement', 'HTMLButtonElement', 'HTMLTableElement', 'getComputedStyle', 'CSS', 'self', 'MutationObserver', 'requestAnimationFrame', 'cancelAnimationFrame'];
   const g = globalThis as Record<string, unknown>;
   const saved = new Map<string, unknown>();
   for (const key of globals) {
     saved.set(key, g[key]);
+    const value = key in frameClock ? frameClock[key] : view[key];
     try {
-      g[key] = view[key];
+      g[key] = value;
     } catch {
-      Object.defineProperty(globalThis, key, { value: view[key], configurable: true, writable: true });
+      Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
     }
   }
-  t.after(() => {
+  attachFrameClock(view);
+  const unmounts: (() => void)[] = [];
+  t.after(async () => {
+    // Unmount first and let the last frames and timers run while the
+    // document is live; only then detach the clock and close the window.
+    for (const unmount of unmounts.splice(0)) unmount();
+    for (let i = 0; i < 3; i++) await new Promise((resolve) => view.requestAnimationFrame(resolve));
+    await settle();
+    if (frameView === view) frameView = null;
     for (const key of globals) {
       // Keep `window` bound to the last mounted view: a framer-motion exit
       // animation resolves after teardown and React reads `window.event` for
@@ -317,7 +353,7 @@ async function mount(t: TestContext, statuses: number[], bodies: Record<number, 
   const require = createRequire(join(out, 'lib', 'loader.cjs'));
   const React = require('react') as { createElement: (type: unknown, props?: unknown, ...children: unknown[]) => unknown };
   const { bootApp } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/boot.js')).href)) as {
-    bootApp: (spec: unknown, doc: Document | undefined, routes: Record<string, unknown>, custom: Record<string, unknown>) => void;
+    bootApp: (spec: unknown, doc: Document | undefined, routes: Record<string, unknown>, custom: Record<string, unknown>) => () => void;
   };
   const { FormView } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/form/FormView.js')).href)) as { FormView: unknown };
   const { Field } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/form/fields.js')).href)) as { Field: unknown };
@@ -350,7 +386,7 @@ async function mount(t: TestContext, statuses: number[], bodies: Record<number, 
     },
     lookupRoute,
     boot: async (overrides: Record<string, unknown> = {}) => {
-      bootApp(spec, view.document, { ...routes, ...overrides }, {});
+      unmounts.push(bootApp(spec, view.document, { ...routes, ...overrides }, {}));
       await settle();
     },
   };
@@ -528,4 +564,81 @@ test('a 403 on submit shows the access-denied screen', { skip: SKIP }, async (t)
   m.click(submit);
   await m.settle();
   assert.ok(m.main().querySelector('[data-access-denied]'), 'the denied screen renders');
+});
+
+function submitButton(m: Mounted): HTMLButtonElement {
+  const submit = [...m.main().querySelectorAll('button')].find((b) => (b as HTMLButtonElement).type === 'submit');
+  assert.ok(submit, 'a submit button is present');
+  return submit as HTMLButtonElement;
+}
+
+function postedKeys(m: Mounted): unknown[] {
+  return m.hits.filter((hit) => hit.body && hit.body.includes('"record"')).map((hit) => (JSON.parse(hit.body!) as Record<string, unknown>).idempotencyKey);
+}
+
+test('a committed submit whose on-success failed (200 + warning) shows the success banner', { skip: SKIP }, async (t) => {
+  const m = await mount(t, [200], { 200: JSON.stringify({ dryRun: false, wrote: true, values: {}, warning: { code: 'POST_COMMIT_FAILED', message: 'The record was saved. An action after the save did not complete.', requestId: 'r1' } }) });
+  await m.boot();
+  await m.go('#/form/Order');
+  (m.main().querySelector('form input[name="Title"]') as HTMLInputElement).value = 'Order for ACME';
+  m.click(submitButton(m));
+  await m.settle();
+  const banner = m.main().querySelector('.c2c-banner')?.textContent ?? '';
+  assert.match(banner, /Record added|Added Successfully/i, banner);
+  assert.doesNotMatch(banner, /not saved|Dry run/i);
+});
+
+test('a 5xx that says wrote true shows the success banner: the row is stored', { skip: SKIP }, async (t) => {
+  const m = await mount(t, [500], { 500: JSON.stringify({ code: 'INTERNAL_ERROR', message: 'Internal server error', correlationId: 'c', wrote: true }) });
+  await m.boot();
+  await m.go('#/form/Order');
+  (m.main().querySelector('form input[name="Title"]') as HTMLInputElement).value = 'Order for ACME';
+  m.click(submitButton(m));
+  await m.settle();
+  const banner = m.main().querySelector('.c2c-banner')?.textContent ?? '';
+  assert.match(banner, /Record added|Added Successfully/i, banner);
+  assert.doesNotMatch(banner, /Internal server error|went wrong|not saved/i);
+});
+
+test('a retry after a failed submit reuses the idempotency key; a committed submit starts a new one', { skip: SKIP }, async (t) => {
+  const m = await mount(t, [503, 200, 200], { 200: JSON.stringify({ dryRun: false, wrote: true, values: {} }) });
+  await m.boot();
+  await m.go('#/form/Order');
+  for (let i = 0; i < 3; i++) {
+    (m.main().querySelector('form input[name="Title"]') as HTMLInputElement).value = 'Order for ACME';
+    m.click(submitButton(m));
+    await m.settle();
+  }
+  const keys = postedKeys(m);
+  assert.equal(keys.length, 3, JSON.stringify(m.hits.map((hit) => hit.url)));
+  for (const key of keys) assert.match(String(key), /^c2c-[0-9a-f-]{32,36}$/);
+  assert.equal(keys[1], keys[0], 'the retry of a failed submit sends the same key');
+  assert.notEqual(keys[2], keys[1], 'after a committed submit the next one is a new record');
+});
+
+test('submit is ignored while a submit is in flight: two presses post once', { skip: SKIP }, async (t) => {
+  const m = await mount(t, [200]);
+  let release: (value: unknown) => void = () => {};
+  const posts: string[] = [];
+  m.view.fetch = ((url: string, init: { body?: string } = {}) => {
+    if (init.body && init.body.includes('"record"')) {
+      posts.push(String(url));
+      return new Promise((resolve) => (release = resolve));
+    }
+    return Promise.resolve({ ok: true, status: 200, text: async () => '{}' });
+  }) as unknown as typeof fetch;
+  await m.boot();
+  await m.go('#/form/Order');
+  (m.main().querySelector('form input[name="Title"]') as HTMLInputElement).value = 'Order for ACME';
+  const formEl = m.main().querySelector('form')!;
+  formEl.dispatchEvent(new (m.view.Event as typeof Event)('submit', { bubbles: true, cancelable: true }));
+  formEl.dispatchEvent(new (m.view.Event as typeof Event)('submit', { bubbles: true, cancelable: true }));
+  await m.settle();
+  assert.equal(submitButton(m).getAttribute('aria-busy'), 'true', 'the submit control shows busy while in flight');
+  formEl.dispatchEvent(new (m.view.Event as typeof Event)('submit', { bubbles: true, cancelable: true }));
+  await m.settle();
+  assert.equal(posts.length, 1, 'only one post while in flight');
+  release({ ok: true, status: 200, text: async () => JSON.stringify({ dryRun: false, wrote: true, values: {} }) });
+  await m.settle();
+  assert.equal(posts.length, 1);
 });

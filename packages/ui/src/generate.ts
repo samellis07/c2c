@@ -2052,10 +2052,10 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
 `
     : '';
   const flowCommit = flowModules.length
-    ? `    for (const spec of flowModules) {
-      const mod = await import(spec);
-      if (mod && typeof mod.commit === "function") await mod.commit(ctx);
-    }
+    ? `      for (const spec of flowModules) {
+        const mod = await import(spec);
+        if (mod && typeof mod.commit === "function") await mod.commit(ctx);
+      }
 `
     : '';
   const zoneLine = zone ? `\n      settingsTimeZone: ${JSON.stringify(zone)},` : '';
@@ -2095,13 +2095,13 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
     'Add needs the Create grant and edit (body.ROWID names a row) needs the Edit grant. An edit finds the row under the caller\'s modify scope: without Modify All only a row the caller added can be edited.',
     'A live reply carries only the fields the caller may read, plus the row id and system columns.',
     'Policy file: functions/access-policy.json. This module embeds it as access.',
-    'When functions/c2c-deploy.json mode is "live" and a datastore is injected, accepted values are written after validate and before on-success scripts. Dry run does not write and does not run those scripts. On success sees the inserted row, including ID (the stored ROWID) and system fields. If an on-success script throws after the write, the row stays: a Deluge runtime or refused-connection error reports its text; any other failure replies 500 request failed.',
+    'When functions/c2c-deploy.json mode is "live" and a datastore is injected, accepted values are written after validate and before on-success scripts. Dry run does not write and does not run those scripts. On success sees the inserted row, including ID (the stored ROWID) and system fields. If an on-success script, the history row or mail fails after the write, the row stays and the reply is still 200 wrote true with a warning {code POST_COMMIT_FAILED, message, requestId}; the failure is logged, its text never reaches the caller.',
     'A live edit captures Catalyst MODIFIEDTIME while preparing the row, then re-reads ROWID/MODIFIEDTIME once immediately before updateRows. A change is refused as c2c code C2C_STALE_WRITE (409). This is c2c\'s stale check and one extra bounded read; Data Store itself has no optimistic lock.',
     'Creator runs On Success after the record is submitted (https://help.zoho.com/portal/en/kb/creator/developer-guide/workflows/create-and-manage-on-success-action/articles/understand-on-success-action): "The actions that you define in the On success event will be executed when a new record is successfully submitted to the database or when an existing record is updated or deleted from the database." Whether Creator rolls that row back when On Success throws is unverified; this port leaves the row.',
     ...(deferSuccess
       ? ['Async on-success opt-in: in live mode this endpoint validates and stores the row, then replies without running the on-success modules. The after-commit event function (functions/events/after-commit.mjs) runs them when the record trigger fires; a failure dead-letters to C2CEventDeadLetter for the sweep Job (docs/event-deadletter.md).']
       : []),
-  ])}${policyPrelude('../../access-policy.json', false, `import { ${[...new Set(['applyInitialValues', 'createRuntime', 'projectReadable', 'replyStoreError', ...fieldStoreImports(storeShape)])].sort().join(', ')} } from "creator-to-catalyst/shims";\n`)}
+  ])}${policyPrelude('../../access-policy.json', false, `import { ${[...new Set(['applyInitialValues', 'createRuntime', 'postCommitWarning', 'projectReadable', 'replyStoreError', ...fieldStoreImports(storeShape)])].sort().join(', ')} } from "creator-to-catalyst/shims";\n`)}
 export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(path)}, dryRun: true };
 export const formName = ${JSON.stringify(form.name)};
 export const fieldNames = ${JSON.stringify(fields.names)};
@@ -2213,28 +2213,28 @@ ${stageCheck}    // API and import inserts never saw the Slate prefill. Absent
     // fields fall back to their Creator initial values on insert only.
     if (!ctx.rowId && ctx.writeOp !== "update") applyInitialValues(ctx.record, fields);
 ${validateRun}${flowBegin}    await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
+    // The row is committed from here on. A failure after it (history row,
+    // on-success script, mail) is a warning on a 200, never a failed submit:
+    // a failure reply would invite a retry that inserts a second row.
+    let warning = null;
+    try {
 ${flowCommit}${deferSuccess
-        ? `    // Async on-success opt-in: the on-success modules are not run here. The
-    // record trigger fires the after-commit event function on the committed
-    // row, which runs them once; a failure dead-letters for the sweep Job.
+        ? `      // Async on-success opt-in: the on-success modules are not run here. The
+      // record trigger fires the after-commit event function on the committed
+      // row, which runs them once; a failure dead-letters for the sweep Job.
 `
-        : `    try {
-      for (const spec of eventSpecs(successAdd, successEdit, ctx.rowId)) {
+        : `      for (const spec of eventSpecs(successAdd, successEdit, ctx.rowId)) {
         const mod = await import(spec);
         if (mod && typeof mod.handle === "function") await mod.handle(ctx);
       }
-    } catch (err) {
-      // A store refusal from a post-write script call maps before the
-      // generic fail. Catalyst's text never reaches the caller.
-      if (replyStoreError(res, err, { live: true, table: formName, wrote: true })) return;
-      const denied = err && (err.code === "RECORD_ACCESS_DENIED" || err.name === "RecordAccessError");
-      const message = denied && err && err.message ? err.message : "request failed";
-      send(res, denied ? 403 : 500, { dryRun: false, wrote: true, error: message, values: projectReadable(access, principal, formName, ctx.record, submitted), ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });
-      return;
+`}    } catch (err) {
+      // postCommitWarning logs the failure (a store refusal from a post-write
+      // call included); its text never reaches the caller.
+      warning = postCommitWarning(err, { table: formName });
     }
-`}    // Live replies never carry the runtime transcript: it holds record
+    // Live replies never carry the runtime transcript: it holds record
     // values, table names and ops.
-    send(res, 200, { dryRun: false, wrote: true, values: projectReadable(access, principal, formName, ctx.record, submitted), ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });
+    send(res, 200, { dryRun: false, wrote: true, values: projectReadable(access, principal, formName, ctx.record, submitted), ...(warning ? { warning } : {}), ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });
   } catch (err) {
     // The row write itself failed at the store (409/422/400 naming
     // the field, plus a structured log line); anything else stays a

@@ -965,7 +965,11 @@ export async function executeSmoke(steps: readonly SmokeStep[], opts: SmokeRunOp
           if ((body as Record<string, unknown>)?.wrote === true && /^\d+$/.test(rowid)) {
             created.set(step.form ?? '', { ...(step.table ? { table: step.table } : {}), rowid });
             submitted.set(step.form ?? '', record);
-            lines.push(`${step.label}: ${res.status} wrote ${redactSmokeSecrets(rowid, auth)}${suffix}`);
+            // A post-commit failure (on-success script, mail) answers 200 with a
+            // warning: the row is stored and tracked; the warning code is named.
+            const warning = (body as Record<string, unknown>).warning;
+            const warned = warning && typeof warning === 'object' && (warning as Record<string, unknown>).code === 'POST_COMMIT_FAILED' ? ' (warning POST_COMMIT_FAILED: an action after the save did not complete)' : '';
+            lines.push(`${step.label}: ${res.status} wrote ${redactSmokeSecrets(rowid, auth)}${warned}${suffix}`);
           } else if ((body as Record<string, unknown>)?.wrote === true) {
             failed = true;
             lines.push(`${step.label}: ${res.status} wrote but returned no usable ROWID${suffix}`);

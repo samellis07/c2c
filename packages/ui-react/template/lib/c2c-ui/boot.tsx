@@ -220,10 +220,15 @@ const REALM_GLOBALS = new Set([
   'btoa',
 ]);
 
-export function bootApp(spec: AppSpec, doc: Document | undefined, routes: RouteTable, custom: Customization): void {
+/**
+ * Boots the app into `doc` and returns its unmount. A harness that tears the
+ * document down calls it first, so effects clean up and no render, animation
+ * frame or deferred read outlives the document.
+ */
+export function bootApp(spec: AppSpec, doc: Document | undefined, routes: RouteTable, custom: Customization): () => void {
   const container = doc?.getElementById('root');
   const view = doc?.defaultView as AppWindow | null | undefined;
-  if (!doc || !container || !view) return;
+  if (!doc || !container || !view) return () => {};
   // A harness can boot the app into a document from another realm (jsdom under
   // Node, as the UI scorer does). React DOM reads the global window for event
   // priority, and third-party effects (the dialog's focus trap and scroll
@@ -263,4 +268,5 @@ export function bootApp(spec: AppSpec, doc: Document | undefined, routes: RouteT
       </StrictMode>,
     );
   });
+  return () => root.unmount();
 }

@@ -22,7 +22,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { Alert } from '../arc/components/alert/alert';
 import { Button } from '../arc/components/button/button';
 import type { FieldSpec, FormRecord, FormSpec, RecordValue } from '../types';
-import { SESSION_EXPIRED_EVENT, type AppWindow } from '../runtime/api';
+import { SESSION_EXPIRED_EVENT, pageHash, type AppWindow } from '../runtime/api';
 import { useEnv } from '../runtime/env';
 import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
 import { Slot, useCustomization } from '../runtime/extend';
@@ -39,6 +39,7 @@ interface Banner {
 interface WriteReply {
   ok?: boolean;
   dryRun?: boolean;
+  wrote?: boolean;
   message?: string;
   error?: string;
   record?: Record<string, unknown>;
@@ -147,6 +148,16 @@ function takeDraft(view: Window, key: string): Record<string, unknown> | null {
   }
 }
 
+/** A fresh per-form-open idempotency key (the vanilla client's shape). */
+function newSubmitKey(): string {
+  const cryptoRef = globalThis.crypto;
+  if (cryptoRef && typeof cryptoRef.randomUUID === 'function') return `c2c-${cryptoRef.randomUUID()}`;
+  const bytes = new Uint8Array(16);
+  if (cryptoRef && typeof cryptoRef.getRandomValues === 'function') cryptoRef.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  return `c2c-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+}
+
 export function FormView({ form, edit, children, handlers }: { form: FormSpec; edit?: string; children?: ReactNode; handlers?: FormHandlers }) {
   const { view, api } = useEnv();
   const custom = useCustomization().forms?.[form.name];
@@ -166,6 +177,13 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
   // from it bumps that field's remount key.
   const published = useRef<Record<string, unknown>>({});
   const loadRan = useRef(false);
+  // One idempotency key per opened form, sent with every submit until one
+  // commits; a retry of a lost or failed answer cannot write a second row.
+  const submitKey = useRef(newSubmitKey());
+  // Set synchronously so a second press or Enter before the re-render is ignored.
+  const inFlight = useRef(false);
+  // True while a committed add clears the fields, so the reset keeps the success banner.
+  const submitReset = useRef(false);
 
   /** Publish a handler draft into React state and remount any field a script rewrote. */
   const publish = useCallback((draft: HandlerDraft) => {
@@ -222,10 +240,20 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
       };
       const actions = await runHandlers(specs, handlers.modules, ctx);
       const results = applyHandlerActions(actions, draft, {
-        reload: () => view.location?.reload?.(),
+        reload: () => {
+          try {
+            view.location?.reload?.();
+          } catch {
+            // the window is already gone
+          }
+        },
         openUrl: (url, target) => {
-          if (target === '_blank') view.open?.(url, '_blank');
-          else if (view.location) view.location.href = url;
+          try {
+            if (target === '_blank') view.open?.(url, '_blank');
+            else if (view.location) view.location.href = url;
+          } catch {
+            // the window is already gone
+          }
         },
       });
       mergeScriptRecord(draft.record, ctx.record);
@@ -264,7 +292,7 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
       const formEl = formRef.current;
       if (!formEl) return;
       const values = stripSecrets(readRecord(formEl, form), form);
-      void draftUserId(view).then((user) => saveDraft(view, draftKey(view.location.hash, user, form.name), values));
+      void draftUserId(view).then((user) => saveDraft(view, draftKey(pageHash(view), user, form.name), values));
     };
     view.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
     return () => view.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
@@ -277,7 +305,7 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
     let live = true;
     void draftUserId(view).then((user) => {
       if (!live) return;
-      const saved = takeDraft(view, draftKey(view.location.hash, user, form.name));
+      const saved = takeDraft(view, draftKey(pageHash(view), user, form.name));
       if (!saved) return;
       setRecord(saved);
       setLoaded((n) => n + 1);
@@ -303,7 +331,7 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
           // A draft saved before a sign-in round trip wins over the stored values.
           void draftUserId(view).then((user) => {
             if (!active) return;
-            const saved = takeDraft(view, draftKey(view.location.hash, user, form.name));
+            const saved = takeDraft(view, draftKey(pageHash(view), user, form.name));
             setRecord(saved ? { ...row, ...saved } : row);
             setLoaded((n) => n + 1);
             if (!loadRan.current) {
@@ -365,6 +393,8 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
       setBanner({ tone: 'info', title: 'Offline. Submitting a form needs a network. Saved report reads stay available.' });
       return;
     }
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setNotes([]);
     try {
@@ -390,13 +420,16 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
         next = changed as FormRecord;
       }
       const endpoint = mode === 'edit' && form.editSubmitEndpoint ? form.editSubmitEndpoint : form.submitEndpoint;
-      const reply = await api.post<WriteReply>(endpoint, { record: next, ...(edit ? { ROWID: edit } : {}) });
-      const dryRun = reply.body?.dryRun !== false;
-      if (reply.status === 403) {
+      const reply = await api.post<WriteReply>(endpoint, { record: next, ...(edit ? { ROWID: edit } : {}), idempotencyKey: submitKey.current });
+      // wrote true is a stored row even when a step after the save failed.
+      const committed = reply.ok || reply.body?.wrote === true;
+      const dryRun = committed && reply.body?.wrote === true ? false : reply.body?.dryRun !== false;
+      if (committed && reply.body?.wrote === true) submitKey.current = newSubmitKey();
+      if (reply.status === 403 && !committed) {
         deny();
         return;
       }
-      if (!reply.ok) {
+      if (!committed) {
         // 401, 5xx and a dropped network get the app's copy; only a validation answer carries the server's words.
         const server = failureText(reply.status) ? undefined : reply.body?.message ?? reply.body?.error;
         setBanner({ tone: 'danger', title: failureText(reply.status) || (typeof server === 'string' && server.trim() ? server : 'The record was not saved.') });
@@ -408,7 +441,16 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
           const done = form.successMessage || (mode === 'edit' ? 'Record updated.' : 'Record added.');
           setBanner({ tone: 'success', title: dryRun ? `${done} Dry run: nothing was saved.` : done });
         }
-        if (mode === 'add' && !dryRun) formEl.reset();
+        if (mode === 'add' && !dryRun) {
+          // Clear the fields for the next record but keep the success banner:
+          // a user reset clears it, this one must not.
+          submitReset.current = true;
+          try {
+            formEl.reset();
+          } finally {
+            submitReset.current = false;
+          }
+        }
         const mailNotes = Array.isArray(reply.body?.mail)
           ? reply.body.mail.map(mailNoticeText).filter(Boolean)
           : [];
@@ -416,10 +458,11 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
           setNotes((prev) => [...prev, ...mailNotes]);
         }
       }
-      await custom?.afterSubmit?.({ ok: reply.ok, dryRun, body: reply.body }, ctx);
+      await custom?.afterSubmit?.({ ok: committed, dryRun, body: reply.body }, ctx);
     } catch (error) {
       setBanner({ tone: 'danger', title: error instanceof Error && error.message === 'upload' ? 'Upload failed. The form was not submitted.' : 'The form was not submitted. Try again.' });
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
@@ -448,7 +491,7 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
       <h1>{form.label}</h1>
       <Slot>{custom?.slots?.before}</Slot>
       <FormContext.Provider value={{ form, errors, record, rowId: edit, hidden: fieldState.hidden, disabled: fieldState.disabled, versions, notify, rowEvent }}>
-        <form ref={formRef} data-form={form.name} data-layout={form.layout} data-mode={mode} noValidate onSubmit={onSubmit} onChange={onFieldChange} onReset={() => { setErrors({}); setBanner(null); }}>
+        <form ref={formRef} data-form={form.name} data-layout={form.layout} data-mode={mode} noValidate onSubmit={onSubmit} onChange={onFieldChange} onReset={() => { setErrors({}); if (!submitReset.current) setBanner(null); }}>
           <div className="form-grid" key={loaded}>
             {children}
           </div>

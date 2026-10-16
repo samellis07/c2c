@@ -18,7 +18,7 @@
  * a handler writes at all.
  */
 const { existsSync, readFileSync } = require('node:fs');
-const { randomUUID } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const { join } = require('node:path');
 const { pathToFileURL } = require('node:url');
 
@@ -165,6 +165,60 @@ function normalizeErrorBody(body, responseStatus) {
   delete out.stack;
   delete out.status;
   return out;
+}
+
+/**
+ * Submit idempotency. A form screen sends one idempotencyKey per opened form
+ * (body.idempotencyKey, or the Idempotency-Key header) and keeps it until a
+ * submit commits. The first committed answer for a key (a 2xx, or any answer
+ * that says wrote true), scoped to the caller and the route, is kept for
+ * SUBMIT_KEY_TTL_MS: a repeat of that key gets the same status and body back
+ * instead of a second write or a duplicate-value refusal. A repeat that
+ * arrives while the first is still running waits for its answer. An answer
+ * that wrote nothing is not kept, so a corrected retry still writes. Keys
+ * live in this function instance's memory, so a repeat served by another
+ * instance is not deduplicated; the form screens also disable submit while a
+ * submit is in flight.
+ */
+const SUBMIT_KEY_TTL_MS = 15 * 60 * 1000;
+const SUBMIT_KEY_MAX = 1000;
+const SUBMIT_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+const submitKeys = new Map();
+
+/** The request's idempotency key, or '' (absent or malformed). The body copy is removed before the handler runs. */
+function takeSubmitKey(req, body) {
+  let raw = '';
+  if (body && typeof body === 'object' && Object.hasOwn(body, 'idempotencyKey')) {
+    if (typeof body.idempotencyKey === 'string') raw = body.idempotencyKey;
+    delete body.idempotencyKey;
+  }
+  const header = req && req.headers ? req.headers['idempotency-key'] : undefined;
+  if (!raw && typeof header === 'string') raw = header;
+  return SUBMIT_KEY_PATTERN.test(raw) ? raw : '';
+}
+
+function submitScope(principal, method, path, key) {
+  const who = principal && principal.userId != null ? String(principal.userId) : '';
+  return createHash('sha256').update(`${who}\n${method} ${path}\n${key}`).digest('hex');
+}
+
+function pruneSubmitKeys(now) {
+  for (const [scope, entry] of submitKeys) {
+    if (now - entry.at > SUBMIT_KEY_TTL_MS || submitKeys.size > SUBMIT_KEY_MAX) submitKeys.delete(scope);
+    else break;
+  }
+}
+
+/** A stored answer is kept only when the row committed: a 2xx that wrote, or any status whose body says wrote true. */
+function committedAnswer(captured) {
+  if (!captured || typeof captured.body !== 'string') return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(captured.body);
+  } catch {
+    return null;
+  }
+  return parsed && typeof parsed === 'object' && parsed.wrote === true ? captured : null;
 }
 
 /** The Creator app time zone: C2C_APP_TIMEZONE, else c2c-deploy.json appTimeZone, else none. */
@@ -360,28 +414,56 @@ module.exports = async function c2cApi(req, res) {
     });
     const store = await load('c2c-store.mjs');
     const handler = handlerModule.default;
-    const call = { url: path + routeSearch(req.url), method, headers: req.headers, body, params: matched.params, catalyst: { user: principal } };
-    await store.runWithDatastore(datastore, async () => {
-      const originalEnd = res.end;
-      res.end = function normalizedEnd(body) {
-        if (typeof body === 'string') {
-          try {
-            const parsed = JSON.parse(body);
-            if (parsed && typeof parsed === 'object' && (Object.hasOwn(parsed, 'error') || res.statusCode >= 400)) {
-              body = JSON.stringify(normalizeErrorBody(parsed, res.statusCode), jsonReplacer);
-            }
-          } catch {
-            /* Leave non-JSON responses unchanged. */
-          }
+    const submitKey = method === 'POST' ? takeSubmitKey(req, body) : '';
+    const scope = submitKey ? submitScope(principal, method, path, submitKey) : '';
+    let entry = null;
+    if (scope) {
+      pruneSubmitKeys(Date.now());
+      for (let prior = submitKeys.get(scope); prior; prior = submitKeys.get(scope)) {
+        const answer = await prior.answer;
+        if (answer) {
+          res.writeHead(answer.status, { 'Content-Type': 'application/json' });
+          res.end(answer.body);
+          return;
         }
-        return originalEnd.call(this, body);
-      };
-      try {
-        await handler(call, res);
-      } finally {
-        res.end = originalEnd;
+        if (submitKeys.get(scope) === prior) submitKeys.delete(scope);
       }
-    });
+      let settle;
+      entry = { at: Date.now(), answer: new Promise((resolve) => { settle = resolve; }), settle };
+      submitKeys.set(scope, entry);
+    }
+    let captured = null;
+    const call = { url: path + routeSearch(req.url), method, headers: req.headers, body, params: matched.params, catalyst: { user: principal } };
+    try {
+      await store.runWithDatastore(datastore, async () => {
+        const originalEnd = res.end;
+        res.end = function normalizedEnd(body) {
+          if (typeof body === 'string') {
+            try {
+              const parsed = JSON.parse(body);
+              if (parsed && typeof parsed === 'object' && (Object.hasOwn(parsed, 'error') || res.statusCode >= 400)) {
+                body = JSON.stringify(normalizeErrorBody(parsed, res.statusCode), jsonReplacer);
+              }
+            } catch {
+              /* Leave non-JSON responses unchanged. */
+            }
+            captured = { status: res.statusCode, body };
+          }
+          return originalEnd.call(this, body);
+        };
+        try {
+          await handler(call, res);
+        } finally {
+          res.end = originalEnd;
+        }
+      });
+    } finally {
+      if (entry) {
+        const answer = committedAnswer(captured);
+        if (!answer && submitKeys.get(scope) === entry) submitKeys.delete(scope);
+        entry.settle(answer);
+      }
+    }
   } catch (err) {
     // A write-rule refusal or store error that escaped the handler still gets
     // the mapped 4xx, not an opaque 500.
