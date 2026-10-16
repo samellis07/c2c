@@ -62,12 +62,55 @@ function indexSource(connect: string): string {
  * The page reflects only the validated state parameter and the configured
  * C2C_SLATE_ORIGIN env. A missing or invalid env answers 500 and never
  * redirects; a malformed state answers 400.
+ *
+ * Every failure writes one JSON line {event:"c2c_auth.bridge_failure",
+ * side, reason, ...} to the function log. Browser-side failures reach it
+ * through GET /bridge/report?reason=<allowlisted>[&status=&code=&sdk=],
+ * which logs short codes only (never tokens, state or user details).
  */
 const { randomBytes } = require('node:crypto');
 
 const SDK = ${JSON.stringify(CATALYST_WEB_SDK)};
 const CONNECT_SRC = ${JSON.stringify(connect)};
 const STATE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const CLIENT_REASONS = ['sdk_unavailable', 'signin_not_finished', 'no_token', 'token_failed'];
+const CODE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+const STATUS_PATTERN = /^[0-9]{1,3}$/;
+
+function logFailure(side, reason, extra) {
+  try {
+    console.error(JSON.stringify(Object.assign({ event: 'c2c_auth.bridge_failure', side: side, reason: reason }, extra || {})));
+  } catch {
+    /* logging must never break the response */
+  }
+}
+
+/** The project id the gateway forwards, digits only; '' when absent. */
+function projectId(req) {
+  const raw = String((req.headers && req.headers['x-zc-projectid']) || '');
+  return /^[0-9]{1,24}$/.test(raw) ? raw : '';
+}
+
+function report(url, res) {
+  const params = url.searchParams;
+  const reason = params.get('reason') || '';
+  if (!CLIENT_REASONS.includes(reason)) {
+    logFailure('client', 'bad_report');
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    res.end('bad request');
+    return;
+  }
+  const extra = {};
+  const status = params.get('status') || '';
+  if (STATUS_PATTERN.test(status) && Number(status) >= 100 && Number(status) <= 599) extra.status = Number(status);
+  for (const key of ['code', 'sdk']) {
+    const value = params.get(key) || '';
+    if (CODE_PATTERN.test(value)) extra[key] = value;
+  }
+  logFailure('client', reason, extra);
+  res.writeHead(204, { 'cache-control': 'no-store' });
+  res.end();
+}
 
 /** The configured Slate origin, checked with the same rules --slate-domain uses. */
 function slateOrigin() {
@@ -88,7 +131,7 @@ function pageUrl(rawUrl) {
   }
 }
 
-function html(nonce, state, slate, action) {
+function html(nonce, state, slate, action, project) {
   return (
     '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
@@ -98,28 +141,39 @@ function html(nonce, state, slate, action) {
     '<script nonce="' + nonce + '" src="/__catalyst/sdk/init.js"></scr' + 'ipt>' +
     '<script nonce="' + nonce + '">' +
     '(function(){' +
-    'var slate=' + JSON.stringify(slate) + ',state=' + JSON.stringify(state) + ',action=' + JSON.stringify(action) + ';' +
+    'var slate=' + JSON.stringify(slate) + ',state=' + JSON.stringify(state) + ',action=' + JSON.stringify(action) + ',project=' + JSON.stringify(project) + ';' +
     'var msg=document.getElementById("c2c-bridge-msg");' +
     'function fail(t){if(msg)msg.textContent=t;}' +
+    'var path=location.pathname,cut=path.lastIndexOf("/bridge"),base=cut>=0?path.slice(0,cut):path;' +
+    'function report(reason,extra){try{var q="reason="+encodeURIComponent(reason);extra=extra||{};' +
+    '["status","code","sdk"].forEach(function(k){var v=extra[k];if(v!==undefined&&v!==null&&v!=="")q+="&"+k+"="+encodeURIComponent(String(v));});' +
+    'fetch(base+"/bridge/report?"+q,{credentials:"omit",cache:"no-store",keepalive:true}).catch(function(){});}catch(e){}}' +
+    'function sdkCode(e){return e&&typeof e.code==="string"?e.code:"";}' +
+    'function currentUser(){if(!project)return Promise.resolve({});' +
+    'return fetch("/baas/v1/project/"+project+"/project-user/current",{credentials:"include",cache:"no-store"})' +
+    '.then(function(r){return r.json().then(function(j){return {status:r.status,code:j&&j.data&&j.data.error_code};},function(){return {status:r.status};});},function(){return {status:0};});}' +
     'var auth=window.catalyst&&window.catalyst.auth;' +
-    'if(!auth){fail("Sign-in is unavailable on this host.");return;}' +
+    'if(!auth){report("sdk_unavailable");fail("Sign-in is unavailable on this host.");return;}' +
     'if(action==="signout"){try{if(typeof auth.signOut==="function"){auth.signOut(slate+"/");return;}}catch(e){}location.replace(slate+"/");return;}' +
     'function marked(){try{var at=Number(sessionStorage.getItem("c2c.bridge.login-at"));return isFinite(at)&&at>0&&Date.now()-at<60000;}catch(e){return false;}}' +
     'var self=location.pathname+location.search;' +
     'Promise.resolve()' +
     '.then(function(){return typeof auth.isUserAuthenticated==="function"?auth.isUserAuthenticated():Promise.reject(new Error("no auth"));})' +
-    '.catch(function(){' +
-    'if(marked()){fail("Sign-in did not finish. Reload to try again, or ask the app administrator to check your access.");return Promise.reject("stop");}' +
+    '.catch(function(err){' +
+    'if(marked()){try{sessionStorage.removeItem("c2c.bridge.login-at");}catch(e){}' +
+    'fail("Sign-in did not finish. Reload to try again, or ask the app administrator to check your access.");' +
+    'currentUser().then(function(u){report("signin_not_finished",{status:u.status,code:u.code,sdk:sdkCode(err)});});' +
+    'return Promise.reject("stop");}' +
     'try{sessionStorage.setItem("c2c.bridge.login-at",String(Date.now()));}catch(e){}' +
     'location.assign("/__catalyst/auth/login?service_url="+encodeURIComponent(self));' +
     'return Promise.reject("stop");})' +
     '.then(function(){return auth.generateAuthToken();})' +
     '.then(function(res){' +
     'var token=res&&res.access_token;' +
-    'if(typeof token!=="string"||!token){fail("No sign-in token was issued.");return;}' +
+    'if(typeof token!=="string"||!token){report("no_token");fail("No sign-in token was issued.");return;}' +
     'try{sessionStorage.removeItem("c2c.bridge.login-at");}catch(e){}' +
     'location.replace(slate+"/#c2c_auth="+encodeURIComponent(token)+"&state="+encodeURIComponent(state));})' +
-    '.catch(function(e){if(e!=="stop")fail("Sign-in could not finish. Reload to try again.");});' +
+    '.catch(function(e){if(e!=="stop"){report("token_failed",{sdk:sdkCode(e)});fail("Sign-in could not finish. Reload to try again.");}});' +
     '})();' +
     '</scr' + 'ipt></body></html>'
   );
@@ -128,6 +182,7 @@ function html(nonce, state, slate, action) {
 module.exports = function c2cAuth(req, res) {
   try {
     if (String(req.method || 'GET').toUpperCase() !== 'GET') {
+      logFailure('server', 'method_not_allowed');
       res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
       res.end('bad request');
       return;
@@ -137,7 +192,12 @@ module.exports = function c2cAuth(req, res) {
     const prefix = '/server/${AUTH_FUNCTION}';
     if (path === prefix || path.startsWith(prefix + '/')) path = path.slice(prefix.length);
     if (path === '/execute' || path.startsWith('/execute/')) path = path.slice('/execute'.length);
+    if (path === '/bridge/report') {
+      report(url, res);
+      return;
+    }
     if (path !== '/bridge' && path !== '/bridge/') {
+      logFailure('server', 'unknown_path');
       res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
       res.end('bad request');
       return;
@@ -145,12 +205,14 @@ module.exports = function c2cAuth(req, res) {
     const action = url.searchParams.get('action') || '';
     const state = url.searchParams.get('state') || '';
     if (action !== 'signout' && !STATE_PATTERN.test(state)) {
+      logFailure('server', 'bad_state', { state_length: state.length });
       res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
       res.end('bad request');
       return;
     }
     const slate = slateOrigin();
     if (!slate) {
+      logFailure('server', 'slate_origin_unset');
       res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
       res.end('c2c_auth is not configured: set C2C_SLATE_ORIGIN to the Slate app origin');
       return;
@@ -164,8 +226,9 @@ module.exports = function c2cAuth(req, res) {
       'content-security-policy':
         "default-src 'none'; script-src 'nonce-" + nonce + "' 'self' https://static.zohocdn.com; connect-src 'self' " + CONNECT_SRC + "; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     });
-    res.end(html(nonce, state, slate, action));
+    res.end(html(nonce, state, slate, action, projectId(req)));
   } catch (err) {
+    logFailure('server', 'exception', { error: err && err.name ? String(err.name).slice(0, 64) : 'Error' });
     try {
       res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
       res.end('bridge failed');
