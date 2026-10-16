@@ -400,6 +400,46 @@ interface Binding {
   stateReads?: string[];
 }
 
+/**
+ * One enclosing if-test a record write replays under, recorded when the arm
+ * was entered. `binding` replays the test into a prefetch variable so the
+ * write runs under the same condition the handler saw.
+ */
+interface WriteGuard {
+  binding: Binding;
+  /** The arm runs when the test is false (an else arm or a skipped elif). */
+  negated: boolean;
+  /** False when the test itself cannot replay: writes under it stay refused. */
+  ok: boolean;
+}
+
+/**
+ * A handler write to record state, with everything a prefetch replay of it
+ * needs: the emitted statement, the guard terms on its path, and the local
+ * reads (with their recorded binding versions) the write evaluates.
+ */
+interface ReplayWrite {
+  /** The record-state key {@link staleRead} matches reads against. */
+  key: string;
+  /** Program order, against bindings and other writes. */
+  seq: number;
+  /** The write statement, exactly as emitted for the server side. */
+  line: string;
+  guards: WriteGuard[];
+  /** Local names the write (value and computed segments) reads. */
+  reads: string[];
+  /** Record-state keys the write's own expressions read, for transitive replay. */
+  stateReads: string[];
+  /** The binding each name in `reads` resolved to when the write ran. */
+  deps: Map<string, Binding | undefined>;
+  /**
+   * The replay is exact only when the write is unconditional or behind
+   * replayable guards, sits outside loops/try/function frames, and its value
+   * is a read-only expression the prefetch module can evaluate.
+   */
+  replayable: boolean;
+}
+
 /** One `for each` whose elements the client already iterates. */
 interface LoopFrame {
   name: string;
@@ -491,14 +531,29 @@ interface Scope {
    * Record-state writes the handler emitted so far — `input.<field>` or
    * `old.<field>` assignments, a computed-key write under the record root
    * (`input` / `old`), an `input.<subform>` insert/clear, and `rec.<row>`
-   * field writes on a prefetched row — mapped to the clock seq of the first
-   * write. The prefetch snapshot predates the handler, so a slot or replayed
-   * binding that reads a written key serves the pre-update value: it refuses
-   * instead ({@link staleRead}).
+   * field writes on a prefetched row — in program order. The prefetch
+   * snapshot predates the handler, so a slot or replayed binding that reads
+   * a written key serves the pre-update value: it refuses instead
+   * ({@link staleRead}), unless the write itself replays into the prefetch
+   * first ({@link planWriteReplay}), which makes the slot see the post-write
+   * value exactly.
    */
-  stateWrites: Map<string, number>;
-  /** Earliest write seq under each record root (`input`, `old`), for whole-record reads. */
-  stateRootSeq: Map<string, number>;
+  stateWriteLog: ReplayWrite[];
+  /** Write seqs already replayed into the prefetch module. */
+  writesEmitted: Set<number>;
+  /**
+   * The guard terms enclosing the point being translated: one entry per if
+   * test on the path (negated for skipped arms). A record write replays only
+   * when every term on its path does, so a write behind a `thisapp` call or
+   * an untranslated test stays refused.
+   */
+  writeGuards: WriteGuard[];
+  /**
+   * Frames whose writes a prefetch replay cannot reproduce in order: loops
+   * (a write may run zero or many times), try/catch arms, and function
+   * bodies. Inside one, recorded writes are marked non-replayable.
+   */
+  replayBarrier: number;
   /** List updates (`L.add(x)`) in the `for each` body being translated, for {@link loopListUpdate}. */
   listUpdates?: { name: string; value: Fx }[];
   /** Names bound in the prefetch module without a replayed assignment (params, `row`). */
@@ -1448,17 +1503,56 @@ function flushMaps(scope: Scope, force: boolean): void {
 function slotExpr(value: Fx, scope: Scope): string | null {
   // An expression that writes, calls out, or reads a name bound only
   // later stays a todo: the prefetch would run the effect or the later value.
-  if (value.sideEffect || value.appFunction || value.todo || value.unboundReads.length || nonReadReplay(value.code) || valueUseBeforeDef(value, scope) || staleFx(value, scope)) return null;
-  for (const name of value.reads) if (!prefetchable(name, scope, new Set())) return null;
+  if (value.sideEffect || value.appFunction || value.todo || value.unboundReads.length || nonReadReplay(value.code) || valueUseBeforeDef(value, scope)) return null;
   const mark = scope.prefetch.length;
   const emittedMark = new Map(scope.emitted);
+  const writesMark = new Set(scope.writesEmitted);
+  const fail = (): null => {
+    scope.prefetch.length = mark;
+    scope.emitted = emittedMark;
+    scope.writesEmitted = writesMark;
+    return null;
+  };
+  // Reads of record state the handler wrote replay the writes first: the
+  // prefetch then evaluates the post-write value the program saw, not the
+  // pre-handler snapshot. The plan marks the writes emitted so the
+  // staleness checks below accept them; a later failure rolls back.
+  const writes = planWriteReplay(value, scope);
+  if (writes === null) return fail();
+  for (const w of writes) scope.writesEmitted.add(w.seq);
+  for (const name of value.reads) if (!prefetchable(name, scope, new Set())) return fail();
   const ordered: { name: string; binding: Binding }[] = [];
   const seen = new Set<Binding>();
   for (const name of value.reads) {
-    if (!emitBinding(name, scope, new Set(), ordered, seen)) {
-      scope.prefetch.length = mark;
-      scope.emitted = emittedMark;
-      return null;
+    if (!emitBinding(name, scope, new Set(), ordered, seen)) return fail();
+  }
+  // Each replayed write needs the locals its value and guards read, at the
+  // binding versions the write recorded: their closures join the same
+  // ordered emission. The guard tests emit as `var __wcond<seq>` the write
+  // line wraps in `if`s.
+  for (const w of writes) {
+    for (const [name, dep] of w.deps) {
+      if (dep === undefined) {
+        if (!scope.prefetchBound.has(name)) return fail();
+      } else if (!collectChain(name, dep, scope, new Set(), ordered, seen, true)) {
+        return fail();
+      }
+    }
+    for (const g of w.guards) {
+      // The guard test emits at its seq in the flat prefetch module, so the
+      // dominance check on the binding itself does not apply — only its own
+      // reads resolve through their recorded versions.
+      for (const [depName, dep] of g.binding.deps) {
+        if (dep === undefined) {
+          if (!scope.prefetchBound.has(depName)) return fail();
+        } else if (!collectChain(depName, dep, scope, new Set(), ordered, seen, true)) {
+          return fail();
+        }
+      }
+      if (!seen.has(g.binding)) {
+        seen.add(g.binding);
+        ordered.push({ name: `__wcond${g.binding.seq}`, binding: g.binding });
+      }
     }
   }
   // Emit the whole closure in assignment order, not depth-first per read:
@@ -1466,9 +1560,21 @@ function slotExpr(value: Fx, scope: Scope): string | null {
   // a `var` line runs only after each name it reads holds that version, and a
   // later version of one name (`n = 1; a = n; n = n + 9` needs both `n`s for
   // one slot) emits after its dependents instead of being overwritten by a
-  // re-emitted earlier one.
-  ordered.sort((a, b) => a.binding.seq - b.binding.seq);
-  emitOrdered(ordered, scope);
+  // re-emitted earlier one. Replayed writes join the same seq order: a
+  // record read emitted before a write's seq sees the pre-write value, one
+  // emitted after sees the replayed write — program order exactly.
+  const items: ({ seq: number; item: { name: string; binding: Binding } } | { seq: number; write: ReplayWrite })[] = [
+    ...ordered.map((o) => ({ seq: o.binding.seq, item: o })),
+    ...writes.map((w) => ({ seq: w.seq, write: w })),
+  ];
+  items.sort((a, b) => a.seq - b.seq);
+  for (const it of items) {
+    if ('item' in it) {
+      if (!it.item.binding.bound) emitReplay(it.item.name, it.item.binding, scope);
+    } else {
+      scope.prefetch.push(replayedWriteLine(it.write));
+    }
+  }
   const id = `c${scope.slot++}`;
   scope.prefetch.push(`slots[${JSON.stringify(id)}] = ${value.code};`);
   return `slots[${JSON.stringify(id)}]`;
@@ -1513,12 +1619,49 @@ function flowOk(binding: Binding, scope: Scope): boolean {
  * seq orders it against bindings: a binding that read the key BEFORE the
  * write captured the value the prefetch serves, so it may still replay.
  */
-function recordStateWrite(key: string, scope: Scope): void {
+function recordStateWrite(key: string, scope: Scope, line?: string, value?: Fx): void {
   const seq = scope.clock.seq++;
-  if (!scope.stateWrites.has(key)) scope.stateWrites.set(key, seq);
-  const root = key.includes('.') ? key.slice(0, key.indexOf('.')) : key;
-  const cur = scope.stateRootSeq.get(root);
-  if (cur === undefined || seq < cur) scope.stateRootSeq.set(root, seq);
+  const reads = [...(value?.reads ?? [])];
+  // A `rec.<row>` write needs the row name bound in the prefetch too.
+  if (key.startsWith('rec.') && !reads.includes(key.slice(4))) reads.push(key.slice(4));
+  const deps = new Map<string, Binding | undefined>();
+  for (const name of reads) deps.set(name, scope.bindings.get(name));
+  scope.stateWriteLog.push({
+    key,
+    seq,
+    line: line ?? '',
+    guards: scope.writeGuards.slice(),
+    reads,
+    stateReads: value?.stateReads ?? [],
+    deps,
+    replayable:
+      line !== undefined &&
+      value !== undefined &&
+      scope.replayBarrier === 0 &&
+      !value.todo &&
+      !value.appFunction &&
+      !value.sideEffect &&
+      !value.unboundReads.length &&
+      !nonReadReplay(value.code) &&
+      // A write whose argument is itself a slot cannot be re-ordered before it.
+      !line.includes('slots[') &&
+      scope.writeGuards.every((g) => g.ok),
+  });
+}
+
+/**
+ * A record-state read key a write covers. Field writes cover their own field
+ * and a whole-record read; a root write (a computed `input[expr] = …` key)
+ * covers every read under that root. `rec.<row>` keys match exactly.
+ */
+function writeMatchesRead(write: string, read: string): boolean {
+  if (write === read) return true;
+  const wdot = write.indexOf('.');
+  const rdot = read.indexOf('.');
+  const wroot = wdot < 0 ? write : write.slice(0, wdot);
+  const rroot = rdot < 0 ? read : read.slice(0, rdot);
+  if (wroot !== rroot || wroot === 'rec') return false;
+  return wdot < 0 || rdot < 0;
 }
 
 /**
@@ -1526,14 +1669,15 @@ function recordStateWrite(key: string, scope: Scope): void {
  * point is `Infinity`) can see a write the prefetch snapshot predates. A
  * computed-key write under the root (`input[expr] = …` records the bare
  * `input` key) makes every field read stale; a field write makes a
- * whole-record read stale.
+ * whole-record read stale. A write already replayed into the prefetch is not
+ * stale: the read after it sees the replayed post-write value.
  */
 function staleRead(key: string, at: number, scope: Scope): boolean {
-  const w = scope.stateWrites.get(key);
-  if (w !== undefined && w < at) return true;
-  const dot = key.indexOf('.');
-  const rw = dot < 0 ? scope.stateRootSeq.get(key) : scope.stateWrites.get(key.slice(0, dot));
-  return rw !== undefined && rw < at;
+  for (const w of scope.stateWriteLog) {
+    if (w.seq >= at) break;
+    if (!scope.writesEmitted.has(w.seq) && writeMatchesRead(w.key, key)) return true;
+  }
+  return false;
 }
 
 /** The record-state keys an expression reads, plus `rec.<row>` for each row variable it reads. */
@@ -1548,8 +1692,111 @@ function staleBinding(binding: Binding, scope: Scope): boolean {
   return binding.reads.some((r) => staleRead(`rec.${r}`, binding.seq, scope));
 }
 
-function dominates(name: string, binding: Binding, scope: Scope): boolean {
-  if (binding.sideEffect || binding.appFunction || binding.todo || binding.unboundReads.length || bindingNonRead(binding) || staleBinding(binding, scope) || !flowOk(binding, scope)) return false;
+/**
+ * The reads a replayed write must see: record keys of its value and guard
+ * tests, plus `rec.<name>` for each local (a row read is a record read).
+ */
+function writeStateReads(w: ReplayWrite): string[] {
+  const keys = [...w.stateReads, ...w.reads.map((r) => `rec.${r}`)];
+  for (const g of w.guards) {
+    keys.push(...(g.binding.stateReads ?? []), ...g.binding.reads.map((r) => `rec.${r}`));
+  }
+  return keys;
+}
+
+/**
+ * Plans the record writes a slot replay must emit first so the slot and the
+ * bindings it replays read post-write record state — the exact value the
+ * program saw — instead of the pre-handler snapshot. Returns the writes to
+ * emit (program order, deduped), or `null` when one is not replayable: a
+ * write behind a `thisapp` call, inside a loop or try arm, or one whose value
+ * is not a read-only prefetch expression keeps the refusal.
+ *
+ * The plan is a fixpoint: a write's own value and guard reads can be stale on
+ * earlier writes, and every binding a read resolves to (the write's `deps`
+ * and the value's current bindings) can be stale the same way.
+ */
+function planWriteReplay(value: Fx, scope: Scope): ReplayWrite[] | null {
+  if (!scope.stateWriteLog.length) return [];
+  const planned: ReplayWrite[] = [];
+  const seenW = new Set<ReplayWrite>();
+  const seenB = new Set<Binding>();
+  const writesFor = (keys: readonly string[], at: number): boolean => {
+    for (const w of scope.stateWriteLog) {
+      if (w.seq >= at || seenW.has(w) || scope.writesEmitted.has(w.seq)) continue;
+      if (!keys.some((k) => writeMatchesRead(w.key, k))) continue;
+      if (!w.replayable) return false;
+      seenW.add(w);
+      if (!writesFor(writeStateReads(w), w.seq)) return false;
+      for (const b of w.deps.values()) if (b !== undefined && !walkB(b)) return false;
+      for (const g of w.guards) if (!walkB(g.binding)) return false;
+      planned.push(w);
+    }
+    return true;
+  };
+  const walkB = (b: Binding): boolean => {
+    if (seenB.has(b)) return true;
+    seenB.add(b);
+    const keys = [...(b.stateReads ?? []), ...b.reads.map((r) => `rec.${r}`)];
+    if (!writesFor(keys, b.seq)) return false;
+    return b.reads.every((r) => {
+      const dep = b.deps.get(r);
+      return dep === undefined || walkB(dep);
+    });
+  };
+  const top = [...(value.stateReads ?? []), ...value.reads.map((r) => `rec.${r}`)];
+  if (!writesFor(top, Number.POSITIVE_INFINITY)) return null;
+  for (const r of value.reads) {
+    const b = scope.bindings.get(r);
+    if (b !== undefined && !walkB(b)) return null;
+  }
+  return planned.sort((a, b) => a.seq - b.seq);
+}
+
+/**
+ * A record write emitted into the prefetch module, wrapped in the replayed
+ * guards of its arm. Each test was emitted as a `var` ahead of the write.
+ */
+function replayedWriteLine(w: ReplayWrite): string {
+  let line = w.line;
+  for (let i = w.guards.length - 1; i >= 0; i--) {
+    const g = w.guards[i]!;
+    line = `if (${g.negated ? '!' : ''}__wcond${g.binding.seq}) {\n${indent(line)}\n}`;
+  }
+  return line;
+}
+
+/**
+ * The if-test a record write replays under, as a binding: deps pin the name
+ * versions the test saw, so the replayed `var` evaluates the same way.
+ */
+function writeGuardBinding(test: Fx, scope: Scope): Binding {
+  const deps = new Map<string, Binding | undefined>();
+  for (const name of test.reads) deps.set(name, scope.bindings.get(name));
+  return {
+    code: test.code,
+    reads: [...test.reads],
+    unboundReads: [...test.unboundReads],
+    appFunction: test.appFunction,
+    todo: test.todo,
+    sideEffect: test.sideEffect,
+    deps,
+    seq: scope.clock.seq++,
+    flow: scope.flowStack[scope.flowStack.length - 1]!,
+    stateReads: test.stateReads ? [...test.stateReads] : undefined,
+  };
+}
+
+/** True when an if-test can replay into the prefetch as a write guard. */
+function guardOk(test: Fx): boolean {
+  return !test.todo && !test.appFunction && !test.sideEffect && !test.unboundReads.length && !nonReadReplay(test.code);
+}
+
+function dominates(name: string, binding: Binding, scope: Scope, seqOrder = false): boolean {
+  // `seqOrder` is the write-replay emission: bindings interleave with writes
+  // by clock seq in one flat module, so a binding captured inside an arm that
+  // is closed by the slot's point still replays at its own program point.
+  if (binding.sideEffect || binding.appFunction || binding.todo || binding.unboundReads.length || bindingNonRead(binding) || staleBinding(binding, scope) || (!seqOrder && !flowOk(binding, scope))) return false;
   for (const loop of scope.loops) {
     if (loop.assigned.has(name) && binding.flow < loop.frame) return false;
   }
@@ -1750,10 +1997,14 @@ function collectionIsGetAll(e: Expr): boolean {
 function underLoop<T>(scope: Scope, assigned: Set<string>, f: () => T): T {
   const frame = scope.clock.flow;
   scope.loops.push({ frame, assigned });
+  // A record write in a loop body may run zero or many times — a count the
+  // prefetch cannot replay in order, so writes here stay refused.
+  scope.replayBarrier++;
   try {
     return underFlow(scope, f);
   } finally {
     scope.loops.pop();
+    scope.replayBarrier--;
   }
 }
 
@@ -2049,15 +2300,16 @@ function collectChain(
   stack: Set<string>,
   out: { name: string; binding: Binding }[],
   seen: Set<Binding>,
+  seqOrder = false,
 ): boolean {
-  if (!dominates(name, binding, scope)) return false;
+  if (!dominates(name, binding, scope, seqOrder)) return false;
   if (seen.has(binding)) return true;
   seen.add(binding);
   stack.add(name);
   for (const dep of binding.reads) {
     const depBinding = binding.deps.get(dep);
     const fail = dep !== name && stack.has(dep) && !olderVersion(depBinding, binding);
-    if (fail || (depBinding ? !collectChain(dep, depBinding, scope, stack, out, seen) : !scope.prefetchBound.has(dep))) {
+    if (fail || (depBinding ? !collectChain(dep, depBinding, scope, stack, out, seen, seqOrder) : !scope.prefetchBound.has(dep))) {
       stack.delete(name);
       return false;
     }
@@ -2173,8 +2425,10 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     flowStack: [0],
     loops: [],
     emitted: new Map(),
-    stateWrites: new Map(),
-    stateRootSeq: new Map(),
+    stateWriteLog: [],
+    writesEmitted: new Set(),
+    writeGuards: [],
+    replayBarrier: 0,
     prefetchBound: new Set(options.prefetchBound ?? []),
     formNames: new Set(options.formNames ?? []),
     functions: new Set((options.functions ?? []).map((n) => n.toLowerCase())),
@@ -2574,14 +2828,26 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
   for (const body of bodies) for (const name of assignedNames(body)) assigned.add(name);
   const translated: Out[] = [];
   const perArm: { assigns: Set<string>; classes: ArmClasses }[] = [];
-  for (const body of bodies) {
+  const armTests = [test, ...elifTests];
+  for (let bi = 0; bi < bodies.length; bi++) {
+    const body = bodies[bi]!;
     restoreClasses(scope, atClass);
     for (const name of assigned) {
       const prior = atTest.bindings.get(name);
       if (prior) scope.bindings.set(name, prior);
       else scope.bindings.delete(name);
     }
-    translated.push(underFlow(scope, () => statement(body, scope, stats, todos)));
+    // A record write inside this arm replays under the arm's path condition:
+    // the tests of every skipped arm negated, then this arm's own test.
+    const guards: WriteGuard[] = [];
+    for (let k = 0; k < bi && k < armTests.length; k++) guards.push({ binding: writeGuardBinding(armTests[k]!, scope), negated: true, ok: guardOk(armTests[k]!) });
+    if (bi < armTests.length) guards.push({ binding: writeGuardBinding(armTests[bi]!, scope), negated: false, ok: guardOk(armTests[bi]!) });
+    scope.writeGuards.push(...guards);
+    try {
+      translated.push(underFlow(scope, () => statement(body, scope, stats, todos)));
+    } finally {
+      scope.writeGuards.length -= guards.length;
+    }
     perArm.push({ assigns: assignedNames(body), classes: copyClasses(scope) });
   }
   // A name is client-ready after the if only when every arm — and the
@@ -2987,14 +3253,24 @@ function whileStmt(s: Extract<Stmt, { kind: 'while' }>, scope: Scope, stats: Tra
 }
 
 function tryStmt(s: Extract<Stmt, { kind: 'try' }>, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
-  const body = underFlow(scope, () => statement(s.body, scope, stats, todos));
+  // A record write in a try or catch arm may not have run (a throw skips the
+  // rest): the prefetch cannot order it, so the write stays refused.
+  scope.replayBarrier++;
+  let body: Out;
+  try {
+    body = underFlow(scope, () => statement(s.body, scope, stats, todos));
+  } finally {
+    scope.replayBarrier--;
+  }
   // An empty client try never throws, so only the server can reach the catch.
   const outerCatch = scope.serverCatch;
   scope.serverCatch = outerCatch || !body.client.trim();
   let catchBody: Out | undefined;
+  scope.replayBarrier++;
   try {
     catchBody = s.catchBody ? underFlow(scope, () => statement(s.catchBody!, scope, stats, todos)) : undefined;
   } finally {
+    scope.replayBarrier--;
     scope.serverCatch = outerCatch;
   }
   account(stats, todos, { todo: false, shim: false, constructs: [] }, s.span);
@@ -3214,7 +3490,7 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
       ? `shim.input.set(ctx, ${JSON.stringify(path.path)}, ${value.code});`
       : `shim.record.set(${jsIdent(path.root)}, ${JSON.stringify(path.path)}, ${value.code});`;
     void code;
-    recordStateWrite(path.root === 'input' ? `input.${path.path[0]}` : `rec.${path.root}`, scope);
+    recordStateWrite(path.root === 'input' ? `input.${path.path[0]}` : `rec.${path.root}`, scope, fixed, value);
     account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
     return { server: fixed, client: value.serverOnly ? '' : fixed };
   }
@@ -3226,9 +3502,9 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
   }
   if (path && scope.row.has(path.root)) {
     if (path.path.some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
-    recordStateWrite(`rec.${path.root}`, scope);
-    account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
     const line = `shim.record.set(${jsIdent(path.root)}, ${JSON.stringify(path.path)}, ${value.code});`;
+    recordStateWrite(`rec.${path.root}`, scope, line, value);
+    account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
     // The row itself is a server value: the client cannot write to it even when the value is client-side.
     return { server: line, client: value.serverOnly || scope.serverOnly.has(path.root) ? '' : line };
   }
@@ -3238,16 +3514,16 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     const rowFields = scope.rowFields;
     if (rowFields?.names.has(path.root) && scope.row.has(rowFields.row)) {
       if ([path.root, ...path.path].some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
-      recordStateWrite(`rec.${rowFields.row}`, scope);
-      account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
       const line = `shim.record.set(${jsIdent(rowFields.row)}, ${JSON.stringify([path.root, ...path.path])}, ${value.code});`;
+      recordStateWrite(`rec.${rowFields.row}`, scope, line, value);
+      account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
       return { server: line, client: value.serverOnly || scope.serverOnly.has(rowFields.row) ? '' : line };
     }
     if (scope.inputFields.has(path.root)) {
       if ([path.root, ...path.path].some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
-      recordStateWrite(`input.${path.root}`, scope);
-      account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
       const line = `shim.input.set(ctx, ${JSON.stringify([path.root, ...path.path])}, ${value.code});`;
+      recordStateWrite(`input.${path.root}`, scope, line, value);
+      account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
       return { server: line, client: value.serverOnly ? '' : line };
     }
   }
@@ -3261,10 +3537,10 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     // the runtime key guard instead of indexing the record object raw.
     const segFxs = indexed.segments.map((seg) => (seg.key !== undefined ? fx({ code: JSON.stringify(seg.key) }) : expr(seg.index!, scope)));
     account(stats, todos, mergeFx('', [...segFxs, value]), span);
-    // A computed segment can name any field, so the write keys the record root.
-    recordStateWrite(indexed.segments[0]?.key !== undefined ? `${indexed.root}.${indexed.segments[0].key}` : indexed.root, scope);
     const api = indexed.root === 'input' ? 'shim.input.set' : 'shim.old.set';
     const line = `${api}(ctx, [${segFxs.map((seg) => seg.code).join(', ')}], ${value.code});`;
+    // A computed segment can name any field, so the write keys the record root.
+    recordStateWrite(indexed.segments[0]?.key !== undefined ? `${indexed.root}.${indexed.segments[0].key}` : indexed.root, scope, line, mergeFx('', [...segFxs, value]));
     const serverOnly = value.serverOnly || segFxs.some((seg) => seg.serverOnly);
     return { server: line, client: serverOnly ? '' : line };
   }
@@ -3562,13 +3838,20 @@ function exprStmt(e: Expr, span: { start: number; end: number }, scope: Scope, s
     const clientArgs = values.map((v) => clientExpr(v, scope));
     const constructs = values.flatMap((v) => v.constructs);
     if (clientArgs.some((c) => c.todo)) constructs.push('client-condition-uses-server');
-    recordStateWrite(`input.${mutate.path[0]}`, scope);
-    account(stats, todos, { todo: values.some((v) => v.todo) || clientArgs.some((c) => c.todo), shim: true, constructs }, span);
     const path = JSON.stringify(mutate.path);
     const server =
       mutate.method === 'clear'
         ? `shim.list.clear(shim.input.get(ctx, ${mutate.path.map((p) => JSON.stringify(p)).join(', ')}));`
         : `shim.input.insert(ctx, ${path}, ${values[0]?.code ?? 'null'});`;
+    // The write replays only when its row argument does: `insert(fetched)` is a
+    // query the prefetch must not re-run, so that write stays refused.
+    recordStateWrite(
+      `input.${mutate.path[0]}`,
+      scope,
+      server,
+      mergeFx('', values.length ? values : [fx({ code: 'null', stateReads: [`input.${mutate.path[0]}`] })]),
+    );
+    account(stats, todos, { todo: values.some((v) => v.todo) || clientArgs.some((c) => c.todo), shim: true, constructs }, span);
     const client =
       mutate.method === 'clear'
         ? `actions.push({ op: "clear", targets: [${JSON.stringify(mutate.path.join('.'))}] });`
@@ -3681,6 +3964,10 @@ function fnStmt(s: Extract<Stmt, { kind: 'fn' }>, scope: Scope, stats: Translate
   // analysed, so it is never credited to or blamed on the enclosing event.
   const fnScope = { ...scope, local: new Set(scope.local), alertEvent: 'unverified' as AlertEventClass };
   for (const p of s.params) fnScope.local.add(p.name);
+  // A write inside a function body runs when the function is called, not in
+  // program order here — and the outer guards do not enclose it.
+  fnScope.writeGuards = [];
+  fnScope.replayBarrier++;
   const body = underFlow(fnScope, () => statement(s.body, fnScope, stats, todos));
   account(stats, todos, { todo: false, shim: false, constructs: [] }, s.span);
   const params = s.params.map((p) => jsIdent(p.name)).join(', ');
