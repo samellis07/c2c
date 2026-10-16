@@ -3454,11 +3454,25 @@ function recordQuery(e: Expr, fns: readonly CriteriaFunction[] | undefined, dept
   if (callee.object.kind !== 'name' || callee.object.name !== 'thisapp') return null;
   const fn = fns?.find((f) => f.name === callee.property);
   const body = fn?.deluge?.length === 1 ? fn.deluge[0]!.text : '';
-  const returned = /^\s*return\b([\s\S]*?);?\s*$/.exec(body)?.[1]?.trim();
+  const returned = singleReturnText(body);
   // Only a single-statement `return <expr>` inlines. A `;` or newline inside
   // the captured text means the body runs more than the return.
   if (!returned || /[;\r\n]/.test(returned)) return null;
   return recordQuery(parseExpression(returned, true), fns, depth + 1);
+}
+
+/**
+ * The expression text of a function body that is `return <expr>` with an
+ * optional trailing `;`, or undefined. A linear trim and slice: a regex with a
+ * lazy capture before optional trailing parts backtracks polynomially on long
+ * whitespace runs.
+ */
+export function singleReturnText(body: string): string | undefined {
+  const text = body.trim();
+  if (!/^return(?![A-Za-z0-9_])/.test(text)) return undefined;
+  let rest = text.slice('return'.length);
+  if (rest.endsWith(';')) rest = rest.slice(0, -1);
+  return rest.trim();
 }
 
 function criteriaValue(e: Expr, fns?: readonly CriteriaFunction[], depth = 0): Criteria {
