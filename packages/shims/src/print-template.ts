@@ -287,7 +287,7 @@ export function cleanPrintStyle(value: string): { style: string; dropped: string
 function safeStyleValue(raw: string, prop?: string): boolean {
   let text = String(raw ?? '').trim();
   if (!text || text.length > STYLE_TEXT_MAX || /[;\\@<>]/.test(text) || text.includes('/*')) return false;
-  if (prop === 'font-family') text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
+  if (prop === 'font-family' || prop === 'font') text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
   if (/['"]/.test(text)) return false;
   const flat = flatCss(text);
   if (flat.includes('url(') || flat.includes('expression')) return false;
