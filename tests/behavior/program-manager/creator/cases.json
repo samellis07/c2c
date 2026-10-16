@@ -1677,6 +1677,278 @@
           }
         }
       ]
+    },
+    {
+      "id": "r4-add-program-admin-is-caller",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Program_Type",
+          "record": {
+            "Type": "Type tundra 504"
+          },
+          "bind": {
+            "r_add_program_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Lumen",
+              "last_name": "Juniper"
+            },
+            "Email": "email.424@example.com",
+            "Mobile_No": "+1555018455",
+            "Address": {
+              "address_line_1": "643 Harbor Way",
+              "district_city": "Alpha",
+              "state_province": "Maple",
+              "postal_Code": "75335",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Program",
+          "record": {
+            "Name": "Name r4 north 2103",
+            "Description": "Sample Description note 2501 generated for r4 capture.",
+            "Type": "<ref:r_add_program_type_setup_submit>",
+            "From": "25-Oct-2026 09:00:00",
+            "To": "25-Oct-2026 17:00:00",
+            "Manager": "<ref:r_add_user_valid_submit>",
+            "Admin": "admin@example.test",
+            "Status": "Active",
+            "Users": [
+              "<ref:r_add_user_valid_submit>"
+            ]
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Program Details Added Successfully!"
+          },
+          "bind": {
+            "r_r4_add_program_admin_is_caller": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Program": [
+            {
+              "Status": "Active",
+              "Type": "<ref:r_add_program_type_setup_submit>",
+              "Description": "Sample Description note 2501 generated for r4 capture.",
+              "From_col": "2026-10-25 09:00:00",
+              "To": "2026-10-25 17:00:00",
+              "Manager": "<ref:r_add_user_valid_submit>",
+              "Admin": "admin@example.test",
+              "Name": "Name r4 north 2103"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit",
+        "Admin is the caller's login email: the golden uses the offline harness login-user placeholder 'admin@example.test' for the capture's runner_values.login_user_email; the real account email is never committed",
+        "Creator echoed Users as [] despite an id being sent (an on-add workflow clears it on create); not asserted in tables"
+      ]
+    },
+    {
+      "id": "r4-read-all-programs-caller-admin",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Program_Type",
+          "record": {
+            "Type": "Type tundra 504"
+          },
+          "bind": {
+            "r_add_program_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Lumen",
+              "last_name": "Juniper"
+            },
+            "Email": "email.424@example.com",
+            "Mobile_No": "+1555018455",
+            "Address": {
+              "address_line_1": "643 Harbor Way",
+              "district_city": "Alpha",
+              "state_province": "Maple",
+              "postal_Code": "75335",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Program",
+          "record": {
+            "Name": "Name r4 north 2103",
+            "Description": "Sample Description note 2501 generated for r4 capture.",
+            "Type": "<ref:r_add_program_type_setup_submit>",
+            "From": "25-Oct-2026 09:00:00",
+            "To": "25-Oct-2026 17:00:00",
+            "Manager": "<ref:r_add_user_valid_submit>",
+            "Admin": "admin@example.test",
+            "Status": "Active",
+            "Users": [
+              "<ref:r_add_user_valid_submit>"
+            ]
+          },
+          "bind": {
+            "r_r4_add_program_admin_is_caller": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "All_Programs",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Program": [
+            {
+              "Status": "Active",
+              "Type": "<ref:r_add_program_type_setup_submit>",
+              "Description": "Sample Description note 2501 generated for r4 capture.",
+              "From_col": "2026-10-25 09:00:00",
+              "To": "2026-10-25 17:00:00",
+              "Manager": "<ref:r_add_user_valid_submit>",
+              "Admin": "admin@example.test",
+              "Name": "Name r4 north 2103"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "the All_Programs report filter is `Admin == zoho.loginuserid || Manager.Email == zoho.loginuserid || Users.Email == zoho.loginuserid`; a record whose Admin is the caller's login email is visible, resolving the r3 'empty reports' mystery to report filtering, not a workflow"
+      ]
+    },
+    {
+      "id": "r4-read-all-programs-r3-admin",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Program_Type",
+          "record": {
+            "Type": "Type tundra 504"
+          },
+          "bind": {
+            "r_add_program_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Lumen",
+              "last_name": "Juniper"
+            },
+            "Email": "email.424@example.com",
+            "Mobile_No": "+1555018455",
+            "Address": {
+              "address_line_1": "643 Harbor Way",
+              "district_city": "Alpha",
+              "state_province": "Maple",
+              "postal_Code": "75335",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Program",
+          "record": {
+            "Name": "Name north 103",
+            "Description": "Sample Description note 501 generated for capture.",
+            "Type": "<ref:r_add_program_type_setup_submit>",
+            "From": "25-Oct-2026 09:00:00",
+            "To": "25-Oct-2026 17:00:00",
+            "Manager": "<ref:r_add_user_valid_submit>",
+            "Admin": "admin.16@example.com",
+            "Status": "Active",
+            "Users": [
+              "<ref:r_add_user_valid_submit>"
+            ]
+          },
+          "bind": {
+            "r_add_program_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "All_Programs",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9280,
+            "message": "No records found matching the given criteria. Try using a different search criteria."
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Program": [
+            {
+              "Status": "Active",
+              "Type": "<ref:r_add_program_type_setup_submit>",
+              "Description": "Sample Description note 501 generated for capture.",
+              "From_col": "2026-10-25 09:00:00",
+              "To": "2026-10-25 17:00:00",
+              "Manager": "<ref:r_add_user_valid_submit>",
+              "Admin": "admin.16@example.com",
+              "Name": "Name north 103"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "Creator answered 9280 'No records found matching the given criteria' (records exist but none match), not 9220 -- consistent with the report filter hiding records whose Admin matches no OR branch of the login-user filter"
+      ]
     }
   ]
 }
