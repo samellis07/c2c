@@ -163,3 +163,19 @@ test('thisapp.call bounded recursion returns the nested result', async () => {
   });
   assert.equal(await ctx.shim.thisapp.call(ctx, ['F', 'count'], [5]), 5);
 });
+
+test('thisapp.permissions.* is refused as a Creator built-in, not a missing app function', async () => {
+  const { ctx } = live({ 'F.g': { call: async () => 1 } });
+  await assert.rejects(
+    ctx.shim.thisapp.call(ctx, ['permissions', 'assignUserInProfile'], ['user@example.test', 'Employee']),
+    (err: unknown) =>
+      err instanceof DelugeRuntimeError &&
+      /Creator built-in not run by c2c/.test((err as Error).message) &&
+      !/no such function/.test((err as Error).message),
+  );
+  // An app function that happens to be called "permissions" with one segment is still a missing function.
+  await assert.rejects(
+    ctx.shim.thisapp.call(ctx, ['permissions'], []),
+    (err: unknown) => err instanceof DelugeRuntimeError && /no such function/.test((err as Error).message),
+  );
+});

@@ -2026,6 +2026,14 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
   const zone = appTimeZone(app);
   const validate = siblingSpecs(delugeFiles, form.name, 'validate');
   const success = siblingSpecs(delugeFiles, form.name, 'success');
+  // The validate and success modules run on this stub's runtime (ctx.shim).
+  // When one calls a thisapp function, the runtime carries the same registry
+  // the module's own route has: without it a call was a silent placeholder
+  // here and a script failure never reached the caller as the post-commit
+  // warning (Creator: saved, code 3000 plus the script error).
+  const siblingPrefix = `functions/aio/${slug(form.name)}/`;
+  const siblingSpecsUsed = new Set([...validate.add, ...validate.edit, ...success.add, ...success.edit].map((spec) => `${siblingPrefix}${spec.slice(2)}`));
+  const usesThisapp = delugeFiles.some((file) => siblingSpecsUsed.has(file.path) && file.source.includes('from "../../thisapp.mjs"'));
   // State machines (approvals, blueprints) that govern this form: begin() stamps
   // the start stage before the row write, commit() logs the history row after.
   // Emitted only for governed forms, so a machine-free form's stub is unchanged.
@@ -2111,7 +2119,7 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
     ...(deferSuccess
       ? ['Async on-success opt-in: in live mode this endpoint validates and stores the row, then replies without running the on-success modules. The after-commit event function (functions/events/after-commit.mjs) runs them when the record trigger fires; a failure dead-letters to C2CEventDeadLetter for the sweep Job (docs/event-deadletter.md).']
       : []),
-  ])}${policyPrelude('../../access-policy.json', false, `import { ${[...new Set(['applyInitialValues', 'createRuntime', 'postCommitWarning', 'projectReadable', 'replyStoreError', ...fieldStoreImports(storeShape)])].sort().join(', ')} } from "creator-to-catalyst/shims";\n`)}
+  ])}${policyPrelude('../../access-policy.json', false, `import { ${[...new Set(['applyInitialValues', 'createRuntime', 'postCommitWarning', 'projectReadable', 'replyStoreError', ...fieldStoreImports(storeShape)])].sort().join(', ')} } from "creator-to-catalyst/shims";\n${usesThisapp ? 'import { functions } from "../../thisapp.mjs";\n' : ''}`)}
 export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(path)}, dryRun: true };
 export const formName = ${JSON.stringify(form.name)};
 export const fieldNames = ${JSON.stringify(fields.names)};
@@ -2204,7 +2212,7 @@ ${requirePrincipal()}
       dryRun: false,
       appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined,${zoneLine}${decimalLine}${uniqueLine}
       ...(datastore ? { datastore, ...(datastore.now ? { now: datastore.now } : {}) } : {}),
-      access,
+      access,${usesThisapp ? '\n      functions,' : ''}
       // writeLive -> datastore.update re-authorizes the screened values; the
       // schema lets a granted composite field carry its nested parts. Hidden
       // marks are stripped: the hidden rule screens the client-posted body
