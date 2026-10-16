@@ -143,6 +143,15 @@ fields to the parent ROWID before insert, convert `dd-MMM-yyyy` to
 `true`/`false` — a manual `/row` load with those transforms stores
 every row and a ZCQL join resolves the remapped keys.
 
+### Read rows back over MCP in pages of at most 300
+
+Recipe: [TESTED] MCP `CatalystbyZoho_Get_Rows` takes `max_rows` up to 300;
+`max_rows: 1000` answers `INVALID_OPERATION` "max_rows cannot be more than
+300" even though the tool text says 1000. Send 300 and follow `next_token`
+until `more_records` is false. Not every MCP server exposes
+`Execute_Query`; when it is absent, reconcile counts and values from the
+paged `Get_Rows` read-back.
+
 ### Take migrated rows from the JSON report export — it always carries record ids
 
 Recipe: [UNVERIFIED] a Creator report exported as JSON carries each record's `ID`;
