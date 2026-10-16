@@ -1,0 +1,43 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Lead Management",
+  "source": {
+    "file": "Lead_Management.ds",
+    "origin": "Creator gallery app lead-management, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-industry-types",
+      "steps": [],
+      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
+      "tags": [
+        "superseded"
+      ]
+    },
+    {
+      "id": "add-industry-type-valid-submit",
+      "steps": [],
+      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
+      "tags": [
+        "superseded"
+      ]
+    },
+    {
+      "id": "add-industry-type-invalid-duplicate-industry-name",
+      "steps": [],
+      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
+      "tags": [
+        "superseded"
+      ]
+    },
+    {
+      "id": "post-industry-types",
+      "steps": [],
+      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
+      "tags": [
+        "superseded"
+      ]
+    }
+  ]
+}
