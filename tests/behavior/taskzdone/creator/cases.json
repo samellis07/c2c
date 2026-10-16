@@ -1,0 +1,726 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "TaskzDone",
+  "source": {
+    "file": "TaskzDone.ds",
+    "origin": "Creator gallery app taskzdone, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-all-contacts",
+      "steps": [
+        {
+          "op": "report",
+          "report": "All_Contacts",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "baseline-attachments",
+      "steps": [
+        {
+          "op": "report",
+          "report": "Attachments",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "add-contact-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Ivory",
+              "last_name": "Alpha"
+            },
+            "Email": "email.755@example.com"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Contact Invited Successfully!"
+          },
+          "bind": {
+            "r_add_contact_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Contact": [
+            {
+              "Email": "email.755@example.com",
+              "Name_first_name": "Ivory",
+              "Name_last_name": "Alpha"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-contact-invalid-duplicate-email",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Ivory",
+              "last_name": "Alpha"
+            },
+            "Email": "email.755@example.com"
+          },
+          "bind": {
+            "r_add_contact_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Alpha",
+              "last_name": "Ridge"
+            },
+            "Email": "email.755@example.com"
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Email": "This value already exists. Enter a unique value."
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Contact": [
+            {
+              "Email": "email.755@example.com",
+              "Name_first_name": "Ivory",
+              "Name_last_name": "Alpha"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-tasklist-setup-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Ivory",
+              "last_name": "Alpha"
+            },
+            "Email": "email.755@example.com"
+          },
+          "bind": {
+            "r_add_contact_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Tasklist",
+          "record": {
+            "Tasklist": "Tasklist alpha 212"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Tasklist Added Successfully!"
+          },
+          "bind": {
+            "r_add_tasklist_setup_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Tasklist": [
+            {
+              "Tasklist": "Tasklist alpha 212"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-task_setup-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Ivory",
+              "last_name": "Alpha"
+            },
+            "Email": "email.755@example.com"
+          },
+          "bind": {
+            "r_add_contact_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Tasklist",
+          "record": {
+            "Tasklist": "Tasklist alpha 212"
+          },
+          "bind": {
+            "r_add_tasklist_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Task",
+          "record": {
+            "Task_Name": "Task_Name quartz 983",
+            "Tasklist": "<ref:r_add_tasklist_setup_submit>",
+            "Starting_Date": "14-Oct-2026",
+            "Ending_Date": "28-Oct-2026",
+            "Priority": "Low",
+            "Status": "Open",
+            "Co_Owners": [
+              "<ref:r_add_contact_valid_submit>"
+            ],
+            "Add_Description": "<p>Sample Add_Description text 151</p>"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Task Added Successfully!"
+          },
+          "bind": {
+            "r_add_task_setup_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Task": [
+            {
+              "Status": "Open",
+              "Tasklist": "<ref:r_add_tasklist_setup_submit>",
+              "Starting_Date": "2026-10-14",
+              "Ending_Date": "2026-10-28",
+              "Priority_col": "Low",
+              "Task_Name": "Task_Name quartz 983",
+              "Add_Description": "<p>Sample Add_Description text 151</p>"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "Co_Owners is not a stored column of Add_Task (report/display field); not asserted"
+      ]
+    },
+    {
+      "id": "add-task_invalid-choice-priority",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Ivory",
+              "last_name": "Alpha"
+            },
+            "Email": "email.755@example.com"
+          },
+          "bind": {
+            "r_add_contact_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Tasklist",
+          "record": {
+            "Tasklist": "Tasklist alpha 212"
+          },
+          "bind": {
+            "r_add_tasklist_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Task",
+          "record": {
+            "Task_Name": "Task_Name quartz 983",
+            "Tasklist": "<ref:r_add_tasklist_setup_submit>",
+            "Starting_Date": "14-Oct-2026",
+            "Ending_Date": "28-Oct-2026",
+            "Priority": "Low",
+            "Status": "Open",
+            "Co_Owners": [
+              "<ref:r_add_contact_valid_submit>"
+            ],
+            "Add_Description": "<p>Sample Add_Description text 151</p>"
+          },
+          "bind": {
+            "r_add_task_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Task",
+          "record": {
+            "Task_Name": "Task_Name quartz 977",
+            "Tasklist": "<ref:r_add_tasklist_setup_submit>",
+            "Starting_Date": "13-Oct-2026",
+            "Ending_Date": "04-Oct-2026",
+            "Priority": "ZZ_Not_A_Choice",
+            "Status": "Open",
+            "Co_Owners": [
+              "<ref:r_add_contact_valid_submit>"
+            ],
+            "Add_Description": "<p>Sample Add_Description text 931</p>"
+          },
+          "creator": {
+            "code": 3001,
+            "error": [
+              "Invalid column value for Priority"
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Task": [
+            {
+              "Status": "Open",
+              "Tasklist": "<ref:r_add_tasklist_setup_submit>",
+              "Starting_Date": "2026-10-14",
+              "Ending_Date": "2026-10-28",
+              "Priority_col": "Low",
+              "Task_Name": "Task_Name quartz 983",
+              "Add_Description": "<p>Sample Add_Description text 151</p>"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-attachment-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Ivory",
+              "last_name": "Alpha"
+            },
+            "Email": "email.755@example.com"
+          },
+          "bind": {
+            "r_add_contact_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Tasklist",
+          "record": {
+            "Tasklist": "Tasklist alpha 212"
+          },
+          "bind": {
+            "r_add_tasklist_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Task",
+          "record": {
+            "Task_Name": "Task_Name quartz 983",
+            "Tasklist": "<ref:r_add_tasklist_setup_submit>",
+            "Starting_Date": "14-Oct-2026",
+            "Ending_Date": "28-Oct-2026",
+            "Priority": "Low",
+            "Status": "Open",
+            "Co_Owners": [
+              "<ref:r_add_contact_valid_submit>"
+            ],
+            "Add_Description": "<p>Sample Add_Description text 151</p>"
+          },
+          "bind": {
+            "r_add_task_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Attachment",
+          "record": {
+            "Task_Name": "<ref:r_add_task_setup_submit>",
+            "Commented_By": "<ref:r_add_contact_valid_submit>",
+            "Comments": "<p>Sample Comments text 193</p>"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Comment/Attachment Added Successfully!"
+          },
+          "bind": {
+            "r_add_attachment_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Attachment": [
+            {
+              "Comments": "<p>Sample Comments text 193</p>",
+              "Task_Name": "<ref:r_add_task_setup_submit>",
+              "Commented_By": "<ref:r_add_contact_valid_submit>"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-tasklist-boundary-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Ivory",
+              "last_name": "Alpha"
+            },
+            "Email": "email.755@example.com"
+          },
+          "bind": {
+            "r_add_contact_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Tasklist",
+          "record": {
+            "Tasklist": "Tasklist alpha 212"
+          },
+          "bind": {
+            "r_add_tasklist_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Task",
+          "record": {
+            "Task_Name": "Task_Name quartz 983",
+            "Tasklist": "<ref:r_add_tasklist_setup_submit>",
+            "Starting_Date": "14-Oct-2026",
+            "Ending_Date": "28-Oct-2026",
+            "Priority": "Low",
+            "Status": "Open",
+            "Co_Owners": [
+              "<ref:r_add_contact_valid_submit>"
+            ],
+            "Add_Description": "<p>Sample Add_Description text 151</p>"
+          },
+          "bind": {
+            "r_add_task_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Attachment",
+          "record": {
+            "Task_Name": "<ref:r_add_task_setup_submit>",
+            "Commented_By": "<ref:r_add_contact_valid_submit>",
+            "Comments": "<p>Sample Comments text 193</p>"
+          },
+          "bind": {
+            "r_add_attachment_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Tasklist",
+          "record": {
+            "Tasklist": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Tasklist Added Successfully!"
+          },
+          "bind": {
+            "r_add_tasklist_boundary_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Tasklist": [
+            {
+              "Tasklist": "Tasklist alpha 212"
+            },
+            {
+              "Tasklist": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-all-contacts",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Ivory",
+              "last_name": "Alpha"
+            },
+            "Email": "email.755@example.com"
+          },
+          "bind": {
+            "r_add_contact_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Tasklist",
+          "record": {
+            "Tasklist": "Tasklist alpha 212"
+          },
+          "bind": {
+            "r_add_tasklist_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Task",
+          "record": {
+            "Task_Name": "Task_Name quartz 983",
+            "Tasklist": "<ref:r_add_tasklist_setup_submit>",
+            "Starting_Date": "14-Oct-2026",
+            "Ending_Date": "28-Oct-2026",
+            "Priority": "Low",
+            "Status": "Open",
+            "Co_Owners": [
+              "<ref:r_add_contact_valid_submit>"
+            ],
+            "Add_Description": "<p>Sample Add_Description text 151</p>"
+          },
+          "bind": {
+            "r_add_task_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Attachment",
+          "record": {
+            "Task_Name": "<ref:r_add_task_setup_submit>",
+            "Commented_By": "<ref:r_add_contact_valid_submit>",
+            "Comments": "<p>Sample Comments text 193</p>"
+          },
+          "bind": {
+            "r_add_attachment_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Tasklist",
+          "record": {
+            "Tasklist": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+          },
+          "bind": {
+            "r_add_tasklist_boundary_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "All_Contacts",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_Contact": [
+            {
+              "Email": "email.755@example.com",
+              "Name_last_name": "Alpha",
+              "Name_first_name": "Ivory"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-attachments",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Ivory",
+              "last_name": "Alpha"
+            },
+            "Email": "email.755@example.com"
+          },
+          "bind": {
+            "r_add_contact_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Tasklist",
+          "record": {
+            "Tasklist": "Tasklist alpha 212"
+          },
+          "bind": {
+            "r_add_tasklist_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Task",
+          "record": {
+            "Task_Name": "Task_Name quartz 983",
+            "Tasklist": "<ref:r_add_tasklist_setup_submit>",
+            "Starting_Date": "14-Oct-2026",
+            "Ending_Date": "28-Oct-2026",
+            "Priority": "Low",
+            "Status": "Open",
+            "Co_Owners": [
+              "<ref:r_add_contact_valid_submit>"
+            ],
+            "Add_Description": "<p>Sample Add_Description text 151</p>"
+          },
+          "bind": {
+            "r_add_task_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Attachment",
+          "record": {
+            "Task_Name": "<ref:r_add_task_setup_submit>",
+            "Commented_By": "<ref:r_add_contact_valid_submit>",
+            "Comments": "<p>Sample Comments text 193</p>"
+          },
+          "bind": {
+            "r_add_attachment_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Tasklist",
+          "record": {
+            "Tasklist": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+          },
+          "bind": {
+            "r_add_tasklist_boundary_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Attachments",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_Attachment": [
+            {
+              "Comments": "<p>Sample Comments text 193</p>",
+              "Task_Name": "<ref:r_add_task_setup_submit>",
+              "Commented_By": "<ref:r_add_contact_valid_submit>"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
