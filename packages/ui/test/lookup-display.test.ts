@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { buildModel, buildUi, type UiField, type UiModel, type UiReport } from '../src/index.js';
+import { displayRefs, displayTerms, lookupFormats } from '../src/decorations/lookups.js';
 
 /**
  * Lookup display values. `displayformat = [Field]` picks the display field for
@@ -479,4 +480,315 @@ test('lookup options keep the display value from the endpoint response', async (
   const options = await runtime.loadLookupOptions(view, '/lookups/Vendor/Vendor_Name');
   assert.equal(calls[0]?.startsWith('/lookups/Vendor/Vendor_Name'), true);
   assert.deepEqual(options, [{ value: '1', label: 'Acme' }]);
+});
+
+/**
+ * The library app's shape: Book_Transaction.Member looks up Add_Member with
+ * `displayformat = [Member_ID + " - " + Name.first_name]` (two parent fields),
+ * Reading_Club.Members is a multi lookup with the same format, and the Guest
+ * profile reads transactions but not Add_Member.
+ */
+function libraryBody(): string {
+  const grant = (form: string, report: string, fields: string[]) => `\t\t\t\t${form}
+\t\t\t\t{
+\t\t\t\t\tenabled = true
+\t\t\t\t\tReportPermissions
+\t\t\t\t\t{
+\t\t\t\t\t\t${report} = {"View"}
+\t\t\t\t\t}
+\t\t\t\t\tFieldPermissions
+\t\t\t\t\t{
+${fields.map((name) => `\t\t\t\t\t\t${name}\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tvisibility:true,readonly:false\n\t\t\t\t\t\t}`).join('\n')}
+\t\t\t\t\t}
+\t\t\t\t}`;
+  const profile = (name: string, modules: string[]) => `\t\t"${name}"
+\t\t{
+\t\t\tname = "${name}"
+\t\t\ttype = Users_Permissions
+\t\t\tModulePermissions
+\t\t\t{
+${modules.join('\n')}
+\t\t\t}
+\t\t}`;
+  const txn = grant('Book_Transaction', 'All_Book_Transactions', ['Title', 'Member']);
+  const club = grant('Reading_Club', 'All_Clubs', ['Club', 'Members']);
+  const member = grant('Add_Member', 'All_Members', ['Member_ID', 'Name']);
+  return `\tsection Main
+\t{
+\t\tform Add_Member
+\t\t{
+${field('Member_ID', 'text', '\t\t\tdisplayname = "Member ID"')}
+\t\t\tName
+\t\t\t(
+\t\t\t\ttype = name
+\t\t\t\tfirst_name
+\t\t\t\t(
+\t\t\t\t\ttype = text
+\t\t\t\t)
+\t\t\t\tlast_name
+\t\t\t\t(
+\t\t\t\t\ttype = text
+\t\t\t\t)
+\t\t\t)
+\t\t}
+\t\tform Book_Transaction
+\t\t{
+${field('Title', 'text')}
+\t\t\tmust have Member
+\t\t\t(
+\t\t\t\ttype = picklist
+\t\t\t\tvalues  = Add_Member.ID
+    \t\t\tdisplayformat = [Member_ID + " - " + Name.first_name]
+\t\t\t)
+\t\t}
+\t\tform Reading_Club
+\t\t{
+${field('Club', 'text')}
+\t\t\tMembers
+\t\t\t(
+\t\t\t\ttype = list
+\t\t\t\tvalues  = Add_Member.ID
+    \t\t\tdisplayformat = [Member_ID + " - " + Name.first_name]
+\t\t\t)
+\t\t}
+\t\tlist All_Members
+\t\t{
+\t\t\tshow all rows from Add_Member
+\t\t\t(
+\t\t\t\tMember_ID
+\t\t\t\tName
+\t\t\t)
+\t\t}
+\t\tlist All_Book_Transactions
+\t\t{
+\t\t\tshow all rows from Book_Transaction
+\t\t\t(
+\t\t\t\tTitle
+\t\t\t\tMember
+\t\t\t)
+\t\t}
+\t\tlist All_Clubs
+\t\t{
+\t\t\tshow all rows from Reading_Club
+\t\t\t(
+\t\t\t\tClub
+\t\t\t\tMembers
+\t\t\t)
+\t\t}
+\t}
+\tshare_settings
+\t{
+${profile('Librarian', [member, txn, club])}
+${profile('Guest', [txn, club])}
+\t}`;
+}
+
+const ADA = { ROWID: '3601', Member_ID: 'M-001', Name_first_name: 'Ada', Name_last_name: 'Lovelace' };
+const ALAN = { ROWID: '3602', Member_ID: 'M-002', Name: { first_name: 'Alan', last_name: 'Turing' } };
+
+async function withStore<T>(query: (form: string, where: string) => unknown[], run: () => Promise<T>): Promise<T> {
+  process.env.C2C_DEPLOY_MODE = 'live';
+  (globalThis as Record<string, unknown>).__c2cDatastore = { query: async (form: string, where: string) => query(form, where) };
+  try {
+    return await run();
+  } finally {
+    delete process.env.C2C_DEPLOY_MODE;
+    delete (globalThis as Record<string, unknown>).__c2cDatastore;
+  }
+}
+
+test('a display format over several parent fields keys the lookup by its first field and keeps the format', async () => {
+  const decorate = await loadDecorator();
+  const app = appOf(libraryBody());
+  const model = buildModel(app);
+  decorate(model, app);
+  const member = fieldOf(model, 'Book_Transaction', 'Member') as DisplayField & { lookup?: { displayFormat?: unknown } };
+  assert.equal(member.lookup?.field, 'Member_ID', 'the format spans Member_ID and Name: the ID link field is not a display');
+  assert.equal(member.lookup?.endpoint, '/lookups/Add_Member/Member_ID');
+  assert.deepEqual(member.lookup?.displayFormat, [{ ref: 'Member_ID' }, { text: ' - ' }, { ref: 'Name.first_name' }]);
+  const column = columnOf(reportOf(model, 'All_Book_Transactions'), 'Member') as DisplayColumn & { lookup?: { displayFormat?: unknown } };
+  assert.deepEqual(column.lookup?.displayFormat, [{ ref: 'Member_ID' }, { text: ' - ' }, { ref: 'Name.first_name' }]);
+});
+
+test('lookup picker options show the composed display, never the ROWID', async () => {
+  const built = await writeBuilt(libraryBody());
+  try {
+    const lookup = await built.load('functions/lookups/lookup.mjs');
+    const res = await invoke(lookup.default, { user: { profile: 'Librarian' }, url: '/lookups/Add_Member/Member_ID', body: { rows: [ADA, ALAN] } });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.field, 'Member_ID');
+    assert.deepEqual(res.body.rows, [
+      { ROWID: ADA.ROWID, Member_ID: 'M-001 - Ada' },
+      { ROWID: ALAN.ROWID, Member_ID: 'M-002 - Alan' },
+    ]);
+  } finally {
+    rmSync(built.dir, { recursive: true, force: true });
+  }
+});
+
+test('lookup search by name runs server-side on the display fields, bounded and scoped', async () => {
+  const built = await writeBuilt(libraryBody());
+  try {
+    const lookup = await built.load('functions/lookups/lookup.mjs');
+    const librarian = { user: { profile: 'Librarian' } };
+    const wheres: string[] = [];
+    await withStore(
+      (form, where) => {
+        wheres.push(`${form}: ${where}`);
+        return where.includes("'*Ada*'") ? [ADA] : [ADA, ALAN];
+      },
+      async () => {
+        const res = await invoke(lookup.default, { ...librarian, url: '/lookups/Add_Member/Member_ID?q=Ada&page=0' });
+        assert.equal(res.status, 200);
+        assert.deepEqual(res.body.rows, [{ ROWID: ADA.ROWID, Member_ID: 'M-001 - Ada' }], `search did not reach the query: ${wheres.join(' | ')}`);
+        assert.match(wheres[0]!, /Member_ID LIKE '\*Ada\*'/);
+        assert.match(wheres[0]!, /Name_first_name LIKE '\*Ada\*'/);
+        // The search text is a criteria value: a quote cannot end the literal.
+        wheres.length = 0;
+        const quoted = await invoke(lookup.default, { ...librarian, url: `/lookups/Add_Member/Member_ID?q=${encodeURIComponent("x' OR '1'='1")}` });
+        assert.equal(quoted.status, 200);
+        assert.doesNotMatch(wheres[0]!, /LIKE '\*x' OR /, `unescaped search text: ${wheres[0]}`);
+        const long = await invoke(lookup.default, { ...librarian, url: `/lookups/Add_Member/Member_ID?q=${'a'.repeat(101)}` });
+        assert.equal(long.status, 400);
+      },
+    );
+    // A dry-run picker filters the supplied rows by the composed text.
+    const dry = await invoke(lookup.default, { ...librarian, url: '/lookups/Add_Member/Member_ID?q=alan', body: { rows: [ADA, ALAN] } });
+    assert.deepEqual(dry.body.rows, [{ ROWID: ALAN.ROWID, Member_ID: 'M-002 - Alan' }]);
+  } finally {
+    rmSync(built.dir, { recursive: true, force: true });
+  }
+});
+
+test('a caller without read on the lookup target sees no member name, and no ROWID', async () => {
+  const built = await writeBuilt(libraryBody());
+  try {
+    const lookup = await built.load('functions/lookups/lookup.mjs');
+    const report = await built.load('functions/reports/all-book-transactions.mjs');
+    const guest = { user: { profile: 'Guest' } };
+    await withStore(
+      (form) => (form === 'Add_Member' ? [ADA] : [{ ROWID: '9', Title: 'Dune', Member: ADA.ROWID }]),
+      async () => {
+        const options = await invoke(lookup.default, { ...guest, url: '/lookups/Add_Member/Member_ID' });
+        assert.notEqual(options.status, 200);
+        assert.doesNotMatch(JSON.stringify(options.body), /Ada|M-001/);
+        const shown = await invoke(report.default, { ...guest, body: { op: 'query' } });
+        assert.equal(shown.status, 200);
+        const rows = shown.body.rows as Record<string, unknown>[];
+        assert.equal(rows[0]?.Member, '', 'neither the name nor the ROWID');
+        assert.doesNotMatch(JSON.stringify(shown.body), new RegExp(`Ada|M-001|${ADA.ROWID}`));
+      },
+    );
+  } finally {
+    rmSync(built.dir, { recursive: true, force: true });
+  }
+});
+
+test('report columns show the composed member display for single and multi lookups', async () => {
+  const built = await writeBuilt(libraryBody());
+  try {
+    const txns = await built.load('functions/reports/all-book-transactions.mjs');
+    const clubs = await built.load('functions/reports/all-clubs.mjs');
+    const librarian = { user: { profile: 'Librarian' } };
+    await withStore(
+      (form) => {
+        if (form === 'Add_Member') return [ADA, ALAN];
+        if (form === 'Reading_Club') return [{ ROWID: '5', Club: 'Sci-fi', Members: [ADA.ROWID, ALAN.ROWID] }];
+        return [{ ROWID: '9', Title: 'Dune', Member: ADA.ROWID }];
+      },
+      async () => {
+        const shown = await invoke(txns.default, { ...librarian, body: { op: 'query' } });
+        assert.equal(shown.status, 200);
+        assert.equal((shown.body.rows as Record<string, unknown>[])[0]?.Member, 'M-001 - Ada');
+        const club = await invoke(clubs.default, { ...librarian, body: { op: 'query' } });
+        assert.equal(club.status, 200);
+        assert.deepEqual((club.body.rows as Record<string, unknown>[])[0]?.Members, ['M-001 - Ada', 'M-002 - Alan']);
+      },
+    );
+  } finally {
+    rmSync(built.dir, { recursive: true, force: true });
+  }
+});
+
+test('the vanilla lookup select gets a server search box that finds a member by name and keeps the chosen one', async () => {
+  const runtime = (await import(pathToFileURL(join(process.cwd(), 'packages/ui/src/client-runtime.js')).href)) as {
+    fillLookups(form: unknown, formEl: unknown, view: unknown): Promise<void>;
+  };
+  const dom = new JSDOM('<!doctype html><body><form><div class="field"><select name="Member" aria-label="Member" data-lookup="/lookups/Add_Member/Member_ID"><option value="">-Select-</option></select></div></form></body>');
+  const win = dom.window as unknown as Window & typeof globalThis;
+  const document = win.document;
+  const urls: string[] = [];
+  const view = {
+    fetch: async (url: string) => {
+      urls.push(url);
+      const rows = url.includes('q=Alan') ? [{ ROWID: ALAN.ROWID, Member_ID: 'M-002 - Alan' }] : [{ ROWID: ADA.ROWID, Member_ID: 'M-001 - Ada' }];
+      return { ok: true, text: async () => JSON.stringify({ rows, field: 'Member_ID' }) };
+    },
+  };
+  const formEl = document.querySelector('form') as HTMLFormElement;
+  await runtime.fillLookups({}, formEl, view);
+  const select = document.querySelector('select[name="Member"]') as unknown as HTMLSelectElement;
+  assert.equal(select.options[1]?.text, 'M-001 - Ada');
+  select.value = ADA.ROWID;
+  const box = document.querySelector('input[data-lookup-search="Member"]') as unknown as HTMLInputElement;
+  assert.ok(box, 'no search box before the lookup select');
+  assert.equal(box.getAttribute('aria-label'), 'Search Member');
+  box.value = 'Alan';
+  box.dispatchEvent(new win.Event('input'));
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.equal(urls.at(-1), '/lookups/Add_Member/Member_ID?page=0&pageSize=300&q=Alan');
+  const texts = [...select.options].map((option) => option.text);
+  assert.ok(texts.includes('M-002 - Alan'), `search result missing: ${texts.join(', ')}`);
+  assert.ok(texts.includes('M-001 - Ada'), 'the chosen member keeps its option');
+  assert.equal(select.value, ADA.ROWID);
+  assert.ok(!texts.some((text) => text === ADA.ROWID || text === ALAN.ROWID), 'no option shows a ROWID');
+  await runtime.fillLookups({}, formEl, view);
+  assert.equal(document.querySelectorAll('input[data-lookup-search]').length, 1, 'one search box per select');
+});
+
+test('displayformat terms: refs and literals in order, escapes kept, a stray quote skipped', () => {
+  assert.deepEqual(displayTerms('[Member_ID + " - " + Name.first_name]'), [{ ref: 'Member_ID' }, { text: ' - ' }, { ref: 'Name.first_name' }]);
+  assert.deepEqual(displayTerms(`[" " + Name.first_name + ' ' + Name.last_name]`), [{ text: ' ' }, { ref: 'Name.first_name' }, { text: ' ' }, { ref: 'Name.last_name' }]);
+  assert.deepEqual(displayTerms('["a\\"b" + Code]'), [{ text: 'a"b' }, { ref: 'Code' }]);
+  assert.deepEqual(displayTerms('[Title]'), [{ ref: 'Title' }]);
+  assert.deepEqual(displayTerms('["open + Name'), [{ ref: 'open' }, { ref: 'Name' }], 'a quote that never closes is skipped');
+  assert.deepEqual(displayTerms('["a\\\n" + "b"]'), [{ ref: 'a' }, { text: ' + ' }, { ref: 'b' }], 'a backslash before a line break ends the literal');
+  assert.deepEqual(displayRefs('[Member_ID + " - x.y " + Name.first_name]'), ['Member_ID', 'Name.first_name']);
+});
+
+test('displayformat scanning stays linear on an unclosed quote full of escaped quotes', () => {
+  const hostile = '"' + '\\"!'.repeat(16_667);
+  assert.ok(hostile.length >= 50_000);
+  const started = performance.now();
+  const terms = displayTerms(hostile);
+  const refs = displayRefs(hostile);
+  const elapsed = performance.now() - started;
+  assert.deepEqual(terms, []);
+  assert.deepEqual(refs, []);
+  assert.ok(elapsed < 500, `scanning took ${elapsed.toFixed(0)} ms`);
+});
+
+test('lookupFormats leaves out prototype keys and never touches Object.prototype', () => {
+  const lookupField = (name: string, form: string, displayFormat: string) => ({ name, lookup: { form, field: 'Code', displayFormat } });
+  const app = {
+    forms: [
+      {
+        name: 'Loan',
+        fields: [
+          lookupField('A', '__proto__', '[polluted + " - " + Other.part]'),
+          lookupField('B', 'Members', '[__proto__ + " - " + Other.part]'),
+          lookupField('C', 'Members', '[constructor + " - " + Other.part]'),
+          lookupField('D', 'prototype', '[Code + " - " + Other.part]'),
+          lookupField('E', 'Members', '[Member_ID + " - " + Name.first_name]'),
+        ],
+      },
+    ],
+  } as unknown as App;
+  const formats = lookupFormats(app);
+  assert.equal(({} as Record<string, unknown>).polluted, undefined);
+  assert.equal(Object.prototype.hasOwnProperty.call(Object.prototype, 'polluted'), false);
+  assert.deepEqual(Object.keys(formats), ['Members']);
+  assert.deepEqual(Object.keys(formats.Members!), ['Member_ID']);
+  assert.equal(Object.getPrototypeOf(formats), null);
+  assert.equal(Object.getPrototypeOf(formats.Members), null);
 });
