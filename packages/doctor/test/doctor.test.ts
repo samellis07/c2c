@@ -2004,17 +2004,19 @@ test('evidence: a project entry without a decimal id is stale, a non-entry is re
   assert.throws(() => parseEvidence(JSON.stringify(evidence({ projects: [7] }))), (err) => err instanceof EvidenceRejected && /not an id or an entry/.test(err.message));
 });
 
-test('mcp probe: no numeric org/project never calls REST, and a REST failure is unverifiable', async () => {
+test('mcp probe: org-only creation probe reads the org, while invalid scopes never call REST', async () => {
   let calls = 0;
   const counting = async () => {
     calls++;
     return { status: 200, body: { data: [{ bucket_name: 'c2cprobex' }] } };
   };
-  for (const target of [{}, { org: ORG }, { org: 'acme', project: PROJECT }, { org: ORG, project: 'my-app' }]) {
+  for (const target of [{}, { org: 'acme', project: PROJECT }, { org: ORG, project: 'my-app' }]) {
     const result = await verifyProbe(counting, target, 'c2cprobex');
     assert.equal(result.status, 'unresolved', JSON.stringify(target));
   }
-  assert.equal(calls, 0);
+  const orgResult = await verifyProbe(counting, { org: ORG }, 'c2cprobex');
+  assert.equal(orgResult.status, 'verified');
+  assert.equal(calls, 1);
   const failing = await verifyProbe(
     async () => {
       throw new Error('socket hang up');

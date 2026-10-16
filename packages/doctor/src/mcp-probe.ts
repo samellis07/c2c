@@ -89,9 +89,21 @@ export interface ProbeResult {
  */
 export async function verifyProbe(rest: RestFn, target: ProbeTarget, name: string): Promise<ProbeResult> {
   const base = { kind: 'bucket' as const, name };
-  if (!target.org || !/^[0-9]+$/.test(target.org) || !target.project || !/^[0-9]+$/.test(target.project)) {
-    return { ...base, status: 'unresolved', detail: 'no org/project is selected, so the REST read-back has no target' };
+  if (!target.org || !/^[0-9]+$/.test(target.org)) return { ...base, status: 'unresolved', detail: 'no org is selected, so the REST read-back has no target' };
+  // Import is the one legitimate project-less probe: the project does not
+  // exist until the org-scoped import completes.  A successful org-level
+  // project-list read proves that the explicit Catalyst-org binding is
+  // reachable; the nonce bucket probe is repeated once the project exists.
+  if (!target.project) {
+    try {
+      const read = await rest({ method: 'GET', path: '/baas/v1/project' });
+      if (read.status >= 200 && read.status < 300) return { ...base, status: 'verified', detail: `org ${target.org} is readable through the Catalyst REST API; in-project probe required after creation` };
+      return { ...base, status: 'unverifiable', httpStatus: read.status, detail: `the REST org project list answered HTTP ${read.status}` };
+    } catch (err) {
+      return { ...base, status: 'unverifiable', detail: `the REST org read-back failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
   }
+  if (!/^[0-9]+$/.test(target.project)) return { ...base, status: 'unresolved', detail: 'the selected project id is invalid' };
   const read = await readBucketList(rest, target.project, name);
   if (read.status === 'found') return { ...base, status: 'verified', detail: `probe bucket ${name} found in project ${target.project} over the Catalyst REST API` };
   if (read.status === 'absent') return { ...base, status: 'absent', detail: `probe bucket ${name} is not in project ${target.project}: the MCP write never landed in the selected org/DC/project` };
