@@ -4634,11 +4634,15 @@ function dataUrlBytes(value) {
  * The option value is the ROWID the submit sends back; the text is the
  * display value the report shows. Rows without a ROWID are not options.
  */
-export async function loadLookupOptions(viewRef, endpoint) {
+export async function loadLookupOptions(viewRef, endpoint, query) {
   const call = (viewRef && viewRef.fetch) || globalThis.fetch;
   if (!endpoint || typeof call !== 'function') throw new Error('lookup endpoint missing');
   const separator = endpoint.includes('?') ? '&' : '?';
-  const res = await apiCall(call, viewRef, `${endpoint}${separator}page=0&pageSize=300`, { method: 'GET', headers: { 'content-type': 'application/json' } });
+  // A search runs on the server over the lookup's display field(s), scoped to
+  // the records the caller may read; the endpoint takes at most 100 characters.
+  const text = typeof query === 'string' ? query.trim().slice(0, 100) : '';
+  const search = text ? `&q=${encodeURIComponent(text)}` : '';
+  const res = await apiCall(call, viewRef, `${endpoint}${separator}page=0&pageSize=300${search}`, { method: 'GET', headers: { 'content-type': 'application/json' } });
   if (!res || res.ok === false) throw new Error(`lookup request failed (${res ? res.status : 'no response'})`);
   const body = await readJson(res);
   const rows = body && Array.isArray(body.rows) ? body.rows : [];
@@ -4652,14 +4656,20 @@ export async function loadLookupOptions(viewRef, endpoint) {
   return options;
 }
 
-/** Fill a lookup `<select>` without losing a value the form already holds. */
+/**
+ * Fill a lookup `<select>` without losing a value the form already holds: a
+ * chosen record the new options (a search) do not list keeps its option.
+ */
 export function fillLookupSelect(select, options) {
   const current = select.multiple
     ? [...select.options].filter((option) => option.selected).map((option) => option.value)
     : [select.value];
+  const listed = new Set((options || []).map((option) => option.value));
+  const kept = [...select.options].filter((option) => option.value !== '' && current.includes(option.value) && !listed.has(option.value));
   const blank = select.options && select.options[0] && select.options[0].value === '' ? select.options[0] : null;
   select.textContent = '';
   if (blank) select.appendChild(blank);
+  for (const option of kept) select.appendChild(option);
   for (const option of options || []) {
     const el = select.ownerDocument ? select.ownerDocument.createElement('option') : document.createElement('option');
     el.value = option.value;
@@ -4683,7 +4693,43 @@ export async function fillLookups(form, formEl, viewRef) {
     } catch {
       /* the select keeps its rendered options */
     }
+    attachLookupSearch(select, endpoint, viewRef);
   }
+}
+
+/**
+ * A search box before a lookup select: typing asks the endpoint for the
+ * records whose display matches (after a short pause), so a record past the
+ * first page is found by its name. An empty box reads the first page again.
+ */
+export function attachLookupSearch(select, endpoint, viewRef) {
+  const doc = select && select.ownerDocument;
+  if (!doc || !select.parentNode || select.getAttribute('data-lookup-searchable') === 'true') return null;
+  select.setAttribute('data-lookup-searchable', 'true');
+  const input = doc.createElement('input');
+  input.type = 'search';
+  input.className = 'c2c-lookup-search';
+  input.setAttribute('data-lookup-search', select.getAttribute('name') || '');
+  input.setAttribute('aria-label', `Search ${select.getAttribute('aria-label') || select.getAttribute('name') || 'records'}`);
+  input.setAttribute('placeholder', 'Search');
+  input.setAttribute('maxlength', '100');
+  select.parentNode.insertBefore(input, select);
+  const view = doc.defaultView || globalThis;
+  let timer = null;
+  let asked = 0;
+  input.addEventListener('input', () => {
+    if (timer) view.clearTimeout(timer);
+    timer = view.setTimeout(() => {
+      timer = null;
+      const ask = ++asked;
+      loadLookupOptions(viewRef, endpoint, input.value)
+        .then((options) => {
+          if (ask === asked) fillLookupSelect(select, options);
+        })
+        .catch(() => {});
+    }, 250);
+  });
+  return input;
 }
 
 /** The document that owns the form. Its FormData and File are not this module's realm. */

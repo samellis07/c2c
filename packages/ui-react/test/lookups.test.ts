@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { deriveIr, parse } from '../../core/src/index.js';
 import { TEMPLATE_DIR, reactAppSpec } from '../src/index.js';
-import { LOOKUP_PAGE_SIZE, LookupSource, filterLookupOptions, lookupIds, lookupKnownLabels, lookupOptions, lookupPageUrl, lookupSource } from '../template/lib/c2c-ui/lookup/source.js';
+import { LOOKUP_BLANK_LABEL, LOOKUP_PAGE_SIZE, LookupSource, filterLookupOptions, lookupIds, lookupKnownLabels, lookupOptions, lookupPageUrl, lookupSource } from '../template/lib/c2c-ui/lookup/source.js';
 import { isEmptyRow, subformRows, validateRows, validateSubforms } from '../template/lib/c2c-ui/subform/rows.js';
 import { createApi, type ApiReply, type AppWindow } from '../template/lib/c2c-ui/runtime/api.js';
 import type { FieldSpec, FormSpec } from '../template/lib/c2c-ui/types.js';
@@ -176,8 +176,9 @@ test('search filters the pages read; a failed page is an error state that retrie
 test('lookup replies map ROWID to the display value; a static host with no function is an empty list', async () => {
   assert.deepEqual(lookupOptions({ rows: [{ ROWID: '1', Name: 'Ann' }, { Name: 'no id' }, { ROWID: 2 }], field: 'Name' }), [
     { value: '1', label: 'Ann' },
-    { value: '2', label: '2' },
+    { value: '2', label: LOOKUP_BLANK_LABEL },
   ]);
+  assert.notEqual(LOOKUP_BLANK_LABEL, '2', 'a record with no display value never shows its ROWID');
   const source = new LookupSource(async () => ({ ok: false, status: 404, body: undefined }), '/lookups/X/Y');
   await source.open();
   assert.deepEqual([source.snapshot().state, source.snapshot().done, source.snapshot().options.length, source.snapshot().status], ['ready', true, 0, null]);
@@ -449,4 +450,40 @@ test('lookup ids follow one rule, bare or wrapped: digit strings, bigints and sa
   assert.deepEqual(lookupIds({ ROWID: 'Acme Ltd' }), []);
   assert.deepEqual(lookupIds([-1, 1.5, true, null]), []);
   assert.deepEqual(lookupOptions({ rows: [{ ROWID: 'x', Name: 'bad' }, { ROWID: 2 ** 60, Name: 'lost' }, { ROWID: '3', Name: 'ok' }], field: 'Name' }), [{ value: '3', label: 'ok' }]);
+});
+
+test('a search the read pages cannot answer asks the endpoint (?q=) and adds the matches once', async () => {
+  const calls: Calls = [];
+  const page = fakeGet(10, 1000, calls);
+  const get = async (url: string): Promise<ApiReply<unknown>> => {
+    if (!url.includes('&q=')) return page(url);
+    calls.push(url);
+    const q = decodeURIComponent(/[&]q=([^&]*)/.exec(url)![1]!);
+    return { ok: true, status: 200, body: { rows: q === 'Customer 950' ? [{ ROWID: '1950', Name: 'Customer 950' }] : [], field: 'Name', page: 0, pageSize: 300 } };
+  };
+  const source = new LookupSource(get, '/lookups/Customer/Name');
+  await source.open();
+  await source.search('customer 29');
+  assert.equal(calls.length, 1, 'a match in the read pages asks nothing');
+  await source.search('Customer 950');
+  assert.equal(calls.at(-1), '/lookups/Customer/Name?page=0&pageSize=300&q=Customer%20950');
+  assert.deepEqual(filterLookupOptions(source.snapshot().options, 'customer 950'), [{ value: '1950', label: 'Customer 950' }]);
+  const asked = calls.length;
+  await source.search('Customer 950');
+  await source.search('x'.repeat(101));
+  assert.equal(calls.length, asked, 'each text is asked once; an over-long text is not sent');
+  await source.more();
+  await source.more();
+  await source.more();
+  assert.equal(source.snapshot().options.filter((o) => o.value === '1950').length, 1, 'a later page does not duplicate a searched record');
+});
+
+test('both lookup controls send the typed search to the endpoint through the vendored onQueryChange', () => {
+  const field = readFileSync(join(TEMPLATE_DIR, 'lib/c2c-ui/lookup/LookupField.tsx'), 'utf8');
+  assert.equal(field.match(/onQueryChange=\{\(query\) => void source\.search\(query\)\}/g)?.length, 2, 'Combobox and MultiSelect both search the server');
+  for (const name of ['combobox/combobox.tsx', 'multi-select/multi-select.tsx']) {
+    const src = readFileSync(join(TEMPLATE_DIR, 'lib/c2c-ui/arc/components', name), 'utf8');
+    assert.match(src, /onQueryChange\?\.\(event\.target\.value\)/, `${name} reports the typed search`);
+  }
+  assert.match(readFileSync(join(TEMPLATE_DIR, 'lib/c2c-ui/ARC-UPSTREAM.md'), 'utf8'), /onQueryChange/);
 });

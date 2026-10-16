@@ -3,7 +3,8 @@
  * multi-select, both over the parent form's paged lookup endpoint (see
  * source.ts): the first page is read when the control opens (or at once when
  * the record already holds a value, to show its display text), more pages on
- * request, and the search filters the pages read. The submitted value is the
+ * request, and the search filters the pages read, asking the endpoint for
+ * matching records the read pages do not hold. The submitted value is the
  * parent ROWID (a list of them for a multi lookup), carried by a named hidden
  * control so the record reader sees it like any other field. When the parent
  * form has a screen in this app, the chosen record links to its edit screen.
@@ -158,6 +159,7 @@ export function LookupControl({ field, name, label, value, error, hideLabel, lin
         onOpenChange={(open) => {
           if (open) void source.open();
         }}
+        onQueryChange={(query) => void source.search(query)}
         emptyMessage={emptyText(snap)}
         footer={<LookupFooter source={source} snap={snap} label={label} />}
         required={field.required}
@@ -197,6 +199,7 @@ export function LookupMultiControl({ field, name, label, value, error, hideLabel
         onOpenChange={(open) => {
           if (open) void source.open();
         }}
+        onQueryChange={(query) => void source.search(query)}
         disabled={disabled}
         searchable
         emptyMessage={emptyText(snap)}
