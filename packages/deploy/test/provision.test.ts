@@ -665,6 +665,13 @@ test('L1 provisions end to end in the fake project, every step read back', { ski
       if (step.readBack.via === 'cli' && (step.via === 'cli' || step.id.endsWith('-enable'))) {
         return provisionCli(['--out', out, '--record', step.id, ...SCOPE], c.io);
       }
+      // A console read-back is the host's own observation — the recorded file
+      // carries the observed keys directly ({"sign_in_page": true}), there is
+      // no tool answer to fake.
+      if (step.readBack.via === 'console') {
+        const result = writeResult(out, `${step.id}-rb`, step.readBack.match);
+        return provisionCli(['--out', out, '--record', step.id, '--result', result, '--applied', ...SCOPE], c.io);
+      }
       const result = writeResult(
         out,
         `${step.id}-rb`,
