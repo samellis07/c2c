@@ -31,6 +31,7 @@ import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, real
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { EvidenceRejected, parseEvidence, schemaDigest, type McpEvidence } from './evidence.js';
+import { isProbeName } from './mcp-probe.js';
 import { NO_FOLLOW_READ_FLAGS, isSymlinkRefusedError, isUnopenableError } from '../../core/src/fs-kind.js';
 import type { Observed } from './observed.js';
 import { c2cVersion } from './report.js';
@@ -210,7 +211,7 @@ const BINDING_STATUSES = new Set(['verified', 'absent', 'unverifiable', 'unresol
 function bindingOf(value: unknown): McpEvidence['binding'] | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const b = value as Record<string, unknown>;
-  if (b.kind !== 'bucket' || typeof b.name !== 'string' || !/^c2cprobe[0-9a-f]{32}$/.test(b.name)) return undefined;
+  if (b.kind !== 'bucket' || typeof b.name !== 'string' || !isProbeName(b.name)) return undefined;
   if (typeof b.status !== 'string' || !BINDING_STATUSES.has(b.status) || typeof b.detail !== 'string' || b.detail.length > 400) return undefined;
   return { kind: 'bucket', name: b.name, status: b.status as NonNullable<McpEvidence['binding']>['status'], detail: b.detail };
 }

@@ -40,11 +40,14 @@ scope, and holds an MCP record < 12 h old.
 The plugin never asks the user for an evidence file. `/c2c:doctor` runs:
 
 1. `c2c doctor --mcp-begin` — opens a one-time request in
-   `c2c-out/.c2c/mcp-request.json` (a random request id and when it was
-   issued; it expires after 15 minutes) and prints the calls to make.
+   `c2c-out/.c2c/mcp-request.json` (a random request id, when it was
+   issued, and the probe bucket it named; it expires after 15 minutes) and
+   prints the calls to make.
 2. The agent makes the calls the request names in the session — first
-   `CatalystbyZoho_Create_Bucket`, a short-lived probe bucket named after the
-   request id (`c2cprobe<id>`), then `CatalystbyZoho_List_All_Organizations` —
+   `CatalystbyZoho_Create_Bucket`, the probe bucket (`c2cprobe-p<project-id>`
+   — one bucket per project, reused across runs, so a repeated doctor run
+   never creates a second bucket; an already-exists answer means an earlier
+   run left it), then `CatalystbyZoho_List_All_Organizations` —
    and the user approves each call at the host's normal prompt. No setting
    changes. The agent never calls `CatalystbyZoho_List_All_Projects` or
    `CatalystbyZoho_Get_Project_By_Id`: they return project secrets
@@ -53,11 +56,13 @@ The plugin never asks the user for an evidence file. `/c2c:doctor` runs:
    The probe write is the security check: a submitted JSON can echo the
    request id, so the doctor instead reads the probe bucket back over the
    Catalyst REST API with the user's own CLI credential
-   (`GET /baas/v1/project/<id>/bucket/c2cprobe<id>`). A match proves the MCP
+   (the bucket list `GET /baas/v1/project/<id>/bucket`, matched on the exact
+   probe name). A match proves the MCP
    connector is bound to the same org/DC/project as the CLI — the only
    evidence a stdio/local connector can offer. Afterwards the agent removes
    the probe with `CatalystbyZoho_Delete_Bucket` (the delete call is printed
-   on every run while the probe may still exist).
+   on every run while the probe may still exist, and D-B8 warns until a
+   read-back shows the bucket gone).
 3. The agent pipes one observation into `c2c doctor --mcp-observed -` (with
    the usual scope flags):
 

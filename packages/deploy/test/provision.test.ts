@@ -3496,7 +3496,11 @@ test('an org-scoped doctor probe must land inside the created project before any
   const home = mkdtempSync(join(tmpdir(), 'c2c-prov-home-'));
   const env = { HOME: home, C2C_WORKSPACE: ws };
   const out = writeImportPlan(join(ws, 'c2c-out', 'widget'));
+  // A legacy org-scoped record names a random bucket; the in-project probe
+  // now uses the one deterministic bucket per project instead, shared with
+  // later project-scoped doctor runs.
   const probeName = `c2cprobe${'a1b2c3d4'.repeat(4)}`;
+  const wantProbe = `c2cprobe-p${PROJECT}`;
   // The doctor that gated --run import was org-scoped: a verified binding
   // whose detail is the in-project-probe-required marker.
   writeMcpEvidence(
@@ -3515,7 +3519,7 @@ test('an org-scoped doctor probe must land inside the created project before any
   assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import', '--org', ORG, '--dc', 'in'], c1.io), 0, c1.err());
   // The import closes, then names the exact probe call that must land inside the new project.
   assert.match(c1.out(), /in-project probe/);
-  assert.ok(c1.out().includes(probeName), c1.out());
+  assert.ok(c1.out().includes(wantProbe), c1.out());
   assert.ok(c1.out().includes(`"projectId":"${PROJECT}"`), c1.out());
 
   // MUST-FAIL: the probe bucket is not in the new project, so --run tables
@@ -3525,7 +3529,7 @@ test('an org-scoped doctor probe must land inside the created project before any
   c2.io.env = env;
   assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'tables', '--org', ORG, '--dc', 'in'], c2.io), 1);
   assert.match(c2.err(), /in-project MCP probe is not verified/);
-  assert.ok(c2.err().includes(probeName), c2.err());
+  assert.ok(c2.err().includes(wantProbe), c2.err());
   assert.ok(!c2.restCalls.some((line) => line.startsWith('POST')), c2.restCalls.join('\n'));
   assert.equal(readState(out).steps.tables, undefined);
 
@@ -3539,12 +3543,12 @@ test('an org-scoped doctor probe must land inside the created project before any
 
   // The session wrote the probe bucket: the in-project read-back verifies and
   // the step runs — recorded so no later step re-probes.
-  sandbox.buckets.push({ bucket_name: probeName });
+  sandbox.buckets.push({ bucket_name: wantProbe });
   const c3 = cap(sandbox, api.fetch);
   c3.io.env = env;
   assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'tables', '--org', ORG, '--dc', 'in'], c3.io), 0, c3.err());
   assert.ok(c3.restCalls.some((line) => line === `GET /baas/v1/project/${PROJECT}/bucket`), c3.restCalls.join('\n'));
-  assert.equal(readState(out).learned.inProjectProbe?.name, probeName);
+  assert.equal(readState(out).learned.inProjectProbe?.name, wantProbe);
   assert.equal(readState(out).learned.inProjectProbe?.projectId, PROJECT);
   rmSync(ws, { recursive: true, force: true });
   rmSync(home, { recursive: true, force: true });
