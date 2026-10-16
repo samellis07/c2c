@@ -100,10 +100,10 @@ test('resume continues after a mid-run write failure without repeating ids', asy
     return response({ ids: body.rows.map((row) => row.id) });
   };
   const checkpoint = emptyCheckpoint();
-  await assert.rejects(
-    () => migrateData({ ...bases, dryRun: false, fetch: skipReconcileQuery(fetch), checkpoint }),
-    /mid-run/,
-  );
+  const first = await migrateData({ ...bases, dryRun: false, fetch: skipReconcileQuery(fetch), checkpoint });
+  assert.equal(first.ok, false);
+  assert.equal(first.tables[0].mismatch, true);
+  assert.match(first.tables[0].error ?? '', /mid-run/);
   assert.equal(checkpoint.tables.Book.count, 200);
   assert.equal(checkpoint.tables.Book.lastId, 'r199');
   assert.equal(JSON.stringify(checkpoint).includes(SECRET), false);
@@ -131,10 +131,9 @@ test('resume after a mid-run failure fails verification when a destination id wa
     return response({ ids: body.rows.map((row) => row.id) });
   };
   const checkpoint = emptyCheckpoint();
-  await assert.rejects(
-    () => migrateData({ ...bases, dryRun: false, fetch: skipReconcileQuery(fetch), checkpoint }),
-    /mid-run/,
-  );
+  const first = await migrateData({ ...bases, dryRun: false, fetch: skipReconcileQuery(fetch), checkpoint });
+  assert.equal(first.ok, false);
+  assert.match(first.tables[0].error ?? '', /mid-run/);
   const second = await migrateData({ ...bases, dryRun: false, fetch: skipReconcileQuery(fetch), checkpoint });
   assert.equal(second.ok, false);
   assert.equal(second.tables[0].mismatch, true);
@@ -244,10 +243,9 @@ test('a successful POST then a checkpoint failure does not duplicate rows on res
     }
     persisted = JSON.parse(JSON.stringify(next)) as Checkpoint;
   };
-  await assert.rejects(
-    () => migrateData({ ...bases, dryRun: false, fetch, checkpoint: emptyCheckpoint(), saveCheckpoint, batchSize: 2 }),
-    /checkpoint failed/,
-  );
+  const first = await migrateData({ ...bases, dryRun: false, fetch, checkpoint: emptyCheckpoint(), saveCheckpoint, batchSize: 2 });
+  assert.equal(first.ok, false);
+  assert.match(first.tables[0].error ?? '', /checkpoint failed/);
   assert.equal(persisted.tables.Book, undefined);
   assert.deepEqual(inserted, ['r0', 'r1']);
   const second = await migrateData({ ...bases, dryRun: false, fetch, checkpoint: persisted, saveCheckpoint, batchSize: 2 });
@@ -451,7 +449,7 @@ test('the holder stamps the lease before its first await, and an expired lease c
   assert.equal(expired.tables.Book.done, true);
 });
 
-test('a unique violation that is not c2c_source_id fails closed', async () => {
+test('a unique violation that is not c2c_source_id fails the table closed', async () => {
   let posts = 0;
   const fetch: FetchLike = async (url, init) => {
     const method = init?.method ?? 'GET';
@@ -465,16 +463,15 @@ test('a unique violation that is not c2c_source_id fails closed', async () => {
     );
   };
   const checkpoint = emptyCheckpoint();
-  await assert.rejects(
-    () => migrateData({ ...bases, dryRun: false, fetch, checkpoint }),
-    /catalyst unique violation: 409/,
-  );
+  const result = await migrateData({ ...bases, dryRun: false, fetch, checkpoint });
+  assert.equal(result.ok, false);
+  assert.match(result.tables[0].error ?? '', /catalyst unique violation: 409/);
   assert.equal(posts, 1);
   assert.equal(checkpoint.tables.Book.lock, undefined);
   assert.notEqual(checkpoint.tables.Book.done, true);
 });
 
-test('a non-unique write error still aborts', async () => {
+test('a non-unique write error fails the table and the run reports it', async () => {
   const fetch: FetchLike = async (url, init) => {
     const method = init?.method ?? 'GET';
     if (method === 'GET') return response({ data: rows(1) });
@@ -485,10 +482,10 @@ test('a non-unique write error still aborts', async () => {
       403,
     );
   };
-  await assert.rejects(
-    () => migrateData({ ...bases, dryRun: false, fetch, checkpoint: emptyCheckpoint() }),
-    /catalyst write failed: 403/,
-  );
+  const result = await migrateData({ ...bases, dryRun: false, fetch, checkpoint: emptyCheckpoint() });
+  assert.equal(result.ok, false);
+  assert.equal(result.tables[0].mismatch, true);
+  assert.match(result.tables[0].error ?? '', /catalyst write failed: 403/);
 });
 
 test('dry-run does not POST, and the next page sends the cursor', async () => {
@@ -615,7 +612,9 @@ test('a store failure at the sixth table leaves no duplicates: the rerun stores 
   const checkpoint = emptyCheckpoint();
   // The store fake speaks the real /row shape, so this run bypasses the
   // legacy { rows }/{ ids } translation the other tests in this file use.
-  await assert.rejects(migrateDataReal({ ...bases, tables, dryRun: false, fetch, checkpoint }), /catalyst write failed: 403.*MANDATORY_MISSING/);
+  const first = await migrateDataReal({ ...bases, tables, dryRun: false, fetch, checkpoint });
+  assert.equal(first.ok, false);
+  assert.match(first.tables.find((entry) => entry.table === 'Create_BOM')?.error ?? '', /catalyst write failed: 403.*MANDATORY_MISSING/);
   for (const { table } of tables.slice(0, 5)) assert.equal(checkpoint.tables[table]?.done, true);
   assert.notEqual(checkpoint.tables.Create_BOM?.done, true);
 
@@ -683,14 +682,75 @@ test('a failed reconcile query stops the table before any row POST and names sta
     posts += 1;
     return response({ ids: [] });
   };
-  await assert.rejects(
-    () => migrateData({ ...bases, dryRun: false, fetch, checkpoint: emptyCheckpoint(), scope: { org: '10000000000', projectId: '10000000000000001', token: SECRET } }),
-    (err: unknown) => {
-      const message = (err as Error).message;
-      assert.match(message, /^catalyst query failed: 500 INTERNAL_SERVER_ERROR: query broke \(POST \/baas\/v1\/project\/10000000000000001\/query, table Book\)$/);
-      assert.equal(message.includes(SECRET), false);
-      return true;
-    },
-  );
+  const result = await migrateData({
+    ...bases,
+    dryRun: false,
+    fetch,
+    checkpoint: emptyCheckpoint(),
+    scope: { org: '10000000000', projectId: '10000000000000001', token: SECRET },
+  });
+  assert.equal(result.ok, false);
+  const message = result.tables[0].error ?? '';
+  assert.match(message, /^catalyst query failed: 500 INTERNAL_SERVER_ERROR: query broke \(POST \/baas\/v1\/project\/10000000000000001\/query, table Book\)$/);
+  assert.equal(message.includes(SECRET), false);
   assert.equal(posts, 0);
+});
+
+test('a table whose write is refused is recorded and the run loads the rest', async () => {
+  const tables = [
+    { report: 'Bad_Report', table: 'Bad' },
+    { report: 'Good_Report', table: 'Good' },
+  ];
+  const fetch: FetchLike = async (url, init) => {
+    const method = init?.method ?? 'GET';
+    const path = new URL(url).pathname;
+    if (method === 'GET') {
+      const report = decodeURIComponent(path.split('/').at(-1) ?? '');
+      return response({ data: [{ ID: `${report}-1`, Name: 'x' }] });
+    }
+    if (path.includes('/table/Bad/row')) {
+      return catalystFailure(400, 'INVALID_INPUT', 'Invalid input value for When. date value expected');
+    }
+    const body = JSON.parse(init?.body ?? '{}') as { rows: { id: string }[] };
+    return response({ ids: body.rows.map((row) => row.id) });
+  };
+  const checkpoint = emptyCheckpoint();
+  const result = await migrateData({ ...bases, tables, dryRun: false, fetch: skipReconcileQuery(fetch), checkpoint });
+  assert.equal(result.ok, false);
+  assert.equal(result.tables.length, 2, 'every table gets a report row');
+  const bad = result.tables.find((entry) => entry.table === 'Bad')!;
+  assert.equal(bad.mismatch, true);
+  assert.match(bad.error ?? '', /catalyst write failed: 400 INVALID_INPUT/);
+  assert.equal(checkpoint.tables.Bad?.done !== true, true);
+  const good = result.tables.find((entry) => entry.table === 'Good')!;
+  assert.equal(good.mismatch, false);
+  assert.equal(good.writtenCount, 1);
+  assert.equal(checkpoint.tables.Good?.done, true);
+});
+
+test('a table whose load throws is recorded and the run loads the rest', async () => {
+  const tables = [
+    { report: 'Bad_Report', table: 'Bad' },
+    { report: 'Good_Report', table: 'Good' },
+  ];
+  const fetch: FetchLike = async (url, init) => {
+    const method = init?.method ?? 'GET';
+    const path = new URL(url).pathname;
+    if (method === 'GET') {
+      const report = decodeURIComponent(path.split('/').at(-1) ?? '');
+      if (report === 'Bad_Report') throw new Error('creator read broke');
+      return response({ data: [{ ID: 'g1', Name: 'x' }] });
+    }
+    const body = JSON.parse(init?.body ?? '{}') as { rows: { id: string }[] };
+    return response({ ids: body.rows.map((row) => row.id) });
+  };
+  const checkpoint = emptyCheckpoint();
+  const result = await migrateData({ ...bases, tables, dryRun: false, fetch: skipReconcileQuery(fetch), checkpoint });
+  assert.equal(result.ok, false);
+  const bad = result.tables.find((entry) => entry.table === 'Bad')!;
+  assert.match(bad.error ?? '', /creator read broke/);
+  assert.equal(bad.mismatch, true);
+  const good = result.tables.find((entry) => entry.table === 'Good')!;
+  assert.equal(good.mismatch, false);
+  assert.equal(checkpoint.tables.Good?.done, true);
 });

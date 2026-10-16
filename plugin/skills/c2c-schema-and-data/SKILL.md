@@ -33,9 +33,9 @@ ZCQL schema, planning, and data-load rules are indexed in `plugin/references/fac
 | Formula | computed in code (evaluator); TODO where the evaluator does not support it yet | Never leave an empty column silently |
 | Initial value | applied **by the server on insert** when the field is absent | The generated handler applies it; without that, absent fields are stored as `null` [TESTED]. Migrated rows keep their explicit values |
 | Record ID | `c2c_source_id varchar(255)`, **nullable, not unique** | Mandatory+unique made every app insert fail with `403 MANDATORY_MISSING "Column c2c_source_id is mandatory and cannot be empty"` and used a unique slot [TESTED]. The loader enforces uniqueness of migrated IDs |
-| "No duplicate values" | `is_unique` while the table has ≤ 2 unique varchar columns; beyond that, app-level uniqueness | Cap is 2 [TESTED] |
+| "No duplicate values" | `is_unique` while the table has ≤ 2 unique varchar columns; beyond that, app-level uniqueness. Never on `date`/`datetime` — a unique date column refuses every insert (`400 INVALID_INPUT … date value expected`), so the handler enforces it | Cap is 2 [TESTED]; unique-date refusal [TESTED] |
 
-Reserved ZCQL words (`FROM`, `TO`, …) as column names are renamed with a mapping.
+Reserved column names (`FROM`, `TO`, `PRIORITY`, `TABLE`, `TIME`, the `ROWID`/`CREATEDTIME`-style system names, …) are refused at create (`403 INVALID_OPERATION` "reserved keywords") and renamed with a mapping — `To` → `To_col` [TESTED].
 
 ### Budgets (the plan fails closed)
 

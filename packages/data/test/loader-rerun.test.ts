@@ -405,7 +405,9 @@ test('a fill update that fails after the store applied it throws; the re-run con
   const store = quirkRowServer({ errorAfterWrite: true });
   store.addStored('Vendor', { c2c_source_id: 's1', ROWID: '10000000000013101', Name: 'Ada', Added_Time: null });
   const page = creator([{ ID: 's1', Name: 'Ada', Added_Time: '2026-10-05 09:08:07' }]);
-  await assert.rejects(run(page, store), /catalyst row update failed: 400 INVALID_INPUT/);
+  const failed = await run(page, store);
+  assert.equal(failed.ok, false);
+  assert.match(failed.tables[0].error ?? '', /catalyst row update failed: 400 INVALID_INPUT/);
   assert.equal(store.puts.length, 1);
   assert.equal(store.stored.get('Vendor\0s1')?.Added_Time, '2026-10-05 09:08:07');
   const second = await run(page, store);
@@ -429,7 +431,9 @@ test('a failed update batch keeps the count of fills already sent; the re-run fi
       return next(url, init);
     };
   const page = creator(source);
-  await assert.rejects(run(page, store, {}, failSecond), /catalyst row update failed: 500.*200 stored cell update/);
+  const failed = await run(page, store, {}, failSecond);
+  assert.equal(failed.ok, false);
+  assert.match(failed.tables[0].error ?? '', /catalyst row update failed: 500.*200 stored cell update/);
   const filledAfterThrow = [...store.stored.values()].filter((row) => row.Added_Time).length;
   assert.equal(filledAfterThrow, 200);
   const second = await run(page, store);
@@ -491,10 +495,9 @@ test('a fill ROWID that only exists on another table is refused by the store', a
       }
       return next(url, init);
     };
-  await assert.rejects(
-    run(creator([{ ID: 's1', Name: 'Ada', Added_Time: '2026-10-05 09:08:07' }]), store, {}, forge),
-    /catalyst row update failed: 400/,
-  );
+  const forged = await run(creator([{ ID: 's1', Name: 'Ada', Added_Time: '2026-10-05 09:08:07' }]), store, {}, forge);
+  assert.equal(forged.ok, false);
+  assert.match(forged.tables[0].error ?? '', /catalyst row update failed: 400/);
   assert.equal(store.stored.get('Other\0x1')?.Added_Time, undefined);
 });
 

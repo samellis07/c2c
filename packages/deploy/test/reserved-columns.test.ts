@@ -132,8 +132,10 @@ function refusingStore(words: readonly string[] = ['table', 'time', 'priority'])
 }
 
 test('reserved column names match the whole name in any case', () => {
-  for (const name of ['Table', 'TIME', 'priority', 'From', 'Order', 'Limit']) assert.equal(isReservedColumnName(name), true, name);
-  for (const name of ['Table_Number', 'task_priority', 'Time_Of_Attending', 'Status', 'Comments', 'Type', 'To']) assert.equal(isReservedColumnName(name), false, name);
+  for (const name of ['Table', 'TIME', 'priority', 'From', 'Order', 'Limit', 'To', 'to', 'CREATEDTIME', 'ModifiedTime', 'CreatorID']) {
+    assert.equal(isReservedColumnName(name), true, name);
+  }
+  for (const name of ['Table_Number', 'task_priority', 'Time_Of_Attending', 'Status', 'Comments', 'Type', 'To_Date', 'ToTime']) assert.equal(isReservedColumnName(name), false, name);
 });
 
 test('the schema stores a reserved field under a suffixed column and records the rename', () => {
@@ -172,6 +174,25 @@ test('a hand-edited step with a reserved column name is refused before any colum
   const step = { table: 'New_Order', form: 'New_Order', nosql: false, columns: [{ table: 'New_Order', column_name: 'Table', data_type: 'varchar', max_length: 255, is_unique: false, is_mandatory: false }] };
   await assert.rejects(() => applyTablePlan('1001', [step], store.rest), /refusing to create New_Order: reserved column name\(s\) Table/);
   assert.equal(store.columns.size, 0);
+});
+
+test('a field named To is reserved: the plan stores To_col and the refusing store accepts it', async () => {
+  // Live refusal: Work_experience.To -> 403 INVALID_OPERATION "Column name cannot contain reserved keywords".
+  const hr = deriveIr(parse('application "HR"\n{\n\tform Work_experience\n\t{\n\t\tFrom_col\n\t\t(\n\t\t\ttype = date\n\t\t)\n\t\tTo\n\t\t(\n\t\t\ttype = date\n\t\t)\n\t}\n}\n'));
+  const plan = generateSchema(hr);
+  const work = plan.tables.find((table) => table.name === 'Work_experience')!;
+  for (const column of work.columns) assert.equal(isReservedColumnName(column.name), false, column.name);
+  assert.equal(work.columns.find((column) => column.field === 'To')?.name, 'To_col');
+  assert.equal(work.columns.find((column) => column.name === 'To_col')?.dataType, 'Date');
+  assert.deepEqual(columnRenamesOf(plan), { Work_experience: { To: 'To_col' } });
+  const store = refusingStore(['to']);
+  const diff = await applyTablePlan('1001', tableCreatePlan(plan), store.rest);
+  assert.ok(diff.createdColumns.includes('Work_experience.To_col'));
+  // Must-fail arm: a step that still names the reserved word never reaches the store.
+  const refused = refusingStore(['to']);
+  const step = { table: 'Work_experience', form: 'Work_experience', nosql: false, columns: [{ table: 'Work_experience', column_name: 'To', data_type: 'date', is_unique: false, is_mandatory: false }] };
+  await assert.rejects(() => applyTablePlan('1001', [step], refused.rest), /refusing to create Work_experience: reserved column name\(s\) To/);
+  assert.equal(refused.columns.size, 0);
 });
 
 const fixtures = process.env.C2C_FIXTURES_DIR;

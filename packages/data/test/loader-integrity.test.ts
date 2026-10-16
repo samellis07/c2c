@@ -240,10 +240,10 @@ test('a 400 that did not write the row still fails closed', async () => {
     const body = JSON.stringify({ status: 'failure', data: { error_code: 'INVALID_INPUT', message: 'Invalid input value for Order_Date. date value expected' } });
     return { status: 400, headers: { get: () => null }, text: async () => body };
   };
-  await assert.rejects(
-    () => migrateData({ ...bases, dryRun: false, fetch, checkpoint: emptyCheckpoint() }),
-    /catalyst write failed: 400 INVALID_INPUT: Invalid input value for Order_Date\. date value expected/,
-  );
+  const result = await migrateData({ ...bases, dryRun: false, fetch, checkpoint: emptyCheckpoint() });
+  assert.equal(result.ok, false);
+  assert.equal(result.tables[0].mismatch, true);
+  assert.match(result.tables[0].error ?? '', /catalyst write failed: 400 INVALID_INPUT: Invalid input value for Order_Date\. date value expected/);
   assert.equal(posts, 1);
 });
 

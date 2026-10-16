@@ -263,9 +263,9 @@ test('Catalyst system columns on stored rows are ignored; user-column drift stil
 });
 
 test('a schema column named like a Catalyst system column is still compared', () => {
-  // generateSchema keeps a field named CREATORID. isReservedColumnName does not
-  // list it (only priority, table, time, and ZCQL words). The edit API refuses
-  // that name for a new field; parity follows the generated schema.
+  // generateSchema stores a field named CREATORID as CREATORID_col: the name is
+  // a Data Store system column and a create naming it is refused. The edit API
+  // refuses that name for a new field; parity follows the generated schema.
   const app = appOf(`application "Widget"
 {
 form Vendor
@@ -292,20 +292,20 @@ CREATORID as "Creator Id"
 }
 `);
   const declared = generateSchema(app).tables.find((table) => table.name === 'Vendor')!.columns.map((column) => column.name);
-  assert.ok(declared.includes('CREATORID'));
+  assert.ok(declared.includes('CREATORID_col'));
   const dir = writeJsonExport(app, {
     All_Vendors: [{ ID: '101', 'Vendor Name': 'Acme', 'Creator Id': 'mine' }],
   });
   const loaded = readSourceJson(dir, app);
   const stored = fakeStore(app, loaded, { systemColumns: true });
-  assert.equal(stored.get('Vendor')![0]!.CREATORID, 'mine');
+  assert.equal(stored.get('Vendor')![0]!.CREATORID_col, 'mine');
   const clean = dataParity({ app, loaded, stored });
   assert.equal(clean.ok, true, JSON.stringify(clean.tables, null, 2));
 
   const drifted = new Map<string, Record<string, unknown>[]>(
     [...stored].map(([table, rows]) => [table, rows.map((row) => ({ ...row }))]),
   );
-  drifted.get('Vendor')![0]!.CREATORID = 'other';
+  drifted.get('Vendor')![0]!.CREATORID_col = 'other';
   const drift = dataParity({ app, loaded, stored: drifted });
   assert.equal(drift.ok, false);
   assert.deepEqual(drift.tables.find((table) => table.table === 'Vendor')!.changedIds, ['101']);

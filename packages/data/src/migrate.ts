@@ -24,8 +24,8 @@
  *
  * Unique-violation race. A 409 DUPLICATE_VALUE ("Duplicate value for …") comes from an
  * app unique column. The mover re-queries the batch, drops ids now present, and retries
- * the rest. If the re-query finds none of the posted ids, the run fails closed. A 403 or
- * 404 fails closed too. A 400 or 5xx is UNKNOWN: the mover reads the batch back by
+ * the rest. If the re-query finds none of the posted ids, the table fails. A 403 or
+ * 404 fails the table too. A 400 or 5xx is UNKNOWN: the mover reads the batch back by
  * c2c_source_id and does not insert those ids again. Rows that are present and unchanged
  * count as unknown-then-found. A stored value that differs from the payload is a
  * silent-change refusal. Two movers that do not share a checkpoint can both see an
@@ -42,11 +42,17 @@
  *
  * Per-table lease. A live run stamps the table checkpoint with { owner, expiresAt }
  * before its first await, renews the expiry on each save, and clears it when the table
- * finishes or the run throws. A second mover that shares the checkpoint object does not
+ * finishes or its load throws. A second mover that shares the checkpoint object does not
  * write that table while expiresAt is still ahead of now; an expired lease can be taken
  * over. The lease is not saved on its own (the next confirmed batch persists it). Two
  * processes that loaded the checkpoint before either saved still race; the re-reconcile
  * on resume is the backstop.
+ *
+ * Per-table failure. A table whose load is refused or whose read, write, or checkpoint
+ * step throws is recorded in the per-table report (mismatch, error) and the run moves on
+ * to the next table: one bad table must not leave the rest of the app empty. The run's
+ * ok flag is false and the caller exits non-zero. Only refusals decided before a table's
+ * load begins — a disallowed host and another mover's live lease — still abort the run.
  *
  * Source id length. Creator v2.1 Get Records returns ID as a numeric string. The
  * published sample is 17 digits and a lookup criteria example is 19 digits. Both
@@ -188,7 +194,7 @@ export interface TableCheckpoint {
   sourceChecksum?: string;
   /**
    * Per-table lease. Set before the first await of a live run, renewed on each save,
-   * cleared when the table finishes or the run throws. Absent on a dry run.
+   * cleared when the table finishes or its load throws. Absent on a dry run.
    */
   lock?: { owner: string; expiresAt: number };
   done: boolean;
@@ -1105,7 +1111,7 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
     delete copy.lock;
     return copy;
   };
-  for (const table of opts.tables) {
+  perTable: for (const table of opts.tables) {
     const readUrl = creatorUrl(opts.creatorBase, opts.owner, opts.appLink, table.report);
     const writeUrl = catalystWriteUrl(opts.catalystBase, table.table, opts.scope);
     const target: WriteTarget = {
@@ -1159,141 +1165,35 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
     let sourceState = state.sourceChecksum !== undefined ? parseChecksum(state.sourceChecksum) : FNV_OFFSET;
     let writtenState = parseChecksum(state.checksum);
     let sourceCount = state.sourceCount ?? 0;
-    const seen = new Set<string>();
-    /** Canonical fingerprints of this run's rows, for the end-of-table read-back. */
-    const canonById = new Map<string, { canon: string; keys: string[]; payload: Record<string, unknown> }>();
-    while (!state.done) {
-      const page = await readPage(opts.fetch, readUrl, state.requestCursor, opts.dc).catch((err: unknown) => park(err));
-      let rows = page.rows;
-      if (state.lastId) {
-        const index = rows.findIndex((row) => row.id === state.lastId);
-        if (index >= 0) rows = rows.slice(index + 1);
-      }
-      for (const row of rows) {
-        if (!row.missingSystemFields.length) continue;
-        const set = systemGaps.get(table.table) ?? new Set<string>();
-        for (const name of row.missingSystemFields) set.add(name);
-        systemGaps.set(table.table, set);
-      }
-      // c2c_source_id is not a unique column. A repeated source id is refused before
-      // any row of this page is written, so the store never holds one id twice.
-      const duplicateIds: string[] = [];
-      for (const row of rows) {
-        if (seen.has(row.id)) {
-          if (!duplicateIds.includes(row.id)) duplicateIds.push(row.id);
-        } else seen.add(row.id);
-      }
-      if (duplicateIds.length) {
-        state = release(state);
-        opts.checkpoint.tables[table.table] = state;
-        save(opts.checkpoint, opts.saveCheckpoint);
-        results.push({
-          table: table.table,
-          sourceCount,
-          writtenCount: state.count,
-          sourceChecksum: checksumHex(sourceState),
-          writtenChecksum: checksumHex(writtenState),
-          batches,
-          mismatch: true,
-          missingIds: [],
-          duplicateIds,
-          ...(tableFilledNulls ? { filledNulls: tableFilledNulls } : {}),
-          ...(tableCorrectedLookups ? { correctedLookups: tableCorrectedLookups } : {}),
-          error: `source repeats ${duplicateIds.length} record id(s); c2c_source_id must be unique per table`,
-        });
-        return finish(false);
-      }
-      const tooLong = rows.find((row) => row.id.length > SOURCE_ID_MAX_LENGTH);
-      if (tooLong) {
-        state = release(state);
-        opts.checkpoint.tables[table.table] = state;
-        save(opts.checkpoint, opts.saveCheckpoint);
-        results.push({
-          table: table.table,
-          sourceCount,
-          writtenCount: state.count,
-          sourceChecksum: checksumHex(sourceState),
-          writtenChecksum: checksumHex(writtenState),
-          batches,
-          mismatch: true,
-          missingIds: [],
-          ...(tableFilledNulls ? { filledNulls: tableFilledNulls } : {}),
-          ...(tableCorrectedLookups ? { correctedLookups: tableCorrectedLookups } : {}),
-          error: `source id length ${tooLong.id.length} exceeds ${SOURCE_ID_MAX_LENGTH}`,
-        });
-        return finish(false);
-      }
-      for (let i = 0; i < rows.length; ) {
-        const slice = rows.slice(i, i + batch);
-        // Check every cell — including a missing mandatory column — before the
-        // reconcile query, so a bad row refuses the slice before any write.
-        const prepared = slice.map((row) => prepareRow(row, target, table.shadows, table.files));
-        for (const item of prepared) canonById.set(item.row.id, { canon: item.canon, keys: item.keys, payload: item.payload });
-        let present = new Set<string>();
-        let toWrite = prepared;
-        let acked: string[] = [];
-        let unknownIds: string[] = [];
-        let blocked: IntegrityRefusal[] = prepared.flatMap((item) => item.refusals);
-        try {
-          if (!opts.dryRun && !blocked.length) {
-            const scan = await queryExistingSourceIds(opts.fetch, opts.catalystBase, table.table, slice.map((row) => row.id), opts.dc, opts.scope);
-            present = scan.present;
-            const prior = scan.duplicates.length
-              ? { refusals: duplicateRefusals(table.table, scan.duplicates), filled: 0, corrected: 0 }
-              : await alreadyStoredRefusals(opts.fetch, prepared, present, opts.dc, opts.scope, target);
-            blocked = prior.refusals;
-            tableFilledNulls += prior.filled;
-            filledNullCells += prior.filled;
-            tableCorrectedLookups += prior.corrected;
-            correctedLookupCells += prior.corrected;
-            if (!blocked.length) {
-              toWrite = prepared.filter((item) => !present.has(item.row.id));
-              const maxAttempts = Math.max(toWrite.length, 1);
-              let attempt = 0;
-              while (toWrite.length > 0) {
-                try {
-                  const batchWrite = await writeBatch(opts.fetch, writeUrl, toWrite, opts.dc, false, opts.scope, target);
-                  if (batchWrite.refusals.length) {
-                    blocked = batchWrite.refusals;
-                    acked = [];
-                    break;
-                  }
-                  acked = batchWrite.ids;
-                  unknownIds = batchWrite.unknownIds;
-                  break;
-                } catch (err) {
-                  if (!(err instanceof UniqueViolationError)) throw err;
-                  attempt += 1;
-                  const found = await queryExistingSourceIds(opts.fetch, opts.catalystBase, table.table, toWrite.map((item) => item.row.id), opts.dc, opts.scope);
-                  if (found.duplicates.length) {
-                    blocked = duplicateRefusals(table.table, found.duplicates);
-                    acked = [];
-                    break;
-                  }
-                  if (found.present.size === 0 || attempt > maxAttempts) throw err;
-                  for (const id of found.present) present.add(id);
-                  const next = toWrite.filter((item) => !present.has(item.row.id));
-                  if (next.length === toWrite.length) throw err;
-                  toWrite = next;
-                  acked = [];
-                }
-              }
-            }
-          } else if (opts.dryRun && !blocked.length) {
-            const batchWrite = await writeBatch(opts.fetch, writeUrl, prepared, opts.dc, true, opts.scope, target);
-            if (batchWrite.refusals.length) blocked = batchWrite.refusals;
-            else acked = batchWrite.ids;
-          }
-        } catch (err) {
-          park(err);
+    try {
+      const seen = new Set<string>();
+      /** Canonical fingerprints of this run's rows, for the end-of-table read-back. */
+      const canonById = new Map<string, { canon: string; keys: string[]; payload: Record<string, unknown> }>();
+      while (!state.done) {
+        const page = await readPage(opts.fetch, readUrl, state.requestCursor, opts.dc).catch((err: unknown) => park(err));
+        let rows = page.rows;
+        if (state.lastId) {
+          const index = rows.findIndex((row) => row.id === state.lastId);
+          if (index >= 0) rows = rows.slice(index + 1);
         }
-        if (blocked.length) {
-          refusalLog.push(...blocked);
+        for (const row of rows) {
+          if (!row.missingSystemFields.length) continue;
+          const set = systemGaps.get(table.table) ?? new Set<string>();
+          for (const name of row.missingSystemFields) set.add(name);
+          systemGaps.set(table.table, set);
+        }
+        // c2c_source_id is not a unique column. A repeated source id is refused before
+        // any row of this page is written, so the store never holds one id twice.
+        const duplicateIds: string[] = [];
+        for (const row of rows) {
+          if (seen.has(row.id)) {
+            if (!duplicateIds.includes(row.id)) duplicateIds.push(row.id);
+          } else seen.add(row.id);
+        }
+        if (duplicateIds.length) {
           state = release(state);
           opts.checkpoint.tables[table.table] = state;
           save(opts.checkpoint, opts.saveCheckpoint);
-          const duplicateIds = [...new Set(blocked.filter((item) => item.rule === 'duplicate-source-id').map((item) => item.sourceId))];
-          const beforeWrite = blocked.every((item) => item.rule !== 'silent-change' && item.rule !== 'duplicate-source-id');
           results.push({
             table: table.table,
             sourceCount,
@@ -1303,47 +1203,15 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
             batches,
             mismatch: true,
             missingIds: [],
-            ...(duplicateIds.length ? { duplicateIds } : {}),
+            duplicateIds,
             ...(tableFilledNulls ? { filledNulls: tableFilledNulls } : {}),
             ...(tableCorrectedLookups ? { correctedLookups: tableCorrectedLookups } : {}),
-            error: duplicateIds.length
-              ? `duplicate c2c_source_id (${duplicateIds.length}); extra rows are already stored`
-              : beforeWrite
-                ? `refused ${blocked.length} value(s) before write`
-                : `stored value differs for ${blocked.length} column(s)`,
+            error: `source repeats ${duplicateIds.length} record id(s); c2c_source_id must be unique per table`,
           });
-          return finish(false);
+          continue perTable;
         }
-        batches.push(slice.length);
-        const unknown = new Set(unknownIds);
-        if (toWrite.length === 0 || acked.length === toWrite.length) {
-          for (const row of slice) {
-            sourceState = fnv1a64(sourceState, row.id);
-            sourceCount += 1;
-          }
-          noteAck(acked, present, unknown, Boolean(table.integrityColumns?.length));
-          for (const id of writtenIdsForSlice(slice, present, acked)) writtenState = fnv1a64(writtenState, id);
-          state = hold({
-            requestCursor: state.requestCursor,
-            lastId: slice[slice.length - 1].id,
-            count: state.count + slice.length,
-            checksum: checksumHex(writtenState),
-            sourceCount,
-            sourceChecksum: checksumHex(sourceState),
-            done: false,
-          });
-          opts.checkpoint.tables[table.table] = state;
-          save(opts.checkpoint, opts.saveCheckpoint);
-          i += slice.length;
-          continue;
-        }
-        const confirmed = confirmedPrefix(slice, [...slice.filter((row) => present.has(row.id)).map((row) => row.id), ...acked]);
-        if (confirmed === 0) {
-          const missing = slice.map((row) => row.id);
-          let reportSource = sourceState;
-          for (const row of slice) reportSource = fnv1a64(reportSource, row.id);
-          let reportWritten = writtenState;
-          for (const id of acked) reportWritten = fnv1a64(reportWritten, id);
+        const tooLong = rows.find((row) => row.id.length > SOURCE_ID_MAX_LENGTH);
+        if (tooLong) {
           state = release(state);
           opts.checkpoint.tables[table.table] = state;
           save(opts.checkpoint, opts.saveCheckpoint);
@@ -1351,117 +1219,284 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
             table: table.table,
             sourceCount,
             writtenCount: state.count,
-            sourceChecksum: checksumHex(reportSource),
-            writtenChecksum: checksumHex(reportWritten),
+            sourceChecksum: checksumHex(sourceState),
+            writtenChecksum: checksumHex(writtenState),
             batches,
             mismatch: true,
-            missingIds: missing,
+            missingIds: [],
             ...(tableFilledNulls ? { filledNulls: tableFilledNulls } : {}),
             ...(tableCorrectedLookups ? { correctedLookups: tableCorrectedLookups } : {}),
+            error: `source id length ${tooLong.id.length} exceeds ${SOURCE_ID_MAX_LENGTH}`,
           });
-          return finish(false);
+          continue perTable;
         }
-        const prefix = slice.slice(0, confirmed);
-        noteAck(prefix.map((row) => row.id), present, unknown, Boolean(table.integrityColumns?.length));
-        for (const row of prefix) {
-          sourceState = fnv1a64(sourceState, row.id);
-          writtenState = fnv1a64(writtenState, row.id);
-          sourceCount += 1;
-        }
-        state = hold({
-          requestCursor: state.requestCursor,
-          lastId: prefix[prefix.length - 1].id,
-          count: state.count + prefix.length,
-          checksum: checksumHex(writtenState),
-          sourceCount,
-          sourceChecksum: checksumHex(sourceState),
-          done: false,
-        });
-        opts.checkpoint.tables[table.table] = state;
-        save(opts.checkpoint, opts.saveCheckpoint);
-        i += confirmed;
-      }
-      if (!page.nextCursor) {
-        state = release({ ...state, requestCursor: state.requestCursor, lastId: undefined, done: true });
-      } else {
-        state = hold({ ...state, requestCursor: page.nextCursor, lastId: undefined, done: false });
-      }
-      opts.checkpoint.tables[table.table] = state;
-      save(opts.checkpoint, opts.saveCheckpoint);
-    }
-    const sourceChecksum = checksumHex(sourceState);
-    const writtenChecksum = checksumHex(writtenState);
-    // Value fidelity: the source side folds id + canonical cells per row of this
-    // run; the written side reads those ids back once more and folds the stored
-    // rows with the same keys. A value Catalyst truncated, rounded, or coerced
-    // after the write flips writtenValueChecksum, even when the row-level echo
-    // checks let it through. A table resumed from a checkpoint folds the rows
-    // this run saw; rows an earlier run verified keep their own evidence.
-    // A stored row is the same as its source row exactly when the canonical
-    // compare (changedColumns) finds no changed cell, so the store's own
-    // spellings (a :SSS fraction, a trailing Z, Boolean text, NULL for empty)
-    // fold to the source fingerprint and only a real change flips the checksum.
-    let sourceValueChecksum: string | undefined;
-    let writtenValueChecksum: string | undefined;
-    let missingIds: string[] = [];
-    let differingIds: string[] = [];
-    let storedDupes: string[] = [];
-    let verifyError: string | undefined;
-    if (target.columns?.length && canonById.size) {
-      let valueState = FNV_OFFSET;
-      for (const [id, entry] of canonById) valueState = fnv1a64(valueState, `${id}\x00${entry.canon}`);
-      sourceValueChecksum = checksumHex(valueState);
-    }
-    if (!opts.dryRun && sourceValueChecksum !== undefined) {
-      try {
-        const ids = [...canonById.keys()];
-        const select = [...new Set([...canonById.values()].flatMap((entry) => entry.keys))].filter((name) =>
-          /^[A-Za-z_][A-Za-z0-9_]*$/.test(name),
-        );
-        const stored = await queryStoredRows(opts.fetch, opts.catalystBase, table.table, ids, select, opts.dc, opts.scope);
-        storedDupes = duplicateSourceIds(stored);
-        const dupeSet = new Set(storedDupes);
-        let valueState = FNV_OFFSET;
-        for (const [id, entry] of canonById) {
-          const rows = stored.get(id) ?? [];
-          if (rows.length === 0 || dupeSet.has(id)) {
-            valueState = fnv1a64(valueState, `${id}\x00-`);
-            if (rows.length === 0) missingIds.push(id);
+        for (let i = 0; i < rows.length; ) {
+          const slice = rows.slice(i, i + batch);
+          // Check every cell — including a missing mandatory column — before the
+          // reconcile query, so a bad row refuses the slice before any write.
+          const prepared = slice.map((row) => prepareRow(row, target, table.shadows, table.files));
+          for (const item of prepared) canonById.set(item.row.id, { canon: item.canon, keys: item.keys, payload: item.payload });
+          let present = new Set<string>();
+          let toWrite = prepared;
+          let acked: string[] = [];
+          let unknownIds: string[] = [];
+          let blocked: IntegrityRefusal[] = prepared.flatMap((item) => item.refusals);
+          try {
+            if (!opts.dryRun && !blocked.length) {
+              const scan = await queryExistingSourceIds(opts.fetch, opts.catalystBase, table.table, slice.map((row) => row.id), opts.dc, opts.scope);
+              present = scan.present;
+              const prior = scan.duplicates.length
+                ? { refusals: duplicateRefusals(table.table, scan.duplicates), filled: 0, corrected: 0 }
+                : await alreadyStoredRefusals(opts.fetch, prepared, present, opts.dc, opts.scope, target);
+              blocked = prior.refusals;
+              tableFilledNulls += prior.filled;
+              filledNullCells += prior.filled;
+              tableCorrectedLookups += prior.corrected;
+              correctedLookupCells += prior.corrected;
+              if (!blocked.length) {
+                toWrite = prepared.filter((item) => !present.has(item.row.id));
+                const maxAttempts = Math.max(toWrite.length, 1);
+                let attempt = 0;
+                while (toWrite.length > 0) {
+                  try {
+                    const batchWrite = await writeBatch(opts.fetch, writeUrl, toWrite, opts.dc, false, opts.scope, target);
+                    if (batchWrite.refusals.length) {
+                      blocked = batchWrite.refusals;
+                      acked = [];
+                      break;
+                    }
+                    acked = batchWrite.ids;
+                    unknownIds = batchWrite.unknownIds;
+                    break;
+                  } catch (err) {
+                    if (!(err instanceof UniqueViolationError)) throw err;
+                    attempt += 1;
+                    const found = await queryExistingSourceIds(opts.fetch, opts.catalystBase, table.table, toWrite.map((item) => item.row.id), opts.dc, opts.scope);
+                    if (found.duplicates.length) {
+                      blocked = duplicateRefusals(table.table, found.duplicates);
+                      acked = [];
+                      break;
+                    }
+                    if (found.present.size === 0 || attempt > maxAttempts) throw err;
+                    for (const id of found.present) present.add(id);
+                    const next = toWrite.filter((item) => !present.has(item.row.id));
+                    if (next.length === toWrite.length) throw err;
+                    toWrite = next;
+                    acked = [];
+                  }
+                }
+              }
+            } else if (opts.dryRun && !blocked.length) {
+              const batchWrite = await writeBatch(opts.fetch, writeUrl, prepared, opts.dc, true, opts.scope, target);
+              if (batchWrite.refusals.length) blocked = batchWrite.refusals;
+              else acked = batchWrite.ids;
+            }
+          } catch (err) {
+            park(err);
+          }
+          if (blocked.length) {
+            refusalLog.push(...blocked);
+            state = release(state);
+            opts.checkpoint.tables[table.table] = state;
+            save(opts.checkpoint, opts.saveCheckpoint);
+            const duplicateIds = [...new Set(blocked.filter((item) => item.rule === 'duplicate-source-id').map((item) => item.sourceId))];
+            const beforeWrite = blocked.every((item) => item.rule !== 'silent-change' && item.rule !== 'duplicate-source-id');
+            results.push({
+              table: table.table,
+              sourceCount,
+              writtenCount: state.count,
+              sourceChecksum: checksumHex(sourceState),
+              writtenChecksum: checksumHex(writtenState),
+              batches,
+              mismatch: true,
+              missingIds: [],
+              ...(duplicateIds.length ? { duplicateIds } : {}),
+              ...(tableFilledNulls ? { filledNulls: tableFilledNulls } : {}),
+              ...(tableCorrectedLookups ? { correctedLookups: tableCorrectedLookups } : {}),
+              error: duplicateIds.length
+                ? `duplicate c2c_source_id (${duplicateIds.length}); extra rows are already stored`
+                : beforeWrite
+                  ? `refused ${blocked.length} value(s) before write`
+                  : `stored value differs for ${blocked.length} column(s)`,
+            });
+            continue perTable;
+          }
+          batches.push(slice.length);
+          const unknown = new Set(unknownIds);
+          if (toWrite.length === 0 || acked.length === toWrite.length) {
+            for (const row of slice) {
+              sourceState = fnv1a64(sourceState, row.id);
+              sourceCount += 1;
+            }
+            noteAck(acked, present, unknown, Boolean(table.integrityColumns?.length));
+            for (const id of writtenIdsForSlice(slice, present, acked)) writtenState = fnv1a64(writtenState, id);
+            state = hold({
+              requestCursor: state.requestCursor,
+              lastId: slice[slice.length - 1].id,
+              count: state.count + slice.length,
+              checksum: checksumHex(writtenState),
+              sourceCount,
+              sourceChecksum: checksumHex(sourceState),
+              done: false,
+            });
+            opts.checkpoint.tables[table.table] = state;
+            save(opts.checkpoint, opts.saveCheckpoint);
+            i += slice.length;
             continue;
           }
-          const differs = changedColumns(entry.payload, rows[0]!, target.columns).length > 0;
-          const canon = differs ? canonRow(rows[0]!, entry.keys, target.columns) : entry.canon;
-          valueState = fnv1a64(valueState, `${id}\x00${canon}`);
-          if (differs) differingIds.push(id);
+          const confirmed = confirmedPrefix(slice, [...slice.filter((row) => present.has(row.id)).map((row) => row.id), ...acked]);
+          if (confirmed === 0) {
+            const missing = slice.map((row) => row.id);
+            let reportSource = sourceState;
+            for (const row of slice) reportSource = fnv1a64(reportSource, row.id);
+            let reportWritten = writtenState;
+            for (const id of acked) reportWritten = fnv1a64(reportWritten, id);
+            state = release(state);
+            opts.checkpoint.tables[table.table] = state;
+            save(opts.checkpoint, opts.saveCheckpoint);
+            results.push({
+              table: table.table,
+              sourceCount,
+              writtenCount: state.count,
+              sourceChecksum: checksumHex(reportSource),
+              writtenChecksum: checksumHex(reportWritten),
+              batches,
+              mismatch: true,
+              missingIds: missing,
+              ...(tableFilledNulls ? { filledNulls: tableFilledNulls } : {}),
+              ...(tableCorrectedLookups ? { correctedLookups: tableCorrectedLookups } : {}),
+            });
+            continue perTable;
+          }
+          const prefix = slice.slice(0, confirmed);
+          noteAck(prefix.map((row) => row.id), present, unknown, Boolean(table.integrityColumns?.length));
+          for (const row of prefix) {
+            sourceState = fnv1a64(sourceState, row.id);
+            writtenState = fnv1a64(writtenState, row.id);
+            sourceCount += 1;
+          }
+          state = hold({
+            requestCursor: state.requestCursor,
+            lastId: prefix[prefix.length - 1].id,
+            count: state.count + prefix.length,
+            checksum: checksumHex(writtenState),
+            sourceCount,
+            sourceChecksum: checksumHex(sourceState),
+            done: false,
+          });
+          opts.checkpoint.tables[table.table] = state;
+          save(opts.checkpoint, opts.saveCheckpoint);
+          i += confirmed;
         }
-        writtenValueChecksum = checksumHex(valueState);
-      } catch (err) {
-        verifyError = `fidelity read-back failed: ${err instanceof Error ? err.message : String(err)}`;
+        if (!page.nextCursor) {
+          state = release({ ...state, requestCursor: state.requestCursor, lastId: undefined, done: true });
+        } else {
+          state = hold({ ...state, requestCursor: page.nextCursor, lastId: undefined, done: false });
+        }
+        opts.checkpoint.tables[table.table] = state;
+        save(opts.checkpoint, opts.saveCheckpoint);
       }
+      const sourceChecksum = checksumHex(sourceState);
+      const writtenChecksum = checksumHex(writtenState);
+      // Value fidelity: the source side folds id + canonical cells per row of this
+      // run; the written side reads those ids back once more and folds the stored
+      // rows with the same keys. A value Catalyst truncated, rounded, or coerced
+      // after the write flips writtenValueChecksum, even when the row-level echo
+      // checks let it through. A table resumed from a checkpoint folds the rows
+      // this run saw; rows an earlier run verified keep their own evidence.
+      // A stored row is the same as its source row exactly when the canonical
+      // compare (changedColumns) finds no changed cell, so the store's own
+      // spellings (a :SSS fraction, a trailing Z, Boolean text, NULL for empty)
+      // fold to the source fingerprint and only a real change flips the checksum.
+      let sourceValueChecksum: string | undefined;
+      let writtenValueChecksum: string | undefined;
+      let missingIds: string[] = [];
+      let differingIds: string[] = [];
+      let storedDupes: string[] = [];
+      let verifyError: string | undefined;
+      if (target.columns?.length && canonById.size) {
+        let valueState = FNV_OFFSET;
+        for (const [id, entry] of canonById) valueState = fnv1a64(valueState, `${id}\x00${entry.canon}`);
+        sourceValueChecksum = checksumHex(valueState);
+      }
+      if (!opts.dryRun && sourceValueChecksum !== undefined) {
+        try {
+          const ids = [...canonById.keys()];
+          const select = [...new Set([...canonById.values()].flatMap((entry) => entry.keys))].filter((name) =>
+            /^[A-Za-z_][A-Za-z0-9_]*$/.test(name),
+          );
+          const stored = await queryStoredRows(opts.fetch, opts.catalystBase, table.table, ids, select, opts.dc, opts.scope);
+          storedDupes = duplicateSourceIds(stored);
+          const dupeSet = new Set(storedDupes);
+          let valueState = FNV_OFFSET;
+          for (const [id, entry] of canonById) {
+            const rows = stored.get(id) ?? [];
+            if (rows.length === 0 || dupeSet.has(id)) {
+              valueState = fnv1a64(valueState, `${id}\x00-`);
+              if (rows.length === 0) missingIds.push(id);
+              continue;
+            }
+            const differs = changedColumns(entry.payload, rows[0]!, target.columns).length > 0;
+            const canon = differs ? canonRow(rows[0]!, entry.keys, target.columns) : entry.canon;
+            valueState = fnv1a64(valueState, `${id}\x00${canon}`);
+            if (differs) differingIds.push(id);
+          }
+          writtenValueChecksum = checksumHex(valueState);
+        } catch (err) {
+          verifyError = `fidelity read-back failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      }
+      const valueMismatch =
+        verifyError !== undefined ||
+        missingIds.length > 0 ||
+        differingIds.length > 0 ||
+        storedDupes.length > 0 ||
+        (sourceValueChecksum !== undefined && writtenValueChecksum !== undefined && sourceValueChecksum !== writtenValueChecksum);
+      results.push({
+        table: table.table,
+        sourceCount,
+        writtenCount: state.count,
+        sourceChecksum,
+        writtenChecksum,
+        ...(sourceValueChecksum !== undefined ? { sourceValueChecksum } : {}),
+        ...(writtenValueChecksum !== undefined ? { writtenValueChecksum } : {}),
+        batches,
+        mismatch: sourceChecksum !== writtenChecksum || sourceCount !== state.count || valueMismatch,
+        missingIds,
+        ...(differingIds.length ? { differingIds } : {}),
+        ...(storedDupes.length ? { duplicateIds: storedDupes } : {}),
+        ...(verifyError ? { error: verifyError } : {}),
+        ...(tableFilledNulls ? { filledNulls: tableFilledNulls } : {}),
+        ...(tableCorrectedLookups ? { correctedLookups: tableCorrectedLookups } : {}),
+      });
+    } catch (err) {
+      // A table whose load fails is recorded, the lease released, and the run
+      // continues with the next table: one refused table must not leave the
+      // rest of the app empty. The result set still reports every table and
+      // ok is false, so the caller exits non-zero. Host and lease refusals
+      // (assertAllowedHost, TableLockedError) are raised before this block and
+      // still abort the run.
+      const message = err instanceof Error ? err.message : String(err);
+      const held = opts.checkpoint.tables[table.table];
+      if (held?.lock?.owner === owner) {
+        const copy = { ...held };
+        delete copy.lock;
+        opts.checkpoint.tables[table.table] = copy;
+      }
+      results.push({
+        table: table.table,
+        sourceCount,
+        writtenCount: state.count,
+        sourceChecksum: checksumHex(sourceState),
+        writtenChecksum: checksumHex(writtenState),
+        batches: [...batches],
+        mismatch: true,
+        missingIds: [],
+        ...(tableFilledNulls ? { filledNulls: tableFilledNulls } : {}),
+        ...(tableCorrectedLookups ? { correctedLookups: tableCorrectedLookups } : {}),
+        error: message,
+      });
     }
-    const valueMismatch =
-      verifyError !== undefined ||
-      missingIds.length > 0 ||
-      differingIds.length > 0 ||
-      storedDupes.length > 0 ||
-      (sourceValueChecksum !== undefined && writtenValueChecksum !== undefined && sourceValueChecksum !== writtenValueChecksum);
-    results.push({
-      table: table.table,
-      sourceCount,
-      writtenCount: state.count,
-      sourceChecksum,
-      writtenChecksum,
-      ...(sourceValueChecksum !== undefined ? { sourceValueChecksum } : {}),
-      ...(writtenValueChecksum !== undefined ? { writtenValueChecksum } : {}),
-      batches,
-      mismatch: sourceChecksum !== writtenChecksum || sourceCount !== state.count || valueMismatch,
-      missingIds,
-      ...(differingIds.length ? { differingIds } : {}),
-      ...(storedDupes.length ? { duplicateIds: storedDupes } : {}),
-      ...(verifyError ? { error: verifyError } : {}),
-      ...(tableFilledNulls ? { filledNulls: tableFilledNulls } : {}),
-      ...(tableCorrectedLookups ? { correctedLookups: tableCorrectedLookups } : {}),
-    });
   }
   return finish(results.every((result) => !result.mismatch));
 }

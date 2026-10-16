@@ -512,6 +512,8 @@ export const DECISIONS = {
     'Every migrated table, including child and junction tables, has a varchar c2c_source_id (255) holding the Creator record id. It is not mandatory and not unique: rows the deployed app creates leave it NULL (a mandatory column fails every app insert with 403 MANDATORY_MISSING), and a unique varchar would spend the per-table unique varchar budget. The loader enforces one row per Creator id: it refuses a source that repeats an id, and the server-side write gate never accepts c2c_source_id from a client. A field that would have used that name is renamed. Creator v2.1 Get Records returns ID as a numeric string; the published sample is 17 digits and a lookup criteria example is 19 digits. The mover rejects a longer source id before insert instead of hashing it, because a varchar past 255 is stored truncated. It reconciles a pending batch with ZCQL IN queries of at most 300 ids and skips ids already stored. A DUPLICATE_VALUE response (HTTP 409) re-queries that batch, drops ids now present, and retries the rest; any other write error fails closed. It does not upsert. Each live table run holds a checkpoint lease (owner id and expiry, renewed on each save, released when the table finishes or the run throws). Another mover does not write that table while the lease is unexpired; an expired lease can be taken over. Movers that do not share the checkpoint rely on the re-reconcile on resume.',
   uniqueVarchar:
     'Data Store refuses a third unique varchar column on one table (403 INVALID_OPERATION "Reached max number of columns of Unique varchar type"). The schema keeps the first UNIQUE_VARCHAR_MAX_PER_TABLE unique varchar columns of a table, in field order, as store-level unique. The rest are created not unique and marked appUnique: the generated handler checks them with a ZCQL read before insert and update and refuses a duplicate. That check is not atomic, so two concurrent submits can both pass. A unique varchar the source data disproved also demotes (see constraintsFromSource) and frees its slot for the next unique column. precheck reports every table over the budget.',
+  uniqueDate:
+    'A unique date or datetime column refuses EVERY insert with 400 INVALID_INPUT "date value expected" — the same value a non-unique date column accepts [TESTED 2026-10-16]. The schema therefore never sets is_unique on a Date or DateTime column: a Creator "no duplicate values" date field is created not unique and marked appUnique, and the generated handler enforces it with a ZCQL read before insert and update. That check is not atomic, so two concurrent submits can both pass; Data Store-level uniqueness is not enforced for dates. The demotion does not depend on source rows.',
   constraintsFromSource:
     'With source rows to measure (a backup, an export, or a seed), a store constraint is kept unless the data itself disproves it: a Creator "must have" field demotes only when a row carries the column with an empty value, and a "unique" field demotes only when two carried non-empty values repeat. A disproved constraint demotes to the app layer — the column is provisioned without it and the schema marks it appMandatory or appUnique — and the generated app enforces the Creator rule instead: an insert or update carrying an empty value is refused MANDATORY_MISSING, and an app-unique value is checked by a ZCQL read before insert and update. Existing rows that violate the flag still load: Creator applies the flag at submit time, not retroactively. Every demotion is a plan decision {table, column, rule, layer: "app", violations} named in the plan and fidelity output with the offending row count, so re-runs, the table templates, and provisioning agree. A field the source does not carry proves nothing — the store constraint stands (a complete source may store the field outside the row files, as a backup\'s reverse-lookup rel# files do), and a load that leaves a kept is_mandatory column empty, or repeats a kept store-unique value, is refused before any write with the column named and a re-provision instruction. Confirmed loads check against the constraint flags the live project actually reports — the provisioned decisions replayed onto the generated schema — not a re-measure of the current input. Generated columns (c2c_source_id, system fields, parent links) are never demoted this way.',
   logicalId:
@@ -535,9 +537,23 @@ export const UNIQUE_VARCHAR_MAX_PER_TABLE = 2;
  * 403 INVALID_OPERATION "You cannot perform this operation. Column name cannot
  * contain reserved keywords". The whole name is compared, ignoring case: a
  * column named `Table_Number` or `task_priority` is created. Catalyst does not
- * publish the list; these names are the ones a column create has refused.
+ * publish the list; `priority`, `table`, `time`, and `to` are the names a live
+ * column create has refused [TESTED 2026-10-16, `to` on Work_experience].
+ * The four Data Store system columns are refused as user column names by the
+ * same rule — the console creates them on every table and no rename is offered
+ * (https://docs.catalyst.zoho.com/en/cloud-scale/help/data-store/columns/)
+ * [UNVERIFIED: no live probe has posted one of these names].
  */
-export const STORE_REFUSED_COLUMN_NAMES: readonly string[] = ['priority', 'table', 'time'];
+export const STORE_REFUSED_COLUMN_NAMES: readonly string[] = [
+  'priority',
+  'table',
+  'time',
+  'to',
+  'rowid',
+  'creatorid',
+  'createdtime',
+  'modifiedtime',
+];
 
 /**
  * ZCQL clause words (https://docs.catalyst.zoho.com/en/cloud-scale/help/zcql/
