@@ -25,8 +25,8 @@ TODO item per untranslated construct occurrence.
 |---|---:|
 | corpus apps | 67 |
 | deterministic apps | 20 (29.9%) |
-| residual TODO items | 433 |
-| distinct TODO kinds | 21 |
+| residual TODO items | 440 |
+| distinct TODO kinds | 22 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
 ## Top 20 TODO kinds
@@ -34,12 +34,13 @@ TODO item per untranslated construct occurrence.
 | construct | count |
 |---|---:|
 | `client-shim-unsupported` | 131 |
-| `client-condition-uses-server` | 118 |
+| `client-condition-uses-server` | 122 |
 | `Server-side Deluge snippet requires manual translation` | 99 |
 | `Static <style> CSS not carried over:(app identifier)` | 44 |
 | `Embedded zc-component report (app identifier) has no generated view` | 13 |
 | `pushnotification` | 6 |
 | `Embedded zc-component form (app identifier) has no generated view` | 4 |
+| `client-loop-uses-server` | 3 |
 | `Rebuild the pivot table manually:(app identifier)` | 2 |
 | `report-conditional-format` | 2 |
 | `ZML <button> (app identifier) click action ExecuteFunction calling function button_functions.workoutDone is not generated; wire the click to the function by hand (the snippet stays manual:(app identifier)` | 2 |
@@ -52,7 +53,6 @@ TODO item per untranslated construct occurrence.
 | `ZML <button> (app identifier) click action ExecuteFunction calling function button_functions.checkIn is not generated; wire the click to the function by hand (the snippet stays manual:(app identifier)` | 1 |
 | `ZML <button> (app identifier) click action ExecuteFunction calling function button_functions.checkOut is not generated; wire the click to the function by hand (the snippet stays manual:(app identifier)` | 1 |
 | `ZML <image> (app identifier) click action Function calling function Vote.downvote is not generated; wire the click to the function by hand (the snippet stays manual:(app identifier)` | 1 |
-| `ZML <image> (app identifier) click action Function calling function Vote.upvote is not generated; wire the click to the function by hand (the snippet stays manual:(app identifier)` | 1 |
 
 ## Sole-kind unblocks
 
@@ -81,7 +81,7 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "client-condition-uses-server",
-      "count": 118
+      "count": 122
     },
     {
       "construct": "Server-side Deluge snippet requires manual translation",
@@ -102,6 +102,10 @@ clears the app. The count is apps, not items.
     {
       "construct": "Embedded zc-component form (app identifier) has no generated view",
       "count": 4
+    },
+    {
+      "construct": "client-loop-uses-server",
+      "count": 3
     },
     {
       "construct": "Rebuild the pivot table manually:(app identifier)",
@@ -182,6 +186,25 @@ clears the app. The count is apps, not items.
     {
       "constructs": [
         "client-condition-uses-server",
+        "client-loop-uses-server",
+        "client-shim-unsupported",
+        "Server-side Deluge snippet requires manual translation",
+        "Static <style> CSS not carried over:(app identifier)"
+      ],
+      "items": 29
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "client-loop-uses-server",
+        "Server-side Deluge snippet requires manual translation",
+        "Static <style> CSS not carried over:(app identifier)"
+      ],
+      "items": 12
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
         "client-shim-unsupported",
         "Filter not migrated:(app identifier)",
         "report-criteria",
@@ -215,7 +238,7 @@ clears the app. The count is apps, not items.
         "sendmail-attachment:view",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 39
+      "items": 40
     },
     {
       "constructs": [
@@ -257,15 +280,6 @@ clears the app. The count is apps, not items.
       "constructs": [
         "client-condition-uses-server",
         "client-shim-unsupported",
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
-      ],
-      "items": 28
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "client-shim-unsupported",
         "ZML <image> (app identifier) click action Form is not generated; wire the click to the function by hand",
         "ZML <image> (app identifier) click action OpenReport is not generated; wire the click to the function by hand"
       ],
@@ -279,7 +293,7 @@ clears the app. The count is apps, not items.
         "Server-side Deluge snippet requires manual translation",
         "Static <style> CSS not carried over:(app identifier)"
       ],
-      "items": 12
+      "items": 15
     },
     {
       "constructs": [
@@ -333,14 +347,6 @@ clears the app. The count is apps, not items.
         "Static <style> CSS not carried over:(app identifier)"
       ],
       "items": 7
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
-      ],
-      "items": 10
     },
     {
       "constructs": [
@@ -521,7 +527,7 @@ clears the app. The count is apps, not items.
       "items": 4
     }
   ],
-  "todoTotal": 433,
+  "todoTotal": 440,
   "totalApps": 67
 }
 ```
