@@ -1128,6 +1128,507 @@
       "notes": [
         "User_calfield is not a stored column of Booking_Form (report/display field); not asserted"
       ]
+    },
+    {
+      "id": "r4-booking-form-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:00:00",
+            "To_Time_With_Date": "24-Oct-2026 10:00:00"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Booked Successfully! Confirmation mail has been sent to you!!"
+          },
+          "bind": {
+            "r_r4_booking_form_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:00:00",
+              "From_Time_With_Date": "2026-10-24 09:00:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            }
+          ]
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "r4-booking-form-invalid-rule-0-overlap",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:00:00",
+            "To_Time_With_Date": "24-Oct-2026 10:00:00"
+          },
+          "bind": {
+            "r_r4_booking_form_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:30:00",
+            "To_Time_With_Date": "24-Oct-2026 10:30:00"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Booked Successfully! Confirmation mail has been sent to you!!"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:00:00",
+              "From_Time_With_Date": "2026-10-24 09:00:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            },
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:30:00",
+              "From_Time_With_Date": "2026-10-24 09:30:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            }
+          ]
+        }
+      },
+      "tags": [
+        "creator-api-replay-unconfirmed"
+      ],
+      "notes": [
+        "the booking-overlap rule is a Booking_Form on-add 'on validate' script: `Booking_Form[Official_Email == input.Official_Email && (overlap) && Status == \"Registered\"]` -> alert 'Already booked this room for the time period You have given'; stored bookings carry Status 'Reserved', so the Status == \"Registered\" clause can never match -- consistent with the rule never firing even on a byte-identical replay, recorded as an open Creator question (the same kind of on-validate alert fired reliably on vendors.Add_Contract and quotation-management.Create_Quotation)",
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "r4-booking-form-invalid-rule-0-exact-replay",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:00:00",
+            "To_Time_With_Date": "24-Oct-2026 10:00:00"
+          },
+          "bind": {
+            "r_r4_booking_form_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:00:00",
+            "To_Time_With_Date": "24-Oct-2026 10:00:00"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Booked Successfully! Confirmation mail has been sent to you!!"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:00:00",
+              "From_Time_With_Date": "2026-10-24 09:00:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            },
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:00:00",
+              "From_Time_With_Date": "2026-10-24 09:00:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            }
+          ]
+        }
+      },
+      "tags": [
+        "creator-api-replay-unconfirmed"
+      ],
+      "notes": [
+        "the booking-overlap rule is a Booking_Form on-add 'on validate' script: `Booking_Form[Official_Email == input.Official_Email && (overlap) && Status == \"Registered\"]` -> alert 'Already booked this room for the time period You have given'; stored bookings carry Status 'Reserved', so the Status == \"Registered\" clause can never match -- consistent with the rule never firing even on a byte-identical replay, recorded as an open Creator question (the same kind of on-validate alert fired reliably on vendors.Add_Contract and quotation-management.Create_Quotation)",
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "r4-post-booking-schedule",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:00:00",
+            "To_Time_With_Date": "24-Oct-2026 10:00:00"
+          },
+          "bind": {
+            "r_r4_booking_form_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:30:00",
+            "To_Time_With_Date": "24-Oct-2026 10:30:00"
+          },
+          "bind": {
+            "r_r4_booking_form_invalid_rule_0_overlap": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:00:00",
+            "To_Time_With_Date": "24-Oct-2026 10:00:00"
+          },
+          "bind": {
+            "r_r4_booking_form_invalid_rule_0_exact_replay": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Booking_Schedule_In_Timeline",
+          "expect": {
+            "outcome": "rows",
+            "count": 3
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 3
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:00:00",
+              "From_Time_With_Date": "2026-10-24 09:00:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            },
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:30:00",
+              "From_Time_With_Date": "2026-10-24 09:30:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            },
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:00:00",
+              "From_Time_With_Date": "2026-10-24 09:00:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            }
+          ]
+        }
+      },
+      "tags": [
+        "creator-api-replay-unconfirmed"
+      ],
+      "notes": [
+        "the booking-overlap rule is a Booking_Form on-add 'on validate' script: `Booking_Form[Official_Email == input.Official_Email && (overlap) && Status == \"Registered\"]` -> alert 'Already booked this room for the time period You have given'; stored bookings carry Status 'Reserved', so the Status == \"Registered\" clause can never match -- consistent with the rule never firing even on a byte-identical replay, recorded as an open Creator question (the same kind of on-validate alert fired reliably on vendors.Add_Contract and quotation-management.Create_Quotation)",
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
     }
   ]
 }
