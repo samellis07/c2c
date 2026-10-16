@@ -11,7 +11,7 @@
  * locally and fail under CI, where the install step is part of the run.
  */
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -155,7 +155,7 @@ test('the spec carries the hidden target names on denied, and keeps the nav clea
 
 let compiled: string | undefined;
 function lib(): string {
-  if (!compiled) compiled = join(tmpdir(), `c2c-hidden-route-${process.pid}`);
+  if (!compiled) compiled = mkdtempSync(join(tmpdir(), 'c2c-hidden-route-'));
   const out = compiled;
   // `after` below is scoped to the test that compiles, so a later test can
   // find the shared directory already torn down (earlier tests only survived
