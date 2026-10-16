@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { emptyApp, type App, type Field, type Workflow } from '../../core/src/index.js';
+import { FORM_EVENT_SERVER_UNINVOKED, clientPostsServerPath } from '../../deluge/src/generate.js';
 import { auditApp, collectOutputs, groupDrops, renderNoSilentDrop } from '../src/no-silent-drop.js';
 
 const Z = { start: 0, end: 0 };
@@ -238,6 +239,268 @@ test('a permissions literal holding a value that is not a scope name stays a dro
   // The URL is never copied into the report's scope list.
   assert.ok(report.connections.diagnostics.every((d) => !d.includes('https://')));
   assert.equal(auditApp(conn, report).filter((d) => d.kind === 'permission').length, 1);
+});
+
+function formOf(name: string, names: string[]): App['forms'][number] {
+  return { name, properties: [], fields: names.map((n) => field(n, 'text')), actions: [], blocks: [], span: Z };
+}
+
+test('a merged on-user-input route is produced when the script is written into it', () => {
+  const booking = app({
+    forms: [
+      formOf('Add_Services', ['ID', 'Service_Time']),
+      formOf('Appointment_Booking', ['Service', 'Schedule_upto', 'Staff_Name']),
+    ],
+    workflows: [
+      workflow({
+        name: 'Run_Scripts_On_Always1',
+        container: 'form',
+        form: 'Appointment_Booking',
+        event: 'on user input of Schedule_Date_Time',
+        span: { start: 10, end: 40, file: 'app.ds' },
+        deluge: {
+          text: 'if (input.Service != null) {\n  getServiceDetails = Add_Services[ID == input.Service];\n  input.Schedule_upto = getServiceDetails.Service_Time;\n}',
+          span: { start: 12, end: 38, file: 'app.ds' },
+        },
+      }),
+      workflow({
+        name: 'Run_Scripts_On_Always2',
+        container: 'form',
+        form: 'Appointment_Booking',
+        event: 'on user input of Staff_Name',
+        span: { start: 50, end: 70, file: 'app.ds' },
+        deluge: { text: 'hide input.Staff_Name;', span: { start: 52, end: 68, file: 'app.ds' } },
+      }),
+    ],
+  });
+  const out = collectOutputs(booking);
+  assert.ok(out.files.some((f) => f.path === 'functions/aio/appointment-booking/input-handlers.mjs'));
+  assert.ok(out.files.some((f) => f.path.includes('client/handlers/appointment-booking/on-user-input-of-schedule-date-time')));
+  const prefetch = out.files.find((f) => f.path.endsWith('input-handlers-prefetch.mjs'));
+  assert.ok(prefetch);
+  assert.match(prefetch.source, /slots\[/);
+  assert.doesNotMatch(prefetch.source, /thisapp\.call/);
+  assert.deepEqual(auditApp(booking, out).filter((d) => d.kind === 'workflow'), []);
+  const schedule = out.coverage?.find((c) => c.event.includes('Schedule_Date_Time'));
+  assert.equal(schedule?.serverInvoked, true);
+  const client = out.files.find((f) => f.path.includes('on-user-input-of-schedule-date-time'));
+  assert.ok(client);
+  assert.match(client.source, /shim\.client\.run\(ctx\)/);
+  assert.equal(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === 10), false);
+
+  // The merged leaf is not the per-event slug. Without coverage, the client
+  // file, and the counted server-half TODO, the same script is a silent drop.
+  const stripped = {
+    ...out,
+    coverage: [],
+    todos: out.todos.filter((t) => t.construct !== FORM_EVENT_SERVER_UNINVOKED),
+    files: out.files.filter((f) => !f.path.includes('on-user-input-of-schedule-date-time')),
+  };
+  const drops = auditApp(booking, stripped).filter((d) => d.kind === 'workflow');
+  assert.equal(drops.length, 1);
+  assert.match(drops[0]!.name, /Schedule_Date_Time/);
+});
+
+test('a thisapp field write in a merged route is covered and is not prefetched', () => {
+  const hours = app({
+    forms: [formOf('Timesheet', ['End_Time', 'Hours'])],
+    functions: [],
+    workflows: [
+      workflow({
+        name: 'Run_Scripts_On_Always2',
+        container: 'form',
+        form: 'Timesheet',
+        event: 'on user input of End_Time',
+        span: { start: 10, end: 30, file: 'app.ds' },
+        deluge: { text: 'input.Hours = thisapp.timesheet.getHours(input.End_Time);', span: { start: 12, end: 28, file: 'app.ds' } },
+      }),
+      workflow({
+        name: 'Show_Note',
+        container: 'form',
+        form: 'Timesheet',
+        event: 'on user input of Hours',
+        span: { start: 40, end: 55, file: 'app.ds' },
+        deluge: { text: 'hide input.Hours;', span: { start: 42, end: 50, file: 'app.ds' } },
+      }),
+    ],
+  });
+  const out = collectOutputs(hours);
+  assert.ok(out.files.some((f) => f.path === 'functions/aio/timesheet/input-handlers.mjs'));
+  const prefetch = out.files.filter((f) => f.path.includes('prefetch')).map((f) => f.source).join('\n');
+  assert.doesNotMatch(prefetch, /thisapp\.call/);
+  assert.deepEqual(auditApp(hours, out).filter((d) => d.kind === 'workflow'), []);
+  const hoursServer = out.coverage?.find((c) => c.event === 'on user input of End_Time');
+  assert.equal(hoursServer?.serverInvoked, false);
+  assert.ok(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === 10));
+  const hidden = {
+    ...out,
+    coverage: (out.coverage ?? []).filter((c) => c.event !== 'on user input of End_Time'),
+    todos: out.todos.filter((t) => !(t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === 10)),
+    files: out.files.filter((f) => !f.path.includes('on-user-input-of-end-time')),
+  };
+  const drops = auditApp(hours, hidden).filter((d) => d.kind === 'workflow');
+  assert.equal(drops.length, 1);
+  assert.match(drops[0]!.name, /End_Time/);
+});
+
+test('an on-start sendmail merged with an empty sibling is the handler module', () => {
+  const mail = app({
+    forms: [formOf('Add_User', ['Email'])],
+    workflows: [
+      workflow({
+        name: 'Send_Email_Form_Propertie',
+        container: 'form',
+        form: 'Add_User',
+        event: 'on start',
+        span: { start: 10, end: 40, file: 'app.ds' },
+        deluge: {
+          text: 'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];',
+          span: { start: 12, end: 36, file: 'app.ds' },
+        },
+      }),
+      workflow({
+        name: 'Field_Scripts8',
+        container: 'form',
+        form: 'Add_User',
+        event: '',
+        span: { start: 80, end: 90, file: 'app.ds' },
+        deluge: { text: '', span: { start: 82, end: 88, file: 'app.ds' } },
+      }),
+    ],
+  });
+  const out = collectOutputs(mail);
+  assert.ok(out.files.some((f) => f.path === 'functions/aio/add-user/handler-handlers.mjs'));
+  assert.ok(!out.files.some((f) => f.path.endsWith('/on-start.mjs')));
+  const blob = out.files.map((f) => f.source).join('\n');
+  assert.match(blob, /shim\.mail\.send/);
+  assert.doesNotMatch(blob, /slots\[.*mail\.send|mail\.send[\s\S]*slots\[/);
+  assert.deepEqual(auditApp(mail, out).filter((d) => d.kind === 'workflow'), []);
+  const started = out.coverage?.find((c) => c.name === 'Send_Email_Form_Propertie');
+  assert.equal(started?.serverInvoked, false);
+  assert.ok(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === 10));
+  const cleared = {
+    ...out,
+    coverage: [],
+    todos: out.todos.filter((t) => t.construct !== FORM_EVENT_SERVER_UNINVOKED),
+  };
+  const drops = auditApp(mail, cleared).filter((d) => d.kind === 'workflow');
+  assert.equal(drops.length, 1);
+  assert.match(drops[0]!.name, /on start/);
+});
+
+test('a client run posts /input and credits the merged server half', () => {
+  // The same hide+sendmail script keeps its client half; the generated
+  // shim.client.run guard posts the merged route, so the server part is
+  // invoked and no form-event-server-uninvoked todo remains.
+  const lead = app({
+    forms: [formOf('New_Lead', ['Mode_of_Shipment'])],
+    workflows: [
+      workflow({
+        name: 'pop_sub_mode_of_shipment',
+        container: 'form',
+        form: 'New_Lead',
+        event: 'on user input of Mode_of_Shipment',
+        span: { start: 10, end: 40, file: 'app.ds' },
+        deluge: {
+          text: 'hide Mode_of_Shipment;\nsendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];',
+          span: { start: 12, end: 38, file: 'app.ds' },
+        },
+      }),
+    ],
+  });
+  const out = collectOutputs(lead);
+  const serverPath = '/forms/New_Lead/input';
+  const client = out.files.find((f) => f.path.includes('client/handlers/new-lead/'));
+  const server = out.files.find((f) => f.path.startsWith('functions/aio/new-lead/') && !f.path.includes('prefetch') && !f.path.endsWith('_lib.mjs'));
+  assert.ok(client);
+  assert.ok(server);
+  assert.match(server.source, /path: "\/forms\/New_Lead\/input"/);
+  assert.match(client.source, /shim\.client\.run\(ctx\)/);
+  assert.equal(clientPostsServerPath(client.source, serverPath), true);
+  const entry = out.coverage?.find((c) => c.name === 'pop_sub_mode_of_shipment');
+  assert.ok(entry);
+  assert.equal(entry.serverInvoked, true);
+  assert.ok(entry.paths.includes(server.path));
+  assert.ok(entry.paths.some((p) => p.startsWith('client/')));
+  assert.equal(auditApp(lead, out).filter((d) => d.kind === 'workflow').length, 0);
+  assert.equal(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED), false);
+});
+
+test('a server-only on-input script the client never posts stays counted', () => {
+  const lead = app({
+    forms: [formOf('New_Lead', ['Mode_of_Shipment'])],
+    workflows: [
+      workflow({
+        name: 'pop_sub_mode_of_shipment',
+        container: 'form',
+        form: 'New_Lead',
+        event: 'on user input of Mode_of_Shipment',
+        span: { start: 10, end: 40, file: 'app.ds' },
+        deluge: {
+          text: 'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];',
+          span: { start: 12, end: 38, file: 'app.ds' },
+        },
+      }),
+    ],
+  });
+  const out = collectOutputs(lead);
+  const serverPath = '/forms/New_Lead/input';
+  const server = out.files.find((f) => f.path.startsWith('functions/aio/new-lead/') && !f.path.includes('prefetch') && !f.path.endsWith('_lib.mjs'));
+  assert.ok(server);
+  assert.match(server.source, /path: "\/forms\/New_Lead\/input"/);
+  for (const f of out.files.filter((f) => f.path.startsWith('client/'))) {
+    assert.equal(clientPostsServerPath(f.source, serverPath), false, f.path);
+  }
+  const entry = out.coverage?.find((c) => c.name === 'pop_sub_mode_of_shipment');
+  assert.ok(entry);
+  assert.equal(entry.serverInvoked, false);
+  assert.equal(entry.paths.includes(server.path), false);
+  assert.equal(auditApp(lead, out).filter((d) => d.kind === 'workflow').length, 0);
+  assert.ok(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === 10 && t.end === 40));
+  // Crediting the uninvoked server file is the failure this guards. With the
+  // count removed and the flag forced true, the client file would pass the
+  // audit with nothing listed. The real output must not take that shape.
+  const forced = {
+    ...out,
+    todos: out.todos.filter((t) => t.construct !== FORM_EVENT_SERVER_UNINVOKED),
+    coverage: (out.coverage ?? []).map((c) => (c.name === 'pop_sub_mode_of_shipment' ? { ...c, serverInvoked: true as const } : c)),
+  };
+  assert.equal(auditApp(lead, forced).filter((d) => d.kind === 'workflow').length, 0);
+  assert.equal(entry.serverInvoked, false);
+  assert.ok(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED));
+});
+
+test('submit still credits an on-success server half the browser posts', () => {
+  const orders = app({
+    forms: [formOf('Orders', ['Title'])],
+    workflows: [
+      workflow({
+        name: 'Stamp',
+        container: 'form',
+        form: 'Orders',
+        event: 'on success',
+        span: { start: 10, end: 30, file: 'app.ds' },
+        deluge: {
+          text: 'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];',
+          span: { start: 12, end: 28, file: 'app.ds' },
+        },
+      }),
+    ],
+  });
+  const out = collectOutputs(orders);
+  const entry = out.coverage?.find((c) => c.name === 'Stamp');
+  assert.equal(entry?.serverInvoked, true);
+  assert.ok(entry?.paths.some((p) => p.startsWith('functions/aio/')));
+  assert.equal(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED), false);
+  assert.deepEqual(auditApp(orders, out).filter((d) => d.kind === 'workflow'), []);
+});
+
+test('a prefetch URL is not a post of the server route', () => {
+  const path = '/forms/New_Lead/input';
+  assert.equal(clientPostsServerPath(`POST ${path}/prefetch`, path), false);
+  assert.equal(clientPostsServerPath(`{"prefetch":"${path}/prefetch"}`, path), false);
+  assert.equal(clientPostsServerPath(`await postJson("${path}", body)`, path), true);
+  assert.equal(clientPostsServerPath(`await postJson("${path}/other", body)`, path), false);
 });
 
 test('rows are numbered and carry no app names', () => {

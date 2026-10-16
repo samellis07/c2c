@@ -9,9 +9,18 @@
 /** Shim names the browser calls directly (`shim.each(...)`, `shim.list()`). */
 export const CLIENT_SHIM_CALLABLE: ReadonlySet<string> = new Set(['each', 'get', 'ifnull', 'isBlank', 'isEmpty', 'isNull', 'isNumber', 'list', 'map', 'set', 'todo']);
 
+/**
+ * `client.run(ctx)` is the merged form-event call: it POSTs `ctx.runPath`
+ * (`/forms/<form>/<kind>`) with the caller's record and `ctx.runEvent`, the
+ * one workflow script the route may run. The route resolves that token
+ * through its exported `scriptEvents` map into `ctx.onlyScript`; a token the
+ * map does not list, another event, or an index out of range is refused.
+ * Only form events the generator merges onto a route (load, input, add row,
+ * delete row, click) carry `ctx.runPath`/`ctx.runEvent`.
+ */
 /** Namespaces and the methods the browser implements on each. */
 export const CLIENT_SHIM_METHODS: ReadonlyMap<string, ReadonlySet<string>> = new Map<string, ReadonlySet<string>>([
-  ['client', new Set(['call', 'element', 'prefetch', 'rows', 'touch'])],
+  ['client', new Set(['call', 'element', 'prefetch', 'rows', 'run', 'touch'])],
   ['compare', new Set(['eq', 'ne'])],
   ['convert', new Set(['toLong', 'toNumber'])],
   [

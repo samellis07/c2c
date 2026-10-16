@@ -80,6 +80,27 @@ test('browser client.call and client.element refuse a reply that carries an erro
   assert.equal(await blockedMessage(() => client(reply({ error: 'slot failed', slots: { s1: 3 } })).element!(ctx(), 'x', 1, 's1') as Promise<unknown>), 'slot failed');
 });
 
+test('browser client.run posts the merged route with runEvent and blocks a refused run', async () => {
+  const sent: { url: string; body: Record<string, unknown> }[] = [];
+  const reply = (status: number, extra: Record<string, unknown>) =>
+    (async (url: string, init: { body: string }) => {
+      sent.push({ url: String(url), body: JSON.parse(init.body) as Record<string, unknown> });
+      return new Response(JSON.stringify(extra), { status });
+    }) as unknown;
+  const { browserShim } = await runtime();
+  const client = (fetchImpl: unknown) => browserShim(fetchImpl).client as Record<string, Fn>;
+  const ctx = () => ({ formNonce: 'n-2', record: { Name: 'x' }, runPath: '/forms/Orders/input', runEvent: 'on user input of Name' });
+
+  const ok = (await client(reply(200, { dryRun: true, result: null })).run!(ctx())) as Record<string, unknown>;
+  assert.equal(ok.dryRun, true);
+  assert.deepEqual(sent[0], { url: '/forms/Orders/input', body: { record: { Name: 'x' }, nonce: 'n-2', runEvent: 'on user input of Name' } });
+  // A refused status and a refused reply both block the run like client.call.
+  assert.equal(await blockedMessage(() => client(reply(404, { error: 'unknown script event' })).run!(ctx()) as Promise<unknown>), 'unknown script event');
+  assert.equal(await blockedMessage(() => client(reply(200, { error: 'refused' })).run!(ctx()) as Promise<unknown>), 'refused');
+  // No runPath on the context blocks the run without a request.
+  await blockedMessage(() => client(reply(200, {})).run!({ formNonce: 'n-2', record: {} }) as Promise<unknown>);
+});
+
 const RECEIVERS: unknown[] = [
   [1, 2, 3, 2],
   ['b', 'a', 'c', 'a'],

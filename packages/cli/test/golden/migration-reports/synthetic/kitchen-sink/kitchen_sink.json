@@ -40,9 +40,19 @@
       "label": "not applicable (out of scope)"
     }
   ],
-  "todoCount": 0,
-  "todoKinds": [],
+  "todoCount": 1,
+  "todoKinds": [
+    {
+      "construct": "form-event-server-uninvoked",
+      "count": 1
+    }
+  ],
   "manualSteps": [
+    {
+      "severity": "warning",
+      "check": "converter-gap",
+      "count": 1
+    },
     {
       "severity": "warning",
       "check": "pivot-analytics",

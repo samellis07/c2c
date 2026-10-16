@@ -399,7 +399,7 @@ export interface FieldValueReader {
 
 /** Fields `Runtime.context` takes; `form` names the record's form for {@link RuntimeOptions.fieldValues}. */
 export type ContextInput = Partial<
-  Pick<ShimContext, 'record' | 'old' | 'row' | 'appTimeZone' | 'principal' | 'formNonce' | 'writeOp' | 'rowId' | 'subformRow' | 'args' | 'transition' | 'approver' | 'element' | 'prefetchPath' | 'slots' | 'rangeSlot' | 'rangeFrom' | 'rangeTo' | 'rangeEmpty'>
+  Pick<ShimContext, 'record' | 'old' | 'row' | 'appTimeZone' | 'principal' | 'formNonce' | 'writeOp' | 'rowId' | 'subformRow' | 'args' | 'transition' | 'approver' | 'element' | 'prefetchPath' | 'slots' | 'rangeSlot' | 'rangeFrom' | 'rangeTo' | 'rangeEmpty' | 'onlyScript' | 'runPath' | 'runEvent'>
 > & { form?: string };
 
 export interface ShimContext {
@@ -431,6 +431,15 @@ export interface ShimContext {
   formNonce?: string;
   /** Prefetch endpoint path the client handler loaded, set by the first prefetch call. */
   prefetchPath?: string;
+  /**
+   * Merged form-event route the client run POSTs (`/forms/<form>/<kind>`),
+   * set by the generated client handler. The route resolves `runEvent`
+   * through its exported `scriptEvents` map into `ctx.onlyScript`; a token
+   * the map does not list is refused 404.
+   */
+  runPath?: string;
+  /** The one workflow event token `client.run` sends with the merged-route POST. */
+  runEvent?: string;
   /**
    * The accepted prefetch's slots, assigned by the generated client handler
    * after the nonce check. The browser shim answers `zoho.<env>` reads from
@@ -467,6 +476,13 @@ export interface ShimContext {
   rowId?: string;
   /** Set by the generated live-write path once the row is stored, so the script does not stamp it twice. */
   persisted?: boolean;
+  /**
+   * Merged form-event module: the one script index the request may run. The
+   * route resolves it server-side from `body.runEvent` through its exported
+   * `scriptEvents` map — an index is never taken from the body. Absent means
+   * every merged script runs.
+   */
+  onlyScript?: number;
   /**
    * The state-machine transition being run (approvals and blueprints only).
    * `submit` is the machine's on-start phase; approve/reject/transition name
@@ -976,6 +992,13 @@ export interface Shim {
      * as request parameters; the endpoint clamps and runs the named read.
      */
     rows(ctx: ShimContext, slot: string, from: unknown, to: unknown): Promise<SlotRowsResult>;
+    /**
+     * Browser-only merged form-event run: POSTs `ctx.runPath` with the
+     * caller's record and `ctx.runEvent`, the one script the route may run.
+     * A refused or failed run throws `c2cElementBlocked`. Absent on the
+     * server runtime; generated handlers guard the call.
+     */
+    run?(ctx: ShimContext): Promise<unknown>;
   };
 }
 
@@ -3990,6 +4013,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       if (typeof partial.rangeFrom === 'number') ctx.rangeFrom = partial.rangeFrom;
       if (typeof partial.rangeTo === 'number') ctx.rangeTo = partial.rangeTo;
       if (partial.rangeEmpty === true) ctx.rangeEmpty = true;
+      if (typeof partial.onlyScript === 'number') ctx.onlyScript = partial.onlyScript;
 
       return ctx;
     },

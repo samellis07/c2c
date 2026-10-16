@@ -4094,6 +4094,41 @@ export function browserShimSurface(fetchImpl) {
       if (got !== null && typeof got === 'object' && (got.ok === false || got.dryRun === true || got.performed === false)) throw clientBlocked(null);
       return got;
     },
+    /**
+     * One merged form-event server half: POSTs ctx.runPath
+     * (`/forms/<form>/<kind>`) with the caller's record and ctx.runEvent
+     * naming the single workflow script the route may run, resolved through
+     * the module's scriptEvents map into ctx.onlyScript. A refused or failed
+     * run throws `c2cElementBlocked` like client.call: the handler discards
+     * the actions it already queued.
+     */
+    async run(ctx) {
+      if (!ctx || typeof ctx.runPath !== 'string' || !ctx.runPath) throw clientBlocked(null);
+      let body = null;
+      try {
+        const res = await apiCall(call, globalThis, ctx.runPath, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(
+            {
+              record: ctx.record || {},
+              nonce: ctx.formNonce,
+              ...(typeof ctx.runEvent === 'string' ? { runEvent: ctx.runEvent } : {}),
+              ...(ctx.subformRow ? { subformRow: ctx.subformRow } : {}),
+              ...(Array.isArray(ctx.args) ? { args: ctx.args } : {}),
+            },
+            jsonReplacer,
+          ),
+        });
+        body = await responseJson(res);
+        if (!res.ok) throw clientBlocked(body);
+      } catch (err) {
+        if (err && err.c2cElementBlocked === true) throw err;
+        throw clientBlocked(body);
+      }
+      if (body && typeof body.error === 'string') throw clientBlocked(body);
+      return body;
+    },
   };
   /** POST JSON and read the reply, or null when the request failed. */
   async function postJson(path, payload) {
