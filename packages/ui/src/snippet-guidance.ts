@@ -6,7 +6,11 @@
  * The reasons come from the snippet source and the compiler's refusal, in a
  * fixed order, so the same snippet always yields the same step text.
  */
+import type { App } from '../../core/src/index.js';
 import { DROPPED_TAGS, droppedStyles } from './pages.js';
+
+export const INTERNAL_RECORD_SUMMARY =
+  /^(?:https?:\/\/(?:[A-Za-z0-9-]+\.)*(?:zohocreator\.(?:com|in|eu|com\.au|com\.cn)|creator(?:app)?\.zoho\.(?:com|in|eu|com\.au|com\.cn))(?::\d+)?)?(?:<%=\s*zoho\.appuri\s*%>\/?|\/)?record-summary\/([A-Za-z_]\w*)\/<%=([\s\S]+?)%>$/i;
 
 /**
  * Every reason a server snippet stays counted, in report order. analyze,
@@ -122,12 +126,39 @@ function droppedTags(markup: string): string[] {
   return [...found].sort();
 }
 
+function hasKnownReportSummary(source: string, app?: App): boolean {
+  if (!app) return false;
+  for (const m of source.matchAll(/<iframe\b((?:[^>"']|"[^"]*"|'[^']*')*?)>/gi)) {
+    const src = /\bsrc\s*=\s*(["'])([\s\S]*?)\1/i.exec(m[1]);
+    if (!src) continue;
+    const match = INTERNAL_RECORD_SUMMARY.exec(src[2].trim());
+    if (match && app.reports.some((r) => r.name === match[1])) return true;
+  }
+  return false;
+}
+
+function hasOtherEmbedOrIslandUrl(source: string, markup: string, app?: App): { hasEmbed: boolean; hasIslandUrl: boolean } {
+  const stripKnown = (text: string) =>
+    text.replace(/<iframe\b((?:[^>"']|"[^"]*"|'[^']*')*?)>(?:[\s\S]*?<\/iframe\s*>)?/gi, (whole, attrs) => {
+      const src = /\bsrc\s*=\s*(["'])([\s\S]*?)\1/i.exec(attrs);
+      if (!src) return whole;
+      const match = INTERNAL_RECORD_SUMMARY.exec(src[2].trim());
+      if (match && app?.reports.some((r) => r.name === match[1])) return '';
+      return whole;
+    });
+  const strippedMarkup = stripKnown(markup);
+  const strippedSource = stripKnown(source);
+  const hasEmbed = [...strippedMarkup.matchAll(/<\s*([A-Za-z][\w-]*)/g)].some((m) => EMBED_TAGS.has((m[1] ?? '').toLowerCase()));
+  const hasIslandUrl = /\b(?:src|href|action|formaction|data|poster)\s*=\s*["']?[^"'>\s]*<%/i.test(strippedSource);
+  return { hasEmbed, hasIslandUrl };
+}
+
 /**
  * Guidance for one counted snippet. `source` is the decoded snippet text,
  * `refusal` the compiler's reason (absent when it was not compiled), and
  * `location` names the snippet and its page.
  */
-export function serverSnippetGuidance(source: string, refusal: string | undefined, location: string): SnippetGuidance {
+export function serverSnippetGuidance(source: string, refusal: string | undefined, location: string, app?: App): SnippetGuidance {
   const code = islandCode(source);
   const markup = splitIslands(source).markup.replace(/^\s*htmlpage\b[^\n]*\n?/i, '');
   const reasons: SnippetReason[] = [];
@@ -140,6 +171,22 @@ export function serverSnippetGuidance(source: string, refusal: string | undefine
   const lost = [...droppedTags(markup).map((t) => `<${t}>`), ...[...new Set(droppedStyles(markup))].sort()];
   if (lost.length || refusal === 'static markup contains a dropped style declaration') reasons.push('sanitizer-loss');
   if (!reasons.length || (refusal !== undefined && TRANSLATION_REFUSALS.has(refusal))) reasons.push('untranslated');
+
+  if (hasKnownReportSummary(source, app)) {
+    const { hasEmbed, hasIslandUrl } = hasOtherEmbedOrIslandUrl(source, markup, app);
+    if (!hasEmbed && !hasIslandUrl && (refusal === undefined || !URL_REFUSALS.has(refusal))) {
+      const idx = reasons.indexOf('dynamic-url');
+      if (idx >= 0) reasons.splice(idx, 1);
+    }
+    const codeWithoutSummaryRead = code.replace(/\b[A-Za-z_]\w*\s*=\s*[A-Za-z_]\w*\s*\[[^\]]*\]\s*\.\s*ID\s*;?/gi, '');
+    if (!readsForCaller(codeWithoutSummaryRead, headerParams(source))) {
+      const idx = reasons.indexOf('caller-read');
+      if (idx >= 0) reasons.splice(idx, 1);
+    }
+    if (!reasons.length && refusal !== undefined && TRANSLATION_REFUSALS.has(refusal)) {
+      reasons.push('untranslated');
+    }
+  }
 
   reasons.sort((a, b) => SNIPPET_REASONS.indexOf(a) - SNIPPET_REASONS.indexOf(b));
   const steps = reasons.map((reason) => {

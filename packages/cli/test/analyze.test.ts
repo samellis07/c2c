@@ -539,16 +539,11 @@ test(
   const management = analyze(galleryDs('employee-management', 'Employee_Management.ds'));
   assertCountedOnce(management);
   // e4d07e1de translates the Dashboard snippet's relative-date fetch (Add_Holiday[Date_field in this year]), removing the Dashboard blocker.
-  assert.deepEqual(management.deluge.todoLocations, [
-    {
-      location: 'page Employee_Profile.dsp',
-      construct: 'Server-side Deluge snippet requires manual translation',
-      scope: 'ui',
-      manualReasons: ['caller-read', 'dynamic-url'],
-      manualStep:
-        'snippet HTML Snippet on page Employee_Profile: It reads records filtered by the signed-in user or by page parameters. Serve those reads from a server route that checks the caller\'s read grant for each form and field and passes the parameters as bound criteria values. It builds an iframe, embed, or link URL at render time. Rebuild it with a fixed allowlisted destination or a generated form or report route, and encode each dynamic part. Keep this TODO open until the rebuilt section is verified.',
-    },
-  ]);
+  // Translating caller-filtered record-summary iframe snippets to static route removes the final blocker on employee-management.
+  assert.deepEqual(management.deluge.todoLocations, []);
+  assert.equal(management.deluge.todo, 0);
+  assert.equal(management.determinism.todoCount, 0);
+  assert.equal(management.determinism.deterministic, true);
   },
 );
 

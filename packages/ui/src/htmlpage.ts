@@ -31,6 +31,7 @@ import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, 
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { c2cUrlFunctionSource, flatUrl } from './url-policy.js';
 import { hasShapeCWrites, isShapeCGuarded, shapeCStmtOk, shapeCServerOk, type ShapeCGuard } from './htmlpage-shape-c.js';
+import { INTERNAL_RECORD_SUMMARY, serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
 
 export interface HtmlpageFile {
   path: string;
@@ -39,6 +40,7 @@ export interface HtmlpageFile {
 
 export interface HtmlpageCompiled {
   ok: boolean;
+  manualReasons?: SnippetReason[];
   /** The template contains only an empty statement wrapper and static markup. */
   staticOnly?: boolean;
   /** Sanitized static shell for the element (`el.html`). */
@@ -1844,7 +1846,7 @@ export function rewriteRecordSummaryFrames(template: string, app?: App): string 
   return replaceIframeElements(String(template ?? ''), (whole, attrs, inner) => {
     const src = /\bsrc\s*=\s*(["'])([\s\S]*?)\1/i.exec(attrs);
     if (!src) return whole;
-    const match = /^<%=\s*zoho\.appuri\s*%>record-summary\/([A-Za-z_]\w*)\/<%=([\s\S]+?)%>$/i.exec(src[2]);
+    const match = INTERNAL_RECORD_SUMMARY.exec(src[2].trim());
     if (!match) return whole;
     const target = match[1];
     const report = app?.reports.find((item) => item.name === target);
@@ -1857,7 +1859,8 @@ export function rewriteRecordSummaryFrames(template: string, app?: App): string 
     const idExpr = match[2].trim();
     const read = new RegExp(`^${form}\\s*\\[[^\\[\\]]+\\]\\s*\\.\\s*ID$`, 'i').test(idExpr);
     const param = /^input\.[A-Za-z_]\w*$/.test(idExpr);
-    if (!read && !param) return whole;
+    const variable = /^[A-Za-z_]\w*$/.test(idExpr);
+    if (!read && !param && !variable) return whole;
     const routed = report ? `#/report/${report.name}/row/<%=${idExpr}%>` : `#/record/${form}/<%=${idExpr}%>`;
     const nextAttrs = attrs.slice(0, src.index) + `src=${src[1]}${routed}${src[1]}` + attrs.slice(src.index + src[0].length);
     const anchorAttrs = nextAttrs.replace(/\bsrc\s*=/i, 'href=');
@@ -2305,7 +2308,11 @@ export function compileHtmlpage(
   decoded: string,
   opts: { id?: string; schema?: SchemaPlan } = {},
 ): HtmlpageCompiled {
-  const fail = (reason: string): HtmlpageCompiled => ({ ok: false, reason });
+  const fail = (reason: string): HtmlpageCompiled => ({
+    ok: false,
+    reason,
+    manualReasons: serverSnippetGuidance(decoded, reason, elementName, app).reasons,
+  });
   const head = splitTemplate(decoded);
   head.template = rewriteRecordSummaryFrames(head.template, app);
   head.template = convertZmlSnippetToHtml(head.template, new Set(app.forms.map((f) => f.name)));
@@ -2330,7 +2337,7 @@ export function compileHtmlpage(
     const html = done.html ?? '';
     for (const name of includes) if (!html.includes(`data-zml="${PAGE_INCLUDE_PREFIX}${name}"`)) return fail('page embed did not survive markup sanitization');
     for (const marker of embedded.markers) if (!html.includes(`data-zml="${marker}"`)) return fail('component embed did not survive markup sanitization');
-    return { ...done, ...(includes.length ? { includes } : {}), ...(embedded.components.length ? { components: embedded.components } : {}), ...(embedded.todos.length ? { componentTodos: embedded.todos } : {}) };
+    return { manualReasons: [], ...done, ...(includes.length ? { includes } : {}), ...(embedded.components.length ? { components: embedded.components } : {}), ...(embedded.todos.length ? { componentTodos: embedded.todos } : {}) };
   };
   const chunks = splitChunks(head.template);
   if (!chunks) return fail('malformed Deluge island');
