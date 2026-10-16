@@ -43,7 +43,7 @@ This is the routing layer and the order of work. Do not do a step from memory: l
 - **When something is unverified:** say "unverified: needs a probe" and ask before proposing an empirical check. The CLI probe command is not available yet.
 - **Rule — default settings only:** the user runs c2c with default host settings and no browser automation — never drive a browser or console, never change permission rules, never use a pre-made or supplied evidence file. Every fact comes from CLI/API/MCP calls made live in the current session; what no call can do is a guided ask (exact console path, what to click, how it is read back), collected into one batched checklist (C2C.md rule 13).
 - **One credential, one refresher (C2C.md rule 14):** serialize every `catalyst`/`c2c` call — no parallel runs and no keep-fresh loop beside a run; a second refresher on the same login rotates the refresh token out from under both. On a read-only `401 INVALID_TOKEN`, re-read the stored token rather than forcing a refresh.
-- **Teardown boundary (C2C.md rule 15):** a failed step never means deleting the project to retry — teardown happens only on the user's explicit request, or on a failure before the Slate "Start Exploring" step. Anything that has taken a human or console step is kept; stop, report, resume with `--resume`.
+- **Teardown boundary (C2C.md rule 15):** a failed step never means deleting the project to retry — teardown happens only on the user's explicit request, or on a failure before the first human or console step. Anything that has taken a human or console step is kept; stop, report, resume with `--resume`.
 
 ## What to ask the user (and when)
 

@@ -106,15 +106,15 @@ Recipe: Create schema in Development. Promote with the migrate rule. Then use th
 
 Read-back: GET /baas/v1/project/<project-id>/table with the Production header lists the promoted tables and no extra table from a Production POST.
 
-### Skip Start Exploring except for the first Slate deploy
+### First-use gates except Slate
 
-Rule: Do not ask the user to click Start Exploring for Data Store, Functions, or Authentication when the gate probe already answers open — those calls already work. On a fresh imported project the user opens Slate once before the first `catalyst deploy slate`, which otherwise returns `400` `Please access the Slate service in your project's console before deploying via the CLI.`
+Rule: Do not ask the user to click Start Exploring for Data Store, Functions, Authentication, or Slate. Slate links and deploys with `-ni` on a fresh project [TESTED]. Cloud Scale, Stratus and SmartBrowz still verify their first-use gates before the writes that need them.
 
-Surface: guided console step; verified by a REST read c2c runs with the CLI token
+Surface: guided console step; only for the remaining closed gates — the gate probe is a REST read c2c runs with the CLI token
 
-Recipe: c2c probes each gate the app needs (Cloud Scale GET /baas/v1/project/<project-id>/table, Stratus GET /baas/v1/project/<project-id>/bucket, SmartBrowz grid list, Slate GET /slate/v1/project/<project-id>/app). Open: continue with no human step. Closed: print one line (console → the project → <service> → Start Exploring), stop before any write, and probe again on the re-run (`c2c provision --out c2c-out/<app> --record <gate>-enable`, or deploy `--resume`). The console enable has no token equivalent (`401 AUTHENTICATION_FAILURE`) and no IaC component pre-enables it.
+Recipe: c2c probes Cloud Scale (`GET /baas/v1/project/<project-id>/table`), Stratus (`GET /baas/v1/project/<project-id>/bucket`) and SmartBrowz (browser-grid list) when used. Open: continue with no human step. Closed: print one line (console → the project → <service> → Start Exploring), stop before that write, and probe again on the re-run (`c2c provision --out c2c-out/<app> --record <gate>-enable`, or deploy `--resume`).
 
-Read-back: the gate probe answers `200` with a success envelope; then `catalyst deploy slate` finishes and the App URL serves.
+Read-back: the gate probe answers `200` with a success envelope; then the gated write proceeds.
 
 ## Data Store
 
@@ -292,13 +292,13 @@ Read-back: GET the function again and compare key names to the merged map.
 
 ### Link a Slate app
 
-Rule: catalyst.json `slate` must be an array. An object makes `catalyst slate:link` throw `TypeError: existingSlates.findIndex is not a function`.
+Rule: `slate:link` writes the `slate` entry in `catalyst.json`; do not pre-write one. An existing entry means "already linked" — preserve it and skip link; a malformed non-array entry is removed before retry.
 
 Surface: Catalyst CLI
 
-Recipe: Write `"slate": []`, then `catalyst slate:link`. Do not record an absolute machine path as the source.
+Recipe: Run `catalyst slate:link -p <project-id> --org <org-id> --dc <dc> … -ni`, then `catalyst deploy slate <app> -p <project-id> --org <org-id> --dc <dc> -ni`.
 
-Read-back: catalyst.json slate is an array and the link command exits 0.
+Read-back: link succeeds or reports already linked; deploy reports/serves the App URL.
 
 ### Deploy a Slate app
 
@@ -306,7 +306,7 @@ Rule: Deploy Slate with the CLI after link. Capture the App URL. A later `HTTP E
 
 Surface: Catalyst CLI
 
-Recipe: `catalyst deploy slate`. Production static deploy is `catalyst deploy slate --production`. `<dc>` is the config data centre, so the host is `<app>.onslate.<dc>`.
+Recipe: `catalyst deploy slate`. Production static deploy is `catalyst deploy slate --production`. `<dc>` is the config data centre, so the host is `<app>.onslate.<dc>`. An older CLI can still answer `400` "Please access the Slate service in your project's console before deploying via the CLI."; the fallback is the console Slate page → Start Exploring, then re-run.
 
 Read-back: The App URL returns HTTP 200, and MCP CatalystbyZoho_List_All_Slate_Apps lists the app. `curl -I` shows `cache-control: public, max-age=31536000` on index.html; hashed asset names are the cache bust.
 

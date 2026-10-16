@@ -37,7 +37,7 @@ import { mailConfig } from './mail.js';
 import { deployCommands, functionSources } from './plan.js';
 import { planCustomerSteps } from './customer-steps.js';
 import { readDeployConfig } from './provision-config.js';
-import { ACTIVATION_SERVICES, FIRST_USE_GATES, type FirstUseGate } from './first-use.js';
+import { FIRST_USE_GATES, type FirstUseGate } from './first-use.js';
 import { buildFunctionEnv, extractConnectionSecrets, writeOrUpdateFunctionEnv } from './function-env.js';
 import { isVerifiedMcpTool } from './mcp-registry.js';
 import { MCP_TOOL_PREFIX, REQUIRED_MCP_TOOLS } from '../../doctor/src/required-tools.js';
@@ -1122,9 +1122,8 @@ function buildSteps(opts: {
     );
   }
   if (opts.client) {
-    // A fresh project (IaC-imported or console-created) refuses the first
-    // `deploy slate` with HTTP 400 until Slate is opened in the console once.
-    steps.push(gateStep(FIRST_USE_GATES.slate));
+    // Slate links and deploys non-interactively on a fresh project; only the
+    // resulting App URL host needs authorising and checking.
     steps.push({
       id: 'authorized-domain',
       via: 'cli',
@@ -1519,9 +1518,9 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
     portalUsers: auth.portalUsers.length,
     tablePermissions: auth.tablePermissions,
     // Every deploy links and deploys a Slate client (deployCommands), Creator
-    // pages or not, so every plan carries the Slate gate, the authorized domain
-    // and the sign-in check that client needs.
-    client: deployCommands(link, '<org>', '<project>').some((command) => command.argv.includes('slate:link')),
+    // pages or not, so every plan carries the authorized domain and the
+    // sign-in check that client needs.
+    client: deployCommands(link, '<org>', '<project>', '<dc>').some((command) => command.argv.includes('slate:link')),
     newProject,
     ...(opts.production ? { production: true } : {}),
   });
@@ -1713,10 +1712,10 @@ function formatPlanMd(
   }
   lines.push('', '## Provision steps (provision/plan.json)', '');
   for (const step of plan.steps) lines.push(`- ${step.id} [${step.via}] ${stepRef(step)} → read back ${stepRef(step.readBack)}`);
-  // The list c2c provision prints once every step is done. Each service start
-  // is its <service>-enable step above, so it is closed by then and not listed.
+  // The list c2c provision prints once every step is done. Service first-use
+  // gates are provision steps above, not customer checklist items.
   lines.push('', '## Human steps (after the last provision step; c2c provision prints the same list)', '');
-  planCustomerSteps(plan.steps, { started: ACTIVATION_SERVICES, connectionSecretKeys: plan.connectionSecretKeys ?? [] }).forEach((item, index) => lines.push(`${index + 1}. ${item}`));
+  planCustomerSteps(plan.steps, { connectionSecretKeys: plan.connectionSecretKeys ?? [] }).forEach((item, index) => lines.push(`${index + 1}. ${item}`));
   lines.push('', '## Required MCP tools (doctor D-B5)', '', `- base (${plan.mcpTools.base.length}): ${plan.mcpTools.base.join(', ')}`);
   lines.push(`- plan (${plan.mcpTools.plan.length}): ${plan.mcpTools.plan.length ? plan.mcpTools.plan.join(', ') : 'none beyond base'}`);
   lines.push('', '## Probes (scratch resources prefixed c2c_probe_, deleted afterwards)', '');

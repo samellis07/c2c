@@ -41,7 +41,7 @@ matching, nonmatching and missing-record cases before accepting a custom rule.
 
 1. **Review** the UI section of `plan.md`: forms, reports by view type, pages, TODOs. Show the user which views degrade to tables.
 2. **Deploy** happens in `c2c deploy <ds> --confirm --function-env <file>` (`c2c-provision-and-deploy`): `catalyst slate:link` then `catalyst deploy slate`.
-   - `catalyst.json` must contain `"slate": [ … ]` (an **array**). An object makes zcatalyst-cli crash in `addExistingSlate` with `TypeError: existingSlates.findIndex is not a function`, shown as `An unexpected error has occurred. Kindly contact Catalyst support` [TESTED]; c2c writes an array. If you see it on an older c2c, do not hand-edit generated files: upgrade c2c.
+   - Do not pre-write `catalyst.json` `slate`: `slate:link` writes the entry deploy needs [TESTED]. An existing entry means already linked — preserve it and skip link.
    - `slate:link` writes an absolute local `source` path into `catalyst.json` [TESTED]; that file is workspace-only, never committed with customer paths.
 3. **Record the App URL.** c2c must print and store `App Url: https://<name>.onslate.<dc>` in `c2c-deploy-report.json`. Without it, you cannot add the Authorized Domain. A deploy that printed the URL and then `HTTP Error: 404, No such app with the given id exists` was live anyway [TESTED]: verify by fetching the URL, not by the CLI exit code alone.
 4. **Authorized Domain** for the App URL host (`c2c-auth-and-access` step 3).

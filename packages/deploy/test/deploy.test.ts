@@ -497,10 +497,10 @@ test('deploy without --confirm writes the plan and does not spawn', async () => 
   assert.doesNotMatch(plan, /c2c-mail\.mjs/);
   assert.doesNotMatch(plan, /c2c_mail_log/);
   assert.match(plan, /slate\/index\.html/);
-  assert.match(plan, /catalyst --org 10000000000 --project 1001 slate:link --name c2c-widget/);
+  assert.match(plan, /catalyst -p 1001 --org 10000000000 --dc in slate:link --name c2c-widget/);
   assert.match(plan, /npm install --omit=dev --no-audit --no-fund \(in functions\/c2c_api\)/);
   assert.match(plan, /catalyst --org 10000000000 --project 1001 deploy --only functions:c2c_api -ni/);
-  assert.match(plan, /catalyst --org 10000000000 --project 1001 deploy slate c2c-widget -ni/);
+  assert.match(plan, /catalyst -p 1001 --org 10000000000 --dc in deploy slate c2c-widget -ni/);
   const rc = JSON.parse(readFileSync(join(out, '.catalystrc'), 'utf8')) as {
     project_id?: string;
     org_id?: string;
@@ -574,14 +574,15 @@ test('deploy --confirm spawns the Development CLI and still hides the credential
   const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--mail'], cap.io);
   assert.equal(code, 0);
   const scope = ['--org', '10000000000', '--project', '1001'];
+  const slateScope = ['-p', '1001', '--org', '10000000000', '--dc', 'in'];
   assert.deepEqual(
     cap.spawned.map((call) => call.args),
     [
       [...scope, 'project:list'],
       ['install', '--omit=dev', '--no-audit', '--no-fund'],
       [...scope, 'deploy', '--only', 'functions:c2c_api', '-ni'],
-      [...scope, 'slate:link', '--name', 'c2c-widget', '--framework', 'static', '--source', './slate', '-ni'],
-      [...scope, 'deploy', 'slate', 'c2c-widget', '-ni'],
+      [...slateScope, 'slate:link', '--name', 'c2c-widget', '--framework', 'static', '--source', './slate', '-ni'],
+      [...slateScope, 'deploy', 'slate', 'c2c-widget', '-ni'],
       [...scope, 'deploy', '--only', 'functions:c2c_auth', '-ni'],
     ],
   );
@@ -920,7 +921,7 @@ require('fs').appendFileSync(${JSON.stringify(npmLog)}, JSON.stringify({ args: p
   assert.ok(npmCalls[0].cwd.endsWith(join('functions', 'c2c_api')));
   for (const call of calls) {
     const orgAt = call.args.indexOf('--org');
-    const projectAt = call.args.indexOf('--project');
+    const projectAt = call.args.indexOf('--project') >= 0 ? call.args.indexOf('--project') : call.args.indexOf('-p');
     assert.ok(orgAt >= 0 && orgAt < call.args.indexOf(call.args.includes('project:list') ? 'project:list' : call.args.includes('slate:link') ? 'slate:link' : 'deploy'));
     assert.equal(call.args[orgAt + 1], '10000000000');
     assert.equal(call.args[projectAt + 1], '1001');
@@ -1137,7 +1138,7 @@ test('a failed deploy command still provisions auth and writes the report', asyn
   rmSync(out, { recursive: true, force: true });
 });
 
-test('a slate deploy refused because the service was never opened names the console activation step', async () => {
+test('an older CLI slate refusal keeps the console activation fallback', async () => {
   const ds = writeDs();
   const out = mkdtempSync(join(tmpdir(), 'c2c-out-'));
   const cap = capture();
@@ -1160,7 +1161,6 @@ test('a slate deploy refused because the service was never opened names the cons
   const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out], cap.io);
   assert.equal(code, 1);
   assert.match(cap.stderr(), /Start Exploring/, 'the refusal must name the console activation action');
-  assert.match(cap.stderr(), /slate-enable/, 'the refusal must name the provision step that tracks it');
   // The guided ask carries the project's own Slate page.
   assert.match(cap.stderr(), /console\.catalyst\.zoho\.in\/baas\/10000000000\/project\/1001\/Development#\/slate/);
   const report = JSON.parse(readFileSync(join(out, DEPLOY_REPORT), 'utf8')) as { exitCode: number };
@@ -1168,58 +1168,40 @@ test('a slate deploy refused because the service was never opened names the cons
   rmSync(out, { recursive: true, force: true });
 });
 
-test('deploy --confirm verifies the Slate first-use gate before any write: closed stops with the checklist line, open continues', async () => {
+test('a Slate app-list refusal is not a deploy pre-gate: the CLI still links and deploys', async () => {
   const ds = writeDs();
   const out = mkdtempSync(join(tmpdir(), 'c2c-out-'));
   const cap = capture();
   cap.io.spawn = async (command, args, opts) => {
     cap.spawned.push({ command, args, env: opts.env });
     if (args.includes('project:list')) return { code: 0, stdout: FAITHFUL_PROJECT_LIST, stderr: '' };
-    if (args.includes('slate:link')) return { code: 0, stdout: 'App Url: https://c2c-widget-xyz.onslate.in\n', stderr: '' };
+    if (args.includes('slate:link')) return { code: 0, stdout: 'Slate linked successfully\n', stderr: '' };
+    if (args.includes('deploy') && args.includes('slate')) return { code: 0, stdout: 'App Url: https://c2c-widget-xyz.onslate.in\n', stderr: '' };
     return { code: 0, stdout: '', stderr: '' };
   };
   const inner = cap.io.rest!;
-  let opened = false;
-  cap.io.rest = async (call) => {
-    if (!opened && call.method === 'GET' && call.path === '/slate/v1/project/1001/app') {
-      cap.restCalls.push({ method: call.method, path: call.path });
-      // A never-opened Slate service answers the "access the service" refusal.
-      return { status: 400, body: { status: 'failure', data: { error_code: 'INVALID_REQUEST', message: "Please access the Slate service in your project's console before deploying via the CLI." } } };
-    }
-    return inner(call);
-  };
+  cap.io.rest = async (call) => (call.path === '/slate/v1/project/1001/app' ? { status: 400, body: { status: 'failure', data: { message: "Please access the Slate service in your project's console before deploying via the CLI." } } } : inner(call));
   const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out], cap.io);
-  assert.equal(code, 1);
-  assert.match(cap.stderr(), /Slate first-use gate is closed \(GET \/slate\/v1\/project\/<project>\/app → 400 Please access the Slate service/);
-  assert.match(cap.stderr(), /Checklist: Catalyst console → the project → Slate → Start Exploring \(https:\/\/console\.catalyst\.zoho\.in\/baas\/10000000000\/project\/1001\/Development#\/slate\)/);
-  assert.match(cap.stderr(), /--resume --out /);
-  assert.match(cap.stdout(), /Cloud Scale first-use gate verified open/);
-  // Nothing was written: no table, auth or deploy step ran past the gate.
-  assert.equal(cap.restCalls.filter((call) => call.method !== 'GET').length, 0);
-  assert.equal(cap.spawned.some((item) => item.args.includes('deploy') || item.args.includes('slate:link')), false);
-  // The user opens Slate; the same read answers open and the run continues.
-  opened = true;
-  const again = await deployCli([...baseArgs(ds), '--confirm', '--resume', '--function-env', 'new', '--out', out], cap.io);
-  assert.equal(again, 0, cap.stderr());
-  assert.match(cap.stdout(), /Slate first-use gate verified open \(GET \/slate\/v1\/project\/<project>\/app → 200\)/);
+  assert.equal(code, 0, cap.stderr());
   assert.ok(cap.spawned.some((item) => item.args.includes('slate:link')));
+  assert.ok(cap.spawned.some((item) => item.args.includes('deploy') && item.args.includes('slate')));
   rmSync(out, { recursive: true, force: true });
 });
 
-test('an unrecognised Slate probe answer stops deploy --confirm like a closed gate', async () => {
+test('an unrecognised Slate app-list answer is a read-back note, not a gate', async () => {
   const ds = writeDs();
   const out = mkdtempSync(join(tmpdir(), 'c2c-out-'));
   const cap = capture();
   cap.io.spawn = async (command, args, opts) => {
     cap.spawned.push({ command, args, env: opts.env });
     if (args.includes('project:list')) return { code: 0, stdout: FAITHFUL_PROJECT_LIST, stderr: '' };
+    if (args.includes('deploy') && args.includes('slate')) return { code: 0, stdout: 'App Url: https://c2c-widget-xyz.onslate.in\n', stderr: '' };
     return { code: 0, stdout: '', stderr: '' };
   };
   const inner = cap.io.rest!;
   cap.io.rest = async (call) => (call.path === '/slate/v1/project/1001/app' ? { status: 503, body: {} } : inner(call));
-  assert.equal(await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out], cap.io), 1);
-  assert.match(cap.stderr(), /Slate first-use gate could not be verified/);
-  assert.equal(cap.restCalls.filter((call) => call.method !== 'GET').length, 0);
+  assert.equal(await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out], cap.io), 0, cap.stderr());
+  assert.ok(cap.spawned.some((item) => item.args.includes('slate:link')));
   rmSync(out, { recursive: true, force: true });
 });
 
@@ -3571,19 +3553,17 @@ test('migrateSeed refuses a table that repeats a source id before any write', as
   assert.equal(posts, 0);
 });
 
-test('catalyst.json writes slate as an array the CLI can link against', () => {
+test('catalyst.json leaves slate for slate:link to write', () => {
   const guard = checkGuards({ org: '10000000000', projectId: '1001', appLink: 'Widget', credentialPath: SECRET, registry });
   const app = deriveIr(parse(DS));
   const { files } = buildDeploy(app, guard, false);
   const raw = files.find((file) => file.path === 'catalyst.json');
   assert.ok(raw, 'missing catalyst.json');
-  const catalyst = JSON.parse(typeof raw.data === 'string' ? raw.data : raw.data.toString('utf8')) as { slate: unknown };
-  // zcatalyst-cli 1.27.2 addExistingSlate calls existingSlates.findIndex: an
-  // object here crashes every re-run behind "contact Catalyst support".
-  assert.ok(Array.isArray(catalyst.slate), `slate must be an array, got ${JSON.stringify(catalyst.slate)}`);
+  const catalyst = JSON.parse(typeof raw.data === 'string' ? raw.data : raw.data.toString('utf8')) as { slate?: unknown };
+  assert.equal(catalyst.slate, undefined, `slate:link owns the entry, got ${JSON.stringify(catalyst.slate)}`);
 });
 
-test('a resume migrates an object-shaped slate field instead of crashing again', async () => {
+test('a resume removes an object-shaped slate field instead of crashing again', async () => {
   const ds = writeDs();
   const out = mkdtempSync(join(tmpdir(), 'c2c-slate-migrate-'));
   try {
@@ -3596,7 +3576,7 @@ test('a resume migrates an object-shaped slate field instead of crashing again',
     const second = capture();
     assert.equal(await deployCli([...baseArgs(ds), '--out', out, '--confirm', '--function-env', 'new', '--resume'], second.io), 0);
     const migrated = JSON.parse(readFileSync(path, 'utf8')) as { slate: unknown };
-    assert.ok(Array.isArray(migrated.slate), `resume kept the object slate: ${JSON.stringify(migrated.slate)}`);
+    assert.equal(migrated.slate, undefined, `resume kept the object slate: ${JSON.stringify(migrated.slate)}`);
     assert.ok(second.spawned.some((call) => call.args.includes('slate:link')), 'slate:link never ran');
   } finally {
     rmSync(out, { recursive: true, force: true });
@@ -3709,7 +3689,7 @@ test('a CLI-extended slate array survives a bundle-changed resume and a plain re
   }
 });
 
-test('a plain re-run still replaces an object-shaped slate with an array', async () => {
+test('a plain re-run removes an object-shaped slate entry', async () => {
   const ds = writeDs();
   const out = mkdtempSync(join(tmpdir(), 'c2c-slate-obj-'));
   try {
@@ -3719,7 +3699,7 @@ test('a plain re-run still replaces an object-shaped slate with an array', async
     writeFileSync(path, `${JSON.stringify(written, null, 2)}\n`);
     const second = capture();
     assert.equal(await deployCli([...baseArgs(ds), '--out', out, '--confirm', '--function-env', 'new'], second.io), 0);
-    assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')).slate, []);
+    assert.equal(JSON.parse(readFileSync(path, 'utf8')).slate, undefined);
   } finally {
     rmSync(out, { recursive: true, force: true });
   }

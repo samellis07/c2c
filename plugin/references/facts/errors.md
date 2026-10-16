@@ -82,7 +82,7 @@ Rule: `401 AUTHENTICATION_FAILURE` on a write means the token is not accepted fo
 
 Cause: POST /baas/v1/project/<project-id>/role, or a console-only action (Production enable, diff, migrate or disable; a service's Start Exploring) attempted with the CLI token.
 
-Fix: Custom roles and Production enable, diff, migrate, and disable are guided console steps. Skip Start Exploring for Data Store, Functions, and Authentication. A service the app uses whose gate probe answers closed is one guided console action in the same sentence pattern: Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring; SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring; Slate — in the Catalyst console open the project → Slate → Start Exploring. Declare custom roles, table scopes, and table permissions in the greenfield template when the project is created.
+Fix: Custom roles and Production enable, diff, migrate, and disable are guided console steps. Skip Start Exploring for Data Store, Functions, and Authentication. A service the app uses whose gate probe answers closed is one guided console action in the same sentence pattern: Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring; SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring. Declare custom roles, table scopes, and table permissions in the greenfield template when the project is created.
 
 Recipe: Do not retry the token call. Success is the console action's read-back: MCP CatalystbyZoho_List_All_Roles, or GET /baas/v1/project/<project-id>/environment showing both environments after a promotion the user ran.
 
@@ -432,13 +432,13 @@ Recipe: `catalyst <command> --verbose`. Success is a debug line that matches a s
 
 ### `TypeError: existingSlates.findIndex is not a function`
 
-Rule: `TypeError: existingSlates.findIndex is not a function` means catalyst.json `slate` is an object. The CLI requires an array.
+Rule: `TypeError: existingSlates.findIndex is not a function` means catalyst.json `slate` is a malformed object. Remove that stale entry and let `catalyst slate:link` write the current one.
 
-Cause: A deploy wrote `"slate": {…}` and `catalyst slate:link` called findIndex on it.
+Cause: An older deploy wrote `"slate": {…}` and `catalyst slate:link` called findIndex on it.
 
-Fix: Write `"slate": []` before link. A plain re-run that rewrites catalyst.json as an object crashes again. Resume after the file is an array.
+Fix: Remove the malformed `slate` entry and retry `slate:link` with `-ni`. If link reports "already linked", preserve that entry and continue to deploy.
 
-Recipe: `catalyst slate:link` then `catalyst deploy slate`. Success is a link that finishes and an App URL that returns HTTP 200.
+Recipe: `catalyst slate:link … -ni` then `catalyst deploy slate … -ni`. Success is a link that finishes (or reports already linked) and an App URL that returns HTTP 200.
 
 ### `TypeError: Cannot read properties of undefined (reading 'bucket_name')`
 
@@ -452,13 +452,13 @@ Recipe: POST /bulk/write and poll until Completed. Success is Completed and the 
 
 ### `400` `Please access the Slate service in your project's console before deploying via the CLI.`
 
-Rule: `Please access the Slate service in your project's console before deploying via the CLI.` on the first Slate deploy means the Slate service was never opened in the project's console.
+Rule: This is an older-CLI fallback condition, not a required first step. Catalyst CLI 1.28.0 runs `slate:link` and `deploy slate` with `-ni` on a fresh project without opening Slate in the console [TESTED] (public test: `packages/deploy/test/plan.test.ts`, "a Slate client needs no slate-enable console step; Data Store and Functions get no activation step").
 
-Cause: `catalyst deploy slate` on a fresh imported project where "Start Exploring" for Slate was never clicked. Data Store and Functions deploys do not need it.
+Cause: `catalyst deploy slate` on a fresh imported project under an older CLI path.
 
-Fix: Slate — in the Catalyst console open the project → Slate → Start Exploring (once; the CLI token cannot enable it: `401 AUTHENTICATION_FAILURE`), then re-run the deploy. No IaC component pre-enables it.
+Fix: Prefer the non-interactive CLI path with explicit `-p`, `--org`, `--dc` and `-ni`. If the same refusal still returns, open the project → Slate → Start Exploring as fallback guidance, then re-run.
 
-Recipe: `catalyst deploy slate`. Success is the deploy finishing and GET /slate/v1/project/<project-id>/app/<app>/deployment returning the app_url.
+Recipe: `catalyst slate:link -p <project-id> --org <org-id> --dc <dc> … -ni` then `catalyst deploy slate <app> -p <project-id> --org <org-id> --dc <dc> -ni`. Success is the deploy finishing and the App URL serving.
 
 ### `HTTP Error: 404, No such app with the given id exists`
 

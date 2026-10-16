@@ -16,7 +16,7 @@ test('every gate is guided with one console line and a documented GET probe', ()
 
 test('the app decides which gates apply: Cloud Scale always, the rest by service use', () => {
   assert.deepEqual(requiredGates({ client: false, files: false, pdf: false }).map((gate) => gate.id), ['cloudscale']);
-  assert.deepEqual(requiredGates({ client: true, files: true, pdf: true }).map((gate) => gate.id), ['cloudscale', 'stratus', 'smartbrowz', 'slate']);
+  assert.deepEqual(requiredGates({ client: true, files: true, pdf: true }).map((gate) => gate.id), ['cloudscale', 'stratus', 'smartbrowz']);
 });
 
 test('probe answers: the access-the-service refusal is closed, a success envelope is open, anything else is unverified', () => {

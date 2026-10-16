@@ -155,9 +155,9 @@ Checks omitted from this table currently emit no `FAIL` result: D-A4, D-B4, D-B6
 
 - Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring
 - SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring
-- Slate — in the Catalyst console open the project → Slate → Start Exploring
+- Slate — no console first-open step; run `catalyst slate:link` / `catalyst deploy slate` with `-ni` and explicit `-p`, `--org`, `--dc`
 
-Name only the services the app uses; never ask for a service the app does not use. The gate table is in [facts/projects.md](../../references/facts/projects.md#console-first-use-gates-are-one-checklist-line-plus-a-read-c2c-verifies).
+Name only the services the app uses; never ask for a service the app does not use. The remaining gate table is in [facts/projects.md](../../references/facts/projects.md#console-first-use-gates-are-one-checklist-line-plus-a-read-c2c-verifies).
 
 ## Where to look
 

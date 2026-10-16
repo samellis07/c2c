@@ -215,7 +215,7 @@ function assertParity(a: Artifacts): void {
   assert.equal(a.doneNext.done, true);
   assert.equal(a.doneNext.steps, planned.length);
   assert.deepEqual(a.doneNext.checklist, a.planMdHuman, 'provision --next checklist matches plan.md human steps');
-  assert.ok(a.planMdHuman.length <= 5, 'at most the five customer steps');
+  assert.ok(a.planMdHuman.length <= 4, 'at most the four customer steps');
   const ids = new Set(a.planJson.map((step) => step.id));
   assert.equal(a.planMdHuman.some((item) => item.startsWith('Verify mail sender:')), ids.has('mail-sender'), 'mail human step iff the mail-sender step');
 
@@ -250,9 +250,10 @@ function assertParity(a: Artifacts): void {
   // The Slate client the deploy ships is planned: its gate, its domain and the sign-in check.
   const commands = block(a.deploy, /^commands /);
   const deploysSlate = commands.some((line) => / slate:link /.test(line)) && commands.some((line) => / deploy slate /.test(line));
-  for (const id of ['slate-enable', 'authorized-domain', 'sign-in-check']) {
+  for (const id of ['authorized-domain', 'sign-in-check']) {
     assert.equal(ids.has(id), deploysSlate, `plan step ${id} iff the deploy dry-run deploys Slate`);
   }
+  assert.equal(ids.has('slate-enable'), false, 'Slate needs no first-use console gate');
   const postDeploy = block(a.deploy, /^post-deploy /);
   assert.equal(postDeploy.some((line) => line.startsWith('- Sign-in check:')), ids.has('sign-in-check'), 'the deploy sign-in check is the planned sign-in-check step');
   assert.equal(
@@ -287,7 +288,7 @@ test('the parity check catches a dropped, reordered or extra step and a drifted 
     ['plan.md drops a step', (a) => void a.planMdSteps.pop()],
     ['plan.json reorders steps', (a) => void a.planJson.reverse()],
     ['provision runs an unplanned step', (a) => void (a.status += '- extra-step [cli] pending\n')],
-    ['plan has no Slate gate while the deploy ships Slate', (a) => void (a.planJson = a.planJson.filter((step) => step.id !== 'slate-enable'))],
+    ['plan wrongly adds a Slate gate', (a) => void a.planJson.unshift({ id: 'slate-enable', via: 'console' })],
     ['plan.md loses a human step', (a) => void a.planMdHuman.pop()],
     ['provision prints a different checklist', (a) => void (a.doneNext.checklist = [...a.doneNext.checklist, 'Extra: a sixth step'])],
     ['deploy creates an unplanned column', (a) => void (a.deploy = a.deploy.replace(/^- iac:import/m, '- create column Booking.Extra data_type=varchar max_length=255 if missing\n- iac:import'))],

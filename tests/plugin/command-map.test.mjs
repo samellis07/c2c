@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const plugin = path.join(repo, 'plugin');
 const groups = ['analyze/plan', 'provision/deploy', 'data/cutover', 'doctor/preflight', 'fill-todos', 'status/troubleshoot'];
-const humanSteps = ['Start services once', 'Accept the admin invite', 'Sign in once', 'Run the in-app check and paste its code', 'Verify the mail sender (only if your app sends mail)'];
+const humanSteps = ['Accept the admin invite', 'Sign in once', 'Run the in-app check and paste its code', 'Verify the mail sender (only if your app sends mail)'];
 const expected = {
   'analyze/plan': { commands: ['commands/analyze.md', 'commands/plan.md'], skills: ['skills/c2c-analyze-and-precheck/SKILL.md', 'skills/c2c-migrate/SKILL.md', 'skills/c2c-edit/SKILL.md'], verbs: ['analyze', 'precheck', 'plan', 'edit'] },
   'provision/deploy': { commands: ['commands/migrate.md'], skills: ['skills/c2c-migrate/SKILL.md', 'skills/c2c-provision-and-deploy/SKILL.md', 'skills/c2c-auth-and-access/SKILL.md', 'skills/c2c-ui/SKILL.md', 'skills/c2c-integrations/SKILL.md'], verbs: ['provision', 'deploy', 'auth', 'users', 'ui', 'ui-react'] },
@@ -77,6 +77,6 @@ test('validation rejects unknown verbs and human steps', () => {
   const valid = parseMap(readFileSync(path.join(plugin, 'C2C.md'), 'utf8'));
   valid[0] = { ...valid[0], human: 'Click arbitrary button' };
   assert.throws(() => validate(valid), /unapproved human step/);
-  valid[0] = { ...valid[0], human: 'Start services once then click Publish' };
+  valid[0] = { ...valid[0], human: 'Start services once' };
   assert.throws(() => validate(valid), /unapproved human step/);
 });
