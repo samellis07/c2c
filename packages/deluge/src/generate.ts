@@ -21,9 +21,10 @@ import { fieldTypeRow } from '../../schema/src/mapping.js';
 import type { AccessPolicy, FieldRuleDenial, FormGrant, WriteField, WriteOp, WriteScalar } from '../../shims/src/access.js';
 import { criteriaHasRelative, criteriaHasTodo, type Criteria, type DecimalColumn, type DecimalColumns } from '../../shims/src/criteria.js';
 import { integrityColumns, type IntegrityColumn } from '../../data/src/integrity.js';
-import { flowHistoryTable, generateSchema, type SchemaPlan } from '../../schema/src/generator.js';
+import { flowHistoryTable, generateSchema, isMultiChoiceField, type SchemaPlan } from '../../schema/src/generator.js';
 import { EXTENSION_KEY, plainRecordStages } from '../../schema/src/limits.js';
 import { LIMITS, jobPoolName } from '../../shims/src/index.js';
+import { multiValueDefault } from '../../shims/src/multi-value.js';
 import { blueprintFieldSpec, isConsumedPhaseProperty, isOwnerBlockName, isOwnerKey, isStageFieldProperty, phaseFieldKind, transitionOwnerProperties, type BlueprintFieldSpec } from './blueprint-rules.js';
 import { analyzeConnections, connectionsChecklist, declaredConnections } from './connections.js';
 import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, writeLiveSource } from './field-store.js';
@@ -3770,7 +3771,7 @@ function writeField(field: Field): WriteField {
   }
   const scalar = writeScalar(row?.id);
   if (scalar) node.scalar = scalar;
-  const initial = staticDefault(field.initialValue);
+  const initial = isMultiChoiceField(field) ? multiValueDefault(field.initialValue) : staticDefault(field.initialValue);
   if (initial !== undefined) node.defaultValue = initial;
   return node;
 }

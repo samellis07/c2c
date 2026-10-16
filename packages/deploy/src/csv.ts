@@ -81,6 +81,7 @@ import {
 } from '../../data/src/integrity.js';
 import { decimalShadow } from '../../shims/src/criteria.js';
 import { quantizeDecimal } from '../../shims/src/decimal.js';
+import { encodeMultiValue } from '../../shims/src/multi-value.js';
 import { exactId, parseJsonExact } from './json-exact.js';
 import { confirmGuardLines, planScopeLines } from './guards.js';
 import {
@@ -1632,9 +1633,8 @@ function writeColumn(
 ): void {
   const column = hit.column;
   if (typeof cell !== 'string' && 'list' in cell && column.kind === 'multi') {
-    const values = cell.list.map((item) => cellString(item).trim()).filter((item) => item.length > 0);
-    if (!values.length) return;
-    const value = JSON.stringify(values);
+    const value = encodeMultiValue(cell.list.map((item) => cellString(item)));
+    if (value === undefined) return;
     columns[column.column] = value;
     idInputs[column.column] = value;
     return;
@@ -1811,7 +1811,7 @@ function convertCell(label: string, raw: string, column: ColSpec, file: string, 
     case 'bool':
       return formatBool(text, label, file, labels?.displayTrue, labels?.displayFalse);
     case 'multi':
-      return JSON.stringify(splitMulti(text));
+      return encodeMultiValue(splitMulti(text));
     case 'lookup':
       return text;
     case 'number':

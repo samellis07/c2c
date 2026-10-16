@@ -41,6 +41,7 @@ import { constraintDecisionNote, generateSchema, type SchemaColumn, type SchemaT
 import { normalizeType, SOURCE_ID_COLUMN, SYSTEM_FIELD_COLUMNS } from '../../schema/src/mapping.js';
 import { decimalShadow } from '../../shims/src/criteria.js';
 import { quantizeDecimal } from '../../shims/src/decimal.js';
+import { encodeMultiValue } from '../../shims/src/multi-value.js';
 import { mandatoryMissingRefusals, normalizeDate, overLengthRefusals, normalizeDateTime } from '../../data/src/integrity.js';
 import { appTimeZone } from '../../ui/src/generate.js';
 import { assertExportCounts, loaderColumns, parseCsv, type CsvColumnNote, type CsvGap, type CsvLoad } from './csv.js';
@@ -382,10 +383,8 @@ function convertCell(header: string, raw: string, column: SchemaColumn, kind: Ce
       if (value === 'false' || value === 'no' || value === '0') return 'false';
       throw new Error(`${header} in ${file} is not true or false`);
     }
-    case 'multi': {
-      const values = (text.includes(';') ? text.split(';') : text.split(',')).map((item) => item.trim()).filter((item) => item.length > 0);
-      return JSON.stringify(values);
-    }
+    case 'multi':
+      return encodeMultiValue(text.includes(';') ? text.split(';') : text.split(','));
     case 'number':
       if (!/^-?\d+$/.test(text)) throw new Error(`${header} in ${file} is not a whole number`);
       return text;

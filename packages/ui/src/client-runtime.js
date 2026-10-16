@@ -414,6 +414,18 @@ function fieldDomId(field, prefix) {
   return raw || 'f-field';
 }
 
+/** The items of a stored multi-value cell (JSON list text); any other text is one item. */
+function initialListOf(text) {
+  if (text === '') return [];
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed.map((item) => String(item));
+  } catch {
+    // Not JSON list text: one choice.
+  }
+  return [text];
+}
+
 function fieldControl(field, id, describedBy) {
   const name = escapeHtml(field.name);
   const required = field.required ? ' required aria-required="true"' : '';
@@ -444,11 +456,13 @@ function fieldControl(field, id, describedBy) {
     const multiple = field.widget === 'multiselect' || field.widget === 'lookup-multi' ? ' multiple' : '';
     const lookup = field.lookup ? ` data-lookup="${escapeHtml(field.lookup.endpoint)}"` : '';
     const initialValue = field.initialValue != null ? String(field.initialValue) : '';
-    const mark = (choice) => (initialValue !== '' && String(choice) === initialValue ? ' selected' : '');
-    const known = (field.choices || []).some((choice) => String(choice) === initialValue);
+    // A multi select initial value is the stored JSON list text (["No"]); each item is selected.
+    const initialItems = field.widget === 'multiselect' ? initialListOf(initialValue) : initialValue !== '' ? [initialValue] : [];
+    const mark = (choice) => (initialItems.includes(String(choice)) ? ' selected' : '');
+    const listed = new Set((field.choices || []).map((choice) => String(choice)));
     const options = (field.choices || []).map((choice) => `<option value="${escapeHtml(choice)}"${mark(choice)}>${escapeHtml(choice)}</option>`).join('');
     // The export initial value is a real option even when it is not a listed choice.
-    const extra = initialValue !== '' && !known ? `<option value="${escapeHtml(initialValue)}" selected>${escapeHtml(initialValue)}</option>` : '';
+    const extra = initialItems.filter((item) => !listed.has(item)).map((item) => `<option value="${escapeHtml(item)}" selected>${escapeHtml(item)}</option>`).join('');
     const blank = multiple ? '' : '<option value="">-Select-</option>';
     return `<select${idAttr} name="${name}"${multiple}${required}${lookup}${described}>${blank}${extra}${options}</select>`;
   }

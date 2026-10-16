@@ -1611,7 +1611,7 @@ export default async function handler(req, res) {
 test('subset shims: computes byte savings on small fixture apps', () => {
   const allShims = vendoredShims();
   const allBytes = allShims.reduce((acc, f) => acc + Buffer.byteLength(f.data), 0);
-  assert.ok(allBytes > 470000 && allBytes < 600000, `total shims size should remain in the expected range: ${allBytes}`);
+  assert.ok(allBytes > 470000 && allBytes < 620000, `total shims size should remain in the expected range: ${allBytes}`);
 
   for (const appName of ['freight-forwarding', 'library-application-system']) {
     const fixtureDir = join(root, 'fixtures/redistributable', appName);

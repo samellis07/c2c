@@ -16,6 +16,7 @@ import { requiredCompositePart } from '../../schema/src/composite-parts.js';
 import { CURRENCY_CODES, fieldTypeRow, normalizeType, type FieldTypeRow } from '../../schema/src/mapping.js';
 import { criteriaHasTodo, sealRelativeCriteria } from '../../shims/src/criteria.js';
 import { LIMITS } from '../../shims/src/index.js';
+import { multiValueDefault } from '../../shims/src/multi-value.js';
 import {
   droppedStyleReason,
   carriedStyleRules,
@@ -628,7 +629,11 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
     ui.todo = 'Field regex did not compile; the pattern was not copied.';
     todos.push({ area: 'field', name: `${formName}.${field.name}`, reason: ui.todo });
   } else if (pattern.value) ui.pattern = pattern.value;
-  if (field.initialValue) ui.initialValue = unquote(field.initialValue);
+  if (field.initialValue) {
+    // A multi select prefills the stored shape (["No"]), never Deluge list source ({"No"}).
+    const initial = widget === 'multiselect' ? multiValueDefault(field.initialValue) : unquote(field.initialValue);
+    if (initial !== undefined) ui.initialValue = initial;
+  }
   if (FILE_WIDGETS.has(widget)) {
     ui.uploadEndpoint = `/uploads/${encodeURIComponent(formName)}/${encodeURIComponent(field.name)}`;
     ui.accept = widget === 'image' || widget === 'signature' ? 'image/*' : widget === 'audio' ? 'audio/*' : widget === 'video' ? 'video/*' : undefined;

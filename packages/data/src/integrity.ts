@@ -105,6 +105,7 @@ export function integrityColumns(
       : {}),
     ...(column.exactDecimal ? { exactDecimal: true } : {}),
     ...(column.shadowFor ? { shadow: true } : {}),
+    ...(column.matrixId === 'multi-select' || column.matrixId === 'checkbox-multi' ? { multiValue: true } : {}),
     ...((scope === 'app' ? column.mandatory || column.appMandatory === true : column.mandatory) && !optional?.has(column.name)
       ? { required: true }
       : {}),
