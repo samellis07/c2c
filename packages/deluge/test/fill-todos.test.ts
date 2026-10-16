@@ -8,7 +8,7 @@ import { deriveIr, parse } from '../../core/src/index.js';
 import { emptyApp, type App, type Workflow } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { repoRoot } from '../../core/src/toolchain.js';
-import { generate } from '../src/generate.js';
+import { FORM_EVENT_SERVER_UNINVOKED, generate } from '../src/generate.js';
 import { lintFill } from '../src/fill-check.js';
 import {
   SHIM_API,
@@ -54,6 +54,11 @@ function app(partial: Partial<App> = {}): App {
 
 function sources(result: { files: { path: string; source: string }[] }): string {
   return result.files.map((file) => `${file.path}\n${file.source}`).join('\n---\n');
+}
+
+/** The walk fills script holes. An uninvoked form-event server body is generator accounting, not a hole. */
+function fillableTodos<T extends { construct: string }>(todos: readonly T[]): T[] {
+  return todos.filter((todo) => todo.construct !== FORM_EVENT_SERVER_UNINVOKED);
 }
 
 /**
@@ -374,7 +379,7 @@ test('every translator TODO construct is represented and fixtures walk', () => {
       }),
     ],
   });
-  const todos = generate(demo).todos;
+  const todos = fillableTodos(generate(demo).todos);
   const tasks = collectTasks(demo);
   const tally: Record<string, number> = {};
   for (const task of tasks) {
@@ -396,7 +401,7 @@ test('every translator TODO construct is represented and fixtures walk', () => {
     const first = collectTasks(loaded).map((task) => task.id);
     const second = collectTasks(loaded).map((task) => task.id);
     assert.deepEqual(second, first);
-    const fixtureTodos = generate(loaded).todos;
+    const fixtureTodos = fillableTodos(generate(loaded).todos);
     const counts: Record<string, number> = {};
     for (const task of collectTasks(loaded)) {
       counts[task.construct] = (counts[task.construct] ?? 0) + 1;
@@ -559,11 +564,12 @@ test('the walk passes every translate option the generator passes', () => {
   assert.match(client.source, /shim\.decimal\.cmp\(shim\.input\.get\(ctx, "Paid_Amount"\), 0, ">"\)/);
 
   const tasks = collectTasks(demo);
+  const generatedTodos = fillableTodos(generate(demo).todos);
   const expected: Record<string, number> = {};
-  for (const todo of generate(demo).todos) expected[todo.construct] = (expected[todo.construct] ?? 0) + 1;
+  for (const todo of generatedTodos) expected[todo.construct] = (expected[todo.construct] ?? 0) + 1;
   const counts: Record<string, number> = {};
   for (const task of tasks) counts[task.construct] = (counts[task.construct] ?? 0) + 1;
-  assert.equal(tasks.length, generate(demo).todos.length);
+  assert.equal(tasks.length, generatedTodos.length);
   assert.deepEqual(counts, expected);
   assert.ok(tasks.some((task) => task.ir.kind === 'report' && task.construct === 'report-criteria'));
   assert.deepEqual(
@@ -663,7 +669,7 @@ ${body}\t\t\t}
 }
 `),
     );
-    const todos = generate(demo).todos;
+    const todos = fillableTodos(generate(demo).todos);
     const tasks = collectTasks(demo);
     assert.equal(tasks.length, todos.length, label);
     const expected: Record<string, number> = {};

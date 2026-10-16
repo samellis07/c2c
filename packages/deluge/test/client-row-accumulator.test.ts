@@ -79,6 +79,10 @@ test('a local summed from client-iterated prefetched rows is assigned on the cli
       seed: { Orders: rows },
       clientPrefetch: async (_path, nonce) => ({ nonce, slots: await pre.prefetch(runtime.context({ record: {} })) }),
     });
+    runtime.shim.client.run = async (ctx) => {
+      runtime.transcript.push({ op: 'client-run', path: ctx.runPath, event: ctx.runEvent });
+      return { dryRun: true };
+    };
     return (await cmod.clientActions(runtime.context({ record: {} }))).map((a) => [a.op, a.message]);
   };
   // 2 + 1 counted (the free row and the closed row are not): 2 left.

@@ -49,6 +49,88 @@ export interface GenerateResult {
   todos: TodoItem[];
   /** construct → count, untranslated only */
   constructs: Map<string, number>;
+  /**
+   * Form workflows whose script landed in a generated module. A merged route
+   * (`input-handlers`, `handler-handlers`) is one file for several events, so
+   * the per-event slug is not the file name. The no-silent-drop audit reads
+   * this instead of guessing the path. A workflow whose server body nothing
+   * invokes is not credited: `serverInvoked` is false and the report counts
+   * `form-event-server-uninvoked`.
+   */
+  coverage: WorkflowCoverage[];
+}
+
+/**
+ * A form-event server body was emitted, but the generated client never posts
+ * that route and the submit/delete runtime does not call it either. Counted,
+ * not credited. Prefetch (`<route>/prefetch`) is not this route.
+ */
+export const FORM_EVENT_SERVER_UNINVOKED = 'form-event-server-uninvoked';
+
+const CLIENT_RUN_GUARD = 'if (!shim.client || typeof shim.client.run !== "function") throw Object.assign(new Error("client.run unavailable; server half not run"), { c2cElementBlocked: true });\nawait shim.client.run(ctx);';
+
+/** One form workflow that emitFormHandler actually wrote into a module. */
+export interface WorkflowCoverage {
+  form: string;
+  event: string;
+  name: string;
+  start: number;
+  end: number;
+  file?: string;
+  /**
+   * Paths `put` returned for parts that run. A sibling's file is not listed.
+   * The server file is omitted when `serverInvoked` is false.
+   */
+  paths: string[];
+  /**
+   * False when this workflow wrote a server body and neither the generated
+   * client nor the submit/delete runtime runs that route. Omitted when the
+   * workflow wrote no server body.
+   */
+  serverInvoked?: boolean;
+}
+
+/**
+ * True when `source` refers to `serverPath` itself. A prefetch URL
+ * (`serverPath + '/prefetch'`) and a longer route do not count.
+ */
+export function clientPostsServerPath(source: string, serverPath: string): boolean {
+  if (!serverPath) return false;
+  const prefetch = `${serverPath}/prefetch`;
+  let from = 0;
+  while (from <= source.length) {
+    const at = source.indexOf(serverPath, from);
+    if (at < 0) return false;
+    const rest = source.slice(at + serverPath.length);
+    if (rest.startsWith('/prefetch')) {
+      from = at + prefetch.length;
+      continue;
+    }
+    const next = rest[0] ?? '';
+    if (next === '/' || next === '-' || next === '%' || /[A-Za-z0-9]/.test(next)) {
+      from = at + serverPath.length;
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+/** The Advanced I/O route whose `handle` runs this form-event kind. */
+export function formEventServerPath(form: string, kind: string): string {
+  const leaf = kind === 'delete' ? 'delete-script' : kind;
+  return `/forms/${encodeURIComponent(form)}/${leaf}`;
+}
+
+/**
+ * Submit posts the success route (the UI model promotes it to submitEndpoint).
+ * That module and the submit stub both call validate `handle`. The delete
+ * button posts `/forms/<form>/delete`, and the delete stub calls the
+ * delete-script module. Other kinds run only when a generated client posts
+ * the route; prefetch does not.
+ */
+function runtimeReachesFormEvent(kind: string): boolean {
+  return kind === 'success' || kind === 'validate' || kind === 'delete';
 }
 
 /**
@@ -167,7 +249,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
   const stats = EMPTY_STATS();
   const todos: TodoItem[] = [];
   const alertDiagnostics: AlertDiagnostic[] = [];
-  const put = (path: string, source: string) => {
+  const put = (path: string, source: string): string => {
     let p = path;
     let n = 2;
     while (used.has(p)) {
@@ -179,6 +261,11 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
     files.push({ path: p, source });
     return p;
   };
+  const coverage: WorkflowCoverage[] = [];
+  // Forms whose success module owns the submit URL. A `submit`-kind server
+  // module on those forms is not what the browser posts.
+  const successServerForms = new Set<string>();
+  const submitFixups: { entry: WorkflowCoverage; clientPosted: boolean; serverFile?: string }[] = [];
 
   put('runtime/limits.mjs', limitsModule());
 
@@ -207,7 +294,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
   }
   const emitHandlers = (w: Workflow): void => {
     const group = handlerGroups.get(`${w.form || 'form'}${eventKind(w.event)}`);
-    if (group && group[0] === w) emitFormHandler(app, group, put, stats, todos, alertDiagnostics, warnings, clientCalls.names, calledFunctions, options?.schema, !!options?.asyncOnSuccess, recordHandler);
+    if (group && group[0] === w) emitFormHandler(app, group, put, stats, todos, alertDiagnostics, warnings, clientCalls.names, calledFunctions, options?.schema, !!options?.asyncOnSuccess, recordHandler, coverage, files, successServerForms, submitFixups);
   };
   const thisappEntries: ThisappEntry[] = [];
   const warnings: GenerateWarning[] = [];
@@ -231,6 +318,15 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
       if (group[0] === w) emitApproval(app, group, specOf.get(w)!, put, stats, todos, alertDiagnostics, options?.schema);
     } else if (workflowKind(w) === 'schedule') emitSchedule(app, w, schedulePlans.get(w)!, put, stats, todos, alertDiagnostics, options?.schema);
     else emitHandlers(w);
+  }
+  // A submit-kind module emitted before its form's success module looked
+  // reachable. Once every handler exists, success owns that submit URL.
+  for (const fix of submitFixups) {
+    if (fix.clientPosted || fix.entry.serverInvoked === false) continue;
+    if (!successServerForms.has(fix.entry.form)) continue;
+    fix.entry.serverInvoked = false;
+    if (fix.serverFile) fix.entry.paths = fix.entry.paths.filter((p) => p !== fix.serverFile);
+    todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: fix.entry.start, end: fix.entry.end });
   }
   // Every Advanced I/O form handler imports the shared request helpers from
   // one app-local module. Emit it only when this app has at least one AIO file.
@@ -362,7 +458,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
       for (const item of stale) options.stale.push(item);
     }
   }
-  return { files, stats, todos, constructs };
+  return { files, stats, todos, constructs, coverage };
 }
 
 /**
@@ -446,10 +542,17 @@ function handlerGroup(app: App, form: string, kind: string): Workflow[] {
   return app.workflows.filter((w) => isHandlerWorkflow(w) && (w.form || 'form') === form && eventKind(w.event) === kind);
 }
 
+const TAIL_EVENT_KINDS = new Set(['load', 'input', 'addrow', 'deleterow', 'click']);
+function workflowButtonName(w: Workflow): string {
+  const text = w.event ?? '';
+  const match = text.match(/button\s*=\s*([A-Za-z_][A-Za-z0-9_]*)/i);
+  return match?.[1] ?? '';
+}
+
 function emitFormHandler(
   app: App,
   group: readonly Workflow[],
-  put: (path: string, source: string) => void,
+  put: (path: string, source: string) => string,
   stats: TranslateStats,
   todos: TodoItem[],
   alertDiagnostics: AlertDiagnostic[],
@@ -459,6 +562,10 @@ function emitFormHandler(
   schema?: SchemaPlan,
   asyncOnSuccess = false,
   recordHandler?: (entry: { path: string; kind: string; candidate: AsyncCandidate }) => void,
+  coverage?: WorkflowCoverage[],
+  files: readonly GeneratedFile[] = [],
+  successServerForms?: Set<string>,
+  submitFixups?: { entry: WorkflowCoverage; clientPosted: boolean; serverFile?: string }[],
 ): void {
   const first = group[0]!;
   const form = first.form || 'form';
@@ -475,10 +582,12 @@ function emitFormHandler(
   let slot = 0;
   const serverParts: string[] = [];
   const prefetchParts: string[] = [];
-  const clientParts: { w: Workflow; body: string; prefetchPath: string }[] = [];
+  const clientParts: { w: Workflow; body: string; prefetchPath: string; index: number; server: boolean }[] = [];
+  const serverScriptIndex = new Map<number, number>();
   let prefetchElement = false;
   let hasPrefetch = false;
   const writeKinds = new Set<'insert' | 'update' | 'add-or-edit'>();
+  const contributed: { w: Workflow; server: boolean; prefetch: boolean; client: boolean }[] = [];
   for (const w of group) {
     const subform = subformEventField(w.event);
     const todosBefore = todos.length;
@@ -518,14 +627,17 @@ function emitFormHandler(
     }
     if (multiSubform && subform) conds.push(`ctx.subformRow && ctx.subformRow.field === ${JSON.stringify(subform)}`);
     const wrap = (part: string): string => (part.trim() && conds.length ? `if (${conds.join(' && ')}) {\n${indent(part)}\n}` : part);
-    if (server.trim()) serverParts.push(wrap(server));
+    if (server.trim()) {
+      serverScriptIndex.set(group.indexOf(w), serverParts.length);
+      serverParts.push(wrap(server));
+    }
     if (prefetch.trim()) {
       hasPrefetch = true;
       prefetchParts.push(wrap(prefetch));
       if (translated.usesElement) prefetchElement = true;
     }
     const prefetchPath = prefetch.trim() ? `/forms/${encodeURIComponent(form)}/${kind}/prefetch` : '';
-    if (clientBody.trim()) clientParts.push({ w, body: clientBody, prefetchPath });
+    if (clientBody.trim()) clientParts.push({ w, body: clientBody, prefetchPath, index: group.indexOf(w), server: serverScriptIndex.has(group.indexOf(w)) });
     if (server.trim()) {
       recordHandler?.({
         path: `functions/aio/${base}.mjs`,
@@ -538,13 +650,34 @@ function emitFormHandler(
         },
       });
     }
+    contributed.push({ w, server: !!server.trim(), prefetch: !!prefetch.trim(), client: !!clientBody.trim() });
+  }
+  if (TAIL_EVENT_KINDS.has(kind) && serverParts.length > 1) {
+    for (const [index, w] of [...group.entries()].sort((a, b) => a[0] - b[0])) {
+      if (!serverScriptIndex.has(index) || clientParts.some((part) => part.index === index)) continue;
+      clientParts.push({ w, body: CLIENT_RUN_GUARD, prefetchPath: '', index, server: true });
+    }
+    clientParts.sort((a, b) => a.index - b.index);
   }
   // A merged route can contain several independently failing scripts. Keep
   // their boundaries so the event replay ledger can resume after a completed
   // script without repeating its side effects.
+  const runEventTokens = new Map<number, string>();
+  const seenEvents = new Map<string, number>();
+  for (const [index, w] of [...group.entries()].sort((a, b) => a[0] - b[0])) {
+    const button = workflowButtonName(w);
+    const token = button ? `${w.event} [${button}]` : w.event || w.name || 'handler';
+    const ordinal = (seenEvents.get(token) ?? 0) + 1;
+    seenEvents.set(token, ordinal);
+    runEventTokens.set(index, ordinal === 1 ? token : `${token} #${ordinal}`);
+  }
+  const scriptEvents = group.length > 1 && serverParts.length > 1 && TAIL_EVENT_KINDS.has(kind)
+    ? Object.fromEntries([...serverScriptIndex].sort((a, b) => a[1] - b[1]).map(([index, i]) => [runEventTokens.get(index)!, i]))
+    : undefined;
   const serverBody = group.length > 1 && serverParts.length > 1
-    ? serverParts.map((part, i) => `await shim.__c2cScript(${i}, async () => {\n${indent(part)}\n});`).join('\n')
+    ? serverParts.map((part, i) => `if (ctx.onlyScript == null || ctx.onlyScript === ${i}) await shim.__c2cScript(${i}, async () => {\n${indent(part)}\n});`).join('\n')
     : serverParts.join('\n');
+  let serverFile: string | undefined;
   if (serverBody.trim()) {
     const systemWrite =
       writeKinds.size === 0 ? null : writeKinds.size === 1 ? [...writeKinds].sort(compareEnUs)[0]! : 'add-or-edit';
@@ -559,7 +692,8 @@ function emitFormHandler(
             : 'on add';
     const extraRecordEvents = recordEvents.size > 1 ? { recordEvents: [...new Set(group.map((w) => w.recordEvent ?? ''))].sort(compareEnUs) } : {};
 
-    put(
+    if (kind === 'success') successServerForms?.add(form);
+    serverFile = put(
       `functions/aio/${base}.mjs`,
       aioModule({
         app,
@@ -575,12 +709,14 @@ function emitFormHandler(
         validateSpecs: systemWrite ? validateSiblingSpecs(app, form) : undefined,
         body: serverBody,
         schema,
+        scriptEvents,
         deferSuccess: asyncOnSuccess && kind === 'success',
       }),
     );
   }
+  let prefetchFile: string | undefined;
   if (hasPrefetch) {
-    put(
+    prefetchFile = put(
       `functions/aio/${base}-prefetch.mjs`,
       prefetchModule({
         app,
@@ -595,12 +731,55 @@ function emitFormHandler(
       }),
     );
   }
+  const clientFile = new Map<Workflow, string>();
   for (const part of clientParts) {
     collectClientCalls(part.body, calledFunctions);
-    put(
-      `client/handlers/${slug(form)}/${slug(part.w.event || part.w.name || 'handler')}.mjs`,
-      clientModule(part.body, part.prefetchPath, { form, event: part.w.event, when: kind, recordEvent: part.w.recordEvent }),
+    clientFile.set(
+      part.w,
+      put(
+        `client/handlers/${slug(form)}/${slug(part.w.event || part.w.name || 'handler')}.mjs`,
+        clientModule(part.body + (part.server && TAIL_EVENT_KINDS.has(kind) && !part.body.includes('shim.client.run(') ? `\n${CLIENT_RUN_GUARD}` : ''), part.prefetchPath, { form, event: part.w.event, when: kind, recordEvent: part.w.recordEvent, runPath: part.server && TAIL_EVENT_KINDS.has(kind) ? `/forms/${encodeURIComponent(form)}/${kind}` : undefined, runEvent: part.server && TAIL_EVENT_KINDS.has(kind) ? runEventTokens.get(part.index) : undefined, button: kind === 'click' ? workflowButtonName(part.w) : undefined }),
+      ),
     );
+  }
+  // A merged route is one file for several events. Credit only the workflows
+  // that wrote a non-empty part, and only the files that part landed in.
+  // An empty sibling shares the route and is not listed. A server body is
+  // credited only when the generated client posts its route, or the
+  // submit/delete runtime calls it. Prefetch is not that call. An uninvoked
+  // server body is a counted TODO, never a silent drop and never a credit.
+  if (coverage) {
+    const serverPath = formEventServerPath(form, kind);
+    const clientSources = [...clientFile.values()]
+      .sort(compareEnUs)
+      .map((p) => files.find((f) => f.path === p)?.source ?? '');
+    const clientPosted = clientSources.some((source) => clientPostsServerPath(source, serverPath));
+    for (const item of contributed) {
+      let serverInvoked: boolean | undefined;
+      if (item.server && serverFile) {
+        if (kind === 'submit' && !clientPosted) serverInvoked = !successServerForms?.has(form);
+        else serverInvoked = clientPosted || runtimeReachesFormEvent(kind);
+        if (!serverInvoked) todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: item.w.span.start, end: item.w.span.end });
+      }
+      const paths: string[] = [];
+      if (item.server && serverFile && serverInvoked !== false) paths.push(serverFile);
+      if (item.prefetch && prefetchFile) paths.push(prefetchFile);
+      const clientPath = clientFile.get(item.w);
+      if (item.client && clientPath) paths.push(clientPath);
+      if (!paths.length && serverInvoked !== false) continue;
+      const entry: WorkflowCoverage = {
+        form: item.w.form || 'form',
+        event: item.w.event || '',
+        name: item.w.name || '',
+        start: item.w.span.start,
+        end: item.w.span.end,
+        ...(item.w.span.file ? { file: item.w.span.file } : {}),
+        paths,
+        ...(serverInvoked !== undefined ? { serverInvoked } : {}),
+      };
+      coverage.push(entry);
+      if (item.server && serverFile && kind === 'submit') submitFixups?.push({ entry, clientPosted, serverFile });
+    }
   }
 }
 
@@ -3805,6 +3984,7 @@ function aioModule(opts: {
   body: string;
   /** Sourced schema plan; the embedded write rules match the provisioned store. */
   schema?: SchemaPlan;
+  scriptEvents?: Record<string, number>;
   /** Async on-success lane: the live endpoint stores the row and replies; the record trigger runs this script after commit (docs/event-deadletter.md). */
   deferSuccess?: boolean;
 }): string {
@@ -3825,6 +4005,11 @@ function aioModule(opts: {
   }
   lines.push('The access gate runs before this script: hidden form, op view, and authorizeWrite.');
   lines.push('authorizeWrite rejects a key that is not a writable field at that depth. It does not drop keys.');
+  if (opts.scriptEvents) {
+    lines.push(
+      'body.runEvent names the one merged script this request may run: the exported scriptEvents map resolves it to ctx.onlyScript, and an unlisted token is refused 404. No runEvent runs every merged script.',
+    );
+  }
   if (schema?.ruleDenied.length) {
     lines.push('authorizeWrite also refuses fields an unconditional field rule hides or disables (fieldRuleDenied). Conditional rules depend on client state and are not enforced here.');
   }
@@ -3926,6 +4111,21 @@ ${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' :
     send(res, 200, live ? { dryRun: false, wrote: true, values: projectReadable(access, principal, formName, ctx.record, Object.keys(accepted)), result: result ?? null, ...(warning ? { warning } : {}), ...(runtime.mail?.length ? { mail: runtime.mail } : {}) } : { dryRun: true, result: result ?? null, ...(warning ? { warning } : {}), transcript: runtime.transcript, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`
     : `    const result = await handle(ctx);
     send(res, 200, { dryRun: true, result: result ?? null, transcript: runtime.transcript, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`;
+  // A client run names body.runEvent; only the merged script it resolves to
+  // through the emitted scriptEvents map runs. The index never comes from the
+  // body: an unlisted token, another event, or a foreign name is refused.
+  const scriptEventGate = opts.scriptEvents
+    ? `  const runEvent = req && req.body && typeof req.body.runEvent === "string" ? req.body.runEvent : "";
+  if (runEvent) {
+    const onlyScript = Object.prototype.hasOwnProperty.call(scriptEvents, runEvent) ? scriptEvents[runEvent] : -1;
+    if (onlyScript < 0) {
+      send(res, 404, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: "unknown script event" });
+      return;
+    }
+    ctx.onlyScript = onlyScript;
+  }
+`
+    : '';
   const deleteRefusal = opts.body.includes('shim.validate.cancelDelete')
     ? `    if (err && err.code === "DELETE_REFUSED") {
       send(res, 422, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, refused: true, error: err.message, ${opts.systemWrite ? '...debugTranscript' : 'transcript: runtime.transcript'} });
@@ -3962,6 +4162,7 @@ export const access = ${accessLiteral(opts.app)};
 export const formName = ${JSON.stringify(opts.form)};
 export const recordEvent = ${JSON.stringify(opts.recordEvent ?? null)};
 ${opts.recordEvents ? `export const recordEvents = ${JSON.stringify(opts.recordEvents)};
+` : ''}${opts.scriptEvents ? `export const scriptEvents = ${JSON.stringify(opts.scriptEvents)};
 ` : ''}${schemaExports}
 ${subformRowHelper}${liveHelpersBlock}export async function handle(ctx) {
   const shim = ctx.shim;
@@ -4037,7 +4238,7 @@ ${runtimeSetup}
     appTimeZone: process.env.C2C_APP_TIMEZONE,
     rowId: reqRowId,${subformRowCtx}
   });
-${opts.systemWrite && schema ? '  // API and import inserts never saw the Slate prefill. Absent\n  // fields fall back to their Creator initial values here, so validate\n  // scripts and the row write see the same record as the form path.\n  if (!ctx.rowId && ctx.writeOp !== "update") applyInitialValues(ctx.record, fields);\n' : ''}  try {
+${opts.systemWrite && schema ? '  // API and import inserts never saw the Slate prefill. Absent\n  // fields fall back to their Creator initial values here, so validate\n  // scripts and the row write see the same record as the form path.\n  if (!ctx.rowId && ctx.writeOp !== "update") applyInitialValues(ctx.record, fields);\n' : ''}${scriptEventGate}  try {
 ${successBody}
   } catch (err) {
 ${refusal}${opts.systemWrite ? '    // The row write itself failed at the store. Map the refusal\n    // (409/422/400 naming the field) and log it; anything else stays a\n    // sanitized 500.\n    if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;\n    if (err && err.code === "C2C_STALE_WRITE") {\n      send(res, 409, { dryRun: !live, wrote: false, code: "C2C_STALE_WRITE", error: err.message });\n      return;\n    }\n' : ''}    const denied = err && err.code === "RECORD_ACCESS_DENIED";
@@ -4073,7 +4274,7 @@ export function requestRowId(req) {
 function clientModule(
   body: string,
   prefetchPath = '',
-  meta: { form?: string; event?: string; when?: string; signature?: string; params?: string[]; recordEvent?: string } = {},
+  meta: { form?: string; event?: string; when?: string; signature?: string; params?: string[]; recordEvent?: string; runPath?: string; runEvent?: string; button?: string } = {},
 ): string {
   const params = meta.params ?? [];
   const lines = [
@@ -4099,19 +4300,22 @@ const slots = prefetched.slots;
 ctx.slots = slots;
 `
     : '';
-  const usesRoundTrip = body.includes('shim.client.element(') || body.includes('shim.client.call(');
+  const usesRun = !!meta.runPath && body.includes('shim.client.run(');
+  const runDecl = usesRun ? `ctx.runPath = ${JSON.stringify(meta.runPath)};\n${meta.runEvent ? `ctx.runEvent = ${JSON.stringify(meta.runEvent)};\n` : ''}` : '';
+  const usesRoundTrip = body.includes('shim.client.element(') || body.includes('shim.client.call(') || usesRun;
   // A refused or failed server round trip throws `c2cElementBlocked`: the run
   // discards the actions already queued, so a failure never leaves partial
   // client actions applied.
   const wrapped = usesRoundTrip
-    ? `try {\n${indent(load + body)}\n} catch (err) {\n  if (!err || err.c2cElementBlocked !== true) throw err;\n  actions.length = 0;\n  actions.push({ op: "info", message: (err && err.message) || "Prefetch is stale or failed; client action blocked." });\n  return actions;\n}`
-    : load + body;
+    ? `try {\n${indent(load + runDecl + body)}\n} catch (err) {\n  if (!err || err.c2cElementBlocked !== true) throw err;\n  actions.length = 0;\n  actions.push({ op: "info", message: (err && err.message) || "Prefetch is stale or failed; client action blocked." });\n  return actions;\n}`
+    : load + runDecl + body;
   return `${banner(lines)}export const c2cHandler = ${JSON.stringify({
     form: meta.form ?? null,
     event: meta.event ?? null,
     when: meta.when ?? null,
     prefetch: prefetchPath || null,
     recordEvent: meta.recordEvent ?? null,
+    ...(meta.runEvent ? { runEvent: meta.runEvent } : {}),
   })};
 
 export async function clientActions(ctx${params.length ? `, ${params.join(', ')}` : ''}) {

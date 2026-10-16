@@ -4984,3 +4984,58 @@ test('app user listing stays a counted todo for other roots, methods, arities an
     assert.ok(t.todos.some((item) => item.construct === construct), `${script} -> ${construct}`);
   }
 });
+
+test('a query field write inside an input test is a client slot and a server write', () => {
+  const t = translate(
+    [
+      'if (input.Service != null) {',
+      '  getServiceDetails = Add_Services[ID == input.Service];',
+      '  input.Schedule_upto = getServiceDetails.Service_Time;',
+      '}',
+    ].join('\n'),
+    {
+      inputFields: ['Service', 'Schedule_upto'],
+      formNames: ['Add_Services'],
+      formFields: { Add_Services: ['ID', 'Service_Time'] },
+    },
+  );
+  assert.equal(t.todos.length, 0);
+  const client = stripComments(t.client);
+  const server = stripComments(t.server);
+  const prefetch = stripComments(t.prefetch);
+  assert.match(client, /shim\.input\.set\(ctx, \["Schedule_upto"\], slots\[/);
+  assert.match(client, /if \(/);
+  assert.match(prefetch, /slots\[/);
+  assert.match(server, /shim\.input\.set\(ctx, \["Schedule_upto"\]/);
+  assert.doesNotMatch(prefetch, /thisapp\.call/);
+  assert.doesNotMatch(client, /shim\.datastore\.field/);
+});
+
+test('a field write under a thisapp test stays on the server and adds no condition todo', () => {
+  const t = translate('if (thisapp.Check()) {\n  input.Hours = Orders[ID == 1].Name;\n}', {
+    inputFields: ['Hours'],
+    formNames: ['Orders'],
+    formFields: { Orders: ['ID', 'Name'] },
+  });
+  assert.equal(t.todos.some((item) => item.construct === 'client-condition-uses-server'), false);
+  assert.doesNotMatch(stripComments(t.client), /shim\.input\.set/);
+  assert.doesNotMatch(t.prefetch, /thisapp\.call/);
+  assert.match(stripComments(t.server), /shim\.input\.set/);
+});
+
+test('a thisapp field write stays on the server and is not prefetched', () => {
+  const t = translate('input.Hours = thisapp.timesheet.getHours(input.Start_Time);', {
+    inputFields: ['Hours', 'Start_Time'],
+  });
+  assert.equal(t.todos.length, 0);
+  assert.equal(stripComments(t.client).trim(), '');
+  assert.doesNotMatch(t.prefetch, /thisapp\.call/);
+  assert.match(stripComments(t.server), /shim\.thisapp\.call/);
+});
+
+test('sendmail is not hoisted into a field-write prefetch', () => {
+  const t = translate('sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];');
+  assert.doesNotMatch(t.prefetch, /mail\.send/);
+  assert.doesNotMatch(t.client, /mail\.send/);
+  assert.match(stripComments(t.server), /shim\.mail\.send/);
+});

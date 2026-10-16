@@ -22,10 +22,23 @@
  *   workflow (packages/deluge/src/generate.ts workflowKind) emitted its file:
  *   a handler module, a job module with a planned cron or sweep
  *   (packages/deluge/src/schedules.ts planSchedules), a flow machine module
- *   (flowSpecs), or a not-supported payment stub. A workflow with no script
+ *   (flowSpecs), or a payment stub for an unimplemented gateway. A merged form-event route
+ *   is one module (`input-handlers.mjs`, `handler-handlers.mjs`) for every
+ *   event in the group, so the per-event slug is not the file name.
+ *   generate() records each workflow that wrote a non-empty part, and the
+ *   paths that part landed in, on WorkflowCoverage. The audit treats that
+ *   list as the produced artifact only when the server body is actually
+ *   invoked: the generated client posts the route, or the submit/delete
+ *   runtime calls it. A prefetch URL is not that call. When `serverInvoked`
+ *   is false the workflow is not credited, even if its client file exists;
+ *   it is listed by the `form-event-server-uninvoked` todo instead.
+ *   The per-event slug still counts when the file is named for that one event
+ *   and the server half is not an uninvoked one. A workflow with no script
  *   and no field rules declares no behaviour, so there is nothing to migrate.
- *   Listed: a Deluge todo whose span sits inside the workflow span (translate
- *   todos are shifted into the script span; gap todos use the workflow span).
+ *   An empty sibling that shares the route is not credited with the group's
+ *   file. Listed: a Deluge todo whose span sits inside the workflow span
+ *   (translate todos are shifted into the script span; gap todos use the
+ *   workflow span).
  * - integration: a `zoho.<service>.<task>()` call or an `invokeurl` is
  *   produced when the translator evaluates it locally (date/time/app env
  *   roots in packages/deluge/src/dispatch.ts ZOHO_ENV, or a `local` adapter
@@ -53,7 +66,7 @@ import { authPlan, type AuthPlan } from '../../auth/src/plan.js';
 import { analyzeConnections, memberChain, permissionScopes, walk, type ConnectionsReport } from '../../deluge/src/connections.js';
 import type { Expr } from '../../deluge/src/ast.js';
 import { dispatchGet, ZOHO_ENV, ZOHO_PAYMENT } from '../../deluge/src/dispatch.js';
-import { flowSpecs, generate, slug, workflowKind, type FlowSpec, type GeneratedFile, type GenerateWarning } from '../../deluge/src/generate.js';
+import { flowSpecs, generate, slug, workflowKind, type FlowSpec, type GeneratedFile, type GenerateWarning, type WorkflowCoverage } from '../../deluge/src/generate.js';
 import { parse } from '../../deluge/src/parser.js';
 import { planSchedules, type SchedulePlan } from '../../deluge/src/schedules.js';
 import { reportCriteria, type TodoItem } from '../../deluge/src/translate.js';
@@ -93,6 +106,13 @@ export interface AuditOutputs {
   connections: ConnectionsReport;
   schedules: Map<Workflow, SchedulePlan>;
   specs: FlowSpec[];
+  /**
+   * Form workflows emitFormHandler wrote into a module. Absent when a test
+   * fabricates outputs that predate this field. A merged route names one
+   * file for several events; each entry lists only the files that workflow
+   * contributed.
+   */
+  coverage?: WorkflowCoverage[];
 }
 
 /** Run every generator over the app and bundle the outputs the audit reads. */
@@ -117,7 +137,7 @@ export function collectOutputs(app: App): AuditOutputs {
   } catch {
     warnings = [];
   }
-  return { schema, model, files: gen.files, todos: gen.todos, warnings, auth, connections, schedules, specs: flowSpecs(app) };
+  return { schema, model, files: gen.files, todos: gen.todos, warnings, auth, connections, schedules, specs: flowSpecs(app), coverage: gen.coverage };
 }
 
 function within(inner: { start: number; end: number }, outer: { start: number; end: number }): boolean {
@@ -200,6 +220,55 @@ function handlerBase(w: Workflow): string {
   return `${slug(w.form || 'form')}/${slug(w.event || w.name || 'handler')}`;
 }
 
+/** Coverage row for this workflow, when generate recorded one. */
+function coverageEntry(w: Workflow, out: AuditOutputs): WorkflowCoverage | undefined {
+  const coverage = out.coverage;
+  if (!coverage) return undefined;
+  const file = w.span.file ?? '';
+  return coverage.find(
+    (c) =>
+      c.form === (w.form || 'form') &&
+      c.event === (w.event || '') &&
+      c.name === (w.name || '') &&
+      c.start === w.span.start &&
+      c.end === w.span.end &&
+      (c.file ?? '') === file,
+  );
+}
+
+/**
+ * The per-event slug, or a coverage entry for the merged route file.
+ * A coverage row with `serverInvoked: false` is not production: the server
+ * body was emitted and nothing runs it. The client file does not override that.
+ */
+function handlerProduced(w: Workflow, out: AuditOutputs, paths: Set<string>): boolean {
+  const entry = coverageEntry(w, out);
+  if (entry?.serverInvoked === false) return false;
+  const base = handlerBase(w);
+  const legacy = [...paths].some(
+    (p) =>
+      p === `functions/aio/${base}.mjs` ||
+      p.startsWith(`functions/aio/${base}-`) ||
+      p.startsWith(`functions/aio/${base}.`) ||
+      p === `client/handlers/${base}.mjs` ||
+      p.startsWith(`client/handlers/${base}-`),
+  );
+  if (legacy) return true;
+  const coverage = out.coverage;
+  if (!coverage) return false;
+  const file = w.span.file ?? '';
+  return coverage.some(
+    (c) =>
+      c.form === (w.form || 'form') &&
+      c.event === (w.event || '') &&
+      c.name === (w.name || '') &&
+      c.start === w.span.start &&
+      c.end === w.span.end &&
+      (c.file ?? '') === file &&
+      c.paths.some((p) => paths.has(p)),
+  );
+}
+
 /**
  * A workflow with no runnable statements declares no behaviour: blank, or
  * commented out (gallery scripts wrapped in `/* ... *\/` or `//` lines parse
@@ -226,8 +295,7 @@ function auditWorkflow(app: App, out: AuditOutputs, drops: SilentDrop[]): void {
     const listed = listedTodos(out.todos, w).length > 0;
     if (kind === 'form') {
       if (vacuous(w)) continue;
-      const base = handlerBase(w);
-      const produced = [...paths].some((p) => p === `functions/aio/${base}.mjs` || p.startsWith(`functions/aio/${base}-`) || p.startsWith(`functions/aio/${base}.`) || p === `client/handlers/${base}.mjs` || p.startsWith(`client/handlers/${base}-`));
+      const produced = handlerProduced(w, out, paths);
       if (!produced && !listed) {
         drops.push({
           kind: 'workflow',

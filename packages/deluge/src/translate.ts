@@ -3401,6 +3401,50 @@ function rowScalarOnClient(value: Fx, scope: Scope): boolean {
   );
 }
 
+/**
+ * Prefetch slot for a field-write value the client must show. Input-field
+ * names and prefetch-bound names (`row`) are not free locals: the emitted
+ * code already reads them through the shim, or the prefetch module binds
+ * them. Dropping a read the code does not mention as an identifier lets a
+ * mixed expression slot. A name the code still mentions stays, so the slot
+ * does not reference a free variable. Returns null when the split refuses
+ * the value (`thisapp`, mail, or any other non-read).
+ */
+function slotFieldValue(value: Fx, scope: Scope): string | null {
+  if (value.sideEffect || value.appFunction || value.todo) return null;
+  const skip = new Set<string>();
+  for (const name of value.reads) {
+    if (scope.inputFields.has(name) || scope.prefetchBound.has(name)) skip.add(name);
+  }
+  if (skip.size === 0) return slotExpr(value, scope);
+  const reads = value.reads.filter((name) => {
+    if (!skip.has(name)) return true;
+    const id = jsIdent(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${id}\\b`).test(value.code);
+  });
+  return slotExpr(reads.length === value.reads.length ? value : { ...value, reads }, scope);
+}
+
+/**
+ * Client half of an input or row field write. A pure server value becomes a
+ * prefetch slot under the same refusals as a client condition. A refusal
+ * leaves the client write empty and adds no todo: the server line still runs.
+ * Call before {@link recordStateWrite} so this write is not replayed into its
+ * own value. A server-only unit (`noClient`) must not call {@link slotExpr}:
+ * the prefetch is discarded, but the slot's bookkeeping would change a later
+ * server line.
+ */
+function clientFieldWrite(value: Fx, scope: Scope, line: (code: string) => string): string {
+  if (!value.serverOnly) return line(value.code);
+  if (scope.noClient) return '';
+  // A guard the prefetch cannot replay (`thisapp`, mail, an unbound name)
+  // would turn this set into a client `if` whose test is a counted todo, and
+  // the set would not run. Leave that write on the server.
+  if (scope.writeGuards.some((g) => !g.ok)) return '';
+  const slot = slotFieldValue(value, scope);
+  return slot ? line(slot) : '';
+}
+
 function assignTo(target: Expr, value: Fx, span: { start: number; end: number }, scope: Scope, stats: TranslateStats, todos: TodoItem[], declType?: string, selfRef = false): Out {
   void declType;
   if (target.kind === 'name') {
@@ -3486,16 +3530,15 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
   const path = aliasedPath(target, scope);
   if (path && (path.root === 'input' || path.root === 'row')) {
     if (path.path.some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
-    const api = path.root === 'input' ? 'input' : 'record';
-    const base = path.root === 'input' ? '' : `${jsIdent(path.root)}, `;
-    const code = `shim.${api}.set(ctx, ${base}${JSON.stringify(path.path)}, ${value.code})`.replace('set(ctx, ,', 'set(ctx,');
-    const fixed = path.root === 'input'
-      ? `shim.input.set(ctx, ${JSON.stringify(path.path)}, ${value.code});`
-      : `shim.record.set(${jsIdent(path.root)}, ${JSON.stringify(path.path)}, ${value.code});`;
-    void code;
+    const lineFor = (code: string): string =>
+      path.root === 'input'
+        ? `shim.input.set(ctx, ${JSON.stringify(path.path)}, ${code});`
+        : `shim.record.set(${jsIdent(path.root)}, ${JSON.stringify(path.path)}, ${code});`;
+    const fixed = lineFor(value.code);
+    const client = clientFieldWrite(value, scope, lineFor);
     recordStateWrite(path.root === 'input' ? `input.${path.path[0]}` : `rec.${path.root}`, scope, fixed, value);
     account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
-    return { server: fixed, client: value.serverOnly ? '' : fixed };
+    return { server: fixed, client };
   }
   if (path && scope.query.has(path.root)) {
     if (path.path.some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
@@ -3524,10 +3567,12 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     }
     if (scope.inputFields.has(path.root)) {
       if ([path.root, ...path.path].some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
-      const line = `shim.input.set(ctx, ${JSON.stringify([path.root, ...path.path])}, ${value.code});`;
+      const lineFor = (code: string): string => `shim.input.set(ctx, ${JSON.stringify([path.root, ...path.path])}, ${code});`;
+      const line = lineFor(value.code);
+      const client = clientFieldWrite(value, scope, lineFor);
       recordStateWrite(`input.${path.root}`, scope, line, value);
       account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
-      return { server: line, client: value.serverOnly ? '' : line };
+      return { server: line, client };
     }
   }
   const indexed = assignPath(target);
@@ -3541,11 +3586,20 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     const segFxs = indexed.segments.map((seg) => (seg.key !== undefined ? fx({ code: JSON.stringify(seg.key) }) : expr(seg.index!, scope)));
     account(stats, todos, mergeFx('', [...segFxs, value]), span);
     const api = indexed.root === 'input' ? 'shim.input.set' : 'shim.old.set';
-    const line = `${api}(ctx, [${segFxs.map((seg) => seg.code).join(', ')}], ${value.code});`;
+    const lineFor = (code: string): string => `${api}(ctx, [${segFxs.map((seg) => seg.code).join(', ')}], ${code});`;
+    const line = lineFor(value.code);
     // A computed segment can name any field, so the write keys the record root.
+    // A server-only segment has no client path. `old` stays server-only when
+    // the value is: the browser does not project the previous record.
+    const segmentsServerOnly = segFxs.some((seg) => seg.serverOnly);
+    const client =
+      indexed.root === 'input' && !segmentsServerOnly
+        ? clientFieldWrite(value, scope, lineFor)
+        : value.serverOnly || segmentsServerOnly
+          ? ''
+          : line;
     recordStateWrite(indexed.segments[0]?.key !== undefined ? `${indexed.root}.${indexed.segments[0].key}` : indexed.root, scope, line, mergeFx('', [...segFxs, value]));
-    const serverOnly = value.serverOnly || segFxs.some((seg) => seg.serverOnly);
-    return { server: line, client: serverOnly ? '' : line };
+    return { server: line, client };
   }
   if (target.kind === 'index' || target.kind === 'member') {
     // A computed key (and a member step that resolved to a local holding a

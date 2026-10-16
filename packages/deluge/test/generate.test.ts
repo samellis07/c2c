@@ -5144,6 +5144,92 @@ test('same form event: one merged module runs every script in export order', asy
   assert.equal((tables.get('Second_Log') ?? []).length, 1, 'the second script ran');
 });
 
+test('a merged tail route runs only the script body.runEvent resolves through scriptEvents', async () => {
+  // Two on-user-input scripts share /forms/Work_Orders/input. The client run
+  // names its workflow by runEvent token; the route maps it to ctx.onlyScript
+  // through its exported scriptEvents and refuses a token it does not list.
+  const g = generate(
+    app({
+      forms: [plainForm('Work_Orders', [plainField('Name'), plainField('Mark_A'), plainField('Mark_B')])],
+      profiles: [
+        {
+          name: 'Staff',
+          type: 'Users_Permissions',
+          properties: [],
+          modules: [grantModule('Work_Orders', 'create, viewall')],
+          span: Z,
+        },
+      ],
+      workflows: [
+        workflow({ name: 'First', form: 'Work_Orders', event: 'on user input of Name', deluge: { text: 'input.Mark_A = "first";', span: Z } }),
+        workflow({ name: 'Second', form: 'Work_Orders', event: 'on user input of Mark_A', deluge: { text: 'input.Mark_B = "second";', span: Z } }),
+      ],
+    }),
+  );
+  const merged = g.files.find((f) => f.path === 'functions/aio/work-orders/input-handlers.mjs');
+  assert.ok(merged, g.files.map((f) => f.path).join('\n'));
+  const src = stripComments(merged.source);
+  assert.match(src, /export const scriptEvents = \{"on user input of Name":0,"on user input of Mark_A":1\};/);
+  assert.match(src, /ctx\.onlyScript = onlyScript/);
+  check(merged.source, 'merged-run.mjs');
+  const mod = (await loadModule(merged.source, 'merged-run.mjs')) as unknown as {
+    default: (req: unknown, res: unknown) => unknown;
+    scriptEvents: Record<string, number>;
+  };
+  assert.deepEqual(mod.scriptEvents, { 'on user input of Name': 0, 'on user input of Mark_A': 1 });
+  const caller = { user: { profile: 'Staff', loginUser: 's@t' } };
+  const marks = (body: Record<string, unknown>): string[] =>
+    (((body.transcript as { op: string; path?: string[] }[]) ?? []).filter((e) => e.op === 'input.set').map((e) => (e.path ?? []).join('.')) as string[]);
+
+  // Auth first: anonymous 401, a token the map does not list 404, and a caller
+  // may not run another event's script or reach ctx.onlyScript by index.
+  assert.equal((await invoke(mod.default, { body: { record: {}, runEvent: 'on user input of Name' } })).status, 401);
+  const foreign = await invoke(mod.default, { ...caller, body: { record: {}, runEvent: 'on click' } });
+  assert.equal(foreign.status, 404, JSON.stringify(foreign.body));
+  assert.equal('transcript' in foreign.body, false);
+  const byIndex = await invoke(mod.default, { ...caller, body: { record: {}, runEvent: '1' } });
+  assert.equal(byIndex.status, 404, JSON.stringify(byIndex.body));
+
+  const first = await invoke(mod.default, { ...caller, body: { record: {}, runEvent: 'on user input of Name' } });
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  assert.deepEqual(marks(first.body), ['Mark_A']);
+  const second = await invoke(mod.default, { ...caller, body: { record: {}, runEvent: 'on user input of Mark_A' } });
+  assert.equal(second.status, 200, JSON.stringify(second.body));
+  assert.deepEqual(marks(second.body), ['Mark_B']);
+  // No runEvent is the direct-call contract: every merged script runs.
+  const all = await invoke(mod.default, { ...caller, body: { record: {} } });
+  assert.equal(all.status, 200, JSON.stringify(all.body));
+  assert.deepEqual(marks(all.body).sort(), ['Mark_A', 'Mark_B']);
+});
+
+test('a merged client run without client.run blocks instead of skipping', async () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Work_Orders', [plainField('Name')])],
+      workflows: [
+        workflow({
+          name: 'First',
+          form: 'Work_Orders',
+          event: 'on user input of Name',
+          deluge: {
+            text: 'hide Name;\nsendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];',
+            span: Z,
+          },
+        }),
+      ],
+    }),
+  );
+  const client = g.files.find((f) => f.path === 'client/handlers/work-orders/on-user-input-of-name.mjs');
+  assert.ok(client);
+  assert.match(client.source, /client\.run unavailable; server half not run/);
+  const mod = (await loadModule(client.source, 'missing-client-run.mjs')) as unknown as {
+    clientActions: (ctx: unknown) => Promise<{ op: string; message?: string }[]>;
+  };
+  const runtime = createRuntime({ dryRun: true, appTimeZone: 'UTC' });
+  const actions = await mod.clientActions(runtime.context({ record: { Name: 'x' } }));
+  assert.deepEqual(actions, [{ op: 'info', message: 'client.run unavailable; server half not run' }]);
+});
+
 test('mixed record events in one merged module keep their add/edit/delete scopes', () => {
   const ir = app({
     forms: [plainForm('Item', [plainField('Name')])],
@@ -6981,6 +7067,8 @@ test('handler wrappers inside a button or success actions block generate their s
 \t}
 \t}`);
   const generated = generate(ir);
+  const clickWorkflow = ir.workflows.find((workflow) => workflow.event.toLowerCase().includes('click'));
+  assert.ok(clickWorkflow);
   assert.deepEqual(generated.todos, []);
   const sources = generated.files.map((file) => file.source).join('\n');
   assert.doesNotMatch(sources, /shim\.todo\(ctx, "task:(on|custom)"/);
