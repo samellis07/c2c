@@ -422,15 +422,16 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
   const dropped: string[] = [];
   const drop = (what: string) => { dropped.push(what); };
   let uncommented = '';
-  let quote = '', comment = '', lineWhitespace = true;
+  let quote = '', comment = '', lineWhitespace = true, parens = 0;
   for (let n = 0; n < css.length; n++) {
     const ch = css[n]!;
     if (comment === 'block') { if (ch === '*' && css[n + 1] === '/') { comment = ''; n++; uncommented += ' '; } continue; }
     if (comment === 'line') { if (ch === '\n' || ch === '\r') { comment = ''; uncommented += ch; lineWhitespace = true; } continue; }
     if (quote) { uncommented += ch; if (ch === '\\' && n + 1 < css.length) uncommented += css[++n]!; else if (ch === quote) quote = ''; if (ch === '\n' || ch === '\r') lineWhitespace = true; else if (!/\s/.test(ch)) lineWhitespace = false; continue; }
-    if (lineWhitespace && ch === '/' && css[n + 1] === '/') { comment = 'line'; n++; continue; }
+    if (parens === 0 && ch === '/' && css[n + 1] === '/') { comment = 'line'; n++; continue; }
     if (ch === '/' && css[n + 1] === '*') { comment = 'block'; n++; continue; }
     if (ch === '"' || ch === "'") quote = ch;
+    if (ch === '(') parens++; else if (ch === ')' && parens > 0) parens--;
     uncommented += ch;
     if (ch === '\n' || ch === '\r') lineWhitespace = true;
     else if (!/\s/.test(ch)) lineWhitespace = false;
@@ -444,12 +445,14 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
   const skip = () => { while (i < css.length && (css[i]!.trim() === '' || css[i] === ';')) i++; };
   // Safe declarations are kept; each refused one is named by its property.
   const declarations = (body: string): string[] => {
-    const out: string[] = []; let start = 0, depth = 0, quote = '', comment = false;
+    const out: string[] = []; let start = 0, depth = 0, quote = '', comment = false, lineComment = false;
     for (let n = 0; n <= body.length; n++) {
       const ch = body[n] ?? ';';
       if (comment) { if (ch === '*' && body[n + 1] === '/') { comment = false; n++; } continue; }
+      if (lineComment) { if (ch === '\n' || ch === '\r') { lineComment = false; start = n + 1; } continue; }
       if (quote) { if (ch === '\\') n++; else if (ch === quote) quote = ''; continue; }
       if (ch === '/' && body[n + 1] === '*') { comment = true; n++; continue; }
+      if (depth === 0 && ch === '/' && body[n + 1] === '/') { lineComment = true; n++; continue; }
       if (ch === '"' || ch === "'") { quote = ch; continue; }
       if (ch === '(') depth++; else if (ch === ')') depth--;
       else if (ch === ';' && depth === 0) {
@@ -485,7 +488,7 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
       if (css.slice(start, i).trim().startsWith('@') && statementEnd >= 0) { drop(atRuleLabel(css.slice(start, i))!); i = statementEnd + 1; continue; }
       drop('unparsed CSS'); break;
     }
-    const head = css.slice(start, i).trim();
+    let head = css.slice(start, i).trim();
     let depth = 1, end = i + 1; quote = ''; comment = false;
     for (; end < css.length && depth; end++) {
       const ch = css[end]!;
@@ -518,6 +521,18 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
     const frames = !inMedia && /^@(?:-webkit-|-moz-|-o-)?keyframes\s+[A-Za-z_][-\w]{0,60}$/i.test(head) ? keyframesRule(head, body, prefix, declarations) : undefined;
     if (frames) { rules.push(frames); continue; }
     if (head.startsWith('@')) { drop(atRuleLabel(head)!); continue; }
+    if (head.includes(';')) {
+      let lastSemi = -1, q = '', d = 0;
+      for (let n = 0; n < head.length; n++) {
+        const ch = head[n]!;
+        if (q) { if (ch === '\\') n++; else if (ch === q) q = ''; }
+        else if (ch === '"' || ch === "'") q = ch;
+        else if (ch === '(' || ch === '[') d++;
+        else if (ch === ')' || ch === ']') { if (d > 0) d--; }
+        else if (ch === ';' && d === 0) lastSemi = n;
+      }
+      if (lastSemi >= 0) head = head.slice(lastSemi + 1).trim();
+    }
     const sels: string[] = [];
     let selectorStart = 0, selectorDepth = 0, selectorQuote = '', selectorSyntaxOkay = true;
     for (let n = 0; n <= head.length; n++) {
@@ -666,7 +681,7 @@ function declarationLabel(prop: string): string {
 function safeStyleValue(raw: string, prop?: string): boolean {
   let text = String(raw ?? '').trim();
   if (!text || text.length > STYLE_TEXT_MAX || /[;\\@<>]/.test(text) || text.includes('/*')) return false;
-  if (prop === 'font-family') text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
+  if (prop === 'font-family' || prop === 'font') text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
   if (/['"]/.test(text)) return false;
   const flat = flatCss(text);
   if (flat.includes('url(') || flat.includes('expression')) return false;
@@ -820,7 +835,8 @@ export function droppedStyleRules(raw: string): number {
   const walk = (node: DomNode) => {
     if (node.nodeType !== 1) return;
     if ((node.tagName || '').toLowerCase() === 'style') {
-      rules += cssRuleCount(maskTemplateIslands(node.textContent ?? '', 'x'));
+      const decoded = decodeXmlEntities(node.textContent ?? '');
+      rules += cssRuleCount(maskTemplateIslands(decoded, 'x'));
       return;
     }
     for (const child of listOf(node.childNodes)) walk(child);
@@ -837,7 +853,8 @@ export function carriedStyleRules(raw: string, scope: string): ScopedStyle {
   const walk = (node: DomNode) => {
     if (node.nodeType !== 1) return;
     if ((node.tagName || '').toLowerCase() === 'style') {
-      sheets.push(maskTemplateIslands(node.textContent ?? '', ' '));
+      const decoded = decodeXmlEntities(node.textContent ?? '');
+      sheets.push(maskTemplateIslands(decoded, ' '));
       return;
     }
     for (const child of listOf(node.childNodes)) walk(child);

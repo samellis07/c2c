@@ -47,6 +47,7 @@ const VECTORS: Array<[string, string, string | null, string[]]> = [
   ['important flag', 'color:red !important', 'color:red !important', []],
   ['empty declarations', 'color:red;;', 'color:red;;', []],
   ['font shorthand with a slash', 'font: 12px/1.5 Arial', 'font: 12px/1.5 Arial', []],
+  ['font shorthand with a quoted font name', "font: 12px/1.5 'Catamaran', sans-serif", "font: 12px/1.5 'Catamaran', sans-serif", []],
   ['commented-out declaration beside a valid one', 'height:35px;/* border:1px solid #ededed; */', 'height:35px', []],
   // Safe calc() is carried over. A trailing token with no colon is not a declaration.
   ['calc() addition', 'width:calc(1px + 2px)', 'width:calc(1px + 2px)', []],
@@ -247,6 +248,78 @@ test('a stray top-level } drops one rule, not the rest of the sheet', () => {
   const result = carryStaticStyle('}.a{color:red}.b{color:blue}', '[data-page="a"]');
   assert.equal(result.droppedRules, 1);
   assert.equal(result.css, '[data-page="a"] .a{color:red}\n[data-page="a"] .b{color:blue}');
+});
+
+test('static <style> CSS with font-family, -webkit-box-orient, and -webkit-line-clamp carries with 0 dropped rules', () => {
+  const css = `
+    #paraaa {
+      line-height: 1;
+      text-overflow: ellipsis;
+      -webkit-line-clamp: 2;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      font-family: 'Catamaran', sans-serif;
+    }
+  `;
+  const result = carryStaticStyle(css, '[data-page="Home"]');
+  assert.equal(result.droppedRules, 0);
+  assert.equal(
+    result.css,
+    "[data-page=\"Home\"] #paraaa{line-height: 1;text-overflow: ellipsis;-webkit-line-clamp: 2;overflow: hidden;display: -webkit-box;-webkit-box-orient: vertical;font-family: 'Catamaran', sans-serif}",
+  );
+});
+
+test('a rule body containing a single-line comment alongside valid declarations carries valid declarations with 0 dropped rules', () => {
+  const css = `
+    form.form-table.label-left {
+      width: inherit !important;
+      // position: fixed;
+      color: #103c7e;
+    }
+  `;
+  const result = carryStaticStyle(css, '[data-page="Home"]');
+  assert.equal(result.droppedRules, 0);
+  assert.equal(
+    result.css,
+    '[data-page="Home"] form.form-table.label-left{width: inherit !important;color: #103c7e}',
+  );
+});
+
+test('dangerous properties in <style> rules continue to be rejected and increment droppedRules when no safe declarations exist', () => {
+  const dangerous = [
+    '.a { behavior: url(x.htc); }',
+    '.b { -moz-binding: url(x.xml#y); }',
+    '.c { width: expression(alert(1)); }',
+    '.d { background: url(//example.test/x); }',
+    '.e { background: javascript:alert(1); }',
+  ];
+  for (const snippet of dangerous) {
+    const res = carryStaticStyle(snippet, '[data-page="Home"]');
+    assert.equal(res.droppedRules, 1, `expected 1 dropped rule for: ${snippet}`);
+    assert.equal(res.css, '', `expected empty css for: ${snippet}`);
+  }
+});
+
+test('@keyframes rules carry and rule with partial unsafe declarations keeps safe ones', () => {
+  const css = `
+    @keyframes slideInFromLeft {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(0); }
+    }
+    .back {
+      background-image: url("http://i.stack.imgur.com/kOnzy.gif");
+      background-repeat: none;
+      background-position: 50% 40%;
+      background-size: 130px;
+    }
+  `;
+  const result = carryStaticStyle(css, '[data-page="Home"]');
+  assert.equal(result.droppedRules, 0);
+  assert.equal(
+    result.css,
+    '@keyframes slideInFromLeft{0%{transform: translateX(-100%)}100%{transform: translateX(0)}}\n[data-page="Home"] .back{background-repeat: none;background-position: 50% 40%;background-size: 130px}',
+  );
 });
 
 test('the rendered <style> keeps child combinators', async () => {
