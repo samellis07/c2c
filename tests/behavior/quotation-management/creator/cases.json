@@ -2921,6 +2921,874 @@
           }
         }
       ]
+    },
+    {
+      "id": "r4-request-quotation-setup-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Client",
+          "record": {
+            "Client_Name": "Client_Company_Name prairie 472",
+            "Email": "email.643@example.com",
+            "Phone_Number": "+1555016145",
+            "Address": {
+              "address_line_1": "139 Ivory Way",
+              "district_city": "Delta",
+              "state_province": "Lumen",
+              "postal_Code": "21323",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_add_client_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Clients",
+          "where": {
+            "Email": "email.643@example.com"
+          },
+          "record": {
+            "Client_Name": "Client / Company Name updated 866"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product_Service",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name quartz 606",
+            "Rate": 115,
+            "Unit": "Box",
+            "Available_Quantity": 109
+          },
+          "bind": {
+            "r_add_product_service_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Products_Services",
+          "where": {
+            "Product_Service_Name": "Product_Service_Name quartz 606"
+          },
+          "record": {
+            "Rate": 947
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name1": {
+              "first_name": "Grain",
+              "last_name": "Alpha"
+            },
+            "Email": "email.70@example.com",
+            "Phone_Number": "+1555016990",
+            "Department": "Department bravo 360"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Users",
+          "where": {
+            "Email": "email.70@example.com"
+          },
+          "record": {
+            "Department": "Department updated 346"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Request_Quotation",
+          "record": {
+            "Client_Name": "<ref:r_add_client_valid_submit>",
+            "Required_Before": "31-Oct-2026",
+            "Status": "Pending",
+            "Items_On_Quote": [
+              {
+                "Product_Service": "<ref:r_add_product_service_valid_submit>",
+                "Quantity": 2
+              },
+              {
+                "Product_Service": "<ref:r_add_product_service_valid_submit>",
+                "Quantity": 3
+              }
+            ]
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Quotation Request Sent Successfully!"
+          },
+          "bind": {
+            "r_r4_request_quotation_setup_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Request_Quotation": [
+            {
+              "Client_Name": "<ref:r_add_client_valid_submit>",
+              "Required_Before": "2026-10-31",
+              "Status": "Pending"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "r4-create-quotation-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Client",
+          "record": {
+            "Client_Name": "Client_Company_Name prairie 472",
+            "Email": "email.643@example.com",
+            "Phone_Number": "+1555016145",
+            "Address": {
+              "address_line_1": "139 Ivory Way",
+              "district_city": "Delta",
+              "state_province": "Lumen",
+              "postal_Code": "21323",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_add_client_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Clients",
+          "where": {
+            "Email": "email.643@example.com"
+          },
+          "record": {
+            "Client_Name": "Client / Company Name updated 866"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product_Service",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name quartz 606",
+            "Rate": 115,
+            "Unit": "Box",
+            "Available_Quantity": 109
+          },
+          "bind": {
+            "r_add_product_service_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Products_Services",
+          "where": {
+            "Product_Service_Name": "Product_Service_Name quartz 606"
+          },
+          "record": {
+            "Rate": 947
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name1": {
+              "first_name": "Grain",
+              "last_name": "Alpha"
+            },
+            "Email": "email.70@example.com",
+            "Phone_Number": "+1555016990",
+            "Department": "Department bravo 360"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Users",
+          "where": {
+            "Email": "email.70@example.com"
+          },
+          "record": {
+            "Department": "Department updated 346"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Create_Quotation",
+          "record": {
+            "Subject_field": "Subject r4 grain 2413",
+            "Client_Name": "<ref:r_add_client_valid_submit>",
+            "Quote_Status": "New",
+            "Quotation_Date": "17-Oct-2026",
+            "Expiry_Date": "31-Oct-2026",
+            "Quote_Owner": "<ref:r_add_user_valid_submit>",
+            "Grand_Total": 230,
+            "Sub_Total": 230,
+            "Tax": 0,
+            "Tax_Amount": 0,
+            "Discount": 0,
+            "Discounted_Amount": 0,
+            "Send_quotation_in_mail": false,
+            "Terms_Conditions": "Sample Terms_Conditions note 2875 generated for r4 capture.",
+            "Products_On_Quote": [
+              {
+                "Product_Services_Name": "<ref:r_add_product_service_valid_submit>",
+                "Unit": "Box",
+                "Quantity": 2,
+                "Amount": 230
+              }
+            ]
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Quotation Created Successfully!"
+          },
+          "bind": {
+            "r_r4_create_quotation_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Create_Quotation": [
+            {
+              "Client_Name": "<ref:r_add_client_valid_submit>",
+              "Grand_Total": "230.00",
+              "Expiry_Date": "2026-10-31",
+              "Discount": "0.00",
+              "Sub_Total": "230.00",
+              "Quotation_Date": "2026-10-17",
+              "Tax": "0.00",
+              "Terms_Conditions": "Sample Terms_Conditions note 2875 generated for r4 capture.",
+              "Discounted_Amount": "0.00",
+              "Send_quotation_in_mail": "false",
+              "Tax_Amount": "0.00",
+              "Quote_Owner": "<ref:r_add_user_valid_submit>",
+              "Subject_field": "Subject r4 grain 2413",
+              "Quote_Status": "New"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit",
+        "Send_quotation_in_mail is false, so the stored Quote_Status stays 'New' (the r3 capture sent true and stored 'Sent To Client')"
+      ]
+    },
+    {
+      "id": "r4-create-quotation-invalid-rule-0",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Client",
+          "record": {
+            "Client_Name": "Client_Company_Name prairie 472",
+            "Email": "email.643@example.com",
+            "Phone_Number": "+1555016145",
+            "Address": {
+              "address_line_1": "139 Ivory Way",
+              "district_city": "Delta",
+              "state_province": "Lumen",
+              "postal_Code": "21323",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_add_client_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Clients",
+          "where": {
+            "Email": "email.643@example.com"
+          },
+          "record": {
+            "Client_Name": "Client / Company Name updated 866"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product_Service",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name quartz 606",
+            "Rate": 115,
+            "Unit": "Box",
+            "Available_Quantity": 109
+          },
+          "bind": {
+            "r_add_product_service_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Products_Services",
+          "where": {
+            "Product_Service_Name": "Product_Service_Name quartz 606"
+          },
+          "record": {
+            "Rate": 947
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name1": {
+              "first_name": "Grain",
+              "last_name": "Alpha"
+            },
+            "Email": "email.70@example.com",
+            "Phone_Number": "+1555016990",
+            "Department": "Department bravo 360"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Users",
+          "where": {
+            "Email": "email.70@example.com"
+          },
+          "record": {
+            "Department": "Department updated 346"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Request_Quotation",
+          "record": {
+            "Client_Name": "<ref:r_add_client_valid_submit>",
+            "Required_Before": "31-Oct-2026",
+            "Status": "Pending",
+            "Items_On_Quote": [
+              {
+                "Product_Service": "<ref:r_add_product_service_valid_submit>",
+                "Quantity": 2
+              },
+              {
+                "Product_Service": "<ref:r_add_product_service_valid_submit>",
+                "Quantity": 3
+              }
+            ]
+          },
+          "bind": {
+            "r_r4_request_quotation_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Create_Quotation",
+          "record": {
+            "Subject_field": "Subject r4 grain 2414",
+            "Quotation_Request_Number": "<ref:r_r4_request_quotation_setup_submit>",
+            "Client_Name": "<ref:r_add_client_valid_submit>",
+            "Quote_Status": "New",
+            "Quotation_Date": "17-Oct-2026",
+            "Expiry_Date": "31-Oct-2026",
+            "Quote_Owner": "<ref:r_add_user_valid_submit>",
+            "Grand_Total": 230,
+            "Sub_Total": 230,
+            "Tax": 0,
+            "Tax_Amount": 0,
+            "Discount": 0,
+            "Discounted_Amount": 0,
+            "Send_quotation_in_mail": false,
+            "Terms_Conditions": "Sample Terms_Conditions note 2875 generated for r4 capture.",
+            "Products_On_Quote": [
+              {
+                "Product_Services_Name": "<ref:r_add_product_service_valid_submit>",
+                "Unit": "Box",
+                "Quantity": 2,
+                "Amount": 230
+              }
+            ]
+          },
+          "creator": {
+            "code": 3001,
+            "error": [
+              {
+                "task": "alert",
+                "alert_message": [
+                  "Please select all the requested product/services in the Products On Quote subform for the selected quotation request.!"
+                ]
+              },
+              {
+                "task": "cancel_submit",
+                "message": "Failed to add data."
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Create_Quotation": []
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit",
+        "the request holds 2 Items_On_Quote rows and the quote carries only 1 Products_On_Quote row: the count-mismatch on-validate rule fires on the API path once Quotation_Request_Number is set (the r3 case omitted it, so the rule body never ran)"
+      ]
+    },
+    {
+      "id": "r4-create-quotation-invalid-rule-0-exact-replay",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Client",
+          "record": {
+            "Client_Name": "Client_Company_Name prairie 472",
+            "Email": "email.643@example.com",
+            "Phone_Number": "+1555016145",
+            "Address": {
+              "address_line_1": "139 Ivory Way",
+              "district_city": "Delta",
+              "state_province": "Lumen",
+              "postal_Code": "21323",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_add_client_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Clients",
+          "where": {
+            "Email": "email.643@example.com"
+          },
+          "record": {
+            "Client_Name": "Client / Company Name updated 866"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product_Service",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name quartz 606",
+            "Rate": 115,
+            "Unit": "Box",
+            "Available_Quantity": 109
+          },
+          "bind": {
+            "r_add_product_service_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Products_Services",
+          "where": {
+            "Product_Service_Name": "Product_Service_Name quartz 606"
+          },
+          "record": {
+            "Rate": 947
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name1": {
+              "first_name": "Grain",
+              "last_name": "Alpha"
+            },
+            "Email": "email.70@example.com",
+            "Phone_Number": "+1555016990",
+            "Department": "Department bravo 360"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Users",
+          "where": {
+            "Email": "email.70@example.com"
+          },
+          "record": {
+            "Department": "Department updated 346"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Request_Quotation",
+          "record": {
+            "Client_Name": "<ref:r_add_client_valid_submit>",
+            "Required_Before": "31-Oct-2026",
+            "Status": "Pending",
+            "Items_On_Quote": [
+              {
+                "Product_Service": "<ref:r_add_product_service_valid_submit>",
+                "Quantity": 2
+              },
+              {
+                "Product_Service": "<ref:r_add_product_service_valid_submit>",
+                "Quantity": 3
+              }
+            ]
+          },
+          "bind": {
+            "r_r4_request_quotation_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Create_Quotation",
+          "record": {
+            "Subject_field": "Subject r4 grain 2414",
+            "Quotation_Request_Number": "<ref:r_r4_request_quotation_setup_submit>",
+            "Client_Name": "<ref:r_add_client_valid_submit>",
+            "Quote_Status": "New",
+            "Quotation_Date": "17-Oct-2026",
+            "Expiry_Date": "31-Oct-2026",
+            "Quote_Owner": "<ref:r_add_user_valid_submit>",
+            "Grand_Total": 230,
+            "Sub_Total": 230,
+            "Tax": 0,
+            "Tax_Amount": 0,
+            "Discount": 0,
+            "Discounted_Amount": 0,
+            "Send_quotation_in_mail": false,
+            "Terms_Conditions": "Sample Terms_Conditions note 2875 generated for r4 capture.",
+            "Products_On_Quote": [
+              {
+                "Product_Services_Name": "<ref:r_add_product_service_valid_submit>",
+                "Unit": "Box",
+                "Quantity": 2,
+                "Amount": 230
+              }
+            ]
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Create_Quotation",
+          "record": {
+            "Subject_field": "Subject r4 grain 2414",
+            "Quotation_Request_Number": "<ref:r_r4_request_quotation_setup_submit>",
+            "Client_Name": "<ref:r_add_client_valid_submit>",
+            "Quote_Status": "New",
+            "Quotation_Date": "17-Oct-2026",
+            "Expiry_Date": "31-Oct-2026",
+            "Quote_Owner": "<ref:r_add_user_valid_submit>",
+            "Grand_Total": 230,
+            "Sub_Total": 230,
+            "Tax": 0,
+            "Tax_Amount": 0,
+            "Discount": 0,
+            "Discounted_Amount": 0,
+            "Send_quotation_in_mail": false,
+            "Terms_Conditions": "Sample Terms_Conditions note 2875 generated for r4 capture.",
+            "Products_On_Quote": [
+              {
+                "Product_Services_Name": "<ref:r_add_product_service_valid_submit>",
+                "Unit": "Box",
+                "Quantity": 2,
+                "Amount": 230
+              }
+            ]
+          },
+          "creator": {
+            "code": 3001,
+            "error": [
+              {
+                "task": "alert",
+                "alert_message": [
+                  "Please select all the requested product/services in the Products On Quote subform for the selected quotation request.!"
+                ]
+              },
+              {
+                "task": "cancel_submit",
+                "message": "Failed to add data."
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Create_Quotation": []
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit",
+        "byte-identical replay produced the identical alert: the on-validate alert runs reliably on the API path for this form"
+      ]
+    },
+    {
+      "id": "r4-post-all-quotations",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Client",
+          "record": {
+            "Client_Name": "Client_Company_Name prairie 472",
+            "Email": "email.643@example.com",
+            "Phone_Number": "+1555016145",
+            "Address": {
+              "address_line_1": "139 Ivory Way",
+              "district_city": "Delta",
+              "state_province": "Lumen",
+              "postal_Code": "21323",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_add_client_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Clients",
+          "where": {
+            "Email": "email.643@example.com"
+          },
+          "record": {
+            "Client_Name": "Client / Company Name updated 866"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product_Service",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name quartz 606",
+            "Rate": 115,
+            "Unit": "Box",
+            "Available_Quantity": 109
+          },
+          "bind": {
+            "r_add_product_service_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Products_Services",
+          "where": {
+            "Product_Service_Name": "Product_Service_Name quartz 606"
+          },
+          "record": {
+            "Rate": 947
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name1": {
+              "first_name": "Grain",
+              "last_name": "Alpha"
+            },
+            "Email": "email.70@example.com",
+            "Phone_Number": "+1555016990",
+            "Department": "Department bravo 360"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Users",
+          "where": {
+            "Email": "email.70@example.com"
+          },
+          "record": {
+            "Department": "Department updated 346"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Create_Quotation",
+          "record": {
+            "Subject_field": "Subject r4 grain 2413",
+            "Client_Name": "<ref:r_add_client_valid_submit>",
+            "Quote_Status": "New",
+            "Quotation_Date": "17-Oct-2026",
+            "Expiry_Date": "31-Oct-2026",
+            "Quote_Owner": "<ref:r_add_user_valid_submit>",
+            "Grand_Total": 230,
+            "Sub_Total": 230,
+            "Tax": 0,
+            "Tax_Amount": 0,
+            "Discount": 0,
+            "Discounted_Amount": 0,
+            "Send_quotation_in_mail": false,
+            "Terms_Conditions": "Sample Terms_Conditions note 2875 generated for r4 capture.",
+            "Products_On_Quote": [
+              {
+                "Product_Services_Name": "<ref:r_add_product_service_valid_submit>",
+                "Unit": "Box",
+                "Quantity": 2,
+                "Amount": 230
+              }
+            ]
+          },
+          "bind": {
+            "r_r4_create_quotation_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Request_Quotation",
+          "record": {
+            "Client_Name": "<ref:r_add_client_valid_submit>",
+            "Required_Before": "31-Oct-2026",
+            "Status": "Pending",
+            "Items_On_Quote": [
+              {
+                "Product_Service": "<ref:r_add_product_service_valid_submit>",
+                "Quantity": 2
+              },
+              {
+                "Product_Service": "<ref:r_add_product_service_valid_submit>",
+                "Quantity": 3
+              }
+            ]
+          },
+          "bind": {
+            "r_r4_request_quotation_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Create_Quotation",
+          "record": {
+            "Subject_field": "Subject r4 grain 2414",
+            "Quotation_Request_Number": "<ref:r_r4_request_quotation_setup_submit>",
+            "Client_Name": "<ref:r_add_client_valid_submit>",
+            "Quote_Status": "New",
+            "Quotation_Date": "17-Oct-2026",
+            "Expiry_Date": "31-Oct-2026",
+            "Quote_Owner": "<ref:r_add_user_valid_submit>",
+            "Grand_Total": 230,
+            "Sub_Total": 230,
+            "Tax": 0,
+            "Tax_Amount": 0,
+            "Discount": 0,
+            "Discounted_Amount": 0,
+            "Send_quotation_in_mail": false,
+            "Terms_Conditions": "Sample Terms_Conditions note 2875 generated for r4 capture.",
+            "Products_On_Quote": [
+              {
+                "Product_Services_Name": "<ref:r_add_product_service_valid_submit>",
+                "Unit": "Box",
+                "Quantity": 2,
+                "Amount": 230
+              }
+            ]
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "All_Quotations",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 3
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Create_Quotation": [
+            {
+              "Client_Name": "<ref:r_add_client_valid_submit>",
+              "Grand_Total": "230.00",
+              "Expiry_Date": "2026-10-31",
+              "Discount": "0.00",
+              "Sub_Total": "230.00",
+              "Quotation_Date": "2026-10-17",
+              "Tax": "0.00",
+              "Terms_Conditions": "Sample Terms_Conditions note 2875 generated for r4 capture.",
+              "Discounted_Amount": "0.00",
+              "Send_quotation_in_mail": "false",
+              "Tax_Amount": "0.00",
+              "Quote_Owner": "<ref:r_add_user_valid_submit>",
+              "Subject_field": "Subject r4 grain 2413",
+              "Quote_Status": "New"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "Creator's read listed 3 rows (2 pre-existing 'Subject grain 413' records plus the new r4 record); in a fresh store only the r4 valid submit exists, so the golden expects the 1 replayed row"
+      ]
     }
   ]
 }
