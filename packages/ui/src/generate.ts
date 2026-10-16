@@ -583,6 +583,10 @@ ${requirePrincipal()}
  *     first required text field), so cleanup cannot remove a row this run did
  *     not write. The marker field name is a generated allowlist entry, not a
  *     caller-supplied column, and the tag must be a smoke-tag literal.
+ *   - { op: "delete", form, rowId } (no marker) deletes exactly that one
+ *     ROWID, only on a form that has no marker field (rowIdForms). The runner
+ *     sends only ROWIDs its own submits returned and read back; the endpoint
+ *     never deletes by query or criteria, and update/arith still need a marker.
  *
  * The gate is principal.profile against the Administrator-preset names —
  * body, query and header values are never principals.
@@ -601,10 +605,12 @@ function smokeStub(app: App, model: UiModel, schema: ReturnType<typeof generateS
   }
   const markers: Record<string, string> = {};
   const numbers: Record<string, string> = {};
+  const rowIdForms: string[] = [];
   for (const form of model.forms) {
     if (!tables[form.name]) continue;
     const field = smokeMarkerField(form.fields);
     if (field) markers[form.name] = field;
+    else rowIdForms.push(form.name);
     const number = smokeNumberField(form.fields, field);
     if (field && number) numbers[form.name] = number;
   }
@@ -613,7 +619,9 @@ function smokeStub(app: App, model: UiModel, schema: ReturnType<typeof generateS
     'op "status" answers { ok, mode, forms }; op "update" patches one row, op "arith" stores 41 in',
     'one number field and checks that the live read gives a number (41 + 1 is 42, 41 > 9), and',
     'op "delete" removes one row — each only when its marker field carries the calling run\'s tag,',
-    'so a run cannot touch a row it did not write. The generated app has no edit route: update lives here.',
+    'so a run cannot touch a row it did not write. On a form with no marker field, op "delete" takes',
+    'no marker and removes exactly the one ROWID the run created — never by query or criteria.',
+    'The generated app has no edit route: update lives here.',
     'Administrator-preset profiles only. The row read goes through authorizeRead, the patch through',
     'authorizeWrite, and the delete through authorizeDelete, with functions/c2c-deploy.json mode',
     'deciding live effects. Replies carry statuses and booleans only — never record values,',
@@ -628,6 +636,8 @@ const tables = ${JSON.stringify(tables)};
 const markerFields = ${JSON.stringify(markers)};
 /** Form link name -> the number field op "arith" writes and reads back. */
 const numberFields = ${JSON.stringify(numbers)};
+/** Forms with no marker field: op "delete" removes the one ROWID the run created and read back. */
+const rowIdForms = ${JSON.stringify(rowIdForms.sort())};
 const SMOKE_TAG = /^c2c smoke [A-Za-z0-9_-]{1,64}$/;
 
 ${deployHelpers('../c2c-deploy.json', '../c2c-store.mjs')}
@@ -680,14 +690,15 @@ export default async function handler(req, res) {
     send(res, 400, { dryRun: !live, error: "rowId must be a ROWID" });
     return;
   }
+  const byRowId = body.op === "delete" && body.marker === undefined && rowIdForms.includes(form);
   const marker = body.marker && typeof body.marker === "object" && !Array.isArray(body.marker) ? body.marker : {};
   const field = typeof marker.field === "string" ? marker.field : "";
-  if (!Object.prototype.hasOwnProperty.call(markerFields, form) || markerFields[form] !== field) {
+  if (!byRowId && (!Object.prototype.hasOwnProperty.call(markerFields, form) || markerFields[form] !== field)) {
     send(res, 400, { dryRun: !live, error: "no smoke marker field on this form" });
     return;
   }
   const tag = typeof marker.tag === "string" ? marker.tag : "";
-  if (!SMOKE_TAG.test(tag)) {
+  if (!byRowId && !SMOKE_TAG.test(tag)) {
     send(res, 400, { dryRun: !live, error: "marker tag is not a smoke tag" });
     return;
   }
@@ -728,14 +739,13 @@ export default async function handler(req, res) {
     }
     const scoped = authorizeRead(access, principal, form, { op: "==", field: "ROWID", value: rowId }, undefined, "modify");
     const where = zcqlPredicate(compileCriteria(scoped.criteria));
-    const rows = await datastore.query(table, where, 1, 0, "ORDER BY ROWID", ["ROWID", field]);
+    const rows = await datastore.query(table, where, 1, 0, "ORDER BY ROWID", byRowId ? ["ROWID"] : ["ROWID", field]);
     const row = Array.isArray(rows) && rows[0] && typeof rows[0] === "object" ? rows[0] : null;
     if (!row) {
       send(res, 404, { dryRun: false, deleted: false, updated: false, error: "no such row" });
       return;
     }
-    const stored = row[field];
-    if (stored !== tag) {
+    if (!byRowId && row[field] !== tag) {
       send(res, 409, { dryRun: false, deleted: false, updated: false, error: "the row carries no marker of this run" });
       return;
     }

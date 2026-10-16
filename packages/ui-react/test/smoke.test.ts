@@ -183,6 +183,11 @@ function fakeServer() {
         const list = rows[form] ?? [];
         const row = list.find((item) => String(item.ROWID) === rowId);
         if (!row) return reply(404, { error: 'no such row' });
+        // No marker: the endpoint deletes exactly the named ROWID (markerless forms).
+        if (body.marker === undefined) {
+          rows[form] = list.filter((item) => item !== row);
+          return reply(200, { deleted: true });
+        }
         if (!String(row[String(marker.field)] ?? '').includes(String(marker.tag))) return reply(409, { error: 'row carries no marker of this run' });
         rows[form] = list.filter((item) => item !== row);
         return reply(200, { deleted: true });
@@ -567,6 +572,61 @@ test('#/admin/smoke reports a stalled access check instead of waiting forever', 
     }
     assert.equal(state, 'failed');
     assert.match(section.querySelector('[data-smoke-state]')?.textContent ?? '', /timed out/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** A form with no marker field: the run submits a canned record and cleans up by the ROWID it created. */
+function markerlessPlan(): Record<string, unknown>[] {
+  return [
+    { kind: 'session', label: 'session bootstrap', method: 'GET', path: '/' },
+    { kind: 'submit', label: 'submit Vendor', form: 'Vendor', table: 'Vendor', method: 'POST', path: '/forms/Vendor/submit', record: [{ name: 'Vendor_Name', source: 'canned', value: 'Acme' }] },
+    { kind: 'read-back', label: 'read-back Vendor', form: 'Vendor', table: 'Vendor' },
+    { kind: 'cleanup', label: 'delete Vendor', form: 'Vendor', table: 'Vendor' },
+  ];
+}
+
+test('#/admin/smoke cleans up a form with no marker field by the exact ROWID it created', async () => {
+  const { dir, runtime } = await loadSmokeRuntime();
+  try {
+    const server = fakeServer();
+    server.rows.Vendor.push({ ROWID: '7', Vendor_Name: 'Acme' }, { ROWID: '8', Vendor_Name: 'Existing' });
+    const result = await runtime.runSmokePlan(runtime.smokeModel(spec()), markerlessPlan(), { fetch: server.handler });
+    assert.equal(result.ok, true, result.lines.join('\n'));
+    assert.equal(result.json.created, 1);
+    assert.equal(result.json.deleted, 1);
+    assert.equal(result.json.left, 0);
+    const deletes = server.calls.filter((call) => call.path === '/admin/smoke' && (call.body as { op?: string }).op === 'delete');
+    assert.deepEqual(
+      deletes.map((call) => call.body),
+      [{ op: 'delete', form: 'Vendor', rowId: '1000' }],
+    );
+    // Rows the run did not create — even one with the same values — stay.
+    assert.deepEqual(server.rows.Vendor.map((row) => row.ROWID), ['7', '8']);
+    assert.ok(result.lines.some((line: string) => line.includes('delete Vendor') && line.includes('row 1000 deleted (verified gone)')), result.lines.join('\n'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('#/admin/smoke keeps ok false and names the row when a markerless delete fails', async () => {
+  const { dir, runtime } = await loadSmokeRuntime();
+  try {
+    const server = fakeServer();
+    const fetch = async (url: string, init: { method?: string; body?: string }) => {
+      if (String(url).endsWith('/admin/smoke') && String(init?.body ?? '').includes('"op":"delete"')) {
+        return { ok: false, status: 403, json: async () => ({ error: 'delete not granted' }), text: async () => '{"error":"delete not granted"}' };
+      }
+      return server.handler(url, init);
+    };
+    const result = await runtime.runSmokePlan(runtime.smokeModel(spec()), markerlessPlan(), { fetch });
+    assert.equal(result.ok, false, result.lines.join('\n'));
+    assert.equal(result.json.ok, false);
+    assert.equal(result.json.left, 1);
+    const step = (result.json.steps as { label: string; ok: boolean; detail: string }[]).find((row) => row.label === 'delete Vendor');
+    assert.deepEqual(step, { label: 'delete Vendor', ok: false, detail: 'row 1000 not deleted — 403 delete not granted; left in place' });
+    assert.deepEqual(server.rows.Vendor.map((row) => row.ROWID), ['1000']);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

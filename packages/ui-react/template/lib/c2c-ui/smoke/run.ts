@@ -483,20 +483,19 @@ export async function runSmokePlan(model: SmokeModel, plan: readonly SmokeStep[]
             break;
           }
           const marker = step.marker?.field;
-          if (!marker) {
-            push(label, `skipped — ${step.form} has no marker field; left in place`);
-            break;
-          }
           exercised += 1;
           const res = await api('/admin/smoke', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ op: 'delete', form: step.form, rowId, marker: { field: marker, tag: `c2c smoke ${tag}` } }),
+            // A form with no marker field is cleaned up by the exact ROWID this
+            // run's submit returned and read back — never by query or criteria.
+            body: JSON.stringify(marker ? { op: 'delete', form: step.form, rowId, marker: { field: marker, tag: `c2c smoke ${tag}` } } : { op: 'delete', form: step.form, rowId }),
           });
           const body = await readJson(res);
           if (!res || res.ok === false || body?.deleted !== true) {
             failed = true;
-            push(label, `${res?.status || '?'} ${(body?.error as string | undefined) || 'not deleted'}`.trim(), false);
+            const reason = `${res?.status || '?'} ${(body?.error as string | undefined) || 'not deleted'}`.trim();
+            push(label, marker ? reason : `row ${rowId} not deleted — ${reason}; left in place`, false);
             break;
           }
           const gone = await smokeReadRow(api, step, marker, rowId);

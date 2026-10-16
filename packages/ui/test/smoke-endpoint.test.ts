@@ -49,6 +49,13 @@ const SOURCE = `application "Widget"
 \t\t\t\ttype = text
 \t\t\t)
 \t\t}
+\t\tform Log
+\t\t{
+\t\t\tQty
+\t\t\t(
+\t\t\t\ttype = number
+\t\t\t)
+\t\t}
 \t}
 }
 `;
@@ -151,6 +158,7 @@ test('smoke endpoint: a non-admin profile gets 403 and nothing is read, written 
         { op: 'status' },
         { op: 'delete', form: 'Item', rowId: '101', marker: marker() },
         { op: 'update', form: 'Item', rowId: '101', marker: marker(), fields: { Status: 'Closed' } },
+        { op: 'delete', form: 'Log', rowId: '201' },
       ]) {
         const store = spyDatastore(seed());
         const out = await withLive(store, () => invoke(handler, { user, body }));
@@ -203,6 +211,42 @@ test('smoke endpoint: an Administrator is allowed, and delete touches only the r
       store.rows.map((row) => row.ROWID),
       ['102', '103'],
       'only the row tagged c2c smoke <this tag> is gone',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('smoke endpoint: a form with no marker field deletes exactly the one ROWID named, nothing else', async () => {
+  const { dir, handler } = await loadHandler();
+  try {
+    const admin = { profile: 'Administrator' };
+    const store = spyDatastore([...seed(), { ROWID: '201', Qty: 1 }, { ROWID: '202', Qty: 1 }]);
+    // A marker form still needs its marker; a markerless form refuses one; update and arith never go by ROWID alone.
+    for (const body of [
+      { op: 'delete', form: 'Item', rowId: '101' },
+      { op: 'delete', form: 'Log', rowId: '201', marker: marker() },
+      { op: 'update', form: 'Log', rowId: '201', fields: { Qty: 2 } },
+      { op: 'arith', form: 'Log', rowId: '201', field: 'Qty' },
+      { op: 'delete', form: 'Log', rowId: 'ROWID > 0' },
+      { op: 'delete', form: 'Log' },
+    ]) {
+      const out = await withLive(store, () => invoke(handler, { user: admin, body }));
+      assert.equal(out.status, 400, `${JSON.stringify(body)}: ${JSON.stringify(out.body)}`);
+    }
+    assert.equal(store.calls.length, 0, 'refused before the store is read');
+
+    const missing = await withLive(store, () => invoke(handler, { user: admin, body: { op: 'delete', form: 'Log', rowId: '299' } }));
+    assert.equal(missing.status, 404, JSON.stringify(missing.body));
+    assert.equal(store.calls.includes('delete'), false);
+
+    const own = await withLive(store, () => invoke(handler, { user: admin, body: { op: 'delete', form: 'Log', rowId: '201' } }));
+    assert.equal(own.status, 200, JSON.stringify(own.body));
+    assert.equal(own.body.deleted, true);
+    assert.deepEqual(
+      store.rows.map((row) => row.ROWID),
+      ['101', '102', '103', '202'],
+      'only the named ROWID is gone',
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
