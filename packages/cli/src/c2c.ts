@@ -286,6 +286,24 @@ function usage(): never {
   process.exit(2);
 }
 
+/**
+ * Short customer entry for an unknown verb: the five-command journey plus a
+ * pointer at docs/guide/. The full internal usage stays behind --help.
+ */
+function unknownCommand(cmd: string): number {
+  process.stderr.write(
+    `c2c: unknown command '${cmd}'\n` +
+      'Start with the customer journey:\n' +
+      '  c2c doctor (check your setup)\n' +
+      '  c2c analyze <file.ds> (is your app convertible?)\n' +
+      '  c2c plan <file.ds> --out <dir> (the full blueprint)\n' +
+      '  c2c migrate-data (move the records)\n' +
+      '  c2c verify (prove it matches)\n' +
+      'See docs/guide/ for the walkthrough (c2c --help lists every command).\n',
+  );
+  return 2;
+}
+
 function summarize(ir: App): string {
   const fields = ir.forms.reduce((n, f) => n + f.fields.length, 0);
   return [
@@ -423,6 +441,7 @@ function main(argv: string[]): number {
   if (!cmd) usage();
   if (cmd === '--help' || cmd === '-h') return printHelp();
   if (helpRequested(cmd, restAll)) return printHelp((DISPATCH_COMMANDS as readonly string[]).includes(cmd) ? cmd : undefined);
+  if (!(DISPATCH_COMMANDS as readonly string[]).includes(cmd)) return unknownCommand(cmd);
   // A flag the command does not know is refused, never silently ignored.
   const unknown = argvShapeProblems(cmd, restAll).filter((problem) => problem.startsWith('unknown flag '));
   if (unknown.length) {
@@ -696,7 +715,9 @@ function main(argv: string[]): number {
     if (rest.some((arg) => arg !== '--json')) usage();
     const st = statSync(target, { throwIfNoEntry: false });
     if (!st) {
-      process.stderr.write(`c2c: no such file or directory: ${target}\n`);
+      process.stderr.write(
+        `c2c: no such file or directory: ${target}\nnext step: check the path, or pass the export with --app (e.g. c2c doctor --app <file.ds>)\n`,
+      );
       return PRECHECK_EXIT.missing;
     }
     if (!st.isFile()) {
@@ -711,18 +732,24 @@ function main(argv: string[]): number {
         process.stderr.write(`c2c: ${err.message}\n`);
         return 2;
       }
-      process.stderr.write(`c2c: cannot parse ${target}: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(
+        `c2c: cannot parse ${target}: ${err instanceof Error ? err.message : String(err)}\nnext step: re-export the app from Creator (Settings -> Export) and confirm the file is non-empty\n`,
+      );
       return PRECHECK_EXIT.unparsable;
     }
     // A file with no `application "<name>" { ... }` block is not a Creator export; never certify it clean.
     if (!parsed.file.ir.name || parsed.file.ir.dialect === 'snippet') {
-      process.stderr.write(`c2c: ${target} is not a Creator .ds application export (no application block)\n`);
+      process.stderr.write(
+        `c2c: ${target} is not a Creator .ds application export (no application block)\nnext step: re-export the app from Creator (Settings -> Export) and confirm the file is non-empty\n`,
+      );
       return PRECHECK_EXIT.unparsable;
     }
     // A truncated or unbalanced .ds is a parse failure, not a clean app.
     if (parsed.file.cst.errors.length) {
       const first = parsed.file.cst.errors[0]!;
-      process.stderr.write(`c2c: cannot parse ${target}: ${first.message}${parsed.file.cst.errors.length > 1 ? ` (+${parsed.file.cst.errors.length - 1} more)` : ''}\n`);
+      process.stderr.write(
+        `c2c: cannot parse ${target}: ${first.message}${parsed.file.cst.errors.length > 1 ? ` (+${parsed.file.cst.errors.length - 1} more)` : ''}\nnext step: re-export the app from Creator (Settings -> Export) and confirm the file is non-empty\n`,
+      );
       return PRECHECK_EXIT.unparsable;
     }
     const { ir } = parsed.file;
