@@ -162,7 +162,10 @@ function lib(): string {
   // on cached modules). Rebuild on demand instead of trusting the directory.
   if (!existsSync(join(out, 'lib/c2c-ui/boot.js'))) {
     compileLib(out);
-    after(() => rmSync(out, { recursive: true, force: true }));
+    after(() => {
+      rmSync(out, { recursive: true, force: true });
+      compiled = undefined;
+    });
   }
   return out;
 }
