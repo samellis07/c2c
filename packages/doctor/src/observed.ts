@@ -6,21 +6,23 @@
  *   1. `c2c doctor --mcp-begin` opens a one-time request
  *      (`c2c-out/.c2c/mcp-request.json`: a random id and when it was issued)
  *      and prints the calls to make;
- *   2. the agent calls `CatalystbyZoho_Create_Bucket` (a short-lived probe
- *      bucket named after the request id — a write only the connector bound
- *      to the project can make) and `CatalystbyZoho_List_All_Organizations`
- *      in the session — never the MCP project tools, which return project
- *      secrets (the doctor lists projects through the Catalyst CLI, D-C4);
+ *   2. the agent calls `CatalystbyZoho_Create_Bucket` (one probe bucket per
+ *      project, reused), then `CatalystbyZoho_Create_Upload_Signature` to
+ *      write an object whose key is this run's nonce, and
+ *      `CatalystbyZoho_List_All_Organizations` — never the MCP project tools,
+ *      which return project secrets (the doctor lists projects through the
+ *      Catalyst CLI, D-C4);
  *   3. the agent pipes an observation — the request id, the session's
  *      Catalyst server/host/tool names, and each call's verbatim result — into
  *      `c2c doctor --mcp-observed -`.
  *
  * The echo of the nonce inside the submitted JSON proves nothing: the call
  * results are caller-controlled. The binding comes from the server side —
- * the doctor reads the probe bucket back over the Catalyst REST API with the
- * user's own CLI credential (`binding`), and a stdio/local transport goes
- * green only on that match. The observation results are still checked for
- * error envelopes and reduced to ids/digests.
+ * the doctor reads this run's nonce object back from the probe bucket over
+ * the Catalyst REST API with the user's own CLI credential (`binding`), and
+ * a stdio/local transport goes green only on that exact key. A bucket that
+ * already exists without this run's object does not pass. The observation
+ * results are still checked for error envelopes and reduced to ids/digests.
  *
  * The doctor derives the org ids from the call results itself, stamps
  * `at` and the workspace itself, and records a sha256 digest of each result.
@@ -36,7 +38,7 @@ import { dirname, join } from 'node:path';
 import { EvidenceRejected, EvidenceStale, entryIdOf, parseEvidence, shortToolName, type McpEvidence } from './evidence.js';
 import { NEVER_CALL_MCP_TOOLS } from './required-tools.js';
 import { dcOfCreatorHost, type Dc } from './scope.js';
-import { isProbeName, PROBE_CREATE_CALL, PROBE_DELETE_CALL, probeCreateCall, probeDeleteCall, probeNameOf, type ProbeTarget } from './mcp-probe.js';
+import { isProbeName, PROBE_CREATE_CALL, PROBE_DELETE_CALL, PROBE_OBJECT_CALL, probeCreateCall, probeDeleteCall, probeNameOf, probeNonceCleanup, probeObjectCall, type ProbeNonceCleanup, type ProbeTarget } from './mcp-probe.js';
 
 export const OBSERVATION_KIND = 'c2c-mcp-observation';
 export const OBSERVATION_SCHEMA = 1;
@@ -73,6 +75,8 @@ export interface McpRequest {
   at: string;
   /** The probe bucket the begin output named (deterministic per scope); the observation answers for this bucket. */
   probe?: string;
+  /** This run's object key (32 hex). Recorded here so the read-back can require it. */
+  nonce?: string;
 }
 
 export interface ObservedCall {
@@ -99,7 +103,8 @@ export function mcpRequestPath(workspace: string): string {
  */
 export function beginMcpRequest(workspace: string, now: Date = new Date(), target: ProbeTarget = {}): McpRequest {
   const id = randomBytes(16).toString('hex');
-  const request: McpRequest = { schema: OBSERVATION_SCHEMA, request: id, at: now.toISOString(), probe: probeNameOf(id, target) };
+  const nonce = randomBytes(16).toString('hex');
+  const request: McpRequest = { schema: OBSERVATION_SCHEMA, request: id, at: now.toISOString(), probe: probeNameOf(id, target), nonce };
   const path = mcpRequestPath(workspace);
   mkdirSync(dirname(path), { recursive: true });
   for (const stale of readdirSync(dirname(path))) {
@@ -117,7 +122,10 @@ function readMcpRequest(workspace: string): McpRequest | undefined {
       // back to the deterministic name for the current scope. A probe that
       // is not a probe name is ignored the same way, never trusted.
       const probe = typeof parsed.probe === 'string' && isProbeName(parsed.probe) ? parsed.probe : undefined;
-      return { schema: Number(parsed.schema), request: parsed.request, at: parsed.at, ...(probe ? { probe } : {}) };
+      // An older request file has no nonce. A value that is not 32 hex is
+      // ignored, never trusted as this run's object key.
+      const nonce = typeof parsed.nonce === 'string' && /^[0-9a-f]{32}$/.test(parsed.nonce) ? parsed.nonce : undefined;
+      return { schema: Number(parsed.schema), request: parsed.request, at: parsed.at, ...(probe ? { probe } : {}), ...(nonce ? { nonce } : {}) };
     }
   } catch {
     /* no open request */
@@ -306,7 +314,7 @@ export function readStdinBounded(limit: number = OBSERVATION_MAX_BYTES, fd: numb
  * EvidenceStale for an expired request / an id-less entry). Does not close
  * the request; the caller closes it once the observation is accepted.
  */
-export function parseObservation(text: string, input: { workspace: string; now?: Date }): { evidence: McpEvidence; observed: Observed; probe?: string } {
+export function parseObservation(text: string, input: { workspace: string; now?: Date }): { evidence: McpEvidence; observed: Observed; probe?: string; nonce?: string } {
   const now = input.now ?? new Date();
   if (Buffer.byteLength(text, 'utf8') > OBSERVATION_MAX_BYTES) {
     throw new ObservationRejected(`the observation is larger than the ${OBSERVATION_MAX_BYTES}-byte limit`);
@@ -362,12 +370,14 @@ export function parseObservation(text: string, input: { workspace: string; now?:
       const listed = idsOfResult(result, ORGS_CALL);
       orgs = listed.ids;
       orgDcs = listed.orgDcs;
-    } else if (short === shortToolName(PROBE_CALL) || short === shortToolName(PROBE_DELETE_CALL)) {
-      // The probe write and the cleanup delete are attested by the doctor's
-      // own REST read-back, never by this result: it is checked for an error
-      // envelope and digested. A repeated run reuses the one probe bucket
-      // per project, so an already-exists answer to the re-create is
-      // accepted for the probe write (never for the cleanup delete).
+    } else if (short === shortToolName(PROBE_CALL) || short === shortToolName(PROBE_DELETE_CALL) || short === shortToolName(PROBE_OBJECT_CALL)) {
+      // The probe write, the nonce-object signature, and the cleanup delete
+      // are attested by the doctor's own REST read-back, never by this
+      // result: it is checked for an error envelope and digested. The
+      // signature call may be omitted — the object list is the proof. A
+      // repeated run reuses the one probe bucket per project, so an
+      // already-exists answer to the re-create is accepted for the probe
+      // write only (never for the signature call or the cleanup delete).
       try {
         rejectIfErrorFlag(result, short);
       } catch (err) {
@@ -392,20 +402,32 @@ export function parseObservation(text: string, input: { workspace: string; now?:
   // The bucket --mcp-begin named, pinned in the request file: the read-back
   // and the cleanup track the bucket that was actually created, even if the
   // scope flags drifted since the begin run.
-  return { evidence, observed: { request: open.request, orgs, calls }, ...(open.probe ? { probe: open.probe } : {}) };
+  return { evidence, observed: { request: open.request, orgs, calls }, ...(open.probe ? { probe: open.probe } : {}), ...(open.nonce ? { nonce: open.nonce } : {}) };
 }
 
 /** What the agent is asked to do, for the --mcp-begin output. */
-export function mcpRequestInstructions(request: McpRequest, target: ProbeTarget = {}): { request: string; expires: string; probe: string; calls: Record<string, unknown>[]; cleanup: Record<string, unknown>; neverCall: string[]; command: string; observation: Record<string, unknown> } {
+export function mcpRequestInstructions(request: McpRequest, target: ProbeTarget = {}): { request: string; expires: string; probe: string; nonce?: string; calls: Record<string, unknown>[]; cleanup: Record<string, unknown>; objectCleanup?: ProbeNonceCleanup; neverCall: string[]; command: string; observation: Record<string, unknown> } {
   // The pinned bucket from the request file when this request opened it;
   // older request files fall back to the deterministic name for this scope.
   const probe = request.probe && isProbeName(request.probe) ? request.probe : probeNameOf(request.request, target);
+  const nonce = request.nonce && /^[0-9a-f]{32}$/.test(request.nonce) ? request.nonce : undefined;
+  const project = target.project !== undefined && /^[0-9]+$/.test(target.project) ? target.project : undefined;
+  const calls: Record<string, unknown>[] = [probeCreateCall(probe, target)];
+  // Org-only begin has no project to put an object in, so it stays the two
+  // calls. A numeric project asks for the nonce object between the bucket
+  // and the org list. The observation template still shows the two required
+  // calls: the signature result is allowed and not required.
+  if (project && nonce) calls.push(probeObjectCall(probe, nonce, target));
+  calls.push({ tool: ORGS_CALL });
+  const objectCleanup = project && nonce ? probeNonceCleanup(probe, nonce, project) : undefined;
   return {
     request: request.request,
     expires: new Date(Date.parse(request.at) + MCP_REQUEST_MAX_AGE_MS).toISOString(),
     probe,
-    calls: [probeCreateCall(probe, target), { tool: ORGS_CALL }],
+    ...(nonce ? { nonce } : {}),
+    calls,
     cleanup: probeDeleteCall(probe, target),
+    ...(objectCleanup ? { objectCleanup } : {}),
     neverCall: NEVER_CALL_MCP_TOOLS.map((name) => `CatalystbyZoho_${name}`),
     command: 'c2c doctor --mcp-observed -',
     observation: {

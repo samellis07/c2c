@@ -44,7 +44,7 @@ const SCOPE = { dc: 'in', org: ORG, project: PROJECT };
 const PROBE = `c2cprobe-p${PROJECT}`;
 /** The observed-flow fields of the doctor.json mcp block. */
 type ObservedFile = DoctorFile & {
-  mcp?: { source?: string; binding?: { status?: string }; observed?: { request: string; orgs: string[]; calls: { tool: string; digest: string }[] } };
+  mcp?: { source?: string; binding?: { status?: string; detail?: string }; observed?: { request: string; orgs: string[]; calls: { tool: string; digest: string }[] } };
 };
 const NO_HOOKS: ScopeHooks = { cliDc: () => undefined, cliOrg: () => undefined };
 
@@ -112,12 +112,33 @@ const INVALID_URL_PATTERN = { status: 404, body: { status: 'failure', data: { me
  * A fake REST shaped like the recorded live behaviour: the bucket LIST route
  * answers every bucket the project holds (the keys of `buckets`), and the
  * specific-bucket route answers 404 INVALID_URL_PATTERN for any name.
+ *
+ * Object list: omitted `objects` serves this run's 32-hex prefix back as
+ * `contents[].key` when that bucket is in the map (the successful probe).
+ * A string serves that key only when it equals the prefix. An array is
+ * returned as-is, so a stale or near-miss key can be planted.
  */
-function fakeRest(buckets: Record<string, unknown> = {}, seen?: { path: string }[]): NonNullable<DoctorIo['rest']> {
+function fakeRest(buckets: Record<string, unknown> = {}, seen?: { path: string }[], objects?: string | readonly string[]): NonNullable<DoctorIo['rest']> {
   return async (call) => {
     seen?.push({ path: call.path });
     if (call.method === 'GET' && /^\/baas\/v1\/project\/[0-9]+\/bucket$/.test(call.path)) {
       return { status: 200, body: { status: 'success', data: Object.keys(buckets).map((bucket_name) => ({ bucket_name, bucket_url: `https://${bucket_name}-development.zohostratus.in` })) } };
+    }
+    if (call.method === 'GET' && /\/bucket\/objects(?:\?|$)/.test(call.path)) {
+      const query = new URLSearchParams(call.path.slice(call.path.indexOf('?') + 1));
+      const bucket = query.get('bucket_name') ?? '';
+      const prefix = query.get('prefix') ?? '';
+      const keys = !(bucket in buckets)
+        ? []
+        : objects === undefined
+          ? (/^[0-9a-f]{32}$/.test(prefix) ? [prefix] : [])
+          : typeof objects === 'string'
+            ? (objects === prefix ? [objects] : [])
+            : [...objects];
+      return { status: 200, body: { status: 'success', data: { contents: keys.map((key) => ({ key })), truncated: false } } };
+    }
+    if (call.method === 'PUT' && /\/bucket\/object(?:\?|$)/.test(call.path)) {
+      return { status: 200, body: { status: 'success', data: { message: 'Deletion successful' } } };
     }
     if (call.path.includes('/bucket/')) return INVALID_URL_PATTERN;
     return { status: 404, body: { code: 'INVALID_ID' } };
@@ -346,7 +367,10 @@ test('mcp-observed: the probe verifies from the bucket list among other buckets;
   assert.equal(run.code, 0, run.out + run.err);
   const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
   assert.equal(file.mcp?.binding?.status, 'verified');
-  assert.ok(seen.length > 0 && seen.every((call) => !call.path.includes('/bucket/')), JSON.stringify(seen));
+  // The object list and the nonce-object delete are allowed. The per-bucket
+  // route `GET .../bucket/<name>` (404 INVALID_URL_PATTERN) is not.
+  assert.ok(seen.some((call) => call.path.includes('/bucket/objects')), JSON.stringify(seen));
+  assert.ok(seen.length > 0 && seen.every((call) => !/\/bucket\/(?!objects?(?:\?|$))/.test(call.path)), JSON.stringify(seen));
 });
 
 test('verifyProbe: a paginated bucket list is followed to the page that holds the probe', async () => {
@@ -375,6 +399,174 @@ test('verifyProbe: a paginated bucket list is followed to the page that holds th
   assert.equal((await verifyProbe(rest, target, name)).status, 'unverifiable');
   // A list route error is unverifiable, never absent.
   assert.equal((await verifyProbe(async () => INVALID_URL_PATTERN, target, name)).status, 'unverifiable');
+});
+
+const NONCE = '0123456789abcdef0123456789abcdef';
+const STALE = 'fedcba9876543210fedcba9876543210';
+
+function objectPages(contents: unknown, extra: Record<string, unknown> = {}): { status: number; body: unknown } {
+  return { status: 200, body: { status: 'success', data: { contents, truncated: false, ...extra } } };
+}
+
+/** Bucket list holds the probe; object pages are keyed by path suffix after `?`. */
+function nonceRest(pages: Record<string, { status: number; body: unknown }>, seen?: string[]): NonNullable<DoctorIo['rest']> {
+  return async (call) => {
+    seen?.push(`${call.method} ${call.path}`);
+    if (call.method === 'GET' && call.path === `/baas/v1/project/${PROJECT}/bucket`) {
+      return { status: 200, body: { data: [{ bucket_name: PROBE }] } };
+    }
+    const found = pages[call.path];
+    if (found) return found;
+    return INVALID_URL_PATTERN;
+  };
+}
+
+test('verifyProbe: a per-run nonce object must match exactly; a bucket alone does not', async () => {
+  const target = { org: ORG, project: PROJECT };
+  const objects = `/baas/v1/project/${PROJECT}/bucket/objects?bucket_name=${encodeURIComponent(PROBE)}&prefix=${NONCE}&max_keys=50`;
+  // Pre-created bucket, no object for this run.
+  assert.equal((await verifyProbe(nonceRest({ [objects]: objectPages([]) }), target, PROBE, NONCE)).status, 'absent');
+  const missing = await verifyProbe(nonceRest({ [objects]: objectPages([]) }), target, PROBE, NONCE);
+  assert.match(missing.detail, /nonce object was not read back/);
+  assert.notEqual(missing.detail, 'in-project-probe-required');
+  // A key left by an earlier run, a prefix, and a superstring all fail.
+  for (const key of [STALE, NONCE.slice(0, 31), `${NONCE}aa`]) {
+    const result = await verifyProbe(nonceRest({ [objects]: objectPages([{ key }]) }), target, PROBE, NONCE);
+    assert.equal(result.status, 'absent', key);
+    assert.notEqual(result.status, 'verified');
+  }
+  // This run's key passes, including when a stale key shares the page.
+  const verified = await verifyProbe(nonceRest({ [objects]: objectPages([{ key: STALE }, { key: NONCE }]) }), target, PROBE, NONCE);
+  assert.equal(verified.status, 'verified');
+  assert.match(verified.detail, new RegExp(NONCE));
+  // The key on a later page passes; a repeated token and a truncated page do not.
+  const page2 = `${objects}&next_continuation_token=tok2`;
+  const paged = await verifyProbe(nonceRest({
+    [objects]: objectPages([{ key: 'other' }], { next_continuation_token: 'tok2', truncated: true }),
+    [page2]: objectPages([{ key: NONCE }]),
+  }), target, PROBE, NONCE);
+  assert.equal(paged.status, 'verified');
+  assert.equal((await verifyProbe(nonceRest({ [objects]: objectPages([], { truncated: true }) }), target, PROBE, NONCE)).status, 'unverifiable');
+  assert.equal((await verifyProbe(nonceRest({
+    [objects]: objectPages([], { next_continuation_token: 'tok2' }),
+    [page2]: objectPages([], { next_continuation_token: 'tok2' }),
+  }), target, PROBE, NONCE)).status, 'unverifiable');
+  // A list error is unverifiable, not "the object is absent".
+  const errored = await verifyProbe(nonceRest({ [objects]: { status: 500, body: { message: 'upstream' } } }), target, PROBE, NONCE);
+  assert.equal(errored.status, 'unverifiable');
+  assert.match(errored.detail, /HTTP 500/);
+  // Malformed contents cannot prove the key missing.
+  assert.equal((await verifyProbe(nonceRest({ [objects]: { status: 200, body: '{not-json' } }), target, PROBE, NONCE)).status, 'unverifiable');
+  assert.equal((await verifyProbe(nonceRest({ [objects]: objectPages({ key: NONCE }) }), target, PROBE, NONCE)).status, 'unverifiable');
+  // No nonce: the bucket list alone still verifies (in-project re-check, leftover cleanup).
+  assert.equal((await verifyProbe(nonceRest({}), target, PROBE)).status, 'verified');
+  // A nonce that is not 32 hex fails closed and does not treat the bucket as proof.
+  const bad = await verifyProbe(nonceRest({}), target, PROBE, 'not-a-nonce');
+  assert.equal(bad.status, 'unverifiable');
+  // The bucket itself missing never consults the object list.
+  const seen: string[] = [];
+  const gone = await verifyProbe(async (call) => {
+    seen.push(call.path);
+    return { status: 200, body: { data: [] } };
+  }, target, PROBE, NONCE);
+  assert.equal(gone.status, 'absent');
+  assert.doesNotMatch(gone.detail, /nonce object/);
+  assert.ok(seen.every((path) => !path.includes('/bucket/objects')));
+});
+
+test('mcp-observed: a pre-created bucket without this run\'s nonce fails, a stale key fails, and the exact key passes', async () => {
+  const stdio = { host_of_url: undefined, transport: 'stdio' as const };
+  // 1. Bucket exists, object list empty.
+  {
+    const { dir, env } = workspace();
+    const { request } = await begin(env);
+    const run = await observe(env, observation(request, stdio), [], NO_HOOKS, fakeRest({ [PROBE]: {} }, undefined, []));
+    assert.equal(run.code, 1, run.out + run.err);
+    assert.match(run.out, /FAIL D-B2 .*probe write was not read back/);
+    const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
+    assert.notEqual(file.mcp?.binding?.status, 'verified');
+    assert.equal(file.mcp?.binding?.status, 'absent');
+    assert.match(file.mcp?.binding?.detail ?? '', /nonce object was not read back/);
+    // The bucket is still there, so the delete reminder stays.
+    assert.ok(existsSync(join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json')));
+  }
+  // 2. Object list holds a different run's key.
+  {
+    const { dir, env } = workspace();
+    const { request } = await begin(env);
+    const run = await observe(env, observation(request, stdio), [], NO_HOOKS, fakeRest({ [PROBE]: {} }, undefined, [STALE]));
+    assert.equal(run.code, 1, run.out + run.err);
+    const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
+    assert.notEqual(file.mcp?.binding?.status, 'verified');
+    assert.match(file.mcp?.binding?.detail ?? '', /nonce object was not read back/);
+  }
+  // 3. The object key is this run's nonce. A refused object delete still passes and prints both cleanups.
+  {
+    const { dir, env } = workspace();
+    const opened = await begin(env);
+    const nonce = (JSON.parse(opened.out) as { nonce: string }).nonce;
+    assert.match(nonce, /^[0-9a-f]{32}$/);
+    const seen: { method: string; path: string }[] = [];
+    const rest: NonNullable<DoctorIo['rest']> = async (call) => {
+      seen.push({ method: call.method, path: call.path });
+      if (call.method === 'PUT') throw new Error('objects.DELETE refused');
+      return fakeRest({ [PROBE]: {} }, undefined, nonce)(call);
+    };
+    const run = await observe(env, observation(opened.request, stdio), [], NO_HOOKS, rest);
+    assert.equal(run.code, 0, run.out + run.err);
+    assert.match(run.out, /PASS D-B1 .*bound by the probe write/);
+    assert.match(run.out, new RegExp(`cleanup: remove the probe bucket ${PROBE} .*Delete_Bucket`));
+    assert.match(run.out, new RegExp(`cleanup: remove the probe nonce object ${nonce}`));
+    assert.ok(seen.some((call) => call.method === 'PUT' && call.path.includes('/bucket/object')));
+    const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
+    assert.equal(file.mcp?.binding?.status, 'verified');
+  }
+});
+
+test('mcp-observed: a project-scoped request with no nonce does not accept the bucket', async () => {
+  const { dir, env } = workspace();
+  const { request } = await begin(env);
+  const path = join(dir, 'c2c-out', '.c2c', 'mcp-request.json');
+  const open = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+  delete open.nonce;
+  writeFileSync(path, JSON.stringify(open));
+  const seen: { path: string }[] = [];
+  const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [PROBE]: {} }, seen));
+  assert.equal(run.code, 1, run.out + run.err);
+  assert.match(run.out, /FAIL D-B2 .*probe write was not read back/);
+  const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
+  assert.equal(file.mcp?.binding?.status, 'unverifiable');
+  assert.match(file.mcp?.binding?.detail ?? '', /no per-run nonce/);
+  assert.equal(seen.length, 0);
+});
+
+test('mcp-observed: Create_Upload_Signature may be reported and an error on it is refused', async () => {
+  const { dir, env } = workspace();
+  const { request, out } = await begin(env);
+  const nonce = (JSON.parse(out) as { nonce: string }).nonce;
+  const run = await observe(env, observation(request, {
+    host_of_url: undefined,
+    transport: 'stdio',
+    calls: [
+      { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(PROBE) },
+      { tool: 'CatalystbyZoho_Create_Upload_Signature', result: { status: 'success', data: { object_key: nonce } } },
+      { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG], 'console.zoho.in') },
+    ],
+  }), [], NO_HOOKS, fakeRest({ [PROBE]: {} }));
+  assert.equal(run.code, 0, run.out + run.err);
+  const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
+  assert.deepEqual(file.mcp?.observed?.calls.map((call) => call.tool), ['Create_Bucket', 'Create_Upload_Signature', 'List_All_Organizations']);
+  const retry = workspace();
+  const opened = await begin(retry.env);
+  const refused = await observe(retry.env, observation(opened.request, {
+    calls: [
+      { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(PROBE) },
+      { tool: 'CatalystbyZoho_Create_Upload_Signature', result: { isError: true, content: [{ type: 'text', text: 'denied' }] } },
+      { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG]) },
+    ],
+  }));
+  assert.equal(refused.code, 1, refused.out + refused.err);
+  assert.match(refused.err, /Create_Upload_Signature call returned an error/);
 });
 
 test('mcp-observed: a failed observation stays red on the next bare doctor run, and the gate says the same', async () => {
@@ -798,7 +990,10 @@ test('mcp-observed: a verified probe without a project tracks no pending cleanup
   writeFileSync(join(dir, DEPLOY_CONFIG), JSON.stringify({ dc: 'in', org: ORG, env: 'Development', ui: 'vanilla' }));
   const env = { HOME: home, C2C_WORKSPACE: dir, C2C_CATALYST_SKILLS_DIR: join(home, 'skills') };
   const opened = await begin(env);
-  assert.equal((JSON.parse(opened.out) as { probe: string }).probe, `c2cprobe-o${ORG}`);
+  const orgAsk = JSON.parse(opened.out) as { probe: string; calls: { tool?: string }[] };
+  assert.equal(orgAsk.probe, `c2cprobe-o${ORG}`);
+  assert.equal(orgAsk.calls.length, 2);
+  assert.ok(!orgAsk.calls.some((call) => call.tool === 'CatalystbyZoho_Create_Upload_Signature'));
   // The org project-list read proves the binding is reachable.
   const rest: NonNullable<DoctorIo['rest']> = async (call) => {
     if (call.method === 'GET' && call.path === '/baas/v1/project') {
@@ -864,18 +1059,30 @@ test('mcp-observed: --mcp-begin asks for the probe write and the org list, and n
   // nonce, but the bucket no longer follows it.
   assert.equal(ask.probe, PROBE);
   assert.doesNotMatch(ask.probe, new RegExp(ask.request));
-  assert.equal(ask.calls.length, 2);
+  assert.equal(ask.calls.length, 3);
   const create = ask.calls[0] as { tool: string; path_variables: { projectId: string }; headers: Record<string, unknown>; body: { bucket_name: string } };
   assert.equal(create.tool, 'CatalystbyZoho_Create_Bucket');
   assert.equal(create.body.bucket_name, ask.probe);
   assert.equal(create.path_variables.projectId, PROJECT);
   assert.equal(create.headers['Catalyst-org'], Number(ORG));
-  assert.deepEqual(ask.calls[1], { tool: 'CatalystbyZoho_List_All_Organizations' });
+  const nonce = (ask as { nonce?: string }).nonce ?? '';
+  assert.match(nonce, /^[0-9a-f]{32}$/);
+  assert.notEqual(nonce, ask.request);
+  const upload = ask.calls[1] as { tool: string; query_params: { bucket_name: string; object_key: string } };
+  assert.equal(upload.tool, 'CatalystbyZoho_Create_Upload_Signature');
+  assert.equal(upload.query_params.bucket_name, ask.probe);
+  assert.equal(upload.query_params.object_key, nonce);
+  assert.deepEqual(ask.calls[2], { tool: 'CatalystbyZoho_List_All_Organizations' });
   assert.equal((ask.cleanup as { tool: string }).tool, 'CatalystbyZoho_Delete_Bucket');
+  const objectCleanup = (ask as { objectCleanup?: { method: string; path: string; body: { objects: { key: string }[] } } }).objectCleanup;
+  assert.equal(objectCleanup?.method, 'PUT');
+  assert.match(objectCleanup?.path ?? '', /\/bucket\/object\?bucket_name=/);
+  assert.deepEqual(objectCleanup?.body, { objects: [{ key: nonce }] });
   assert.deepEqual(ask.neverCall, ['CatalystbyZoho_List_All_Projects', 'CatalystbyZoho_Get_Project_By_Id']);
   const human = fakeIo(env, '');
   assert.equal(await doctorCli(['--mcp-begin'], human.io, { hooks: NO_HOOKS }), 0);
   assert.match(human.out(), /Never call CatalystbyZoho_List_All_Projects or CatalystbyZoho_Get_Project_By_Id/);
+  assert.match(human.out(), /Create_Upload_Signature/);
   assert.match(human.out(), /Delete_Bucket/);
 });
 

@@ -4,8 +4,11 @@
  * the request asks the host to WRITE it into the selected project through the
  * MCP connector — a short-lived Stratus bucket named after the request id —
  * and the doctor then reads it back over the Catalyst REST API with the
- * user's own CLI credential. Only the connector that really is bound to the
- * same org/DC/project can place the bucket where that read finds it.
+ * user's own CLI credential. The bucket name is deterministic per project, so
+ * a pre-created bucket is not proof: each run also writes a fresh 32-hex
+ * nonce object into that bucket and the doctor requires that exact key.
+ * Only the connector that really is bound to the same org/DC/project can
+ * place this run's object where that read finds it.
  *
  * Documented pair (facts ledger):
  *   - `Create_Bucket` is an MCP-only write — the CLI token answers
@@ -26,14 +29,16 @@
  * (`c2cprobe-p<project-id>`), one per org before the project exists
  * (`c2cprobe-o<org-id>`) — so repeated doctor runs reuse the same bucket
  * instead of leaking a new random bucket every run. A scope the doctor
- * cannot pin to an org or project keeps the legacy request-id name. The
- * read-back still proves the bucket is visible inside the selected project
- * over the CLI credential; a repeated run that finds the bucket left by an
- * earlier run re-verifies without writing a second bucket.
+ * cannot pin to an org or project keeps the legacy request-id name. A
+ * project-scoped run proves the binding by reading back this run's nonce
+ * object (`GET .../bucket/objects`, exact `key`), not by the bucket's
+ * existence. Callers that pass no nonce (the in-project re-check before a
+ * project exists is handled separately, and leftover-bucket cleanup) still
+ * match the bucket list only. A repeated run reuses the one bucket.
  */
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readBucketList, type RestFn } from '../../deploy/src/tables.js';
+import { BUCKET_LIST_MAX_PAGES, readBucketList, type RestFn } from '../../deploy/src/tables.js';
 
 export const PROBE_PREFIX = 'c2cprobe';
 /**
@@ -46,6 +51,10 @@ export const PROBE_PREFIX = 'c2cprobe';
 export const IN_PROJECT_PROBE_REQUIRED = 'in-project-probe-required';
 export const PROBE_CREATE_CALL = 'CatalystbyZoho_Create_Bucket';
 export const PROBE_DELETE_CALL = 'CatalystbyZoho_Delete_Bucket';
+/** Signing call the agent uses to PUT this run's nonce object. Not required in the observation. */
+export const PROBE_OBJECT_CALL = 'CatalystbyZoho_Create_Upload_Signature';
+/** A per-run object key: 16 crypto-random bytes, hex. */
+const NONCE_RE = /^[0-9a-f]{32}$/;
 
 /**
  * The deterministic probe bucket for a scope: one bucket per project, one
@@ -100,6 +109,55 @@ export function probeCreateCall(name: string, target: ProbeTarget): Record<strin
   };
 }
 
+/**
+ * The Create_Upload_Signature arguments that name this run's nonce object.
+ * The agent PUTs the nonce text to the signed URL; the doctor never trusts
+ * that call's result — it lists objects and matches `key` exactly.
+ */
+export function probeObjectCall(bucket: string, nonce: string, target: ProbeTarget): Record<string, unknown> {
+  return {
+    tool: PROBE_OBJECT_CALL,
+    path_variables: { projectId: target.project ?? '<project-id>' },
+    headers: { 'Catalyst-org': orgHeader(target.org), Environment: 'Development' },
+    query_params: { bucket_name: bucket, object_key: nonce },
+  };
+}
+
+/** PUT that deletes one nonce object and leaves the reusable probe bucket. [DOC] object delete; CLI token scope [UNVERIFIED]. */
+export interface ProbeNonceCleanup {
+  method: 'PUT';
+  path: string;
+  bucket: string;
+  nonce: string;
+  body: { objects: { key: string }[] };
+}
+
+export function probeNonceCleanup(bucket: string, nonce: string, project: string): ProbeNonceCleanup {
+  return {
+    method: 'PUT',
+    path: `/baas/v1/project/${project}/bucket/object?bucket_name=${encodeURIComponent(bucket)}`,
+    bucket,
+    nonce,
+    body: { objects: [{ key: nonce }] },
+  };
+}
+
+/**
+ * Best-effort delete of this run's nonce object. The CLI token's
+ * buckets.objects.DELETE scope is not proven, so a refusal is ignored and
+ * the caller still prints {@link probeNonceCleanup}. Never deletes the bucket.
+ */
+export async function deleteProbeNonce(rest: RestFn, project: string, bucket: string, nonce: string): Promise<boolean> {
+  if (!/^[0-9]+$/.test(project) || !NONCE_RE.test(nonce)) return false;
+  try {
+    const instruction = probeNonceCleanup(bucket, nonce, project);
+    const res = await rest({ method: 'PUT', path: instruction.path, body: instruction.body });
+    return res.status >= 200 && res.status < 300;
+  } catch {
+    return false;
+  }
+}
+
 /** The exact Delete_Bucket arguments for cleanup (by bucket name, not an id — errors.md). */
 export function probeDeleteCall(name: string, target: ProbeTarget): Record<string, unknown> {
   return {
@@ -121,23 +179,112 @@ export interface ProbeResult {
   httpStatus?: number;
 }
 
+const OBJECT_PAGE_TOKEN_KEYS = ['next_continuation_token', 'continuation_token', 'next_token'] as const;
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function objectPageToken(record: Record<string, unknown> | undefined): { key: (typeof OBJECT_PAGE_TOKEN_KEYS)[number]; token: string } | undefined {
+  if (!record) return undefined;
+  for (const key of OBJECT_PAGE_TOKEN_KEYS) {
+    const value = record[key];
+    if (typeof value === 'string' && value !== '') return { key, token: value };
+  }
+  return undefined;
+}
+
+/** `truncated` / `is_truncated` are the documented object-list flags; `more_records` matches the bucket list. */
+function objectListContinues(record: Record<string, unknown> | undefined): boolean {
+  if (!record) return false;
+  return record.more_records === true || record.truncated === true || record.is_truncated === true;
+}
+
+function objectsPath(project: string, bucket: string, nonce: string, token?: { key: string; token: string }): string {
+  const query = `bucket_name=${encodeURIComponent(bucket)}&prefix=${encodeURIComponent(nonce)}&max_keys=50`;
+  const page = token ? `&${token.key}=${encodeURIComponent(token.token)}` : '';
+  return `/baas/v1/project/${project}/bucket/objects?${query}${page}`;
+}
+
 /**
- * Read the probe bucket back through the Catalyst REST API. `verified` means
- * the selected project really holds the nonce-named bucket — the connector
- * that wrote it is bound to the CLI's org/DC/project. Anything else never
- * counts the submitted call result.
- *
- * The read-back uses the shared paginated bucket LIST reader and matches
- * `bucket_name` exactly. A list error or incomplete pagination cannot prove
- * absence.
+ * List objects in the probe bucket and require a `contents` entry whose `key`
+ * is exactly this run's nonce. A prefix or superstring does not count. An
+ * empty list is absent. A list error, a malformed page, or a truncated page
+ * with no token is unverifiable — never treated as "the object is missing".
+ * [DOC] GET .../bucket/objects (`data.contents[].key`, `next_continuation_token`).
  */
-export async function verifyProbe(rest: RestFn, target: ProbeTarget, name: string): Promise<ProbeResult> {
+async function readNonceObject(rest: RestFn, project: string, bucket: string, nonce: string): Promise<Pick<ProbeResult, 'status' | 'detail' | 'httpStatus'>> {
+  const seen = new Set<string>();
+  let token: { key: string; token: string } | undefined;
+  for (let page = 0; page < BUCKET_LIST_MAX_PAGES; page++) {
+    let res: { status: number; body: unknown };
+    try {
+      res = await rest({ method: 'GET', path: objectsPath(project, bucket, nonce, token) });
+    } catch (err) {
+      return { status: 'unverifiable', detail: `the REST object list failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+    if (res.status < 200 || res.status >= 300) {
+      return { status: 'unverifiable', httpStatus: res.status, detail: `the REST object list answered HTTP ${res.status}; this run's nonce object could not be verified` };
+    }
+    let body: unknown = res.body;
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body) as unknown;
+      } catch {
+        return { status: 'unverifiable', detail: 'the REST object list returned malformed JSON; this run\'s nonce object could not be verified' };
+      }
+    }
+    const record = asRecord(body);
+    const data = asRecord(record?.data);
+    const contents = data?.contents;
+    if (!Array.isArray(contents)) {
+      return { status: 'unverifiable', detail: 'the REST object list did not return contents; this run\'s nonce object could not be verified' };
+    }
+    for (let index = 0; index < contents.length; index++) {
+      const row = asRecord(contents[index]);
+      const key = row?.key;
+      if (!row || typeof key !== 'string' || key.trim() === '') {
+        return { status: 'unverifiable', detail: `the REST object list returned a malformed row at index ${index}; this run's nonce object could not be verified` };
+      }
+      if (key === nonce) {
+        return { status: 'verified', detail: `probe nonce object ${nonce} read back from bucket ${bucket} in project ${project} over the Catalyst REST API` };
+      }
+    }
+    const next = objectPageToken(data) ?? objectPageToken(record);
+    const more = objectListContinues(data) || objectListContinues(record);
+    if (!next) {
+      if (more) return { status: 'unverifiable', detail: 'the REST object list has more rows but no page token; this run\'s nonce object could not be ruled out' };
+      return { status: 'absent', detail: `this run's nonce object was not read back from bucket ${bucket} in project ${project}` };
+    }
+    if (seen.has(next.token)) {
+      return { status: 'unverifiable', detail: 'the REST object list repeated a page token; this run\'s nonce object could not be verified' };
+    }
+    seen.add(next.token);
+    token = next;
+  }
+  return { status: 'unverifiable', detail: `the REST object list ran past ${BUCKET_LIST_MAX_PAGES} pages; this run's nonce object could not be verified` };
+}
+
+/**
+ * Read the probe back through the Catalyst REST API. With no `nonce`, `verified`
+ * means the selected project lists the probe bucket (the in-project re-check
+ * and leftover-bucket cleanup). With a 32-hex `nonce`, the bucket must exist
+ * and the object list must contain that exact key — a pre-created bucket, or
+ * a key left by an earlier run, does not count. Anything else never counts
+ * the submitted call result.
+ *
+ * The bucket read uses the shared paginated LIST reader and matches
+ * `bucket_name` exactly. The per-bucket route is not used. A list error or
+ * incomplete pagination cannot prove absence.
+ */
+export async function verifyProbe(rest: RestFn, target: ProbeTarget, name: string, nonce?: string): Promise<ProbeResult> {
   const base = { kind: 'bucket' as const, name };
   if (!target.org || !/^[0-9]+$/.test(target.org)) return { ...base, status: 'unresolved', detail: 'no org is selected, so the REST read-back has no target' };
   // Import is the one legitimate project-less probe: the project does not
   // exist until the org-scoped import completes.  A successful org-level
   // project-list read proves that the explicit Catalyst-org binding is
   // reachable; the nonce bucket probe is repeated once the project exists.
+  // A nonce on this path is ignored: no project holds the object yet.
   if (!target.project) {
     try {
       const read = await rest({ method: 'GET', path: '/baas/v1/project' });
@@ -148,13 +295,27 @@ export async function verifyProbe(rest: RestFn, target: ProbeTarget, name: strin
     }
   }
   if (!/^[0-9]+$/.test(target.project)) return { ...base, status: 'unresolved', detail: 'the selected project id is invalid' };
+  if (nonce !== undefined && !NONCE_RE.test(nonce)) {
+    return { ...base, status: 'unverifiable', detail: 'the MCP request nonce is not a 32-hex value, so the probe cannot be verified' };
+  }
   const read = await readBucketList(rest, target.project, name);
-  if (read.status === 'found') return { ...base, status: 'verified', detail: `probe bucket ${name} found in project ${target.project} over the Catalyst REST API` };
+  if (nonce === undefined) {
+    if (read.status === 'found') return { ...base, status: 'verified', detail: `probe bucket ${name} found in project ${target.project} over the Catalyst REST API` };
+    if (read.status === 'absent') return { ...base, status: 'absent', detail: `probe bucket ${name} is not in project ${target.project}: the MCP write never landed in the selected org/DC/project` };
+    const detail = read.httpStatus === undefined
+      ? read.detail
+      : `the REST bucket list answered HTTP ${read.httpStatus}; Stratus may not be enabled in this project`;
+    return { ...base, status: 'unverifiable', detail };
+  }
   if (read.status === 'absent') return { ...base, status: 'absent', detail: `probe bucket ${name} is not in project ${target.project}: the MCP write never landed in the selected org/DC/project` };
-  const detail = read.httpStatus === undefined
-    ? read.detail
-    : `the REST bucket list answered HTTP ${read.httpStatus}; Stratus may not be enabled in this project`;
-  return { ...base, status: 'unverifiable', detail };
+  if (read.status !== 'found') {
+    const detail = read.httpStatus === undefined
+      ? read.detail
+      : `the REST bucket list answered HTTP ${read.httpStatus}; Stratus may not be enabled in this project`;
+    return { ...base, status: 'unverifiable', detail };
+  }
+  const object = await readNonceObject(rest, target.project, name, nonce);
+  return { ...base, ...object };
 }
 
 export interface PendingCleanup {
