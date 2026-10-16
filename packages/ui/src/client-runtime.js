@@ -3488,7 +3488,7 @@ function recentBridge(viewRef) {
   try {
     const store = bridgeStore(viewRef);
     const at = Number(store && store.getItem(BRIDGE_MARK));
-    return Number.isFinite(at) && at > 0 && Date.now() - at < BRIDGE_LOOP_MS;
+    return Number.isFinite(at) && at > 0 && Date.now() - at < BRIDGE_LOOP_MS; // determinism-allow: runtime browser clock read; Date.now is not evaluated while generating files
   } catch {
     return false;
   }
@@ -3527,7 +3527,7 @@ export function bridgeRedirect(viewRef, force) {
     if (!store) return false;
     store.setItem(BRIDGE_ROUTE_KEY, here || '/');
     store.setItem(BRIDGE_STATE_KEY, state);
-    store.setItem(BRIDGE_MARK, String(Date.now()));
+    store.setItem(BRIDGE_MARK, String(Date.now())); // determinism-allow: runtime browser clock read; Date.now is not evaluated while generating files
   } catch {
     // storage refused: the fragment's state check will refuse the return — do not leave
     return false;
