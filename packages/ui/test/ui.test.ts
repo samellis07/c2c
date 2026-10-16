@@ -18,7 +18,7 @@ import { deriveIr, parse, parseProject, type App } from '../../core/src/index.js
 import { parseZml } from '../../core/src/zml.js';
 import { FIELD_TYPES } from '../../schema/src/mapping.js';
 import { LIMITS } from '../../shims/src/index.js';
-import { buildSlate, buildUi, elementsFromZml, generateUi, sanitizeSnippet, type UiModel } from '../src/index.js';
+import { buildSlate, buildUi, elementsFromZml, generateUi, sanitizeSnippet, shortHashId, type UiModel } from '../src/index.js';
 import { leaves } from '../src/pages.js';
 
 function appOf(body: string): App {
@@ -1324,7 +1324,7 @@ test('sw.js precaches with cache:reload and answers navigations network-first', 
   // The cache version mixes the worker's own bytes, so an sw.js change bumps
   // the cache name and an installed client moves to a fresh cache on activate.
   const rawSw = String(bundle.files.find((file) => file.path === 'slate/sw.js')?.data);
-  const sha = (data: string) => createHash('sha256').update(data).digest('hex').slice(0, 10);
+  const sha = (data: string) => shortHashId(createHash('sha256').update(data).digest('hex'));
   const precache = JSON.parse(/PRECACHE = (\[[^\]]*\])/.exec(sw)?.[1] ?? '[]') as string[];
   const expectedId = sha(`${sha(rawSw)}\n${sha(index)}\n${precache.join('\n')}`);
   assert.match(sw, new RegExp(`CACHE = "c2c-${expectedId}"`), 'the cache name must derive from the worker bytes');
