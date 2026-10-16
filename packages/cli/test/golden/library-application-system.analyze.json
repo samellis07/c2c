@@ -489,8 +489,8 @@
   "deluge": {
     "units": 14,
     "statements": 65,
-    "translated": 2,
-    "shimmed": 63,
+    "translated": 5,
+    "shimmed": 60,
     "todo": 0,
     "todoLocations": []
   },
@@ -506,11 +506,11 @@
     "readiness": 78,
     "band": "needs-work",
     "features": 75,
-    "deluge": 81
+    "deluge": 82
   },
   "effort": {
     "estimate": true,
-    "hours": 86.3,
+    "hours": 86,
     "weights": {
       "hoursPerFeature": {
         "supported": 0,
