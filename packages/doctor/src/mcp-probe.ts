@@ -86,6 +86,37 @@ export function isProbeName(name: string): boolean {
   return /^c2cprobe(?:[0-9a-f]{32}|-p[0-9]+|-o[0-9]+)$/.test(name);
 }
 
+/**
+ * The scope a probe request was opened under: the scope kind ('project',
+ * 'org', or the unscoped legacy 'request') and the exact target ids. A run
+ * verifies a probe only in the same scope it was begun in: an org-scoped
+ * begin must never be completed by a project-scoped binding that creates the
+ * org-named bucket inside the project.
+ */
+export interface ProbeScope {
+  kind: 'project' | 'org' | 'request';
+  org?: string;
+  project?: string;
+}
+
+/** The scope of a target, normalized the same way the probe name is derived. */
+export function probeScopeOf(target: ProbeTarget): ProbeScope {
+  if (target.project !== undefined && /^[0-9]+$/.test(target.project)) {
+    return { kind: 'project', ...(target.org !== undefined ? { org: target.org } : {}), project: target.project };
+  }
+  if (target.org !== undefined && /^[0-9]+$/.test(target.org)) return { kind: 'org', org: target.org };
+  return { kind: 'request' };
+}
+
+/** The scope a deterministic probe name pins; legacy request-id names pin none. */
+export function probeScopeOfName(name: string): ProbeScope {
+  const project = /^c2cprobe-p([0-9]+)$/.exec(name);
+  if (project) return { kind: 'project', project: project[1]! };
+  const org = /^c2cprobe-o([0-9]+)$/.exec(name);
+  if (org) return { kind: 'org', org: org[1]! };
+  return { kind: 'request' };
+}
+
 export interface ProbeTarget {
   org?: string;
   project?: string;
