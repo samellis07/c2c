@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { emptyApp, parseProject, type App, type Field, type Workflow } from '../../core/src/index.js';
-import { FORM_EVENT_SERVER_UNINVOKED, assertNoSkippedStatements, clientPostsServerPath } from '../../deluge/src/generate.js';
+import { FORM_EVENT_SERVER_UNINVOKED, assertNoSkippedStatements, clientPostsServerPath, generate } from '../../deluge/src/generate.js';
 import { assertCovered, auditApp, collectOutputs, coverageLedger, groupDrops, renderNoSilentDrop, SilentDropError } from '../src/no-silent-drop.js';
 
 const Z = { start: 0, end: 0 };
@@ -709,7 +710,7 @@ test('a statement visited but accounted nowhere fails generation', () => {
   assert.match(drops[0]!.note, /silent drop/);
 });
 
-test('a skipped statement row fails generation, wired into generate()', () => {
+test('assertNoSkippedStatements throws on a skipped non-block row only', () => {
   const row = { unit: 'workflow W (on load)', kind: 'assign', start: 0, end: 5 };
   assert.throws(() => assertNoSkippedStatements([{ ...row, bucket: 'skipped' }]), /silent drop/);
   // A `block` only recurses; 'skipped' is its resting bucket, not a drop.
@@ -719,6 +720,57 @@ test('a skipped statement row fails generation, wired into generate()', () => {
       { ...row, bucket: 'translated' },
     ]),
   );
+});
+
+// The translator accounts every statement it can parse, so no script reaches a
+// 'skipped' row on its own. A child process replaces translate() with one
+// that reports its rows as skipped and runs the real generate(): the gate
+// inside generate() is what must refuse the app.
+const SKIPPING_TRANSLATE = `
+import { mock } from 'node:test';
+const [translateUrl, generateUrl, appJson] = process.argv.slice(1);
+const real = await import(translateUrl);
+mock.module(translateUrl, {
+  namedExports: {
+    ...real,
+    translate: (src, options) => {
+      const out = real.translate(src, options);
+      return { ...out, coverage: out.coverage.map((c) => ({ ...c, bucket: 'skipped' })) };
+    },
+  },
+});
+const { generate } = await import(generateUrl);
+try {
+  generate(JSON.parse(appJson));
+  console.log('generated');
+} catch (e) {
+  console.log(e.message);
+}
+`;
+
+test('generate() refuses an app whose translator leaves a statement skipped', () => {
+  const a = app({
+    ...coveredApp(),
+    workflows: [workflow({ name: 'Load', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'x = 1;', span: Z } })],
+  });
+  // Control: the same app generates when every statement is accounted.
+  assert.ok(generate(a).statementCoverage.some((c) => c.kind === 'assign' && c.bucket !== 'skipped'));
+  const child = spawnSync(
+    process.execPath,
+    [
+      '--experimental-test-module-mocks',
+      '--no-warnings',
+      '--input-type=module',
+      '-e',
+      SKIPPING_TRANSLATE,
+      new URL('../../deluge/src/translate.js', import.meta.url).href,
+      new URL('../../deluge/src/generate.js', import.meta.url).href,
+      JSON.stringify(a),
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(child.status, 0, child.stderr);
+  assert.match(child.stdout, /^silent drop: a assign statement in workflow Load \(on load\) was visited but emitted nothing/);
 });
 
 test('a todo-bucket statement with no covering TODO item fails generation', () => {
