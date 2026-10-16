@@ -25,11 +25,11 @@ TODO item per untranslated construct occurrence.
 |---|---:|
 | corpus apps | 67 |
 | deterministic apps | 16 (23.9%) |
-| residual TODO items | 310 |
-| distinct TODO kinds | 20 |
+| residual TODO items | 301 |
+| distinct TODO kinds | 17 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
-## Top 20 TODO kinds
+## Top 17 TODO kinds
 
 | construct | count |
 |---|---:|
@@ -37,9 +37,6 @@ TODO item per untranslated construct occurrence.
 | `Server-side Deluge snippet requires manual translation` | 99 |
 | `Static <style> CSS not carried over:(app identifier)` | 44 |
 | `pushnotification` | 6 |
-| `method:(app identifier)` | 4 |
-| `task:(app identifier)` | 3 |
-| `call:(app identifier)` | 2 |
 | `Rebuild the pivot table manually:(app identifier)` | 2 |
 | `report-conditional-format` | 2 |
 | `ZML <button> (app identifier) click action ExecuteFunction calling function button_functions.workoutDone is not generated; wire the click to the function by hand (the snippet stays manual:(app identifier)` | 2 |
@@ -63,6 +60,7 @@ clears the app. The count is apps, not items.
 |---|---:|
 | `client-condition-uses-server` | 8 |
 | `Server-side Deluge snippet requires manual translation` | 8 |
+| `pushnotification` | 3 |
 
 ## Machine-readable
 
@@ -89,18 +87,6 @@ clears the app. The count is apps, not items.
     {
       "construct": "pushnotification",
       "count": 6
-    },
-    {
-      "construct": "method:(app identifier)",
-      "count": 4
-    },
-    {
-      "construct": "task:(app identifier)",
-      "count": 3
-    },
-    {
-      "construct": "call:(app identifier)",
-      "count": 2
     },
     {
       "construct": "Rebuild the pivot table manually:(app identifier)",
@@ -156,15 +142,6 @@ clears the app. The count is apps, not items.
     }
   ],
   "perAppConstructSets": [
-    {
-      "constructs": [
-        "call:(app identifier)",
-        "client-condition-uses-server",
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
-      ],
-      "items": 13
-    },
     {
       "constructs": [
         "client-condition-uses-server"
@@ -322,6 +299,14 @@ clears the app. The count is apps, not items.
         "Server-side Deluge snippet requires manual translation",
         "Static <style> CSS not carried over:(app identifier)"
       ],
+      "items": 11
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "Server-side Deluge snippet requires manual translation",
+        "Static <style> CSS not carried over:(app identifier)"
+      ],
       "items": 13
     },
     {
@@ -374,33 +359,21 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
-        "method:(app identifier)",
-        "Server-side Deluge snippet requires manual translation",
-        "ZML <image> (app identifier) click action Function calling function Vote.downvote is not generated; wire the click to the function by hand (the snippet stays manual:(app identifier)",
-        "ZML <image> (app identifier) click action Function calling function Vote.upvote is not generated; wire the click to the function by hand (the snippet stays manual:(app identifier)"
+        "pushnotification"
       ],
-      "items": 7
+      "items": 1
     },
     {
       "constructs": [
-        "pushnotification",
-        "task:(app identifier)"
+        "pushnotification"
       ],
-      "items": 2
+      "items": 1
     },
     {
       "constructs": [
-        "pushnotification",
-        "task:(app identifier)"
+        "pushnotification"
       ],
-      "items": 2
-    },
-    {
-      "constructs": [
-        "pushnotification",
-        "task:(app identifier)"
-      ],
-      "items": 2
+      "items": 1
     },
     {
       "constructs": [
@@ -520,9 +493,17 @@ clears the app. The count is apps, not items.
         "The <style> element is removed from this page snippet by the sanitizer"
       ],
       "items": 2
+    },
+    {
+      "constructs": [
+        "Server-side Deluge snippet requires manual translation",
+        "ZML <image> (app identifier) click action Function calling function Vote.downvote is not generated; wire the click to the function by hand (the snippet stays manual:(app identifier)",
+        "ZML <image> (app identifier) click action Function calling function Vote.upvote is not generated; wire the click to the function by hand (the snippet stays manual:(app identifier)"
+      ],
+      "items": 3
     }
   ],
-  "todoTotal": 310,
+  "todoTotal": 301,
   "totalApps": 67
 }
 ```
