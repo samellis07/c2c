@@ -144,21 +144,29 @@ export type GateVerdict = 'open' | 'closed' | 'unknown';
  * 400 "Please access the Slate service in your project's console before
  * deploying via the CLI."; the Slate app list on an unopened service answers
  * INVALID_URL_PATTERN; a Stratus write or bucket list on a project that never
- * opened the service answers OPERATION_NOT_ALLOWED "in session when accessing
- * Stratus for the first time". Any "access the <service> service" refusal,
- * INVALID_URL_PATTERN or a first-session refusal on the probe path is read as
- * closed.
+ * opened the service answers OPERATION_NOT_ALLOWED "User needs to be in
+ * session when accessing Stratus for the first time". Any "access the
+ * <service> service" refusal or INVALID_URL_PATTERN is read as closed; the
+ * first-session refusal only ever names the probed service, so it is read as
+ * closed only on the Stratus probe and only with the recorded Stratus
+ * wording — the same sentence naming another service, or a generic
+ * OPERATION_NOT_ALLOWED, stays unverified.
  */
-const CLOSED_TEXT = /access the [\w ]+ service|INVALID_URL_PATTERN|in session when accessing [\w ]+/i;
+const CLOSED_TEXT = /access the [\w ]+ service|INVALID_URL_PATTERN/i;
+const STRATUS_FIRST_USE = /in session when accessing Stratus for the first time[.!?]?/i;
 
-export function classifyGateProbe(result: Pick<RestResult, 'status' | 'body'>): GateVerdict {
+function closedAnswer(text: string, gate: FirstUseGate): boolean {
+  return CLOSED_TEXT.test(text) || (gate.id === 'stratus' && STRATUS_FIRST_USE.test(text));
+}
+
+export function classifyGateProbe(result: Pick<RestResult, 'status' | 'body'>, gate: FirstUseGate): GateVerdict {
   const text = typeof result.body === 'string' ? result.body : JSON.stringify(result.body ?? '');
-  if (result.status >= 400) return CLOSED_TEXT.test(text) ? 'closed' : 'unknown';
+  if (result.status >= 400) return closedAnswer(text, gate) ? 'closed' : 'unknown';
   if (result.status < 200 || result.status >= 300) return 'unknown';
   const body = result.body;
   if (body && typeof body === 'object' && !Array.isArray(body)) {
     const status = (body as Record<string, unknown>).status;
-    if (status === 'failure' || status === 'error') return CLOSED_TEXT.test(text) ? 'closed' : 'unknown';
+    if (status === 'failure' || status === 'error') return closedAnswer(text, gate) ? 'closed' : 'unknown';
   }
   return 'open';
 }
@@ -197,6 +205,6 @@ export async function checkGate(rest: RestFn, gate: FirstUseGate, projectId: str
   } catch (err) {
     result = { status: 0, body: { message: err instanceof Error ? err.message : String(err) } };
   }
-  const verdict = result.status === 0 ? 'unknown' : classifyGateProbe(result);
+  const verdict = result.status === 0 ? 'unknown' : classifyGateProbe(result, gate);
   return { gate, verdict, status: result.status, message: gateMessage(gate, verdict, result, consoleLine) };
 }
