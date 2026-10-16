@@ -3833,7 +3833,7 @@ function aioModule(opts: {
       'After authorizeWrite, the server sets Added_User and Added_Time on insert, and Modified_User and Modified_Time on update. A client value is not copied into those columns. On edit, and on add or edit when body.ROWID names a row, the server loads that row when the caller may modify it and copies stored Added_User and Added_Time onto the record before the script. A row the caller may read but not modify is refused before the script runs. Add versus edit follows that ROWID, never body.op.',
     );
     lines.push(
-      'When functions/c2c-deploy.json mode is "live" and a datastore is injected, this handler validates, writes the row, then runs this script. Any other mode does not write. The script sees the inserted row, including ID (the stored ROWID) and system fields. If the script throws after the write, the row stays: a Deluge runtime or refused-connection error reports its text; any other failure replies 500 request failed.',
+      'When functions/c2c-deploy.json mode is "live" and a datastore is injected, this handler validates, writes the row, then runs this script. Any other mode does not write. The script sees the inserted row, including ID (the stored ROWID) and system fields. If the script fails after the write, the row stays and the reply is still 200 wrote true with a warning {code POST_COMMIT_FAILED, message, requestId}; the failure is logged, its text never reaches the caller.',
     );
     lines.push(
       'A live edit captures Catalyst MODIFIEDTIME while preparing the row, then re-reads ROWID/MODIFIEDTIME once immediately before updateRows. A change is refused as c2c code C2C_STALE_WRITE (409). This is c2c\'s stale check and one extra bounded read; Data Store itself has no optimistic lock.',
@@ -3912,27 +3912,18 @@ ${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' :
       await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
     }
     let result = null;
+    let warning = null;
     try {
       result = ${opts.deferSuccess ? 'live ? { deferred: "after-commit event" } : await handle(ctx)' : 'await handle(ctx)'};
     } catch (err) {
       if (!ctx.persisted) throw err;
-      // A store refusal from a post-write script call maps before the
-      // generic fail. Catalyst's text never reaches the caller.
-      if (replyStoreError(res, err, { live, table: formName, wrote: true })) return;
-      const denied = err && err.code === "RECORD_ACCESS_DENIED";
-      const refused = err && err.code === "DELETE_REFUSED";
-      // Caller-facing texts only: Creator's own Deluge messages and the named
-      // live-refused policy denials. Adapter and JS internals stay server-side.
-      const reportable = err && (err.code === "DELUGE_RUNTIME" || err.code === "DELUGE_CONVERSION" || err.code === "ZOHO_CONNECTION_REFUSED");
-      const message = (denied || refused || reportable) && err && err.message ? err.message : "request failed";
-      if (refused) {
-        send(res, 422, { dryRun: !live, wrote: true, refused: true, error: message, values: projectReadable(access, principal, formName, ctx.record, Object.keys(accepted)), ...(runtime.mail?.length ? { mail: runtime.mail } : {}), ...debugTranscript });
-        return;
-      }
-      send(res, denied ? 403 : 500, { dryRun: !live, wrote: true, error: message, values: projectReadable(access, principal, formName, ctx.record, Object.keys(accepted)), ...(runtime.mail?.length ? { mail: runtime.mail } : {}), ...debugTranscript });
-      return;
+      // The row is committed. A failure after it (on-success script, mail, a
+      // store refusal from a post-write call) is a logged warning on a 200,
+      // never a failed submit: a failure reply would invite a retry that
+      // inserts a second row. Its text never reaches the caller.
+      warning = postCommitWarning(err, { table: formName });
     }
-    send(res, 200, live ? { dryRun: false, wrote: true, values: projectReadable(access, principal, formName, ctx.record, Object.keys(accepted)), result: result ?? null, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) } : { dryRun: true, result: result ?? null, transcript: runtime.transcript, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`
+    send(res, 200, live ? { dryRun: false, wrote: true, values: projectReadable(access, principal, formName, ctx.record, Object.keys(accepted)), result: result ?? null, ...(warning ? { warning } : {}), ...(runtime.mail?.length ? { mail: runtime.mail } : {}) } : { dryRun: true, result: result ?? null, ...(warning ? { warning } : {}), transcript: runtime.transcript, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`
     : `    const result = await handle(ctx);
     send(res, 200, { dryRun: true, result: result ?? null, transcript: runtime.transcript, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`;
   const deleteRefusal = opts.body.includes('shim.validate.cancelDelete')
@@ -3954,7 +3945,7 @@ ${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' :
       : '';
   const refusal = `${deleteRefusal}${submitRefusal}`;
   const shimNames = opts.systemWrite
-    ? ['authorizeRead', 'authorizeWrite', 'applyInitialValues', 'compileCriteria', 'createRuntime', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'principalFromRequest', 'projectFields', 'projectReadable', 'replyStoreError']
+    ? ['authorizeRead', 'authorizeWrite', 'applyInitialValues', 'compileCriteria', 'createRuntime', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'postCommitWarning', 'principalFromRequest', 'projectFields', 'projectReadable', 'replyStoreError']
     : ['authorizeRead', 'authorizeWrite', 'createRuntime', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'principalFromRequest'];
   if (usesApp && !shimNames.includes('RecordAccessError')) shimNames.push('RecordAccessError');
   for (const name of fieldStoreImports(storeShape)) {

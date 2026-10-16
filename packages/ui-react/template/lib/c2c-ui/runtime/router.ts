@@ -64,7 +64,15 @@ export function useRoute(view: Window): Route {
       view.addEventListener('hashchange', notify);
       return () => view.removeEventListener('hashchange', notify);
     },
-    () => view.location.hash,
+    () => {
+      // A scheduled render can land after the window is torn down; a closed
+      // window throws on `location`, so read the hash defensively.
+      try {
+        return view.location.hash;
+      } catch {
+        return '';
+      }
+    },
   );
   const last = useRef<Route>({ name: 'home' });
   const next = parseRoute(hash);

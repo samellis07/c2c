@@ -202,7 +202,7 @@ The app talks to the existing `c2c_api` function through `createApi`
 |---|---|---|---|
 | report rows | `report.queryEndpoint` (`/reports/<name>`) | `{ op: "query", page, pageSize }` | `{ rows: [...] }`; 404/405/501 is an empty report (static host), other errors show the error state |
 | chart and metric rows | the same `report.queryEndpoint` | the same, pages 0, 1, ... until a short page, at most 10 pages | the same; one read per report per screen, shared by every chart and metric on it |
-| add or edit | `form.submitEndpoint` / `form.editSubmitEndpoint` | `{ record, ROWID? }` | `{ ok, dryRun, message? }`; `dryRun !== false` is worded as "nothing was saved" |
+| add or edit | `form.submitEndpoint` / `form.editSubmitEndpoint` | `{ record, ROWID?, idempotencyKey }` | `{ ok, dryRun, wrote, values, warning? }`; `dryRun !== false` is worded as "nothing was saved". `wrote: true` is a stored row and shows the success banner, also with a `warning` (an on-success action or mail failed after the save) or on a 5xx. One `idempotencyKey` per opened form: a repeat of it gets the first committed answer back, never a second row; submit is disabled while a submit is in flight |
 | edit prefill | `form.recordEndpoint` (`/forms/<name>/record`) | `{ ROWID }` | `{ record }` |
 | file upload | `field.uploadEndpoint` (`/uploads/<form>/<field>`) | `{ filename, contentType }` | `{ reference: { key } }`; the submit value is exactly `{ key }` |
 | lookup options | `field.lookup.endpoint` (`GET /lookups/<form>/<display field>?page=&pageSize=300`) | none | `{ rows: [{ ROWID, <display field> }], field }`; 404/405/501 is an empty list |

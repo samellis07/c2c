@@ -339,6 +339,15 @@ is a manual action in the Catalyst console, outside the generated code.
   caller gets the same request id with its safe message
   (`logStoreError` / `replyStoreError` in
   [`packages/shims/src/store-errors.ts`](../packages/shims/src/store-errors.ts)).
+- A failure after the row write (on-success script, mail, history row) is
+  answered 200 `wrote: true` with `warning: { code: "POST_COMMIT_FAILED",
+  message, requestId }` — a fixed message; the error's own text, and record
+  values, never cross the wire. The log line (`postCommitWarning` in
+  `store-errors.ts`) carries table, error code and name, and the request id.
+- Submit idempotency keys (`fn/index.js`) are scoped by a SHA-256 of the
+  caller's user id, the route, and the key, so one caller's key never
+  replays another caller's answer. Only a committed answer is kept, for
+  15 minutes, in the function instance's memory.
 - The Deluge runtime transcript (record values, table names, ops) is a
   dry-run debug view only; no live reply carries it. URL/header/parameter
   and thrown-message masking lives in
