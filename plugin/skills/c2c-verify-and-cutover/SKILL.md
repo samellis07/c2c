@@ -47,13 +47,13 @@ Customer steps (in order) — tell the user exactly these, nothing else:
 4. Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
  Check the sign-in path too: before sign-in the app shows a clear signed-out state, and the framed sign-in page renders the login form — if it serves the app shell, the service worker is answering `/accounts/`, `/__catalyst/`, `/baas/`, `/server/` or cross-origin navigations it must bypass. After sign-in the user must land on the app root — a landing on `/app/` (404) means the `signIn` call is missing `{service_url}` (Slate has no redirect field in `catalyst.json`).
 
-Step 1 names only the services the app uses, one sentence each (an app that uses none of them has no step 1):
+Console gate lines are not customer steps: c2c prints one only when a gate probe answers closed, naming only the services the app uses, one sentence each (an app that uses none of them has none):
 
-Stratus gate line: after Start Exploring, on **Create your First Bucket** create one bucket (any name). Done when it shows in the Stratus bucket list [UNVERIFIED]. This stays within step 1.
+Stratus gate line: after Start Exploring, on **Create your First Bucket** create one bucket (any name). Done when it shows in the Stratus bucket list [UNVERIFIED]. This stays within the Stratus gate line.
 
 - Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name). Done when it shows in the Stratus bucket list [UNVERIFIED] (only when the app has file fields)
 - SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring (only when the app renders PDF)
-- Slate — no console first-open step; `slate:link` and `deploy slate` run with `-ni` on a fresh project [TESTED]
+- Slate — no gate line; `slate:link` and `deploy slate` run with `-ni` on a fresh project [TESTED]. Only an older CLI answering `Please access the Slate service…` needs the console Slate page → Start Exploring as fallback, then a re-run
 
 ### A3. Parity
 

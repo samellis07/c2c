@@ -38,9 +38,10 @@ The usual suspects:
 ## First-use service gates
 
 - **"Please access the Slate service in your project's console
-  before deploying via the CLI"** — normal on a new project: do
-  [your step 1](04-your-five-steps.md) (open Slate once), then the AI
-  re-runs the deploy.
+  before deploying via the CLI"** — only an older Catalyst CLI says
+  this; a current one links and deploys Slate on a new project with no
+  console visit. Update the CLI, or as a fallback open the project →
+  Slate → Start Exploring once, then the AI re-runs the deploy.
 - The same one-time console visit can apply to file storage or PDF
   making: if a read-back fails there on a brand-new project,
   the AI asks you to open that service once, then re-checks.

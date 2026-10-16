@@ -98,7 +98,7 @@ c2c deploy exports/<app>.ds --out c2c-out/<app> --project <id> --org <org> --con
 - P-401: unauthenticated `POST …/server/c2c_api/forms/<f>/submit` → `401 NO_ACCESS`, run credential-free — `curl -s -o /dev/null -w '%{http_code}' -X POST <function-url>/forms/<f>/submit` prints `401` (a signed-in session passes the gateway, so it cannot prove the rule).
 - Sign-in lands on the app root, not the default `/app/` path (404 on Slate) — the embedded `signIn` call passes `{service_url}`; every invite carried `redirect_url` = the Slate URL and went out only after the Slate host existed.
 - `c2c-deploy-report.json` written even when a step failed, with `postDeploySteps` and the DC/source.
-- **Do not** send the user to click "Start Exploring" unless the gate probe answers closed: Cloud Scale (`GET …/table`), Stratus (`GET …/bucket`), SmartBrowz (the browser-grid list), Slate (`GET /slate/v1/project/<id>/app`). A closed gate is one checklist line; c2c verifies it with the same read (`c2c provision --out c2c-out/<app> --record <gate>-enable`) and never continues past an unverified gate. See `references/facts/projects.md`.
+- **Do not** send the user to click "Start Exploring" unless the gate probe answers closed: Cloud Scale (`GET …/table`), Stratus (`GET …/bucket`), SmartBrowz (the browser-grid list). Slate is not a gate. A closed gate is one checklist line; c2c verifies it with the same read (`c2c provision --out c2c-out/<app> --record <gate>-enable`) and never continues past an unverified gate. See `references/facts/projects.md`.
 
 ## Limits this phase enforces
 
@@ -108,7 +108,7 @@ Each limit below names its limit id, the c2c behaviour, and [its row](../../refe
 - [L-DEV-USERS](../../references/limits.md#l-dev-users-app-users-in-development): 25 app users in Development [DOC]; a higher effective cap is [UNVERIFIED] → warn.
 - [L-TABLE-CREATES](../../references/limits.md#l-table-creates-table-creates-per-org): org-wide table-create quota [TESTED] → warn + retry; on `API_LIMIT_REACHED` stop creates, keep created tables, retry after 30/60/120 min.
 - [L-JOB-TIME](../../references/limits.md#l-job-time-job-function): Job functions run 15 min [DOC] → split; generated Jobs chunk with self-resubmit and checkpoint.
-- [L-SERVICE-ACTIVATION](../../references/limits.md#l-service-activation-first-activation-of-stratus-smartbrowz-and-slate): first activation of Stratus, SmartBrowz and Slate has no API, CLI or MCP path [UNVERIFIED] → guide; customer step 1 names only the services the app uses, one sentence each, and c2c probes each gate before the first write.
+- [L-SERVICE-ACTIVATION](../../references/limits.md#l-service-activation-first-activation-of-stratus-and-smartbrowz): first activation of Stratus and SmartBrowz has no API, CLI or MCP path [UNVERIFIED] → guide; a closed gate is one console line naming only the services the app uses, one sentence each, outside the four customer steps, and c2c probes each gate before the first write. Slate needs no activation (`-ni` on a fresh project [TESTED]); the console Slate page is only the older-CLI fallback.
 
 ## Stop conditions
 

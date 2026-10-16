@@ -21,12 +21,11 @@ is the in-app check from the verify flow, asked while verifying.
     [UNVERIFIED] (your app has file fields)
   - SmartBrowz — in the Catalyst console open the project → SmartBrowz →
     Start Exploring (your app makes PDFs)
-  - Slate — in the Catalyst console open the project → Slate → Start
-    Exploring (your app has web screens)
 - **Why:** turning a service on for the first time has no API, CLI or
   MCP path; on a brand-new project the service refuses c2c until it
-  has been opened in the console once. An app that uses none of the
-  three has no step 1.
+  has been opened in the console once. An app that uses neither has
+  no step 1. Slate needs no such step: c2c links and deploys it from
+  the CLI on a brand-new project.
 - **How the AI verifies:** c2c reads each service back itself (the
   gate probe) and continues only when it answers open; see
   [facts/projects.md](../../plugin/references/facts/projects.md).

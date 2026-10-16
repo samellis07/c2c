@@ -36,7 +36,7 @@ Every row below has a stable limit id (`L-…`). Skills cite the id of each limi
 | [L-STRATUS-OBJECT](#l-stratus-object-stratus-single-object) | Stratus single object | note |
 | [L-SLATE-CACHE](#l-slate-cache-slate-indexhtml-cache) | Slate `index.html` cache | version |
 | [L-CREATOR-EGRESS](#l-creator-egress-creator-api-from-catalyst) | Creator API from Catalyst | queue |
-| [L-SERVICE-ACTIVATION](#l-service-activation-first-activation-of-stratus-smartbrowz-and-slate) | First activation of Stratus, SmartBrowz and Slate | guide |
+| [L-SERVICE-ACTIVATION](#l-service-activation-first-activation-of-stratus-and-smartbrowz) | First activation of Stratus and SmartBrowz | guide |
 | [L-INBOUND-MAIL](#l-inbound-mail-inbound-email) | Inbound email | refuse |
 | [L-PAYMENTS](#l-payments-payments) | Payments | map |
 | [L-UNIQUE-RACE](#l-unique-race-unique-under-concurrency) | Unique under concurrency | refuse |
@@ -181,9 +181,9 @@ Value: 429 at ~1 req/min. Label: [UNVERIFIED]. Behaviour: queue — run the move
 
 ## Platform scope
 
-### L-SERVICE-ACTIVATION: First activation of Stratus, SmartBrowz and Slate
+### L-SERVICE-ACTIVATION: First activation of Stratus and SmartBrowz
 
-Value: no API, CLI or MCP path; one console action per service. Label: [UNVERIFIED]. Behaviour: guide — the customer's first step names only the services the app uses, one sentence each: `<Service> — in the Catalyst console open the project → <page> → Start Exploring`; c2c probes each gate before the first write. Probe: the gate probes in facts/projects.md.
+Value: no API, CLI or MCP path; one console action per service. Label: [UNVERIFIED]. Behaviour: guide — a closed gate is one console line, outside the four customer steps, naming only the services the app uses, one sentence each: `<Service> — in the Catalyst console open the project → <page> → Start Exploring`; c2c probes each gate before the first write. Slate needs no activation: the CLI links and deploys it with `-ni` on a fresh project [TESTED]. Probe: the gate probes in facts/projects.md.
 
 ### L-INBOUND-MAIL: Inbound email
 
