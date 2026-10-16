@@ -206,7 +206,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
   };
 
   if (parsed.mcpBegin) {
-    const request = beginMcpRequest(workspace);
+    const request = beginMcpRequest(workspace, undefined, probeTarget);
     const ask = mcpRequestInstructions(request, probeTarget);
     const pending = readPendingCleanups(workspace);
     if (parsed.json) {
@@ -216,7 +216,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
       io.stdout(
         `MCP request ${ask.request} (answer before ${ask.expires})\n` +
           `1. In this session, make these calls; approve each call when asked. Never call ${ask.neverCall.join(' or ')}: they return project secrets into the transcript, and the doctor lists projects through the Catalyst CLI.\n${callLines}\n` +
-          `   The first call writes a short-lived probe bucket (${ask.probe}) the doctor reads back over the Catalyst REST API with your CLI credential — the echoed nonce alone proves nothing.\n` +
+          `   The first call writes the probe bucket (${ask.probe}; one per project, reused across runs — an already-exists answer means an earlier run left it: carry on and still send the observation) the doctor reads back over the Catalyst REST API with your CLI credential — the echoed nonce alone proves nothing.\n` +
           `2. Pipe the observation — this request id, the Catalyst server, host and tool names the session lists, and each call's result verbatim — into:\n` +
           `   ${ask.command}\n` +
           `${JSON.stringify(ask.observation, null, 2)}\n` +
@@ -245,12 +245,31 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
         // doctor's own REST read-back of the probe bucket, not the echoed
         // nonce. Runs before closeMcpRequest so a rejected observation can
         // never consume the request (parse already threw by this point).
-        const probe = probeNameOf(result.observed.request);
+        // The bucket --mcp-begin named, pinned in the request file: the
+        // read-back and the cleanup track the bucket that was actually
+        // created, even if the scope flags drifted since the begin run.
+        const probe = result.probe ?? probeNameOf(result.observed.request, probeTarget);
         const rest = io.rest ?? ((call: { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; path: string }) => catalystRestCall(io.env, probeTarget.org ?? '', probeTarget.project ?? '', call));
         const binding = await verifyProbe(rest, probeTarget, probe);
         evidence.binding = binding;
-        if (binding.status === 'absent') clearPendingCleanup(workspace, probe);
-        else writePendingCleanup(workspace, probe, probeTarget);
+        if (binding.status === 'absent') {
+          clearPendingCleanup(workspace, probe);
+        } else if (probeTarget.project !== undefined && /^[0-9]+$/.test(probeTarget.project)) {
+          writePendingCleanup(workspace, probe, probeTarget);
+          if (binding.status === 'verified') {
+            // A verified in-project probe supersedes the pre-project probe:
+            // project-less records name no actionable delete target, so
+            // they would warn forever. Legacy random buckets stay tracked
+            // until the re-check below shows them gone.
+            for (const pending of readPendingCleanups(workspace)) {
+              if (!pending.project && (pending.org === undefined || pending.org === probeTarget.org)) clearPendingCleanup(workspace, pending.name);
+            }
+          }
+        }
+        // A verified probe without a project tracks nothing: no bucket was
+        // provably created inside a project, and its delete call would carry
+        // a placeholder project. The in-project probe after the project
+        // exists tracks its own bucket.
         // Earlier runs' probes owe a delete too: each is re-checked and its
         // reminder drops only once the read-back shows it is actually gone.
         for (const pending of readPendingCleanups(workspace)) {
@@ -325,6 +344,11 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
   // doctor and the gate read the same D-B rows and agree on the verdict.
   const carried = evidence === undefined ? carriedMcpRecord({ workspace, scope: { dc: scope.dc, org: scope.org, project: scope.project }, env: io.env, ...(now ? { now: now() } : {}) }) : undefined;
 
+  // Cleanup always runs: while a probe bucket may exist, the delete call is
+  // re-printed on every run — in the human table and as pendingCleanup in
+  // the JSON body, so machine consumers see the instruction too. Each record
+  // clears only when a REST read-back confirms that bucket is gone.
+  const pendingCleanups = readPendingCleanups(workspace);
   const ctx: DoctorContext = {
     io,
     workspace,
@@ -336,7 +360,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
     ...(origin ? { evidenceSource: origin.source } : {}),
     ...(carried ? { carried: { checks: carried.checks, at: carried.mcp.at ?? '' } } : {}),
     ...(reuseNote ? { evidenceNote: reuseNote } : {}),
-    pendingCleanup: readPendingCleanups(workspace).map((p) => p.name),
+    pendingCleanup: pendingCleanups.map((p) => p.name),
     cliDc: cliHooks.cliDc,
     cliOrg: cliHooks.cliOrg,
   };
@@ -368,17 +392,16 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
   }
   if (!parsed.quiet) {
     if (parsed.json) {
-      io.stdout(`${JSON.stringify({ ...file, ...(path ? { doctorJson: path } : {}) }, null, 2)}\n`);
+      io.stdout(
+        `${JSON.stringify({ ...file, ...(path ? { doctorJson: path } : {}), ...(pendingCleanups.length ? { pendingCleanup: pendingCleanups.map((p) => probeDeleteCall(p.name, p)) } : {}) }, null, 2)}\n`,
+      );
     } else {
       io.stdout(formatTable(run.checks, file, reuseNote));
       if (carried) io.stdout(`D-B/D-V: ${carried.signed ? '' : 'failed rows '}from the MCP observation recorded at ${carried.mcp.at}; run c2c doctor --mcp-begin to record a new one\n`);
       if (path) io.stdout(`doctor.json: ${path}\n`);
       else io.stdout('(local run; doctor.json not updated)\n');
     }
-    // Cleanup always runs: while a probe bucket may exist, the delete call is
-    // re-printed on every run (each pending record clears only when a REST
-    // read-back confirms that bucket is gone).
-    for (const pending of readPendingCleanups(workspace)) {
+    for (const pending of pendingCleanups) {
       io.stdout(`cleanup: remove the probe bucket ${pending.name} — in this session call ${JSON.stringify(probeDeleteCall(pending.name, pending))}\n`);
     }
   }

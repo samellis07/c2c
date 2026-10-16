@@ -91,7 +91,7 @@ const SCHEMAS = {
 async function observe(env: NodeJS.ProcessEnv, overrides: Record<string, unknown> = {}) {
   const begin = await doctor(env, ['--mcp-begin', '--json']);
   assert.equal(begin.code, 0, begin.err);
-  const ask = JSON.parse(begin.out) as { request: string; observation: Record<string, unknown> };
+  const ask = JSON.parse(begin.out) as { request: string; probe: string; observation: Record<string, unknown> };
   assert.ok('schemas' in ask.observation, 'the observation template asks for the tool schemas');
   const request = ask.request;
   const body = {
@@ -105,7 +105,7 @@ async function observe(env: NodeJS.ProcessEnv, overrides: Record<string, unknown
     tools: requiredTools.base.map((name) => `CatalystbyZoho_${name}`),
     schemas: SCHEMAS,
     calls: [
-      { tool: 'CatalystbyZoho_Create_Bucket', result: { content: [{ type: 'text', text: JSON.stringify({ data: { bucket_name: `c2cprobe${request}` } }) }] } },
+      { tool: 'CatalystbyZoho_Create_Bucket', result: { content: [{ type: 'text', text: JSON.stringify({ data: { bucket_name: ask.probe } }) }] } },
       {
         tool: 'CatalystbyZoho_List_All_Organizations',
         result: { content: [{ type: 'text', text: JSON.stringify({ data: [{ id: ORG, org_name: 'secret-org-name', admin_email: 'admin@example.com' }] }) }] },

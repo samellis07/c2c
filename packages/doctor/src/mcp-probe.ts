@@ -21,6 +21,15 @@
  *     `CatalystbyZoho_Delete_Bucket` by `query_params.bucket_name`
  *     (errors.md), instructed for the session and re-printed while a pending
  *     cleanup record exists.
+ *
+ * The probe bucket name is deterministic per scope — one bucket per project
+ * (`c2cprobe-p<project-id>`), one per org before the project exists
+ * (`c2cprobe-o<org-id>`) — so repeated doctor runs reuse the same bucket
+ * instead of leaking a new random bucket every run. A scope the doctor
+ * cannot pin to an org or project keeps the legacy request-id name. The
+ * read-back still proves the bucket is visible inside the selected project
+ * over the CLI credential; a repeated run that finds the bucket left by an
+ * earlier run re-verifies without writing a second bucket.
  */
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -38,9 +47,34 @@ export const IN_PROJECT_PROBE_REQUIRED = 'in-project-probe-required';
 export const PROBE_CREATE_CALL = 'CatalystbyZoho_Create_Bucket';
 export const PROBE_DELETE_CALL = 'CatalystbyZoho_Delete_Bucket';
 
-/** The probe name is the request id itself — a name the caller cannot choose. */
-export function probeNameOf(request: string): string {
-  return `${PROBE_PREFIX}${request}`;
+/**
+ * The deterministic probe bucket for a scope: one bucket per project, one
+ * per org while there is no project yet. Project ids are unique per org, so
+ * the name is unique per project; the `p`/`o` infix keeps the two shapes
+ * apart. Scopes without a numeric org or project id have no deterministic
+ * name (undefined) and keep the legacy request-id name.
+ */
+export function probeNameFor(target: ProbeTarget): string | undefined {
+  if (target.project !== undefined && /^[0-9]+$/.test(target.project)) return `${PROBE_PREFIX}-p${target.project}`;
+  if (target.org !== undefined && /^[0-9]+$/.test(target.org)) return `${PROBE_PREFIX}-o${target.org}`;
+  return undefined;
+}
+
+/**
+ * The probe bucket name: the deterministic per-scope name when the scope
+ * pins it, else the legacy request-id name (a name the caller cannot choose).
+ */
+export function probeNameOf(request: string, target: ProbeTarget = {}): string {
+  return probeNameFor(target) ?? `${PROBE_PREFIX}${request}`;
+}
+
+/**
+ * A name this doctor treats as one of its probe buckets: the deterministic
+ * per-project/per-org names and the legacy request-id names. Anything else
+ * is never tracked for cleanup.
+ */
+export function isProbeName(name: string): boolean {
+  return /^c2cprobe(?:[0-9a-f]{32}|-p[0-9]+|-o[0-9]+)$/.test(name);
 }
 
 export interface ProbeTarget {

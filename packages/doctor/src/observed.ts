@@ -36,7 +36,7 @@ import { dirname, join } from 'node:path';
 import { EvidenceRejected, EvidenceStale, entryIdOf, parseEvidence, shortToolName, type McpEvidence } from './evidence.js';
 import { NEVER_CALL_MCP_TOOLS } from './required-tools.js';
 import { dcOfCreatorHost, type Dc } from './scope.js';
-import { PROBE_CREATE_CALL, PROBE_DELETE_CALL, probeCreateCall, probeDeleteCall, probeNameOf, type ProbeTarget } from './mcp-probe.js';
+import { isProbeName, PROBE_CREATE_CALL, PROBE_DELETE_CALL, probeCreateCall, probeDeleteCall, probeNameOf, type ProbeTarget } from './mcp-probe.js';
 
 export const OBSERVATION_KIND = 'c2c-mcp-observation';
 export const OBSERVATION_SCHEMA = 1;
@@ -71,6 +71,8 @@ export interface McpRequest {
   schema: number;
   request: string;
   at: string;
+  /** The probe bucket the begin output named (deterministic per scope); the observation answers for this bucket. */
+  probe?: string;
 }
 
 export interface ObservedCall {
@@ -90,9 +92,14 @@ export function mcpRequestPath(workspace: string): string {
   return join(workspace, 'c2c-out', '.c2c', 'mcp-request.json');
 }
 
-/** Open (or replace) this workspace's one-time request. */
-export function beginMcpRequest(workspace: string, now: Date = new Date()): McpRequest {
-  const request: McpRequest = { schema: OBSERVATION_SCHEMA, request: randomBytes(16).toString('hex'), at: now.toISOString() };
+/**
+ * Open (or replace) this workspace's one-time request. The probe bucket is
+ * pinned here so --mcp-observed reads back and tracks the bucket --mcp-begin
+ * actually named, even if the scope flags drifted between the two runs.
+ */
+export function beginMcpRequest(workspace: string, now: Date = new Date(), target: ProbeTarget = {}): McpRequest {
+  const id = randomBytes(16).toString('hex');
+  const request: McpRequest = { schema: OBSERVATION_SCHEMA, request: id, at: now.toISOString(), probe: probeNameOf(id, target) };
   const path = mcpRequestPath(workspace);
   mkdirSync(dirname(path), { recursive: true });
   for (const stale of readdirSync(dirname(path))) {
@@ -106,7 +113,11 @@ function readMcpRequest(workspace: string): McpRequest | undefined {
   try {
     const parsed = JSON.parse(readFileSync(mcpRequestPath(workspace), 'utf8')) as Partial<McpRequest>;
     if (typeof parsed.request === 'string' && /^[0-9a-f]{32}$/.test(parsed.request) && typeof parsed.at === 'string') {
-      return { schema: Number(parsed.schema), request: parsed.request, at: parsed.at };
+      // A request file from an older build has no probe: the caller falls
+      // back to the deterministic name for the current scope. A probe that
+      // is not a probe name is ignored the same way, never trusted.
+      const probe = typeof parsed.probe === 'string' && isProbeName(parsed.probe) ? parsed.probe : undefined;
+      return { schema: Number(parsed.schema), request: parsed.request, at: parsed.at, ...(probe ? { probe } : {}) };
     }
   } catch {
     /* no open request */
@@ -210,6 +221,23 @@ function entriesOf(payload: unknown, depth = 0): Record<string, unknown>[] | und
   return undefined;
 }
 
+/**
+ * An error result that only says the deterministic probe bucket is already
+ * there (a repeated run re-creating the one bucket per project). The write
+ * is still attested by the REST read-back, never by this result — any other
+ * error is refused as before. The live duplicate shape is not documented, so
+ * this matches the common wordings ([UNVERIFIED] against the live API).
+ */
+function isAlreadyExistsResult(result: unknown): boolean {
+  let text: string;
+  try {
+    text = typeof result === 'string' ? result : JSON.stringify(result);
+  } catch {
+    return false;
+  }
+  return /already[\s_-]*exists|duplicate|conflict|\b409\b/i.test(text);
+}
+
 /** A DC is retained only after it is derived from an org's observed console/API host. */
 function orgHostDc(entry: Record<string, unknown>): Dc | undefined {
   for (const key of ['console_url', 'consoleUrl', 'console_host', 'consoleHost', 'api_url', 'apiUrl', 'api_host', 'apiHost']) {
@@ -278,7 +306,7 @@ export function readStdinBounded(limit: number = OBSERVATION_MAX_BYTES, fd: numb
  * EvidenceStale for an expired request / an id-less entry). Does not close
  * the request; the caller closes it once the observation is accepted.
  */
-export function parseObservation(text: string, input: { workspace: string; now?: Date }): { evidence: McpEvidence; observed: Observed } {
+export function parseObservation(text: string, input: { workspace: string; now?: Date }): { evidence: McpEvidence; observed: Observed; probe?: string } {
   const now = input.now ?? new Date();
   if (Buffer.byteLength(text, 'utf8') > OBSERVATION_MAX_BYTES) {
     throw new ObservationRejected(`the observation is larger than the ${OBSERVATION_MAX_BYTES}-byte limit`);
@@ -337,8 +365,14 @@ export function parseObservation(text: string, input: { workspace: string; now?:
     } else if (short === shortToolName(PROBE_CALL) || short === shortToolName(PROBE_DELETE_CALL)) {
       // The probe write and the cleanup delete are attested by the doctor's
       // own REST read-back, never by this result: it is checked for an error
-      // envelope and digested.
-      rejectIfErrorFlag(result, short);
+      // envelope and digested. A repeated run reuses the one probe bucket
+      // per project, so an already-exists answer to the re-create is
+      // accepted for the probe write (never for the cleanup delete).
+      try {
+        rejectIfErrorFlag(result, short);
+      } catch (err) {
+        if (short !== shortToolName(PROBE_CALL) || !isAlreadyExistsResult(result)) throw err;
+      }
     } else throw new ObservationRejected(`calls[${index}] is not a call the MCP request asked for`);
     calls.push({ tool: short, digest: resultDigest(result) });
   }
@@ -355,12 +389,17 @@ export function parseObservation(text: string, input: { workspace: string; now?:
   if (Object.keys(orgDcs).length) evidence.orgDcs = orgDcs;
   evidence.at = now.toISOString();
   evidence.workspace = input.workspace;
-  return { evidence, observed: { request: open.request, orgs, calls } };
+  // The bucket --mcp-begin named, pinned in the request file: the read-back
+  // and the cleanup track the bucket that was actually created, even if the
+  // scope flags drifted since the begin run.
+  return { evidence, observed: { request: open.request, orgs, calls }, ...(open.probe ? { probe: open.probe } : {}) };
 }
 
 /** What the agent is asked to do, for the --mcp-begin output. */
 export function mcpRequestInstructions(request: McpRequest, target: ProbeTarget = {}): { request: string; expires: string; probe: string; calls: Record<string, unknown>[]; cleanup: Record<string, unknown>; neverCall: string[]; command: string; observation: Record<string, unknown> } {
-  const probe = probeNameOf(request.request);
+  // The pinned bucket from the request file when this request opened it;
+  // older request files fall back to the deterministic name for this scope.
+  const probe = request.probe && isProbeName(request.probe) ? request.probe : probeNameOf(request.request, target);
   return {
     request: request.request,
     expires: new Date(Date.parse(request.at) + MCP_REQUEST_MAX_AGE_MS).toISOString(),

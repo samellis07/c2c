@@ -38,7 +38,7 @@ import { restWithRetry, spawnWithRetry, type ReRead, type RestRetry, type RetryO
 import { assertProtectedProject } from './guards.js';
 import { ACTIVATION_SERVICES, checkGate, FIRST_USE_GATES, gateConsoleLine, gateForStep, type FirstUseGate, type GateCheck } from './first-use.js';
 import { iacImportBundle, runProjectImport, ImportEndedError, StuckImportError, type ImportFetch } from './iac-import.js';
-import { IN_PROJECT_PROBE_REQUIRED, probeCreateCall, verifyProbe } from '../../doctor/src/mcp-probe.js';
+import { IN_PROJECT_PROBE_REQUIRED, probeCreateCall, probeNameFor, verifyProbe } from '../../doctor/src/mcp-probe.js';
 import { loadMcpEvidence } from '../../doctor/src/mcp-state.js';
 import { workspaceDir } from '../../doctor/src/report.js';
 
@@ -1730,6 +1730,10 @@ function probeWorkspace(ctx: Ctx): string {
  * `in-project-probe-required` marker. Anything else — a project-scoped
  * record, another scope, no record, a non-marker binding — owes nothing and
  * leaves the existing-project path exactly as strict as before.
+ *
+ * The name is the deterministic per-project probe bucket, shared with later
+ * project-scoped doctor runs, so the import path and the doctor path never
+ * leave two probe buckets in one project.
  */
 function pendingInProjectProbe(ctx: Ctx): string | undefined {
   const projectId = ctx.scope.projectId ?? ctx.state.learned.projectId;
@@ -1745,18 +1749,19 @@ function pendingInProjectProbe(ctx: Ctx): string | undefined {
   if (reuse.status !== 'reused') return undefined;
   const binding = reuse.evidence.binding;
   if (binding?.status !== 'verified' || binding.detail !== IN_PROJECT_PROBE_REQUIRED) return undefined;
+  const name = probeNameFor({ project: projectId })!;
   const done = ctx.state.learned.inProjectProbe;
-  if (done && done.name === binding.name && done.projectId === projectId) return undefined;
-  return binding.name;
+  if (done && done.name === name && done.projectId === projectId) return undefined;
+  return name;
 }
 
 /**
  * The mandatory re-probe after an import created the project under an
- * org-scoped doctor: the nonce bucket the session was asked to write must be
- * read back INSIDE the new project over the Catalyst REST API before any
- * table, function or deploy step may run. Fail closed — any answer but
- * `verified` stops the step and names the exact Create_Bucket call to make,
- * then re-run.
+ * org-scoped doctor: the deterministic per-project probe bucket the session
+ * was asked to write must be read back INSIDE the new project over the
+ * Catalyst REST API before any table, function or deploy step may run. Fail
+ * closed — any answer but `verified` stops the step and names the exact
+ * Create_Bucket call to make, then re-run.
  */
 async function inProjectProbeRefusal(ctx: Ctx): Promise<string | undefined> {
   const name = pendingInProjectProbe(ctx);

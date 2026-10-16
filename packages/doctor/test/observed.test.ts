@@ -17,11 +17,14 @@ import {
   doctorJsonPath,
   evaluateGate,
   gateRefusalMessage,
+  isProbeName,
   MCP_RESULT_MAX_BYTES,
   mcpRequestPath,
   mcpStatePath,
   ObservationRejected,
   OBSERVATION_MAX_BYTES,
+  probeNameFor,
+  probeNameOf,
   readStdinBounded,
   verifyProbe,
   type DoctorFile,
@@ -37,6 +40,8 @@ const ORG = '10000000000';
 const FOREIGN_ORG = '10000000001';
 const PROJECT = '10000000000013200';
 const SCOPE = { dc: 'in', org: ORG, project: PROJECT };
+/** The one probe bucket per project: every run in this scope names the same bucket. */
+const PROBE = `c2cprobe-p${PROJECT}`;
 /** The observed-flow fields of the doctor.json mcp block. */
 type ObservedFile = DoctorFile & {
   mcp?: { source?: string; binding?: { status?: string }; observed?: { request: string; orgs: string[]; calls: { tool: string; digest: string }[] } };
@@ -176,7 +181,7 @@ function observation(request: string, overrides: Record<string, unknown> = {}): 
       'catalyst-stratus',
     ],
     calls: [
-      { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(`c2cprobe${request}`) },
+      { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(PROBE) },
       { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG]) },
     ],
     ...overrides,
@@ -219,7 +224,7 @@ test('mcp-observed: an observed List_All_Organizations result records evidence b
 test('mcp-observed: stdio is green when the probe write is read back in the selected project', async () => {
   const { dir, env } = workspace();
   const { request } = await begin(env);
-  const probe = `c2cprobe${request}`;
+  const probe = PROBE;
   const body = observation(request, {
     host_of_url: undefined,
     transport: 'stdio',
@@ -238,7 +243,7 @@ test('mcp-observed: stdio is green when the probe write is read back in the sele
   const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
   assert.equal(file.mcp?.binding?.status, 'verified');
   // The cleanup instruction always follows a verified probe.
-  assert.match(run.out, /cleanup: remove the probe bucket c2cprobe[0-9a-f]+ .*Delete_Bucket/);
+  assert.match(run.out, new RegExp(`cleanup: remove the probe bucket ${PROBE} .*Delete_Bucket`));
   assert.ok(existsSync(join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json')));
 });
 
@@ -252,7 +257,7 @@ test('mcp-observed: a fabricated stdio observation without the server-side write
       host_of_url: undefined,
       transport,
       calls: [
-        { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(`c2cprobe${request}`) },
+        { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(PROBE) },
         { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG], 'console.zoho.in') },
       ],
     });
@@ -274,7 +279,7 @@ test('mcp-observed: a fabricated org host or a matching CLI selection never stan
     host_of_url: undefined,
     transport: 'stdio',
     calls: [
-      { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(`c2cprobe${request}`) },
+      { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(PROBE) },
       // Caller claims an org host in the target DC; CLI hooks claim the same org/DC.
       { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG], 'console.zoho.in') },
     ],
@@ -301,8 +306,8 @@ test('mcp-observed: the bucket list must name the exact probe bucket — never a
   for (const [label, body] of [
     ['different bucket', { data: [{ bucket_name: 'some-other-bucket' }] }],
     ['empty data', { data: [] }],
-    ['name prefix', (request: string) => ({ data: [{ bucket_name: `c2cprobe${request.slice(0, -1)}` }] })],
-    ['name superstring', (request: string) => ({ data: [{ bucket_name: `c2cprobe${request}x` }, { bucket_name: `x-c2cprobe${request}` }] })],
+    ['name prefix', (probe: string) => ({ data: [{ bucket_name: probe.slice(0, -1) }] })],
+    ['name superstring', (probe: string) => ({ data: [{ bucket_name: `${probe}x` }, { bucket_name: `x-${probe}` }] })],
     ['row without a name', { data: [{ bucket_url: 'https://x-development.zohostratus.in' }] }],
     ['data not a list', { data: { bucket_name: 'x' } }],
     ['top-level name only', { bucket_name: 'x' }],
@@ -311,7 +316,7 @@ test('mcp-observed: the bucket list must name the exact probe bucket — never a
   ] as const) {
     const { dir, env } = workspace();
     const { request } = await begin(env);
-    const resolved = typeof body === 'function' ? body(request) : body;
+    const resolved = typeof body === 'function' ? body(PROBE) : body;
     const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, listRest(resolved));
     assert.equal(run.code, 1, `${label}: ${run.out}${run.err}`);
     assert.match(run.out, /FAIL D-B2 .*probe write was not read back/);
@@ -327,7 +332,7 @@ test('mcp-observed: the bucket list must name the exact probe bucket — never a
 test('mcp-observed: the probe verifies from the bucket list among other buckets; the specific-bucket 404 INVALID_URL_PATTERN is never consulted', async () => {
   const { dir, env } = workspace();
   const { request } = await begin(env);
-  const probe = `c2cprobe${request}`;
+  const probe = PROBE;
   const seen: { path: string }[] = [];
   // The project also holds a console-created bucket and an earlier probe; the
   // specific-bucket route answers 404 INVALID_URL_PATTERN for all of them.
@@ -400,7 +405,7 @@ test('mcp-observed: a failed observation stays red on the next bare doctor run, 
 test('mcp-observed: a verified observation carries to a bare run, so doctor and the gate both stay green', async () => {
   const { dir, env } = workspace();
   const { request } = await begin(env);
-  const probe = `c2cprobe${request}`;
+  const probe = PROBE;
   assert.equal((await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: {} }))).code, 0);
   const { io, out } = fakeIo(env);
   assert.equal(await doctorCli([], io, { hooks: NO_HOOKS }), 0, out());
@@ -412,7 +417,7 @@ test('mcp-observed: a verified observation carries to a bare run, so doctor and 
 async function verifiedRecord(): Promise<{ dir: string; env: NodeJS.ProcessEnv; file: ObservedFile }> {
   const { dir, env } = workspace();
   const { request } = await begin(env);
-  const probe = `c2cprobe${request}`;
+  const probe = PROBE;
   assert.equal((await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: {} }))).code, 0);
   const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
   for (const id of ['D-B1', 'D-B2']) assert.equal(file.checks.find((c) => c.id === id)?.status, 'pass', id);
@@ -484,7 +489,7 @@ test('mcp-observed: a failed record with no signed state still carries its faile
 test('mcp-observed: a record from another c2c version is not carried to a bare run', async () => {
   const { dir, env } = workspace();
   const { request } = await begin(env);
-  const probe = `c2cprobe${request}`;
+  const probe = PROBE;
   assert.equal((await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: {} }))).code, 0);
   const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
   writeFileSync(doctorJsonPath(dir), JSON.stringify({ ...file, c2c: '0.0.0' }));
@@ -528,7 +533,7 @@ test('mcp-observed: a record for another project or past 12 h is not carried', a
 test('mcp-observed: cleanup is re-printed while the probe may still exist, and cleared once it is gone', async () => {
   const { dir, env } = workspace();
   const { request } = await begin(env);
-  const probe = `c2cprobe${request}`;
+  const probe = PROBE;
   const run = await observe(env, observation(request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: { data: [{ bucket_name: probe }] } }));
   assert.equal(run.code, 0, run.out + run.err);
   assert.match(run.out, /cleanup: remove the probe bucket/);
@@ -546,7 +551,7 @@ test('mcp-observed: cleanup is re-printed while the probe may still exist, and c
 test('mcp-observed: an observation may report the Delete_Bucket cleanup call', async () => {
   const { dir, env } = workspace();
   const { request } = await begin(env);
-  const probe = `c2cprobe${request}`;
+  const probe = PROBE;
   const run = await observe(
     env,
     observation(request, {
@@ -567,25 +572,26 @@ test('mcp-observed: an observation may report the Delete_Bucket cleanup call', a
 
 test('mcp-observed: cleanup owed warns on D-B8 without downgrading D-B1/D-B2', async () => {
   const { dir, env } = workspace();
-  const { request } = await begin(env);
-  const probe = `c2cprobe${request}`;
-  const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe]: {} }));
+  const first = await begin(env);
+  assert.equal((JSON.parse(first.out) as { probe: string }).probe, PROBE);
+  const run = await observe(env, observation(first.request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [PROBE]: {} }));
   assert.equal(run.code, 0, run.out + run.err);
   assert.match(run.out, /PASS D-B1 .*bound by the probe write/);
   assert.match(run.out, /PASS D-B2/);
-  assert.match(run.out, new RegExp(`WARN D-B8 .*${probe}`));
+  assert.match(run.out, new RegExp(`WARN D-B8 .*${PROBE}`));
   const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as DoctorFile;
   assert.equal(file.checks.find((c) => c.id === 'D-B8')?.status, 'warn');
-  // Once the read-back shows the probe gone, the next run's row is green.
+  // A repeated run reuses the same bucket: the warning names the same name,
+  // and the pending file holds exactly one record — never a second bucket.
   const next = await begin(env);
-  const probe2 = `c2cprobe${next.request}`;
-  const run2 = await observe(env, observation(next.request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe2]: {} }));
+  assert.equal((JSON.parse(next.out) as { probe: string }).probe, PROBE);
+  const run2 = await observe(env, observation(next.request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [PROBE]: {} }));
   assert.equal(run2.code, 0, run2.out + run2.err);
-  assert.match(run2.out, new RegExp(`WARN D-B8 .*${probe2}`));
-  assert.doesNotMatch(run2.out, new RegExp(`WARN D-B8 .*${probe}`));
+  assert.match(run2.out, new RegExp(`WARN D-B8 .*${PROBE}`));
+  const tracked = JSON.parse(readFileSync(join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json'), 'utf8')) as { name: string }[];
+  assert.deepEqual(tracked.map((p) => p.name), [PROBE]);
   // No pending cleanup at all: D-B8 reports pass, never a leftover warning.
   const third = await begin(env);
-  const probe3 = `c2cprobe${third.request}`;
   const seen: { path: string }[] = [];
   const run3 = await observe(env, observation(third.request), [], NO_HOOKS, fakeRest({}, seen));
   assert.equal(run3.code, 0, run3.out + run3.err);
@@ -610,26 +616,25 @@ test('mcp-observed: a bucket the probe did not create is never targeted for clea
   assert.match(out, /c2cprobe-not-hex/);
 });
 
-test('mcp-observed: a second probe never orphans the first — both are tracked, reminded, and cleared', async () => {
+test('mcp-observed: a repeated run creates no second bucket — one record, one reminder, one clear', async () => {
   const { dir, env } = workspace();
   const cleanupFile = join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json');
   // First probe verified server-side, but the session never ran its delete.
   const first = await begin(env);
-  const probe1 = `c2cprobe${first.request}`;
-  const run1 = await observe(env, observation(first.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { data: [{ bucket_name: probe1 }] } }));
+  const run1 = await observe(env, observation(first.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [PROBE]: { data: [{ bucket_name: PROBE }] } }));
   assert.equal(run1.code, 0, run1.out + run1.err);
-  // The second begin still reminds about the first probe, and the second
-  // verified probe is APPENDED — both buckets stay tracked.
+  // The second begin still reminds about the same bucket, and the second
+  // verified probe REFRESHES the single record instead of appending a
+  // second bucket.
   const second = await begin(env);
-  const probe2 = `c2cprobe${second.request}`;
-  assert.match(second.out, new RegExp(probe1));
-  const run2 = await observe(env, observation(second.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { data: [{ bucket_name: probe1 }] }, [probe2]: { data: [{ bucket_name: probe2 }] } }));
+  assert.equal((JSON.parse(second.out) as { probe: string }).probe, PROBE);
+  assert.match(second.out, new RegExp(PROBE));
+  const run2 = await observe(env, observation(second.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [PROBE]: { data: [{ bucket_name: PROBE }] } }));
   assert.equal(run2.code, 0, run2.out + run2.err);
   const tracked = JSON.parse(readFileSync(cleanupFile, 'utf8')) as { name: string }[];
-  assert.deepEqual(tracked.map((p) => p.name).sort(), [probe1, probe2].sort());
-  assert.match(run2.out, new RegExp(`cleanup: remove the probe bucket ${probe1}`));
-  assert.match(run2.out, new RegExp(`cleanup: remove the probe bucket ${probe2}`));
-  // Once both buckets read back absent, every record clears.
+  assert.deepEqual(tracked.map((p) => p.name), [PROBE]);
+  assert.match(run2.out, new RegExp(`cleanup: remove the probe bucket ${PROBE}`));
+  // Once the bucket reads back absent, the record clears.
   const third = await begin(env);
   const run3 = await observe(env, observation(third.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({}));
   assert.equal(run3.code, 1);
@@ -637,24 +642,177 @@ test('mcp-observed: a second probe never orphans the first — both are tracked,
   assert.doesNotMatch(run3.out, /cleanup: remove the probe bucket|cleanup still pending/);
 });
 
-test('mcp-observed: a partial cleanup keeps the remaining pending record', async () => {
+test('mcp-observed: a legacy random probe stays tracked beside the shared bucket until it reads back absent', async () => {
   const { dir, env } = workspace();
   const cleanupFile = join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json');
+  const legacy = `c2cprobe${'b'.repeat(32)}`;
   const first = await begin(env);
-  const probe1 = `c2cprobe${first.request}`;
-  assert.equal((await observe(env, observation(first.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { data: [{ bucket_name: probe1 }] } }))).code, 0);
+  assert.equal((await observe(env, observation(first.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [PROBE]: { data: [{ bucket_name: PROBE }] } }))).code, 0);
+  // An older build left one random bucket behind; it is appended beside the
+  // single shared-bucket record.
+  const tracked1 = JSON.parse(readFileSync(cleanupFile, 'utf8')) as { name: string }[];
+  writeFileSync(cleanupFile, JSON.stringify([...tracked1, { name: legacy, org: ORG, project: PROJECT, at: new Date().toISOString() }]));
+  // While both buckets exist, both reminders print.
   const second = await begin(env);
-  const probe2 = `c2cprobe${second.request}`;
-  assert.equal((await observe(env, observation(second.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe1]: { data: [{ bucket_name: probe1 }] }, [probe2]: { data: [{ bucket_name: probe2 }] } }))).code, 0);
-  // The session deleted only the first bucket: its entry drops, the second stays.
+  const run2 = await observe(env, observation(second.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [PROBE]: { data: [{ bucket_name: PROBE }] }, [legacy]: { data: [{ bucket_name: legacy }] } }));
+  assert.equal(run2.code, 0, run2.out + run2.err);
+  const tracked2 = JSON.parse(readFileSync(cleanupFile, 'utf8')) as { name: string }[];
+  assert.deepEqual(tracked2.map((p) => p.name).sort(), [PROBE, legacy].sort());
+  assert.match(run2.out, new RegExp(`cleanup: remove the probe bucket ${PROBE}`));
+  assert.match(run2.out, new RegExp(`cleanup: remove the probe bucket ${legacy}`));
+  // The session deleted only the legacy bucket: its entry drops, the shared one stays.
   const third = await begin(env);
-  const probe3 = `c2cprobe${third.request}`;
-  const run3 = await observe(env, observation(third.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [probe2]: { data: [{ bucket_name: probe2 }] }, [probe3]: { data: [{ bucket_name: probe3 }] } }));
+  const run3 = await observe(env, observation(third.request, { transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [PROBE]: { data: [{ bucket_name: PROBE }] } }));
   assert.equal(run3.code, 0, run3.out + run3.err);
-  const tracked = JSON.parse(readFileSync(cleanupFile, 'utf8')) as { name: string }[];
-  assert.deepEqual(tracked.map((p) => p.name).sort(), [probe2, probe3].sort());
-  assert.match(run3.out, new RegExp(`cleanup: remove the probe bucket ${probe2}`));
-  assert.doesNotMatch(run3.out, new RegExp(`cleanup: remove the probe bucket ${probe1}`));
+  const tracked3 = JSON.parse(readFileSync(cleanupFile, 'utf8')) as { name: string }[];
+  assert.deepEqual(tracked3.map((p) => p.name), [PROBE]);
+  assert.match(run3.out, new RegExp(`cleanup: remove the probe bucket ${PROBE}`));
+  assert.doesNotMatch(run3.out, new RegExp(`cleanup: remove the probe bucket ${legacy}`));
+});
+
+test('mcp-observed: owed cleanup warns D-B8 on a bare run, with the exact bucket and delete call in both outputs', async () => {
+  const { env } = workspace();
+  const { request } = await begin(env);
+  const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [PROBE]: {} }));
+  assert.equal(run.code, 0, run.out + run.err);
+  // A later bare run — no new evidence — still warns and re-prints the exact
+  // delete call, so the owed cleanup always reaches the user.
+  const bare = fakeIo(env);
+  assert.equal(await doctorCli([], bare.io, { hooks: NO_HOOKS }), 0, bare.out());
+  assert.match(bare.out(), new RegExp(`WARN D-B8 .*${PROBE}`));
+  assert.match(bare.out(), new RegExp(`cleanup: remove the probe bucket ${PROBE} .*Delete_Bucket.*"bucket_name":"${PROBE}"`));
+  // The JSON body carries the same instruction for machine consumers (the
+  // human cleanup line follows the JSON document on the same stream).
+  const json = fakeIo(env);
+  assert.equal(await doctorCli(['--json'], json.io, { hooks: NO_HOOKS }), 0, json.err());
+  assert.match(json.out(), new RegExp(`cleanup: remove the probe bucket ${PROBE} .*Delete_Bucket`));
+  const bodyText = json.out().includes('\ncleanup:') ? json.out().slice(0, json.out().indexOf('\ncleanup:')) : json.out();
+  const body = JSON.parse(bodyText) as { checks: { id: string; status: string; detail: string }[]; pendingCleanup: { tool: string; query_params: { bucket_name: string } }[] };
+  assert.equal(body.checks.find((c) => c.id === 'D-B8')?.status, 'warn');
+  assert.match(body.checks.find((c) => c.id === 'D-B8')?.detail ?? '', new RegExp(PROBE));
+  assert.equal(body.pendingCleanup[0]?.tool, 'CatalystbyZoho_Delete_Bucket');
+  assert.equal(body.pendingCleanup[0]?.query_params.bucket_name, PROBE);
+});
+
+test('mcp-observed: an already-exists probe create is accepted; any other probe error is still refused', async () => {
+  const alreadyExists = (name: string): unknown => ({
+    isError: true,
+    content: [{ type: 'text', text: JSON.stringify({ status: 'failure', data: { message: `Bucket ${name} already exists`, error_code: 'BUCKET_ALREADY_EXISTS' } }) }],
+  });
+  const { env } = workspace();
+  const { request } = await begin(env);
+  // A repeated run re-creates the one bucket per project: the duplicate
+  // answer is accepted and the REST read-back still attests the write.
+  const run = await observe(
+    env,
+    observation(request, {
+      host_of_url: undefined,
+      transport: 'stdio',
+      calls: [
+        { tool: 'CatalystbyZoho_Create_Bucket', result: alreadyExists(PROBE) },
+        { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG], 'console.zoho.in') },
+      ],
+    }),
+    [],
+    NO_HOOKS,
+    fakeRest({ [PROBE]: {} }),
+  );
+  assert.equal(run.code, 0, run.out + run.err);
+  assert.match(run.out, /PASS D-B1 .*bound by the probe write/);
+  // Any other probe error is still refused before anything is written.
+  for (const result of [
+    { isError: true, content: [{ type: 'text', text: 'denied' }] },
+    { isError: true, content: [{ type: 'text', text: JSON.stringify({ status: 'failure', error_code: 'OAUTH_SCOPE_MISMATCH' }) }] },
+  ]) {
+    const retry = workspace();
+    const opened = await begin(retry.env);
+    const refused = await observe(
+      retry.env,
+      observation(opened.request, {
+        calls: [
+          { tool: 'CatalystbyZoho_Create_Bucket', result },
+          { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG]) },
+        ],
+      }),
+    );
+    assert.equal(refused.code, 1, refused.out + refused.err);
+    assert.match(refused.err, /returned an error/);
+  }
+});
+
+test('mcp-observed: the observation reads back the bucket --mcp-begin named, even if the scope flags drifted', async () => {
+  const { dir, env } = workspace();
+  const { request } = await begin(env);
+  // The scope flags drift after begin: the config now names another project.
+  const other = '10000000000000001';
+  writeFileSync(join(dir, DEPLOY_CONFIG), JSON.stringify({ dc: 'in', org: ORG, project: other, env: 'Development', ui: 'vanilla' }));
+  // Only the begin-time project holds the bucket; the drifted project is empty.
+  const seen: { path: string }[] = [];
+  const rest: NonNullable<DoctorIo['rest']> = async (call) => {
+    seen.push({ path: call.path });
+    if (call.path === `/baas/v1/project/${PROJECT}/bucket`) {
+      return { status: 200, body: { status: 'success', data: [{ bucket_name: PROBE, bucket_url: 'https://x-development.zohostratus.in' }] } };
+    }
+    return { status: 200, body: { status: 'success', data: [] } };
+  };
+  const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, rest);
+  // Fail closed: the read-back goes to the currently selected project, where
+  // the bucket is absent — and no phantom record for the drifted scope's
+  // bucket (which was never created) is tracked.
+  assert.equal(run.code, 1, run.out + run.err);
+  assert.equal(seen[0]?.path, `/baas/v1/project/${other}/bucket`);
+  assert.match(run.out, /FAIL D-B1 .*not proved bound/);
+  assert.doesNotMatch(run.out, new RegExp(`c2cprobe-p${other}`));
+  const cleanupFile = join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json');
+  if (existsSync(cleanupFile)) {
+    assert.doesNotMatch(readFileSync(cleanupFile, 'utf8'), new RegExp(`c2cprobe-p${other}`));
+  }
+});
+
+test('probe names: one deterministic bucket per project or org, legacy fallback otherwise', () => {
+  assert.equal(probeNameFor({ project: PROJECT }), PROBE);
+  assert.equal(probeNameFor({ org: ORG, project: PROJECT }), PROBE);
+  assert.equal(probeNameFor({ org: ORG }), `c2cprobe-o${ORG}`);
+  assert.equal(probeNameFor({}), undefined);
+  assert.equal(probeNameFor({ org: 'acme', project: 'my-app' }), undefined);
+  assert.equal(probeNameOf('a1'.repeat(16), { project: PROJECT }), PROBE);
+  assert.equal(probeNameOf('a1'.repeat(16)), `c2cprobe${'a1'.repeat(16)}`);
+  assert.ok(isProbeName(PROBE));
+  assert.ok(isProbeName(`c2cprobe-o${ORG}`));
+  assert.ok(isProbeName(`c2cprobe${'a1'.repeat(16)}`));
+  assert.ok(!isProbeName('customer-data'));
+  assert.ok(!isProbeName('c2cprobe-not-hex'));
+  assert.ok(!isProbeName(`${PROBE}x`));
+});
+
+test('mcp-observed: a verified probe without a project tracks no pending cleanup', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-observed-'));
+  dirs.push(dir);
+  const home = mkdtempSync(join(tmpdir(), 'c2c-observed-home-'));
+  dirs.push(home);
+  const skills = join(home, 'skills', 'catalyst-by-zoho');
+  mkdirSync(skills, { recursive: true });
+  writeFileSync(join(skills, 'SKILL.md'), '---\nname: catalyst-by-zoho\ndescription: official\nmetadata:\n  version: "0.0.2"\n---\nbody\n');
+  // Org-scoped: the project does not exist yet, so there is no project to
+  // create the probe bucket in — and no actionable delete target either.
+  writeFileSync(join(dir, DEPLOY_CONFIG), JSON.stringify({ dc: 'in', org: ORG, env: 'Development', ui: 'vanilla' }));
+  const env = { HOME: home, C2C_WORKSPACE: dir, C2C_CATALYST_SKILLS_DIR: join(home, 'skills') };
+  const opened = await begin(env);
+  assert.equal((JSON.parse(opened.out) as { probe: string }).probe, `c2cprobe-o${ORG}`);
+  // The org project-list read proves the binding is reachable.
+  const rest: NonNullable<DoctorIo['rest']> = async (call) => {
+    if (call.method === 'GET' && call.path === '/baas/v1/project') {
+      return { status: 200, body: { status: 'success', data: [{ id: PROJECT }] } };
+    }
+    return { status: 404, body: { code: 'INVALID_ID' } };
+  };
+  const run = await observe(env, observation(opened.request), [], NO_HOOKS, rest);
+  const file = JSON.parse(readFileSync(doctorJsonPath(dir), 'utf8')) as ObservedFile;
+  assert.equal(file.mcp?.binding?.detail, 'in-project-probe-required');
+  // Nothing provable was created inside a project: no pending record, and
+  // D-B8 passes instead of warning forever about an unactionable bucket.
+  assert.ok(!existsSync(join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json')));
+  assert.match(run.out, /PASS D-B8/);
 });
 
 test('mcp-observed: an unreadable read-back keeps stdio red and still asks for cleanup', async () => {
@@ -702,7 +860,10 @@ test('mcp-observed: --mcp-begin asks for the probe write and the org list, and n
   const { io, out } = fakeIo(env, '');
   assert.equal(await doctorCli(['--mcp-begin', '--json'], io, { hooks: NO_HOOKS }), 0);
   const ask = JSON.parse(out()) as { probe: string; request: string; calls: Record<string, unknown>[]; cleanup: Record<string, unknown>; neverCall: string[] };
-  assert.equal(ask.probe, `c2cprobe${ask.request}`);
+  // One deterministic bucket per project: the request id stays a single-use
+  // nonce, but the bucket no longer follows it.
+  assert.equal(ask.probe, PROBE);
+  assert.doesNotMatch(ask.probe, new RegExp(ask.request));
   assert.equal(ask.calls.length, 2);
   const create = ask.calls[0] as { tool: string; path_variables: { projectId: string }; headers: Record<string, unknown>; body: { bucket_name: string } };
   assert.equal(create.tool, 'CatalystbyZoho_Create_Bucket');
@@ -722,7 +883,7 @@ test('mcp-observed: a foreign-org result fails D-B7 and the gate', async () => {
   const { dir, env } = workspace();
   const { request } = await begin(env);
   const run = await observe(env, observation(request, { calls: [
-    { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(`c2cprobe${request}`) },
+    { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(PROBE) },
     { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([FOREIGN_ORG]) },
   ] }));
   assert.equal(run.code, 1);
@@ -980,13 +1141,13 @@ test('mcp-observed: an unrequested call, or a missing orgs or probe call, is ref
   const cases: [(request: string) => unknown[], RegExp][] = [
     [
       (request) => [
-        { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(`c2cprobe${request}`) },
+        { tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(PROBE) },
         { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG]) },
         { tool: 'CatalystbyZoho_List_All_Tables', result: { content: [] } },
       ],
       /calls\[2\] is not a call the MCP request asked for/,
     ],
-    [(request) => [{ tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(`c2cprobe${request}`) }], /has no CatalystbyZoho_List_All_Organizations result/],
+    [(request) => [{ tool: 'CatalystbyZoho_Create_Bucket', result: probeResult(PROBE) }], /has no CatalystbyZoho_List_All_Organizations result/],
     [() => [{ tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG]) }], /has no CatalystbyZoho_Create_Bucket result/],
   ];
   for (const [calls, message] of cases) {
