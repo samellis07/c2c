@@ -92,6 +92,33 @@ test('date arithmetic and component reads agree on both runtimes', async () => {
   }
 });
 
+test('hour/minute/second shifts carry out-of-range clock fields like the server', async () => {
+  const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const server = runtime.shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const ctx = { appTimeZone: 'America/New_York' };
+  const dates: unknown[] = [
+    '15-Oct-2026 23:60:00', // mm=60: hour shifts carry mm raw
+    '15-Oct-2026 23:59:61', // ss=61: hour/minute shifts carry ss raw
+    '15-Oct-2026 23:59:59', // day-boundary carry
+    '15-Oct-2026 00:00:00', // midnight, negative shifts borrow a day
+    '08-Mar-2026 01:30:00', // DST spring-forward night
+    '01-Nov-2026 00:30:00', // DST fall-back night
+    '08-Mar-2026 01:60:00', // mm=60 on a DST night
+    '01-Nov-2026 00:00:61', // ss=61 on a DST night
+  ];
+  const fns = ['addHour', 'subHour', 'addMinutes', 'subMinutes', 'addSeconds', 'subSeconds'];
+  const amounts = [-25, -1, 0, 1, 25];
+  for (const name of fns) {
+    for (const d of dates) {
+      for (const n of amounts) {
+        const want = server.date[name]!(d, n, ctx);
+        const got = browser.date[name]!(d, n, ctx);
+        assert.deepEqual(plain(got), plain(want), `${name}(${JSON.stringify(d)}, ${n})`);
+      }
+    }
+  }
+});
+
 test('a bad literal throws on both runtimes', async () => {
   const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
   const server = runtime.shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
