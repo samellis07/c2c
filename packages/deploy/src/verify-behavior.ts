@@ -32,6 +32,7 @@ import { generateUi, type UiModel } from '../../ui/src/index.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from './guards.js';
 import { deployFiles, writeDeployTree } from './plan.js';
 import { emptyRegistry } from './registry.js';
+import { tableCreatePlan, type TableCreateStep } from './tables.js';
 
 // ---------- golden schema ----------
 
@@ -422,8 +423,21 @@ export interface OfflineHarnessOptions {
 
 interface FakeSdk {
   setSession(token: string, user: unknown): void;
+  /** Columns the table plan creates is_unique, enforced as Data Store does. */
+  setUnique?(declared: Record<string, string[]>): void;
   state(): { tables: Record<string, Record<string, unknown>[]> };
   executeZCQLQuery(sql: string): Promise<unknown>;
+}
+
+/** table → the columns its create step marks is_unique (the store enforces only these). */
+export function uniqueByTable(steps: readonly TableCreateStep[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const step of steps) {
+    for (const column of step.columns) {
+      if (column.is_unique) (out[step.table] ??= []).push(column.column_name);
+    }
+  }
+  return out;
 }
 
 function offlineGuard(app: App): GuardOk {
@@ -451,7 +465,8 @@ export async function startOfflineBackend(app: App, opts: OfflineHarnessOptions 
   const savedEnv = new Map<string, string | undefined>();
   let server: Server | undefined;
   try {
-    writeDeployTree(dir, deployFiles(app, offlineGuard(app), false, { mode: opts.mode ?? 'live' }).files);
+    const generated = deployFiles(app, offlineGuard(app), false, { mode: opts.mode ?? 'live' });
+    writeDeployTree(dir, generated.files);
     const fnDir = join(dir, 'functions/c2c_api');
     const config = JSON.parse(readFileSync(join(fnDir, 'catalyst-config.json'), 'utf8')) as { deployment?: { env_variables?: Record<string, string> } };
     for (const [key, value] of Object.entries(config.deployment?.env_variables ?? {})) {
@@ -467,6 +482,7 @@ export async function startOfflineBackend(app: App, opts: OfflineHarnessOptions 
     const req = createRequire(import.meta.url);
     const sdk = req(fake) as FakeSdk;
     const token = 'c2c-behavior';
+    sdk.setUnique?.(uniqueByTable(tableCreatePlan(generated.schema)));
     sdk.setSession(token, { user_id: '1', email_id: 'admin@example.test', role_details: { role_name: 'App Administrator' } });
     const entry = req(join(fnDir, 'index.js')) as (rq: IncomingMessage, rs: ServerResponse) => Promise<void>;
     server = createServer((rq, rs) => void entry(rq, rs));
