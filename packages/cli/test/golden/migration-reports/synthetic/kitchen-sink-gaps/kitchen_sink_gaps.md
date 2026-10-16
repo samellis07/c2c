@@ -24,3 +24,11 @@ App: Archive_Intake_Gaps
 ## Manual steps
 
 - 2 warning converter-gap
+
+## Hidden from end users
+
+3
+
+- form Artifact_Intake field External_Record: the integration control is not generated yet
+- form Artifact_Intake field Forecast: Needs a trained Zia model. No column is generated. Not-yet-tried as a generated field.
+- form Artifact_Intake field Site_Location: Not a Creator field type. Latitude and longitude exist only inside Address (and Added/Modified Location). No geo column is invented for this token. If a source still says geolocation, it is reported unsupported.

@@ -275,10 +275,6 @@ export default function ${component}() {
 }
 `;
   }
-  const pending = report.view !== 'list';
-  const note = pending
-    ? `      <p className="todo" data-view-pending=${q(report.view)}>The ${report.view.replace(/[<>&"]/g, '')} view is not generated yet.</p>\n`
-    : '';
   return `${HEADER}import { ReportView, type ScreenProps } from '@c2c/ui';
 import { model } from '../model';
 
@@ -286,11 +282,7 @@ const report = model.reports[${q(report.name)}]!;
 
 /** ${report.label.replace(/\*\//g, '* /')}: ${report.columns.length} columns. */
 export default function ${component}({ row }: ScreenProps) {
-  return (
-    <>
-${note}      <ReportView report={report} row={row} />
-    </>
-  );
+  return <ReportView report={report} row={row} />;
 }
 `;
 }

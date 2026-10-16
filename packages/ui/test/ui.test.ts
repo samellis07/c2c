@@ -2700,7 +2700,7 @@ test('browser subform row add and delete fire addrow/deleterow handlers with the
   assert.equal(title?.value, '7', 'the deleterow handler read the removed row');
 });
 
-test('browser report row paints conditional formats and notes an unmigrated rule', async () => {
+test('browser report row paints conditional formats and logs an unmigrated rule', async () => {
   const runtime = await browserRuntime();
   const report = {
     name: 'All',
@@ -2736,8 +2736,16 @@ test('browser report row paints conditional formats and notes an unmigrated rule
   assert.match(statusCell?.getAttribute('style') || '', /color:red/);
   const closedCell = tds.find((td) => td.textContent === 'Closed');
   assert.equal(closedCell?.getAttribute('style') || '', '');
-  // The unmigrated rule shows a note instead of silently painting nothing.
-  assert.match(runtime.renderReport(report), /conditional formatting rule was not migrated/);
+  // The unmigrated rule is a migration note: the console names it, the screen does not.
+  const info = console.info;
+  const logged: string[] = [];
+  console.info = (...args: unknown[]) => void logged.push(args.map(String).join(' '));
+  try {
+    assert.doesNotMatch(runtime.renderReport(report), /conditional formatting rule was not migrated/);
+  } finally {
+    console.info = info;
+  }
+  assert.ok(logged.some((line) => /conditional formatting rule was not migrated/.test(line)));
   const doc2 = dom.window.document as unknown as Document;
   assert.ok(doc2.querySelector('[data-row-edit]'), 'row edit affordance rendered');
   assert.ok(doc2.querySelector('[data-row-delete]'), 'row delete affordance rendered');

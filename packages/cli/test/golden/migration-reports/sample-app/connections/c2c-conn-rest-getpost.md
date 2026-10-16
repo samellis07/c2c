@@ -23,3 +23,9 @@ App: c2c-conn-rest-getpost
 ## Manual steps
 
 - none
+
+## Hidden from end users
+
+0
+
+- none
