@@ -42,6 +42,8 @@ c2c provision --out c2c-out/<app>                 # dry run: prints provision/pl
 c2c provision --out c2c-out/<app> --next # emits the next pending step as JSON
 ```
 
+- **Scope after a recorded import:** a completed `import` step records its project id, org and DC in `provision/state.json`. Later `c2c provision` runs take them as the defaults — no `--project/--org/--dc` needed — and say so (`using project <id> from the recorded import`). `--project/--org/--dc` and `c2c-deploy.json` still win, and a plan's own DC wins over the recorded one. When the org comes from the recorded import, a bound Catalyst credential in a different org refuses the run; pass `--org` only after confirming the project belongs to that org. (zcatalyst-cli 1.27.2 does not record `active_org`, so that credential cross-check is inert on the shipping CLI — a tampered recorded org is still announced and then stopped by the project/org read-back guards.)
+
 Each step in `provision/plan.json`:
 ```json
 { "id": "jobpool", "via": "mcp", "tool": "CatalystbyZoho_Create_Job_Pool",

@@ -3,7 +3,8 @@
  * DC, org and project id come from: `--dc/--org/--project` flags win, then the
  * customer's `c2c-deploy.json` in the working directory (`--config <file>`
  * overrides the path), then state learned from earlier read-backs (the project
- * id recorded by the `project` step). No bundled registry, no default org.
+ * id recorded by the `project` step, and the project id, org and data centre
+ * the `import` step ran under). No bundled registry, no default org.
  *
  *   {
  *     "dc": "us",                       // or "zohoDc"; no default
@@ -64,7 +65,7 @@ export function readDeployConfig(path: string): DeployConfig {
   }
   if (parsed.org !== undefined) {
     const org = String(parsed.org).trim();
-    if (!/^[0-9]+$/.test(org)) throw new Error(`${path}: org must be a decimal id`);
+    if (!/^[0-9]{1,20}$/.test(org)) throw new Error(`${path}: org must be a decimal id`);
     config.org = org;
   }
   if (parsed.env !== undefined) {
@@ -122,8 +123,10 @@ export function readDeployConfig(path: string): DeployConfig {
 }
 
 /**
- * Resolve dc/org/project for the plan's app. Flag > config > learned.
- * `learnedProjectId` is the id the `project` step's read-back recorded.
+ * Resolve dc/org/project for the plan's app. Flag > config > plan > learned.
+ * `learnedProjectId` is the id the `project` step's read-back recorded;
+ * `learnedOrg`/`learnedDc` are the org and data centre the `import` step ran
+ * under, recorded in provision/state.json.
  */
 export function resolveProvisionScope(opts: {
   args: readonly string[];
@@ -131,6 +134,8 @@ export function resolveProvisionScope(opts: {
   app: string;
   planDc?: string;
   learnedProjectId?: unknown;
+  learnedOrg?: unknown;
+  learnedDc?: unknown;
 }): ProvisionScope {
   const configPath = flag(opts.args, '--config') ?? join(opts.cwd, 'c2c-deploy.json');
   const config = readDeployConfig(configPath);
@@ -150,6 +155,12 @@ export function resolveProvisionScope(opts: {
   } else if (opts.planDc) {
     scope.dc = opts.planDc;
     scope.sources.dc = 'provision/plan.json';
+  } else if (opts.learnedDc) {
+    if (typeof opts.learnedDc !== 'string' || !(DC_TABLE as readonly string[]).includes(opts.learnedDc)) {
+      throw new Error('the recorded data centre is not a known Catalyst DC');
+    }
+    scope.dc = opts.learnedDc;
+    scope.sources.dc = 'provision/state.json (recorded import)';
   }
   if (scope.dc && opts.planDc && scope.dc !== opts.planDc) {
     throw new Error(`data centre mismatch: ${scope.sources.dc} says ${scope.dc}, the plan was made for ${opts.planDc}`);
@@ -157,12 +168,18 @@ export function resolveProvisionScope(opts: {
 
   const orgFlag = flag(opts.args, '--org');
   if (orgFlag !== undefined) {
-    if (!/^[0-9]+$/.test(orgFlag)) throw new Error('--org must be a decimal id');
+    if (!/^[0-9]{1,20}$/.test(orgFlag)) throw new Error('--org must be a decimal id');
     scope.org = orgFlag;
     scope.sources.org = '--org';
   } else if (config.org) {
     scope.org = config.org;
     scope.sources.org = configPath;
+  } else if (opts.learnedOrg != null) {
+    if (typeof opts.learnedOrg !== 'string' || !/^[0-9]{1,20}$/.test(opts.learnedOrg)) {
+      throw new Error('the recorded org is not a decimal id');
+    }
+    scope.org = opts.learnedOrg;
+    scope.sources.org = 'provision/state.json (recorded import)';
   }
 
   const projectFlag = flag(opts.args, '--project');

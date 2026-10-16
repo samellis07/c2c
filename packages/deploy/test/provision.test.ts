@@ -4777,3 +4777,185 @@ test('inputs.json role_id must be a quoted string; a 17-digit string reaches the
   assert.deepEqual(bodies.map((body) => (body as { user_details: { role_id: unknown } }).user_details.role_id), ['10000000000000005']);
   rmSync(out, { recursive: true, force: true });
 });
+
+// --- scope learned from the recorded import ----------------------------------
+
+test('a resumed provision reads project, org and dc from the recorded import and says so', async () => {
+  const out = writeImportPlan();
+  const api = fakeImportApi();
+  const c = cap(undefined, api.fetch);
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import', '--org', ORG, '--dc', 'in'], c.io), 0, c.err());
+  const learned = readState(out).learned;
+  assert.equal(learned.projectId, PROJECT);
+  assert.equal(learned.org, ORG);
+  assert.equal(learned.dc, 'in');
+
+  // No scope flags at all: the recorded import answers project, org and dc,
+  // the run says where each came from, and the step runs against that project.
+  const sandbox = emptySandbox();
+  const again = cap(sandbox);
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'tables'], again.io), 0, again.err());
+  assert.match(again.err(), new RegExp(`using project ${PROJECT} from the recorded import`));
+  assert.match(again.err(), new RegExp(`using org ${ORG} from the recorded import`));
+  assert.match(again.err(), /using dc in from the recorded import/);
+  assert.ok(again.restCalls.some((line) => line === `GET /baas/v1/project/${PROJECT}/table`), again.restCalls.join('\n'));
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('explicit scope flags still win over the recorded import', async () => {
+  const out = writeImportPlan();
+  const api = fakeImportApi();
+  const c = cap(undefined, api.fetch);
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import', '--org', ORG, '--dc', 'in'], c.io), 0, c.err());
+
+  const over = cap(emptySandbox());
+  // Even a credential in a different org is no refusal once --org is explicit:
+  // the flag is the documented override.
+  over.io.cliOrg = () => '10000000002';
+  assert.equal(await provisionCli(['--out', out, '--status', '--org', '10000000001', '--project', '10000000000099001', '--dc', 'us'], over.io), 0, over.err());
+  assert.match(over.out(), /scope: dc=us org=10000000001 project=10000000000099001/);
+  assert.ok(!over.out().includes('from the recorded import'), over.out());
+  assert.ok(!over.err().includes('from the recorded import'), over.err());
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('a bound credential in another org is refused on a recorded import; the same org passes', async () => {
+  const out = writeImportPlan();
+  const api = fakeImportApi();
+  const c = cap(undefined, api.fetch);
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import', '--org', ORG, '--dc', 'in'], c.io), 0, c.err());
+
+  // MUST-FAIL: the recorded import ran under ORG; a credential bound to a
+  // different org must not silently continue it.
+  const foreign = cap(emptySandbox());
+  foreign.io.cliOrg = () => '10000000001';
+  assert.equal(await provisionCli(['--out', out, '--status'], foreign.io), 2);
+  assert.match(foreign.err(), new RegExp(`recorded import org ${ORG} disagrees with the bound Catalyst credential org 10000000001`));
+
+  // The same org as the recording needs no flag.
+  const same = cap(emptySandbox());
+  same.io.cliOrg = () => ORG;
+  assert.equal(await provisionCli(['--out', out, '--status'], same.io), 0, same.err());
+  assert.match(same.err(), new RegExp(`using org ${ORG} from the recorded import`));
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('without a recorded import nothing is reused: scope resolves exactly as before', async () => {
+  const out = writeMiniPlan();
+  const bare = cap(emptySandbox());
+  assert.equal(await provisionCli(['--out', out, '--status'], bare.io), 0, bare.err());
+  assert.match(bare.out(), /scope: dc=\? org=\? project=\(not created yet\)/);
+  assert.ok(!bare.out().includes('from the recorded import'), bare.out());
+  assert.ok(!bare.err().includes('from the recorded import'), bare.err());
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('resolveProvisionScope: recorded values fill empty slots only and malformed records are refused', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-scope-'));
+  // The recorded import fills dc, org and project when nothing else names them.
+  const learned = resolveProvisionScope({ args: [], cwd: dir, app: 'widget', learnedProjectId: PROJECT, learnedOrg: ORG, learnedDc: 'in' });
+  assert.equal(learned.projectId, PROJECT);
+  assert.equal(learned.org, ORG);
+  assert.equal(learned.dc, 'in');
+  assert.equal(learned.sources.org, 'provision/state.json (recorded import)');
+  assert.equal(learned.sources.dc, 'provision/state.json (recorded import)');
+  // Explicit flags win over every recorded value.
+  const flags = resolveProvisionScope({ args: ['--org', '10000000001', '--project', '555', '--dc', 'us'], cwd: dir, app: 'widget', learnedProjectId: PROJECT, learnedOrg: ORG, learnedDc: 'in' });
+  assert.equal(flags.org, '10000000001');
+  assert.equal(flags.projectId, '555');
+  assert.equal(flags.dc, 'us');
+  assert.equal(flags.sources.dc, '--dc');
+  // A plan dc still wins over the recorded one.
+  const planned = resolveProvisionScope({ args: [], cwd: dir, app: 'widget', planDc: 'us', learnedDc: 'in' });
+  assert.equal(planned.dc, 'us');
+  assert.equal(planned.sources.dc, 'provision/plan.json');
+  // MUST-FAIL: a malformed recorded value is refused, never ignored.
+  assert.throws(() => resolveProvisionScope({ args: [], cwd: dir, app: 'widget', learnedOrg: 'org-name' }), /recorded org is not a decimal id/);
+  assert.throws(() => resolveProvisionScope({ args: [], cwd: dir, app: 'widget', learnedOrg: 42 }), /recorded org is not a decimal id/);
+  assert.throws(() => resolveProvisionScope({ args: [], cwd: dir, app: 'widget', learnedDc: 'moon' }), /recorded data centre is not a known Catalyst DC/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('flagless --next after a recorded import prints exactly one JSON document on stdout', async () => {
+  const out = writeImportPlan();
+  const api = fakeImportApi();
+  const c = cap(undefined, api.fetch);
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import', '--org', ORG, '--dc', 'in'], c.io), 0, c.err());
+
+  // MUST-FAIL regression: the "using … from the recorded import" notices go to
+  // stderr, so the whole stdout of a JSON verb is parseable, not just its tail.
+  const next = cap(emptySandbox());
+  assert.equal(await provisionCli(['--out', out, '--next'], next.io), 0, next.err());
+  const doc = JSON.parse(next.out()) as { done: boolean };
+  assert.equal(doc.done, false);
+  assert.match(next.err(), new RegExp(`using project ${PROJECT} from the recorded import`));
+  assert.match(next.err(), new RegExp(`using org ${ORG} from the recorded import`));
+  assert.match(next.err(), /using dc in from the recorded import/);
+  assert.ok(!next.out().includes('from the recorded import'), next.out());
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('a c2c-deploy.json org wins over the recorded org: no credential refusal', async () => {
+  const out = writeImportPlan();
+  const api = fakeImportApi();
+  const c = cap(undefined, api.fetch);
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import', '--org', ORG, '--dc', 'in'], c.io), 0, c.err());
+
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-scope-'));
+  const configPath = join(dir, 'c2c-deploy.json');
+  writeFileSync(configPath, JSON.stringify({ org: '10000000001' }));
+  // The config org equals the bound credential org but differs from the
+  // recorded org: config wins, so there is nothing to refuse.
+  const configured = cap(emptySandbox());
+  configured.io.cliOrg = () => '10000000001';
+  assert.equal(await provisionCli(['--out', out, '--status', '--config', configPath], configured.io), 0, configured.err());
+  assert.match(configured.out(), /scope: dc=in org=10000000001/);
+  assert.ok(!configured.err().includes('disagrees with the bound Catalyst credential'), configured.err());
+  rmSync(out, { recursive: true, force: true });
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a recorded org carrying control bytes is refused before it can echo anywhere', async () => {
+  const out = writeImportPlan();
+  const api = fakeImportApi();
+  const c = cap(undefined, api.fetch);
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import', '--org', ORG, '--dc', 'in'], c.io), 0, c.err());
+
+  const state = readState(out);
+  state.learned!.org = `12\x1b[31m3`;
+  writeFileSync(join(out, 'provision', 'state.json'), JSON.stringify(state, null, 2));
+  const tampered = cap(emptySandbox());
+  assert.equal(await provisionCli(['--out', out, '--status'], tampered.io), 2);
+  assert.match(tampered.err(), /recorded org is not a decimal id/);
+  assert.ok(!tampered.err().includes('\x1b'), tampered.err());
+  assert.ok(!tampered.out().includes('\x1b'), tampered.out());
+
+  // With a config org the recorded org is never validated and never echoed:
+  // the config wins, so a bound credential in yet another org is no refusal
+  // and the control bytes reach no stream.
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-scope-'));
+  const configPath = join(dir, 'c2c-deploy.json');
+  writeFileSync(configPath, JSON.stringify({ org: '10000000001' }));
+  const configured = cap(emptySandbox());
+  configured.io.cliOrg = () => '10000000002';
+  assert.equal(await provisionCli(['--out', out, '--status', '--config', configPath], configured.io), 0, configured.err());
+  assert.ok(!configured.err().includes('\x1b'), configured.err());
+  assert.ok(!configured.out().includes('\x1b'), configured.out());
+  rmSync(out, { recursive: true, force: true });
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('org ids are capped at 20 digits on the flag, the config and the record', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-scope-'));
+  const long = '1'.repeat(21);
+  assert.throws(() => resolveProvisionScope({ args: ['--org', long], cwd: dir, app: 'widget' }), /--org must be a decimal id/);
+  assert.throws(() => resolveProvisionScope({ args: [], cwd: dir, app: 'widget', learnedOrg: long }), /recorded org is not a decimal id/);
+  const configPath = join(dir, 'c2c-deploy.json');
+  writeFileSync(configPath, JSON.stringify({ org: long }));
+  assert.throws(() => resolveProvisionScope({ args: ['--config', configPath], cwd: dir, app: 'widget' }), /org must be a decimal id/);
+  // 20 digits is still a valid id.
+  const bare = mkdtempSync(join(tmpdir(), 'c2c-scope-'));
+  assert.equal(resolveProvisionScope({ args: ['--org', '1'.repeat(20)], cwd: bare, app: 'widget' }).org, '1'.repeat(20));
+  rmSync(bare, { recursive: true, force: true });
+  rmSync(dir, { recursive: true, force: true });
+});

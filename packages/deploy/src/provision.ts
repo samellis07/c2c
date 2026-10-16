@@ -29,7 +29,7 @@ import { planCustomerSteps } from './customer-steps.js';
 import { parseJsonExact } from './json-exact.js';
 import { AUTH_RE, catalystRestCall, EMAIL_RE, hasParamSecret, HEX_B64_TOKEN_RE, JWT_RE, listCatalystProjects, PARAM_SECRET_RE, readCliAccessToken, redactString, renewCliAccessToken, SAFE_CODE_KEY_RE, URL_RE, ZOHO_TOKEN_RE } from './rest.js';
 export { redactString };
-import { catalystBaseFor, dcEndpoints } from './dc.js';
+import { catalystBaseFor, dcEndpoints, readCliActiveOrg } from './dc.js';
 import { catalystScopeArgs, scrubCatalystEnv } from './scope.js';
 import { isExactGrantList, isPerRowGrantMatch, PLAN_CLI_PATH, PLAN_EMITTED_CLI_PATHS, PLAN_STEP_TOOL, PLAN_STEP_TOOLS, STEP_KINDS, sha256, type ProvisionStep, type StepEndpoint } from './offline-plan.js';
 import { readConnectionSecretKeys, writeOrUpdateFunctionEnv } from './function-env.js';
@@ -77,6 +77,10 @@ export interface ProvisionState {
   planSha256: string;
   learned: {
     projectId?: string;
+    /** The org the recorded import ran under — a later run's default org, cross-checked against the bound credential. */
+    org?: string;
+    /** The data centre the recorded import ran under — a later run's default DC. */
+    dc?: string;
     /** The project name the import actually used ("<name>-2" on a clash). */
     importName?: string;
     /** Import attempts by name — a stuck import keeps its name blocked, so a retry never reuses it. */
@@ -1354,6 +1358,8 @@ async function runImportStep(ctx: Ctx, args: Record<string, unknown>): Promise<{
     }
     ctx.state.learned.importName = result.projectName;
     ctx.state.learned.projectId = result.projectId;
+    ctx.state.learned.org = ctx.scope.org;
+    ctx.state.learned.dc = ctx.scope.dc;
     rememberName(ctx.state.learned.byName, result.projectName, result.projectId);
     (ctx.state.learned.imports ??= {})[result.projectName] = { importId: result.importId, status: 'completed' };
     updateFunctionEnvFromCtx(ctx);
@@ -2153,11 +2159,28 @@ export async function provisionCli(args: readonly string[], io: Io, opts: { now?
   let scope: ProvisionScope;
   let inputs: ProvisionInputs;
   try {
-    scope = resolveProvisionScope({ args, cwd: process.cwd(), app: plan.app, ...(plan.dc ? { planDc: plan.dc } : {}), ...(state.learned.projectId ? { learnedProjectId: state.learned.projectId } : {}) });
+    scope = resolveProvisionScope({ args, cwd: process.cwd(), app: plan.app, ...(plan.dc ? { planDc: plan.dc } : {}), ...(state.learned.projectId ? { learnedProjectId: state.learned.projectId } : {}), ...(state.learned.org ? { learnedOrg: state.learned.org } : {}), ...(state.learned.dc ? { learnedDc: state.learned.dc } : {}) });
+    // The import was run under one org's credential; a bound credential in a
+    // different org must not silently continue it. The check applies only when
+    // the run's org itself came from the recorded import: an explicit --org is
+    // the documented override and a c2c-deploy.json org outranks the record.
+    if (scope.sources.org === 'provision/state.json (recorded import)') {
+      const activeOrg = (io.cliOrg ?? readCliActiveOrg)(io.env);
+      if (activeOrg && activeOrg !== scope.org) {
+        throw new Error(`recorded import org ${scope.org} disagrees with the bound Catalyst credential org ${activeOrg}; pass --org only after confirming the project belongs to that org`);
+      }
+    }
     inputs = readProvisionInputs(out);
   } catch (err) {
     io.stderr(`c2c provision: ${err instanceof Error ? err.message : 'config failed'}\n`);
     return 2;
+  }
+  for (const [label, value, source] of [
+    ['project', scope.projectId, scope.sources.projectId],
+    ['org', scope.org, scope.sources.org],
+    ['dc', scope.dc, scope.sources.dc],
+  ] as const) {
+    if (value && source?.startsWith('provision/state.json')) io.stderr(`using ${label} ${value} from the recorded import\n`);
   }
   // --domain is validated at the door like inputs.json slateDomain: the value
   // lands verbatim in the cors-domain body and invite redirect_url.
