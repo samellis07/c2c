@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { test } from 'node:test';
 import { applyFunctionEnvSecrets, buildFunctionEnv, functionIdFromList, liveFunctionVariables } from '../src/function-env.js';
+import { provisionFunctionEnvInput, type ProvisionPlanFile } from '../src/provision.js';
 import { envVariables, isSecretEnvName, RESERVED_ENV_KEYS, secretEnvValues } from '../src/function-dir.js';
 import type { RestCall, RestFn } from '../src/tables.js';
 import { repoRoot } from '../../core/src/toolchain.js';
@@ -512,4 +513,80 @@ test('envVariables refuses a reserved name and keeps a non-reserved CATALYST_ na
     assert.throws(() => envVariables('live', { [reserved]: 'x' }), new RegExp(`function env: ${reserved} is a name Catalyst reserves`));
   }
   assert.equal(envVariables('live', { CATALYST_APP_URL: 'https://a.onslate.in' }).CATALYST_APP_URL, 'https://a.onslate.in');
+});
+
+// Live failure F-CM-ENV: the provisioned env had no C2C_STRATUS_BUCKET and
+// turned the project and job-pool names learned during provision into TABLE_*.
+test('provision env carries the app bucket and TABLE_* only for real tables', () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-fenv-'));
+  mkdirSync(join(out, 'provision'), { recursive: true });
+  writeFileSync(
+    join(out, 'provision', 'tables.json'),
+    JSON.stringify([
+      { table: 'LineItems', columns: [] },
+      { table: 'Jobs', columns: [] },
+    ]),
+  );
+  const plan = {
+    version: 1,
+    app: 'FixtureApp',
+    steps: [
+      {
+        id: 'tables',
+        via: 'cli',
+        args: { plan: 'provision/tables.json', tables: ['LineItems', 'Jobs'] },
+        readBack: { via: 'cli', match: {} },
+      },
+      {
+        id: 'bucket',
+        via: 'mcp',
+        tool: 'CatalystbyZoho_Create_Bucket',
+        args: { body: { bucket_name: 'c2c-fixture-app-abcd1234', bucket_meta: { type: 'protected' } } },
+        readBack: { via: 'mcp', tool: 'CatalystbyZoho_Get_All_Buckets', match: { bucket_name: 'c2c-fixture-app-abcd1234' } },
+      },
+    ],
+  } as unknown as ProvisionPlanFile;
+  const learned = {
+    LineItems: '111111',
+    Jobs: '222222',
+    ConstructionManagement: '333333', // the job pool's name -> id
+    'c2c-br-3': '444444', // the project name -> project id
+  };
+  const env = buildFunctionEnv(provisionFunctionEnvInput({ out, plan, learned }));
+  assert.equal(env.C2C_STRATUS_BUCKET, 'c2c-fixture-app-abcd1234');
+  assert.equal(env.STRATUS_BUCKET, 'c2c-fixture-app-abcd1234');
+  assert.equal(env.TABLE_LINEITEMS_ID, '111111');
+  assert.equal(env.TABLE_ID_LINEITEMS, '111111');
+  assert.equal(env.TABLE_JOBS_ID, '222222');
+  assert.equal(env.TABLE_ID, '111111');
+  for (const bad of ['TABLE_CONSTRUCTIONMANAGEMENT_ID', 'TABLE_ID_CONSTRUCTIONMANAGEMENT', 'TABLE_C2C_BR_3_ID', 'TABLE_ID_C2C_BR_3']) {
+    assert.ok(!(bad in env), `${bad} — a job-pool or project name is never a TABLE_* key`);
+  }
+  for (const [key, value] of Object.entries(env)) {
+    assert.ok(value !== '333333' && value !== '444444', `${key} carries a job-pool or project id`);
+  }
+});
+
+// Deploy asserts the env read-back even when there are no secrets to apply:
+// a files app missing C2C_STRATUS_BUCKET fails the deploy, not the upload.
+test('applyFunctionEnvSecrets with no secrets still asserts required deployed keys', async () => {
+  const detail = (variables: Record<string, string>) => ({ data: { configuration: { environment: { variables } } } });
+  const missingBucket = restStub((call) => {
+    if (call.path === `${PREFIX}/function`) return { status: 200, body: functionList };
+    if (call.method === 'GET') return { status: 200, body: detail({ C2C_DEPLOY_MODE: 'live' }) };
+    return undefined;
+  });
+  await assert.rejects(
+    () => applyFunctionEnvSecrets(missingBucket.rest, '1001', {}, ['C2C_DEPLOY_MODE', 'C2C_STRATUS_BUCKET'], { tries: 1 }),
+    /missing deployed variable.*C2C_STRATUS_BUCKET/,
+  );
+  assert.equal(missingBucket.calls.some((call) => call.method === 'POST'), false);
+
+  const complete = restStub((call) => {
+    if (call.path === `${PREFIX}/function`) return { status: 200, body: functionList };
+    if (call.method === 'GET') return { status: 200, body: detail({ C2C_DEPLOY_MODE: 'live', C2C_STRATUS_BUCKET: 'c2c-fixture-app-abcd1234' }) };
+    return undefined;
+  });
+  assert.deepEqual(await applyFunctionEnvSecrets(complete.rest, '1001', {}, ['C2C_DEPLOY_MODE', 'C2C_STRATUS_BUCKET'], { tries: 1 }), []);
+  assert.equal(complete.calls.some((call) => call.method === 'POST'), false);
 });

@@ -1394,11 +1394,15 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
       // name-only entries; the real values go straight onto the live function
       // over the Catalyst env API, so no generated file ever carries them
       // (facts: functions.md "Manage env vars as one replace-only set").
-      if (command.id === 'functions' && !secretsApplied && Object.keys(secretsToApply).length) {
+      if (command.id === 'functions' && !secretsApplied && (Object.keys(secretsToApply).length || signals.files.length)) {
         try {
-          const applied = await applyFunctionEnvSecrets(restFn, guard.projectId, secretsToApply, deployedEnvKeys, retry);
+          // A files app needs the bucket variable live: the post-deploy
+          // read-back asserts it, so a missing C2C_STRATUS_BUCKET fails the
+          // deploy here rather than the first upload.
+          const requiredKeys = signals.files.length ? [...new Set([...deployedEnvKeys, 'C2C_STRATUS_BUCKET'])] : deployedEnvKeys;
+          const applied = await applyFunctionEnvSecrets(restFn, guard.projectId, secretsToApply, requiredKeys, retry);
           secretsApplied = true;
-          io.stdout(`function env: set ${applied.length} secret variable(s) on ${API_FUNCTION}; the values never entered the generated files\n`);
+          if (applied.length) io.stdout(`function env: set ${applied.length} secret variable(s) on ${API_FUNCTION}; the values never entered the generated files\n`);
         } catch (err) {
           io.stderr(`c2c: ${redact(err instanceof Error ? err.message : String(err), secret)}\n`);
           io.stderr(`next step: set the secret variables on ${API_FUNCTION} (Catalyst console env vars or the MCP env tools), then re-run deploy --confirm --resume --out ${cwd}\n`);

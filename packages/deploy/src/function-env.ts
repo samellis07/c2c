@@ -20,8 +20,9 @@ export interface FunctionEnvInput {
   projectId?: string;
   appUrl?: string;
   bucketName?: string;
+  /** Real schema tables only — a name here becomes TABLE_<NAME>_ID. Names of
+   *  anything else (project, role, job pool, bucket) must never reach this. */
   tables?: ReadonlyArray<{ name: string; id?: string }>;
-  learnedByName?: Record<string, string>;
   connectionSecrets?: readonly DeclaredConnectionSecret[];
   existingEnv?: Record<string, string>;
 }
@@ -130,18 +131,6 @@ export function buildFunctionEnv(input: FunctionEnvInput): Record<string, string
         const nameKey = sanitizeEnvKey(table.name);
         out[`TABLE_${nameKey}_ID`] = table.id;
         out[`TABLE_ID_${nameKey}`] = table.id;
-      }
-    }
-  }
-
-  // From learnedByName
-  if (input.learnedByName) {
-    for (const [name, id] of Object.entries(input.learnedByName)) {
-      if (/^[0-9]+$/.test(id)) {
-        if (!firstTableId) firstTableId = id;
-        const nameKey = sanitizeEnvKey(name);
-        out[`TABLE_${nameKey}_ID`] = id;
-        out[`TABLE_ID_${nameKey}`] = id;
       }
     }
   }
@@ -302,18 +291,20 @@ export async function applyFunctionEnvSecrets(
   rest: RestFn,
   projectId: string,
   secrets: Readonly<Record<string, string>>,
-  requiredKeys: readonly string[] = ['C2C_DEPLOY_MODE'],
+  requiredKeys: readonly string[] = [],
   opts: RetryOptions = {},
 ): Promise<string[]> {
   const names = Object.keys(secrets).sort();
-  if (!names.length) return [];
+  if (!names.length && !requiredKeys.length) return [];
   const prefix = `/baas/v1/project/${projectId}`;
   const list = await call(rest, { method: 'GET', path: `${prefix}/function` }, opts, `listing functions in project ${projectId}`);
   const id = functionIdFromList(list);
   if (!id) throw new Error(`function ${API_FUNCTION} is not in the project function list after its deploy`);
   const detail = await call(rest, { method: 'GET', path: `${prefix}/function/${id}` }, opts, `reading ${API_FUNCTION} configuration`);
   const live = liveFunctionVariables(detail);
-  if (requiredKeys.some((key) => !(key in live))) throw new Error('live env read-back did not match the deployed env_variables; refusing a replace-only write');
+  const absent = requiredKeys.filter((key) => !(key in live));
+  if (absent.length) throw new Error(`live env read-back is missing deployed variable(s) ${absent.join(', ')}; refusing a replace-only write`);
+  if (!names.length) return [];
   const variables = { ...live, ...secrets };
   await call(rest, { method: 'POST', path: `${prefix}/function/${id}/configuration`, body: { variables } }, opts, `setting ${API_FUNCTION} env vars`);
   const verified = liveFunctionVariables(await call(rest, { method: 'GET', path: `${prefix}/function/${id}` }, opts, `verifying ${API_FUNCTION} env vars`));
