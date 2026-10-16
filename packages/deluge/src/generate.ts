@@ -282,8 +282,12 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
     return p;
   };
   const coverage: WorkflowCoverage[] = [];
-  // Forms whose success module owns the submit URL. A `submit`-kind server
-  // module on those forms is not what the browser posts.
+  // Forms whose success handler owns the submit URL: the UI model promotes
+  // `submitEndpoint` to the success route only when a success workflow with a
+  // server module also emitted a client handler whose record event covers the
+  // add scope. A `submit`-kind server module on those forms is not what the
+  // browser posts; with anything weaker (an edit-only success, or a
+  // server-only one that registers no client handler) `/submit` still is.
   const successServerForms = new Set<string>();
   const submitFixups: { entry: WorkflowCoverage; clientPosted: boolean; serverFile?: string }[] = [];
 
@@ -691,10 +695,15 @@ function emitFormHandler(
     }
     contributed.push({ w, server: !!server.trim(), prefetch: !!prefetch.trim(), client: !!clientBody.trim() });
   }
-  if (TAIL_EVENT_KINDS.has(kind) && serverParts.length > 1) {
+  // A server script the group never posts gets the guarded client run as its
+  // whole client half: one script routes need no scriptEvents map — a null
+  // ctx.onlyScript runs the module's single body.
+  if (TAIL_EVENT_KINDS.has(kind) && serverParts.length > 0) {
     for (const [index, w] of [...group.entries()].sort((a, b) => a[0] - b[0])) {
       if (!serverScriptIndex.has(index) || clientParts.some((part) => part.index === index)) continue;
       clientParts.push({ w, body: CLIENT_RUN_GUARD, prefetchPath: '', index, server: true });
+      const entry = contributed.find((item) => item.w === w);
+      if (entry) entry.client = true;
     }
     clientParts.sort((a, b) => a.index - b.index);
   }
@@ -731,7 +740,14 @@ function emitFormHandler(
             : 'on add';
     const extraRecordEvents = recordEvents.size > 1 ? { recordEvents: [...new Set(group.map((w) => w.recordEvent ?? ''))].sort(compareEnUs) } : {};
 
-    if (kind === 'success') successServerForms?.add(form);
+    // The UI model promotes submitEndpoint to this success route only when a
+    // client handler whose record event covers the add scope registers: an
+    // edit- or delete-scoped success handler leaves `/submit` posted, and a
+    // server-only success workflow emits no client handler at all.
+    if (kind === 'success' && clientParts.some((part) => {
+      const rec = (part.w.recordEvent ?? '').trim().toLowerCase();
+      return rec !== 'on edit' && rec !== 'on delete';
+    })) successServerForms?.add(form);
     serverFile = put(
       `functions/aio/${base}.mjs`,
       aioModule({
@@ -777,7 +793,7 @@ function emitFormHandler(
       part.w,
       put(
         `client/handlers/${slug(form)}/${slug(part.w.event || part.w.name || 'handler')}.mjs`,
-        clientModule(part.body + (part.server && TAIL_EVENT_KINDS.has(kind) && !part.body.includes('shim.client.run(') ? `\n${CLIENT_RUN_GUARD}` : ''), part.prefetchPath, { form, event: part.w.event, when: kind, recordEvent: part.w.recordEvent, runPath: part.server && TAIL_EVENT_KINDS.has(kind) ? `/forms/${encodeURIComponent(form)}/${kind}` : undefined, runEvent: part.server && TAIL_EVENT_KINDS.has(kind) ? runEventTokens.get(part.index) : undefined, button: kind === 'click' ? workflowButtonName(part.w) : undefined }),
+        clientModule(part.body + (part.server && TAIL_EVENT_KINDS.has(kind) && !part.body.includes('shim.client.run(') ? `\n${CLIENT_RUN_GUARD}` : ''), part.prefetchPath, { form, event: part.w.event, when: kind, recordEvent: part.w.recordEvent, runPath: part.server && TAIL_EVENT_KINDS.has(kind) ? `/forms/${encodeURIComponent(form)}/${kind}` : undefined, runEvent: part.server && TAIL_EVENT_KINDS.has(kind) && scriptEvents ? runEventTokens.get(part.index) : undefined, button: kind === 'click' ? workflowButtonName(part.w) : undefined }),
       ),
     );
   }

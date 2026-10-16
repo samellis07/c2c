@@ -332,8 +332,12 @@ test('a thisapp field write in a merged route is covered and is not prefetched',
   assert.doesNotMatch(prefetch, /thisapp\.call/);
   assert.deepEqual(auditApp(hours, out).filter((d) => d.kind === 'workflow'), []);
   const hoursServer = out.coverage?.find((c) => c.event === 'on user input of End_Time');
-  assert.equal(hoursServer?.serverInvoked, false);
-  assert.ok(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === 10));
+  assert.equal(hoursServer?.serverInvoked, true);
+  assert.equal(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === 10), false);
+  const guard = out.files.find((f) => f.path.includes('on-user-input-of-end-time'));
+  assert.ok(guard);
+  assert.match(guard.source, /shim\.client\.run\(ctx\)/);
+  assert.equal(clientPostsServerPath(guard.source, '/forms/Timesheet/input'), true);
   const hidden = {
     ...out,
     coverage: (out.coverage ?? []).filter((c) => c.event !== 'on user input of End_Time'),
@@ -428,7 +432,7 @@ test('a client run posts /input and credits the merged server half', () => {
   assert.equal(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED), false);
 });
 
-test('a server-only on-input script the client never posts stays counted', () => {
+test('a server-only on-input script is wired through a guarded client run', () => {
   const lead = app({
     forms: [formOf('New_Lead', ['Mode_of_Shipment'])],
     workflows: [
@@ -450,22 +454,55 @@ test('a server-only on-input script the client never posts stays counted', () =>
   const server = out.files.find((f) => f.path.startsWith('functions/aio/new-lead/') && !f.path.includes('prefetch') && !f.path.endsWith('_lib.mjs'));
   assert.ok(server);
   assert.match(server.source, /path: "\/forms\/New_Lead\/input"/);
-  for (const f of out.files.filter((f) => f.path.startsWith('client/'))) {
-    assert.equal(clientPostsServerPath(f.source, serverPath), false, f.path);
-  }
+  // A single-script route needs no scriptEvents map: the client run posts the
+  // route and the module runs its one body.
+  assert.doesNotMatch(server.source, /export const scriptEvents/);
+  const client = out.files.find((f) => f.path.includes('client/handlers/new-lead/'));
+  assert.ok(client);
+  assert.match(client.source, /shim\.client\.run\(ctx\)/);
+  assert.equal(clientPostsServerPath(client.source, serverPath), true);
   const entry = out.coverage?.find((c) => c.name === 'pop_sub_mode_of_shipment');
   assert.ok(entry);
+  assert.equal(entry.serverInvoked, true);
+  assert.ok(entry.paths.includes(server.path));
+  assert.ok(entry.paths.includes(client.path));
+  assert.equal(auditApp(lead, out).filter((d) => d.kind === 'workflow').length, 0);
+  assert.equal(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED), false);
+});
+
+test('a server body on an event nothing posts stays counted', () => {
+  // `on start` (a presuccess form-properties action) emits the
+  // /forms/<form>/handler route; the guarded client run cannot express it and
+  // the submit pipeline does not call it, so it stays counted.
+  const lead = app({
+    forms: [formOf('New_Lead', ['Mode_of_Shipment'])],
+    workflows: [
+      workflow({
+        name: 'on_start_mail',
+        container: 'form',
+        form: 'New_Lead',
+        event: 'on start',
+        span: { start: 10, end: 40, file: 'app.ds' },
+        deluge: {
+          text: 'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];',
+          span: { start: 12, end: 38, file: 'app.ds' },
+        },
+      }),
+    ],
+  });
+  const out = collectOutputs(lead);
+  const entry = out.coverage?.find((c) => c.name === 'on_start_mail');
+  assert.ok(entry);
   assert.equal(entry.serverInvoked, false);
-  assert.equal(entry.paths.includes(server.path), false);
   assert.equal(auditApp(lead, out).filter((d) => d.kind === 'workflow').length, 0);
   assert.ok(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === 10 && t.end === 40));
   // Crediting the uninvoked server file is the failure this guards. With the
-  // count removed and the flag forced true, the client file would pass the
-  // audit with nothing listed. The real output must not take that shape.
+  // count removed and the flag forced true, the audit would pass with nothing
+  // listed. The real output must not take that shape.
   const forced = {
     ...out,
     todos: out.todos.filter((t) => t.construct !== FORM_EVENT_SERVER_UNINVOKED),
-    coverage: (out.coverage ?? []).map((c) => (c.name === 'pop_sub_mode_of_shipment' ? { ...c, serverInvoked: true as const } : c)),
+    coverage: (out.coverage ?? []).map((c) => (c.name === 'on_start_mail' ? { ...c, serverInvoked: true as const } : c)),
   };
   assert.equal(auditApp(lead, forced).filter((d) => d.kind === 'workflow').length, 0);
   assert.equal(entry.serverInvoked, false);

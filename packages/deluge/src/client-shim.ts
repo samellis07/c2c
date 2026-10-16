@@ -11,12 +11,13 @@ export const CLIENT_SHIM_CALLABLE: ReadonlySet<string> = new Set(['each', 'get',
 
 /**
  * `client.run(ctx)` is the merged form-event call: it POSTs `ctx.runPath`
- * (`/forms/<form>/<kind>`) with the caller's record and `ctx.runEvent`, the
- * one workflow script the route may run. The route resolves that token
- * through its exported `scriptEvents` map into `ctx.onlyScript`; a token the
- * map does not list, another event, or an index out of range is refused.
- * Only form events the generator merges onto a route (load, input, add row,
- * delete row, click) carry `ctx.runPath`/`ctx.runEvent`.
+ * (`/forms/<form>/<kind>`) with the caller's record and, on a multi-script
+ * route, `ctx.runEvent`, the one workflow script the route may run. The route
+ * resolves that token through its exported `scriptEvents` map into
+ * `ctx.onlyScript`; a token the map does not list, another event, or an index
+ * out of range is refused. Only form events the generator puts a client run
+ * on (load, input, add row, delete row, click) carry `ctx.runPath`;
+ * `ctx.runEvent` rides along only when the route exports a `scriptEvents` map.
  */
 /** Namespaces and the methods the browser implements on each. */
 export const CLIENT_SHIM_METHODS: ReadonlyMap<string, ReadonlySet<string>> = new Map<string, ReadonlySet<string>>([
