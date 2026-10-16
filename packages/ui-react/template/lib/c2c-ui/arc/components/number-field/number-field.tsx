@@ -468,7 +468,7 @@ export function NumberField({ label, value, defaultValue = 0, onValueChange, emp
           <span className={styles.number}>
             <span className={styles.display} data-hidden={editing || empty || undefined} aria-hidden="true"><Digits value={shown} format={format} direction={direction} instant={editing} /></span>
             {editing && <span className={styles.mirror} aria-hidden="true">{draft}</span>}
-            <input ref={inputRef} id={inputId} className={styles.input} type="text" role="spinbutton" inputMode={min < 0 ? "text" : decimals || maxFraction ? "decimal" : "numeric"} autoComplete="off" spellCheck={false}
+            <input ref={inputRef} id={inputId} className={styles.input} type="text" role="spinbutton" inputMode={decimals || maxFraction ? "decimal" : "numeric"} autoComplete="off" spellCheck={false}
               value={editing ? draft : empty ? "" : format.format(current)} disabled={disabled} aria-required={required || undefined} aria-describedby={describedBy} aria-invalid={outside ? true : undefined} aria-valuenow={empty ? undefined : current} aria-valuetext={empty ? undefined : spoken(current)}
               aria-valuemin={Number.isFinite(min) ? min : undefined} aria-valuemax={max < Number.MAX_SAFE_INTEGER ? max : undefined}
               onChange={event => onChange(event.currentTarget.value)} onKeyDown={onKeyDown} onKeyUp={event => { if (/^(Arrow(Up|Down)|Page(Up|Down))$/.test(event.key)) stopHold(); }} onBlur={() => { stopHold(); commitDraft(); }} />
