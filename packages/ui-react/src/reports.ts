@@ -77,7 +77,7 @@ export function reportSpec(app: App, ui: UiReport, forms: UiForm[] = []): Report
     pageSize: ui.pageSize,
     columns: reportColumns(app, ir, ui),
     rowActions: { edit: ui.rowActions?.edit === true, delete: ui.rowActions?.delete === true },
-    customActions: ui.customActions.map((a) => ({ name: a.name, endpoint: a.endpoint, ...(a.header === true ? { header: true as const } : {}) })),
+    customActions: ui.customActions.map((a) => ({ name: a.name, endpoint: a.endpoint, ...(a.header === true ? { header: true as const } : {}), ...(a.preview ? { preview: true as const } : {}) })),
     sort: ui.sort.map((s) => ({ field: s.field, ...(s.order ? { order: s.order } : {}) })),
     filters: ui.filters.map((f) => ({ ...(f.label ? { label: f.label } : {}), ...(f.field ? { field: f.field } : {}) })),
     groupBy: ui.groupBy.map((g) => ({ field: g.field })),

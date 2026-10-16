@@ -128,6 +128,11 @@ export interface UiAction {
   endpoint: string;
   /** `show action in view header = true` on the export: a toolbar button. */
   header?: boolean;
+  /**
+   * The generated endpoint is a dry-run stub that runs nothing: the button
+   * renders turned off with a note, and the action is a counted todo.
+   */
+  preview?: true;
 }
 
 export interface UiReport {
@@ -859,12 +864,19 @@ function buildReport(app: App, report: Report, todos: UiTodo[]): UiReport {
     }
   }
   if (todo) todos.push({ area: 'report', name: report.name, reason: todo });
+  // Every custom action endpoint is generated as a dry-run stub (see
+  // actionStub in generate.ts): a button that reported success would claim a
+  // workflow ran when nothing was saved.
   const actions = report.customActions.map((action) => ({
     name: action.name,
     ...(action.workflow ? { workflow: action.workflow } : {}),
     endpoint: `/reports/${encodeURIComponent(report.name)}/actions/${slug(action.name)}`,
     ...(reportProp(action.properties, 'show action in view header') === 'true' ? { header: true as const } : {}),
+    preview: true as const,
   }));
+  for (const action of actions) {
+    todos.push({ area: 'report', name: report.name, reason: `Custom action "${action.name.trim()}" is not migrated; its button is turned off.` });
+  }
   const builtColumns: UiReport['columns'] = columns.map((column) => ({
     ...column,
     ...lookupOf(form, column.field),
