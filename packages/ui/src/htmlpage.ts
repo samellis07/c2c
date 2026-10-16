@@ -448,7 +448,7 @@ function slotContext(prefix: string): 'text' | 'attr' | 'url' | 'style' | 'comme
  */
 export const PAGE_INCLUDE_PREFIX = 'page-include:';
 
-const IFRAME_ATTR = `[${TAG_WS}]+[A-Za-z_:][\\w:.-]*(?:[${TAG_WS}]*=[${TAG_WS}]*(?:"[^"<%]*"|'[^'<%]*'|[^${TAG_WS}"'=<>\`%]+))?`;
+const IFRAME_ATTR = `[${TAG_WS}]+[A-Za-z_:][\\w:.-]*(?:[${TAG_WS}]*=[${TAG_WS}]*(?:"[^"<]*"|'[^'<]*'|[^${TAG_WS}"'=<>\`%]+))?`;
 const IFRAME_OPEN = new RegExp(`^<iframe(?:${IFRAME_ATTR})*?[${TAG_WS}]+src[${TAG_WS}]*=[${TAG_WS}]*(["'])$`, 'i');
 const APPURI_ISLAND = /<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>/gi;
 
@@ -1779,13 +1779,15 @@ function escapeHtml(text: string): string {
 
 /**
  * Pre-pass for compileHtmlpage: rewrites `<iframe>` embeds of own reports
- * (`<%=zoho.appuri%>report-embed/<Report>`) or own pages
- * (`<%=zoho.appuri%>page-embed/<Page>`) to allowlisted static `<a>` links.
+ * (`<%=zoho.appuri%>report-embed/<Report>`) to allowlisted static `<a>` links.
+ * `page-embed` iframes are handled by `inlinePageEmbeds` instead: a provable
+ * one becomes an inline include marker, anything else keeps the snippet
+ * counted.
  * Non-matching or unsafe iframes (external URLs, dynamic names/islands,
  * unallowlisted query parameters) remain unchanged so the compiler refuses them.
  */
 function rewriteEmbedIframes(template: string, app: App): string {
-  if (!template.includes('report-embed') && !template.includes('page-embed')) {
+  if (!template.includes('report-embed')) {
     return template;
   }
   const IFRAME_RE = /<iframe\b((?:[^>"']|"[^"]*"|'[^']*')*?)(?:\/>|>(?:[\s\S]*?<\/iframe>)?)/gi;
@@ -1793,9 +1795,8 @@ function rewriteEmbedIframes(template: string, app: App): string {
     const attrs = parseZmlAttributes(attrText);
     const src = attrs.src;
     if (!src) return match;
-    const m = /^<%=\s*zoho\.appuri\s*%>(report-embed|page-embed)\/([^?#]+)(?:\?([^#]*))?$/i.exec(src.trim());
+    const m = /^<%=\s*zoho\.appuri\s*%>(report-embed)\/([^?#]+)(?:\?([^#]*))?$/i.exec(src.trim());
     if (!m) return match;
-    const kind = m[1].toLowerCase();
     const rawName = m[2];
     if (rawName.includes('<%')) return match;
     const rawQuery = m[3] ?? '';
@@ -1807,26 +1808,14 @@ function rewriteEmbedIframes(template: string, app: App): string {
       name = rawName;
     }
     const queryParts = rawQuery ? rawQuery.replace(/&amp;/g, '&').split('&').filter(Boolean) : [];
-    if (kind === 'report-embed') {
-      const rep = app.reports.find((r) => r.name === name);
-      if (!rep) return match;
-      for (const part of queryParts) {
-        if (!isZcParam(part)) return match;
-      }
-      const label = rep.displayName || rep.name;
-      const href = `#/report/${encodeURIComponent(name)}`;
-      return `<a href="${href}">${escapeHtml(label)}</a>`;
+    const rep = app.reports.find((r) => r.name === name);
+    if (!rep) return match;
+    for (const part of queryParts) {
+      if (!isZcParam(part)) return match;
     }
-    if (kind === 'page-embed') {
-      const pageDef = app.pages.find((p) => p.name === name);
-      if (!pageDef) return match;
-      const keptParams = queryParts.filter((part) => !isZcParam(part));
-      const queryStr = keptParams.length ? `?${keptParams.join('&')}` : '';
-      const href = `#/page/${encodeURIComponent(name)}${queryStr}`;
-      const label = pageDef.displayName || pageDef.name;
-      return `<a href="${href}">${escapeHtml(label)}</a>`;
-    }
-    return match;
+    const label = rep.displayName || rep.name;
+    const href = `#/report/${encodeURIComponent(name)}`;
+    return `<a href="${href}">${escapeHtml(label)}</a>`;
   });
 }
 
