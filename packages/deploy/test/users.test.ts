@@ -973,16 +973,26 @@ function backupWith(from: string, to: string): string {
   return dir;
 }
 
-test("a planned '+' address is invited under its normalised mailbox, naming the user by id", async () => {
+test("a '+' address on a non-Google domain is a distinct manual user — never invited, never folded onto the plain mailbox", async () => {
   const backup = backupWith('user-002', 'User.Tag+Team@Example.COM');
   const ds = dsFile();
   const out = mkdtempSync(join(tmpdir(), 'c2c-users-plus-'));
   let { io, err, out: stdout } = makeIo();
   assert.equal(await usersCli(['plan', '--source-backup', backup, '--ds', ds, '--out', out, '--salt', 's'], io), 0);
-  const planJson = JSON.parse(readFileSync(join(out, 'users', 'plan.json'), 'utf8')) as { counts: { aliases: number }; users: { id: string; aliasRules?: string[] }[] };
-  assert.equal(planJson.counts.aliases, 1);
-  const aliased = planJson.users.find((user) => user.aliasRules?.length);
-  assert.deepEqual(aliased?.aliasRules, ['plus-tag']);
+  const planJson = JSON.parse(readFileSync(join(out, 'users', 'plan.json'), 'utf8')) as {
+    counts: { aliases: number; manual: number };
+    users: { id: string; state: string; aliasRules?: string[] }[];
+    notes: string[];
+  };
+  assert.equal(planJson.counts.aliases, 0);
+  assert.equal(planJson.counts.manual, 1);
+  const manual = planJson.users.find((user) => user.state === 'manual');
+  assert.ok(manual, 'the tagged address stays a distinct user, marked manual');
+  assert.ok(!manual.aliasRules?.length, 'no fold fired — the identity is kept');
+  // The report names the manual step: console Add User for the real mailbox,
+  // then the usr_ id recorded in the users state file.
+  assert.match(planJson.notes.join('\n'), /Manual step: add the real mailbox in Authentication > Users/);
+  assert.match(planJson.notes.join('\n'), /users state file/);
   for (const file of walkFiles(out)) {
     const text = readFileSync(file, 'utf8');
     assert.ok(!text.includes('@'), `${file} carries an identity`);
@@ -996,10 +1006,33 @@ test("a planned '+' address is invited under its normalised mailbox, naming the 
     io,
   );
   assert.equal(code, 0);
+  assert.match(err(), /not invited/);
   const posts = calls.filter((call) => call.method === 'POST' && call.path === `${BASE}/project-user`);
   const sent = posts.map((call) => (call.body as { user_details: { email_id: string } }).user_details.email_id);
-  assert.ok(sent.includes('user.tag@example.com'), `the plain mailbox was invited: ${JSON.stringify(sent)}`);
+  // MUST-NOT-MERGE: neither the tagged address nor a guessed plain mailbox is sent.
   assert.ok(!sent.some((identity) => identity.includes('+')), 'no + address is ever sent');
+  assert.ok(!sent.includes('user.tag@example.com'), `the plain mailbox is never guessed: ${JSON.stringify(sent)}`);
+});
+
+test("two '+' addresses on one custom domain stay two identities (MUST-NOT-MERGE)", async () => {
+  const backup = backupWith('user-002', 'jane+sales@corp.example.test');
+  writeFileSync(
+    join(backup, 'data', 'data_1', 'appUsers.csv'),
+    readFileSync(join(backup, 'data', 'data_1', 'appUsers.csv'), 'utf8').replace('"user-003"', '"jane+support@corp.example.test"'),
+  );
+  const out = mkdtempSync(join(tmpdir(), 'c2c-users-twotags-'));
+  const { io } = makeIo();
+  assert.equal(await usersCli(['plan', '--source-backup', backup, '--ds', dsFile(), '--out', out, '--salt', 's'], io), 0);
+  const planJson = JSON.parse(readFileSync(join(out, 'users', 'plan.json'), 'utf8')) as {
+    counts: { manual: number; duplicates: number };
+    users: { id: string; state: string }[];
+  };
+  const manual = planJson.users.filter((user) => user.state === 'manual');
+  assert.equal(planJson.counts.manual, 2);
+  // The only collapse is the fixture's own repeated user-001 row.
+  assert.equal(planJson.counts.duplicates, 1);
+  assert.equal(planJson.users.length, 4);
+  assert.notEqual(manual[0]?.id, manual[1]?.id, 'two tagged addresses are two principals, not one folded user');
 });
 
 test("a '+' on a user the plan skips (inactive) does not block the plan", async () => {
