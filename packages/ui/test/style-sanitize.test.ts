@@ -226,11 +226,16 @@ test('@media inside @media is dropped, so deep nesting cannot recurse', () => {
   const nested = carryStaticStyle('@media screen { @media print { .x { color: red } } .y { color: blue } }', '[data-page="a"]');
   assert.equal(nested.droppedRules, 1);
   assert.equal(nested.css, '@media screen{[data-page="a"] .y{color: blue}}');
-  const deep = '@media all{'.repeat(5000) + '}'.repeat(5000);
+  // A depth a recursive parser cannot survive: naive recursion overflows the
+  // call stack well before 100000 frames, so an iterative scanner proves the
+  // guard without any wall-clock assertion.
+  const naiveRecurse = (depth: number): number => (depth ? 1 + naiveRecurse(depth - 1) : 0);
+  assert.throws(() => naiveRecurse(100000), RangeError);
+  const deep = '@media all{'.repeat(100000) + '}'.repeat(100000);
   const start = performance.now();
   const result = carryStaticStyle(deep, '[data-page="a"]');
   const ms = performance.now() - start;
-  assert.ok(ms < 50, `5000 nested @media: ${ms.toFixed(1)}ms`);
+  assert.ok(ms < 2000, `100000 nested @media: ${ms.toFixed(1)}ms`);
   assert.equal(result.css, '');
   assert.equal(result.droppedRules, 1);
 });
