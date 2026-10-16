@@ -4,7 +4,7 @@
  * refusing anything else with exit 6 — probed with a stub `node` on PATH so
  * no other toolchain is needed. Accepted versions proceed past the gate
  * (they stop later at the missing vendored converter in a source checkout);
- * refused versions stop at the gate with an exit-6 refusal.
+ * refused versions stop at the gate with "is not supported".
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

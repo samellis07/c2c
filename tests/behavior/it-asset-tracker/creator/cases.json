@@ -23,6 +23,354 @@
           }
         }
       ]
+    },
+    {
+      "id": "addhardware-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "addhardware",
+          "record": {
+            "Peripheral_Type": "Copier",
+            "Manufacturer": "Manufacturer fable 576",
+            "Model": "Model prairie 309",
+            "Serial_Number": "Serial_Number bravo 619",
+            "Status": "Active",
+            "Description": "Sample Description note 836 generated for capture.",
+            "Support_Link": "https://example.com/support-link/243",
+            "Active_Service_Date": "10-Oct-2026"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Hardware Added Successfully!"
+          },
+          "bind": {
+            "r_addhardware_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "addhardware": [
+            {
+              "Status": "Active",
+              "Support_Link": "https://example.com/support-link/243",
+              "Description": "Sample Description note 836 generated for capture.",
+              "Peripheral_Type": "Copier",
+              "Serial_Number": "Serial_Number bravo 619",
+              "Manufacturer": "Manufacturer fable 576",
+              "Model": "Model prairie 309",
+              "Active_Service_Date": "2026-10-10"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "addhardware-invalid-duplicate-serial-number",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "addhardware",
+          "record": {
+            "Peripheral_Type": "Copier",
+            "Manufacturer": "Manufacturer fable 576",
+            "Model": "Model prairie 309",
+            "Serial_Number": "Serial_Number bravo 619",
+            "Status": "Active",
+            "Description": "Sample Description note 836 generated for capture.",
+            "Support_Link": "https://example.com/support-link/243",
+            "Active_Service_Date": "10-Oct-2026"
+          },
+          "bind": {
+            "r_addhardware_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "addhardware",
+          "record": {
+            "Peripheral_Type": "Copier",
+            "Manufacturer": "Manufacturer sable 870",
+            "Model": "Model harbor 679",
+            "Serial_Number": "Serial_Number bravo 619",
+            "Status": "Active",
+            "Description": "Sample Description note 584 generated for capture.",
+            "Support_Link": "https://example.com/support-link/746",
+            "Active_Service_Date": "22-Oct-2026"
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Serial_Number": "This value already exists. Enter a unique value."
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "addhardware": [
+            {
+              "Status": "Active",
+              "Support_Link": "https://example.com/support-link/243",
+              "Description": "Sample Description note 836 generated for capture.",
+              "Peripheral_Type": "Copier",
+              "Serial_Number": "Serial_Number bravo 619",
+              "Manufacturer": "Manufacturer fable 576",
+              "Model": "Model prairie 309",
+              "Active_Service_Date": "2026-10-10"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "addhardware-update-manufacturer",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "addhardware",
+          "record": {
+            "Peripheral_Type": "Copier",
+            "Manufacturer": "Manufacturer fable 576",
+            "Model": "Model prairie 309",
+            "Serial_Number": "Serial_Number bravo 619",
+            "Status": "Active",
+            "Description": "Sample Description note 836 generated for capture.",
+            "Support_Link": "https://example.com/support-link/243",
+            "Active_Service_Date": "10-Oct-2026"
+          },
+          "bind": {
+            "r_addhardware_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "allhardwares",
+          "where": {
+            "Serial_Number": "Serial_Number bravo 619"
+          },
+          "record": {
+            "Manufacturer": "Manufacturer updated 332"
+          },
+          "expect": {
+            "body": {
+              "matched": 1,
+              "updated": 1,
+              "refused": 0
+            }
+          },
+          "creator": {
+            "codes": [
+              3000
+            ],
+            "messages": [
+              "Data Updated Successfully"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "addhardware": [
+            {
+              "Status": "Active",
+              "Support_Link": "https://example.com/support-link/243",
+              "Description": "Sample Description note 836 generated for capture.",
+              "Peripheral_Type": "Copier",
+              "Serial_Number": "Serial_Number bravo 619",
+              "Manufacturer": "Manufacturer updated 332",
+              "Model": "Model prairie 309",
+              "Active_Service_Date": "2026-10-10"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "addhardware-boundary-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "addhardware",
+          "record": {
+            "Peripheral_Type": "Copier",
+            "Manufacturer": "Manufacturer fable 576",
+            "Model": "Model prairie 309",
+            "Serial_Number": "Serial_Number bravo 619",
+            "Status": "Active",
+            "Description": "Sample Description note 836 generated for capture.",
+            "Support_Link": "https://example.com/support-link/243",
+            "Active_Service_Date": "10-Oct-2026"
+          },
+          "bind": {
+            "r_addhardware_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "allhardwares",
+          "where": {
+            "Serial_Number": "Serial_Number bravo 619"
+          },
+          "record": {
+            "Manufacturer": "Manufacturer updated 332"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "addhardware",
+          "record": {
+            "Peripheral_Type": "Copier",
+            "Manufacturer": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+            "Model": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+            "Serial_Number": "b-Serial_Number bravo 619",
+            "Status": "Active",
+            "Description": "Sample Description note 836 generated for capture.",
+            "Support_Link": "https://example.com/support-link/243",
+            "Active_Service_Date": "10-Oct-2026"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Hardware Added Successfully!"
+          },
+          "bind": {
+            "r_addhardware_boundary_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "addhardware": [
+            {
+              "Status": "Active",
+              "Support_Link": "https://example.com/support-link/243",
+              "Description": "Sample Description note 836 generated for capture.",
+              "Peripheral_Type": "Copier",
+              "Serial_Number": "Serial_Number bravo 619",
+              "Manufacturer": "Manufacturer updated 332",
+              "Model": "Model prairie 309",
+              "Active_Service_Date": "2026-10-10"
+            },
+            {
+              "Status": "Active",
+              "Serial_Number": "b-Serial_Number bravo 619",
+              "Manufacturer": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+              "Model": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+              "Support_Link": "https://example.com/support-link/243"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-allhardwares",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "addhardware",
+          "record": {
+            "Peripheral_Type": "Copier",
+            "Manufacturer": "Manufacturer fable 576",
+            "Model": "Model prairie 309",
+            "Serial_Number": "Serial_Number bravo 619",
+            "Status": "Active",
+            "Description": "Sample Description note 836 generated for capture.",
+            "Support_Link": "https://example.com/support-link/243",
+            "Active_Service_Date": "10-Oct-2026"
+          },
+          "bind": {
+            "r_addhardware_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "allhardwares",
+          "where": {
+            "Serial_Number": "Serial_Number bravo 619"
+          },
+          "record": {
+            "Manufacturer": "Manufacturer updated 332"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "addhardware",
+          "record": {
+            "Peripheral_Type": "Copier",
+            "Manufacturer": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+            "Model": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+            "Serial_Number": "b-Serial_Number bravo 619",
+            "Status": "Active",
+            "Description": "Sample Description note 836 generated for capture.",
+            "Support_Link": "https://example.com/support-link/243",
+            "Active_Service_Date": "10-Oct-2026"
+          },
+          "bind": {
+            "r_addhardware_boundary_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "allhardwares",
+          "expect": {
+            "outcome": "rows",
+            "count": 2
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 2
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "addhardware": [
+            {
+              "Status": "Active",
+              "Support_Link": "https://example.com/support-link/243",
+              "Description": "Sample Description note 836 generated for capture.",
+              "Peripheral_Type": "Copier",
+              "Serial_Number": "b-Serial_Number bravo 619",
+              "Manufacturer": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+              "Model": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
+              "Active_Service_Date": "2026-10-10"
+            },
+            {
+              "Status": "Active",
+              "Support_Link": "https://example.com/support-link/243",
+              "Description": "Sample Description note 836 generated for capture.",
+              "Peripheral_Type": "Copier",
+              "Serial_Number": "Serial_Number bravo 619",
+              "Manufacturer": "Manufacturer updated 332",
+              "Model": "Model prairie 309",
+              "Active_Service_Date": "2026-10-10"
+            }
+          ]
+        }
+      }
     }
   ]
 }
