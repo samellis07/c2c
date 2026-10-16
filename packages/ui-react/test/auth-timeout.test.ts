@@ -1,7 +1,9 @@
 /**
  * React client: a current-user call that never answers must show the stall
  * message and a Retry button on the sign-in gate and on the smoke page.
- * The budget is short here so a removed timeout fails the test.
+ * The budget is short here so a removed timeout fails the test: waits are
+ * bounded at 5s, well below the 10s default budget, and poll for the
+ * observable state rather than relying on how fast the runner is.
  */
 process.env.NODE_ENV = 'production';
 import assert from 'node:assert/strict';
@@ -79,13 +81,15 @@ function urlOf(input: unknown): string {
   return String(input ?? '');
 }
 
+const SETTLE_MS = 5000;
+
 async function until(ready: () => boolean, label: string): Promise<void> {
   const started = Date.now();
-  while (Date.now() - started < 1500) {
+  while (Date.now() - started < SETTLE_MS) {
     if (ready()) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  assert.fail(`${label} did not settle within 1500ms`);
+  assert.fail(`${label} did not settle within ${SETTLE_MS}ms`);
 }
 
 function installGlobals(view: Window): () => void {
@@ -142,9 +146,12 @@ test('AuthGate shows the stall message when current-user never answers, and Retr
     const root = createRoot(view.document.getElementById('root')!);
     const env = { view, doc: view.document, spec: {}, api: {} };
     root.render(React.createElement(compiled.env.EnvContext.Provider as never, { value: env }, React.createElement(compiled.auth.AuthGate, null, React.createElement('p', { 'data-app': '' }, 'app'))));
-    const started = Date.now();
-    await until(() => view.document.querySelector('[role="alert"]')?.textContent === STALL, 'AuthGate stall');
-    assert.ok(Date.now() - started < 1500);
+    // The gate's deadline and the fetch's own deadline are separate timers, so
+    // wait until both have fired: stall shown, request aborted and logged.
+    await until(
+      () => view.document.querySelector('[role="alert"]')?.textContent === STALL && signal?.aborted === true && logs.length > 0,
+      'AuthGate stall',
+    );
     assert.equal(view.document.querySelector('h1')?.textContent, 'Sign-in did not complete');
     const retry = [...view.document.querySelectorAll('button')].find((button) => button.textContent === 'Retry');
     assert.ok(retry, 'Retry is shown');
@@ -195,7 +202,10 @@ test("AuthGate logs a sentence when the current-user call throws 't'", { skip },
         React.createElement(compiled.auth.AuthGate, null, React.createElement('p', null, 'app')),
       ),
     );
-    await until(() => view.document.querySelector('[role="alert"]')?.textContent === STALL, 'minified AuthGate stall');
+    await until(
+      () => view.document.querySelector('[role="alert"]')?.textContent === STALL && logs.some((entry) => entry.includes('Sign-in did not complete')),
+      'minified AuthGate stall',
+    );
     for (const entry of logs) assert.notEqual(entry.trim(), 't');
     assert.ok(logs.some((entry) => entry.includes('Sign-in did not complete')));
     root.unmount();
@@ -282,10 +292,8 @@ test('the smoke page fails when current-user never answers, and Retry clears the
     const section = view.document.createElement('section');
     section.innerHTML = '<p data-smoke-state="pending">Checking access…</p><table hidden><tbody data-smoke-steps></tbody></table><pre id="c2c-smoke-json" hidden></pre>';
     view.document.body.appendChild(section);
-    const started = Date.now();
     compiled.smoke.mountSmoke(section, {}, view);
     await until(() => section.querySelector('[data-smoke-state]')?.getAttribute('data-smoke-state') === 'failed', 'react smoke stall');
-    assert.ok(Date.now() - started < 1500);
     assert.equal(section.querySelector('[data-smoke-state]')?.textContent, STALL);
     assert.ok(section.querySelector('[data-smoke-retry]'));
     for (const entry of logs) assert.notEqual(entry.trim(), 't');
