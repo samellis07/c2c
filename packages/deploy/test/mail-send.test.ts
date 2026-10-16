@@ -413,7 +413,7 @@ interface FakeCall {
   rows: { table: string; row: Record<string, unknown> }[];
 }
 
-async function loadModule(config: Record<string, unknown>, opts: { sendThrows?: boolean; logThrows?: boolean } = {}) {
+async function loadModule(config: Record<string, unknown>, opts: { sendThrows?: boolean; sendError?: string; logThrows?: boolean } = {}) {
   const bundle = buildDeploy(appOf(MAIL_DS), guardFor('Mailer', '1001'), true, false, undefined, undefined, {}, undefined, [OWNER]);
   const out = mkdtempSync(join(tmpdir(), 'c2c-mail-mod-'));
   writeDeployTree(out, bundle.files);
@@ -425,7 +425,7 @@ async function loadModule(config: Record<string, unknown>, opts: { sendThrows?: 
     return {
       email: () => ({
         sendMail: async (cfg: Record<string, unknown>) => {
-          if (opts.sendThrows) throw new Error('Invalid sender');
+          if (opts.sendThrows) throw new Error(opts.sendError ?? 'Invalid sender');
           calls.sendMail.push(cfg);
           return { from_email: cfg.from_email };
         },
@@ -515,9 +515,18 @@ test('live send: mail off, outside recipients and attachments are refused withou
 
 test('live send: a sendMail error is a failed row, and a log failure is reported, not thrown', async () => {
   const failed = await loadModule(VERIFIED, { sendThrows: true });
-  const result = await failed.mod.c2cGuardedMail(MESSAGE, {});
-  assert.deepEqual(result, { performed: false, status: 'failed', reason: 'Invalid sender', logged: true });
+  const errors: string[] = [];
+  const origError = console.error;
+  console.error = (msg: unknown) => errors.push(String(msg));
+  let result;
+  try {
+    result = await failed.mod.c2cGuardedMail(MESSAGE, {});
+  } finally {
+    console.error = origError;
+  }
+  assert.deepEqual(result, { performed: false, status: 'failed', reason: 'The email could not be sent.', logged: true });
   assert.equal(failed.calls.rows[0].row.status, 'failed');
+  assert.ok(errors.some((line) => line.includes('Invalid sender')));
   failed.cleanup();
   const unlogged = await loadModule(VERIFIED, { logThrows: true });
   const sent = await unlogged.mod.c2cGuardedMail(MESSAGE, {});
@@ -525,6 +534,24 @@ test('live send: a sendMail error is a failed row, and a log failure is reported
   assert.equal(sent.logged, false);
   assert.equal(sent.logError, 'no such table');
   unlogged.cleanup();
+});
+
+test('live send: provider error detail never reaches the caller — only the public reason', async () => {
+  const { mod, cleanup } = await loadModule(VERIFIED, { sendThrows: true, sendError: 'SMTP 535 for owner@example.com key=s3cr3t-token' });
+  const errors: string[] = [];
+  const origError = console.error;
+  console.error = (msg: unknown) => errors.push(String(msg));
+  let result;
+  try {
+    result = await mod.c2cGuardedMail(MESSAGE, {});
+  } finally {
+    console.error = origError;
+  }
+  assert.equal(result.status, 'failed');
+  assert.equal(result.reason, 'The email could not be sent.');
+  assert.doesNotMatch(JSON.stringify(result), /owner@example\.com|s3cr3t/);
+  assert.ok(errors.some((line) => line.includes('owner@example.com') && line.includes('s3cr3t-token')));
+  cleanup();
 });
 
 /** A mailer whose form carries a `print template` block and sends it `as inline`. */
@@ -792,7 +819,7 @@ test('live send: a convertToPdf failure is a failed row, not a send', async () =
     );
     assert.equal(result.performed, false);
     assert.equal(result.status, 'failed');
-    assert.match(result.reason, /SmartBrowz is not enabled/);
+    assert.equal(result.reason, 'The email could not be sent.');
     assert.deepEqual(calls.sendMail, []);
     assert.equal(calls.rows[0]?.row.status, 'failed');
   } finally {
@@ -833,7 +860,7 @@ test('live send: a convertToPdf wrapper return is a failed row, not a send', asy
     );
     assert.equal(result.performed, false);
     assert.equal(result.status, 'failed');
-    assert.match(result.reason, /did not return PDF bytes/);
+    assert.equal(result.reason, 'The email could not be sent.');
     assert.deepEqual(calls.sendMail, []);
     assert.equal(calls.rows[0]?.row.status, 'failed');
   } finally {
@@ -874,7 +901,7 @@ test('live send: convertToPdf returning non-PDF bytes is a failed row, not a sen
     );
     assert.equal(result.performed, false);
     assert.equal(result.status, 'failed');
-    assert.match(result.reason, /%PDF-/);
+    assert.equal(result.reason, 'The email could not be sent.');
     assert.deepEqual(calls.sendMail, []);
     assert.equal(calls.rows[0]?.row.status, 'failed');
   } finally {

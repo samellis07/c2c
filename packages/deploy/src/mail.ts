@@ -492,7 +492,9 @@ async function attempt(message, req, config) {
     await app.email().sendMail(catalystMail(rendered.message, attachments));
     return { performed: true, status: "sent", reason: "accepted by Catalyst Mail" };
   } catch (err) {
-    return { performed: false, status: "failed", reason: err && err.message ? err.message : String(err) };
+    const detail = err && err.message ? err.message : String(err);
+    console.error(\`c2c mail send failed: \${detail}\`);
+    return { performed: false, status: "failed", reason: "The email could not be sent." };
   }
 }
 
