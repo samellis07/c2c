@@ -1901,7 +1901,7 @@ export function functionRowOptions(app: App, fn: FunctionDef): Pick<TranslateOpt
 }
 
 /** How the function's rows are bound: none, `rec` (for each record) or `recs` (collection of records). */
-function functionRowBinding(fn: FunctionDef): '' | 'rec' | 'recs' {
+export function functionRowBinding(fn: FunctionDef): '' | 'rec' | 'recs' {
   const blob = fn.properties.map((p) => `${p.key} ${p.value}`).join('\n');
   if (/for each record/i.test(blob)) return 'rec';
   if (/collection of records/i.test(blob)) return 'recs';
@@ -3128,7 +3128,7 @@ export function writeRulesOption(app: App, schema?: SchemaPlan): string {
 }
 
 /** Schema-derived createRuntime fields: decimals, app-unique columns, write rules, and split layouts. */
-function schemaRuntimeOptions(app: App, schema?: SchemaPlan): string {
+export function schemaRuntimeOptions(app: App, schema?: SchemaPlan): string {
   return `${decimalColumnsOption(app)}${multiLookupsOption(app, schema)}${appUniqueOption(app, schema)}${writeRulesOption(app, schema)}${splitsOption(app, schema)}`;
 }
 

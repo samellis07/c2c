@@ -11,7 +11,7 @@
 import { closedChoices, scheduleAnchorFieldType, unquote, type App, type Field } from '../../core/src/ir.js';
 import { clientRuntimeSource as bundledClientRuntime } from './client-runtime-parts.js';
 import { toolchainBannerLines, toolchainHeader } from '../../core/src/toolchain.js';
-import { accessPolicyFor, administratorProfiles, appUniqueColumnsOf, decimalColumnsOf, fieldRuleDenials, flowSpecs, generate as generateDeluge, blueprintFieldSpecs, type GeneratedFile } from '../../deluge/src/generate.js';
+import { accessPolicyFor, administratorProfiles, appUniqueColumnsOf, decimalColumnsOf, fieldRuleDenials, flowSpecs, functionRowBinding, generate as generateDeluge, blueprintFieldSpecs, schemaRuntimeOptions, type GeneratedFile } from '../../deluge/src/generate.js';
 import { analyzeConnections } from '../../deluge/src/connections.js';
 import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, fileFieldsByForm, subformLinksFor, writeLiveSource } from '../../deluge/src/field-store.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
@@ -121,7 +121,7 @@ export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
     for (const action of report.customActions) {
       files.push({
         path: `functions/reports/${slug(report.name)}-action-${slug(action.name)}.mjs`,
-        data: actionStub(action.endpoint, action.name, report.form, action.workflow),
+        data: actionStub(app, action.endpoint, action.name, report.form, action.workflow, deluge.files, opts.schema),
       });
     }
   }
@@ -2047,26 +2047,128 @@ ${wantsRelative ? '    if (relative) rows = rows.filter((row) => matchRow(row, a
   return queries ? stageReportSource(source, queries) : source;
 }
 
-function actionStub(path: string, name: string, form: string | undefined, workflow?: string): string {
-  return `${banner([
-    `Custom action ${name}. Dry run: the workflow is not executed.`,
+/**
+ * A report custom action. The action's `workflow` names a `type = functions`
+ * function; the generated module dispatches it in-process through the
+ * functions/thisapp.mjs registry. Mode is decided exactly like every other
+ * generated route: functions/c2c-deploy.json "mode" (C2C_DEPLOY_MODE
+ * overrides it) — "live" runs the function for real on the posted record and
+ * field writes persist; any other mode answers the dry-run preview and writes
+ * nothing.
+ *
+ * A record-bound function (`execution type = for each record` or `collection
+ * of records`) runs on the row whose ROWID the client posts — a single row
+ * reads as a collection of one, so a collection action on one record runs
+ * once over it. A header click posts no ROWID, so there is no selection and
+ * nothing runs — a `wrote:false` reply, never an error. An action whose
+ * workflow did not generate a function (untranslated or not a function at
+ * all) is refused outright in live mode so the answer never claims a write.
+ */
+function actionStub(app: App, path: string, name: string, form: string | undefined, workflow: string | undefined, delugeFiles: GeneratedFile[], schema?: SchemaPlan): string {
+  const wanted = (workflow ?? '').trim().toLowerCase();
+  const fn = wanted ? app.functions.find((item) => item.name.toLowerCase() === wanted) : undefined;
+  // The action can dispatch only when its workflow named a function whose
+  // module generated and is registered in the emitted thisapp registry.
+  const dispatchable =
+    !!fn &&
+    delugeFiles.some((file) => file.path === 'functions/thisapp.mjs') &&
+    delugeFiles.some((file) => file.path === `functions/custom/${slug(fn.name)}.mjs`);
+  // A row binds only when the function's execution type declares one and the
+  // function has a form — the same condition the registry's rowForm follows.
+  const recordForm = dispatchable && fn && functionRowBinding(fn) && fn.form ? fn.form : '';
+  const zone = appTimeZone(app);
+  const zoneLine = zone ? `,\n      settingsTimeZone: ${JSON.stringify(zone)}` : '';
+  const bannerLines = [
+    `Custom action ${name}.`,
     workflow ? `Workflow: ${workflow}.` : 'No workflow name on the action.',
+    'Mode: functions/c2c-deploy.json "mode" (C2C_DEPLOY_MODE overrides) decides.',
+    '"live" runs the named function in-process on the posted record and writes;',
+    'any other mode is a preview: the dry-run answer writes nothing.',
     'The caller must be allowed to read the report form. Policy: functions/access-policy.json.',
-  ])}${policyPrelude('../access-policy.json')}
+  ];
+  if (!dispatchable) bannerLines.push("This action's workflow is not a generated function: a live call is refused, a preview reports dry run.");
+  // A record-bound action writes the fetched row at flush, so a store
+  // without query+update is as unconfigured as no store at all.
+  const storeGuard = recordForm ? '!datastore || typeof datastore.query !== "function" || typeof datastore.update !== "function"' : '!datastore';
+  const liveBody = dispatchable
+    ? `    const datastore = await liveDatastore();
+    if (${storeGuard}) {
+      send(res, 500, { dryRun: false, wrote: false, error: "live datastore is not configured" });
+      return;
+    }
+    const runtime = createRuntime({
+      dryRun: false,
+      appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined${zoneLine}${schemaRuntimeOptions(app, schema)},
+      datastore,
+      access,
+      functions,
+    });
+    const ctx = runtime.context({
+      record: {},
+      old: {},
+      principal,
+      appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined,
+    });
+${recordForm
+        ? `    const rowId = requestRowId(req);
+    if (!rowId) {
+      // A record-bound action clicked with no record is an empty selection:
+      // the function does not run and nothing is written.
+      send(res, 200, { dryRun: false, wrote: false, action: ${JSON.stringify(name)} });
+      return;
+    }
+    // The caller-scoped read binds the fetched row so field writes inside the
+    // function queue for the flush below. A row the caller cannot read is a
+    // 404, exactly like the record endpoint.
+    const rows = await ctx.shim.datastore.rows(
+      ctx,
+      ctx.shim.datastore.query(ctx, recordForm, { op: "==", field: "ROWID", value: rowId }, { system: true }),
+    );
+    const row = rows[0];
+    if (!row) {
+      send(res, 404, { dryRun: false, wrote: false, error: "no such row" });
+      return;
+    }
+    const result = await ctx.shim.thisapp.call(ctx, workflowPath, [row]);
+    await ctx.shim.datastore.flush(ctx);
+    send(res, 200, { dryRun: false, wrote: true, action: ${JSON.stringify(name)}, result: result ?? null, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`
+        : `    const result = await ctx.shim.thisapp.call(ctx, workflowPath, []);
+    await ctx.shim.datastore.flush(ctx);
+    send(res, 200, { dryRun: false, wrote: true, action: ${JSON.stringify(name)}, result: result ?? null, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`}`
+    : `    send(res, 422, { dryRun: false, wrote: false, refused: true, error: ${JSON.stringify(`custom action ${name} has no generated function to run`)} });
+    return;`;
+  return `${banner(bannerLines)}${policyPrelude('../access-policy.json', false, `${dispatchable ? 'import { createRuntime } from "creator-to-catalyst/shims";\nimport { functions } from "../thisapp.mjs";\n' : ''}`)}
 export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(path)}, dryRun: true };
 export const formName = ${JSON.stringify(form ?? '')};
-
+${dispatchable ? `const workflowPath = ${JSON.stringify(fn!.name.split('.'))};
+const recordForm = ${JSON.stringify(recordForm)};
+` : ''}
+${deployHelpers('../c2c-deploy.json', '../c2c-store.mjs')}${recordForm ? `
+function requestRowId(req) {
+  const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : null;
+  if (!body) return "";
+  const id = body.ROWID != null ? body.ROWID : body.rowid;
+  if (id == null || typeof id === "object") return "";
+  return String(id).trim();
+}
+` : ''}
 export default async function handler(req, res) {
+  const deploy = deployConfig();
+  const live = deploy.mode === "live";
   if (isHidden(formName)) {
-    send(res, 403, { dryRun: true, error: "hidden form" });
+    send(res, 403, { dryRun: !live, error: "hidden form" });
     return;
   }
 ${requirePrincipal()}
   try {
     if (formName) authorizeRead(access, principal, formName, { op: "true" });
-    send(res, 200, { dryRun: true, action: ${JSON.stringify(name)} });
+    if (!live) {
+      send(res, 200, { dryRun: true, action: ${JSON.stringify(name)} });
+      return;
+    }
+${liveBody}
   } catch (err) {
-    fail(res, err);
+    fail(res, err, live);
   }
 }
 `;
