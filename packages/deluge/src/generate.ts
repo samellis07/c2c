@@ -478,7 +478,24 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
       for (const item of stale) options.stale.push(item);
     }
   }
+  assertNoSkippedStatements(statementCoverage);
   return { files, stats, todos, constructs, coverage, statementCoverage };
+}
+
+/**
+ * The C3 generation gate: a statement the translator visited but accounted
+ * into no bucket — not translated, not shimmed, not a counted TODO — is a
+ * silent drop, a generator bug rather than a declared fidelity gap.
+ * Generation refuses to ship it. A `block` only recurses into its children,
+ * so 'skipped' is its resting bucket; its children carry the real rows.
+ */
+export function assertNoSkippedStatements(coverage: readonly CoverageEntry[]): void {
+  const row = coverage.find((c) => c.bucket === 'skipped' && c.kind !== 'block');
+  if (row) {
+    throw new Error(
+      `silent drop: a ${row.kind} statement in ${row.unit} was visited but emitted nothing — generation fails on it instead of shipping a module that quietly skips it`,
+    );
+  }
 }
 
 /**

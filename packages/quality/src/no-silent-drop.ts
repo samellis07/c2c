@@ -929,8 +929,9 @@ function takeElement(pool: UiElement[], source: ZmlNode): UiElement | undefined 
   const tag = source.tag.toLowerCase();
   const name = zmlName(source.attributes)?.toLowerCase();
   const same = pool.filter((el) => el.tag.toLowerCase() === tag);
-  const exact = name ? same.find((el) => (el.name ?? '').toLowerCase() === name) : undefined;
-  const picked = exact ?? same.find((el) => !el.name) ?? same[0];
+  // A named node is satisfied only by the generated element carrying that
+  // name: an unrelated same-tag node never stands in for it.
+  const picked = name ? same.find((el) => (el.name ?? '').toLowerCase() === name) : (same.find((el) => !el.name) ?? same[0]);
   if (!picked) return undefined;
   pool.splice(pool.indexOf(picked), 1);
   return picked;
@@ -951,7 +952,31 @@ function pageBehaviorGap(source: ZmlNode, ui: UiElement): string | undefined {
   if (criteria && !ui.criteria) return 'criteria';
   const fn = kpiFunction(source, ui);
   if (fn && !SUPPORTED_KPI.has(fn)) return `kpi ${fn}`;
+  const payload = staticPayload(source, ui);
+  if (payload && ui.kind !== 'container' && ui.kind !== 'todo' && !ui.kpi && !(ui.text?.trim() || ui.html?.trim())) return 'content';
   return undefined;
+}
+
+/**
+ * The static text payload the export wrote on a leaf element: its inner text
+ * or a literal `label`/`text` attribute, plus `value` on the kinds where it
+ * is the shown content (text, button). An attribute holding an expression
+ * (`thisapp.X.count(...)`, `openUrl(...)`) or a non-text token (an icon name,
+ * an embed URL) is not static payload; those elements are proved through the
+ * KPI/behaviour checks instead.
+ */
+function staticPayload(source: ZmlNode, ui: UiElement): string {
+  const inner = (source.text ?? '').trim();
+  if (inner) return inner;
+  const literal = (ciAttr(source.attributes, ['label', 'text']) ?? '').trim();
+  if (literal && !literal.includes('(')) return literal;
+  if (ui.kind === 'text' || ui.kind === 'button') {
+    const value = (ciAttr(source.attributes, ['value']) ?? '').trim();
+    // The value is emitted when it became the element's identity (an icon's
+    // name) or its icon, not only when it is the shown text.
+    if (value && ui.name !== value && ui.icon !== value && !value.includes('(') && !/^thisapp\./i.test(value)) return value;
+  }
+  return '';
 }
 
 function kpiFunction(source: ZmlNode, ui: UiElement): string | undefined {
@@ -1319,20 +1344,41 @@ function eachStatement(list: readonly Stmt[], visit: (s: Stmt) => void): void {
 /**
  * Every declared script (`workflow deluge`, blueprint transition phase
  * `deluge`, `function` body) as one audit unit, labelled for drop names.
+ * `cov` is the coverage-ledger unit the emitters record its rows under
+ * (generate.ts coverShift); a unit whose script is never translated has no
+ * coverage label at all, so its statements can never borrow another unit's
+ * rows. `via` marks a unit whose script is deliberately not translated —
+ * a payments stub names the workflow and states no gateway is called, which
+ * is the listing surface for its statements. Any other unit without a
+ * coverage label drops every statement it declares.
  */
-function scriptUnits(app: App): { label: string; owner: string; text: string; start: number; end: number }[] {
-  const out: { label: string; owner: string; text: string; start: number; end: number }[] = [];
+function scriptUnits(app: App, specs: readonly FlowSpec[]): { label: string; cov: string | null; via: string | null; owner: string; text: string; start: number; end: number }[] {
+  const out: { label: string; cov: string | null; via: string | null; owner: string; text: string; start: number; end: number }[] = [];
   for (const w of app.workflows) {
     const label = w.name || w.form || 'workflow';
-    if (w.deluge) out.push({ label: `workflow ${label} (${w.event})`, owner: workflowRowName(w), text: w.deluge.text, start: w.deluge.span.start, end: w.deluge.span.end });
+    if (w.deluge) {
+      const kind = workflowKind(w);
+      let cov: string | null = null;
+      let via: string | null = null;
+      if (kind === 'schedule') cov = `schedule ${label}`;
+      else if (kind === 'approval') {
+        const key = w.name || `approval:${w.form ?? ''}`;
+        const spec = specs.find((s) => s.kind === 'approval' && s.name === key) ?? (key !== w.name ? specs.find((s) => s.kind === 'approval' && s.name === w.name) : undefined);
+        cov = spec ? `approval ${spec.name}` : null;
+      } else if (kind === 'form') cov = `workflow ${label} (${w.event})`;
+      else if (kind === 'payment') via = 'payment stub';
+      out.push({ label: `workflow ${label} (${w.event})`, cov, via, owner: workflowRowName(w), text: w.deluge.text, start: w.deluge.span.start, end: w.deluge.span.end });
+    }
     for (const t of w.blueprint?.transitions ?? []) {
       for (const p of t.phases) {
-        for (const d of p.deluge) out.push({ label: `blueprint ${t.name} / ${p.phase}`, owner: workflowRowName(w), text: d.text, start: d.span.start, end: d.span.end });
+        for (const d of p.deluge)
+          out.push({ label: `blueprint ${t.name} / ${p.phase}`, cov: `blueprint ${t.name} / ${p.phase}`, via: null, owner: workflowRowName(w), text: d.text, start: d.span.start, end: d.span.end });
       }
     }
   }
   for (const fn of app.functions) {
-    for (const d of fn.deluge) out.push({ label: `function ${fn.name}`, owner: `fn:${fn.name}`, text: d.text, start: d.span.start, end: d.span.end });
+    for (const d of fn.deluge)
+      out.push({ label: `function ${fn.name}`, cov: `function ${fn.name}`, via: null, owner: `fn:${fn.name}`, text: d.text, start: d.span.start, end: d.span.end });
   }
   return out;
 }
@@ -1355,7 +1401,12 @@ function auditStatements(app: App, out: AuditOutputs, rows: CoverageRow[]): void
   const ownerStatus = new Map<string, CoverageRow['status']>();
   for (const r of rows) if (r.kind === 'workflow' || r.kind === 'schedule' || r.kind === 'approval') ownerStatus.set(r.name, r.status);
   for (const r of rows) if (r.kind === 'function') ownerStatus.set(`fn:${r.name}`, r.status);
-  for (const unit of scriptUnits(app)) {
+  // One claim set for the whole app: a coverage row can satisfy exactly one
+  // declared statement, in exactly one unit. Rows are also scoped to their
+  // own unit label, so a missing row can never be papered over by borrowing
+  // a neighbouring unit's same-kind row.
+  const used = new Set<CoverageEntry>();
+  for (const unit of scriptUnits(app, out.specs)) {
     if (!unit.text.trim()) continue;
     if (ownerStatus.get(unit.owner) !== 'emitted') continue;
     let script;
@@ -1367,19 +1418,25 @@ function auditStatements(app: App, out: AuditOutputs, rows: CoverageRow[]): void
     // The declared span covers at least the script text (a degenerate
     // `span: {0,0}` fixture widens to `start + text.length`), and an
     // app-call resolution (`thisapp.<fn>` inserts in translateInApp) can push
-    // a statement's end past the raw span, so the window is slack.
+    // a statement's end past the raw span, so the end window is slack.
     const unitEnd = Math.max(unit.end, unit.start + unit.text.length);
-    const cover = out.statementCoverage.filter((c) => c.start >= unit.start && c.start <= unitEnd + 4096);
-    const used = new Set<CoverageEntry>();
+    const cover = out.statementCoverage.filter((c) => c.unit === unit.cov && c.start >= unit.start && c.start <= unitEnd + 4096);
     eachStatement(script.body, (s) => {
+      const name = `${unit.label} ${s.kind} statement`;
+      // A unit whose script is deliberately not translated (a payments stub)
+      // lists every statement through that listing surface.
+      if (unit.via) {
+        rows.push({ kind: 'statement', name, status: 'counted', via: unit.via });
+        return;
+      }
       const abs = { start: unit.start + s.span.start, end: unit.start + s.span.end };
       // Exact span + kind first; when resolveAppCalls rewrote the source the
       // emitted spans sit in resolved coordinates, so fall back to the first
-      // unclaimed row of the same kind (statement order and kinds survive).
+      // unclaimed row of the same kind in this unit (statement order and
+      // kinds survive).
       const row =
         cover.find((c) => !used.has(c) && c.start === abs.start && c.end === abs.end && c.kind === s.kind) ??
         cover.find((c) => !used.has(c) && c.kind === s.kind);
-      const name = `${unit.label} ${s.kind} statement`;
       if (!row) {
         rows.push({
           kind: 'statement',

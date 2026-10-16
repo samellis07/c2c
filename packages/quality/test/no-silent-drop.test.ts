@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { test } from 'node:test';
-import { emptyApp, type App, type Field, type Workflow } from '../../core/src/index.js';
-import { FORM_EVENT_SERVER_UNINVOKED, clientPostsServerPath } from '../../deluge/src/generate.js';
+import { emptyApp, parseProject, type App, type Field, type Workflow } from '../../core/src/index.js';
+import { FORM_EVENT_SERVER_UNINVOKED, assertNoSkippedStatements, clientPostsServerPath } from '../../deluge/src/generate.js';
 import { assertCovered, auditApp, collectOutputs, coverageLedger, groupDrops, renderNoSilentDrop, SilentDropError } from '../src/no-silent-drop.js';
 
 const Z = { start: 0, end: 0 };
@@ -642,6 +643,62 @@ test('a fake generator that skips a statement fails generation', () => {
   assert.throws(() => assertCovered(a, out), SilentDropError);
 });
 
+/** Two emitted workflows with identical statements: deleting one unit's row must not be covered by the other unit's. */
+function twoUnitApp(): App {
+  const base = coveredApp();
+  return app({
+    ...base,
+    workflows: [
+      workflow({ name: 'StampA', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'x = 1;\ny = 2;', span: { start: 0, end: 12 } } }),
+      workflow({ name: 'StampB', container: 'form', form: 'Orders', event: 'on success', deluge: { text: 'x = 1;\ny = 2;', span: { start: 100, end: 112 } } }),
+    ],
+  });
+}
+
+test('a statement row can only satisfy a statement in its own unit', () => {
+  const a = twoUnitApp();
+  const out = collectOutputs(a);
+  const units = new Set(out.statementCoverage.map((c) => c.unit));
+  assert.ok(units.has('workflow StampA (on load)') && units.has('workflow StampB (on success)'));
+  // Remove StampA's `y = 2;` row. StampB still emits its own `y = 2;` row of
+  // the same kind: before unit-scoping that row covered the deletion.
+  out.statementCoverage = out.statementCoverage.filter((c) => !(c.unit === 'workflow StampA (on load)' && c.kind === 'assign' && c.start === 7));
+  const drops = auditApp(a, out);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['workflow StampA (on load) assign statement'],
+  );
+});
+
+test('deleting one emitted statement row per unit is detected across gallery apps', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR/gallery is not available' : false }, () => {
+  const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
+  for (const name of ['admission-management', 'sales-management', 'course-planner']) {
+    const appUnderTest = parseProject(join(gallery, name)).ir;
+    const out = collectOutputs(appUnderTest);
+    const emittedByUnit = new Map<string, typeof out.statementCoverage>();
+    for (const c of out.statementCoverage) {
+      if (c.bucket !== 'translated' && c.bucket !== 'shimmed') continue;
+      const list = emittedByUnit.get(c.unit) ?? [];
+      list.push(c);
+      emittedByUnit.set(c.unit, list);
+    }
+    let tested = 0;
+    let caught = 0;
+    for (const list of emittedByUnit.values()) {
+      const victim = list[0]!;
+      const mutated = { ...out, statementCoverage: out.statementCoverage.filter((c) => c !== victim) };
+      const drops = coverageLedger(appUnderTest, mutated).filter((r) => r.status === 'dropped' && r.kind === 'statement');
+      // A unit whose owner is itself dropped or counted reports at the owner
+      // row, so a missing statement row surfaces only under an emitted owner.
+      if (!drops.length) continue;
+      tested++;
+      const baseline = coverageLedger(appUnderTest, out).filter((r) => r.status === 'dropped' && r.kind === 'statement').length;
+      if (drops.length > baseline) caught++;
+    }
+    assert.equal(caught, tested, `${name}: ${caught}/${tested} single-row deletions detected`);
+  }
+});
+
 test('a statement visited but accounted nowhere fails generation', () => {
   const a = twoStatementApp();
   const out = collectOutputs(a);
@@ -650,6 +707,18 @@ test('a statement visited but accounted nowhere fails generation', () => {
   assert.equal(drops.length, 1);
   assert.equal(drops[0]!.kind, 'statement');
   assert.match(drops[0]!.note, /silent drop/);
+});
+
+test('a skipped statement row fails generation, wired into generate()', () => {
+  const row = { unit: 'workflow W (on load)', kind: 'assign', start: 0, end: 5 };
+  assert.throws(() => assertNoSkippedStatements([{ ...row, bucket: 'skipped' }]), /silent drop/);
+  // A `block` only recurses; 'skipped' is its resting bucket, not a drop.
+  assert.doesNotThrow(() =>
+    assertNoSkippedStatements([
+      { ...row, kind: 'block', bucket: 'skipped' },
+      { ...row, bucket: 'translated' },
+    ]),
+  );
 });
 
 test('a todo-bucket statement with no covering TODO item fails generation', () => {
@@ -842,6 +911,62 @@ test('a page element whose payload was not generated is a drop even though the n
     ['Dash.Book_Report', 'Dash.Fine', 'Dash.Go'],
   );
   for (const drop of drops) assert.match(drop.note ?? '', /Add one:/);
+});
+
+test('a page element emitted as an empty stub is a drop', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Dash',
+        properties: [],
+        zml: [
+          { tag: 'text', attributes: { elementName: 'Hello' }, children: [], text: 'Hello', start: 10, end: 20 },
+          { tag: 'text', attributes: { elementName: 'World' }, children: [], text: 'World', start: 21, end: 30 },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  assert.deepEqual(dropNames(source, out), []);
+  const stub = cloneOutputs(out);
+  const walk = (els: typeof stub.model.pages[number]['elements']): void => {
+    for (const el of els) {
+      if (el.kind === 'text') el.text = '';
+      walk(el.children);
+    }
+  };
+  walk(stub.model.pages[0]!.elements);
+  assert.deepEqual(dropNames(source, stub).sort(), ['Dash.Hello', 'Dash.World']);
+});
+
+test('a same-tag element under another name does not satisfy a named page element', () => {
+  const source = app({
+    pages: [
+      {
+        name: 'Dash',
+        properties: [],
+        zml: [
+          { tag: 'text', attributes: { elementName: 'Hello' }, children: [], text: 'Hello', start: 10, end: 20 },
+          { tag: 'text', attributes: { elementName: 'World' }, children: [], text: 'World', start: 21, end: 30 },
+        ],
+        references: [],
+        span: { start: 1, end: 40 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  assert.deepEqual(dropNames(source, out), []);
+  const renamed = cloneOutputs(out);
+  const walk = (els: typeof renamed.model.pages[number]['elements']): void => {
+    for (const el of els) {
+      if (el.name === 'Hello') el.name = 'SomethingElse';
+      walk(el.children);
+    }
+  };
+  walk(renamed.model.pages[0]!.elements);
+  assert.deepEqual(dropNames(source, renamed), ['Dash.Hello']);
 });
 
 test('a kanban view that the model does not keep, and an options icon, are drops', () => {
