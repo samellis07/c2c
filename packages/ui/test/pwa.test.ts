@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import vm from 'node:vm';
 import { inflateSync } from 'node:zlib';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
-import { buildSlate, generateUi, pwaServiceWorkerSource, serviceWorker } from '../src/index.js';
+import { buildSlate, generateUi, pwaServiceWorkerSource, serviceWorker, shortHashId } from '../src/index.js';
 
 function appOf(name: string, extra = ''): App {
   return deriveIr(
@@ -451,4 +451,20 @@ test('a cache-first shell asset with a new query fetches fresh bytes', async () 
     }
   }
   assert.deepEqual(bodies, ['v2-bytes'], 'the query-less cache entry is replaced by the fresh bytes');
+});
+
+test('content ids in the Slate build can never be a bare run of digits', () => {
+  // A 10-digit run reads as a numeric identifier, not a hash; generated-output
+  // scans flag it. The id slides its window to the first slice with a letter.
+  assert.match(shortHashId('6998605721abcdef0123456789'), /[a-f]/);
+  assert.equal(shortHashId('6998605721abcdef0123456789'), '998605721a');
+  assert.equal(shortHashId('1234567890'.repeat(7)), 'g123456789');
+  for (const hex of ['abcdef0123456789'.repeat(4), 'f'.repeat(64)]) {
+    assert.equal(shortHashId(hex).length, 10);
+  }
+  const files = slateFiles(appOf('Demo'));
+  const sw = String(files.get('slate/sw.js'));
+  for (const match of sw.matchAll(/\b\d{10,}\b/g)) assert.fail(`sw.js carries a bare digit run ${match[0]}`);
+  const cache = /CACHE = "c2c-([0-9a-z]+)"/.exec(sw)?.[1];
+  assert.ok(cache && /[a-z]/.test(cache), `cache id ${cache} is never all digits`);
 });

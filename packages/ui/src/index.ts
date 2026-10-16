@@ -1,4 +1,4 @@
-export { buildSlate, solidPng } from './build.js';
+export { buildSlate, shortHashId, solidPng } from './build.js';
 export type { OutFile } from './build.js';
 export { formatUiReport, uiCorpus } from './corpus.js';
 export type { AppNumbers, UiCorpusNumbers } from './corpus.js';
