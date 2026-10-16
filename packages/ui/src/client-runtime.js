@@ -3625,6 +3625,33 @@ const AUTH_EXCHANGE = /\/project-user\/(?:current|token)(?:[/?#]|$)|\/authentica
 const authInflight = new WeakMap();
 const authStallFlag = new WeakMap();
 const wrappedAuthFetches = new WeakSet();
+/** In-flight current-user and token fetches. The deadline aborts these in the same turn it gives up. */
+const authFetchControllers = new WeakMap();
+
+function rememberAuthFetch(scope, controller) {
+  if (!scope) return () => {};
+  let set = authFetchControllers.get(scope);
+  if (!set) {
+    set = new Set();
+    authFetchControllers.set(scope, set);
+  }
+  set.add(controller);
+  return () => {
+    set.delete(controller);
+  };
+}
+
+function abortAuthFetches(scope) {
+  const set = scope && authFetchControllers.get(scope);
+  if (!set) return;
+  for (const controller of set) {
+    try {
+      controller.abort();
+    } catch {
+      /* already aborted */
+    }
+  }
+}
 
 function authTimeoutMs(scope) {
   const configured = scope && typeof scope.C2C_AUTH_TIMEOUT_MS === 'number' && Number.isFinite(scope.C2C_AUTH_TIMEOUT_MS) && scope.C2C_AUTH_TIMEOUT_MS >= 0
@@ -3684,6 +3711,9 @@ function withAuthDeadline(scope, work, controller) {
   const timeout = new Promise((_, reject) => {
     timer = timers.set(() => {
       if (settled) return;
+      // Abort hung auth fetches before rejecting. Their own timer is registered
+      // later with the same delay, and Node 20 can paint the stall first.
+      abortAuthFetches(scope);
       try {
         if (controller) controller.abort();
       } catch {
@@ -3720,6 +3750,7 @@ function bindAuthFetch(scope) {
     const url = requestUrl(input);
     if (!AUTH_EXCHANGE.test(url)) return native.call(view, input, init);
     const controller = new AbortController();
+    const forgetFetch = rememberAuthFetch(view, controller);
     const outer = init && init.signal;
     if (outer && typeof outer.aborted === 'boolean') {
       if (outer.aborted) controller.abort();
@@ -3751,6 +3782,7 @@ function bindAuthFetch(scope) {
         throw timedOut || isAuthTimeout(error) ? authTimeoutError() : error;
       })
       .finally(() => {
+        forgetFetch();
         timers.clear(timer);
         authInflight.set(view, Math.max(0, authInflightCount(view) - 1));
       });
