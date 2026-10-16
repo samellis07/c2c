@@ -542,8 +542,10 @@ export async function migrateSeed(opts: {
       ...(opts.userIds?.size ? { userIds: opts.userIds } : {}),
     });
     singles.push(single);
-    if (!single.ok) break;
-    if (!opts.dryRun && opts.scope) {
+    // A refused or failed table is recorded and the load continues: one bad
+    // table must not leave the rest of the app empty. ok stays false and the
+    // per-table report names the table that did not load.
+    if (single.ok && !opts.dryRun && opts.scope) {
       rowIds.set(
         table.table,
         await loadRowIds(opts.fetch, opts.catalystBase, opts.dc, table.table, table.rows.map((row) => row.id), opts.scope),

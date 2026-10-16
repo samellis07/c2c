@@ -385,6 +385,43 @@ test('a table over the unique varchar budget keeps the first two store-level and
   for (const name of new Set(stored)) assert.ok(stored.filter((item) => item === name).length <= UNIQUE_VARCHAR_MAX_PER_TABLE);
 });
 
+test('a unique date or datetime column is never store-unique: the handler enforces it', () => {
+  // A Data Store date/datetime column created with is_unique refuses every
+  // insert (400 INVALID_INPUT "date value expected"), so the flag must not
+  // reach the plan no matter what the source holds.
+  const plan = planOf(
+    [
+      field('Fiscal_Year_From', 'date', '', 'must have unique'),
+      field('Fiscal_Year_To', 'datetime', '', 'unique'),
+      field('Code', 'text', '', 'unique'),
+    ].join('\n'),
+    'Make_Your_Fiscal_Year',
+  );
+  const byName = new Map(plan.tables[0].columns.map((column) => [column.name, column]));
+  assert.equal(byName.get('Fiscal_Year_From')?.dataType, 'Date');
+  assert.equal(byName.get('Fiscal_Year_To')?.dataType, 'DateTime');
+  assert.equal(byName.get('Fiscal_Year_From')?.unique, false);
+  assert.equal(byName.get('Fiscal_Year_From')?.appUnique, true);
+  assert.equal(byName.get('Fiscal_Year_To')?.unique, false);
+  assert.equal(byName.get('Fiscal_Year_To')?.appUnique, true);
+  assert.match(byName.get('Fiscal_Year_From')?.note ?? '', /not the store/);
+  // A unique varchar keeps its store flag — the refusal is specific to date types.
+  assert.equal(byName.get('Code')?.unique, true);
+  assert.equal(byName.get('Code')?.appUnique, undefined);
+  // The appUnique marker reaches the emitted schema JSON for the handler wiring.
+  const emitted = JSON.parse(schemaAsJson(plan)).tables[0].columns.find((column: { name: string }) => column.name === 'Fiscal_Year_From');
+  assert.equal(emitted.appUnique, true);
+  assert.equal(emitted.unique, false);
+  assert.ok(
+    plan.issues.some(
+      (issue) =>
+        issue.form === 'Make_Your_Fiscal_Year' &&
+        /has 2 unique date\/datetime column\(s\).*Fiscal_Year_From, Fiscal_Year_To/.test(issue.message),
+    ),
+    JSON.stringify(plan.issues),
+  );
+});
+
 
 /** A form schedule in the gallery shape: a named def inside the schedule container. */
 function formSchedule(name: string, formName: string, extra = ''): string {

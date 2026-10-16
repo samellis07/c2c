@@ -69,15 +69,12 @@ test('a refused write names Catalyst error_code, message, and the path', async (
     if (new URL(url).pathname.endsWith('/query')) return textResponse('{"status":"success","data":[]}');
     return catalystFailure(403, 'MANDATORY_MISSING', 'Column c2c_source_id is mandatory and cannot be empty');
   };
-  await assert.rejects(
-    () => migrateData({ ...bases, dryRun: false, fetch, checkpoint: emptyCheckpoint() }),
-    (err: Error) => {
-      assert.match(err.message, /^catalyst write failed: 403 MANDATORY_MISSING: Column c2c_source_id is mandatory and cannot be empty/);
-      assert.match(err.message, /\/table\/Vendor\/row/);
-      assert.ok(!err.message.includes(SCOPE.token));
-      return true;
-    },
-  );
+  const result = await migrateData({ ...bases, dryRun: false, fetch, checkpoint: emptyCheckpoint() });
+  assert.equal(result.ok, false);
+  const message = result.tables[0].error ?? '';
+  assert.match(message, /^catalyst write failed: 403 MANDATORY_MISSING: Column c2c_source_id is mandatory and cannot be empty/);
+  assert.match(message, /\/table\/Vendor\/row/);
+  assert.ok(!message.includes(SCOPE.token));
 });
 
 test('a source that repeats a record id is refused with a report before any write', async () => {

@@ -1142,6 +1142,7 @@ export function generateSchema(app: App, opts?: { source?: readonly SourceTableD
     const nameBlocker = tableNameLengthBlocker(table.form, table.name);
     if (nameBlocker) limitBlockers.push(nameBlocker);
   }
+  for (const table of tables) demoteUniqueDates(table, issues);
   for (const table of tables) budgetUniqueVarchar(table, issues);
 
   const renames: ColumnRename[] = [];
@@ -1202,6 +1203,40 @@ export function generateSchema(app: App, opts?: { source?: readonly SourceTableD
 /** A column Data Store stores as varchar (VarChar ≤ 255). Longer VarChar becomes text. */
 export function isStoreVarchar(column: SchemaColumn): boolean {
   return column.dataType === 'VarChar' && (column.length ?? 255) <= 255;
+}
+
+/**
+ * Data Store refuses every insert into a unique Date or DateTime column with
+ * 400 INVALID_INPUT "date value expected" — the same value a non-unique date
+ * column accepts (live probe, 2026-10-16). A Creator "no duplicate values" date
+ * field is therefore never store-unique: the column is created without
+ * is_unique and marked appUnique so the generated handler enforces the rule by
+ * a ZCQL read before insert and update. Data Store-level uniqueness is not
+ * enforced for dates, and that check is not atomic. The demotion is
+ * unconditional — it does not depend on source rows.
+ */
+function demoteUniqueDates(table: SchemaTable, issues: MigrationIssue[]): void {
+  if (table.nosql) return;
+  const demoted: string[] = [];
+  for (const column of table.columns) {
+    if (!column.unique || (column.dataType !== 'Date' && column.dataType !== 'DateTime')) continue;
+    column.unique = false;
+    column.appUnique = true;
+    column.note = [
+      column.note,
+      'Unique is enforced by the c2c handler, not the store: a unique Date/DateTime column refuses every insert (400 INVALID_INPUT "date value expected"), so Data Store-level uniqueness is not enforced for dates.',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    demoted.push(column.name);
+  }
+  if (demoted.length) {
+    issues.push({
+      severity: 'warning',
+      form: table.form,
+      message: `${table.name} has ${demoted.length} unique date/datetime column(s); a unique date column refuses every insert (400 INVALID_INPUT "date value expected"). App-level unique (checked by the handler, not atomic; the store does not enforce it): ${demoted.join(', ')}.`,
+    });
+  }
 }
 
 /**
