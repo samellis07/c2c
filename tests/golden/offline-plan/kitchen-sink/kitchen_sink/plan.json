@@ -1482,27 +1482,6 @@
       }
     },
     {
-      "id": "slate-enable",
-      "via": "console",
-      "command": "Catalyst console → the project → Slate → Start Exploring (<console>/baas/<org>/project/<project>/Development#/slate) — then c2c verifies it: c2c provision --record slate-enable (GET /slate/v1/project/<project>/app)",
-      "args": {
-        "service": "Slate"
-      },
-      "readBack": {
-        "via": "cli",
-        "command": "c2c provision --record slate-enable",
-        "args": {
-          "call": {
-            "method": "GET",
-            "path": "/slate/v1/project/<project>/app"
-          }
-        },
-        "match": {
-          "gate": "open"
-        }
-      }
-    },
-    {
       "id": "authorized-domain",
       "via": "cli",
       "command": "c2c provision --confirm --run authorized-domain (after the Slate deploy, when the App URL host is known)",

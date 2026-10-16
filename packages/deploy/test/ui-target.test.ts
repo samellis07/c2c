@@ -219,6 +219,17 @@ test('--ui react --confirm installs, builds, rewrites the config and deploys web
   const out = mkdtempSync(join(tmpdir(), 'c2c-ui-out-'));
   try {
     const cap = capture();
+    const events: string[] = [];
+    const origSpawn = cap.io.spawn;
+    cap.io.spawn = async (command, args, opts) => {
+      events.push(`spawn ${command} ${args.join(' ')}`);
+      return origSpawn(command, args, opts);
+    };
+    const origRest = cap.io.rest!;
+    cap.io.rest = async (call) => {
+      if (call.method === 'GET' && /^\/slate\/v1\/project\/1001\/app$/.test(call.path)) events.push('rest slate app list');
+      return origRest(call);
+    };
     const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--ui', 'react', '--out', out], cap.io);
     assert.equal(code, 0, `stdout:\n${cap.stdout()}\nstderr:\n${cap.stderr()}`);
     const names = cap.spawned.map((call) => `${call.command} ${call.args.join(' ')}`);
@@ -233,9 +244,16 @@ test('--ui react --confirm installs, builds, rewrites the config and deploys web
     assert.equal(cap.spawned[deps]!.cwd, join(out, 'web'));
     assert.equal(cap.spawned[build]!.cwd, join(out, 'web'));
     assert.equal(cap.spawned[link]!.cwd, out);
-    const linkArgs = cap.spawned[link]!.args.join(' ');
-    assert.match(linkArgs, /--source \.\/web\/dist/);
-    assert.match(linkArgs, /--framework static/);
+    const linkArgs = cap.spawned[link]!.args;
+    const deployArgs = cap.spawned[deploy]!.args;
+    assert.ok(linkArgs.includes('-ni') && deployArgs.includes('-ni'), 'Slate commands must be non-interactive');
+    for (const args of [linkArgs, deployArgs]) {
+      assert.equal(args[args.indexOf('-p') + 1], '1001');
+      assert.equal(args[args.indexOf('--org') + 1], '10000000000');
+      assert.equal(args[args.indexOf('--dc') + 1], 'in');
+    }
+    assert.match(linkArgs.join(' '), /--source \.\/web\/dist/);
+    assert.match(linkArgs.join(' '), /--framework static/);
     // The learned function base lands in the source config the build reads and
     // in the built dist/ the deploy uploads (rewritten after the clean build).
     const apiBase = 'https://c2c-widget-1001.development.catalystserverless.in/server/c2c_api';
@@ -244,6 +262,86 @@ test('--ui react --confirm installs, builds, rewrites the config and deploys web
     const toml = readFileSync(join(out, 'web', 'dist', '.catalyst', 'slate-config.toml'), 'utf8');
     assert.match(toml, /framework = "static"/);
     assert.match(toml, /deployment_name = "default"/);
+    const catalystJson = JSON.parse(readFileSync(join(out, 'catalyst.json'), 'utf8')) as Record<string, unknown>;
+    assert.equal('slate' in catalystJson, false, 'slate:link writes the slate entry; c2c must not pre-write one');
+    const firstSlateRead = events.indexOf('rest slate app list');
+    assert.ok(firstSlateRead === -1 || firstSlateRead > events.findIndex((event) => event.includes('slate:link')), 'Slate app list may be read back after link, never as a pre-gate');
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('an existing catalyst.json slate entry is preserved and skips slate:link without clobbering it', async () => {
+  const ds = writeDs();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-ui-out-'));
+  try {
+    const existing = { name: 'c2c-widget', project_id: '1001', org_id: '10000000000', environment: 'Development', slate: [{ name: 'c2c-widget', source: '/already/linked' }] };
+    writeFileSync(join(out, 'catalyst.json'), `${JSON.stringify(existing, null, 2)}\n`);
+    const cap = capture();
+    const origSpawn = cap.io.spawn;
+    cap.io.spawn = async (command, args, opts) => {
+      if (command === 'catalyst' && args.includes('deploy') && args.includes('slate')) {
+        cap.spawned.push({ command, args, cwd: opts.cwd, env: opts.env });
+        return { code: 0, stdout: 'App Url: https://c2c-widget-abc123.onslate.in\n', stderr: '' };
+      }
+      return origSpawn(command, args, opts);
+    };
+    const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--ui', 'react', '--out', out], cap.io);
+    assert.equal(code, 0, `stdout:\n${cap.stdout()}\nstderr:\n${cap.stderr()}`);
+    const argvs = cap.spawned.map((call) => call.args.join(' '));
+    assert.ok(!argvs.some((args) => args.includes('slate:link')), 'a linked Slate app must not be linked again');
+    assert.ok(argvs.some((args) => args.includes('deploy slate')), 'deploy slate still runs');
+    assert.deepEqual(JSON.parse(readFileSync(join(out, 'catalyst.json'), 'utf8')).slate, existing.slate);
+    assert.match(cap.stdout(), /skip .*slate:link.*already linked/);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('slate:link "already linked" is a success-path: deploy slate still runs and the entry is not clobbered', async () => {
+  const ds = writeDs();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-ui-out-'));
+  try {
+    const linked = [{ name: 'c2c-widget', source: '/already/linked' }];
+    const cap = capture();
+    const origSpawn = cap.io.spawn;
+    cap.io.spawn = async (command, args, opts) => {
+      if (command === 'catalyst' && args.includes('slate:link')) {
+        writeFileSync(join(opts.cwd, 'catalyst.json'), `${JSON.stringify({ slate: linked })}\n`);
+        return { code: 1, stdout: '', stderr: 'Slate app is already linked' };
+      }
+      if (command === 'catalyst' && args.includes('deploy') && args.includes('slate')) {
+        cap.spawned.push({ command, args, cwd: opts.cwd, env: opts.env });
+        return { code: 0, stdout: 'App Url: https://c2c-widget-abc123.onslate.in\n', stderr: '' };
+      }
+      return origSpawn(command, args, opts);
+    };
+    const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--ui', 'react', '--out', out], cap.io);
+    assert.equal(code, 0, `stdout:\n${cap.stdout()}\nstderr:\n${cap.stderr()}`);
+    assert.ok(cap.spawned.some((call) => call.args.join(' ').includes('deploy slate')), 'deploy slate still runs');
+    assert.deepEqual(JSON.parse(readFileSync(join(out, 'catalyst.json'), 'utf8')).slate, linked);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('the old Slate service-closed CLI text remains a fallback with the console instruction', async () => {
+  const ds = writeDs();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-ui-out-'));
+  try {
+    const cap = capture();
+    const origSpawn = cap.io.spawn;
+    cap.io.spawn = async (command, args, opts) => {
+      if (command === 'catalyst' && args.includes('deploy') && args.includes('slate')) {
+        return { code: 1, stdout: '', stderr: "Please access the Slate service in your project's console before deploying via the CLI." };
+      }
+      return origSpawn(command, args, opts);
+    };
+    const code = await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--ui', 'react', '--out', out], cap.io);
+    assert.notEqual(code, 0);
+    assert.match(cap.stderr(), /Please access the Slate service/);
+    assert.match(cap.stderr(), /Slate → Start Exploring/);
+    assert.match(cap.stderr(), /re-run deploy/);
   } finally {
     rmSync(out, { recursive: true, force: true });
   }

@@ -289,8 +289,7 @@ test('Acceptance 2: a fixture with one connection yields exactly one checklist i
     const scopesResult = writeResult(out, 'import-table-scopes', { '101': { 'App Administrator': ['GLOBAL'], 'App User': ['GLOBAL'] } });
     assert.equal(await provisionCli(['--out', out, '--record', 'import-table-scopes', '--result', scopesResult, '--org', ORG, '--dc', 'in'], cap(sandbox).io), 0);
 
-    // Every app ships a Slate client, so its gate, domain and sign-in check close too.
-    assert.equal(await provisionCli(['--out', out, '--record', 'slate-enable', '--org', ORG, '--dc', 'in'], cap(sandbox).io), 0);
+    // Every app ships a Slate client; its domain and sign-in check close too.
     const inputsPath = join(out, 'provision', 'inputs.json');
     writeFileSync(inputsPath, `${JSON.stringify({ ...JSON.parse(readFileSync(inputsPath, 'utf8')), slateDomain: 'app.example.test' }, null, 2)}\n`);
     const corsResult = writeResult(out, 'authorized-domain', { domains: [{ domain: 'app.example.test', cors: true, iframe: true }] });
@@ -336,27 +335,27 @@ test('Acceptance 2: a fixture with one connection yields exactly one checklist i
   }
 });
 
-test('Acceptance 3: generated human-step checklist for the 3 RC fixture shapes has <= 5 items, and docs/human-steps.md matches', () => {
+test('Acceptance 3: generated human-step checklist for the 3 RC fixture shapes has <= 4 items, and docs/human-steps.md matches', () => {
   // Shape 1: deterministic (minimal app without mail or slate)
   const shape1 = humanChecklist({ slate: false, sendsMail: false });
-  assert.ok(shape1.length <= 5, `deterministic shape must have <= 5 items, got ${shape1.length}`);
+  assert.ok(shape1.length <= 4, `deterministic shape must have <= 4 items, got ${shape1.length}`);
 
   // Shape 2: few TODOs (e.g. standard Slate app without mail)
   const shape2 = humanChecklist({ slate: true, sendsMail: false });
-  assert.ok(shape2.length <= 5, `few TODOs shape must have <= 5 items, got ${shape2.length}`);
+  assert.ok(shape2.length <= 4, `few TODOs shape must have <= 4 items, got ${shape2.length}`);
 
   // Shape 3: mail + Slate (app with Slate client and mail)
   const shape3 = humanChecklist({ slate: true, sendsMail: true });
-  assert.ok(shape3.length <= 5, `mail+Slate shape must have <= 5 items, got ${shape3.length}`);
+  assert.ok(shape3.length <= 4, `mail+Slate shape must have <= 4 items, got ${shape3.length}`);
 
-  // Shape 3 with connection secret: still <= 5 items
+  // Shape 3 with connection secret: still <= 4 items
   const shape3WithSecret = (humanChecklist as unknown as (input: Record<string, unknown>) => string[])({
     slate: true,
     sendsMail: true,
     connectionSecretKeys: ['MY_STRIPE_CLIENT_SECRET'],
   });
-  assert.ok(shape3WithSecret.length <= 5, `mail+Slate+secret shape must have <= 5 items, got ${shape3WithSecret.length}`);
-  assert.equal(shape3WithSecret.length, 5);
+  assert.ok(shape3WithSecret.length <= 4, `mail+Slate+secret shape must have <= 4 items, got ${shape3WithSecret.length}`);
+  assert.equal(shape3WithSecret.length, 4);
 
   // Check docs/human-steps.md matches
   const docsPath = join(repoRoot(), 'docs/human-steps.md');

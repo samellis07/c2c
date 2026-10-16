@@ -117,8 +117,9 @@ export interface DeployBundle {
  * served Slate origin in its environment. The bridge cannot run safely before
  * the app URL is known.
  */
-export function deployCommands(slateName: string, org: string, projectId: string, ui: DeployUi = 'react'): DeployCommand[] {
+export function deployCommands(slateName: string, org: string, projectId: string, dc: string, ui: DeployUi = 'react'): DeployCommand[] {
   const scope = catalystScopeArgs(org, projectId);
+  const slateScope = ['-p', projectId, '--org', org, '--dc', dc];
   return [
     { id: 'install', command: 'npm', argv: ['install', '--omit=dev', '--no-audit', '--no-fund'], cwd: FUNCTION_DIR },
     { id: 'functions', argv: [...scope, 'deploy', '--only', `functions:${API_FUNCTION}`, '-ni'] },
@@ -131,8 +132,8 @@ export function deployCommands(slateName: string, org: string, projectId: string
           { id: 'ui-build' as const, command: 'npm' as const, argv: ['run', 'build'], cwd: 'web' },
         ]
       : []),
-    { id: 'slate-link', argv: [...scope, 'slate:link', '--name', slateName, '--framework', 'static', '--source', ui === 'react' ? './web/dist' : './slate', '-ni'] },
-    { id: 'slate', argv: [...scope, 'deploy', 'slate', slateName, '-ni'] },
+    { id: 'slate-link', argv: [...slateScope, 'slate:link', '--name', slateName, '--framework', 'static', '--source', ui === 'react' ? './web/dist' : './slate', '-ni'] },
+    { id: 'slate', argv: [...slateScope, 'deploy', 'slate', slateName, '-ni'] },
     // c2c_auth has no dependencies; cli.ts writes its validated C2C_SLATE_ORIGIN
     // after the Slate URL is known and immediately before this deployment.
     { id: 'functions-auth', argv: [...scope, 'deploy', '--only', `functions:${AUTH_FUNCTION}`, '-ni'] },
@@ -352,7 +353,7 @@ export function buildDeploy(
     },
     sender,
   );
-  const commands = deployCommands(slateName, guard.org, guard.projectId, ui);
+  const commands = deployCommands(slateName, guard.org, guard.projectId, guard.dc, ui);
   const tableSteps = deployTableSteps(schema, mails, mail.enabled, usesEvents);
   const mailFindings = mailSenderPrecheck(app, mail);
   const widgetItems = widgetManualItems(app.widgets);
@@ -382,26 +383,23 @@ export function writeDeployTree(dir: string, files: readonly DeployFile[]): void
 }
 
 function catalystJson(guard: GuardOk, mail: MailConfig) {
-  // slate is an empty array until `slate:link` registers the app: zcatalyst-cli
-  // 1.27.2 addExistingSlate calls existingSlates.findIndex, so an object here
-  // crashes every link behind "contact Catalyst support".
+  // No `slate` key: `slate:link` registers the app and writes that entry
+  // itself. A pre-written entry can make the CLI answer "already linked".
   return {
     name: guard.projectName,
     project_id: guard.projectId,
     org_id: guard.org,
     environment: guard.environment,
     functions: { targets: [API_FUNCTION, AUTH_FUNCTION], ignore: [], source: 'functions' },
-    slate: [],
     mail: { enabled: mail.enabled, allowlist: mail.allowlist },
   };
 }
 
 /**
- * Migrate an object-shaped `slate` field in an existing catalyst.json to the
- * array the CLI expects. Older c2c wrote an object; the CLI never linked it,
- * so nothing registered is lost by resetting to []. Returns true when the
- * file was rewritten. A file that is already an array (in particular one the
- * CLI itself extended on link) is left untouched.
+ * Remove a malformed non-array `slate` field from an existing catalyst.json.
+ * Older c2c wrote an object; deleting it lets `slate:link` write the current
+ * entry itself. An array (in particular one the CLI itself extended on link)
+ * is left untouched.
  */
 export function migrateCatalystJson(dir: string): boolean {
   const path = join(dir, 'catalyst.json');
@@ -411,8 +409,8 @@ export function migrateCatalystJson(dir: string): boolean {
   } catch {
     return false;
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Array.isArray(parsed.slate)) return false;
-  parsed.slate = [];
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || parsed.slate === undefined || Array.isArray(parsed.slate)) return false;
+  delete parsed.slate;
   writeFileSync(path, `${JSON.stringify(parsed, null, 2)}\n`);
   return true;
 }

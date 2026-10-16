@@ -103,10 +103,10 @@ Rule: Assume a project whose `project_type` stays `Importing` keeps holding its 
 
 ### Tear down only on request, or before the first console step
 
-Rule: [UNVERIFIED] c2c tears a project down only when the user explicitly asks, or when a failure struck before the Slate "Start Exploring" step — the first human/console step in the flow. A project that has taken any human or console step is kept: stop, report the state, and let the user decide.
+Rule: [UNVERIFIED] c2c tears a project down only when the user explicitly asks, or when a failure struck before the first human/console step in the flow. A project that has taken any human or console step is kept: stop, report the state, and let the user decide.
 
 - "Kept" means no delete of the project, its tables, buckets or rows to "start clean" — a failed step resumes with `--resume` or is re-planned.
-- Automation built on c2c inherits the same boundary: a later-stage failure never deletes a project that passed the Slate step.
+- Automation built on c2c inherits the same boundary: a later-stage failure never deletes a project that passed its first human or console step.
 
 ## Environments
 
@@ -160,7 +160,7 @@ Rule: [UNVERIFIED] never assume a component exists in the customer's DC; `c2c do
 
 ### Console first-use gates are one checklist line plus a read c2c verifies
 
-Rule: [UNVERIFIED] no API or CLI command opens a service on a project ("Start Exploring") — the console's enable action answers `401 AUTHENTICATION_FAILURE` to the CLI token, and IaC has no component for it. Each gate is therefore one guided console line, and c2c then runs the gate's documented GET itself. Only an open answer lets provision, deploy or the seed load continue; a closed or unrecognised answer stops before any write and prints the line. A result file never closes a gate.
+Rule: [UNVERIFIED] no API or CLI command opens a service on a project ("Start Exploring") — the console's enable action answers `401 AUTHENTICATION_FAILURE` to the CLI token, and IaC has no component for it. Each remaining gate is therefore one guided console line, and c2c then runs the gate's documented GET itself. Only an open answer lets provision, deploy or the seed load continue; a closed or unrecognised answer stops before any write and prints the line. A result file never closes a gate.
 
 | Gate | When | Console line | Probe c2c runs | Closed answer | Open answer |
 |---|---|---|---|---|---|
@@ -173,7 +173,7 @@ Rule: [UNVERIFIED] no API or CLI command opens a service on a project ("Start Ex
 - Data Store, Functions and Authentication calls usually work on a fresh project before any click, so the Cloud Scale probe normally answers open and no human step is printed.
 - An unrecognised probe answer (`401`, `5xx`, a failure envelope without the refusal text) is unverified, never open.
 - Project services are opt-in — the first console open of a service (Start Exploring) enables it for the project.
-- The customer's first step names only the services the app uses (Stratus, SmartBrowz, Slate — Cloud Scale normally answers open) and has not started, one sentence each. For Stratus, the line includes creating one bucket; the customer steps stay five at most. [UNVERIFIED]
+- Stratus and SmartBrowz first-use gates remain guided provision steps when their app uses them. Slate is not a gate: Catalyst CLI 1.28.0 links and deploys it with `-ni` on a fresh project without opening the console page [TESTED] (public test: `packages/deploy/test/plan.test.ts`, "a Slate client needs no slate-enable console step; Data Store and Functions get no activation step"). The customer checklist is four steps; for Stratus, its provision line includes creating one bucket [UNVERIFIED].
 
 ### Treat DevOps (APM, alerts, logs) as opt-in console observability
 
@@ -185,9 +185,10 @@ Rule: [UNVERIFIED] never depend on APM or alerts in generated code or plans — 
 
 ### Link and deploy the Slate app through the CLI only
 
-Rule: [UNVERIFIED] Slate has no create/deploy REST or MCP route — `catalyst slate:link` records the app, `catalyst deploy slate` publishes it.
+Rule: [TESTED] (public test: `packages/deploy/test/ui-target.test.ts`, "--ui react --confirm installs, builds, rewrites the config and deploys web/dist") Catalyst CLI 1.28.0 can run `catalyst slate:link -p <project-id> --org <org-id> --dc <dc> --name <app> --framework static --source <dist> -ni` followed by `catalyst deploy slate <app> -p <project-id> --org <org-id> --dc <dc> -ni` on a fresh project without opening Slate in the console.
 
-- In `catalyst.json`, `slate` must be an array (`"slate": []` before linking). If the key holds an object, `slate:link` crashes with `TypeError: existingSlates.findIndex is not a function` — fix the JSON and retry.
+- Do not pre-write a `slate` entry in `catalyst.json`: `slate:link` writes the config that `deploy slate` requires. A pre-existing entry can make link answer "already linked"; preserve it and skip the link, never clobber it.
+- If an older CLI still answers `Please access the Slate service in your project's console before deploying via the CLI.`, use the console Slate page → Start Exploring as fallback guidance, then re-run.
 - `slate:link` writes the build path as an absolute `source` in `catalyst.json` — rewrite it to a relative path before the tree leaves the machine.
 - A PWA (service worker + manifest) deploys unchanged.
 

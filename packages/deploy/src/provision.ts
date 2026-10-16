@@ -36,7 +36,7 @@ import { readConnectionSecretKeys, writeOrUpdateFunctionEnv } from './function-e
 import { applyTablePlan, type RestCall, type RestFn, type RestResult, type TableCreateStep } from './tables.js';
 import { restWithRetry, spawnWithRetry, type ReRead, type RestRetry, type RetryOptions } from './retry.js';
 import { assertProtectedProject } from './guards.js';
-import { ACTIVATION_SERVICES, checkGate, FIRST_USE_GATES, gateConsoleLine, gateForStep, type FirstUseGate, type GateCheck } from './first-use.js';
+import { checkGate, gateConsoleLine, gateForStep, type FirstUseGate, type GateCheck } from './first-use.js';
 import { iacImportBundle, runProjectImport, ImportEndedError, StuckImportError, type ImportFetch } from './iac-import.js';
 import { IN_PROJECT_PROBE_REQUIRED, probeCreateCall, probeNameFor, verifyProbe } from '../../doctor/src/mcp-probe.js';
 import { loadMcpEvidence } from '../../doctor/src/mcp-state.js';
@@ -1565,14 +1565,9 @@ function updateFunctionEnvFromCtx(ctx: Ctx): void {
 }
 
 /** What no step can do for you once every step is done — the list plan.md names. */
-function humanChecklist(plan: ProvisionPlanFile, state?: ProvisionState, out?: string): string[] {
-  // A gate step already done or existing proves that service was started, so
-  // a re-run drops it from the first step; the rest keep their numbering.
-  const started = ACTIVATION_SERVICES.filter((id) =>
-    plan.steps.some((step) => step.id === FIRST_USE_GATES[id].stepId && state && ['done', 'existing'].includes(statusOf(state, step))),
-  );
+function humanChecklist(plan: ProvisionPlanFile, out?: string): string[] {
   const connectionSecretKeys = out ? readConnectionSecretKeys(out, plan.connectionSecretKeys) : (plan.connectionSecretKeys ?? []);
-  return planCustomerSteps(plan.steps, { started, connectionSecretKeys });
+  return planCustomerSteps(plan.steps, { connectionSecretKeys });
 }
 
 function printStatus(ctx: Ctx): number {
@@ -1588,7 +1583,7 @@ function printStatus(ctx: Ctx): number {
   lines.push('', `done: ${done}/${steps.length}`);
   if (done === steps.length && steps.length > 0) {
     lines.push('', 'human checklist:');
-    humanChecklist(ctx.plan, ctx.state, ctx.out).forEach((item, index) => lines.push(`${index + 1}. ${item}`));
+    humanChecklist(ctx.plan, ctx.out).forEach((item, index) => lines.push(`${index + 1}. ${item}`));
   }
   ctx.io.stdout(`${lines.join('\n')}\n`);
   return 0;
@@ -1615,7 +1610,7 @@ async function emitNext(ctx: Ctx): Promise<number> {
     const step = steps.find((item) => !['done', 'existing'].includes(statusOf(ctx.state, item)));
     if (!step) {
       updateFunctionEnvFromCtx(ctx);
-      ctx.io.stdout(`${JSON.stringify({ done: true, app: ctx.plan.app, steps: steps.length, checklist: humanChecklist(ctx.plan, ctx.state, ctx.out) }, null, 2)}\n`);
+      ctx.io.stdout(`${JSON.stringify({ done: true, app: ctx.plan.app, steps: steps.length, checklist: humanChecklist(ctx.plan, ctx.out) }, null, 2)}\n`);
       return 0;
     }
     // A gate that already verifies open is never presented as console work:

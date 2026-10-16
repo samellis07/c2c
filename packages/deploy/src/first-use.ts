@@ -85,30 +85,29 @@ export function gateForStep(stepId: string): FirstUseGate | undefined {
   return FIRST_USE_GATE_LIST.find((gate) => gate.stepId === stepId);
 }
 
-/** What the app needs: Cloud Scale always, the rest only when the app uses the service. */
+/** What a deploy must verify before other writes: Cloud Scale always, Stratus and SmartBrowz only when used. Slate is deliberately not a gate — `slate:link`/`deploy slate -ni` works on a fresh project. */
 export function requiredGates(signals: { client: boolean; files: boolean; pdf: boolean }): FirstUseGate[] {
   return FIRST_USE_GATE_LIST.filter(
     (gate) =>
       gate.id === 'cloudscale' ||
       (gate.id === 'stratus' && signals.files) ||
-      (gate.id === 'smartbrowz' && signals.pdf) ||
-      (gate.id === 'slate' && signals.client),
+      (gate.id === 'smartbrowz' && signals.pdf),
   );
 }
 
 /**
- * The services whose first activation the human checklist names. Each has no
- * API, CLI or MCP path, so it stays one guided console action inside the
- * customer's first step — named only when the app uses the service. Cloud
- * Scale is not listed: its probe normally answers open on a fresh project, and
- * a closed answer is the provision step's guided line.
+ * Services that still need a first-use console action named by older callers.
+ * Slate is absent: Catalyst CLI 1.28.0 links and deploys it non-interactively
+ * on a fresh project. Cloud Scale is not listed either: its probe normally
+ * answers open on a fresh project, and a closed answer is the provision step's
+ * guided line.
  */
-export type ActivationServiceId = Extract<FirstUseGateId, 'stratus' | 'smartbrowz' | 'slate'>;
+export type ActivationServiceId = Extract<FirstUseGateId, 'stratus' | 'smartbrowz'>;
 
-export const ACTIVATION_SERVICES: readonly ActivationServiceId[] = ['stratus', 'smartbrowz', 'slate'];
+export const ACTIVATION_SERVICES: readonly ActivationServiceId[] = ['stratus', 'smartbrowz'];
 
 /** One sentence per service, always the same pattern: `<Service> — in the Catalyst console open the project → <page> → Start Exploring`. */
-export function activationSentence(id: ActivationServiceId): string {
+export function activationSentence(id: FirstUseGateId): string {
   const gate = FIRST_USE_GATES[id];
   return `${gate.service} — in the Catalyst console open the project → ${gate.page} → Start Exploring`;
 }
@@ -116,7 +115,7 @@ export function activationSentence(id: ActivationServiceId): string {
 /** The services an app uses, in checklist order, from the plan signals. */
 export function activationServices(signals: { client: boolean; files: boolean; pdf: boolean }): ActivationServiceId[] {
   return ACTIVATION_SERVICES.filter(
-    (id) => (id === 'stratus' && signals.files) || (id === 'smartbrowz' && signals.pdf) || (id === 'slate' && signals.client),
+    (id) => (id === 'stratus' && signals.files) || (id === 'smartbrowz' && signals.pdf),
   );
 }
 

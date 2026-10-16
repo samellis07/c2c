@@ -84,76 +84,30 @@ function guardFor(name: string, projectId: string) {
   }
 }
 
-test('the checklist is one numbered list: slate start, admin invite, sign in, sender verify', () => {
+test('the checklist is one numbered list: admin invite, sign in, sender verify', () => {
   const items = humanChecklist({ slate: true, sendsMail: true });
-  assert.equal(items.length, 4);
-  assert.match(items[0]!, /Slate.*Start Exploring/);
-  assert.match(items[1]!, /invite/i);
-  assert.match(items[2]!, /[Ss]ign in/);
-  assert.match(items[3]!, /sender/i);
-  assert.match(items[3]!, /mail.from/);
-  assert.match(items[3]!, /verification code|code sent/);
-  const printed = formatHumanChecklist({ slate: true, sendsMail: true });
-  assert.match(printed, /^human checklist:\n1\. .*Start Exploring[\s\S]*2\. .*invite[\s\S]*3\. .*[Ss]ign in[\s\S]*4\. .*sender/);
-});
-
-test('the start item names exactly the services the app uses, in the shared sentence', () => {
-  const INVITE = 'Accept the admin invite: open the invite mail sent to the admin address and set the password.';
-  const SIGN_IN = 'Sign in to the app once at the Slate app URL — the first sign-in finishes activating the login.';
-  const STRATUS = 'Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring';
-  const SMARTBROWZ = 'SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring';
-  const SLATE = 'Slate — in the Catalyst console open the project → Slate → Start Exploring';
-  assert.equal(
-    formatHumanChecklist({ slate: true, sendsMail: false }),
-    `human checklist:\n1. Start services: ${SLATE}\n2. ${INVITE}\n3. ${SIGN_IN}\n`,
-  );
-  assert.equal(
-    formatHumanChecklist({ slate: false, files: true, sendsMail: false }),
-    `human checklist:\n1. Start services: ${STRATUS}\n2. ${INVITE}\n`,
-  );
-  assert.equal(
-    formatHumanChecklist({ slate: false, pdf: true, sendsMail: false }),
-    `human checklist:\n1. Start services: ${SMARTBROWZ}\n2. ${INVITE}\n`,
-  );
-  assert.equal(
-    formatHumanChecklist({ slate: true, files: true, pdf: true, sendsMail: false }),
-    `human checklist:\n1. Start services: ${STRATUS}; ${SMARTBROWZ}; ${SLATE}\n2. ${INVITE}\n3. ${SIGN_IN}\n`,
-  );
-  // An app that uses none of the three: no start item at all.
-  assert.equal(formatHumanChecklist({ slate: false, files: false, pdf: false, sendsMail: false }), `human checklist:\n1. ${INVITE}\n`);
-  // A service verified started drops out; the others stay.
-  assert.equal(
-    formatHumanChecklist({ slate: true, files: true, pdf: true, sendsMail: false, started: ['stratus', 'smartbrowz'] }),
-    `human checklist:\n1. Start services: ${SLATE}\n2. ${INVITE}\n3. ${SIGN_IN}\n`,
-  );
-  // Every service in use and every optional item still fits in five.
-  assert.equal(
-    humanChecklist({ slate: true, files: true, pdf: true, sendsMail: true, connectionSecretKeys: ['A_SECRET'] }).length,
-    5,
-  );
-});
-
-test('a re-run after Slate started drops the Slate start and keeps numbering contiguous', () => {
-  const items = humanChecklist({ slate: true, sendsMail: true, slateStarted: true });
   assert.equal(items.length, 3);
-  assert.ok(!items.some((item) => /Start Exploring/i.test(item)));
   assert.match(items[0]!, /invite/i);
   assert.match(items[1]!, /[Ss]ign in/);
   assert.match(items[2]!, /sender/i);
-  const printed = formatHumanChecklist({ slate: true, sendsMail: true, slateStarted: true });
+  assert.match(items[2]!, /mail.from/);
+  assert.match(items[2]!, /verification code|code sent/);
+  const printed = formatHumanChecklist({ slate: true, sendsMail: true });
   assert.match(printed, /^human checklist:\n1\. .*invite[\s\S]*2\. .*[Ss]ign in[\s\S]*3\. .*sender/);
-  assert.equal(printed.includes('Start Exploring'), false);
+  assert.doesNotMatch(printed, /Start Exploring|Slate —/);
 });
 
-test('a re-run after Slate started on an app without mail lists two items', () => {
-  const items = humanChecklist({ slate: true, sendsMail: false, slateStarted: true });
-  assert.equal(items.length, 2);
-  assert.ok(!items.some((item) => /Start Exploring/i.test(item)));
+test('Slate never contributes a start-services item', () => {
+  const INVITE = 'Accept the admin invite: open the invite mail sent to the admin address and set the password.';
+  const SIGN_IN = 'Sign in to the app once at the Slate app URL — the first sign-in finishes activating the login.';
+  assert.equal(formatHumanChecklist({ slate: true, sendsMail: false }), `human checklist:\n1. ${INVITE}\n2. ${SIGN_IN}\n`);
+  assert.equal(formatHumanChecklist({ slate: false, files: true, pdf: true, sendsMail: false }), `human checklist:\n1. ${INVITE}\n`);
+  assert.equal(humanChecklist({ slate: true, files: true, pdf: true, sendsMail: true, connectionSecretKeys: ['A_SECRET'] }).length, 4);
 });
 
 test('the sender step appears only when the app sends mail', () => {
   const without = humanChecklist({ slate: true, sendsMail: false });
-  assert.equal(without.length, 3);
+  assert.equal(without.length, 2);
   assert.ok(!without.some((item) => /sender/i.test(item)));
 });
 

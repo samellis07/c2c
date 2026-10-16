@@ -328,11 +328,11 @@ Recipe: GET /baas/v1/project/<project-id>/limits, `/quota`, `/usage`, `/table/<t
 
 ## Platform scope
 
-### First activation of Stratus, SmartBrowz and Slate
+### First activation of Stratus and SmartBrowz
 
-Rule: Plan the first activation of Stratus, SmartBrowz and Slate as one guided console action per service the app uses, with no API, CLI or MCP path [UNVERIFIED]. c2c names each in the customer's first step in one pattern: `<Service> — in the Catalyst console open the project → <page> → Start Exploring` (Stratus: Cloud Scale → Stratus; SmartBrowz: SmartBrowz; Slate: Slate). A service the app does not use is never named, and the customer's steps stay five.
+Rule: Plan the first activation of Stratus and SmartBrowz as one guided console action per service the app uses, with no API, CLI or MCP path [UNVERIFIED]. Each is one provision plan line: `<Service> — in the Catalyst console open the project → <page> → Start Exploring`. Slate needs no such activation: CLI 1.28.0 links and deploys it with `-ni` on a fresh project [TESTED] (public test: `packages/deploy/test/plan.test.ts`, "a Slate client needs no slate-enable console step; Data Store and Functions get no activation step").
 
-Recipe: c2c runs the gate probe for each service the app uses before the first write (Stratus GET /baas/v1/project/<project-id>/bucket, SmartBrowz the browser-grid list, Slate GET /slate/v1/project/<project-id>/app). Success is a 200 answer; an "access the … service" refusal is closed and prints that service's sentence.
+Recipe: c2c runs the gate probe for Stratus (GET /baas/v1/project/<project-id>/bucket) and SmartBrowz (the browser-grid list) before their writes. Success is a 200 answer; an "access the … service" refusal is closed and prints that service's sentence.
 
 ### Inbound email
 

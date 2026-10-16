@@ -819,7 +819,7 @@ const OPEN_SHAPES: Record<FirstUseGateId, RestResult> = {
   smartbrowz: { status: 200, body: { status: 'success', data: [] } },
 };
 
-for (const id of ['slate', 'cloudscale', 'stratus', 'smartbrowz'] as const) {
+for (const id of ['cloudscale', 'stratus', 'smartbrowz'] as const) {
   const gate = FIRST_USE_GATES[id];
   test(`${gate.stepId}: a closed gate keeps the step open with the checklist line; an open answer closes it`, async () => {
     const out = mkdtempSync(join(tmpdir(), `c2c-prov-gate-${id}-`));
@@ -865,7 +865,7 @@ for (const id of ['slate', 'cloudscale', 'stratus', 'smartbrowz'] as const) {
   });
 }
 
-for (const gates of [['cloudscale'], ['cloudscale', 'stratus'], ['cloudscale', 'smartbrowz'], ['cloudscale', 'slate']] as FirstUseGateId[][]) {
+for (const gates of [['cloudscale'], ['cloudscale', 'stratus'], ['cloudscale', 'smartbrowz']] as FirstUseGateId[][]) {
   test(`the all-done checklist never asks to start a service: ${gates.join('+')}`, async () => {
     const out = mkdtempSync(join(tmpdir(), `c2c-prov-gate-done-${gates.length}-`));
     mkdirSync(join(out, 'provision'), { recursive: true });
@@ -888,11 +888,11 @@ for (const gates of [['cloudscale'], ['cloudscale', 'stratus'], ['cloudscale', '
     assert.equal(done.done, true);
     // Every gate the app uses was verified open, so there is no step 1: the
     // list starts at the invite, and no service is named — numbering is contiguous.
-    assert.deepEqual(done.checklist, CUSTOMER_STEPS.slice(1, 4));
+    assert.deepEqual(done.checklist, CUSTOMER_STEPS.slice(0, 3));
     const status = cap();
     assert.equal(await provisionCli(['--out', out, '--status', ...SCOPE], status.io), 0);
     assert.ok(
-      status.out().endsWith(`human checklist:\n${CUSTOMER_STEPS.slice(1, 4).map((step, i) => `${i + 1}. ${step}`).join('\n')}\n`),
+      status.out().endsWith(`human checklist:\n${CUSTOMER_STEPS.slice(0, 3).map((step, i) => `${i + 1}. ${step}`).join('\n')}\n`),
       status.out(),
     );
     assert.doesNotMatch(status.out().slice(status.out().indexOf('human checklist:')), /Start services|Start Exploring/);
@@ -931,16 +931,16 @@ test('--next probes an open gate past with no console line: no gate step, no Sta
 
 test('--next stops at an unverified gate with the guided step, as before', async () => {
   const out = mkdtempSync(join(tmpdir(), 'c2c-prov-gate-next-unknown-'));
-  writeGatePlan(out, ['slate']);
+  writeGatePlan(out, ['smartbrowz']);
   const c = cap();
   c.io.rest = guardedRest(async () => ({ status: 500, body: { status: 'failure', data: { message: 'internal error' } } }));
   assert.equal(await provisionCli(['--out', out, '--next', ...SCOPE], c.io), 0);
   const next = lastJson(c.out()) as { done: boolean; step: { id: string }; instructions: string };
   assert.equal(next.done, false);
-  assert.equal(next.step.id, 'slate-enable');
-  assert.match(next.instructions, /Slate → Start Exploring/);
-  assert.match(next.instructions, /c2c provision --record slate-enable/);
-  assert.equal(readState(out).steps['slate-enable'], undefined, 'an unverified gate must stay open');
+  assert.equal(next.step.id, 'smartbrowz-enable');
+  assert.match(next.instructions, /SmartBrowz → Start Exploring/);
+  assert.match(next.instructions, /c2c provision --record smartbrowz-enable/);
+  assert.equal(readState(out).steps['smartbrowz-enable'], undefined, 'an unverified gate must stay open');
   rmSync(out, { recursive: true, force: true });
 });
 
@@ -966,12 +966,12 @@ test('an open first-use gate before a cli step is verified by its probe and the 
 
 test('an unrecognised probe answer is never read as an open gate', async () => {
   const out = mkdtempSync(join(tmpdir(), 'c2c-prov-gate-unknown-'));
-  writeGatePlan(out, ['slate']);
+  writeGatePlan(out, ['smartbrowz']);
   const c = cap();
   c.io.rest = guardedRest(async () => ({ status: 500, body: { status: 'failure', data: { message: 'internal error' } } }));
-  assert.equal(await provisionCli(['--out', out, '--record', 'slate-enable', ...SCOPE], c.io), 1);
-  assert.match(c.err(), /Slate first-use gate could not be verified/);
-  assert.equal(readState(out).steps['slate-enable'], undefined);
+  assert.equal(await provisionCli(['--out', out, '--record', 'smartbrowz-enable', ...SCOPE], c.io), 1);
+  assert.match(c.err(), /SmartBrowz first-use gate could not be verified/);
+  assert.equal(readState(out).steps['smartbrowz-enable'], undefined);
   rmSync(out, { recursive: true, force: true });
 });
 

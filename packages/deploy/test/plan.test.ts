@@ -239,32 +239,22 @@ const DS_WITH_PAGE = `application "Widget"
 }
 `;
 
-test('a Slate client adds a slate-enable console step; Data Store and Functions get no activation step', async () => {
+test('a Slate client needs no slate-enable console step; Data Store and Functions get no activation step', async () => {
   const ds = writeDs(DS_WITH_PAGE);
   const out = mkdtempSync(join(tmpdir(), 'c2c-plan-slate-'));
   assert.equal(await planCli([ds, '--out', out, '--dc', 'in'], offlineIo({}).io), 0);
   const steps = (readJson(join(out, 'provision/plan.json')) as { steps: ProvisionStep[] }).steps;
-  const slate = steps.find((step) => step.id === 'slate-enable');
-  assert.ok(slate, 'slate-enable step missing');
-  assert.equal(slate.via, 'console');
-  assert.match(slate.command ?? '', /Slate/);
-  assert.match(slate.command ?? '', /Start Exploring/);
-  // c2c verifies the gate itself: a GET of the Slate app list, closed until opened.
-  assert.equal(slate.readBack.via, 'cli');
-  assert.deepEqual(slate.readBack.args, { call: { method: 'GET', path: '/slate/v1/project/<project>/app' } });
-  assert.deepEqual(slate.readBack.match, { gate: 'open' });
-  // First-use gates: Cloud Scale (verified by its own read, usually already
-  // open) and Slate for a client app. Data Store and Functions get no step.
+  assert.equal(steps.some((step) => step.id === 'slate-enable'), false, 'slate:link -ni works without a console first-open step');
   const activation = steps.filter((step) => /Start Exploring/i.test(step.command ?? ''));
-  assert.deepEqual(activation.map((step) => step.id), ['cloudscale-enable', 'slate-enable']);
+  assert.deepEqual(activation.map((step) => step.id), ['cloudscale-enable']);
   rmSync(out, { recursive: true, force: true });
 
   // An app with no Creator pages still deploys a Slate client (its forms and
-  // reports), so its plan carries the same Slate gate.
+  // reports), and still needs no Slate console gate.
   const noPage = mkdtempSync(join(tmpdir(), 'c2c-plan-nopage-'));
   assert.equal(await planCli([writeDs(), '--out', noPage, '--dc', 'in'], offlineIo({}).io), 0);
   const plain = (readJson(join(noPage, 'provision/plan.json')) as { steps: ProvisionStep[] }).steps;
-  assert.equal(plain.some((step) => step.id === 'slate-enable'), true);
+  assert.equal(plain.some((step) => step.id === 'slate-enable'), false);
   rmSync(noPage, { recursive: true, force: true });
 });
 
@@ -303,10 +293,9 @@ test('a client app with portal users orders its auth chain: Slate host, authoris
   const steps = (readJson(join(out, 'provision/plan.json')) as { steps: ProvisionStep[] }).steps;
   const ids = steps.map((step) => step.id);
   const at = (id: string) => ids.indexOf(id);
-  for (const id of ['slate-enable', 'authorized-domain', 'app-users', 'sign-in-check']) {
+  for (const id of ['authorized-domain', 'app-users', 'sign-in-check']) {
     assert.ok(at(id) >= 0, `the plan carries ${id}`);
   }
-  assert.ok(at('slate-enable') < at('authorized-domain'), 'the host must exist before it is authorised');
   assert.ok(at('authorized-domain') < at('app-users'), 'the invites redirect into the hosted app — the domain is authorised first');
   assert.ok(at('app-users') < at('sign-in-check'), 'the sign-in check closes the chain');
 
@@ -356,36 +345,18 @@ test('missing Stratus signature tool falls back to the documented CLI-token REST
 });
 
 
-test('a Slate client adds a slate-enable console step; Data Store and Functions get no activation step', async () => {
+test('a Slate client plan carries authorised-domain and sign-in steps but no first-open step', async () => {
   const ds = writeDs(DS_WITH_PAGE);
   const out = mkdtempSync(join(tmpdir(), 'c2c-plan-slate-'));
   assert.equal(await planCli([ds, '--out', out, '--dc', 'in'], offlineIo({}).io), 0);
   const steps = (readJson(join(out, 'provision/plan.json')) as { steps: ProvisionStep[] }).steps;
-  const slate = steps.find((step) => step.id === 'slate-enable');
-  assert.ok(slate, 'slate-enable step missing');
-  assert.equal(slate.via, 'console');
-  assert.match(slate.command ?? '', /Slate/);
-  assert.match(slate.command ?? '', /Start Exploring/);
-  // The ask carries the project's own Slate page — the console host is a token
-  // resolved from the plan's data centre, never a hard-coded DC.
-  assert.match(slate.command ?? '', /<console>\/baas\/<org>\/project\/<project>\/Development#\/slate/);
-  // c2c verifies the gate itself: a GET of the Slate app list, closed until opened.
-  assert.equal(slate.readBack.via, 'cli');
-  assert.deepEqual(slate.readBack.args, { call: { method: 'GET', path: '/slate/v1/project/<project>/app' } });
-  assert.deepEqual(slate.readBack.match, { gate: 'open' });
-  // First-use gates: Cloud Scale (verified by its own read, usually already
-  // open) and Slate for a client app. Data Store and Functions get no step.
+  const ids = steps.map((step) => step.id);
+  assert.equal(ids.includes('slate-enable'), false);
+  assert.ok(ids.includes('authorized-domain'));
+  assert.ok(ids.includes('sign-in-check'));
   const activation = steps.filter((step) => /Start Exploring/i.test(step.command ?? ''));
-  assert.deepEqual(activation.map((step) => step.id), ['cloudscale-enable', 'slate-enable']);
+  assert.deepEqual(activation.map((step) => step.id), ['cloudscale-enable']);
   rmSync(out, { recursive: true, force: true });
-
-  // An app with no Creator pages still deploys a Slate client (its forms and
-  // reports), so its plan carries the same Slate gate.
-  const noPage = mkdtempSync(join(tmpdir(), 'c2c-plan-nopage-'));
-  assert.equal(await planCli([writeDs(), '--out', noPage, '--dc', 'in'], offlineIo({}).io), 0);
-  const plain = (readJson(join(noPage, 'provision/plan.json')) as { steps: ProvisionStep[] }).steps;
-  assert.equal(plain.some((step) => step.id === 'slate-enable'), true);
-  rmSync(noPage, { recursive: true, force: true });
 });
 
 
@@ -396,10 +367,9 @@ test('a client app with portal users orders its auth chain: Slate host, authoris
   const steps = (readJson(join(out, 'provision/plan.json')) as { steps: ProvisionStep[] }).steps;
   const ids = steps.map((step) => step.id);
   const at = (id: string) => ids.indexOf(id);
-  for (const id of ['slate-enable', 'authorized-domain', 'app-users', 'sign-in-check']) {
+  for (const id of ['authorized-domain', 'app-users', 'sign-in-check']) {
     assert.ok(at(id) >= 0, `the plan carries ${id}`);
   }
-  assert.ok(at('slate-enable') < at('authorized-domain'), 'the host must exist before it is authorised');
   assert.ok(at('authorized-domain') < at('app-users'), 'the invites redirect into the hosted app — the domain is authorised first');
   assert.ok(at('app-users') < at('sign-in-check'), 'the sign-in check closes the chain');
 
@@ -1264,17 +1234,13 @@ test('--production adds a console promote step with an /environment read-back', 
   rmSync(out2, { recursive: true, force: true });
 });
 
-test('the Slate first-open step is one guided console line that c2c then verifies', async () => {
+test('the plan contains no Slate first-open step', async () => {
   const ds = writeDs(DS_WITH_PAGE);
   const out = mkdtempSync(join(tmpdir(), 'c2c-plan-slate2-'));
   assert.equal(await planCli([ds, '--out', out, '--dc', 'in'], offlineIo({}).io), 0);
   const steps = (readJson(join(out, 'provision/plan.json')) as { steps: ProvisionStep[] }).steps;
-  const slate = steps.find((step) => step.id === 'slate-enable')!;
-  assert.match(slate.command ?? '', /Catalyst console → the project → Slate → Start Exploring/);
-  assert.match(slate.command ?? '', /c2c provision --record slate-enable/);
-  // No console-session call is asked of anyone: the user opens the page, c2c reads.
-  assert.doesNotMatch(slate.command ?? '', /PATCH/);
-  assert.equal(slate.command?.includes('\n'), false);
+  assert.equal(steps.some((step) => step.id === 'slate-enable'), false);
+  assert.equal(steps.some((step) => /Slate → Start Exploring/.test(step.command ?? '')), false);
   rmSync(out, { recursive: true, force: true });
 });
 

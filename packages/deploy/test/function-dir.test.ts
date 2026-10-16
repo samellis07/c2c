@@ -1325,9 +1325,7 @@ test('deploy runs install, functions, slate in order and --resume skips finished
     assert.match(second.out(), /post-deploy \(console\)/);
     const redeployed = JSON.parse(readFileSync(join(out, 'functions/c2c_api/c2c-deploy.json'), 'utf8')) as { allowedOrigins?: string[] };
     assert.deepEqual(redeployed.allowedOrigins, ['https://c2c-sample-app-1.development.catalystserverless.in']);
-    // The re-run confirmed Slate started (slate:link and slate deploy
-    // succeeded), so the end-of-run checklist drops the Slate start item:
-    // no part of the output names it.
+    // Slate has no start item at all: the re-run output never asks for one.
     assert.equal(second.out().includes('Start Exploring'), false);
     const report = JSON.parse(readFileSync(join(out, DEPLOY_REPORT), 'utf8')) as {
       exitCode: number;

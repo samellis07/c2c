@@ -18,7 +18,7 @@ These rules apply to every host (Claude Code, OpenAI Codex, Cursor) and every c2
 12. **Defer to the Catalyst skills for Catalyst facts.** For handler signatures, SDK calls, `catalyst-config.json`, Slate config, ZCQL syntax: load the matching `catalyst-*` skill. c2c skills add the migration decisions on top.
 13. **Default settings only — no browser automation, no supplied evidence, no permission changes.** The end user runs this plugin with the host's default settings: you never automate the Zoho web console or a browser (use the CLI, API or MCP), never change the user's permission or approval rules, and never accept evidence you did not produce — every doctor, probe and read-back fact comes from CLI/API/MCP calls made live in the current session, each behind the host's own approval. Whatever no call can do becomes a guided ask — the exact console link or menu path, what to click, and how the result is read back — collected into one batched checklist, not asked one at a time.
 14. **One Catalyst CLI credential, one refresher.** The refresh token has been observed to rotate on refresh [TESTED], so two processes refreshing the same login can break it for each other — the loser gets `Error when refreshing the access token` or an empty token. Serialize CLI use: one `catalyst`/`c2c` run at a time per credential, never a background keep-fresh loop beside a run, never a credential copied to a second machine or profile. On a read-only `401 INVALID_TOKEN`, re-read the stored token — a refresh may already have renewed it — rather than forcing a refresh; forcing a local refresh is opt-in (`C2C_ALLOW_LOCAL_REFRESH=1`) and only for a single user who owns the only credential.
-15. **Keep whatever a human step has touched.** c2c tears a project down only on the user's explicit request, or on a failure before the Slate "Start Exploring" step — the first console action in the flow. A project that has taken a human or console step is never torn down to "start clean": stop, report the state, and let the user decide.
+15. **Keep whatever a human step has touched.** c2c tears a project down only on the user's explicit request, or on a failure before the first human or console step in the flow. A project that has taken a human or console step is never torn down to "start clean": stop, report the state, and let the user decide.
 
 ## 2. Evidence labels
 
@@ -48,10 +48,10 @@ These rules apply to every host (Claude Code, OpenAI Codex, Cursor) and every c2
 | `analyze/plan` | `commands/analyze.md` | `skills/c2c-analyze-and-precheck/SKILL.md` | `analyze`, `precheck` | none |
 | `analyze/plan` | `commands/plan.md` | `skills/c2c-migrate/SKILL.md` | `plan` | none |
 | `analyze/plan` | none | `skills/c2c-edit/SKILL.md` | `edit` | none |
-| `provision/deploy` | `commands/migrate.md` | `skills/c2c-migrate/SKILL.md` | `provision`, `deploy` | Start services once, Accept the admin invite, Sign in once, Verify the mail sender (only if your app sends mail) |
-| `provision/deploy` | none | `skills/c2c-provision-and-deploy/SKILL.md` | `provision`, `deploy` | Start services once |
+| `provision/deploy` | `commands/migrate.md` | `skills/c2c-migrate/SKILL.md` | `provision`, `deploy` | Accept the admin invite, Sign in once, Run the in-app check and paste its code, Verify the mail sender (only if your app sends mail) |
+| `provision/deploy` | none | `skills/c2c-provision-and-deploy/SKILL.md` | `provision`, `deploy` | Accept the admin invite, Sign in once |
 | `provision/deploy` | none | `skills/c2c-auth-and-access/SKILL.md` | `auth`, `users` | Accept the admin invite, Sign in once |
-| `provision/deploy` | none | `skills/c2c-ui/SKILL.md` | `ui`, `ui-react` | Start services once, Sign in once |
+| `provision/deploy` | none | `skills/c2c-ui/SKILL.md` | `ui`, `ui-react` | Sign in once |
 | `provision/deploy` | none | `skills/c2c-integrations/SKILL.md` | `deploy` | Verify the mail sender (only if your app sends mail) |
 | `data/cutover` | none | `skills/c2c-schema-and-data/SKILL.md` | `schema`, `migrate-data`, `seed`, `sync-delta` | none |
 | `data/cutover` | `commands/verify.md` | `skills/c2c-verify-and-cutover/SKILL.md` | `smoke`, `proof`, `cutover-checklist` | Run the in-app check and paste its code |

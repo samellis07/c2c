@@ -52,14 +52,11 @@ import { cdpBrowser, openOnOrigin, pageFetch, runBrowserSmoke, type BrowserSmoke
 import { TablePlanError, applyTablePlan, formatMandatoryRelaxed, formatTableDiff, provisionedConstraints, type RestCall, type RestFn, type TableDiff } from './tables.js';
 import { appShadowColumns, backfillShadows, formatBackfill } from './shadows.js';
 import {
-  ACTIVATION_SERVICES,
   activationSentence,
-  activationServices,
   checkGate,
   FIRST_USE_GATES,
   gateConsoleLine,
   requiredGates,
-  type ActivationServiceId,
   type FirstUseGate,
 } from './first-use.js';
 import { DcNotConfiguredError, catalystBaseFor, dcEndpoints, deployMailRecipients, findDeployConfig, readCliActiveDc, readCliActiveOrg, readDeployConfig, resolveDeployDc, type DeployConfigFile } from './dc.js';
@@ -491,7 +488,7 @@ function stripAnsi(text: string): string {
   return text.replace(ANSI, '');
 }
 
-/** The exact message a fresh project answers `deploy slate` with until Slate is opened in the console once. */
+/** Older Catalyst CLI builds could answer `deploy slate` with this first-open refusal; keep it as a fallback instruction only. */
 const SLATE_SERVICE_CLOSED = /Please access the Slate service in your project's console before deploying via the CLI\./;
 
 /**
@@ -572,6 +569,28 @@ export function bundleDigest(files: readonly DeployFile[]): string {
     hash.update('\0');
   }
   return hash.digest('hex');
+}
+
+function readSlateEntries(dir: string): unknown[] {
+  try {
+    const slate = (JSON.parse(readFileSync(join(dir, 'catalyst.json'), 'utf8')) as { slate?: unknown }).slate;
+    return Array.isArray(slate) ? slate : [];
+  } catch {
+    return [];
+  }
+}
+
+function slateEntryMatches(entry: unknown, slateName: string): boolean {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+  const record = entry as Record<string, unknown>;
+  for (const key of ['name', 'app_name', 'appName', 'slate_name']) {
+    if (record[key] === slateName) return true;
+  }
+  return false;
+}
+
+function slateEntryFor(dir: string, slateName: string): unknown | undefined {
+  return readSlateEntries(dir).find((entry) => slateEntryMatches(entry, slateName));
 }
 
 function readState(dir: string): DeployState | undefined {
@@ -939,22 +958,22 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     const resumeCommands = resume && same;
     let migratedSlate = false;
     if (out) {
-      const keepCatalystJson = same && existsSync(join(out, 'catalyst.json'));
       let existingSlate: unknown;
       if (existsSync(join(out, 'catalyst.json'))) {
         try { existingSlate = JSON.parse(readFileSync(join(out, 'catalyst.json'), 'utf8')).slate; } catch { /* regenerate */ }
       }
-      if (keepCatalystJson && migrateCatalystJson(out)) {
+      if (migrateCatalystJson(out)) {
         migratedSlate = true;
-        io.stdout('migrated catalyst.json: slate is now an array\n');
+        io.stdout('migrated catalyst.json: removed a stale slate entry\n');
       }
+      const linkedSlate = Array.isArray(existingSlate) && existingSlate.length > 0 ? existingSlate : undefined;
       const files = bundle.files.map((file) => {
-        if (file.path !== 'catalyst.json' || !Array.isArray(existingSlate)) return file;
+        if (file.path !== 'catalyst.json' || linkedSlate === undefined) return file;
         const parsed = JSON.parse(String(file.data)) as Record<string, unknown>;
-        parsed.slate = existingSlate;
+        parsed.slate = linkedSlate;
         return { ...file, data: `${JSON.stringify(parsed, null, 2)}\n` };
       });
-      writeDeployTree(out, keepCatalystJson ? files.filter((file) => file.path !== 'catalyst.json') : files);
+      writeDeployTree(out, files);
     }
     const secret = credential(io.env);
     io.stdout(redact(bundle.plan, secret));
@@ -1060,14 +1079,6 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     const finish = async (code: number): Promise<number> => {
       const done = bundle.commands.filter((command) => state.done.includes(command.id));
       const services = servicesTouched({ createdTables: diff.createdTables, createdColumns: diff.createdColumns, commands: done, extra: earlier, auth: true });
-      // A completed Slate command proves the service was opened in the
-      // console (a fresh project refuses the Slate deploy until it is), so
-      // the end-of-run checklist drops Slate from the start-services item.
-      const slateStarted = done.some((command) => command.id === 'slate-link' || command.id === 'slate');
-      const pendingActivation = (): ActivationServiceId[] =>
-        activationServices({ client: services.includes('Web Client Hosting (Slate)'), files: signals.files.length > 0, pdf: signals.pdf }).filter(
-          (id) => !gates.some((gate) => gate.id === id) && !(id === 'slate' && slateStarted),
-        );
       // A run that captured no "App Url:" — including a resumed run that skipped
       // the slate commands — reads the URL from the Slate API before CORS needs it.
       if (!state.slateUrl && !slateHost(slateDomainFlag)) await readBackSlate();
@@ -1164,7 +1175,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         // gate in `gates` answered open before the first write, and a
         // completed Slate command proves Slate. The mail step carries its own
         // condition, so it stays.
-        io.stdout(`human checklist:\n${formatCustomerSteps(pendingActivation())}`);
+        io.stdout(`human checklist:\n${formatCustomerSteps()}`);
       }
       // A successful run that only saw the URL on slate:link still reports it.
       // A failed slate build does not: that URL did not come from the build.
@@ -1195,10 +1206,8 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
           slate: services.includes('Web Client Hosting (Slate)'),
           files: signals.files.length > 0,
           pdf: signals.pdf,
-          started: ACTIVATION_SERVICES.filter((id) => gates.some((gate) => gate.id === id)),
           sendsMail: bundle.sendsMail,
           mailFrom: bundle.mail.from,
-          slateStarted,
           connectionSecretKeys: readConnectionSecretKeys(cwd),
         }),
         // appUrl prefers the deploy output's "App Url:"; the Slate API read-back is the fallback source.
@@ -1263,6 +1272,13 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         config.deployment.env_variables = { ...(config.deployment.env_variables ?? {}), C2C_SLATE_ORIGIN: slateOrigin };
         writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
       }
+      if (command.id === 'slate-link' && slateEntryFor(cwd, slateName)) {
+        io.stdout(`skip ${commandLine(command)} (already linked in catalyst.json)\n`);
+        ran.push(command);
+        state.done.push(command.id);
+        writeState(cwd, state);
+        continue;
+      }
       const program = command.command ?? 'catalyst';
       const spawnOnce = () => io.spawn(program, command.argv, { cwd: command.cwd ? join(cwd, command.cwd) : cwd, env: childEnv });
       // Catalyst commands re-run on a transient 429/5xx the output names — deploy
@@ -1286,8 +1302,11 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
               },
             })
           : await spawnOnce();
-      io.stdout(result.skipped ? `skip ${commandLine(command)} (the Slate API already lists the app)\n` : `spawn ${commandLine(command)} exit ${result.code}\n`);
       const combined = stripAnsi(`${result.stdout}\n${result.stderr}`);
+      const alreadyLinked = command.id === 'slate-link' && /already linked/i.test(combined);
+      if (result.skipped) io.stdout(`skip ${commandLine(command)} (the Slate API already lists the app)\n`);
+      else if (alreadyLinked) io.stdout(`skip ${commandLine(command)} (already linked)\n`);
+      else io.stdout(`spawn ${commandLine(command)} exit ${result.code}\n`);
       // Any step's App Url can authorise the CORS domain, including slate:link.
       // It is not printed here: a slate:link URL must not look like the live app.
       const captured = slateUrlFrom(combined);
@@ -1302,6 +1321,12 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
       if (built && !slateUrl) {
         slateUrl = built;
         io.stdout(`slate url: ${built}\n`);
+      }
+      if (alreadyLinked) {
+        ran.push(command);
+        state.done.push(command.id);
+        writeState(cwd, state);
+        continue;
       }
       if (result.code !== 0) {
         // A slate:link URL is not the live app. Drop it when the slate build
@@ -1350,10 +1375,10 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         const detail = redact(`${result.stderr}${result.stdout}`, secret).trim();
         if (detail) io.stderr(`${detail}\n`);
         // The recorded fresh-project refusal is an activation step, not a code
-        // failure — name the console action and the provision step that tracks it.
+        // failure — report the console instruction as fallback guidance only.
         if (command.id === 'slate' && SLATE_SERVICE_CLOSED.test(combined)) {
           const slateConsole = `${dcEndpoints(guard.dc).console}/baas/${guard.org}/project/${guard.projectId}/Development#/slate`;
-          io.stderr(`c2c: the Slate service was never opened on this project — ${activationSentence('slate')} (${slateConsole}; provision step slate-enable), then re-run deploy\n`);
+          io.stderr(`c2c: ${activationSentence('slate')} (${slateConsole}), then re-run deploy\n`);
         }
         return await finish(result.code || 1);
       }
