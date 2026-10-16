@@ -11,8 +11,6 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { App } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
-import { activationSentence, type ActivationServiceId } from '../../deploy/src/first-use.js';
-import { connectionSecretItem } from '../../deploy/src/human-steps.js';
 import { flag, loadApp, type Io } from '../../deploy/src/cli.js';
 import { hasReportJson, readSourceCsv, readSourceJson } from '../../deploy/src/csv.js';
 import { readSourceBackup } from '../../deploy/src/backup.js';
@@ -20,6 +18,17 @@ import { buildOfflinePlan, resolveDc, type OfflinePlan } from '../../deploy/src/
 import type { SourceTableData } from '../../schema/src/generator.js';
 import { buildUi, formStatus, type UiModel } from '../../ui/src/index.js';
 import { analyze, type AnalyzeReport, type DelugeLocation } from './analyze.js';
+import {
+  connectionSecretsWording,
+  featureName,
+  featureNotice,
+  fieldGapWording,
+  scrubBusiness,
+  serviceStartSentence,
+  todoNotice,
+  uiReasonNotice,
+  widgetWording,
+} from './report-wording.js';
 
 export interface ReportSection {
   count: number;
@@ -37,6 +46,8 @@ export interface AttentionItem {
   name: string;
   detail: string;
   workaround: string;
+  /** Internal reason or construct, kept for the appendix JSON only. */
+  technical?: string;
 }
 
 export interface BusinessMigrationReport {
@@ -74,51 +85,43 @@ const plural = (count: number, noun: string): string => `${count} ${noun}${count
 const names = (items: readonly string[]): string => (items.length ? items.join(', ') : 'none');
 
 function featureWorkaround(name: string): string {
-  if (/payment/i.test(name)) return 'Keep payment capture in Creator or connect a reviewed payment provider after launch; the generated app does not take payment.';
+  if (/payment/i.test(name)) return 'Keep payment capture in the original app or connect a reviewed payment provider after launch; the generated app does not take payment.';
   if (/offline/i.test(name)) return 'Use the generated web app while online; add a reviewed offline process only if the business still needs one.';
-  if (/form email/i.test(name)) return 'Keep the form-address email route in Creator, or replace it with a reviewed integration before go-live.';
-  if (/cliq/i.test(name)) return 'Keep the Cliq bot in Zoho Cliq, or replace its action with a reviewed webhook or integration.';
+  if (/form email/i.test(name)) return 'Keep the form-address email route in the original app, or replace it with a reviewed integration before go-live.';
+  if (/cliq/i.test(name)) return 'Keep the chat bot where it is, or replace its action with a reviewed webhook or integration.';
   if (/native mobile|mdm/i.test(name)) return 'Use the generated web app in mobile browsers; plan a separate native/mobile-device project if required.';
-  if (/c8 dialect/i.test(name)) return 'Re-export or adjust the app so it uses a supported Creator dialect before migration.';
-  return 'Keep this Creator-side behaviour as the fallback, or add the named Catalyst-side replacement and verify it once before relying on it.';
-}
-
-function fieldWorkaround(id: string): string {
-  if (id === 'integration' || id === 'legacy-crm' || id === 'legacy-crm-link') {
-    return 'Authorize the matching connection during migration where one exists; otherwise keep the external reference as text and complete the lookup after launch.';
-  }
-  if (['prediction', 'keyword', 'sentiment', 'ocr', 'object-detection'].includes(id)) {
-    return 'Keep the AI-filled value out of the automatic form, or add a reviewed post-submit enrichment step before go-live.';
-  }
-  if (id === 'barcode') return 'Enter or paste the code value into the generated text field, or add a reviewed scanning flow if the device workflow is required.';
-  if (id === 'geolocation') return 'Capture the needed address/location in the supported address or location fields instead of a separate geo field.';
-  return 'Review the named field and use the stated mapped storage, or keep the affected behaviour in Creator until a replacement is planned.';
+  if (/c8 dialect/i.test(name)) return 'Re-export or adjust the app so it uses a supported source format before migration.';
+  return 'Keep this behaviour in the original app as the fallback, or add the named replacement and verify it once before relying on it.';
 }
 
 function todoWorkaround(item: DelugeLocation): string {
-  if (item.manualStep) return item.manualStep;
+  if (item.manualStep) return scrubBusiness(item.manualStep);
   return `Open ${item.location} in the generated app, complete the marked item, and verify the affected flow once before go-live.`;
 }
 
-function unsupportedItems(analysis: AnalyzeReport): AttentionItem[] {
+function unsupportedItems(analysis: AnalyzeReport, manualUiLocations: ReadonlySet<string>): AttentionItem[] {
   const items: AttentionItem[] = [];
   for (const feature of analysis.features.used) {
     if (feature.verdict !== 'gap' && feature.verdict !== 'blocker' && feature.verdict !== 'needs-assessment') continue;
-    const name = `${feature.area}: ${feature.feature}`;
+    const name = featureName(feature.area, feature.feature);
     items.push({
       area: 'feature',
       name,
-      detail: `${plural(feature.uses, 'use')} found in the app.`,
+      detail: featureNotice(feature.uses),
       workaround: feature.verdict === 'needs-assessment' ? 'Verify this path in the migrated app before relying on it; keep the current process as the fallback until then.' : featureWorkaround(name),
+      technical: `${feature.area}|${feature.feature} (status ${feature.status})`,
     });
   }
   for (const gap of analysis.fieldGaps) {
     for (const field of gap.fields) {
+      const label = `${field.form}.${field.field}`;
+      const wording = fieldGapWording(gap.matrixId, label);
       items.push({
         area: 'field',
-        name: `${field.form}.${field.field}`,
-        detail: gap.reason,
-        workaround: fieldWorkaround(gap.matrixId),
+        name: label,
+        detail: wording.notice,
+        workaround: wording.workaround,
+        technical: `${gap.matrixId}: ${gap.reason}`,
       });
     }
   }
@@ -126,7 +129,15 @@ function unsupportedItems(analysis: AnalyzeReport): AttentionItem[] {
   for (const todo of analysis.deluge.todoLocations) {
     const fieldName = todo.scope === 'ui' && todo.location.startsWith('field ') ? todo.location.slice('field '.length) : undefined;
     if (fieldName && coveredFields.has(fieldName)) continue;
-    items.push({ area: todo.scope, name: todo.location, detail: todo.construct, workaround: todoWorkaround(todo) });
+    // A generated UI stub with a guided step is already an app-specific item.
+    if (todo.scope === 'ui' && manualUiLocations.has(todo.location)) continue;
+    items.push({
+      area: todo.scope === 'ui' ? 'screen' : todo.scope,
+      name: todo.location,
+      detail: todo.scope === 'ui' ? uiReasonNotice(todo.location.split(' ')[0] ?? '', todo.location.replace(/^[a-z]+ /, ''), todo.construct) : todoNotice(todo.scope, todo.location, todo.construct),
+      workaround: todoWorkaround(todo),
+      technical: todo.construct,
+    });
   }
   items.sort((a, b) => compareEnUs(a.area, b.area) || compareEnUs(a.name, b.name) || compareEnUs(a.detail, b.detail));
   return items;
@@ -135,16 +146,19 @@ function unsupportedItems(analysis: AnalyzeReport): AttentionItem[] {
 function guidedSteps(plan: OfflinePlan): GuidedStep[] {
   const steps: GuidedStep[] = [];
   const serviceIds = new Set(plan.steps.map((step) => step.id));
-  const pending: ActivationServiceId[] = [];
+  const pending: string[] = [];
   // Slate no longer needs a console activation in the supported CLI flow; its
   // plan step remains a c2c verification detail, not a customer checklist item.
-  if (serviceIds.has('stratus-enable')) pending.push('stratus');
-  if (serviceIds.has('smartbrowz-enable')) pending.push('smartbrowz');
+  for (const stepId of ['stratus-enable', 'smartbrowz-enable']) {
+    if (!serviceIds.has(stepId)) continue;
+    const sentence = serviceStartSentence(stepId);
+    if (sentence) pending.push(sentence);
+  }
   if (pending.length) {
     steps.push({
       id: 'start-services',
       title: 'Start the used services',
-      instruction: `In the Catalyst console, ${pending.map(activationSentence).join('; ')}.`,
+      instruction: `In the Catalyst console, ${pending.join('; ')}.`,
     });
   }
   steps.push(
@@ -173,14 +187,21 @@ function appSpecificSteps(app: App, ui: UiModel, plan: OfflinePlan): AttentionIt
   const items: AttentionItem[] = [];
   for (const todo of ui.todos) {
     if (!todo.manualStep) continue;
-    items.push({ area: todo.area, name: todo.name, detail: todo.reason, workaround: todo.manualStep });
+    items.push({
+      area: todo.area === 'zml' ? 'page' : todo.area,
+      name: todo.name,
+      detail: uiReasonNotice(todo.area, todo.name, todo.reason),
+      workaround: scrubBusiness(todo.manualStep),
+      technical: todo.reason,
+    });
   }
   for (const manual of plan.manual ?? []) {
-    items.push({ area: 'widget', name: manual.name, detail: manual.detail, workaround: 'Rebuild the widget with supported page elements, or provide a reviewed replacement before go-live.' });
+    const wording = widgetWording(manual.name);
+    items.push({ area: 'widget', name: manual.name, detail: wording.notice, workaround: wording.workaround, technical: manual.detail });
   }
   const secrets = plan.connectionSecretKeys ?? [];
   if (secrets.length) {
-    items.push({ area: 'connections', name: 'connection secrets', detail: 'Third-party connection credentials are not stored in the generated app.', workaround: connectionSecretItem(secrets) });
+    items.push({ area: 'connections', name: 'connection credentials', detail: 'Passwords and keys for connected third-party accounts are not carried into the generated app.', workaround: connectionSecretsWording(secrets), technical: `connection secret keys: ${secrets.join(', ')}` });
   }
   for (const workflow of app.workflows.filter((item) => (item.container ?? '').toLowerCase() === 'schedule')) {
     items.push({ area: 'schedule', name: workflow.name, detail: 'The schedule is created disabled for review.', workaround: 'Enable this schedule in Job Scheduling after checking its first run time.' });
@@ -215,7 +236,7 @@ function dataSection(plan: OfflinePlan, source: readonly SourceTableData[] | und
     })),
     verification: [
       'Run the guided data load, then compare each migrated table count with the source export count.',
-      'Use the per-table count report from the data step now; when c2c verify-data is available, run it to compare row counts and checksums.',
+      'When automated record verification is available, run it to compare row counts and checksums and keep the result with the migration files.',
       'Check one parent row and its related child or lookup rows before sign-off.',
     ],
   };
@@ -226,7 +247,7 @@ function goLiveChecklist(report: Omit<BusinessMigrationReport, 'goLiveChecklist'
     ...report.guidedSteps.map((step) => `Complete guided step: ${step.title}.`),
     ...(report.appSpecificSteps.length ? ['Finish every app-specific manual item listed in this report.'] : []),
     'Load the source data and confirm every table count matches the source count.',
-    'Run record verification when c2c verify-data is available, then keep the counts/checksum report with the migration files.',
+    'Run record verification when it is available, then keep the counts/checksum report with the migration files.',
     'Sign in as one user in each role and open the pages and reports that role should see.',
     'Submit one test record through each converted form and confirm it appears in the expected report.',
     ...(report.converted.schedules.count ? ['Enable each migrated schedule and confirm the first run completes.'] : []),
@@ -238,6 +259,11 @@ export function buildBusinessMigrationReport(app: App, opts: BusinessReportOptio
   const analysis = analyze(app);
   const ui = buildUi(app);
   const { plan } = buildOfflinePlan(app, { dc: opts.dc, dcSource: '--dc', mail: opts.mail === true, ...(opts.source ? { source: opts.source } : {}) });
+  const manualUiLocations = new Set(
+    ui.model.todos
+      .filter((todo) => todo.manualStep)
+      .map((todo) => (todo.area === 'field' ? `field ${todo.name}` : todo.area === 'report' ? `report ${todo.name}` : `page ${todo.name}`)),
+  );
   const base = {
     schema: 'c2c-business-migration-report/1' as const,
     app: app.name ?? 'app',
@@ -245,14 +271,40 @@ export function buildBusinessMigrationReport(app: App, opts: BusinessReportOptio
     converted: convertedSections(app, ui.model),
     guidedSteps: guidedSteps(plan),
     appSpecificSteps: appSpecificSteps(app, ui.model, plan),
-    unsupported: unsupportedItems(analysis),
+    unsupported: unsupportedItems(analysis, manualUiLocations),
     data: dataSection(plan, opts.source),
   };
   return { ...base, goLiveChecklist: goLiveChecklist(base) };
 }
 
+/** The business report never serializes `technical`; it is appendix-only. */
+function withoutTechnical(key: string, value: unknown): unknown {
+  return key === 'technical' ? undefined : value;
+}
+
 export function businessReportAsJson(report: BusinessMigrationReport): string {
-  return `${JSON.stringify(report, null, 2)}\n`;
+  return `${JSON.stringify(report, withoutTechnical, 2)}\n`;
+}
+
+export interface ReportAppendix {
+  schema: 'c2c-business-migration-report-appendix/1';
+  app: string;
+  items: { section: 'appSpecificSteps' | 'unsupported'; area: string; name: string; technical: string }[];
+}
+
+/** Internal detail for developers: raw reasons and construct names. */
+export function businessReportAppendix(report: BusinessMigrationReport): ReportAppendix {
+  const items: ReportAppendix['items'] = [];
+  for (const section of ['appSpecificSteps', 'unsupported'] as const) {
+    for (const item of report[section]) {
+      if (item.technical !== undefined) items.push({ section, area: item.area, name: item.name, technical: item.technical });
+    }
+  }
+  return { schema: 'c2c-business-migration-report-appendix/1', app: report.app, items };
+}
+
+export function businessReportAppendixAsJson(report: BusinessMigrationReport): string {
+  return `${JSON.stringify(businessReportAppendix(report), null, 2)}\n`;
 }
 
 function sectionLines(title: string, item: ReportSection): string[] {
@@ -292,6 +344,8 @@ export function businessReportAsMarkdown(report: BusinessMigrationReport): strin
     '',
     '## Unsupported or needs review',
     '',
+    'This list covers everything the converter can see in the export. A check inside the running app may surface more; open each converted screen once before sign-off.',
+    '',
     ...attentionLines(report.unsupported, 'none'),
     '',
     '## Data migration',
@@ -309,7 +363,7 @@ export function businessReportAsMarkdown(report: BusinessMigrationReport): strin
     ...report.goLiveChecklist.map((item) => `- [ ] ${item}`),
     '',
   ];
-  return `${lines.join('\n')}\n`;
+  return `${lines.join('\n').replace(/\n+$/, '\n')}`;
 }
 
 function sourceFor(app: App, args: readonly string[]): readonly SourceTableData[] | undefined {
@@ -343,6 +397,7 @@ export async function businessReportCli(args: readonly string[], io: Io): Promis
       mkdirSync(out, { recursive: true });
       writeFileSync(join(out, 'migration-report.json'), json);
       writeFileSync(join(out, 'migration-report.md'), markdown);
+      writeFileSync(join(out, 'migration-report.appendix.json'), businessReportAppendixAsJson(report));
       io.stdout(`report: ${join(out, 'migration-report.md')}\n`);
     } else {
       io.stdout(rest.includes('--json') ? json : markdown);
