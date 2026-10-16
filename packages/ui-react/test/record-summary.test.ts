@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -41,7 +41,7 @@ const form = { name: 'F', label: 'Form', layout: 'one', fields: [
 ], recordEndpoint: '/forms/F/record', submitEndpoint: '/forms/F/submit', buttons: { add: [], edit: [] } } as unknown as FormSpec;
 
 test('RecordSummary handles 403, 404, and renders only declared fields', { skip: SKIP }, async (t) => {
-  const out = join(tmpdir(), `c2c-record-summary-${process.pid}`);
+  const out = mkdtempSync(join(tmpdir(), 'c2c-record-summary-'));
   t.after(() => rmSync(out, { recursive: true, force: true }));
   compile(out);
   const domMod = await import('jsdom');

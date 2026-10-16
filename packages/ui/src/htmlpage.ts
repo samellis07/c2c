@@ -1461,7 +1461,7 @@ export const EXECUTE_FUNCTION_BUTTON = 'ZML ExecuteFunction button';
  * which applies authorizeRead to that exact ROWID before returning fields.
  */
 export function rewriteRecordSummaryFrames(template: string, app?: App): string {
-  return String(template ?? '').replace(/<iframe\b((?:"[^"]*"|'[^']*'|[^>])*)>([\s\S]*?)<\/iframe\s*>/gi, (whole, attrs: string, inner: string) => {
+  return replaceIframeElements(String(template ?? ''), (whole, attrs, inner) => {
     const src = /\bsrc\s*=\s*(["'])([\s\S]*?)\1/i.exec(attrs);
     if (!src) return whole;
     const match = /^<%=\s*zoho\.appuri\s*%>record-summary\/([A-Za-z_]\w*)\/<%=([\s\S]+?)%>$/i.exec(src[2]);
@@ -1484,6 +1484,57 @@ export function rewriteRecordSummaryFrames(template: string, app?: App): string 
     const label = inner.trim() || 'View record summary';
     return `<a${anchorAttrs}>${label}</a>`;
   });
+}
+
+/**
+ * Replace each complete `<iframe ...>...</iframe>` element, scanning once from
+ * left to right. Attributes are read quote-aware (a quote with no closing
+ * partner is plain text), the body ends at the first `</iframe>` (whitespace
+ * allowed before `>`), and an element with no closing tag is left as written.
+ * A hand scanner keeps this linear in the template length where the equivalent
+ * backtracking regular expression was not.
+ */
+function replaceIframeElements(template: string, replace: (whole: string, attrs: string, inner: string) => string): string {
+  const open = /<iframe(?![A-Za-z0-9_])/gi;
+  const close = /<\/iframe/gi;
+  const lastDouble = template.lastIndexOf('"');
+  const lastSingle = template.lastIndexOf("'");
+  let out = '';
+  let copied = 0;
+  for (let start = open.exec(template); start; start = open.exec(template)) {
+    let i = start.index + start[0].length;
+    let quote = '';
+    for (; i < template.length; i += 1) {
+      const ch = template[i];
+      if (quote) {
+        if (ch === quote) quote = '';
+      } else if ((ch === '"' && i < lastDouble) || (ch === "'" && i < lastSingle)) {
+        quote = ch;
+      } else if (ch === '>') {
+        break;
+      }
+    }
+    if (i >= template.length) break;
+    close.lastIndex = i + 1;
+    let end = -1;
+    let bodyEnd = -1;
+    for (let tag = close.exec(template); tag; tag = close.exec(template)) {
+      let j = tag.index + tag[0].length;
+      while (j < template.length && /\s/.test(template[j]!)) j += 1;
+      if (template[j] === '>') {
+        bodyEnd = tag.index;
+        end = j + 1;
+        break;
+      }
+      close.lastIndex = j;
+    }
+    if (end < 0) break;
+    const attrs = template.slice(start.index + start[0].length, i);
+    out += template.slice(copied, start.index) + replace(template.slice(start.index, end), attrs, template.slice(i + 1, bodyEnd));
+    copied = end;
+    open.lastIndex = end;
+  }
+  return out + template.slice(copied);
 }
 
 /** True when the template holds a ZML button whose action calls a Deluge function. */

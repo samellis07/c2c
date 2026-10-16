@@ -2481,12 +2481,17 @@ async function browserRuntime(): Promise<BrowserRuntime> {
   return (await import(`data:text/javascript;base64,${Buffer.from(clientRuntimeSource()).toString('base64')}`)) as unknown as BrowserRuntime;
 }
 
+/** JSON literal that is also safe inside generated script source (no </script>, U+2028/U+2029 breaks). */
+function jsLiteral(value: unknown): string {
+  return JSON.stringify(value).replace(/[<>/\u2028\u2029]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
 function clientModule(source: string): string {
   return `data:text/javascript,${encodeURIComponent(`export async function clientActions(ctx){ ${source} }`)}`;
 }
 
 function handlerModule(tag: string, ret = '[]'): string {
-  return clientModule(`(globalThis.__c2cOrder = globalThis.__c2cOrder || []).push(${JSON.stringify(tag)}); return ${ret};`);
+  return clientModule(`(globalThis.__c2cOrder = globalThis.__c2cOrder || []).push(${jsLiteral(tag)}); return ${ret};`);
 }
 
 function workflowModel(

@@ -2529,6 +2529,42 @@ test('record-summary iframe maps only a recognized read or page parameter to the
   assert.equal(rewriteRecordSummaryFrames(unknownForm, appOf(ORDERS)), unknownForm, 'unknown app targets stay counted');
 });
 
+test('record-summary iframe scan reads quoted attributes, case, and closing-tag whitespace like the markup', () => {
+  const param = `<iframe src='<%=zoho.appuri%>record-summary/Case/<%=input.caseID%>'></iframe>`;
+  const routed = rewriteRecordSummaryFrames(param);
+  assert.equal(rewriteRecordSummaryFrames(`a ${param} b ${param} c`), `a ${routed} b ${routed} c`, 'every element is rewritten, text between kept');
+  assert.match(
+    rewriteRecordSummaryFrames(`<IFRAME title="a>b" src='<%=zoho.appuri%>record-summary/Case/<%=input.caseID%>'>Open</IFRAME \n>`),
+    /^<a title="a>b" href='#\/record\/Case\/<%=input\.caseID%>'>Open<\/a>$/,
+    'a quoted > stays inside the attribute; the tag name is case-insensitive; whitespace may precede the closing >',
+  );
+  const unclosed = `<iframe src='<%=zoho.appuri%>record-summary/Case/<%=input.caseID%>'>`;
+  assert.equal(rewriteRecordSummaryFrames(unclosed), unclosed, 'an element with no closing tag is left as written');
+  const prefixed = `<iframex src='<%=zoho.appuri%>record-summary/Case/<%=input.caseID%>'></iframe>`;
+  assert.equal(rewriteRecordSummaryFrames(prefixed), prefixed, 'a longer tag name is not an iframe');
+  assert.equal(
+    rewriteRecordSummaryFrames(`<iframe data-x=" src='<%=zoho.appuri%>record-summary/Case/<%=input.caseID%>'></iframe>`),
+    `<a data-x=" href='#/record/Case/<%=input.caseID%>'>View record summary</a>`,
+    'a quote with no partner is plain text',
+  );
+});
+
+test('record-summary iframe scan stays linear on adversarial markup', () => {
+  const inputs = [
+    `<iframe${' "'.repeat(100_000)}`,
+    '<iframe>'.repeat(25_000),
+    `<iframe a>${'</iframe '.repeat(25_000)}`,
+    "<iframe '".repeat(25_000),
+    `<iframe${' x'.repeat(100_000)}`,
+  ];
+  for (const input of inputs) {
+    const started = performance.now();
+    rewriteRecordSummaryFrames(input);
+    const elapsed = performance.now() - started;
+    assert.ok(elapsed < 250, `${input.length} chars took ${elapsed.toFixed(1)} ms`);
+  }
+});
+
 test('record-summary report link resolves to its scoped report detail route', () => {
   const app = appOf(`${ORDERS}
 \tlist Employee_Profile1

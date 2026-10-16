@@ -165,7 +165,7 @@ test('a notes block that loses a style declaration is listed as a TODO', () => {
 test('a page snippet that loses a style declaration is listed as a TODO', () => {
   const zml = `<zml><layout><row><column width='100%'><dsp id='html_snippet'><![CDATA[<div style="color: red; transform: rotate(url(x))">Hi</div><p style="border: 1px solid rgb(1, 2, 3)">Ok</p>]]></dsp></column></row></layout></zml>`;
   const app: App = deriveIr(
-    parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${zml.replace(/"/g, '\\"')}"\n\t\t}\n\t}\n}\n`),
+    parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${delugeString(zml)}"\n\t\t}\n\t}\n}\n`),
   );
   const model = buildModel(app);
   const todo = model.todos.find((item) => item.area === 'zml' && /Inline style/.test(item.reason));
@@ -178,11 +178,16 @@ test('a page snippet that loses a style declaration is listed as a TODO', () => 
   assert.match(snippet?.html ?? '', /style="border: 1px solid rgb\(1, 2, 3\)"/);
 });
 
+/** Escape text for a double-quoted Deluge string literal (backslashes first, then quotes, in one pass). */
+function delugeString(text: string): string {
+  return text.replace(/[\\"]/g, (ch) => `\\${ch}`);
+}
+
 function pageModel(snippets: string[]) {
   const cells = snippets.map((html, i) => `<column width='50%'><dsp id='snippet_${i}'><![CDATA[${html}]]></dsp></column>`).join('');
   const zml = `<zml><layout><row>${cells}</row></layout></zml>`;
   const app: App = deriveIr(
-    parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${zml.replace(/"/g, '\\"')}"\n\t\t}\n\t}\n}\n`),
+    parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${delugeString(zml)}"\n\t\t}\n\t}\n}\n`),
   );
   const model = buildModel(app);
   const elements = model.pages[0]?.elements.flatMap(function all(el): typeof model.pages[0]['elements'] {
@@ -274,7 +279,7 @@ test('style rule counting: top-level blocks and @ statements, comments and islan
 
 test('a page snippet lists each removed script, style, SVG, and template tag once in sorted order', () => {
   const zml = `<zml><dsp id='html_snippet'><![CDATA[<script>bad()</script><svg><script>nested()</script></svg><style></style><template><b>hidden</b></template>]]></dsp></zml>`;
-  const app: App = deriveIr(parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${zml.replace(/"/g, '\\"')}"\n\t\t}\n\t}\n}\n`));
+  const app: App = deriveIr(parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${delugeString(zml)}"\n\t\t}\n\t}\n}\n`));
   const model = buildModel(app);
   const todos = model.todos.filter((todo) => todo.area === 'zml' && /removed from this page snippet/.test(todo.reason));
   assert.deepEqual(todos.map((todo) => todo.reason), [
@@ -287,7 +292,7 @@ test('a page snippet lists each removed script, style, SVG, and template tag onc
 
 test('a page snippet with carried static <style> CSS suppresses the generic style TODO', () => {
   const zml = `<zml><dsp id='html_snippet'><![CDATA[<script>bad()</script><style>.x{}</style>]]></dsp></zml>`;
-  const app: App = deriveIr(parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${zml.replace(/"/g, '\\"')}"\n\t\t}\n\t}\n}\n`));
+  const app: App = deriveIr(parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${delugeString(zml)}"\n\t\t}\n\t}\n}\n`));
   const model = buildModel(app);
   const styleTodos = model.todos.filter((t) => t.name === 'Home.style');
   assert.equal(styleTodos.length, 0);
