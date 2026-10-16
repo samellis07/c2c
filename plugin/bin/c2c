@@ -13,7 +13,8 @@ PINNED_NODE="20.20.1"
 # Source of truth for supported Node: the repo package.json engines.node and
 # packages/doctor/data/compat.json node.range (currently ">=20.20 <23",
 # i.e. Node 20 or 22). This launcher mirrors that range as majors 20/22 with
-# the 20.20 floor; anything else (including Node 21) is refused.
+# the 20.20 floor; anything else (including Node 21) is refused. Every
+# version inside the range runs without a warning (CI covers 20.20.1 and 22).
 NODE_RANGE=">=20.20 <23"
 
 node_supported() {
@@ -48,9 +49,6 @@ NODE_V=$(node -p 'process.versions.node')
 if ! node_supported "$NODE_V"; then
   echo "c2c: Node $NODE_V is not supported; c2c needs Node 20 or 22 ($NODE_RANGE; pinned $PINNED_NODE). Fix: nvm install $PINNED_NODE && nvm use $PINNED_NODE" >&2
   exit 6
-fi
-if [ "$NODE_V" != "$PINNED_NODE" ] && [ -z "${C2C_QUIET_NODE_WARN:-}" ]; then
-  echo "c2c: warning: Node $NODE_V is not the pinned $PINNED_NODE; byte-identical manifests are only guaranteed on $PINNED_NODE." >&2
 fi
 
 if [ ! -f "$ENTRY" ]; then

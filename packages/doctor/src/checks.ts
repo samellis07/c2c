@@ -755,8 +755,10 @@ function checkE(ctx: DoctorContext): CheckResult[] {
   if (!nodeSatisfies(node, range)) {
     out.push(fail('D-E1', `Node ${node} is not supported; c2c needs Node ${range} (20 or 22)`, `install Node ${pinned} (nvm install ${pinned} && nvm use ${pinned})`));
   } else {
+    // Every in-range Node is fully supported: CI runs both the pinned leg
+    // (20.20.1) and the 22 leg, and the built dist/ is byte-identical on
+    // Node 20 and 22 — so there is no D-E2 warning for a supported version.
     out.push(pass('D-E1', `node v${node}${node === pinned ? ' (pinned)' : ''}`));
-    if (node !== pinned) out.push(warn('D-E2', `Node ${node} is not the pinned ${pinned}; byte-identical manifests are only guaranteed on ${pinned}`));
   }
   const vendor = findVendorRoot();
   if (!vendor) {

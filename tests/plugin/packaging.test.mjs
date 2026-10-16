@@ -388,13 +388,13 @@ test('vendored analyze and plan run without a repo-root .nvmrc', () => {
     const analyze = spawnSync(bin, ['analyze', fixture], {
       cwd: temp,
       encoding: 'utf8',
-      env: { ...process.env, HOME: temp, C2C_WORKSPACE: temp, C2C_QUIET_NODE_WARN: '1' },
+      env: { ...process.env, HOME: temp, C2C_WORKSPACE: temp },
     });
     assert.equal(analyze.status, 0, analyze.stderr || analyze.stdout);
     const plan = spawnSync(bin, ['plan', fixture, '--dc', 'us', '--out', path.join(temp, 'plan')], {
       cwd: temp,
       encoding: 'utf8',
-      env: { ...process.env, HOME: temp, C2C_WORKSPACE: temp, C2C_QUIET_NODE_WARN: '1' },
+      env: { ...process.env, HOME: temp, C2C_WORKSPACE: temp },
     });
     assert.equal(plan.status, 0, plan.stderr || plan.stdout);
   } finally {

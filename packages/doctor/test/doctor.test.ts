@@ -178,11 +178,16 @@ test('doctor offline coverage: conditional and warning checks return their docum
   assert.match(badExport!.fix!, /Creator.*Settings.*Export/);
   assert.equal((await run()).checks.find((check) => check.id === 'D-D1')?.status, 'skip');
 
-  // D-D2 and D-E2 are warning paths; D-F2 is a failure with its fix.
+  // D-D2 is a warning path; D-F2 is a failure with its fix. A supported but
+  // non-pinned Node (20.20.0, or any 22.x) emits no D-E2: both majors are
+  // fully supported, so D-E1 passes and no Node warning follows.
   const creatorDc = (await run({ local: false, scope: { ...scope, creatorDc: 'creator.zoho.eu' } })).checks.find((check) => check.id === 'D-D2');
   assert.equal(creatorDc?.status, 'warn');
-  const pinnedNode = (await run({ nodeVersion: '20.20.0' })).checks.find((check) => check.id === 'D-E2');
-  assert.equal(pinnedNode?.status, 'warn');
+  for (const nodeVersion of ['20.20.0', '20.20.1', '22.12.0']) {
+    const checks = (await run({ nodeVersion })).checks;
+    assert.equal(checks.find((check) => check.id === 'D-E1')?.status, 'pass', nodeVersion);
+    assert.equal(checks.find((check) => check.id === 'D-E2'), undefined, nodeVersion);
+  }
   const production = (await run({ local: false, scope: { ...scope, env: 'Production' } })).checks.find((check) => check.id === 'D-F2');
   assert.equal(production?.status, 'fail');
   assert.match(production!.fix!, /set "env": "Development"/);

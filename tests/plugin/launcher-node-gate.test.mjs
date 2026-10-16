@@ -4,11 +4,13 @@
  * refusing anything else with exit 6 — probed with a stub `node` on PATH so
  * no other toolchain is needed. Accepted versions proceed past the gate
  * (they stop later at the missing vendored converter in a source checkout);
- * refused versions stop at the gate with "is not supported".
+ * refused versions stop at the gate with "is not supported". Accepted
+ * versions print no pinned-version warning. The launcher's NODE_RANGE and
+ * plugin.json metadata.requires.node are pinned to package.json engines.node.
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -38,7 +40,6 @@ function run(version) {
       PATH: `${stub}:/usr/bin:/bin`,
       STUB_NODE_VERSION: version,
       C2C_WORKSPACE: workspace,
-      C2C_QUIET_NODE_WARN: '1',
     },
   });
 }
@@ -47,6 +48,7 @@ for (const version of ['20.20.0', '20.20.1', '22.0.0', '22.12.0', '22.99.9']) {
   test(`launcher passes the Node gate on ${version}`, () => {
     const res = run(version);
     assert.doesNotMatch(res.stderr, /is not supported/, `stderr: ${res.stderr}`);
+    assert.doesNotMatch(res.stderr, /warning|not the pinned/, `stderr: ${res.stderr}`);
   });
 }
 
@@ -68,4 +70,21 @@ test('launcher exits 6 when node is missing', () => {
   });
   assert.equal(res.status, 6, `stderr: ${res.stderr}`);
   assert.match(res.stderr, /not installed/);
+});
+
+const engines = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).engines.node;
+const nvmrc = readFileSync(path.join(root, '.nvmrc'), 'utf8').trim();
+
+test('launcher NODE_RANGE and PINNED_NODE match package.json engines and .nvmrc', () => {
+  const text = readFileSync(launcher, 'utf8');
+  assert.equal(text.match(/^NODE_RANGE="([^"]*)"$/m)?.[1], engines);
+  assert.equal(text.match(/^PINNED_NODE="([^"]*)"$/m)?.[1], nvmrc);
+});
+
+test('plugin.json requires.node states the engines range and the pin', () => {
+  const manifest = JSON.parse(readFileSync(path.join(root, 'plugin/.claude-plugin/plugin.json'), 'utf8'));
+  const node = manifest.metadata.requires.node;
+  assert.ok(node.includes(engines), `requires.node ${JSON.stringify(node)} must include ${engines}`);
+  assert.ok(node.includes(nvmrc), `requires.node ${JSON.stringify(node)} must include ${nvmrc}`);
+  assert.doesNotMatch(node, /20\.x/);
 });
