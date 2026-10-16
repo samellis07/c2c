@@ -380,6 +380,27 @@ async function startLive(app: App, options?: LiveOptions): Promise<Session> {
   });
   const win = dom.window as unknown as Window & { Event: typeof Event; fetch: typeof fetch };
   let inflight = 0;
+  // Submit listeners resolve after the success banner is applied. The client
+  // validate module loads with import(), which never touches fetch, so a
+  // network-only settle can observe the form before that listener finishes.
+  const pendingSubmit = new Set<Promise<void>>();
+  const formProto = (win as unknown as {
+    HTMLFormElement: { prototype: { addEventListener(type: string, listener: unknown, options?: unknown): void } };
+  }).HTMLFormElement.prototype;
+  const addEventListener = formProto.addEventListener;
+  formProto.addEventListener = function (this: unknown, type: string, listener: unknown, options?: unknown) {
+    if (type !== 'submit' || typeof listener !== 'function') return addEventListener.call(this, type, listener, options);
+    const wrapped = function (this: unknown, ...args: unknown[]) {
+      const result = listener.apply(this, args);
+      if (result && typeof (result as Promise<unknown>).then === 'function') {
+        const tracked = Promise.resolve(result).then(() => undefined, () => undefined);
+        pendingSubmit.add(tracked);
+        void tracked.finally(() => pendingSubmit.delete(tracked));
+      }
+      return result;
+    };
+    return addEventListener.call(this, type, wrapped, options);
+  };
   win.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     inflight += 1;
     const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -398,10 +419,14 @@ async function startLive(app: App, options?: LiveOptions): Promise<Session> {
   await runtime.boot(modelMod.model, win.document);
   const settle = async () => {
     for (let i = 0; i < 100; i++) {
+      if (pendingSubmit.size > 0) {
+        await Promise.race([...pendingSubmit]);
+        continue;
+      }
       await delay(10);
-      if (inflight === 0) {
+      if (inflight === 0 && pendingSubmit.size === 0) {
         await delay(20);
-        if (inflight === 0) return;
+        if (inflight === 0 && pendingSubmit.size === 0) return;
       }
     }
     throw new Error(`network did not settle ${failures.join(' | ')}`);
