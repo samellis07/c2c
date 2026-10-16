@@ -83,7 +83,7 @@ project: new — provision/plan.json creates it with one IaC import (provision/i
 - import-table-permissions [mcp] CatalystbyZoho_Get_Table_Permissions → read back CatalystbyZoho_Get_Table_Permissions
 - import-table-scopes [mcp] CatalystbyZoho_Get_Table_Scopes → read back CatalystbyZoho_Get_Table_Scopes
 - jobpool [mcp] CatalystbyZoho_Create_Job_Pool → read back CatalystbyZoho_List_All_Jobpools
-- stratus-enable [console] Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket) → read back c2c provision --record stratus-enable
+- stratus-enable [console] Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket) → read back c2c provision --record stratus-enable
 - bucket [mcp] CatalystbyZoho_Create_Bucket → read back CatalystbyZoho_Get_All_Buckets
 - auth-hosted [cli] c2c provision --confirm --run auth-hosted → read back CatalystbyZoho_Get_Authentication_Configurations
 - auth-embedded [cli] c2c provision --confirm --run auth-embedded → read back CatalystbyZoho_Get_Authentication_Configurations

@@ -335,14 +335,14 @@ export async function verifyProbe(rest: RestFn, target: ProbeTarget, name: strin
     if (read.status === 'absent') return { ...base, status: 'absent', detail: `probe bucket ${name} is not in project ${target.project}: the MCP write never landed in the selected org/DC/project` };
     const detail = read.httpStatus === undefined
       ? read.detail
-      : `the REST bucket list answered HTTP ${read.httpStatus}; Stratus may not be enabled in this project`;
+      : `the REST bucket list answered HTTP ${read.httpStatus}; Stratus may never have been opened in this project — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name) and wait until it shows in the bucket list`;
     return { ...base, status: 'unverifiable', detail };
   }
   if (read.status === 'absent') return { ...base, status: 'absent', detail: `probe bucket ${name} is not in project ${target.project}: the MCP write never landed in the selected org/DC/project` };
   if (read.status !== 'found') {
     const detail = read.httpStatus === undefined
       ? read.detail
-      : `the REST bucket list answered HTTP ${read.httpStatus}; Stratus may not be enabled in this project`;
+      : `the REST bucket list answered HTTP ${read.httpStatus}; Stratus may never have been opened in this project — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name) and wait until it shows in the bucket list`;
     return { ...base, status: 'unverifiable', detail };
   }
   const object = await readNonceObject(rest, target.project, name, nonce);
