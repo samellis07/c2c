@@ -16,6 +16,7 @@
  */
 
 import { Decimal, quantizeDecimal } from './decimal.js';
+import { multiValueCell } from './multi-value.js';
 
 /** Catalyst text cap. VarChar uses its own length, default 255. */
 export const TEXT_MAX_LENGTH = 10_000;
@@ -38,6 +39,8 @@ export interface WriteRuleColumn {
   shadow?: boolean;
   /** An insert must carry a non-empty value. Partial updates never check it. */
   required?: boolean;
+  /** Multi select or checkboxes: text holding a JSON list, written through multiValueCell. */
+  multiValue?: boolean;
 }
 
 export interface WriteRefusal {
@@ -211,6 +214,7 @@ function textMax(column: WriteRuleColumn): number | undefined {
 
 /** One cell against its column rules. Returns the value to write (a date is normalized) or the refused rule. */
 export function checkCell(column: WriteRuleColumn, value: unknown): { value: unknown } | { rule: WriteRule } {
+  if (column.multiValue) value = multiValueCell(value);
   if (isMissingCell(value)) return { value };
   if (column.dataType === 'Date') {
     if (typeof value !== 'string') return { rule: 'date-format' };
@@ -258,9 +262,10 @@ export function checkRow(
   const byName = new Map(columns.map((column) => [column.name, column]));
   const next: Record<string, unknown> = { ...cells };
   const refusals: WriteRefusal[] = [];
-  for (const [key, value] of Object.entries(cells)) {
+  for (const [key, cell] of Object.entries(cells)) {
     const column = byName.get(key);
     if (!column) continue;
+    const value = column.multiValue ? multiValueCell(cell) : cell;
     if (column.required && isMissingCell(value)) {
       refusals.push({ column: key, rule: 'mandatory-missing' });
       continue;

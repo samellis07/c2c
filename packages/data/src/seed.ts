@@ -3,6 +3,7 @@ import { compareEnUs } from '../../core/src/order.js';
 import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
 import { generateSchema, linkedTableName, schemaIdent, type SchemaPlan, type SchemaTable } from '../../schema/src/generator.js';
 import { tableNameLengthBlocker, type LimitBlocker } from '../../schema/src/limits.js';
+import { encodeMultiValue } from '../../shims/src/multi-value.js';
 
 export interface SeedWarning {
   form: string;
@@ -374,7 +375,7 @@ function scalar(col: SeedColumn, row: number, tag: { text: string; n: number }):
     case 'json': {
       const list = col.choices;
       if (!list?.length) return '';
-      return JSON.stringify([list[(row + shift) % list.length]]);
+      return encodeMultiValue([list[(row + shift) % list.length]]) ?? '';
     }
     case 'image':
     case 'file':

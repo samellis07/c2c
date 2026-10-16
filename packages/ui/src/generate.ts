@@ -2003,7 +2003,8 @@ function writeFieldOf(field: UiModel['forms'][number]['fields'][number]): WriteF
   } else {
     const scalar = scalarOf(field.widget);
     if (scalar) node.scalar = scalar;
-    const initial = staticDisplayDefault(field.initialValue);
+    // A multi select initial value is already the stored JSON list text (model.ts).
+    const initial = field.widget === 'multiselect' ? field.initialValue : staticDisplayDefault(field.initialValue);
     if (initial !== undefined) node.defaultValue = initial;
   }
   return node;

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { flowStatusColumn, formLink, formScheduleSweepGap, isApprovalWorkflow, isBlueprintWorkflow, isFormScheduleWorkflow, type App, type Field, type Form } from '../../core/src/ir.js';
 import { toolchain } from '../../core/src/toolchain.js';
 import { quantizeDecimal } from '../../shims/src/decimal.js';
+import { multiValueDefault } from '../../shims/src/multi-value.js';
 import {
   CURRENCY_CODES,
   DECISIONS,
@@ -391,6 +392,11 @@ function isUsers(field: Field): boolean {
   return normalizeType(prop(field, 'module')) === 'users';
 }
 
+/** A multi select or checkboxes field: one text column holding a JSON list (not a lookup). */
+export function isMultiChoiceField(field: Field): boolean {
+  return !field.lookup && isMulti(field);
+}
+
 function isMulti(field: Field): boolean {
   const token = creatorTypeOf(field);
   if (MULTI_TOKENS.has(token)) return true;
@@ -518,11 +524,19 @@ function baseColumn(env: ColumnEnv, field: Field, row: FieldTypeRow, dataType: C
 function applyDefault(env: ColumnEnv, field: Field, column: SchemaColumn): void {
   if (field.initialValue === undefined) return;
   if (column.dataType === 'Text' || column.dataType === 'Foreign Key' || column.dataType === 'Encrypted') {
+    // A multi-value column holds a JSON list, so its prefill is that list (["No"]), not the .ds list source.
+    const multi = column.matrixId === 'multi-select' || column.matrixId === 'checkbox-multi';
+    const prefill = multi ? multiValueDefault(field.initialValue) : field.initialValue;
     env.issues.push({
       severity: 'warning',
       form: env.form.name,
       field: field.name,
-      message: `Default is not set on ${column.dataType} column ${column.name}. The generated form prefills "${field.initialValue}" instead.`,
+      message:
+        prefill === undefined
+          ? `Default is not set on ${column.dataType} column ${column.name}. The initial value is not a static list, so the generated form does not prefill it.`
+          : multi
+            ? `Default is not set on ${column.dataType} column ${column.name}. The generated form prefills ${prefill} instead, and the submit handler stores it on insert.`
+            : `Default is not set on ${column.dataType} column ${column.name}. The generated form prefills "${prefill}" instead.`,
     });
     return;
   }
