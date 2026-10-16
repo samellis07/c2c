@@ -32,6 +32,7 @@ const ROOTS: Record<string, string[]> = {
   precheck: ['precheck'],
   status: ['statusCli'],
   verify: ['verifyCli'],
+  'verify-behavior': ['verifyBehaviorCli'],
   'rollback-export': ['doctorGateForArgs', 'rollbackExportCli'],
   'cutover-checklist': ['cutoverCli'],
   proof: ['cutoverCli'],

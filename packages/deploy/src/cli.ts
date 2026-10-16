@@ -12,7 +12,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { LockedExportError, parseFileWithSidecars, parseProject, widgetCommandStatus, type App } from '../../core/src/index.js';
 import { seedCompositeMap } from '../../data/src/seed.js';
 import { stratusRestSink } from '../../data/src/files.js';
-import { emptyCheckpoint, type Checkpoint, type FetchLike, type MigrateResult } from '../../data/src/migrate.js';
+import { assertAllowedHost, catalystAuthHeaders, catalystQueryUrl, emptyCheckpoint, type CatalystScope, type Checkpoint, type FetchLike, type MigrateResult } from '../../data/src/migrate.js';
 import { writeCheckpointFile } from '../../data/src/checkpoint-file.js';
 import { emptyIntegrity, groupRefusals, integrityColumns, cellRuleRefusals, mandatoryMissingRefusals, overLengthRefusals, type IntegrityReport } from '../../data/src/integrity.js';
 import { applyConstraintDecisions, columnRenamesOf, generateSchema, type ConstraintDecision, type SchemaPlan } from '../../schema/src/generator.js';
@@ -42,6 +42,7 @@ import { assertSeedReferences, assertSeedTables, foreignKeysForApp } from './rem
 import { formatMigratePlan, formatSkipped, migrateSeed, parseSeed, parseSeedBlocked, seedBucketName, seedFileColumns, seedStoreColumns, type SeedTable } from './seed.js';
 import { ensureSeedBucket } from './stratus-bucket.js';
 import { assertSmokeCookie, assertSmokeUrl, describeSmokeAuth, executeSmoke, formatSmokePlan, planSmoke, type SmokeAuth } from './smoke.js';
+import { formatBehaviorJson, formatBehaviorMarkdown, liveBackend, loadGoldens, runBehavior, startOfflineBackend, type BehaviorBackend } from './verify-behavior.js';
 import { SMOKE_RESULT_MAX_AGE_MINUTES, verifySmokeResult } from './smoke-result.js';
 import { formatCustomerSteps } from './customer-steps.js';
 import { cdpBrowser, openOnOrigin, pageFetch, runBrowserSmoke, type BrowserSmokeResult, type SmokeBrowser } from './browser.js';
@@ -2559,6 +2560,119 @@ export async function usersCli(args: readonly string[], io: Io): Promise<number>
     writeUsersState(statePath, { version: 1, project: guard.projectId, salt, invited: result.invited });
     io.stdout(formatInviteResult(result));
     return result.ok ? 0 : 1;
+  } catch (err) {
+    return fail(io, err);
+  }
+}
+
+const ZCQL_TABLE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * `c2c verify-behavior <file|dir> --goldens <dir>` — replay a Creator golden
+ * against the migrated app and report every difference (tests/behavior/SCHEMA.md).
+ *
+ * Default is offline: the generated c2c_api runs in-process against the
+ * in-memory Catalyst harness — no project, no credential, CI-safe.
+ * --live --confirm runs the same cases against the deployed function, bound by
+ * the deploy report's function origin like `c2c smoke --owner-session`, and
+ * reads stored rows back through the admin ZCQL surface with the CLI scope.
+ * Any finding exits 1; the KPI line reports behavior-equivalent apps.
+ */
+export async function verifyBehaviorCli(args: readonly string[], io: Io): Promise<number> {
+  const { target, rest } = targetOf(args);
+  const ds = target ?? flag(rest, '--ds');
+  const goldens = flag(rest, '--goldens');
+  const live = rest.includes('--live');
+  const usage =
+    'usage: c2c verify-behavior <file|dir> --goldens <dir> [--report <file.json>] [--report-md <file.md>]\n' +
+    '       c2c verify-behavior <file|dir> --goldens <dir> --live --confirm --url <fn-base> [--project <id>] [--org <id>] [--dc <dc>] [--projects <file>] [--config <c2c-deploy.json>] [--auth-token <token> | --session-cookie <name=value>] [--catalyst-base <url>] [--report <file.json>] [--report-md <file.md>]\n' +
+    '       goldens: a Creator capture dir holding cases.json (tests/behavior/SCHEMA.md)\n' +
+    '       default mode replays offline against the generated function in the in-process Catalyst harness; --live replays against the deployed project\n';
+  if (!ds || !goldens) {
+    io.stderr(usage);
+    return 2;
+  }
+  try {
+    const golden = loadGoldens(goldens);
+    const app = loadApp(ds);
+    if (golden.app && app.name && golden.app !== app.name) {
+      throw new Error(`goldens name app "${golden.app}" but ${ds} is "${app.name}"`);
+    }
+    const reportPath = flag(rest, '--report');
+    const reportMdPath = flag(rest, '--report-md');
+    if ((rest.includes('--report') && !reportPath) || (rest.includes('--report-md') && !reportMdPath)) {
+      io.stderr('c2c: --report / --report-md need a file path\n');
+      return 2;
+    }
+    let backend: BehaviorBackend;
+    let mode: 'offline' | 'live';
+    if (live) {
+      const appLink = app.name?.trim();
+      if (!appLink) throw new GuardError('name-mismatch', 'application name is missing');
+      if (!rest.includes('--confirm')) throw new GuardError('configuration', 'verify-behavior --live writes and reads the deployed project — pass --confirm');
+      const guard = await prepareGuard(ds, rest, appLink, io);
+      const raw = flag(rest, '--url');
+      if (!raw) throw new GuardError('configuration', 'verify-behavior --live needs --url <function base>, e.g. https://<project-domain>/server/c2c_api');
+      const base = assertSmokeUrl(raw);
+      // The deploy report beside the source binds --url to this deploy's
+      // function — nothing is sent to a function the report does not name.
+      const bound = deployReportFunctionOrigin(ds);
+      if (!bound) {
+        throw new GuardError('smoke-auth', `--live --url ${base.origin} cannot be bound to project ${guard.projectId}: no ${DEPLOY_REPORT} beside the source — run c2c deploy first; its report records the function base`);
+      }
+      if (bound.origin !== base.origin) {
+        throw new GuardError('smoke-auth', `--url ${base.origin} does not match the deploy report's ${bound.label} origin ${bound.origin}`);
+      }
+      const { auth } = smokeAuth(rest, io.env);
+      await assertLiveProject(io, guard.org, guard.projectId);
+      let scopePromise: Promise<CatalystScope> | undefined;
+      const scope = () => (scopePromise ??= resolveScope(io, guard.org, guard.projectId));
+      const catalystBase = flag(rest, '--catalyst-base') ?? catalystBaseFor(guard.dc);
+      backend = liveBackend({
+        fetch: io.fetch,
+        base: `${base.origin}${base.pathname}`,
+        auth,
+        async query(table) {
+          if (!ZCQL_TABLE.test(table)) throw new Error(`table name ${JSON.stringify(table)} is not a ZCQL identifier`);
+          const resolved = await scope();
+          const url = catalystQueryUrl(catalystBase, resolved);
+          assertAllowedHost(url, guard.dc);
+          const res = await io.fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...catalystAuthHeaders(resolved) },
+            body: JSON.stringify({ query: `SELECT * FROM ${table} ORDER BY ROWID LIMIT 0, 300` }),
+          });
+          const text = await res.text();
+          let body: unknown = {};
+          try {
+            body = JSON.parse(text);
+          } catch {
+            body = {};
+          }
+          if (res.status < 200 || res.status >= 300) throw new Error(`query ${table} answered ${res.status}`);
+          const data = body && typeof body === 'object' ? (body as Record<string, unknown>).data : undefined;
+          const rows = Array.isArray(data) ? data : [];
+          return rows.map((row) => {
+            const inner = row && typeof row === 'object' ? ((row as Record<string, unknown>)[table] ?? row) : row;
+            return inner && typeof inner === 'object' && !Array.isArray(inner) ? (inner as Record<string, unknown>) : {};
+          });
+        },
+      });
+      mode = 'live';
+    } else {
+      backend = await startOfflineBackend(app);
+      mode = 'offline';
+    }
+    try {
+      const { report } = await runBehavior(app, golden, backend, mode);
+      if (reportPath) writeFileSync(reportPath, formatBehaviorJson(report));
+      if (reportMdPath) writeFileSync(reportMdPath, formatBehaviorMarkdown(report, goldens));
+      io.stdout(formatBehaviorMarkdown(report, goldens));
+      if (reportPath) io.stdout(`report: ${reportPath}\n`);
+      return report.ok ? 0 : 1;
+    } finally {
+      await backend.close();
+    }
   } catch (err) {
     return fail(io, err);
   }
