@@ -1229,6 +1229,7 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
   const wantsRelative = criteriaHasRelative(base) || named.some((item) => criteriaHasRelative(item.criteria));
   const criteriaRef = wantsRelative ? 'applied' : 'scoped.criteria';
   const columns = report.columns.map((column) => column.field);
+  // determinism-allow: report column order then stored-column order; dedup keeps first use, and sorting would reorder the emitted aggregateFields
   const aggFields = [...new Set([...columns, ...projection])].filter((field) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(field));
   const decimals = Object.hasOwn(decimalColumnsOf(app), formName) ? decimalColumnsOf(app)[formName]! : {};
   const exact = Object.keys(decimals).length > 0;
