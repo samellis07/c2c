@@ -66,10 +66,21 @@ Rule: [UNVERIFIED] `POST /baas/v1/project/<project-id>/role` with the token → 
 
 Rule: [UNVERIFIED] `PUT /baas/v1/project/<project-id>/table/<table-id>/permission` and `PUT …/scopes` with the token → `401 OAUTH_SCOPE_MISMATCH`; the MCP routes write per-role grants and scope flags.
 
-- MCP `Update_Table_Permissions` takes a body keyed by role name (`{"App Administrator":["SELECT",...]}`) — custom roles are not reachable through it and ship via the template or console instead.
-- MCP `Update_Table_Scopes` toggles a table's scope flags.
-- Read first with `Get_Table_Permissions` / `Get_Table_Scopes`: the update replaces the permission mapping, so `c2c` shows the planned change and the user answers "yes" before it is applied.
-- The console requires an existing role to clone for a new role; scopes (Global/Org/User) and permissions apply to Data Store and File Store only.
+- MCP `Update_Table_Permissions` takes a body keyed by role name (`{"App Administrator":["SELECT",...]}`). [UNVERIFIED: observed once through MCP on a scratch table] A custom role's name is accepted too (`{"<custom role>":["SELECT"]}`), although the tool schema lists only the two built-ins; c2c's existing-project plan still lists custom-role grants as console steps.
+- [UNVERIFIED: observed once through MCP on a scratch table] An update merges per role: only the roles named in the body change. An empty list (`{"App User":[]}`) is accepted and revokes every table operation for that role.
+- MCP `Update_Table_Scopes` takes a body keyed by role name; [UNVERIFIED: observed once through MCP on a scratch table] a custom role's name with `"USER"` is accepted and leaves the other roles unchanged.
+- [UNVERIFIED: observed once through MCP on a scratch table] A new table starts with App Administrator `SELECT, UPDATE, INSERT, DELETE`, App User `SELECT`, every custom role `[]`, and Global scope for every role.
+- Read first with `Get_Table_Permissions` / `Get_Table_Scopes`, so `c2c` shows the planned change and the user answers "yes" before it is applied.
+- The console requires an existing role to clone for a new role; a clone copies its parent's grants [DOC]. Scopes (Global/Org/User) and permissions apply to Data Store and File Store only [DOC]; user-management calls such as `getCurrentUser()` are not table operations, so a role with no table grant can still read its own user (live: [UNVERIFIED]).
+
+### Keep App User and custom roles off the Data Store
+
+Rule: [TESTED] `c2c plan` writes a least-privilege baseline on every app table: App User and every custom role get `[]` (no table operation) at User scope; App Administrator keeps its default (public tests: `packages/auth/test/plan.test.ts`, `packages/deploy/test/iac.test.ts`).
+
+- The generated client reads and writes only through `c2c_api` (`/server/c2c_api`); its only Web SDK use is `catalyst.auth` sign-in and token calls. `c2c_api` reaches the Data Store with the admin-scoped SDK (`initialize(req, {scope:'admin'})`) and enforces each Creator profile (tables, fields, record filters, owner scope) itself.
+- A table grant on a non-admin role would only open a direct Web SDK or ZCQL path that skips those checks [DOC: roles govern the Data Store, Search and ZCQL]. Whether a signed-in App User can use that path against a deployed project is [UNVERIFIED].
+- `c2c_api` is then the single enforcement point; App Administrators keep direct full access.
+- A custom role created before the baseline was written still holds its cloned grants: the grant read-back reports it as a mismatch.
 
 ### Add users as admin — self-service signup is off
 

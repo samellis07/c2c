@@ -801,24 +801,11 @@
               "INSERT",
               "DELETE"
             ],
-            "App User": [
-              "SELECT"
-            ],
-            "Administrator": [
-              "SELECT",
-              "UPDATE",
-              "INSERT",
-              "DELETE"
-            ],
-            "Desk_Staff": [
-              "SELECT"
-            ],
-            "Studio_Lead": [
-              "SELECT"
-            ],
-            "Studio_Crew": [
-              "SELECT"
-            ]
+            "App User": [],
+            "Administrator": [],
+            "Desk_Staff": [],
+            "Studio_Lead": [],
+            "Studio_Crew": []
           },
           "<id:Gear>": {
             "App Administrator": [
@@ -827,24 +814,11 @@
               "INSERT",
               "DELETE"
             ],
-            "App User": [
-              "SELECT"
-            ],
-            "Administrator": [
-              "SELECT",
-              "UPDATE",
-              "INSERT",
-              "DELETE"
-            ],
-            "Desk_Staff": [
-              "SELECT"
-            ],
-            "Studio_Lead": [
-              "SELECT"
-            ],
-            "Studio_Crew": [
-              "SELECT"
-            ]
+            "App User": [],
+            "Administrator": [],
+            "Desk_Staff": [],
+            "Studio_Lead": [],
+            "Studio_Crew": []
           },
           "<id:Session_Log>": {
             "App Administrator": [
@@ -853,24 +827,11 @@
               "INSERT",
               "DELETE"
             ],
-            "App User": [
-              "SELECT"
-            ],
-            "Administrator": [
-              "SELECT",
-              "UPDATE",
-              "INSERT",
-              "DELETE"
-            ],
-            "Desk_Staff": [
-              "SELECT"
-            ],
-            "Studio_Lead": [
-              "SELECT"
-            ],
-            "Studio_Crew": [
-              "SELECT"
-            ]
+            "App User": [],
+            "Administrator": [],
+            "Desk_Staff": [],
+            "Studio_Lead": [],
+            "Studio_Crew": []
           },
           "<id:Booking__Lines>": {
             "App Administrator": [
@@ -879,24 +840,11 @@
               "INSERT",
               "DELETE"
             ],
-            "App User": [
-              "SELECT"
-            ],
-            "Administrator": [
-              "SELECT",
-              "UPDATE",
-              "INSERT",
-              "DELETE"
-            ],
-            "Desk_Staff": [
-              "SELECT"
-            ],
-            "Studio_Lead": [
-              "SELECT"
-            ],
-            "Studio_Crew": [
-              "SELECT"
-            ]
+            "App User": [],
+            "Administrator": [],
+            "Desk_Staff": [],
+            "Studio_Lead": [],
+            "Studio_Crew": []
           },
           "<id:Booking>": {
             "App Administrator": [
@@ -905,25 +853,11 @@
               "INSERT",
               "DELETE"
             ],
-            "App User": [
-              "SELECT"
-            ],
-            "Administrator": [
-              "SELECT",
-              "UPDATE",
-              "INSERT",
-              "DELETE"
-            ],
-            "Desk_Staff": [
-              "SELECT",
-              "UPDATE"
-            ],
-            "Studio_Lead": [
-              "SELECT"
-            ],
-            "Studio_Crew": [
-              "SELECT"
-            ]
+            "App User": [],
+            "Administrator": [],
+            "Desk_Staff": [],
+            "Studio_Lead": [],
+            "Studio_Crew": []
           },
           "<id:Guest>": {
             "App Administrator": [
@@ -932,24 +866,11 @@
               "INSERT",
               "DELETE"
             ],
-            "App User": [
-              "SELECT"
-            ],
-            "Administrator": [
-              "SELECT",
-              "UPDATE",
-              "INSERT",
-              "DELETE"
-            ],
-            "Desk_Staff": [
-              "SELECT"
-            ],
-            "Studio_Lead": [
-              "SELECT"
-            ],
-            "Studio_Crew": [
-              "SELECT"
-            ]
+            "App User": [],
+            "Administrator": [],
+            "Desk_Staff": [],
+            "Studio_Lead": [],
+            "Studio_Crew": []
           },
           "<id:Media_Kit>": {
             "App Administrator": [
@@ -958,24 +879,11 @@
               "INSERT",
               "DELETE"
             ],
-            "App User": [
-              "SELECT"
-            ],
-            "Administrator": [
-              "SELECT",
-              "UPDATE",
-              "INSERT",
-              "DELETE"
-            ],
-            "Desk_Staff": [
-              "SELECT"
-            ],
-            "Studio_Lead": [
-              "SELECT"
-            ],
-            "Studio_Crew": [
-              "SELECT"
-            ]
+            "App User": [],
+            "Administrator": [],
+            "Desk_Staff": [],
+            "Studio_Lead": [],
+            "Studio_Crew": []
           },
           "<id:Booking__Gear_Refs>": {
             "App Administrator": [
@@ -984,24 +892,11 @@
               "INSERT",
               "DELETE"
             ],
-            "App User": [
-              "SELECT"
-            ],
-            "Administrator": [
-              "SELECT",
-              "UPDATE",
-              "INSERT",
-              "DELETE"
-            ],
-            "Desk_Staff": [
-              "SELECT"
-            ],
-            "Studio_Lead": [
-              "SELECT"
-            ],
-            "Studio_Crew": [
-              "SELECT"
-            ]
+            "App User": [],
+            "Administrator": [],
+            "Desk_Staff": [],
+            "Studio_Lead": [],
+            "Studio_Crew": []
           },
           "<id:C2CJobCheckpoint>": {
             "App Administrator": [
@@ -1010,24 +905,11 @@
               "INSERT",
               "DELETE"
             ],
-            "App User": [
-              "SELECT"
-            ],
-            "Administrator": [
-              "SELECT",
-              "UPDATE",
-              "INSERT",
-              "DELETE"
-            ],
-            "Desk_Staff": [
-              "SELECT"
-            ],
-            "Studio_Lead": [
-              "SELECT"
-            ],
-            "Studio_Crew": [
-              "SELECT"
-            ]
+            "App User": [],
+            "Administrator": [],
+            "Desk_Staff": [],
+            "Studio_Lead": [],
+            "Studio_Crew": []
           }
         }
       }
@@ -1158,19 +1040,19 @@
               "GLOBAL"
             ],
             "App User": [
-              "GLOBAL"
+              "USER"
             ],
             "Administrator": [
-              "GLOBAL"
+              "USER"
             ],
             "Desk_Staff": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Lead": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Crew": [
-              "GLOBAL"
+              "USER"
             ]
           },
           "<id:Gear>": {
@@ -1178,19 +1060,19 @@
               "GLOBAL"
             ],
             "App User": [
-              "GLOBAL"
+              "USER"
             ],
             "Administrator": [
-              "GLOBAL"
+              "USER"
             ],
             "Desk_Staff": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Lead": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Crew": [
-              "GLOBAL"
+              "USER"
             ]
           },
           "<id:Session_Log>": {
@@ -1198,19 +1080,19 @@
               "GLOBAL"
             ],
             "App User": [
-              "GLOBAL"
+              "USER"
             ],
             "Administrator": [
-              "GLOBAL"
+              "USER"
             ],
             "Desk_Staff": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Lead": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Crew": [
-              "GLOBAL"
+              "USER"
             ]
           },
           "<id:Booking__Lines>": {
@@ -1218,19 +1100,19 @@
               "GLOBAL"
             ],
             "App User": [
-              "GLOBAL"
+              "USER"
             ],
             "Administrator": [
-              "GLOBAL"
+              "USER"
             ],
             "Desk_Staff": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Lead": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Crew": [
-              "GLOBAL"
+              "USER"
             ]
           },
           "<id:Booking>": {
@@ -1238,19 +1120,19 @@
               "GLOBAL"
             ],
             "App User": [
-              "GLOBAL"
+              "USER"
             ],
             "Administrator": [
-              "GLOBAL"
+              "USER"
             ],
             "Desk_Staff": [
-              "ORG"
+              "USER"
             ],
             "Studio_Lead": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Crew": [
-              "GLOBAL"
+              "USER"
             ]
           },
           "<id:Guest>": {
@@ -1258,19 +1140,19 @@
               "GLOBAL"
             ],
             "App User": [
-              "GLOBAL"
+              "USER"
             ],
             "Administrator": [
-              "GLOBAL"
+              "USER"
             ],
             "Desk_Staff": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Lead": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Crew": [
-              "GLOBAL"
+              "USER"
             ]
           },
           "<id:Media_Kit>": {
@@ -1278,19 +1160,19 @@
               "GLOBAL"
             ],
             "App User": [
-              "GLOBAL"
+              "USER"
             ],
             "Administrator": [
-              "GLOBAL"
+              "USER"
             ],
             "Desk_Staff": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Lead": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Crew": [
-              "GLOBAL"
+              "USER"
             ]
           },
           "<id:Booking__Gear_Refs>": {
@@ -1298,19 +1180,19 @@
               "GLOBAL"
             ],
             "App User": [
-              "GLOBAL"
+              "USER"
             ],
             "Administrator": [
-              "GLOBAL"
+              "USER"
             ],
             "Desk_Staff": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Lead": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Crew": [
-              "GLOBAL"
+              "USER"
             ]
           },
           "<id:C2CJobCheckpoint>": {
@@ -1318,19 +1200,19 @@
               "GLOBAL"
             ],
             "App User": [
-              "GLOBAL"
+              "USER"
             ],
             "Administrator": [
-              "GLOBAL"
+              "USER"
             ],
             "Desk_Staff": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Lead": [
-              "GLOBAL"
+              "USER"
             ],
             "Studio_Crew": [
-              "GLOBAL"
+              "USER"
             ]
           }
         }

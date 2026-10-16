@@ -1067,7 +1067,7 @@ function buildSteps(opts: {
   if (!opts.newProject && consoleGrants.length) {
     const grantTables = [...new Set(consoleGrants.map((grant) => grant.table))];
     const calls = grantTables.map((table) => ({ path_variables: { id: `<id:${table}>` } }));
-    const describe = consoleGrants.map((grant) => `${grant.table}: ${grant.permissions.join('/')} for ${grant.role}`).join('; ');
+    const describe = consoleGrants.map((grant) => `${grant.table}: ${grant.permissions.join('/') || 'no access'} for ${grant.role}`).join('; ');
     steps.push(
       {
         id: 'table-permissions-console',
@@ -1258,9 +1258,13 @@ function plain(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** A list of the grant words Update_Table_Permissions / Scopes write, exact case. */
+/**
+ * A list of the grant words Update_Table_Permissions / Scopes write, exact
+ * case. An empty list is a grant too: it is the least-privilege baseline
+ * (no table operation), and Update_Table_Permissions accepts it as a revoke.
+ */
 export function isExactGrantList(value: unknown): boolean {
-  return Array.isArray(value) && value.length > 0 && value.every((word) => typeof word === 'string' && GRANT_WORDS.has(word));
+  return Array.isArray(value) && value.every((word) => typeof word === 'string' && GRANT_WORDS.has(word));
 }
 
 function grantWordText(value: string): boolean {

@@ -264,10 +264,10 @@ export function authApplyReport(apply: AuthApplyPlan): string {
     ...(apply.tablePermissions.length
       ? apply.tablePermissions.map(
           (perm) =>
-            `- ${perm.table} / ${perm.role}: ${perm.permissions.join(' ')} @ ${perm.scope}` +
+            `- ${perm.table} / ${perm.role}: ${perm.permissions.join(' ') || 'no access'} @ ${perm.scope}` +
             ` — PUT /table/<id>/permission and /table/<id>/scopes`,
         )
-      : ['- none (a role with no rows here reads no tables)']),
+      : ['- none (no app tables)']),
     '',
     '## Invites',
     ...(apply.invites.length
@@ -629,11 +629,11 @@ for (const perm of plan.tablePermissions) {
   for (const step of perm.calls) {
     const path = step.path.replace(/\\{table_id:([^}]+)\\}/g, (_m, name) => tableMap.get(name) ?? '{table_id:' + name + '}');
     if (apply && path.includes('{table_id:')) {
-      note('PUT ' + step.path + ' — the table id for ' + perm.table + ' is unresolved; set ' + perm.role + ' ' + perm.permissions.join(' ') + ' @ ' + perm.scope + ' in the console.');
+      note('PUT ' + step.path + ' — the table id for ' + perm.table + ' is unresolved; set ' + perm.role + ' ' + (perm.permissions.join(' ') || 'no access') + ' @ ' + perm.scope + ' in the console.');
       continue;
     }
     const res = await send(step.method, path, step.body);
-    if (!res.ok && !res.dry) consoleFor('PUT /table/<id>/permission and /scopes', 'set ' + perm.role + ' on ' + perm.table + ' in the console: ' + perm.permissions.join(' ') + ' @ ' + perm.scope);
+    if (!res.ok && !res.dry) consoleFor('PUT /table/<id>/permission and /scopes', 'set ' + perm.role + ' on ' + perm.table + ' in the console: ' + (perm.permissions.join(' ') || 'no access') + ' @ ' + perm.scope);
   }
 }
 

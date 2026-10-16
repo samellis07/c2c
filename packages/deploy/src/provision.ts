@@ -833,7 +833,9 @@ function roleGrantMap(node: unknown, prefer: string): Record<string, unknown> {
     const role = typeof value.role_name === 'string' ? value.role_name : undefined;
     if (role) {
       if (out[role] === undefined) {
-        const grant = [value[prefer], value.table_permissions, value.table_scope].find(isGrantValue) ?? Object.values(value).find(isGrantValue);
+        // Only a named grant field may read as an empty set: any other empty
+        // list on the row is not evidence that the role holds no grant.
+        const grant = [value[prefer], value.table_permissions, value.table_scope].find(isGrantValue) ?? Object.values(value).find((field) => isGrantValue(field) && !(Array.isArray(field) && field.length === 0));
         if (isGrantValue(grant)) out[role] = grant;
       }
     } else {

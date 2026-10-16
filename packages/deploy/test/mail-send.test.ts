@@ -18,6 +18,7 @@ import {
   deployCli,
   mailConfig,
   mailSenderPrecheck,
+  mailModuleSource,
   mailSenderTag,
   maskMailAddress,
   readMailSenderEvidence,
@@ -1286,4 +1287,10 @@ test('a live submit whose on-success sendmail is refused still answers 2xx; a re
     else (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = previousStore;
     rmSync(out, { recursive: true, force: true });
   }
+});
+
+test('the mail module initializes the SDK at admin scope: App User holds no table grant for the mail log', () => {
+  const source = mailModuleSource(['ops@example.test']);
+  assert.match(source, /catalyst\.initialize\(req, \{ scope: "admin" \}\)/);
+  assert.doesNotMatch(source, /initialize\(req\)/);
 });

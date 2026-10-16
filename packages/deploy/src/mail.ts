@@ -313,7 +313,9 @@ async function catalystApp(req) {
   if (installed) return installed(req);
   const sdk = await import("zcatalyst-sdk-node");
   const catalyst = sdk.default || sdk;
-  return catalyst.initialize(req);
+  // Admin scope, like c2c_api's Data Store: App User has no table grant, so
+  // the mail-log insert must not depend on the caller's role.
+  return catalyst.initialize(req, { scope: "admin" });
 }
 
 function readConfig() {

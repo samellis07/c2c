@@ -2,13 +2,16 @@
  * Dry-run Catalyst Authentication plan.
  *
  * Nothing here calls Catalyst. Role creation needs a clone of an existing role
- * (POST /role is rejected without clone_role). Table
- * permissions are planned per profile-role. Creator record filters stay on the
- * access policy the shim already enforces; they are not Catalyst User scope.
+ * (POST /role is rejected without clone_role). Table permissions are a
+ * least-privilege baseline: App User and every custom role get no table
+ * operation at User scope, because the generated client reads and writes only
+ * through c2c_api, which uses the admin-scoped SDK and enforces the Creator
+ * profile (tables, fields, record filters) itself. A Catalyst grant would only
+ * open a direct Web SDK path that skips those checks.
  */
 
 import type { App, ModulePermission, Role } from '../../core/src/ir.js';
-import { accessPolicyFor, profilePreset, type ProfilePreset } from '../../deluge/src/generate.js';
+import { accessPolicyFor, profilePreset } from '../../deluge/src/generate.js';
 import type { AccessPolicy } from '../../shims/src/access.js';
 
 export type Crud = 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE';
@@ -53,8 +56,11 @@ export interface TablePermission {
   table: string;
   role: string;
   permissions: Crud[];
-  scope: 'ORG' | 'GLOBAL';
+  scope: 'USER' | 'ORG' | 'GLOBAL';
 }
+
+/** The grant App User and every custom role carry on each app table: none. */
+export const BASELINE_GRANT: { readonly permissions: readonly Crud[]; readonly scope: 'USER' } = { permissions: [], scope: 'USER' };
 
 export interface PortalUserPlan {
   profile: string;
@@ -80,13 +86,6 @@ export interface AuthPlan {
   accessPolicy: AccessPolicy;
   notes: string[];
 }
-
-const CRUD: { verbs: string[]; crud: Crud }[] = [
-  { verbs: ['view', 'viewall'], crud: 'SELECT' },
-  { verbs: ['add', 'create', 'import'], crud: 'INSERT' },
-  { verbs: ['edit', 'update'], crud: 'UPDATE' },
-  { verbs: ['delete'], crud: 'DELETE' },
-];
 
 export function authPlan(app: App): AuthPlan {
   const formNames = new Set(app.forms.map((form) => form.name));
@@ -157,25 +156,9 @@ export function authPlan(app: App): AuthPlan {
     }
     for (const mod of profile.modules) {
       if (flagFalse(mod, 'enabled')) continue;
-      if (!formNames.has(mod.component)) {
-        pageAccess.push({ page: mod.component, role: profile.name });
-        continue;
-      }
-      const grant = crudFor(mod);
-      if (!grant) continue;
-      tablePermissions.push({
-        table: mod.component,
-        role: roleName,
-        permissions: grant.permissions,
-        scope: grant.viewAll ? 'GLOBAL' : 'ORG',
-      });
+      if (!formNames.has(mod.component)) pageAccess.push({ page: mod.component, role: profile.name });
     }
-    const preset = profilePreset(profile);
-    if (preset) {
-      const grant = presetCrud(preset);
-      for (const form of app.forms) {
-        tablePermissions.push({ table: form.name, role: roleName, permissions: grant.permissions, scope: grant.scope });
-      }
+    if (profilePreset(profile)) {
       for (const page of app.pages) pageAccess.push({ page: page.name, role: profile.name });
     }
   }
@@ -194,16 +177,28 @@ export function authPlan(app: App): AuthPlan {
     });
   });
 
+  // Least-privilege baseline on every app table: App User (the clone base)
+  // first, then each custom role in plan order. Catalyst defaults a new table
+  // to App User SELECT at Global scope and a cloned role to its parent's set,
+  // so every non-admin role is written explicitly. App Administrator is left
+  // as Catalyst sets it.
+  const baselineRoles = ['App User', ...roles.map((role) => role.role_name)];
+  for (const form of app.forms) {
+    for (const role of baselineRoles) {
+      tablePermissions.push({ table: form.name, role, permissions: [...BASELINE_GRANT.permissions], scope: BASELINE_GRANT.scope });
+    }
+  }
+
   notes.push(
     'Dry run. This plan does not call Catalyst and does not create roles, users, or table permissions.',
     'Every Catalyst role is cloned. Apply-time resolves clone_role "App User" or "App Administrator" to that project\'s role id. The id is not invented here.',
     'A Creator profile becomes a Catalyst role of the same name — unless the name spells a built-in Catalyst role under case/space/punctuation folding, in which case the role is "Creator <profile>"; an app user is never invited onto a built-in role by a profile name. Table permissions hang off that role. The shim access policy is keyed by the profile name, so the signed-in principal.profile must be that name.',
-    'Data-hierarchy roles are emitted so the access policy allow-list matches the export. They do not get Data Store permissions unless a profile has the same name.',
+    'Data-hierarchy roles are emitted so the access policy allow-list matches the export.',
     'Portal profiles become app users assigned the portal role. Nobody is invited by this plan.',
-    'Creator report record filters stay on accessPolicy.recordFilter (login user bound from the principal). They are not stored as Catalyst User scope. Viewall is GLOBAL; other grants are ORG.',
-    'Record sharing by owner on portal profiles and on forms listed in role Hierarchy (no View All: own rows only; no Modify All: edit and delete own rows only), hidden and read-only fields, and add-only grants are enforced by c2c_api. Catalyst table permissions carry no field or row rule, so they do not express these; the generated client reads and writes only through c2c_api. migration-report.json security lists what is not enforced.',
+    'Table permissions are a least-privilege baseline, not a copy of the Creator grants: App User and every custom role get no table operation at User scope on every app table. App Administrator is unchanged. The generated client reads and writes only through c2c_api, which uses the admin-scoped SDK and enforces each profile itself, so a Catalyst grant would only open a direct Web SDK path around those checks.',
+    'Creator report record filters stay on accessPolicy.recordFilter (login user bound from the principal). Record sharing by owner on portal profiles and on forms listed in role Hierarchy (no View All: own rows only; no Modify All: edit and delete own rows only), hidden and read-only fields, and add-only grants are enforced by c2c_api. migration-report.json security lists what is not enforced.',
     'Hosted and embedded login are both planned on. Public signup stays off until the owner turns it on. No authorized domain is invented.',
-    'A profile with no ModulePermissions is not an empty allow. Creator predefined sets are written out as grants: Administrator (app owner and admins) can view, add, edit, and delete every form (GLOBAL). Write can view, add, and edit every form (ORG). Read can view every form (ORG). The Customer portal default ("only add and view") can view and add every form (ORG). The shim has one write bit, so add also allows update there. Delete is a separate bit and is not implied by write: only Administrator, among these presets, has it. Any other profile with no modules, including Developer, gets no grant. App User and App Administrator are the Catalyst clone targets for these profiles, not extra profile names.',
+    'A profile with no ModulePermissions is not an empty allow. Creator predefined sets are written out as access-policy grants: Administrator (app owner and admins) can view, add, edit, and delete every form. Write can view, add, and edit every form. Read can view every form. The Customer portal default ("only add and view") can view and add every form. The shim has one write bit, so add also allows update there. Delete is a separate bit and is not implied by write: only Administrator, among these presets, has it. Any other profile with no modules, including Developer, gets no grant. App User and App Administrator are the Catalyst clone targets for these profiles, not extra profile names.',
   );
 
   return {
@@ -231,32 +226,6 @@ function isPortal(type: string | undefined, name: string): boolean {
 function flagFalse(mod: ModulePermission, key: string): boolean {
   const value = mod.properties.find((p) => p.key.toLowerCase() === key)?.value ?? '';
   return /^"?false"?$/i.test(value.trim());
-}
-
-function presetCrud(preset: ProfilePreset): { permissions: Crud[]; scope: 'ORG' | 'GLOBAL' } {
-  if (preset === 'administrator') return { permissions: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'], scope: 'GLOBAL' };
-  if (preset === 'write') return { permissions: ['SELECT', 'INSERT', 'UPDATE'], scope: 'ORG' };
-  if (preset === 'portal-add') return { permissions: ['SELECT', 'INSERT'], scope: 'ORG' };
-  return { permissions: ['SELECT'], scope: 'ORG' };
-}
-
-function crudFor(mod: ModulePermission): { permissions: Crud[]; viewAll: boolean } | undefined {
-  const words = new Set<string>();
-  for (const report of mod.reports) {
-    for (const match of report.value.matchAll(/[A-Za-z]+/g)) words.add(match[0].toLowerCase());
-  }
-  // Module flags: Create allows insert and View All reads, as in the access policy.
-  const enabled = mod.properties.find((p) => p.key.toLowerCase() === 'enabled')?.value ?? '';
-  for (const match of enabled.matchAll(/[A-Za-z]+/g)) {
-    const flag = match[0].toLowerCase();
-    if (flag === 'create' || flag === 'viewall') words.add(flag);
-  }
-  const permissions: Crud[] = [];
-  for (const row of CRUD) {
-    if (row.verbs.some((verb) => words.has(verb)) && !permissions.includes(row.crud)) permissions.push(row.crud);
-  }
-  if (!permissions.includes('SELECT')) return undefined;
-  return { permissions, viewAll: words.has('viewall') };
 }
 
 function walkRoles(roles: Role[], parent: string | undefined, visit: (role: Role, parent?: string) => void): void {
