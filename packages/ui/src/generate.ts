@@ -22,7 +22,8 @@ import { generateSchema, type SchemaPlan } from '../../schema/src/generator.js';
 import { EXTENSION_KEY, limitValue, planReportQuery, planZcql, ZcqlLimitError } from '../../schema/src/limits.js';
 import { fieldTypeRow } from '../../schema/src/mapping.js';
 import { buildSlate, type OutFile } from './build.js';
-import { buildModel, slug, smokeMarkerField, smokeNumberField, summarize, uiSnippetFiles, type UiModel, type UiSummary } from './model.js';
+import { lookupFormats } from './decorations/lookups.js';
+import { actionDispatchTarget, buildModel, slug, smokeMarkerField, smokeNumberField, summarize, uiSnippetFiles, type UiModel, type UiSummary } from './model.js';
 import { iconColorRgb, paletteFor } from './theme-map.js';
 import { pwaFiles, pwaServiceWorkerSource } from './pwa.js';
 import { BASE_CSS, SHELL_BACKGROUND } from './styles.js';
@@ -58,10 +59,10 @@ export function serviceWorker(): string {
 }
 
 export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
-  // The stubs do not depend on the generated files (only handler wiring does),
-  // so this first model pass supplies them before the Deluge pass writes
-  // migration-report.json with them counted.
-  const uiTodos = buildModel(app).todos;
+  // A custom action is a stub only when its workflow generated no function,
+  // so the Deluge pass resolves the UI stubs from its own files before it
+  // writes migration-report.json with them counted.
+  const uiTodos = (files: readonly GeneratedFile[]) => buildModel(app, files).todos;
   const deluge = generateDeluge(app, { schema: opts.schema, uiTodos, ...(opts.asyncOnSuccess ? { asyncOnSuccess: true } : {}) });
   const model = buildModel(app, deluge.files);
   const summary = summarize(model);
@@ -242,10 +243,10 @@ function routeOf(req, kind) {
 ` : ''}`;
 }
 
-function requirePrincipal(indent = '  '): string {
+function requirePrincipal(indent = '  ', dryRun = 'true'): string {
   return `${indent}const principal = principalFromRequest(req);
 ${indent}if (!principal?.profile) {
-${indent}  send(res, 401, { dryRun: true, error: "authenticated caller required" });
+${indent}  send(res, 401, { dryRun: ${dryRun}, error: "authenticated caller required" });
 ${indent}  return;
 ${indent}}`;
 }
@@ -1933,14 +1934,11 @@ ${wantsRelative ? '    if (relative) rows = rows.filter((row) => matchRow(row, a
  * all) is refused outright in live mode so the answer never claims a write.
  */
 function actionStub(app: App, path: string, name: string, form: string | undefined, workflow: string | undefined, delugeFiles: GeneratedFile[], schema?: SchemaPlan): string {
-  const wanted = (workflow ?? '').trim().toLowerCase();
-  const fn = wanted ? app.functions.find((item) => item.name.toLowerCase() === wanted) : undefined;
   // The action can dispatch only when its workflow named a function whose
-  // module generated and is registered in the emitted thisapp registry.
-  const dispatchable =
-    !!fn &&
-    delugeFiles.some((file) => file.path === 'functions/thisapp.mjs') &&
-    delugeFiles.some((file) => file.path === `functions/custom/${slug(fn.name)}.mjs`);
+  // module generated and is registered in the emitted thisapp registry: the
+  // same predicate that enables or turns off the button in the model.
+  const fn = actionDispatchTarget(app, workflow, delugeFiles);
+  const dispatchable = !!fn;
   // A row binds only when the function's execution type declares one and the
   // function has a form — the same condition the registry's rowForm follows.
   const recordForm = dispatchable && fn && functionRowBinding(fn) && fn.form ? fn.form : '';
@@ -1997,12 +1995,25 @@ ${recordForm
       send(res, 404, { dryRun: false, wrote: false, error: "no such row" });
       return;
     }
-    const result = await ctx.shim.thisapp.call(ctx, workflowPath, [row]);
+    // The action writes the row, so it needs the modify scope too, exactly
+    // like the edit and function routes: without Modify All only a row the
+    // caller added is found, so View All alone is a 403 and nothing runs.
+    const modifyScoped = authorizeRead(access, principal, recordForm, { op: "==", field: "ROWID", value: rowId }, undefined, "modify");
+    const readWhere = compileCriteria(authorizeRead(access, principal, recordForm, { op: "==", field: "ROWID", value: rowId }).criteria);
+    const modifyWhere = compileCriteria(modifyScoped.criteria);
+    if (modifyWhere !== readWhere) {
+      const modifyRows = await datastore.query(recordForm, modifyWhere === "true" ? "" : modifyWhere, 1, 0, "ORDER BY ROWID");
+      if (!Array.isArray(modifyRows) || !modifyRows[0] || typeof modifyRows[0] !== "object") {
+        send(res, 403, { dryRun: false, wrote: false, error: "record access: " + recordForm + " row is not visible" });
+        return;
+      }
+    }
+    await ctx.shim.thisapp.call(ctx, workflowPath, [row]);
     await ctx.shim.datastore.flush(ctx);
-    send(res, 200, { dryRun: false, wrote: true, action: ${JSON.stringify(name)}, result: result ?? null, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`
-        : `    const result = await ctx.shim.thisapp.call(ctx, workflowPath, []);
+    send(res, 200, { dryRun: false, wrote: true, action: ${JSON.stringify(name)}, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`
+        : `    await ctx.shim.thisapp.call(ctx, workflowPath, []);
     await ctx.shim.datastore.flush(ctx);
-    send(res, 200, { dryRun: false, wrote: true, action: ${JSON.stringify(name)}, result: result ?? null, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`}`
+    send(res, 200, { dryRun: false, wrote: true, action: ${JSON.stringify(name)}, ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });`}`
     : `    send(res, 422, { dryRun: false, wrote: false, refused: true, error: ${JSON.stringify(`custom action ${name} has no generated function to run`)} });
     return;`;
   return `${banner(bannerLines)}${policyPrelude('../access-policy.json', false, `${dispatchable ? 'import { createRuntime } from "creator-to-catalyst/shims";\nimport { functions } from "../thisapp.mjs";\n' : ''}`)}
@@ -2027,7 +2038,7 @@ export default async function handler(req, res) {
     send(res, 403, { dryRun: !live, error: "hidden form" });
     return;
   }
-${requirePrincipal()}
+${requirePrincipal('  ', '!live')}
   try {
     if (formName) authorizeRead(access, principal, formName, { op: "true" });
     if (!live) {
