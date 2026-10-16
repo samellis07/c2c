@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { parseFile, parseProject, type App, type Workflow } from '../../core/src/index.js';
+import { emptyApp, parseFile, parseProject, type App, type Workflow } from '../../core/src/index.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { analyze } from '../../cli/src/analyze.js';
 import { listReportApps } from '../../cli/src/migration-report.js';
-import { generate } from '../../deluge/src/generate.js';
+import { aioHandlerPath, generate } from '../../deluge/src/generate.js';
 import { resolveStatusDir } from '../src/status.js';
 
 /**
@@ -25,10 +25,15 @@ function mentioned(blob: string, name: string): boolean {
   return new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`).test(blob);
 }
 
-function hasHandler(files: { path: string }[], workflow: Workflow): boolean {
+function hasHandler(app: App, files: { path: string }[], workflow: Workflow): boolean {
   const form = slug(workflow.form || 'form');
   const event = slug(workflow.event || workflow.name || 'handler');
+  // The aio leaf is the event group's shared label or `<kind>-handlers`, so
+  // same-named siblings merge into one module; the client leaf stays per
+  // workflow.
   const bases = [`functions/aio/${form}/${event}`, `client/handlers/${form}/${event}`];
+  const aio = aioHandlerPath(app, workflow);
+  if (aio) bases.push(aio);
   return files.some((file) => bases.some((base) => file.path === `${base}.mjs` || file.path.startsWith(`${base}-`)));
 }
 
@@ -53,7 +58,7 @@ export function silentDrops(app: App): string[] {
   for (const workflow of app.workflows) {
     if (!workflow.name) continue;
     if (mentioned(blob, workflow.name) || mentioned(listed, workflow.name) || spanListed(generated.todos, workflow.span)) continue;
-    if (hasHandler(generated.files, workflow)) continue;
+    if (hasHandler(app, generated.files, workflow)) continue;
     const schedule = /schedule/i.test(`${workflow.container ?? ''} ${workflow.type ?? ''}`);
     drops.push(`${schedule ? 'schedule' : 'workflow'} ${workflow.name}`);
   }
@@ -63,6 +68,29 @@ export function silentDrops(app: App): string[] {
 function loadIr(target: string): App {
   return statSync(target).isDirectory() ? parseProject(target).ir : parseFile(target).ir;
 }
+
+test('two same-named workflows on one form are both accounted', () => {
+  const mail = 'sendmail(from:"zoho.adminuserid" to:"zoho.adminuserid" subject:"s" message:"m")';
+  const dup = (event: string, start: number): Workflow => ({
+    name: 'Run_Scripts_On_Always',
+    form: 'Orders',
+    event,
+    type: 'form',
+    deluge: { text: mail, span: { start, end: start + mail.length } },
+    properties: [],
+    span: { start, end: start + mail.length },
+  });
+  const app: App = {
+    ...emptyApp('deluge'),
+    name: 'Demo_App',
+    workflows: [dup('on user input of Price', 10), dup('on user input of Tax', 200)],
+  };
+  const generated = generate(app);
+  const merged = generated.files.find((file) => file.path === 'functions/aio/orders/input-handlers.mjs');
+  assert.ok(merged);
+  assert.equal(merged.source.match(/shim\.mail\.send/g)?.length, 2);
+  assert.deepEqual(silentDrops(app), []);
+});
 
 test('committed fixtures keep every function, workflow, and schedule', () => {
   const apps = listReportApps(join(repoRoot(), 'fixtures/redistributable'));
