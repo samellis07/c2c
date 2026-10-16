@@ -23,6 +23,7 @@ import { FIRST_USE_GATES, type FirstUseGateId } from '../src/first-use.js';
 import { CUSTOMER_STEPS } from '../src/customer-steps.js';
 import { writeMcpEvidence } from '../../doctor/src/mcp-state.js';
 import { IN_PROJECT_PROBE_REQUIRED } from '../../doctor/src/mcp-probe.js';
+import { repoRoot } from '../../core/src/toolchain.js';
 
 const ORG = '10000000000';
 const PROJECT = '10000000000013200';
@@ -4775,5 +4776,633 @@ test('inputs.json role_id must be a quoted string; a 17-digit string reaches the
   });
   assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'app-users', ...SCOPE], good.io), 0, good.err());
   assert.deepEqual(bodies.map((body) => (body as { user_details: { role_id: unknown } }).user_details.role_id), ['10000000000000005']);
+  rmSync(out, { recursive: true, force: true });
+});
+
+// --- import-existing security runner: recorded MCP evidence, never REST ---
+//
+// The fakes are the real captured Catalyst MCP replies (project
+// c2c-e2e-1015-35e5, table Book) saved under test/fixtures/mcp-security — the
+// {status:"success", data:{status:"success", data:[…]}} envelope, role rows
+// incl. custom roles, table_permissions/table_scope grant fields and
+// is_authenticated flags exactly as the tools answer them. tables.json is the
+// one derived file: no List_All_Tables reply was captured, so it is built from
+// the captured Book id in the same envelope.
+
+const MCP_SECURITY_FIXTURES = join(repoRoot(), 'packages', 'deploy', 'test', 'fixtures', 'mcp-security');
+
+/** The captured table the Get_Table_* replies bind to. */
+const BOOK = 'Book';
+const BOOK_ID = '10000000000013003';
+
+function mcpFixture(name: string): unknown {
+  return JSON.parse(readFileSync(join(MCP_SECURITY_FIXTURES, name), 'utf8'));
+}
+
+/** The row array a captured reply carries under data.data. */
+function fixtureRows(name: string): Record<string, unknown>[] {
+  const body = mcpFixture(name) as { data: { data: Record<string, unknown>[] } };
+  return body.data.data;
+}
+
+interface SecurityEvidenceFiles {
+  roles?: unknown;
+  tables?: unknown;
+  functions?: unknown;
+  permissions?: Record<string, unknown>;
+  scopes?: Record<string, unknown>;
+}
+
+/** Write the evidence files the host agent saves after calling the read tools. */
+function writeSecurityEvidence(out: string, evidence: SecurityEvidenceFiles): void {
+  const dir = join(out, 'provision', 'evidence', 'import-existing');
+  mkdirSync(dir, { recursive: true });
+  const put = (name: string, value: unknown) => writeFileSync(join(dir, name), `${JSON.stringify(value)}\n`);
+  if (evidence.roles !== undefined) put('roles.json', evidence.roles);
+  if (evidence.tables !== undefined) put('tables.json', evidence.tables);
+  if (evidence.functions !== undefined) put('functions.json', evidence.functions);
+  for (const sub of ['permissions', 'scopes'] as const) {
+    const entries = evidence[sub] ?? {};
+    if (!Object.keys(entries).length) continue;
+    mkdirSync(join(dir, sub), { recursive: true });
+    for (const [id, body] of Object.entries(entries)) writeFileSync(join(dir, sub, `${id}.json`), `${JSON.stringify(body)}\n`);
+  }
+}
+
+/** The captured Book project, with an optional mutation hook. */
+function realEvidence(mutate?: (evidence: Required<SecurityEvidenceFiles>) => void): Required<SecurityEvidenceFiles> {
+  const evidence: Required<SecurityEvidenceFiles> = {
+    roles: mcpFixture('roles.json'),
+    tables: mcpFixture('tables.json'),
+    functions: mcpFixture('functions.json'),
+    permissions: { [BOOK]: mcpFixture('permissions-book.json') },
+    scopes: { [BOOK]: mcpFixture('scopes-book.json') },
+  };
+  mutate?.(evidence);
+  return evidence;
+}
+
+/** The security spec that exactly matches the captured Book project. */
+function capturedSpec(): { roles: { role_name: string; clone_role: string }[]; tablePermissions: { table: string; role: string; permissions: string[]; scope: string }[]; function: string } {
+  // App Administrator carries no row: it is out of scope, never diffed.
+  const roles = fixtureRows('roles.json')
+    .filter((row) => row.type === 'Custom')
+    .map((row) => ({ role_name: String(row.role_name), clone_role: 'App User' }));
+  const scopes = Object.fromEntries(fixtureRows('scopes-book.json').map((row) => [String(row.role_name), String(row.table_scope)]));
+  const tablePermissions = fixtureRows('permissions-book.json').filter((row) => row.role_name !== 'App Administrator').map((row) => ({
+    table: 'Book',
+    role: String(row.role_name),
+    permissions: row.table_permissions as string[],
+    scope: scopes[String(row.role_name)]!,
+  }));
+  return { roles, tablePermissions, function: 'c2c_api' };
+}
+
+function writeImportExistingPlan(out: string, spec: unknown = capturedSpec()): void {
+  mkdirSync(join(out, 'provision'), { recursive: true });
+  const plan: PlanFile = {
+    version: 1,
+    app: 'widget',
+    steps: [
+      {
+        id: 'import-existing',
+        via: 'cli',
+        command: 'c2c provision --confirm --run import-existing',
+        args: { plan: 'provision/security.json' },
+        readBack: { via: 'cli', command: 'c2c provision --confirm --run import-existing', match: { security: 'verified' } },
+      },
+    ],
+  };
+  writeFileSync(join(out, 'provision', 'plan.json'), `${JSON.stringify(plan, null, 2)}\n`);
+  writeFileSync(join(out, 'provision', 'security.json'), `${JSON.stringify(spec, null, 2)}\n`);
+}
+
+/** The only rest traffic left is the liveness project GET — every security call moved to recorded MCP evidence. */
+function securityIo(): { io: Io; calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    io: {
+      stdout: (text) => calls.push(`stdout ${text}`),
+      stderr: (text) => calls.push(`stderr ${text}`),
+      env: {},
+      spawn: async () => ({ code: 1, stdout: '', stderr: 'unexpected spawn' }),
+      fetch: async () => new Response('{}'),
+      rest: guardedRest(async (call) => {
+        calls.push(`${call.method} ${call.path}`);
+        return { status: 500, body: { status: 'failure', data: { message: `no route ${call.method} ${call.path}` } } };
+      }),
+    },
+  };
+}
+
+/** Swap one row's field inside a captured reply body. */
+function mutateFixtureRow(body: unknown, name: string, patch: Record<string, unknown>): void {
+  const rows = rowsOfReply(body);
+  const row = rows.find((item) => item.role_name === name || item.name === name);
+  assert.ok(row, `fixture row ${name}`);
+  Object.assign(row!, patch);
+}
+
+function rowsOfReply(body: unknown): Record<string, unknown>[] {
+  return (body as { data: { data: Record<string, unknown>[] } }).data.data;
+}
+
+test('import-existing verifies the captured project (real MCP replies) that already matches the plan', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-security-'));
+  writeImportExistingPlan(out);
+  writeSecurityEvidence(out, realEvidence());
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 0, c.calls.join('\n'));
+  // Not one security REST call — the whole read set came from recorded files.
+  assert.ok(!c.calls.some((call) => /^[A-Z]+ \//.test(call)), c.calls.join('\n'));
+  assert.equal(readState(out).steps['import-existing']?.status, 'existing');
+
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 0);
+  assert.ok(c.calls.some((call) => call.includes('already recorded')), c.calls.join('\n'));
+  assert.ok(!c.calls.some((call) => /^[A-Z]+ \//.test(call)), 'a recorded step makes no calls');
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('import-existing lists the evidence files and the read calls to record when none exist', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-noevidence-'));
+  writeImportExistingPlan(out);
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+  const refused = c.calls.find((call) => call.startsWith('stderr') && call.includes('evidence'));
+  assert.ok(refused, c.calls.join('\n'));
+  assert.ok(refused.includes('provision/evidence/import-existing/roles.json'), refused);
+  assert.ok(refused.includes('CatalystbyZoho_List_All_Roles'), refused);
+  assert.ok(refused.includes('CatalystbyZoho_List_All_Functions'), refused);
+  assert.equal(readState(out).steps['import-existing'], undefined);
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('import-existing lists a missing per-table permission evidence file', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-noevidence-table-'));
+  writeImportExistingPlan(out);
+  const evidence = realEvidence();
+  delete evidence.permissions[BOOK];
+  writeSecurityEvidence(out, evidence);
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+  const refused = c.calls.find((call) => call.startsWith('stderr') && call.includes('evidence'));
+  assert.ok(refused, c.calls.join('\n'));
+  assert.ok(refused.includes(`permissions/${BOOK}.json`), refused);
+  assert.ok(refused.includes('CatalystbyZoho_Get_Table_Permissions'), refused);
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('import-existing refuses a readable-by-all grant outside the plan and lists the removal step', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-broader-'));
+  writeImportExistingPlan(out);
+  // App User gains INSERT the plan does not ask for.
+  writeSecurityEvidence(
+    out,
+    realEvidence((evidence) => mutateFixtureRow(evidence.permissions[BOOK], 'App User', { table_permissions: ['SELECT', 'INSERT'] })),
+  );
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+  const refused = c.calls.find((call) => call.startsWith('stderr') && call.includes('broader'));
+  assert.ok(refused, c.calls.join('\n'));
+  assert.ok(refused.includes('table "Book"'), refused);
+  assert.ok(refused.includes('"App User"'), refused);
+  assert.ok(refused.includes('INSERT'), refused);
+  const fix = 'c2c provision --out <dir> --confirm --run import-existing --narrow-existing-security';
+  assert.ok(refused.includes(`— fix: ${fix}`), refused);
+  assert.ok(refused.indexOf(fix) < refused.indexOf('Catalyst console path:'), refused);
+  assert.equal(readState(out).steps['import-existing'], undefined);
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('import-existing refuses an extra role holding a write grant outside the plan', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-role-'));
+  writeImportExistingPlan(out);
+  writeSecurityEvidence(
+    out,
+    realEvidence((evidence) => {
+      rowsOfReply(evidence.roles).push({ role_name: 'Manager', role_id: '5299', type: 'Custom' });
+      rowsOfReply(evidence.permissions[BOOK]).push({ role_name: 'Manager', role_id: '5299', table_permissions: ['SELECT', 'UPDATE', 'DELETE'] });
+    }),
+  );
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+  const refused = c.calls.find((call) => call.startsWith('stderr') && call.includes('broader'));
+  assert.ok(refused, c.calls.join('\n'));
+  assert.ok(refused.includes('"Manager" has UPDATE'), refused);
+  assert.equal(readState(out).steps['import-existing'], undefined);
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('import-existing prints the exact Update_Table_Permissions call for a system-role grant drift', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-drift-'));
+  // The plan wants INSERT on App User; the project holds only SELECT.
+  const spec = capturedSpec();
+  spec.tablePermissions.find((grant) => grant.role === 'App User')!.permissions = ['SELECT', 'INSERT'];
+  writeImportExistingPlan(out, spec);
+  writeSecurityEvidence(out, realEvidence());
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+  const pending = c.calls.find((call) => call.startsWith('stderr') && call.includes('pending'));
+  assert.ok(pending, c.calls.join('\n'));
+  assert.ok(pending.includes('CatalystbyZoho_Update_Table_Permissions'), pending);
+  assert.ok(pending.includes(`"id":"${BOOK_ID}"`), pending);
+  assert.ok(pending.includes('"App User":["SELECT","INSERT"]'), pending);
+  assert.ok(pending.includes(`"projectId":"${PROJECT}"`), pending);
+  assert.equal(readState(out).steps['import-existing'], undefined);
+
+  // The host ran the call; a re-run over fresh evidence verifies.
+  writeSecurityEvidence(
+    out,
+    realEvidence((evidence) => mutateFixtureRow(evidence.permissions[BOOK], 'App User', { table_permissions: ['SELECT', 'INSERT'] })),
+  );
+  const c2 = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c2.io), 0, c2.calls.join('\n'));
+  assert.equal(readState(out).steps['import-existing']?.status, 'existing');
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('import-existing prints the Update_Table_Permissions call keyed by the custom role name, then verifies', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-custom-'));
+  // "Read" is a captured custom role; the plan wants UPDATE on it.
+  const spec = capturedSpec();
+  spec.tablePermissions.find((grant) => grant.role === 'Read')!.permissions = ['SELECT', 'UPDATE'];
+  writeImportExistingPlan(out, spec);
+  writeSecurityEvidence(out, realEvidence());
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+  const pending = c.calls.find((call) => call.startsWith('stderr') && call.includes('pending'));
+  assert.ok(pending, c.calls.join('\n'));
+  assert.ok(pending.includes(`CatalystbyZoho_Update_Table_Permissions {"path_variables":{"projectId":"${PROJECT}","id":"${BOOK_ID}"}`), pending);
+  assert.ok(pending.includes('"body":{"Read":["SELECT","UPDATE"]}'), pending);
+  // Never mapped onto a system role, never a console step.
+  assert.ok(!pending.includes('"App User"'), pending);
+  assert.ok(!pending.includes('guided steps'), pending);
+  assert.equal(readState(out).steps['import-existing'], undefined);
+
+  writeSecurityEvidence(out, realEvidence((evidence) => mutateFixtureRow(evidence.permissions[BOOK], 'Read', { table_permissions: ['SELECT', 'UPDATE'] })));
+  const c2 = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c2.io), 0, c2.calls.join('\n'));
+  assert.equal(readState(out).steps['import-existing']?.status, 'existing');
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('import-existing guides a missing planned role through the console (no create-role tool exists)', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-missingrole-'));
+  writeImportExistingPlan(out);
+  writeSecurityEvidence(
+    out,
+    realEvidence((evidence) => {
+      const roles = rowsOfReply(evidence.roles);
+      roles.splice(roles.findIndex((row) => row.role_name === 'Read'), 1);
+      const permissions = rowsOfReply(evidence.permissions[BOOK]);
+      permissions.splice(permissions.findIndex((row) => row.role_name === 'Read'), 1);
+      const scopes = rowsOfReply(evidence.scopes[BOOK]);
+      scopes.splice(scopes.findIndex((row) => row.role_name === 'Read'), 1);
+    }),
+  );
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+  const pending = c.calls.find((call) => call.startsWith('stderr') && call.includes('pending'));
+  assert.ok(pending, c.calls.join('\n'));
+  assert.ok(pending.includes('role "Read"'), pending);
+  assert.ok(pending.includes('Add Role'), pending);
+  assert.ok(pending.includes('clone App User'), pending);
+  assert.ok(pending.includes('the next run prints its grant calls'), pending);
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('import-existing --narrow-existing-security revokes an extra role with an empty array, then verifies at any scope', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-narrow-'));
+  writeImportExistingPlan(out);
+  const withManager = (ops: string[]) => (evidence: Required<SecurityEvidenceFiles>): void => {
+    rowsOfReply(evidence.roles).push({ role_name: 'Manager', role_id: '5299', type: 'Custom' });
+    rowsOfReply(evidence.permissions[BOOK]).push({ role_name: 'Manager', table_permissions: ops });
+    rowsOfReply(evidence.scopes[BOOK]).push({ role_name: 'Manager', table_scope: 'GLOBAL' });
+  };
+  writeSecurityEvidence(out, realEvidence(withManager(['UPDATE'])));
+  const c = securityIo();
+  assert.equal(
+    await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', '--narrow-existing-security', ...SCOPE], c.io),
+    1,
+  );
+  const pending = c.calls.find((call) => call.startsWith('stderr') && call.includes('pending'));
+  assert.ok(pending, c.calls.join('\n'));
+  // Update_Table_Permissions merges per named role; [] revokes everything.
+  assert.ok(pending.includes('"body":{"Manager":[]}'), pending);
+  // The scope cannot be cleared and is not asked for.
+  assert.ok(!pending.includes('Update_Table_Scopes'), pending);
+  assert.equal(readState(out).steps['import-existing'], undefined);
+
+  // Re-recorded: Manager now holds [] but keeps GLOBAL — satisfied, no loop.
+  writeSecurityEvidence(out, realEvidence(withManager([])));
+  const c2 = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c2.io), 0, c2.calls.join('\n'));
+  assert.equal(readState(out).steps['import-existing']?.status, 'existing');
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('import-existing prints Enable_Authentication when the planned function is not authenticated', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-auth-'));
+  writeImportExistingPlan(out);
+  writeSecurityEvidence(
+    out,
+    realEvidence((evidence) => mutateFixtureRow(evidence.functions, 'c2c_api', { is_authenticated: false })),
+  );
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+  const pending = c.calls.find((call) => call.startsWith('stderr') && call.includes('pending'));
+  assert.ok(pending, c.calls.join('\n'));
+  assert.ok(pending.includes('CatalystbyZoho_Enable_Authentication'), pending);
+  // Printed exactly — "auth_type" is a key name, not a secret to scrub.
+  assert.ok(pending.includes('"query_params":{"auth_type":"hosted"}'), pending);
+  assert.ok(!pending.includes('<redacted>'), pending);
+  assert.equal(readState(out).steps['import-existing'], undefined);
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('import-existing reports an unauthenticated extra function as broader; --narrow guides it', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-fn-'));
+  writeImportExistingPlan(out);
+  const withLegacy = (evidence: Required<SecurityEvidenceFiles>): void => {
+    rowsOfReply(evidence.functions).push({ name: 'legacy_hook', is_authenticated: false });
+  };
+  writeSecurityEvidence(out, realEvidence(withLegacy));
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+  const refused = c.calls.find((call) => call.startsWith('stderr') && call.includes('broader'));
+  assert.ok(refused, c.calls.join('\n'));
+  assert.ok(refused.includes('function "legacy_hook"'), refused);
+  assert.equal(readState(out).steps['import-existing'], undefined);
+
+  const out2 = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-fn-narrow-'));
+  writeImportExistingPlan(out2);
+  writeSecurityEvidence(out2, realEvidence(withLegacy));
+  const c2 = securityIo();
+  assert.equal(
+    await provisionCli(['--out', out2, '--confirm', '--run', 'import-existing', '--narrow-existing-security', ...SCOPE], c2.io),
+    1,
+  );
+  const pending = c2.calls.find((call) => call.startsWith('stderr') && call.includes('guided'));
+  assert.ok(pending, c2.calls.join('\n'));
+  assert.ok(pending.includes('Functions → legacy_hook'), pending);
+  rmSync(out, { recursive: true, force: true });
+  rmSync(out2, { recursive: true, force: true });
+});
+
+test('import-existing fails a planned grant on a table the evidence does not list', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-notable-'));
+  const spec = capturedSpec();
+  spec.tablePermissions.push({ table: 'Missing', role: 'Read', permissions: ['SELECT'], scope: 'ORG' });
+  writeImportExistingPlan(out, spec);
+  writeSecurityEvidence(out, realEvidence());
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+  const failed = c.calls.find((call) => call.startsWith('stderr') && call.includes('not readable'));
+  assert.ok(failed, c.calls.join('\n'));
+  assert.ok(failed.includes('table Missing'), failed);
+  assert.equal(readState(out).steps['import-existing'], undefined);
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('import-existing fails a missing planned function instead of pending it', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-nofn-'));
+  writeImportExistingPlan(out);
+  writeSecurityEvidence(
+    out,
+    realEvidence((evidence) => {
+      const rows = rowsOfReply(evidence.functions);
+      rows.splice(rows.findIndex((row) => row.name === 'c2c_api'), 1);
+    }),
+  );
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+  const failed = c.calls.find((call) => call.startsWith('stderr') && call.includes('c2c_api'));
+  assert.ok(failed, c.calls.join('\n'));
+  assert.ok(failed.includes('not readable'), failed);
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('import-existing refuses a permission reply with no role rows', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-permmap-'));
+  writeImportExistingPlan(out);
+  writeSecurityEvidence(
+    out,
+    realEvidence((evidence) => {
+      evidence.permissions[BOOK] = { status: 'success', data: { data: { Read: ['SELECT', 'UPDATE'] } } };
+    }),
+  );
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+  const refused = c.calls.find((call) => call.startsWith('stderr') && call.includes('has no role rows'));
+  assert.ok(refused, c.calls.join('\n'));
+  assert.equal(readState(out).steps['import-existing'], undefined);
+  rmSync(out, { recursive: true, force: true });
+});
+
+for (const [name, mutate, expected] of [
+  [
+    'a duplicate role row (a clean copy after one holding DELETE)',
+    (evidence: Required<SecurityEvidenceFiles>) => {
+      const rows = rowsOfReply(evidence.permissions[BOOK]);
+      const user = rows.find((row) => row.role_name === 'App User')!;
+      rows.unshift({ ...user, table_permissions: ['SELECT', 'DELETE'] });
+    },
+    'lists role "App User" twice',
+  ],
+  [
+    'a non-string operation',
+    (evidence: Required<SecurityEvidenceFiles>) => mutateFixtureRow(evidence.permissions[BOOK], 'Read', { table_permissions: ['SELECT', { op: 'DELETE' }] }),
+    'not a list of operation names',
+  ],
+  [
+    'an unknown scope value',
+    (evidence: Required<SecurityEvidenceFiles>) => mutateFixtureRow(evidence.scopes[BOOK], 'Read', { table_scope: 'EVERYONE' }),
+    'not USER, ORG or GLOBAL',
+  ],
+  [
+    'a role listed twice in List_All_Roles',
+    (evidence: Required<SecurityEvidenceFiles>) => {
+      const rows = rowsOfReply(evidence.roles);
+      rows.push({ ...rows.find((row) => row.role_name === 'Read')!, role_id: '5300' });
+    },
+    'lists "Read" twice',
+  ],
+] as const) {
+  test(`import-existing refuses malformed evidence: ${name}`, async () => {
+    const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-malformed-'));
+    writeImportExistingPlan(out);
+    writeSecurityEvidence(out, realEvidence(mutate));
+    const c = securityIo();
+    assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+    assert.ok(c.calls.some((call) => call.startsWith('stderr') && call.includes(expected)), c.calls.join('\n'));
+    assert.equal(readState(out).steps['import-existing'], undefined);
+    rmSync(out, { recursive: true, force: true });
+  });
+}
+
+test('import-existing never diffs, refuses or writes App Administrator', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-admin-'));
+  // Even a plan row asking to revoke it is ignored.
+  const spec = capturedSpec();
+  spec.tablePermissions.push({ table: BOOK, role: 'App Administrator', permissions: [], scope: 'USER' });
+  writeImportExistingPlan(out, spec);
+  writeSecurityEvidence(out, realEvidence());
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', '--narrow-existing-security', ...SCOPE], c.io), 0, c.calls.join('\n'));
+  assert.ok(!c.calls.some((call) => call.includes('"App Administrator":')), c.calls.join('\n'));
+
+  // A project whose admin row reads [] / USER is not "pending" either.
+  const out2 = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-admin2-'));
+  writeImportExistingPlan(out2);
+  writeSecurityEvidence(
+    out2,
+    realEvidence((evidence) => {
+      mutateFixtureRow(evidence.permissions[BOOK], 'App Administrator', { table_permissions: [] });
+      mutateFixtureRow(evidence.scopes[BOOK], 'App Administrator', { table_scope: 'USER' });
+    }),
+  );
+  const c2 = securityIo();
+  assert.equal(await provisionCli(['--out', out2, '--confirm', '--run', 'import-existing', ...SCOPE], c2.io), 0, c2.calls.join('\n'));
+  rmSync(out, { recursive: true, force: true });
+  rmSync(out2, { recursive: true, force: true });
+});
+
+test('import-existing prints a key-like table name (auth_tokens) unredacted', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-authtokens-'));
+  const spec = capturedSpec();
+  const tokensId = '10000000000013009';
+  spec.tablePermissions.push({ table: 'auth_tokens', role: 'Read', permissions: ['SELECT'], scope: 'ORG' });
+  writeImportExistingPlan(out, spec);
+  writeSecurityEvidence(
+    out,
+    realEvidence((evidence) => {
+      rowsOfReply(evidence.tables).push({ table_name: 'auth_tokens', table_id: tokensId });
+      const permissions = structuredClone(evidence.permissions[BOOK]);
+      for (const row of rowsOfReply(permissions)) if (row.role_name !== 'App Administrator') row.table_permissions = [];
+      const scopes = structuredClone(evidence.scopes[BOOK]);
+      mutateFixtureRow(scopes, 'Read', { table_scope: 'USER' });
+      evidence.permissions.auth_tokens = permissions;
+      evidence.scopes.auth_tokens = scopes;
+    }),
+  );
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+  const pending = c.calls.find((call) => call.startsWith('stderr') && call.includes('pending'));
+  assert.ok(pending, c.calls.join('\n'));
+  assert.ok(pending.includes(`"id":"${tokensId}"},"headers"`), pending);
+  assert.ok(pending.includes('"body":{"Read":["SELECT"]}'), pending);
+  assert.ok(pending.includes('"body":{"Read":"ORG"}'), pending);
+  assert.ok(!pending.includes('<redacted>'), pending);
+  rmSync(out, { recursive: true, force: true });
+});
+
+/**
+ * Do what the host agent does with a pending list: run each printed
+ * Update_Table_* call against the recorded evidence with the live semantics
+ * (a merge per named role; [] revokes) — the next record is the re-read.
+ */
+function applyPrintedCalls(stderr: string, evidence: Required<SecurityEvidenceFiles>, tableById: Record<string, string>): number {
+  let applied = 0;
+  for (const line of stderr.split('\n')) {
+    const match = /^\s+\d+\. (CatalystbyZoho_Update_Table_(?:Permissions|Scopes)) (\{.*\})$/.exec(line);
+    if (!match) continue;
+    const args = JSON.parse(match[2]!) as { path_variables: { id: string }; body: Record<string, unknown> };
+    const table = tableById[args.path_variables.id]!;
+    const permissions = match[1] === 'CatalystbyZoho_Update_Table_Permissions';
+    const rows = rowsOfReply(permissions ? evidence.permissions[table] : evidence.scopes[table]);
+    for (const [role, value] of Object.entries(args.body)) {
+      const row = rows.find((item) => item.role_name === role);
+      assert.ok(row, `the live tool only addresses an existing role: ${role}`);
+      row![permissions ? 'table_permissions' : 'table_scope'] = value;
+    }
+    applied++;
+  }
+  return applied;
+}
+
+test('import-existing loop: record -> run -> apply -> re-record -> re-run terminates on a plan not derived from the evidence', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-loop-'));
+  // Hand-written plan in the generated shape: an explicit row for App User and
+  // every custom role the app uses, no App Administrator row. Six captured
+  // custom roles (Administrator, Assistant, Developer, Librarians, Customer,
+  // CEO) are not in it, and "Reviewer" does not exist in the project yet.
+  const spec = {
+    roles: ['Read', 'Write', 'Librarian', 'Reviewer'].map((role_name) => ({ role_name, clone_role: 'App User' })),
+    tablePermissions: [
+      // No operation: its scope (USER here, GLOBAL in the project) is never diffed.
+      { table: BOOK, role: 'App User', permissions: [], scope: 'USER' },
+      { table: BOOK, role: 'Read', permissions: ['SELECT'], scope: 'ORG' },
+      { table: BOOK, role: 'Write', permissions: ['SELECT', 'INSERT', 'UPDATE'], scope: 'USER' },
+      { table: BOOK, role: 'Librarian', permissions: ['SELECT', 'INSERT'], scope: 'ORG' },
+      { table: BOOK, role: 'Reviewer', permissions: ['SELECT'], scope: 'USER' },
+    ],
+    function: 'c2c_api',
+  };
+  writeImportExistingPlan(out, spec);
+  const evidence = realEvidence();
+  const tableById = { [BOOK_ID]: BOOK };
+  const run = async (extra: string[] = []) => {
+    writeSecurityEvidence(out, evidence);
+    const c = securityIo();
+    const code = await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...extra, ...SCOPE], c.io);
+    return { code, stderr: c.calls.filter((call) => call.startsWith('stderr')).join('\n'), calls: c.calls };
+  };
+
+  // 1. Broader grants (six unplanned roles with operations, Librarian GLOBAL > ORG) refuse first.
+  const refused = await run();
+  assert.equal(refused.code, 1);
+  assert.ok(refused.stderr.includes('broader'), refused.stderr);
+  assert.ok(refused.stderr.includes('role "Librarian" holds scope GLOBAL outside the plan'), refused.stderr);
+  assert.ok(!refused.stderr.includes('App Administrator'), refused.stderr);
+
+  // 2. --narrow: one merged permission call, one scope call, the role create guided.
+  const first = await run(['--narrow-existing-security']);
+  assert.equal(first.code, 1);
+  assert.ok(first.stderr.includes('"body":{"Administrator":[],"App User":[],"Assistant":[],"CEO":[],"Customer":[],"Developer":[],"Librarian":["SELECT","INSERT"],"Librarians":[]}'), first.stderr);
+  assert.ok(first.stderr.includes('"body":{"Librarian":"ORG","Write":"USER"}'), first.stderr);
+  assert.ok(first.stderr.includes('role "Reviewer": create it'), first.stderr);
+  assert.ok(!first.stderr.includes('App Administrator'), first.stderr);
+  assert.equal(applyPrintedCalls(first.stderr, evidence, tableById), 2);
+  // The user does the guided create; a new role reads [] at GLOBAL.
+  rowsOfReply(evidence.roles).push({ role_name: 'Reviewer', role_id: '10000000000013011', type: 'Custom' });
+  rowsOfReply(evidence.permissions[BOOK]).push({ role_name: 'Reviewer', table_permissions: [] });
+  rowsOfReply(evidence.scopes[BOOK]).push({ role_name: 'Reviewer', table_scope: 'GLOBAL' });
+
+  // 3. Nothing broader is left; the new role's grant calls are printed.
+  const second = await run();
+  assert.equal(second.code, 1, second.stderr);
+  assert.ok(second.stderr.includes('"body":{"Reviewer":["SELECT"]}'), second.stderr);
+  assert.ok(second.stderr.includes('"body":{"Reviewer":"USER"}'), second.stderr);
+  assert.ok(!second.stderr.includes('guided steps'), second.stderr);
+  // The scope narrows before the operation is granted.
+  assert.ok(second.stderr.indexOf('Update_Table_Scopes') < second.stderr.indexOf('Update_Table_Permissions'), second.stderr);
+  assert.equal(applyPrintedCalls(second.stderr, evidence, tableById), 2);
+
+  // 4. The re-read matches: exit 0 — unplanned roles at [] keep GLOBAL and never loop.
+  const third = await run();
+  assert.equal(third.code, 0, third.calls.join('\n'));
+  assert.equal(readState(out).steps['import-existing']?.status, 'existing');
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('import-existing refuses an evidence file that is not readable JSON', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-existing-badjson-'));
+  writeImportExistingPlan(out);
+  writeSecurityEvidence(out, realEvidence());
+  writeFileSync(join(out, 'provision', 'evidence', 'import-existing', 'roles.json'), 'not json{');
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import-existing', ...SCOPE], c.io), 1);
+  const failed = c.calls.find((call) => call.startsWith('stderr') && call.includes('not readable JSON'));
+  assert.ok(failed, c.calls.join('\n'));
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('--narrow-existing-security is refused on any other step', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-narrow-arg-'));
+  writeImportExistingPlan(out);
+  const c = securityIo();
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'tables', '--narrow-existing-security', ...SCOPE], c.io), 2);
+  assert.equal(await provisionCli(['--out', out, '--status', '--narrow-existing-security', ...SCOPE], c.io), 2);
   rmSync(out, { recursive: true, force: true });
 });

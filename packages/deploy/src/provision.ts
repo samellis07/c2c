@@ -8,6 +8,7 @@
  *   provision/inputs.json   what the plan cannot know (slate domain, user emails, sender)
  *   provision/tables.json   the table-create diff spec for --run tables
  *   provision/crons.json    per-schedule cron specs for --run crons
+ *   provision/security.json  roles/grants/function rule for --run import-existing
  *
  * c2c never calls MCP. `via: mcp` steps are emitted verbatim (tool + JSON args)
  * for the host agent; the agent calls the tool, calls the read-back tool, and
@@ -34,6 +35,7 @@ import { catalystScopeArgs, scrubCatalystEnv } from './scope.js';
 import { isExactGrantList, isPerRowGrantMatch, PLAN_CLI_PATH, PLAN_EMITTED_CLI_PATHS, PLAN_STEP_TOOL, PLAN_STEP_TOOLS, STEP_KINDS, sha256, type ProvisionStep, type StepEndpoint } from './offline-plan.js';
 import { readConnectionSecretKeys, writeOrUpdateFunctionEnv } from './function-env.js';
 import { applyTablePlan, type RestCall, type RestFn, type RestResult, type TableCreateStep } from './tables.js';
+import { applyImportExistingSecurity, ImportExistingPendingError, type ImportExistingEvidence, type ImportExistingSecuritySpec } from './security.js';
 import { restWithRetry, spawnWithRetry, type ReRead, type RestRetry, type RetryOptions } from './retry.js';
 import { assertProtectedProject } from './guards.js';
 import { checkGate, gateConsoleLine, gateForStep, type FirstUseGate, type GateCheck } from './first-use.js';
@@ -45,7 +47,8 @@ import { workspaceDir } from '../../doctor/src/report.js';
 const USAGE =
   'usage: c2c provision --out <dir> [--status | --next | --confirm --run <id> | --record <id> [--result <file>] [--applied]]\n' +
   '                     [--dc <dc>] [--org <id>] [--project <id>] [--config <file>] [--domain <host>]\n' +
-  '                     [--name <project-name>  (--run import only: the name the import creates)]\n';
+  '                     [--name <project-name>  (--run import only: the name the import creates)]\n' +
+  '                     [--narrow-existing-security  (--run import-existing only: remove grants broader than the plan)]\n';
 
 /** A project name the import may create: lower-case letters, digits and dashes. */
 const IMPORT_NAME = /^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?$/;
@@ -113,6 +116,8 @@ interface Ctx {
   domainFlag?: string;
   /** --name: the project name `--run import` creates instead of the planned one. */
   importName?: string;
+  /** --narrow-existing-security: `--run import-existing` removes grants broader than the plan instead of refusing on them. */
+  narrowExistingSecurity?: boolean;
   io: Io;
   now: () => string;
   rest?: RestFn;
@@ -129,7 +134,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // plan + state files
 
 /** Generated side files pinned alongside plan.json: a change under a resumed state is refused like a plan change. inputs.json is deliberately not pinned — the customer fills it in after planning; its consumers revalidate instead. */
-const PINNED_SIDE_FILES = ['tables.json', 'crons.json'] as const;
+const PINNED_SIDE_FILES = ['tables.json', 'crons.json', 'security.json'] as const;
 
 /** Tools whose read-back is a per-row grant list. Anything else on these tools is presence-only. */
 const GRANT_TOOLS = new Set<string>([
@@ -260,6 +265,10 @@ function cliArgsError(stepId: string, args: Record<string, unknown>, readBack: b
     if (fields.some((value) => typeof value !== 'string')) return fail('import spec fields are strings');
     // The import packs exactly the tree c2c plan generated — nothing else.
     if (args.dir !== 'provision/iac') return fail('dir is provision/iac');
+    return undefined;
+  }
+  if (sameKeys(args, ['plan']) || sameKeys(args, ['plan', 'note'])) {
+    if (stepId !== 'import-existing' || args.plan !== 'provision/security.json' || (args.note !== undefined && typeof args.note !== 'string')) return fail('security spec');
     return undefined;
   }
   if (sameKeys(args, ['plan', 'tables'])) {
@@ -1265,6 +1274,58 @@ function readJsonFile<T>(path: string, what: string): T {
 }
 
 /**
+ * Read the raw MCP replies the host agent saved under
+ * provision/evidence/import-existing/ — roles.json, tables.json,
+ * functions.json and one permissions|scopes/<table>.json per table (a
+ * Get_Table_* reply never names its table; the file name binds it). Each file
+ * is unwrapped like a --result recording. Absent files stay undefined; the
+ * runner lists exactly which evidence is missing.
+ */
+function loadSecurityEvidence(out: string): ImportExistingEvidence {
+  const dir = join(out, 'provision', 'evidence', 'import-existing');
+  // One read per file — no exists-then-read window: a missing file is ENOENT.
+  const read = (path: string): unknown => {
+    let text: string;
+    try {
+      text = readFileSync(path, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw new Error(`evidence file ${path} is not readable — save the tool's raw reply there`);
+    }
+    let parsed: unknown;
+    try {
+      parsed = parseJsonExact(text);
+    } catch {
+      throw new Error(`evidence file ${path} is not readable JSON — save the tool's raw reply there`);
+    }
+    return unwrapResult(parsed);
+  };
+  const readDir = (sub: string): Record<string, unknown> => {
+    const subdir = join(dir, sub);
+    const out2: Record<string, unknown> = {};
+    let files: string[];
+    try {
+      files = readdirSync(subdir).sort();
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return out2;
+      throw err;
+    }
+    for (const file of files) {
+      const match = /^([^/]+)\.json$/.exec(file);
+      if (match) out2[match[1]!] = read(join(subdir, file));
+    }
+    return out2;
+  };
+  return {
+    roles: read(join(dir, 'roles.json')),
+    tables: read(join(dir, 'tables.json')),
+    functions: read(join(dir, 'functions.json')),
+    permissions: readDir('permissions'),
+    scopes: readDir('scopes'),
+  };
+}
+
+/**
  * A 4xx that only means the resource is already there is not a failure of
  * create-missing — and only the shapes the server is recorded to answer
  * count: a `DUPLICATE*` error_code, or a message saying the resource is
@@ -1512,6 +1573,14 @@ async function executeCliStep(ctx: Ctx, step: ProvisionStep, args: Record<string
   const projectId = ctx.scope.projectId!;
   const channel = restChannel(ctx);
   const rest = <T,>(call: RestCall, reRead?: (failure: RestResult, attempt: number) => Promise<ReRead<T>>) => checkedRetry(ctx, call, reRead);
+
+  if (step.id === 'import-existing') {
+    const spec = typeof args.plan === 'string' ? args.plan : 'provision/security.json';
+    const security = readJsonFile<ImportExistingSecuritySpec>(join(ctx.out, spec), 'security spec');
+    const evidence = loadSecurityEvidence(ctx.out);
+    const result = applyImportExistingSecurity(evidence, security, { narrow: ctx.narrowExistingSecurity === true }, { projectId, org: ctx.scope.org! });
+    return { applied: false, proven: true, result };
+  }
 
   if (step.id === 'tables') {
     const spec = typeof args.plan === 'string' ? args.plan : 'provision/tables.json';
@@ -1943,6 +2012,27 @@ function printInProjectProbeAsk(ctx: Ctx): void {
 `);
 }
 
+/** The security steps a verified import-existing run closes — the result slice that step's own read-back match checks. */
+const IMPORT_EXISTING_STEPS: Record<string, (result: Record<string, unknown>) => unknown> = {
+  'custom-roles': (result) => result.roles,
+  'table-permissions': (result) => result.permissions,
+  'table-scopes': (result) => result.scopes,
+  'table-permissions-console': (result) => result.permissions,
+  'table-scopes-console': (result) => result.scopes,
+  'security-rule': (result) => result.functions,
+};
+
+function closeImportExistingSteps(ctx: Ctx, result: Record<string, unknown>, resultPath: string, applied: boolean): void {
+  for (const step of ctx.plan.steps) {
+    const slice = IMPORT_EXISTING_STEPS[step.id]?.(result);
+    if (slice === undefined) continue;
+    const missing: string[] = [];
+    const match = resolveTokens(step.readBack.match ?? {}, ctx, missing) as Record<string, unknown>;
+    if (missing.length || !matchReadBack(slice, match).ok) continue;
+    ctx.state.steps[step.id] = { status: applied ? 'done' : 'existing', at: ctx.now(), applied, result: resultPath, matchSha256: sha256(JSON.stringify(match)) };
+  }
+}
+
 async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> {
   const step = findStep(ctx.plan, id);
   if (!step) {
@@ -2054,6 +2144,7 @@ async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> 
     // A proven run closes the step: `done` when it wrote, `existing` when
     // everything was already there and the answer proves the read-back match.
     ctx.state.steps[id] = { status: applied ? 'done' : 'existing', at: ctx.now(), applied, result: rel, matchSha256 };
+    if (id === 'import-existing' && isRecord(outcome.result)) closeImportExistingSteps(ctx, outcome.result, rel, applied);
     writeProvisionState(ctx.out, ctx.state);
     const next = progressSteps(ctx).find((item) => !['done', 'existing'].includes(stepStatus(ctx.state, item.id)));
     ctx.io.stdout(
@@ -2065,9 +2156,18 @@ async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> 
     }
     return 0;
   } catch (err) {
-    ctx.io.stderr(`c2c provision: ${err instanceof Error ? redactString(err.message) : 'run failed'}\n`);
+    // A pending import-existing list is built from evidence names/ids only:
+    // printed as-is (the generic scrub would mangle "auth_type" or a table
+    // named auth_tokens), with only real credential shapes still scrubbed.
+    const message = err instanceof ImportExistingPendingError ? scrubCredentialShapes(err.message) : err instanceof Error ? redactString(err.message) : 'run failed';
+    ctx.io.stderr(`c2c provision: ${message}\n`);
     return 1;
   }
+}
+
+/** Bearer/OAuth headers, JWTs and Zoho tokens — the credential shapes that can never be an evidence name or id. */
+function scrubCredentialShapes(text: string): string {
+  return text.replace(AUTH_RE, '<redacted>').replace(JWT_RE, '<redacted>').replace(ZOHO_TOKEN_RE, '<redacted>');
 }
 
 async function recordStep(ctx: Ctx, id: string, resultPath: string | undefined, appliedFlag: boolean): Promise<number> {
@@ -2278,6 +2378,9 @@ export function provisionArgsProblem(args: readonly string[]): string | undefine
       return 'c2c provision: --name needs a project name of lower-case letters, digits and dashes (at most 50)\n';
     }
   }
+  if (args.includes('--narrow-existing-security') && runId !== 'import-existing') {
+    return 'c2c provision: --narrow-existing-security only applies to --run import-existing\n';
+  }
   return undefined;
 }
 
@@ -2336,6 +2439,7 @@ export async function provisionCli(args: readonly string[], io: Io, opts: { now?
     inputs,
     ...(slateDomainFlag !== undefined ? { domainFlag: slateDomainFlag } : {}),
     ...(importName !== undefined ? { importName } : {}),
+    ...(args.includes('--narrow-existing-security') ? { narrowExistingSecurity: true } : {}),
     io,
     now: opts.now ?? (() => new Date().toISOString()),
     ...(scope.org && scope.projectId

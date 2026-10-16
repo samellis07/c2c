@@ -1,0 +1,270 @@
+{
+ "status": "success",
+ "data": {
+  "status": "success",
+  "data": [
+   {
+    "project_details": {
+     "project_name": "c2c-e2e-1015-35e5",
+     "id": "10000000000013200",
+     "project_type": "Live"
+    },
+    "role_name": "App Administrator",
+    "system_name": "App Administrator",
+    "type": "App Administrator",
+    "description": "Admin Role for the application",
+    "is_default": false,
+    "created_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "created_time": "Oct 15, 2026 01:23 PM",
+    "role_id": "10000000000013007"
+   },
+   {
+    "project_details": {
+     "project_name": "c2c-e2e-1015-35e5",
+     "id": "10000000000013200",
+     "project_type": "Live"
+    },
+    "role_name": "App User",
+    "system_name": "App User",
+    "type": "App User",
+    "description": "User Role for the application",
+    "is_default": true,
+    "created_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "created_time": "Oct 15, 2026 01:23 PM",
+    "role_id": "10000000000013008"
+   },
+   {
+    "project_details": {
+     "project_name": "c2c-e2e-1015-35e5",
+     "id": "10000000000013200",
+     "project_type": "Live"
+    },
+    "role_name": "Read",
+    "system_name": "Read",
+    "type": "Custom",
+    "description": "This profile will have read permission for all components\n",
+    "is_default": false,
+    "created_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "created_time": "Oct 15, 2026 01:23 PM",
+    "role_id": "10000000000013009",
+    "modified_time": "Oct 15, 2026 01:23 PM"
+   },
+   {
+    "project_details": {
+     "project_name": "c2c-e2e-1015-35e5",
+     "id": "10000000000013200",
+     "project_type": "Live"
+    },
+    "role_name": "Write",
+    "system_name": "Write",
+    "type": "Custom",
+    "description": "This profile will have write permission for all components\n",
+    "is_default": false,
+    "created_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "created_time": "Oct 15, 2026 01:23 PM",
+    "role_id": "10000000000013011",
+    "modified_time": "Oct 15, 2026 01:23 PM"
+   },
+   {
+    "project_details": {
+     "project_name": "c2c-e2e-1015-35e5",
+     "id": "10000000000013200",
+     "project_type": "Live"
+    },
+    "role_name": "Administrator",
+    "system_name": "Administrator",
+    "type": "Custom",
+    "description": "This profile will have all the permissions.\n",
+    "is_default": false,
+    "created_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "created_time": "Oct 15, 2026 01:23 PM",
+    "role_id": "10000000000013012",
+    "modified_time": "Oct 15, 2026 01:23 PM"
+   },
+   {
+    "project_details": {
+     "project_name": "c2c-e2e-1015-35e5",
+     "id": "10000000000013200",
+     "project_type": "Live"
+    },
+    "role_name": "Assistant",
+    "system_name": "Assistant",
+    "type": "Custom",
+    "description": "Assistant Profile\n",
+    "is_default": false,
+    "created_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "created_time": "Oct 15, 2026 01:23 PM",
+    "role_id": "10000000000013100",
+    "modified_time": "Oct 15, 2026 01:23 PM"
+   },
+   {
+    "project_details": {
+     "project_name": "c2c-e2e-1015-35e5",
+     "id": "10000000000013200",
+     "project_type": "Live"
+    },
+    "role_name": "Developer",
+    "system_name": "Developer",
+    "type": "Custom",
+    "description": "Developer Profile\n",
+    "is_default": false,
+    "created_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "created_time": "Oct 15, 2026 01:23 PM",
+    "role_id": "10000000000013101",
+    "modified_time": "Oct 15, 2026 01:23 PM"
+   },
+   {
+    "project_details": {
+     "project_name": "c2c-e2e-1015-35e5",
+     "id": "10000000000013200",
+     "project_type": "Live"
+    },
+    "role_name": "Librarians",
+    "system_name": "Librarians",
+    "type": "Custom",
+    "description": "Librarians Profile\n",
+    "is_default": false,
+    "created_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "created_time": "Oct 15, 2026 01:23 PM",
+    "role_id": "10000000000099001",
+    "modified_time": "Oct 15, 2026 01:23 PM"
+   },
+   {
+    "project_details": {
+     "project_name": "c2c-e2e-1015-35e5",
+     "id": "10000000000013200",
+     "project_type": "Live"
+    },
+    "role_name": "Customer",
+    "system_name": "Customer",
+    "type": "Custom",
+    "description": "This is the default profile having only add and view permission.\n",
+    "is_default": false,
+    "created_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "created_time": "Oct 15, 2026 01:23 PM",
+    "role_id": "10000000000315012",
+    "modified_time": "Oct 15, 2026 01:23 PM"
+   },
+   {
+    "project_details": {
+     "project_name": "c2c-e2e-1015-35e5",
+     "id": "10000000000013200",
+     "project_type": "Live"
+    },
+    "role_name": "CEO",
+    "system_name": "CEO",
+    "type": "Custom",
+    "description": "User belonging to this role can access data of all other users.",
+    "is_default": false,
+    "created_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "created_time": "Oct 15, 2026 01:23 PM",
+    "role_id": "10000000000315013",
+    "modified_time": "Oct 15, 2026 01:23 PM"
+   },
+   {
+    "project_details": {
+     "project_name": "c2c-e2e-1015-35e5",
+     "id": "10000000000013200",
+     "project_type": "Live"
+    },
+    "role_name": "Librarian",
+    "system_name": "Librarian",
+    "type": "Custom",
+    "description": "",
+    "is_default": false,
+    "created_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "created_time": "Oct 15, 2026 01:23 PM",
+    "role_id": "10000000000315014",
+    "modified_time": "Oct 15, 2026 01:23 PM"
+   }
+  ]
+ }
+}
