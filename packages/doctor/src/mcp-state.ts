@@ -85,6 +85,16 @@ function inside(child: string, parent: string): boolean {
 }
 
 /**
+ * The per-user key, or a reason there is none. The same key also
+ * authenticates the open MCP request file (observed.ts): a secret the
+ * request file never carries, so an edit between --mcp-begin and
+ * --mcp-observed is detected. `create` makes it once (0600, directory 0700).
+ */
+export function mcpSigningKey(env: Env, workspace: string, create: boolean): { key: Buffer } | { refused: string } {
+  return stateKey(env, workspace, create);
+}
+
+/**
  * The signing key, or a reason there is none. The key must live outside the
  * workspace, be a regular file (not a link) owned by this user and readable
  * by nobody else. `create` makes it once (0600, directory 0700).

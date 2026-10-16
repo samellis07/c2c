@@ -23,7 +23,7 @@ import { runDoctorChecks, type DoctorContext } from './checks.js';
 import { listCatalystProjects, peekCliTokenTag, refreshCliAccessToken } from '../../deploy/src/rest.js';
 import { EvidenceRejected, EvidenceStale, mcpRecord, parseEvidence, type McpEvidence } from './evidence.js';
 import { beginMcpRequest, closeMcpRequest, mcpRequestInstructions, ObservationRejected, parseObservation, readStdinBounded, type Observed } from './observed.js';
-import { clearPendingCleanup, deleteProbeNonce, probeDeleteCall, probeNameOf, probeNonceCleanup, probeScopeOf, readPendingCleanups, verifyProbe, writePendingCleanup, type ProbeNonceCleanup, type ProbeScope, type ProbeTarget } from './mcp-probe.js';
+import { clearPendingCleanup, deleteProbeNonce, probeDeleteCall, probeNonceCleanup, probeScopeOf, readPendingCleanups, verifyProbe, writePendingCleanup, type ProbeNonceCleanup, type ProbeScope, type ProbeTarget } from './mcp-probe.js';
 import { catalystRestCall } from '../../deploy/src/rest.js';
 import { c2cVersion, detectHost, workspaceDir, writeDoctorFile } from './report.js';
 import { formatAge, loadMcpEvidence, MCP_EVIDENCE_MAX_AGE_HOURS, writeMcpEvidence, type McpEvidenceReuse } from './mcp-state.js';
@@ -206,7 +206,16 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
   };
 
   if (parsed.mcpBegin) {
-    const request = beginMcpRequest(workspace, undefined, probeTarget);
+    let request;
+    try {
+      request = beginMcpRequest(workspace, now?.(), probeTarget, io.env);
+    } catch (err) {
+      if (err instanceof ObservationRejected) {
+        io.stderr(`c2c doctor: ${err.message}\n`);
+        return 1;
+      }
+      throw err;
+    }
     const ask = mcpRequestInstructions(request, probeTarget);
     const pending = readPendingCleanups(workspace);
     if (parsed.json) {
@@ -240,7 +249,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
       return 2;
     }
     try {
-      const result = parseObservation(io.stdin(), { workspace });
+      const result = parseObservation(io.stdin(), { workspace, env: io.env });
       evidence = result.evidence;
       origin = { source: 'observed', observed: result.observed };
       // A --local run persists nothing, so it must not consume the request;
@@ -253,13 +262,13 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
         // The bucket --mcp-begin named, pinned in the request file: the
         // read-back and the cleanup track the bucket that was actually
         // created, even if the scope flags drifted since the begin run.
-        const probe = result.probe ?? probeNameOf(result.observed.request, probeTarget);
+        const probe = result.probe;
         // The request pins the scope --mcp-begin ran under (fail closed):
         // an org-scoped begin is never completed by a project-scoped binding,
         // which could create the org-named bucket inside the project, and the
         // same in reverse. A scope the begin could not pin ('request' kind,
         // no numeric org/project) carries no drift check.
-        if (result.scope && result.scope.kind !== 'request') {
+        if (result.scope.kind !== 'request') {
           const runScope = probeScopeOf(probeTarget);
           const drift =
             result.scope.kind !== runScope.kind ||
@@ -273,14 +282,12 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
         }
         const projectScoped = probeTarget.project !== undefined && /^[0-9]+$/.test(probeTarget.project);
         const rest = io.rest ?? ((call: { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; path: string; body?: unknown }) => catalystRestCall(io.env, probeTarget.org ?? '', probeTarget.project ?? '', call));
-        // A project-scoped request with no nonce must not fall back to "the
-        // bucket exists": an older file, or a file whose nonce was removed,
-        // cannot prove this run.
-        const binding = projectScoped && !result.nonce
-          ? { kind: 'bucket' as const, name: probe, status: 'unverifiable' as const, detail: 'the MCP request has no per-run nonce, so the probe cannot be verified' }
-          : result.nonce && projectScoped
-            ? await verifyProbe(rest, probeTarget, probe, result.nonce)
-            : await verifyProbe(rest, probeTarget, probe);
+        // A project-scoped request always carries this run's nonce (the
+        // authenticated request file requires it), so the binding is the
+        // nonce-object read-back — never the bucket's existence alone.
+        const binding = projectScoped
+          ? await verifyProbe(rest, probeTarget, probe, result.nonce)
+          : await verifyProbe(rest, probeTarget, probe);
         evidence.binding = binding;
         // Absent means the bucket itself is gone, so the pending delete can
         // drop. A missing nonce object leaves the reusable bucket in place:
@@ -298,10 +305,10 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
             for (const pending of readPendingCleanups(workspace)) {
               if (!pending.project && (pending.org === undefined || pending.org === probeTarget.org)) clearPendingCleanup(workspace, pending.name);
             }
-            if (result.nonce) await deleteProbeNonce(rest, probeTarget.project as string, probe, result.nonce);
+            await deleteProbeNonce(rest, probeTarget.project as string, probe, result.nonce);
           }
         }
-        if (projectScoped && result.nonce && binding.status !== 'absent') {
+        if (projectScoped && binding.status !== 'absent') {
           nonceCleanup = probeNonceCleanup(probe, result.nonce, probeTarget.project as string);
         }
         // A verified probe without a project tracks nothing: no bucket was
@@ -315,7 +322,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
           const leftover = await verifyProbe(rest, pending, pending.name);
           if (leftover.status === 'absent') clearPendingCleanup(workspace, pending.name);
         }
-        closeMcpRequest(workspace, result.observed.request);
+        closeMcpRequest(workspace, result.observed.request, io.env);
       }
     } catch (err) {
       if (err instanceof EvidenceStale) {

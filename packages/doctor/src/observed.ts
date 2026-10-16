@@ -5,8 +5,9 @@
  *
  *   1. `c2c doctor --mcp-begin` opens a one-time request
  *      (`c2c-out/.c2c/mcp-request.json`: a random id, when it was issued,
- *      the probe bucket and the scope it was opened under, and a digest
- *      that is recomputed on read so an edited file is refused)
+ *      the probe bucket, this run's nonce and the scope it was opened
+ *      under, authenticated by an HMAC recomputed on read so an edited
+ *      file is refused)
  *      and prints the calls to make;
  *   2. the agent calls `CatalystbyZoho_Create_Bucket` (one probe bucket per
  *      project, reused), then `CatalystbyZoho_Create_Upload_Signature` to
@@ -33,14 +34,27 @@
  * this workspace did not issue (or already used), or arrives after the request
  * expired is refused. A free-standing evidence file is operator-only
  * (`--record-mcp <file> --operator`).
+ *
+ * Threat model for the request file: the file lives in the workspace, so it
+ * is authenticated with an HMAC-SHA256 keyed by the same per-user key as the
+ * stored MCP evidence (`$XDG_CONFIG_HOME/c2c/mcp-state.key`, 0600 in a 0700
+ * directory outside the workspace, created on the first --mcp-begin, never
+ * logged and never written into the request file). A local file edit between
+ * begin and complete — a moved probe or nonce, a rewritten scope, a stripped
+ * field — is detected and refused, and a request file written by an older
+ * c2c (no `mac`, or the old plain-sha256 `digest` anyone could recompute)
+ * is refused outright: there is no legacy fallback and no completion that
+ * accepts the probe bucket's existence alone. An attacker who can read the
+ * key file itself is out of scope, as with the stored-evidence signature.
  */
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { EvidenceRejected, EvidenceStale, entryIdOf, parseEvidence, shortToolName, type McpEvidence } from './evidence.js';
 import { NEVER_CALL_MCP_TOOLS } from './required-tools.js';
 import { dcOfCreatorHost, type Dc } from './scope.js';
-import { isProbeName, PROBE_CREATE_CALL, PROBE_DELETE_CALL, PROBE_OBJECT_CALL, probeCreateCall, probeDeleteCall, probeNameOf, probeNonceCleanup, probeObjectCall, probeScopeOf, probeScopeOfName, type ProbeNonceCleanup, type ProbeScope, type ProbeTarget } from './mcp-probe.js';
+import { isProbeName, PROBE_CREATE_CALL, PROBE_DELETE_CALL, PROBE_OBJECT_CALL, probeCreateCall, probeDeleteCall, probeNameOf, probeNonceCleanup, probeObjectCall, probeScopeOf, type ProbeNonceCleanup, type ProbeScope, type ProbeTarget } from './mcp-probe.js';
+import { mcpSigningKey } from './mcp-state.js';
 
 export const OBSERVATION_KIND = 'c2c-mcp-observation';
 export const OBSERVATION_SCHEMA = 1;
@@ -76,13 +90,13 @@ export interface McpRequest {
   request: string;
   at: string;
   /** The probe bucket the begin output named (deterministic per scope); the observation answers for this bucket. */
-  probe?: string;
+  probe: string;
   /** This run's object key (32 hex). Recorded here so the read-back can require it. */
-  nonce?: string;
+  nonce: string;
   /** The scope kind and exact target ids --mcp-begin ran under; the verify step rejects any drift from it. */
-  scope?: ProbeScope;
-  /** sha256 over the request fields, recomputed when the file is read: an edited request never verifies. */
-  digest?: string;
+  scope: ProbeScope;
+  /** HMAC-SHA256 over the request fields under the per-user key, recomputed when the file is read: an edited request never verifies. */
+  mac: string;
 }
 
 export interface ObservedCall {
@@ -113,9 +127,9 @@ function canonical(value: unknown): string {
   return JSON.stringify(value) ?? 'null';
 }
 
-/** The digest written into the request file: sha256 over every field the verify step trusts. */
-function requestDigest(request: Omit<McpRequest, 'digest'>): string {
-  return `sha256:${createHash('sha256').update(canonical(request)).digest('hex')}`;
+/** The tag written into the request file: HMAC-SHA256 under the per-user key over every field the verify step trusts. */
+function requestMac(key: Buffer, request: unknown): string {
+  return `hmac-sha256:${createHmac('sha256', key).update(canonical(request)).digest('hex')}`;
 }
 
 function scopeOfRequest(value: unknown): ProbeScope | undefined {
@@ -139,14 +153,16 @@ function scopeOfRequest(value: unknown): ProbeScope | undefined {
  * the begin scope are pinned here so --mcp-observed reads back and tracks the
  * bucket --mcp-begin actually named, and refuses a completion in any other
  * scope — an org-scoped begin is never verified by a project-scoped binding
- * that creates the org-named bucket inside the project. The digest is
+ * that creates the org-named bucket inside the project. The mac is
  * recomputed on read, so a request file edited after --mcp-begin is refused.
  */
-export function beginMcpRequest(workspace: string, now: Date = new Date(), target: ProbeTarget = {}): McpRequest {
+export function beginMcpRequest(workspace: string, now: Date = new Date(), target: ProbeTarget = {}, env: NodeJS.ProcessEnv = process.env): McpRequest {
+  const signer = mcpSigningKey(env, workspace, true);
+  if ('refused' in signer) throw new ObservationRejected(`the MCP request cannot be authenticated: ${signer.refused}`);
   const id = randomBytes(16).toString('hex');
   const nonce = randomBytes(16).toString('hex');
-  const request: McpRequest = { schema: OBSERVATION_SCHEMA, request: id, at: now.toISOString(), probe: probeNameOf(id, target), nonce, scope: probeScopeOf(target) };
-  request.digest = requestDigest(request);
+  const body = { schema: OBSERVATION_SCHEMA, request: id, at: now.toISOString(), probe: probeNameOf(id, target), nonce, scope: probeScopeOf(target) };
+  const request: McpRequest = { ...body, mac: requestMac(signer.key, body) };
   const path = mcpRequestPath(workspace);
   mkdirSync(dirname(path), { recursive: true });
   for (const stale of readdirSync(dirname(path))) {
@@ -156,31 +172,37 @@ export function beginMcpRequest(workspace: string, now: Date = new Date(), targe
   return request;
 }
 
-function readMcpRequest(workspace: string): McpRequest | undefined {
+function readMcpRequest(workspace: string, env: NodeJS.ProcessEnv): McpRequest | undefined {
   try {
-    const parsed = JSON.parse(readFileSync(mcpRequestPath(workspace), 'utf8')) as Partial<McpRequest>;
+    const parsed = JSON.parse(readFileSync(mcpRequestPath(workspace), 'utf8')) as Partial<McpRequest> & { digest?: unknown };
     if (typeof parsed.request === 'string' && /^[0-9a-f]{32}$/.test(parsed.request) && typeof parsed.at === 'string') {
-      // A request file from an older build has no probe: the caller falls
-      // back to the deterministic name for the current scope. A probe that
-      // is not a probe name is ignored the same way, never trusted.
+      // A request file without a mac is from an older c2c (the plain-sha256
+      // `digest` anyone who can write the file could recompute, or nothing at
+      // all). It is refused, never answered: there is no fallback to the
+      // current scope's deterministic probe and no bucket-existence check.
+      if (typeof parsed.mac !== 'string' || parsed.digest !== undefined) {
+        throw new ObservationRejected('the MCP request file is from an older c2c; run c2c doctor --mcp-begin again');
+      }
+      const signer = mcpSigningKey(env, workspace, false);
+      if ('refused' in signer) throw new ObservationRejected(`the MCP request cannot be authenticated: ${signer.refused}; run c2c doctor --mcp-begin again`);
       const probe = typeof parsed.probe === 'string' && isProbeName(parsed.probe) ? parsed.probe : undefined;
-      // An older request file has no nonce. A value that is not 32 hex is
-      // ignored, never trusted as this run's object key.
       const nonce = typeof parsed.nonce === 'string' && /^[0-9a-f]{32}$/.test(parsed.nonce) ? parsed.nonce : undefined;
       const scope = scopeOfRequest(parsed.scope);
-      const request: McpRequest = { schema: Number(parsed.schema), request: parsed.request, at: parsed.at, ...(probe ? { probe } : {}), ...(nonce ? { nonce } : {}), ...(scope ? { scope } : {}) };
-      // A scoped request is always written with its digest: recompute it and
-      // refuse the file when it does not match — an edited or hand-written
-      // request (a moved probe, nonce or scope) can never complete. An older
-      // file with neither scope nor digest is still answered, pinned only by
-      // the probe name it carries.
-      if (scope !== undefined || parsed.digest !== undefined) {
-        if (typeof parsed.digest !== 'string' || parsed.digest !== requestDigest(request)) {
-          throw new ObservationRejected('the MCP request file was edited after --mcp-begin; run c2c doctor --mcp-begin again');
-        }
-        request.digest = parsed.digest;
+      const body: { schema: number; request: string; at: string; probe?: string; nonce?: string; scope?: ProbeScope } = { schema: Number(parsed.schema), request: parsed.request, at: parsed.at, ...(probe ? { probe } : {}), ...(nonce ? { nonce } : {}), ...(scope ? { scope } : {}) };
+      // Authenticate before trusting a single field: the mac is over the
+      // canonical fields, so a moved probe or nonce, a rewritten scope or a
+      // stripped field can never complete.
+      const want = Buffer.from(requestMac(signer.key, body));
+      const got = Buffer.from(parsed.mac);
+      if (got.length !== want.length || !timingSafeEqual(got, want)) {
+        throw new ObservationRejected('the MCP request file was edited after --mcp-begin; run c2c doctor --mcp-begin again');
       }
-      return request;
+      // A request this c2c signed always carries probe, nonce and scope;
+      // their absence means the file was hand-built with a copied mac.
+      if (probe === undefined || nonce === undefined || scope === undefined) {
+        throw new ObservationRejected('the MCP request file is incomplete; run c2c doctor --mcp-begin again');
+      }
+      return { ...body, probe, nonce, scope, mac: parsed.mac };
     }
   } catch (err) {
     if (err instanceof ObservationRejected) throw err;
@@ -194,7 +216,7 @@ function readMcpRequest(workspace: string): McpRequest | undefined {
  * exactly one request. The closed marker is created exclusively, so two
  * observations racing for one request cannot both win — the loser is refused.
  */
-export function closeMcpRequest(workspace: string, request: string): void {
+export function closeMcpRequest(workspace: string, request: string, env: NodeJS.ProcessEnv = process.env): void {
   try {
     writeFileSync(join(dirname(mcpRequestPath(workspace)), `mcp-request.${request}.closed`), `${request}\n`, { flag: 'wx' });
   } catch (err) {
@@ -204,7 +226,11 @@ export function closeMcpRequest(workspace: string, request: string): void {
     throw err;
   }
   // Drop the open file only while it still names this request.
-  if (readMcpRequest(workspace)?.request === request) rmSync(mcpRequestPath(workspace), { force: true });
+  try {
+    if (readMcpRequest(workspace, env)?.request === request) rmSync(mcpRequestPath(workspace), { force: true });
+  } catch {
+    /* an unverifiable request file is left for the next begin to replace */
+  }
 }
 
 /** An error flag on a result envelope: boolean true, or the "true" string a host may serialize. */
@@ -370,7 +396,7 @@ export function readStdinBounded(limit: number = OBSERVATION_MAX_BYTES, fd: numb
  * EvidenceStale for an expired request / an id-less entry). Does not close
  * the request; the caller closes it once the observation is accepted.
  */
-export function parseObservation(text: string, input: { workspace: string; now?: Date }): { evidence: McpEvidence; observed: Observed; probe?: string; nonce?: string; scope?: ProbeScope } {
+export function parseObservation(text: string, input: { workspace: string; now?: Date; env?: NodeJS.ProcessEnv }): { evidence: McpEvidence; observed: Observed; probe: string; nonce: string; scope: ProbeScope } {
   const now = input.now ?? new Date();
   if (Buffer.byteLength(text, 'utf8') > OBSERVATION_MAX_BYTES) {
     throw new ObservationRejected(`the observation is larger than the ${OBSERVATION_MAX_BYTES}-byte limit`);
@@ -393,7 +419,7 @@ export function parseObservation(text: string, input: { workspace: string; now?:
     if (!ENVELOPE.includes(key) && !PASSTHROUGH.includes(key)) throw new ObservationRejected('the observation holds a field that is not part of the observation schema');
   }
 
-  const open = readMcpRequest(input.workspace);
+  const open = readMcpRequest(input.workspace, input.env ?? process.env);
   if (!open) throw new ObservationRejected('there is no open MCP request in this workspace; run c2c doctor --mcp-begin first');
   if (typeof record.request !== 'string' || record.request !== open.request) {
     throw new ObservationRejected('the observation answers a request this workspace did not issue; run c2c doctor --mcp-begin again');
@@ -455,35 +481,33 @@ export function parseObservation(text: string, input: { workspace: string; now?:
   if (Object.keys(orgDcs).length) evidence.orgDcs = orgDcs;
   evidence.at = now.toISOString();
   evidence.workspace = input.workspace;
-  // The bucket --mcp-begin named and the scope it ran under, both pinned in
-  // the request file: the read-back, the drift check and the cleanup track
-  // what was actually begun, even if the scope flags drifted since the begin
-  // run. An older request file has no scope; the begin scope is then the one
-  // its pinned probe name encodes.
-  const scope = open.scope ?? (open.probe ? probeScopeOfName(open.probe) : undefined);
-  return { evidence, observed: { request: open.request, orgs, calls }, ...(open.probe ? { probe: open.probe } : {}), ...(open.nonce ? { nonce: open.nonce } : {}), ...(scope ? { scope } : {}) };
+  // The bucket --mcp-begin named, this run's nonce and the scope it ran
+  // under, all pinned in the authenticated request file: the read-back, the
+  // drift check and the cleanup track what was actually begun, even if the
+  // scope flags drifted since the begin run.
+  return { evidence, observed: { request: open.request, orgs, calls }, probe: open.probe, nonce: open.nonce, scope: open.scope };
 }
 
 /** What the agent is asked to do, for the --mcp-begin output. */
 export function mcpRequestInstructions(request: McpRequest, target: ProbeTarget = {}): { request: string; expires: string; probe: string; nonce?: string; calls: Record<string, unknown>[]; cleanup: Record<string, unknown>; objectCleanup?: ProbeNonceCleanup; neverCall: string[]; command: string; observation: Record<string, unknown> } {
-  // The pinned bucket from the request file when this request opened it;
-  // older request files fall back to the deterministic name for this scope.
-  const probe = request.probe && isProbeName(request.probe) ? request.probe : probeNameOf(request.request, target);
-  const nonce = request.nonce && /^[0-9a-f]{32}$/.test(request.nonce) ? request.nonce : undefined;
+  // The pinned bucket and nonce from the authenticated request this begin
+  // opened; no fallback — a request file without them is refused on read.
+  const probe = request.probe;
+  const nonce = request.nonce;
   const project = target.project !== undefined && /^[0-9]+$/.test(target.project) ? target.project : undefined;
   const calls: Record<string, unknown>[] = [probeCreateCall(probe, target)];
   // Org-only begin has no project to put an object in, so it stays the two
   // calls. A numeric project asks for the nonce object between the bucket
   // and the org list. The observation template still shows the two required
   // calls: the signature result is allowed and not required.
-  if (project && nonce) calls.push(probeObjectCall(probe, nonce, target));
+  if (project) calls.push(probeObjectCall(probe, nonce, target));
   calls.push({ tool: ORGS_CALL });
-  const objectCleanup = project && nonce ? probeNonceCleanup(probe, nonce, project) : undefined;
+  const objectCleanup = project ? probeNonceCleanup(probe, nonce, project) : undefined;
   return {
     request: request.request,
     expires: new Date(Date.parse(request.at) + MCP_REQUEST_MAX_AGE_MS).toISOString(),
     probe,
-    ...(nonce ? { nonce } : {}),
+    nonce,
     calls,
     cleanup: probeDeleteCall(probe, target),
     ...(objectCleanup ? { objectCleanup } : {}),

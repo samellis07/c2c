@@ -306,14 +306,16 @@ test('evidence state: the signing key is 0600 outside the workspace; a weak or m
   } finally {
     closeSync(fd);
   }
-  // A key directory inside the workspace is never used: the evidence is not stored.
+  // A key directory inside the workspace is never used: without the key the
+  // request file cannot be authenticated, so --mcp-begin itself is refused.
   const inner = workspace();
   const innerEnv = { ...inner.env, HOME: join(inner.dir, 'home') };
   mkdirSync(join(inner.dir, 'home', 'skills'), { recursive: true });
   cpSync(join(inner.env.HOME!, 'skills'), join(inner.dir, 'home', 'skills'), { recursive: true });
-  const run = await observe(innerEnv);
-  assert.equal(run.code, 0, run.out + run.err);
-  assert.match(run.err, /MCP evidence not kept for later runs: the signing key directory is inside the workspace/);
+  const run = await doctor(innerEnv, ['--mcp-begin', '--json']);
+  assert.equal(run.code, 1, run.out + run.err);
+  assert.match(run.err, /the MCP request cannot be authenticated: the signing key directory is inside the workspace/);
+  assert.equal(existsSync(join(inner.dir, 'c2c-out', '.c2c', 'mcp-request.json')), false);
   assert.equal(existsSync(mcpStatePath(inner.dir)), false);
 });
 
