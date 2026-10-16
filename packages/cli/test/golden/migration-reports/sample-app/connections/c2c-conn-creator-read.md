@@ -23,3 +23,9 @@ App: c2c-conn-creator-read
 ## Manual steps
 
 - none
+
+## Hidden from end users
+
+0
+
+- none

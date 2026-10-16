@@ -24,3 +24,9 @@ App: Kitchen_Sink_Studio
 
 - 1 warning converter-gap
 - 1 warning pivot-analytics
+
+## Hidden from end users
+
+0
+
+- none

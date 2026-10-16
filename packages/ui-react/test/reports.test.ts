@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
-import { TEMPLATE_DIR, generateReactApp, reactAppSpec } from '../src/index.js';
+import { TEMPLATE_DIR, generateReactApp, hiddenParts, reactAppSpec } from '../src/index.js';
 
 function source(): string {
   return `application "Shop"
@@ -147,7 +147,7 @@ test('the report spec carries the view options: sort, filters, grouping, detail,
   assert.equal(plain.groupField, 'Status');
 });
 
-test('generated report modules forward the record route and mark pending views as todo', () => {
+test('generated report modules forward the record route and list pending views for the developer, not the screen', () => {
   const files = generateReactApp(appOf());
   const list = files.find((f) => f.path === 'src/generated/reports/Orders.tsx')!;
   const module = String(list.data);
@@ -155,8 +155,8 @@ test('generated report modules forward the record route and mark pending views a
   assert.match(module, /<ReportView report=\{report\} row=\{row\} \/>/);
   assert.doesNotMatch(module, /className="todo"/);
   const board = String(files.find((f) => f.path === 'src/generated/reports/Board.tsx')!.data);
-  assert.match(board, /className="todo"/);
-  assert.match(board, /data-view-pending="kanban"/);
+  assert.doesNotMatch(board, /className="todo"|data-view-pending|not generated/);
+  assert.ok(hiddenParts(reactAppSpec(appOf())).some((part) => part.location === 'report Board' && /kanban view is not drawn/.test(part.reason)));
 });
 
 test('Arc pagination and filter toolbar are vendored at the recorded commit', () => {

@@ -19,6 +19,7 @@ import { compareEnUs } from '../../core/src/order.js';
 import { readLockIfPresent, type FillLock, type LockFileFs } from '../../deluge/src/index.js';
 import { analyze, type TodoKind } from './analyze.js';
 import type { FieldGap } from '../../schema/src/generator.js';
+import type { HiddenPart } from '../../ui-react/src/index.js';
 import { MATRIX_SNAPSHOT, type MatrixSnapshot } from './feature-matrix.js';
 
 export interface MigrationAppEntry {
@@ -28,6 +29,8 @@ export interface MigrationAppEntry {
   fillLockEntries: number;
   todoKinds: TodoKind[];
   fieldGaps: FieldGap[];
+  /** Parts the generated app does not show to end users, with the reason each is hidden. */
+  hiddenParts: HiddenPart[];
   /** UI stubs still marked TODO. Each one is included in `todoCount`. */
   uiTodoCount: number;
   readiness: number;
@@ -57,6 +60,8 @@ export interface MigrationReport {
     todoKinds: TodoKind[];
     fieldGaps: FieldGap[];
     fieldGapTotal: number;
+    /** Every part, across the apps, that the generated app does not show to end users. */
+    hiddenPartTotal: number;
     /** Deterministic apps that still have UI TODO stubs. A stub is a residual hole, so this stays zero. */
     deterministicWithUiTodos: { apps: number; uiTodos: number };
   };
@@ -107,6 +112,7 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
       fillLockEntries: report.determinism.fillLockEntries,
       todoKinds: report.determinism.todoKinds,
       fieldGaps: report.fieldGaps,
+      hiddenParts: report.hiddenParts,
       uiTodoCount: report.determinism.uiTodoCount,
       readiness: report.score.readiness,
       band: report.score.band,
@@ -153,6 +159,7 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
       todoKinds,
       fieldGaps,
       fieldGapTotal: fieldGaps.reduce((total, gap) => total + gap.count, 0),
+      hiddenPartTotal: apps.reduce((total, app) => total + app.hiddenParts.length, 0),
       deterministicWithUiTodos: { apps: withUi.length, uiTodos: withUi.reduce((sum, app) => sum + app.uiTodoCount, 0) },
     },
   };
@@ -178,6 +185,8 @@ export function migrationReportAsText(report: MigrationReport): string {
     `residual TODO items: ${a.todoTotal} across ${a.distinctTodoKinds} kinds`,
     `field gaps: ${a.fieldGapTotal} across ${a.fieldGaps.length} kinds`,
     ...a.fieldGaps.map((gap) => `  ${gap.matrixId}: ${gap.count} (${gap.fields.map((field) => `${field.form}.${field.field}`).join(', ')}) — ${gap.reason}`),
+    `hidden from end users: ${a.hiddenPartTotal}`,
+    ...report.apps.flatMap((app) => app.hiddenParts.map((part) => `  ${app.app}: ${part.location}: ${part.reason}`)),
     `UI TODO stubs on deterministic apps: ${a.deterministicWithUiTodos.uiTodos} in ${a.deterministicWithUiTodos.apps} of the ${a.deterministicApps} deterministic apps`,
     ...a.todoKinds.slice(0, 20).map((kind) => `  ${kind.count} ${kind.construct}`),
   ].join('\n');

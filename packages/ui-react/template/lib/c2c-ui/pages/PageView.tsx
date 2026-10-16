@@ -131,11 +131,10 @@ function Element({ el }: { el: PageElement }): ReactNode {
         </a>
       );
     case 'todo':
-      return (
-        <p className="todo" data-zml={el.tag}>
-          {el.reason}
-        </p>
-      );
+      // A part the generator cannot draw is a migration note for the
+      // developer, not app content: it is listed in `c2c analyze` and the
+      // migration report, never on the page.
+      return null;
   }
 }
 
@@ -144,16 +143,6 @@ export function PageView({ page }: { page: PageSpec }) {
     <section className="c2c-card c2c-page" data-page={page.name}>
       {page.scopedCss ? <style>{page.scopedCss.replace(/</g, '')}</style> : null}
       <h1>{page.label}</h1>
-      {page.todos.length ? (
-        <details className="todo c2c-page-todos" data-todo-count={page.todos.length}>
-          <summary>{page.todos.length === 1 ? '1 part of this page is not generated yet' : `${page.todos.length} parts of this page are not generated yet`}</summary>
-          <ul>
-            {page.todos.map((todo, i) => (
-              <li key={i}>{todo}</li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
       <RowsScope>
         <div className="c2c-page-body">
           {page.elements.map((el, i) => (

@@ -111,6 +111,7 @@ button[type="submit"],.button-primary{background:var(--c2c-primary);color:var(--
 button[type="button"]:not([data-action]):not([data-prev]):not([data-next]):not([data-retry]):not([data-add-row]){background:var(--c2c-surface);color:var(--c2c-ink)}
 .error{color:var(--c2c-danger);min-height:1.2em;margin:0;font-size:var(--c2c-font-size-s)}
 .todo{background:var(--c2c-warn-bg);padding:var(--c2c-space-2) var(--c2c-space-3);border-radius:var(--c2c-radius-s)}
+.unavailable-note{color:var(--c2c-muted);margin:0}
 .notes{color:var(--c2c-muted)}
 [data-banner]:not(:empty){padding:var(--c2c-space-3);border-radius:var(--c2c-radius-s);background:var(--c2c-tint);margin:var(--c2c-space-4) 0}
 .table-wrap{overflow-x:auto;margin:0 calc(var(--c2c-space-5) * -1);padding:0 var(--c2c-space-5)}

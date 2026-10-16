@@ -28,3 +28,9 @@ App: Freight Forwarding and Feeder Solution
 - 1 warning pivot-analytics
 - 1 warning sendmail-sender
 - 1 warning unique-varchar-budget
+
+## Hidden from end users
+
+0
+
+- none
