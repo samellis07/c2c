@@ -420,7 +420,8 @@ async function startLive(app: App, options?: LiveOptions): Promise<Session> {
   const settle = async () => {
     for (let i = 0; i < 100; i++) {
       if (pendingSubmit.size > 0) {
-        await Promise.race([...pendingSubmit]);
+        // Bounded so a listener that never settles still ends in the error below.
+        await Promise.race([...pendingSubmit, delay(10)]);
         continue;
       }
       await delay(10);
