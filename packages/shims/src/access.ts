@@ -123,6 +123,8 @@ export interface AccessPolicy {
    * Direct navigation is denied even when a profile could otherwise read them.
    */
   hidden?: string[];
+  /** Profiles allowed to list users (Administrator / Developer presets or custom admin profiles). */
+  admins?: string[];
 }
 
 export type WriteFieldKind = 'lookup' | 'subform' | 'composite' | 'file';
@@ -400,6 +402,28 @@ function ruleDeniedFor(list: readonly FieldRuleDenial[] | undefined, op: WriteOp
  * any read. The record filter is not applied here; the scoped read that finds
  * ROWIDs does that.
  */
+/**
+ * User listing authorization for Creator's `app.users()` and `app.userEmailIds()`.
+ * In Creator, only Administrator and Developer profiles are permitted to list
+ * application users. Low-privilege profiles (e.g. Employee, Staff, Customer) are refused.
+ */
+export function canListUsers(principal: Principal | undefined, policy?: AccessPolicy): boolean {
+  if (!principal?.profile) return false;
+  const profileName = principal.profile.trim().toLowerCase();
+  if (policy?.admins && policy.admins.length > 0) {
+    if (policy.admins.some((admin) => admin.trim().toLowerCase() === profileName)) {
+      return true;
+    }
+  }
+  return profileName === 'administrator' || profileName === 'developer';
+}
+
+export function authorizeUserListing(principal: Principal | undefined, policy?: AccessPolicy): void {
+  if (!canListUsers(principal, policy)) {
+    throw new RecordAccessError(`record access: profile ${principal?.profile ?? '(none)'} cannot list users`);
+  }
+}
+
 export function authorizeDelete(policy: AccessPolicy, principal: Principal | undefined, form: string): void {
   if (!principal?.profile) throw new RecordAccessError('record access: authenticated profile required');
   if (principal.role && policy.roles.length > 0 && !policy.roles.includes(principal.role)) {

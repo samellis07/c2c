@@ -86,7 +86,7 @@ import {
   type Criteria,
   type DecimalColumns,
 } from './criteria.js';
-import { authorizeDelete, authorizeRead, authorizeWrite, expandCompositeWrites, isSystemWriteDenied, projectFields, RecordAccessError, DRY_RUN_ADMIN_USER, DRY_RUN_ADMIN_USER_ID, type AccessPolicy, type Principal, type ReadIntent, type WriteSchema } from './access.js';
+import { authorizeDelete, authorizeRead, authorizeUserListing, authorizeWrite, expandCompositeWrites, isSystemWriteDenied, projectFields, RecordAccessError, DRY_RUN_ADMIN_USER, DRY_RUN_ADMIN_USER_ID, type AccessPolicy, type Principal, type ReadIntent, type WriteSchema } from './access.js';
 import { isStoredFileKey } from './files.js';
 import { assertWritable, quantizeRow, WriteRuleError, type WriteRuleColumn } from './write-rules.js';
 import * as zohoAdapters from './zoho-adapters.js';
@@ -191,6 +191,18 @@ export interface ThisappFunction {
   params?: readonly string[];
   recordParams?: Readonly<Record<string, string>>;
   rowForm?: string;
+}
+
+/** One account row from the generated app-user adapter. */
+export interface AppUser {
+  userId?: unknown;
+  user_id?: unknown;
+  zuid?: unknown;
+  username?: unknown;
+  login_user?: unknown;
+  email?: unknown;
+  email_id?: unknown;
+  [key: string]: unknown;
 }
 
 export interface RuntimeOptions {
@@ -365,6 +377,8 @@ export interface RuntimeOptions {
   functions?: Readonly<Record<string, ThisappFunction>>;
   /** `thisapp` recursion depth bound; default {@link LIMITS.thisappMaxDepth}. */
   thisappMaxDepth?: number;
+  /** The app's Catalyst user list for `app.users()` / `app.userEmailIds()`. */
+  appUsers?: () => Promise<readonly AppUser[]> | readonly AppUser[];
   /**
    * The deployed function's field reader (`createFieldReader` in the function asset
    * c2c-field-values.mjs, over c2c-columns.json, c2c-renames.json, c2c-rules.json and the
@@ -724,6 +738,10 @@ export interface Shim {
     task(ctx: ShimContext, path: string[], args: unknown[]): Promise<unknown>;
   };
   thisapp: { call(ctx: ShimContext, path: string[], args: unknown[]): Promise<unknown> };
+  app: {
+    users(ctx?: ShimContext): Promise<unknown[]>;
+    userEmailIds(ctx?: ShimContext): Promise<unknown[]>;
+  };
   date: {
     parse(literal: string, ctx: ShimContext): dates.DelugeDate;
     getYear(value: unknown, ctx: ShimContext): number | null;
@@ -2681,6 +2699,25 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     return page[0];
   }
 
+  async function appUsers(which: 'users' | 'userEmailIds', ctx?: ShimContext): Promise<unknown[]> {
+    note({ op: 'app.users', which, dryRun, performed: !!options.appUsers });
+    authorizeUserListing(ctx?.principal, options.access);
+    if (!options.appUsers) {
+      refuseLive(`app.${which}`);
+      return [];
+    }
+    let rows: readonly AppUser[];
+    try {
+      rows = await options.appUsers();
+    } catch {
+      throw new DelugeRuntimeError(`app.${which} failed`);
+    }
+    const key = which === 'users' ? ['userId', 'user_id', 'zuid', 'username', 'login_user'] : ['email', 'email_id'];
+    return (Array.isArray(rows) ? rows : [])
+      .map((user) => key.map((name) => user?.[name]).find((value) => value != null))
+      .filter((value): value is NonNullable<typeof value> => value != null);
+  }
+
   const shim: Shim = {
     async todo(_ctx, construct, detail) {
       note({ op: 'todo', construct, detail: detail ?? null });
@@ -3513,6 +3550,14 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         }
         refuseLive('zoho.task');
         return { dryRun: true, path };
+      },
+    },
+    app: {
+      async users(ctx) {
+        return appUsers('users', ctx);
+      },
+      async userEmailIds(ctx) {
+        return appUsers('userEmailIds', ctx);
       },
     },
     thisapp: {

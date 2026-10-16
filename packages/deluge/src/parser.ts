@@ -274,6 +274,7 @@ class Parser {
       this.eat('ident', 'actions');
       return this.block();
     }
+    if (this.isActionsWithCondition()) return this.actionsStmt();
     if (this.is('ident') && this.peek().text.toLowerCase() === 'function' && this.is('ident', undefined, 1) && this.is('punct', '(', 2)) return this.functionStmt();
     if (this.looksLikeFunction()) return this.functionStmt();
     return this.assignOrExpr();
@@ -291,15 +292,7 @@ class Parser {
     return this.statement();
   }
 
-  private ifStmt(): Stmt {
-    const start = this.peek().start;
-    this.eat('ident', 'if');
-    // expression-if used where a statement was expected: if(c, a, b)
-    if (this.is('punct', '(') && this.parenHasComma()) {
-      const expr = this.ifExpr(start, true);
-      this.eat('punct', ';');
-      return this.exprStmt(expr, start);
-    }
+  private parseIfBody(start: number): Stmt {
     const test = this.parenExpr();
     const then = this.body();
     const elifs: { test: Expr; body: Stmt }[] = [];
@@ -317,6 +310,42 @@ class Parser {
     }
     const end = (els ?? elifs[elifs.length - 1]?.body ?? then).span.end;
     return { kind: 'if', test, then, elifs, ...(els ? { else: els } : {}), span: this.span(start, end) };
+  }
+
+  private ifStmt(): Stmt {
+    const start = this.peek().start;
+    this.eat('ident', 'if');
+    // expression-if used where a statement was expected: if(c, a, b)
+    if (this.is('punct', '(') && this.parenHasComma()) {
+      const expr = this.ifExpr(start, true);
+      this.eat('punct', ';');
+      return this.exprStmt(expr, start);
+    }
+    return this.parseIfBody(start);
+  }
+
+  private actionsStmt(): Stmt {
+    const start = this.peek().start;
+    this.eat('ident', 'actions');
+    return this.parseIfBody(start);
+  }
+
+  /** True when `actions ( ... ) {` begins a conditional action block. */
+  private isActionsWithCondition(at = this.i): boolean {
+    if (this.t[at]?.text !== 'actions' || this.t[at + 1]?.text !== '(') return false;
+    let depth = 0;
+    for (let k = at + 1; k < this.t.length; k++) {
+      const tok = this.t[k]!;
+      if (tok.text === '(' || tok.text === '[' || tok.text === '{') depth++;
+      else if (tok.text === ')' || tok.text === ']' || tok.text === '}') {
+        depth--;
+        if (depth === 0) {
+          return this.t[k + 1]?.text === '{';
+        }
+      }
+      if (tok.kind === 'eof') return false;
+    }
+    return false;
   }
 
   /** True when the `(...)` at `at` has a top-level comma (the 2- or 3-arg `if`). */
@@ -652,6 +681,7 @@ class Parser {
       t.text === 'return' ||
       t.text === 'else' ||
       t.text === 'elseif' ||
+      (t.text === 'actions' && (this.is('punct', '{', 1) || this.isActionsWithCondition(this.i))) ||
       (t.text === 'cancel' && (this.is('ident', 'submit', 1) || this.is('ident', 'delete', 1))) ||
       (t.text === 'success' && this.is('ident', 'message', 1))
     );

@@ -2588,6 +2588,38 @@ function usesThisapp(body: string): boolean {
   return body.includes('shim.thisapp.call(');
 }
 
+/** The generated body reads the app's Catalyst user list. */
+function usesAppUsers(body: string): boolean {
+  return body.includes('shim.app.users(') || body.includes('shim.app.userEmailIds(');
+}
+
+function appUsersHelper(admins: string[] = []): string {
+  return `async function appUsers(req) {
+  const adminProfiles = ${JSON.stringify(admins)};
+  const principal = principalFromRequest(req);
+  if (!principal?.profile) {
+    throw new RecordAccessError("record access: user listing denied");
+  }
+  const profileName = String(principal.profile).trim().toLowerCase();
+  const allowed = (adminProfiles.length > 0 && adminProfiles.some((a) => a.trim().toLowerCase() === profileName)) ||
+    profileName === "administrator" || profileName === "developer";
+  if (!allowed) {
+    throw new RecordAccessError(\`record access: profile \${principal.profile} cannot list users\`);
+  }
+  if (Array.isArray(req?.appUsers)) return req.appUsers;
+  try {
+    const sdk = await import("zcatalyst-sdk-node");
+    const catalyst = sdk.initialize(req, { scope: "admin" });
+    const reply = await catalyst.userManagement().getAllUsers();
+    const rows = Array.isArray(reply) ? reply : Array.isArray(reply?.data) ? reply.data : Array.isArray(reply?.users) ? reply.users : [];
+    return rows.filter((user) => user && typeof user === "object");
+  } catch {
+    return [];
+  }
+}
+`;
+}
+
 /** A live run needs the injected datastore when the body reads or writes rows. */
 function needsDatastore(body: string): boolean {
   return body.includes('shim.datastore.') || body.includes('shim.record.prepare');
@@ -3770,12 +3802,13 @@ import { fileURLToPath } from "node:url";
     : '';
   const usesConnections = !!opts.systemWrite && usesZohoConnections(opts.body);
   const usesThis = usesThisapp(opts.body);
+  const usesApp = usesAppUsers(opts.body);
   const thisappImport = usesThis ? 'import { functions } from "../../thisapp.mjs";\n' : '';
   const usesOutbound = !!opts.systemWrite && usesOutboundInvokeurl(opts.body);
   const usesGetUrl = !!opts.systemWrite && usesOutboundGetUrl(opts.body);
   const storeShape = opts.systemWrite ? fieldStoreShape(opts.app, opts.form) : { links: [], files: [] };
   const validatePick = opts.systemWrite === 'update' ? 'edit' : opts.systemWrite === 'insert' ? 'add' : 'either';
-  const liveHelpersBlock = opts.systemWrite ? `\n${aioLiveHelpers(opts.validateSpecs ?? { add: [], edit: [] }, validatePick, writeLiveSource(opts.form, storeShape))}${usesConnections ? `\n${connectionsLiveHelpers()}` : ''}${usesOutbound || usesGetUrl ? `\n${outboundLiveHelpers()}` : ''}\n` : '\n';
+  const liveHelpersBlock = opts.systemWrite ? `\n${aioLiveHelpers(opts.validateSpecs ?? { add: [], edit: [] }, validatePick, writeLiveSource(opts.form, storeShape))}${usesConnections ? `\n${connectionsLiveHelpers()}` : ''}${usesOutbound || usesGetUrl ? `\n${outboundLiveHelpers()}` : ''}${usesApp ? `\n${appUsersHelper(administratorProfiles(opts.app))}` : ''}\n` : '\n';
   const zoneFields = `${timeZoneFields(opts.app)}${schemaRuntimeOptions(opts.app, opts.schema)}`;
   const runtimeSetup = opts.systemWrite
     ? `  const datastore = loadedStore || (live ? await liveDatastore() : null);
@@ -3787,7 +3820,7 @@ import { fileURLToPath } from "node:url";
     dryRun: !live,
     appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined${zoneFields}${mailFrom},
     ...(datastore ? { datastore, ...(datastore.now ? { now: datastore.now } : {}) } : {}),
-${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' : ''}${usesOutbound ? '    ...(live ? { http: outboundHttp(outboundConfig(req)) } : {}),\n' : ''}${usesGetUrl ? '    ...(live ? { httpGetUrl: outboundGetUrl(outboundConfig(req)) } : {}),\n' : ''}    access,${usesThis ? '\n    functions,' : ''}
+${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' : ''}${usesOutbound ? '    ...(live ? { http: outboundHttp(outboundConfig(req)) } : {}),\n' : ''}${usesGetUrl ? '    ...(live ? { httpGetUrl: outboundGetUrl(outboundConfig(req)) } : {}),\n' : ''}${usesApp ? '    ...(live ? { appUsers: () => appUsers(req) } : {}),\n' : ''}    access,${usesThis ? '\n    functions,' : ''}
   });
   // The transcript holds record values, table names and ops. It is a
   // dry-run debug view only: no live reply carries it.
@@ -3846,6 +3879,7 @@ ${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' :
   const shimNames = opts.systemWrite
     ? ['authorizeRead', 'authorizeWrite', 'applyInitialValues', 'compileCriteria', 'createRuntime', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'principalFromRequest', 'projectFields', 'projectReadable', 'replyStoreError']
     : ['authorizeRead', 'authorizeWrite', 'createRuntime', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'principalFromRequest'];
+  if (usesApp && !shimNames.includes('RecordAccessError')) shimNames.push('RecordAccessError');
   for (const name of fieldStoreImports(storeShape)) {
     if (!shimNames.includes(name)) shimNames.push(name);
   }
@@ -4025,6 +4059,7 @@ function prefetchModule(opts: { app: App; title: string; path: string; body: str
   const subformRow = subformFields.length > 0;
   const subformField = subformFields.length === 1 ? subformFields[0]! : `[${subformFields.join(', ')}]`;
   const usesThis = usesThisapp(opts.body);
+  const usesApp = usesAppUsers(opts.body);
   const thisappImport = usesThis ? `import { functions } from ${JSON.stringify(`${opts.dir ?? '../'}thisapp.mjs`)};\n` : '';
   const params = opts.params ?? [];
   // A custom function's prefetch reads its parameters from the arguments the client sent.
@@ -4056,7 +4091,7 @@ function prefetchModule(opts: { app: App; title: string; path: string; body: str
     ...(usesRange ? ['A `slot`/`range` request serves one deferred read with bounds the client evaluated; the bounds are clamped here, never trusted.'] : []),
     'The response nonce is the form state the slots were computed for. See CLIENT-SPLIT.md.',
     'The previous row is not taken from the client. Dry run uses dryRunOld.',
-  ])}import { ${writeGate ? 'authorizeWrite, ' : gated ? 'authorizeRead, ' : ''}createRuntime, jsonReplacer, ${element ? 'LIMITS, ' : ''}principalFromRequest${usesRange ? ', rangeSlotRequest' : ''} } from "creator-to-catalyst/shims";
+  ])}import { ${writeGate ? 'authorizeWrite, ' : gated ? 'authorizeRead, ' : ''}createRuntime, jsonReplacer, ${element ? 'LIMITS, ' : ''}principalFromRequest${usesApp ? ', RecordAccessError' : ''}${usesRange ? ', rangeSlotRequest' : ''} } from "creator-to-catalyst/shims";
 ${thisappImport}
 export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(opts.path)}, dryRun: true };
 
@@ -4068,7 +4103,7 @@ function isHidden(name) {
   return !!name && Array.isArray(access.hidden) && access.hidden.includes(name);
 }
 ` : ''}
-${subformRow ? `${SUBFORM_ROW_HELPER}\n` : ''}${params.length || element ? `${REQUEST_ARGS_HELPER}\n` : ''}${element ? `${REQUEST_ELEMENT_HELPER}\n` : ''}export async function prefetch(ctx) {
+${subformRow ? `${SUBFORM_ROW_HELPER}\n` : ''}${params.length || element ? `${REQUEST_ARGS_HELPER}\n` : ''}${element ? `${REQUEST_ELEMENT_HELPER}\n` : ''}${usesApp ? `${appUsersHelper(administratorProfiles(opts.app))}\n` : ''}export async function prefetch(ctx) {
   const shim = ctx.shim;
   const slots = {};
 ${indent(bindArgs + opts.body)}
@@ -4088,7 +4123,7 @@ ${gated ? `  if (isHidden(formName)) {
 ${denyBody('prefetch failed')}
     return;
   }` : ''}
-  const runtime = createRuntime({ dryRun: true, appTimeZone: process.env.C2C_APP_TIMEZONE${timeZoneFields(opts.app)}${schemaRuntimeOptions(opts.app, opts.schema)}, access${usesThis ? ', functions' : ''} });
+  const runtime = createRuntime({ dryRun: true, appTimeZone: process.env.C2C_APP_TIMEZONE${timeZoneFields(opts.app)}${schemaRuntimeOptions(opts.app, opts.schema)}, access${usesApp ? ', appUsers: () => appUsers(req)' : ''}${usesThis ? ', functions' : ''} });
   const record = req?.body?.record ?? {};${usesRange ? `
   const rangeReq = rangeSlotRequest(req?.body);
   if (rangeReq.error) {
@@ -4897,6 +4932,7 @@ function customModule(opts: {
   const usesConnections = usesZohoConnections(opts.body);
   const usesGetUrl = usesOutboundGetUrl(opts.body);
   const usesThis = usesThisapp(opts.body);
+  const usesApp = usesAppUsers(opts.body);
   const mailFrom = opts.body.includes('shim.mail.send') ? ', mailFrom: process.env.C2C_MAIL_FROM' : '';
   // Function arguments are the function's `input`: `input.<param>` reads
   // ctx.record[param], so the HTTP args land on the record by name.
@@ -4962,7 +4998,7 @@ export default async function handler(req, res) {
     'GET and DELETE have no body: each declared parameter is a required query parameter, coerced to its declared type; an unknown key is ignored with a warning.',
     'POST /functions/' + slug(opts.name),
     routeLine,
-  ])}import { authorizeRead, createRuntime, jsonReplacer, ${usesGetUrl ? 'outboundGetUrl, ' : ''}principalFromRequest } from "creator-to-catalyst/shims";
+  ])}import { authorizeRead, createRuntime, jsonReplacer, ${usesGetUrl ? 'outboundGetUrl, ' : ''}principalFromRequest${usesApp ? ', RecordAccessError' : ''} } from "creator-to-catalyst/shims";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -4980,7 +5016,7 @@ const adminProfiles = ${adminNames};
 
 ${REQUEST_ARGS_HELPER}
 ${liveHelpers('../')}
-${usesConnections ? `\n${connectionsLiveHelpers('../')}\n` : ''}${usesGetUrl ? `\n${outboundLiveHelpers('../')}\n` : ''}
+${usesConnections ? `\n${connectionsLiveHelpers('../')}\n` : ''}${usesGetUrl ? `\n${outboundLiveHelpers('../')}\n` : ''}${usesApp ? `\n${appUsersHelper(opts.api?.admins ?? administratorProfiles(opts.app))}\n` : ''}
 export default async function handler(req, res) {
   if (isHidden(formName)) {
     send(res, 403, { dryRun: true, error: "hidden form" });
@@ -5010,7 +5046,7 @@ ${argsListLogic}
       dryRun: !live,
       appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined${timeZoneFields(opts.app)}${schemaRuntimeOptions(opts.app, opts.schema)}${mailFrom},
       ...(datastore ? { datastore, ...(datastore.now ? { now: datastore.now } : {}) } : {}),
-${usesConnections ? '      zohoConnections: await zohoConnections(req, live),\n' : ''}${usesGetUrl ? '      ...(live ? { httpGetUrl: outboundGetUrl(outboundConfig(req)) } : {}),\n' : ''}      access,${usesThis ? '\n      functions,' : ''}
+${usesConnections ? '      zohoConnections: await zohoConnections(req, live),\n' : ''}${usesGetUrl ? '      ...(live ? { httpGetUrl: outboundGetUrl(outboundConfig(req)) } : {}),\n' : ''}${usesApp ? '      ...(live ? { appUsers: () => appUsers(req) } : {}),\n' : ''}      access,${usesThis ? '\n      functions,' : ''}
     });
     const ctx = runtime.context({
       record,
