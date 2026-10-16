@@ -151,8 +151,24 @@ function withHash(rel: string, hash: string): string {
   return `${rel.slice(0, dot)}.${hash}${rel.slice(dot)}`;
 }
 
+/**
+ * A 10-hex content id that always contains a letter. A bare run of ten or
+ * more digits reads as a numeric identifier (an org id, say) rather than a
+ * hash, and generated-output scans flag it; sliding the window to the first
+ * slice with a letter keeps the id deterministic and content-derived. The
+ * fallback is unreachable in practice (an all-digit sha256 hex) but keeps the
+ * contract total.
+ */
+export function shortHashId(hex: string): string {
+  for (let start = 0; start + 10 <= hex.length; start += 1) {
+    const slice = hex.slice(start, start + 10);
+    if (/[a-f]/.test(slice)) return slice;
+  }
+  return `g${hex.slice(0, 9)}`;
+}
+
 function sha(data: string | Buffer): string {
-  return createHash('sha256').update(data).digest('hex').slice(0, 10);
+  return shortHashId(createHash('sha256').update(data).digest('hex'));
 }
 
 function crc32(buf: Buffer): number {
