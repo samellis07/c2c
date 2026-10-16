@@ -134,13 +134,32 @@ interface FakeSdk {
   state(): { tables: Record<string, Record<string, unknown>[]> };
 }
 
-async function liveSubmit(ds: string): Promise<{ status: number; body: Record<string, unknown>; rows: Record<string, unknown>[] }> {
+interface LiveReply {
+  status: number;
+  raw: string;
+  body: Record<string, unknown>;
+}
+
+/**
+ * Deploy `ds` live over the fake SDK, serve functions/c2c_api through a real
+ * http server, and POST each body in order (concurrent ones together).
+ */
+async function liveSubmits(
+  ds: string,
+  posts: (Record<string, unknown> | Record<string, unknown>[])[],
+  opts: { form?: string; path?: string } = {},
+): Promise<{ replies: LiveReply[]; rows: Record<string, unknown>[]; logged: string[] }> {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-nozone-gate-'));
   const moduleAny = Module as unknown as { _resolveFilename: (request: string, ...rest: unknown[]) => string };
   const original = moduleAny._resolveFilename;
   moduleAny._resolveFilename = function resolveFake(this: unknown, request: string, ...rest: unknown[]) {
     if (request === 'zcatalyst-sdk-node') return fake;
     return original.call(this, request, ...rest);
+  };
+  const logged: string[] = [];
+  const realError = console.error;
+  console.error = (...args: unknown[]) => {
+    logged.push(args.map(String).join(' '));
   };
   let server: Server | undefined;
   try {
@@ -149,19 +168,30 @@ async function liveSubmit(ds: string): Promise<{ status: number; body: Record<st
     const req = createRequire(import.meta.url);
     const sdk = req(fake) as FakeSdk;
     sdk.setSession('admin', { user_id: '1', email_id: 'admin@example.test', role_details: { role_name: 'App Administrator' } });
+    // The fake SDK's tables live for the whole test process: count only this run's rows.
+    const before = (sdk.state().tables[opts.form ?? 'Book'] ?? []).length;
     const entry = req(join(dir, 'functions/c2c_api/index.js')) as (rq: IncomingMessage, rs: ServerResponse) => Promise<void>;
     server = createServer((rq, rs) => void entry(rq, rs));
     await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as { port: number }).port;
-    const res = await fetch(`http://127.0.0.1:${port}/server/c2c_api/forms/Book/success`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: 'c2c-harness-session=admin' },
-      body: JSON.stringify({ record: { Title: 'abc' } }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    const body = JSON.parse(await res.text()) as Record<string, unknown>;
-    return { status: res.status, body, rows: sdk.state().tables.Book ?? [] };
+    const post = async (body: Record<string, unknown>): Promise<LiveReply> => {
+      const res = await fetch(`http://127.0.0.1:${port}/server/c2c_api${opts.path ?? '/forms/Book/success'}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: 'c2c-harness-session=admin' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(10_000),
+      });
+      const raw = await res.text();
+      return { status: res.status, raw, body: JSON.parse(raw) as Record<string, unknown> };
+    };
+    const replies: LiveReply[] = [];
+    for (const step of posts) {
+      if (Array.isArray(step)) replies.push(...(await Promise.all(step.map(post))));
+      else replies.push(await post(step));
+    }
+    return { replies, rows: (sdk.state().tables[opts.form ?? 'Book'] ?? []).slice(before), logged };
   } finally {
+    console.error = realError;
     if (server) {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server!.close(() => resolve()));
@@ -171,26 +201,109 @@ async function liveSubmit(ds: string): Promise<{ status: number; body: Record<st
   }
 }
 
-test('a 500 hides handler details after an uncaptured for-each throw', async () => {
-  const res = await liveSubmit(DS_INTERNAL);
-  assert.equal(res.status, 500, JSON.stringify(res.body));
-  assert.equal(res.body.code, 'INTERNAL_ERROR');
+async function liveSubmit(ds: string): Promise<{ status: number; body: Record<string, unknown>; rows: Record<string, unknown>[]; logged: string[] }> {
+  const { replies, rows, logged } = await liveSubmits(ds, [{ record: { Title: 'abc' } }]);
+  return { status: replies[0]!.status, body: replies[0]!.body, rows, logged };
+}
+
+/** The committed row answers 200 wrote true with a fixed warning; the failure goes to the log only. */
+function assertCommittedWithWarning(res: { status: number; body: Record<string, unknown>; rows: Record<string, unknown>[]; logged: string[] }, code: string): void {
+  assert.equal(res.status, 200, JSON.stringify(res.body));
   assert.equal(res.body.wrote, true, 'the row write precedes the on-success script');
-  assert.equal(res.body.message, 'Internal server error', 'an internal error message must not reach the client');
-  assert.match(String(res.body.correlationId), /^[0-9a-f-]{36}$/i);
-  assert.deepEqual(Object.keys(res.body).sort(), ['code', 'correlationId', 'message', 'wrote']);
+  assert.equal(res.body.dryRun, false);
+  const warning = res.body.warning as Record<string, unknown>;
+  assert.equal(warning.code, 'POST_COMMIT_FAILED');
+  assert.equal(typeof warning.message, 'string');
+  assert.match(String(warning.requestId), /^[0-9a-z]+$/);
   assert.equal(Object.hasOwn(res.body, 'error'), false);
-  assert.equal(res.rows.length, 1, 'the write is not rolled back');
+  assert.doesNotMatch(JSON.stringify(res.body), /Unable to cast|Uncaptured|for each|stack/i, 'the failure text never reaches the client');
+  assert.equal(res.rows.length, 1, 'exactly one row: the write is not rolled back');
+  const line = res.logged.map((text) => { try { return JSON.parse(text) as Record<string, unknown>; } catch { return null; } }).find((entry) => entry?.event === 'post-commit-failed');
+  assert.ok(line, `a post-commit log line: ${res.logged.join('\n')}`);
+  assert.equal(line.table, 'Book');
+  assert.equal(line.code, code);
+  assert.equal(line.requestId, warning.requestId, 'the warning and the log line share the request id');
+  assert.doesNotMatch(JSON.stringify(line), /abc/, 'no record values in the log');
+}
+
+test('an on-success script that throws after the commit answers 200 with a warning and leaves exactly one row', async () => {
+  assertCommittedWithWarning(await liveSubmit(DS_INTERNAL), 'DELUGE_UNCAPTURED');
 });
 
-test('a Creator-text Deluge error stays out of the client response after the write', async () => {
-  const res = await liveSubmit(DS_DELUGE);
-  assert.equal(res.status, 500, JSON.stringify(res.body));
-  assert.equal(res.body.code, 'INTERNAL_ERROR');
-  assert.equal(res.body.wrote, true);
-  assert.equal(res.body.message, 'Internal server error');
-  assert.match(String(res.body.correlationId), /^[0-9a-f-]{36}$/i);
-  assert.deepEqual(Object.keys(res.body).sort(), ['code', 'correlationId', 'message', 'wrote']);
-  assert.doesNotMatch(JSON.stringify(res.body), /Unable to cast|abc/);
-  assert.equal(Object.hasOwn(res.body, 'error'), false);
+test('a Creator-text Deluge error after the write is a 200 warning and stays out of the client response', async () => {
+  assertCommittedWithWarning(await liveSubmit(DS_DELUGE), 'DELUGE_CONVERSION');
+});
+
+/** A clean on-success script: the submit commits and answers 200 without a warning. */
+const DS_CLEAN = throwOnSuccess('\t\t\t\t\t\t\tinput.Title = input.Title;');
+
+test('the same idempotency key twice writes one row and answers the same response', async () => {
+  const body = { record: { Title: 'once' }, idempotencyKey: 'c2c-key-0001' };
+  const res = await liveSubmits(DS_CLEAN, [body, body]);
+  assert.equal(res.replies[0]!.status, 200, res.replies[0]!.raw);
+  assert.equal(res.replies[0]!.body.wrote, true);
+  assert.equal(res.rows.length, 1, 'a repeated key never writes a second row');
+  assert.equal(res.replies[1]!.status, res.replies[0]!.status);
+  assert.equal(res.replies[1]!.raw, res.replies[0]!.raw, 'the repeat gets the original answer byte for byte');
+});
+
+test('a repeated key after a post-commit failure replays the committed 200 warning, not a second row', async () => {
+  const body = { record: { Title: 'abc' }, idempotencyKey: 'c2c-key-0002' };
+  const res = await liveSubmits(DS_INTERNAL, [body, body]);
+  assert.equal(res.replies[0]!.status, 200, res.replies[0]!.raw);
+  assert.equal((res.replies[0]!.body.warning as Record<string, unknown>).code, 'POST_COMMIT_FAILED');
+  assert.equal(res.replies[1]!.raw, res.replies[0]!.raw);
+  assert.equal(res.rows.length, 1);
+});
+
+test('two concurrent submits with one key write one row; the second waits for the first answer', async () => {
+  const body = { record: { Title: 'race' }, idempotencyKey: 'c2c-key-0003' };
+  const res = await liveSubmits(DS_CLEAN, [[body, body]]);
+  assert.equal(res.rows.length, 1);
+  assert.equal(res.replies[0]!.raw, res.replies[1]!.raw);
+});
+
+test('a malformed idempotency key is ignored and never stored', async () => {
+  const res = await liveSubmits(DS_CLEAN, [
+    { record: { Title: 'bad' }, idempotencyKey: 'x' },
+    { record: { Title: 'bad' }, idempotencyKey: 'x' },
+  ]);
+  assert.equal(res.rows.length, 2, 'a malformed key does not deduplicate');
+  assert.equal(Object.hasOwn(res.rows[0]!, 'idempotencyKey'), false, 'the key is never written as a column');
+});
+
+test('different keys, or no key, still write one row per submit', async () => {
+  const res = await liveSubmits(DS_CLEAN, [
+    { record: { Title: 'a' }, idempotencyKey: 'c2c-key-0004' },
+    { record: { Title: 'b' }, idempotencyKey: 'c2c-key-0005' },
+    { record: { Title: 'c' } },
+    { record: { Title: 'c' } },
+  ]);
+  assert.equal(res.rows.length, 4);
+});
+
+/** One form with a `must have` field; on success makes the submit the deluge handler. */
+const DS_MANDATORY = throwOnSuccess('\t\t\t\t\t\t\tinput.Title = input.Title;').replace('\t\t\tTitle\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)', '\t\t\tmust have Title\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)\n\t\t\tNotes\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)');
+
+test('an empty submit on a form with a mandatory field is refused and writes nothing', async () => {
+  assert.notEqual(DS_MANDATORY, DS_CLEAN, 'the must have field was spliced in');
+  const res = await liveSubmits(DS_MANDATORY, [{ record: {} }, { record: { Notes: 'n', Title: '' } }]);
+  for (const reply of res.replies) {
+    assert.equal(reply.status, 422, reply.raw);
+    assert.equal(reply.body.code, 'MANDATORY_MISSING', reply.raw);
+    assert.equal(reply.body.field, 'Title', reply.raw);
+    assert.notEqual(reply.body.wrote, true);
+  }
+  assert.equal(res.rows.length, 0, 'nothing is written');
+});
+
+test('a refused submit does not consume its key: the corrected retry with the same key writes', async () => {
+  const res = await liveSubmits(DS_MANDATORY, [
+    { record: {}, idempotencyKey: 'c2c-key-0006' },
+    { record: { Title: 'fixed' }, idempotencyKey: 'c2c-key-0006' },
+    { record: { Title: 'fixed' }, idempotencyKey: 'c2c-key-0006' },
+  ]);
+  assert.deepEqual(res.replies.map((reply) => reply.status), [422, 200, 200]);
+  assert.equal(res.rows.length, 1);
+  assert.equal(res.replies[2]!.raw, res.replies[1]!.raw);
 });

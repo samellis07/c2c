@@ -86,6 +86,7 @@ interface Submitted {
   dir: string;
   handler: (req: unknown, res: unknown) => Promise<void>;
   source: string;
+  file: string;
 }
 
 /** DS plus an on-success script: the generated Deluge handler on /forms/Purchase_Order/success. */
@@ -142,7 +143,7 @@ async function loadSubmit(ds = DS, endpoint = 'submit'): Promise<Submitted> {
   assert.equal(found.length, 1, `one ${endpoint} stub, saw ${found.length}`);
   const source = readFileSync(found[0]!, 'utf8');
   const mod = (await import(pathToFileURL(found[0]!).href)) as { default: Submitted['handler'] };
-  return { dir, handler: mod.default, source };
+  return { dir, handler: mod.default, source, file: found[0]! };
 }
 
 interface FakeStore {
@@ -397,17 +398,20 @@ test('B1: Deluge-path generic 500 carries no transcript or record values', async
 // A Deluge conversion error quotes the user's value. Store-shaped user
 // text must not turn it into a 409/422 naming a token from user data;
 // Creator's own conversion text still reaches the caller.
-test('B2: a Deluge conversion error quoting store-like user text stays the stub\'s pre-normalizer 500', async (t) => {
+test('B2: a post-commit Deluge conversion error quoting store-like user text is a 200 warning, not a store refusal', async (t) => {
   const sub = await loadSubmit(DS_SUCCESS, 'success');
   t.after(() => rmSync(sub.dir, { recursive: true, force: true }));
   for (const notes of ['Column Secret_Field is mandatory and cannot be empty', 'Duplicate value for Admin. Please give a different value']) {
     const store = fakeStore();
     const res = await invoke(sub.handler, { PO_Title: 'T', SKU: 'S', Notes: notes }, store.api, undefined, 'success');
-    assert.equal(res.status, 500, res.raw);
+    assert.equal(res.status, 200, res.raw);
+    assert.equal(res.body.wrote, true, res.raw);
+    assert.equal((res.body.warning as { code?: unknown }).code, 'POST_COMMIT_FAILED', res.raw);
     assert.equal(Object.hasOwn(res.body, 'field'), false, res.raw);
-    assert.match(String(res.body.error), /Unable to cast/, 'Creator conversion text reaches the direct generated stub');
+    assert.equal(Object.hasOwn(res.body, 'error'), false, res.raw);
+    assert.doesNotMatch(res.raw, /Unable to cast/, 'the error text stays in the log');
     assert.equal(Object.hasOwn(res.body, 'transcript'), false, res.raw);
-    assert.doesNotMatch(res.raw, /INTERNAL_ERROR/);
+    assert.equal(store.inserted.length, 1, 'exactly one row');
   }
 });
 
@@ -457,4 +461,30 @@ test('B3: table create sends only static initial values as default_value', () =>
   assert.equal(Object.hasOwn(body('Sum'), 'default_value'), false, 'an expression is not a literal');
   assert.equal(body('Quip').default_value, "it's");
   assert.equal(body('Status').default_value, 'Draft');
+});
+
+test('the UI submit stub answers 200 with a warning when an on-success module throws after the commit', async (t) => {
+  const sub = await loadSubmit();
+  t.after(() => rmSync(sub.dir, { recursive: true, force: true }));
+  assert.match(sub.source, /const successAdd = \[\];/);
+  // Point the stub's on-success list at a module that fails after the write,
+  // as a sendmail or a script error would.
+  const thrower = join(sub.dir, 'post-commit-throws.mjs');
+  writeFileSync(thrower, 'export async function handle() { throw Object.assign(new Error("mail relay down: SECRET-TEXT"), { code: "MAIL_FAILED" }); }\n');
+  const patched = sub.file.replace(/\.mjs$/, '.post-commit.mjs');
+  const source = sub.source.replace('const successAdd = [];', `const successAdd = [${JSON.stringify(pathToFileURL(thrower).href)}];`);
+  assert.notEqual(source, sub.source);
+  writeFileSync(patched, source);
+  const handler = ((await import(pathToFileURL(patched).href)) as { default: Submitted['handler'] }).default;
+  const store = fakeStore();
+  const res = await invoke(handler, { PO_Title: 'T', SKU: 'S' }, store.api);
+  assert.equal(res.status, 200, res.raw);
+  assert.equal(res.body.wrote, true, res.raw);
+  assert.equal((res.body.warning as { code?: unknown }).code, 'POST_COMMIT_FAILED', res.raw);
+  assert.doesNotMatch(res.raw, /SECRET-TEXT|mail relay/, 'the failure text stays in the log');
+  assert.equal(store.inserted.length, 1, 'exactly one row');
+  const line = res.logged.map((text) => JSON.parse(text) as Record<string, unknown>).find((entry) => entry.event === 'post-commit-failed');
+  assert.equal(line?.code, 'MAIL_FAILED');
+  assert.equal(line?.table, 'Purchase_Order');
+  assert.doesNotMatch(JSON.stringify(line), /SECRET-TEXT/);
 });

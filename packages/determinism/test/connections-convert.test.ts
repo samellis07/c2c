@@ -208,8 +208,11 @@ test('generated CRM on success: dry run sends nothing; live without a connection
     (await import(pathToFileURL(join(unset, 'functions/c2c-store.mjs')).href)).setDatastore(memoryStore());
     (await import(pathToFileURL(join(unset, 'functions/c2c-connections.mjs')).href)).setConnectionCredentials(async () => 'tok');
     const refused = await invoke((await import(pathToFileURL(join(unset, handlerPath)).href)).default, req);
-    assert.equal(refused.status, 500);
-    assert.match(String(refused.body.error), /live-refused: zoho\.crm\.createRecord: no Catalyst connection configured for "c2c_crm"/);
+    // The refusal comes after the row write: a 200 warning, the refusal text stays in the log.
+    assert.equal(refused.status, 200, JSON.stringify(refused.body));
+    assert.equal(refused.body.wrote, true);
+    assert.equal((refused.body.warning as { code?: unknown }).code, 'POST_COMMIT_FAILED');
+    assert.doesNotMatch(JSON.stringify(refused.body), /live-refused/);
     assert.equal(seen.length, 0);
 
     const liveDir = await writeTree(app, { mode: 'live', appTimeZone: 'Asia/Kolkata', zohoDc: 'in', connections: { c2c_crm: 'c2c_crm' } });

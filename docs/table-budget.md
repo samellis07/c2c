@@ -33,9 +33,9 @@ default deploy creates it only with `--mail`: the "default" columns.
 | `C2C_Flow_History` | 2 | 2 | 2 |
 | `C2CJobCheckpoint` | 35 | 35 | 35 |
 | `c2c_mail_log` | 0 | 64 | 0 |
-| async on-success tables | 0 | 0 | 28 |
-| support tables | 37 | 101 | 65 |
-| **all tables** | **1072** | **1136** | **1100** |
+| async on-success tables | 0 | 0 | 30 |
+| support tables | 37 | 101 | 67 |
+| **all tables** | **1072** | **1136** | **1102** |
 | largest app | 44 | 45 | 44 |
 
 Apps whose sweeper checkpoints in `C2CJobCheckpoint`: 35.
@@ -80,7 +80,7 @@ counted in c2c/total already.
 | 30 | 15 | 2 | 17 | 1 | 16 | 2 | 18 | 1 |
 | 31 | 39 | 2 | 41 | 1 | 40 | 0 | 40 | 1 |
 | 32 | 43 | 2 | 45 | 1 | 44 | 0 | 44 | 1 |
-| 33 | 6 | 1 | 7 | 0 | 6 | 0 | 6 | 0 |
+| 33 | 6 | 1 | 7 | 0 | 6 | 2 | 8 | 0 |
 | 34 | 11 | 1 | 12 | 0 | 11 | 0 | 11 | 0 |
 | 35 | 8 | 0 | 8 | 0 | 8 | 2 | 10 | 0 |
 | 36 | 12 | 2 | 14 | 1 | 13 | 0 | 13 | 1 |

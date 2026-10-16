@@ -2848,3 +2848,84 @@ ${field('Mode', 'text')}
     rmSync(built.dir, { recursive: true, force: true });
   }
 });
+
+/** Boot the Item form with `respond` as fetch, and return helpers to submit and read the outcome. */
+async function bootSubmitForm(respond: (body: Record<string, unknown>) => Promise<Response> | Response) {
+  const runtime = await browserRuntime();
+  const posts: Record<string, unknown>[] = [];
+  const model = workflowModel([], { successMessage: 'Item Added Successfully' } as Partial<UiModel['forms'][number]>);
+  const dom = new JSDOM('<!doctype html><body><main id="main"></main><div id="toasts"></div></body>', {
+    url: 'http://localhost/slate/index.html#/form/Item',
+  });
+  (dom.window as unknown as { fetch: typeof fetch }).fetch = (async (_endpoint: string, init: { body?: string }) => {
+    const body = JSON.parse(String(init && init.body)) as Record<string, unknown>;
+    posts.push(body);
+    return respond(body);
+  }) as unknown as typeof fetch;
+  await runtime.boot(model, dom.window.document);
+  const tick = async (n = 30) => {
+    for (let i = 0; i < n; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+  await tick();
+  const win = dom.window as unknown as JsWin;
+  const input = win.document.querySelector('input[name="Title"]') as unknown as { value: string };
+  input.value = 'Hello';
+  const submit = () => win.document.querySelector('form')!.dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+  const toasts = () => [...win.document.querySelectorAll('#toasts .toast')].map((el) => ({ kind: el.getAttribute('data-kind'), text: el.textContent }));
+  const banner = () => win.document.querySelector('[data-banner]')?.textContent ?? '';
+  const button = () => win.document.querySelector('button[type="submit"]') as unknown as { disabled: boolean };
+  return { posts, submit, tick, toasts, banner, button };
+}
+
+function jsonResponse(status: number, body: unknown) {
+  return { ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body) } as unknown as Response;
+}
+
+test('browser form: a committed submit whose on-success failed (200 + warning) shows the success confirmation', async () => {
+  const form = await bootSubmitForm(() =>
+    jsonResponse(200, { dryRun: false, wrote: true, values: { ROWID: '9' }, warning: { code: 'POST_COMMIT_FAILED', message: 'The record was saved. An action after the save did not complete.', requestId: 'r1' } }),
+  );
+  form.submit();
+  await form.tick();
+  assert.equal(form.banner(), 'Item Added Successfully');
+  assert.deepEqual(form.toasts(), [{ kind: 'success', text: 'Item Added Successfully' }]);
+});
+
+test('browser form: a 5xx that says wrote true is a stored row and shows the success confirmation, not a failure', async () => {
+  const form = await bootSubmitForm(() => jsonResponse(500, { code: 'INTERNAL_ERROR', message: 'Internal server error', correlationId: 'c', wrote: true }));
+  form.submit();
+  await form.tick();
+  assert.equal(form.banner(), 'Item Added Successfully');
+  assert.deepEqual(form.toasts().map((toast) => toast.kind), ['success']);
+});
+
+test('browser form: submit is disabled while in flight; a second press posts nothing', async () => {
+  let release: (res: Response) => void = () => {};
+  const form = await bootSubmitForm(() => new Promise<Response>((resolve) => (release = resolve)));
+  form.submit();
+  await form.tick();
+  assert.equal(form.button().disabled, true, 'the submit control is disabled while the post is in flight');
+  form.submit();
+  form.submit();
+  await form.tick();
+  assert.equal(form.posts.length, 1, 'only one post while in flight');
+  release(jsonResponse(200, { dryRun: false, wrote: true, values: {} }));
+  await form.tick();
+  assert.equal(form.button().disabled, false, 're-enabled once the answer arrives');
+  assert.deepEqual(form.toasts().map((toast) => toast.kind), ['success']);
+});
+
+test('browser form: a retry after a failed answer reuses the idempotency key; a committed submit starts a new one', async () => {
+  const answers = [jsonResponse(503, { code: 'INTERNAL_ERROR', message: 'Internal server error' }), jsonResponse(200, { dryRun: false, wrote: true, values: {} })];
+  const form = await bootSubmitForm(() => answers.shift() ?? jsonResponse(200, { dryRun: false, wrote: true, values: {} }));
+  for (let i = 0; i < 3; i++) {
+    form.submit();
+    await form.tick();
+  }
+  const keys = form.posts.map((body) => body.idempotencyKey);
+  assert.equal(keys.length, 3);
+  for (const key of keys) assert.match(String(key), /^c2c-[0-9a-f-]{32,36}$/);
+  assert.equal(keys[1], keys[0], 'the retry of a failed submit sends the same key');
+  assert.notEqual(keys[2], keys[1], 'after a committed submit the next one is a new record');
+  assert.deepEqual(form.toasts().map((toast) => toast.kind), ['failure', 'success', 'success']);
+});
