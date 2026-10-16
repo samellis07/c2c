@@ -1160,7 +1160,7 @@ export function elementFromZml(
       const snippetTodos: UiElement[] = [];
       if (compiled?.reason !== EXECUTE_FUNCTION_BUTTON) {
         const where = `snippet ${name ?? tag}${env ? ` on page ${env.page}` : ''}`;
-        const guidance = serverSnippetGuidance(decoded, compiled?.reason, where);
+        const guidance = serverSnippetGuidance(decoded, compiled?.reason, where, env?.app);
         snippetTodos.push({
           tag,
           kind: 'todo' as const,

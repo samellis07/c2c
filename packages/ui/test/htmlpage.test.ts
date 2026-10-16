@@ -2920,6 +2920,139 @@ test('a record-summary frame generates a link to the authorized record route', (
   assert.match(compiled.file?.source ?? '', /shim\.datastore\.query/);
 });
 
+test('a page snippet reading zoho.loginuserid and generating an internal record-summary iframe compiles cleanly', () => {
+  const employeeApp = `${ORDERS}
+\tform Add_Employee
+\t{
+\t\tOfficial_Email
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tlist Employee_Profile1
+\t{
+\t\tshow all rows from Add_Employee
+\t\t(
+\t\t\tOfficial_Email
+\t\t)
+\t}`;
+  const snippet = `htmlpage hp1()
+content
+<%{
+\tloginuserid = Add_Employee[Official_Email == zoho.loginuserid].ID;
+\tif(loginuserid != null)
+\t{
+\t\t%>
+<iframe zc_mobileView='inline' width="96%" style="height:78vh !important;padding: 1% 2%;" src="https://app.zohocreator.in<%=zoho.appuri%>record-summary/Employee_Profile1/<%=loginuserid%>"></iframe>
+<%
+\t}
+\telse
+\t{
+\t\t%>
+<div>You are not added as an Employee!</div>
+<%
+\t}
+}%>`;
+  const app = appOf(employeeApp);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, true, compiled.reason);
+  assert.deepEqual(compiled.manualReasons, []);
+  assert.match(compiled.file?.source ?? '', /#\/report\/Employee_Profile1\/row\//);
+  const { model } = generateUi(appOf(`${employeeApp}\n${pageWithSnippet(snippet)}`));
+  assert.equal(model.todos.filter((t) => t.reason === SNIPPET_TODO).length, 0);
+});
+
+test('a snippet building an iframe with an external arbitrary domain or unverified dynamic protocol flags dynamic-url and fails closed', () => {
+  const employeeApp = `${ORDERS}
+\tform Add_Employee
+\t{
+\t\tOfficial_Email
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tlist Employee_Profile1
+\t{
+\t\tshow all rows from Add_Employee
+\t\t(
+\t\t\tOfficial_Email
+\t\t)
+\t}`;
+  const externalSnippet = `htmlpage hp1()
+content
+<%{
+\tloginuserid = Add_Employee[Official_Email == zoho.loginuserid].ID;
+\tif(loginuserid != null)
+\t{
+\t\t%>
+<iframe src="https://arbitrary.com/record-summary/Employee_Profile1/<%=loginuserid%>"></iframe>
+<%
+\t}
+}%>`;
+  const app = appOf(employeeApp);
+  const compiledExternal = compileHtmlpage(app, 'Home', 'hp1', externalSnippet);
+  assert.equal(compiledExternal.ok, false);
+  assert.ok(compiledExternal.manualReasons?.includes('dynamic-url'));
+
+  const protocolSnippet = `htmlpage hp1()
+content
+<%{
+\tloginuserid = Add_Employee[Official_Email == zoho.loginuserid].ID;
+\tif(loginuserid != null)
+\t{
+\t\t%>
+<iframe src="javascript:<%=loginuserid%>"></iframe>
+<%
+\t}
+}%>`;
+  const compiledProtocol = compileHtmlpage(app, 'Home', 'hp1', protocolSnippet);
+  assert.equal(compiledProtocol.ok, false);
+  assert.ok(compiledProtocol.manualReasons?.includes('dynamic-url'));
+
+  const { model } = generateUi(appOf(`${employeeApp}\n${pageWithSnippet(externalSnippet)}`));
+  const snippetTodo = model.todos.find((t) => t.reason === SNIPPET_TODO);
+  assert.ok(snippetTodo, 'snippet remains counted as a TODO');
+  assert.ok(snippetTodo.manualReasons?.includes('dynamic-url'), 'flags dynamic-url reason');
+});
+
+test('a snippet referencing an unknown or undeclared report name continues to emit a TODO', () => {
+  const employeeApp = `${ORDERS}
+\tform Add_Employee
+\t{
+\t\tOfficial_Email
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tlist Employee_Profile1
+\t{
+\t\tshow all rows from Add_Employee
+\t\t(
+\t\t\ttype = list
+\t\t)
+\t}`;
+  const snippet = `htmlpage hp1()
+content
+<%{
+\tloginuserid = Add_Employee[Official_Email == zoho.loginuserid].ID;
+\tif(loginuserid != null)
+\t{
+\t\t%>
+<iframe src="https://app.zohocreator.in<%=zoho.appuri%>record-summary/Unknown_Report/<%=loginuserid%>"></iframe>
+<%
+\t}
+}%>`;
+  const app = appOf(employeeApp);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', snippet);
+  assert.equal(compiled.ok, false);
+  assert.ok(compiled.manualReasons?.includes('dynamic-url'));
+
+  const { model } = generateUi(appOf(`${employeeApp}\n${pageWithSnippet(snippet)}`));
+  const snippetTodo = model.todos.find((t) => t.reason === SNIPPET_TODO);
+  assert.ok(snippetTodo, 'snippet referencing unknown report emits a TODO');
+  assert.ok(snippetTodo.manualReasons?.includes('dynamic-url'));
+});
+
 test('one page with carried <style> CSS, a <script>, an ExecuteFunction button and a ZML image counts only lost constructs', () => {
   const snippet = [
     '<style>.highlight { color: red; }</style>',
