@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import type { App, Field, Form, FunctionDef, Property, Report } from '../../core/src/ir.js';
 import { unquote } from '../../core/src/ir.js';
 import type { BlueprintFieldSpec } from '../../deluge/src/blueprint-rules.js';
-import { blueprintFieldSpecs, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
+import { blueprintFieldSpecs, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { requiredCompositePart } from '../../schema/src/composite-parts.js';
 import { CURRENCY_CODES, fieldTypeRow, normalizeType, type FieldTypeRow } from '../../schema/src/mapping.js';
@@ -422,16 +422,20 @@ export function uiSnippetFiles(model: UiModel): HtmlpageFile[] {
 
 /**
  * The function a report custom action dispatches, or undefined when there is
- * none: the action's workflow must name a declared function whose module
- * generated (functions/custom/<slug>.mjs) and the thisapp registry
- * (functions/thisapp.mjs) must exist. The action endpoint (actionStub in
+ * none. The action's workflow must name, exactly and case-sensitively, a
+ * Creator `type = functions` workflow (kind `creator`, the same binding the
+ * custom-action precheck accepts) whose execution type is `for each record`
+ * or `collection of records`; a standalone Deluge function, a bare script, a
+ * near-name or a workflow with no record execution type is not a binding.
+ * Its generated module (functions/custom/<slug>.mjs) and the thisapp registry
+ * (functions/thisapp.mjs) must also exist. The action endpoint (actionStub in
  * generate.ts) and the button state in the model both read this one
  * predicate, so a button is enabled exactly when its endpoint can run.
  */
 export function actionDispatchTarget(app: App, workflow: string | undefined, delugeFiles: readonly GeneratedFile[]): FunctionDef | undefined {
-  const wanted = (workflow ?? '').trim().toLowerCase();
-  const fn = wanted ? app.functions.find((item) => item.name.toLowerCase() === wanted) : undefined;
-  if (!fn) return undefined;
+  const wanted = (workflow ?? '').trim();
+  const fn = wanted ? app.functions.find((item) => item.kind === 'creator' && item.name === wanted) : undefined;
+  if (!fn || !functionRowBinding(fn)) return undefined;
   const module = `functions/custom/${delugeSlug(fn.name || 'function')}.mjs`;
   const registered = delugeFiles.some((file) => file.path === 'functions/thisapp.mjs') && delugeFiles.some((file) => file.path === module);
   return registered ? fn : undefined;
