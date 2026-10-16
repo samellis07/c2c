@@ -40,15 +40,11 @@
       "label": "not applicable (out of scope)"
     }
   ],
-  "todoCount": 13,
+  "todoCount": 12,
   "todoKinds": [
     {
       "construct": "client-condition-uses-server",
       "count": 11
-    },
-    {
-      "construct": "Custom action \"Convert\" is not migrated; its button is turned off.",
-      "count": 1
     },
     {
       "construct": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",

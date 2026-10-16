@@ -6,11 +6,14 @@
  * (any deploy mode but "live") answers the dry-run preview and writes
  * nothing. A record-bound action without a ROWID is an empty selection — a
  * 200 wrote:false no-op. A row the caller cannot read is a 404; a write the
- * caller's profile denies is a 403 and the row is untouched. A live runtime
+ * caller's profile denies is a 403 and the row is untouched. A View All
+ * without Modify All grant (ownerScope "modify") reads every row but runs the
+ * action only on the caller's own row: another user's row is a 403, the
+ * function does not run and the row is untouched. A live runtime
  * without a writable store fails closed (500), never wrote:true.
  */
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -156,6 +159,13 @@ test('a generated record action writes in live mode and previews in dry-run mode
       mkdirSync(dirname(full), { recursive: true });
       writeFileSync(full, file.data);
     }
+    // Staff has View All without Modify All: every row reads, only its own
+    // rows (Added_User) may be modified.
+    const policyPath = join(dir, 'functions/access-policy.json');
+    const policy = JSON.parse(readFileSync(policyPath, 'utf8')) as { profiles: Record<string, Record<string, { ownerScope?: string }>> };
+    assert.ok(policy.profiles.Staff?.Item, 'the Staff grant on Item was not generated');
+    policy.profiles.Staff.Item.ownerScope = 'modify';
+    writeFileSync(policyPath, JSON.stringify(policy));
     const require = createRequire(import.meta.url);
     const root = repoRoot();
     const fakeSdk = require(join(root, 'tools/catalyst-harness/fake-zcatalyst-sdk-node.cjs')) as FakeSdk;
@@ -170,7 +180,10 @@ test('a generated record action writes in live mode and previews in dry-run mode
     const action = (await import(pathToFileURL(join(dir, actionFile.path)).href)) as ActionModule;
 
     const rowId = String(
-      (await sdkApp.datastore().table('Item').insertRows([{ Name: 'own', Status: 'Open', Secret: 's' }]))[0].ROWID,
+      (await sdkApp.datastore().table('Item').insertRows([{ Name: 'own', Status: 'Open', Secret: 's', Added_User: 'ada@example.test' }]))[0].ROWID,
+    );
+    const otherId = String(
+      (await sdkApp.datastore().table('Item').insertRows([{ Name: 'other', Status: 'Open', Secret: 's', Added_User: 'bo@example.test' }]))[0].ROWID,
     );
     const itemRows = () => fakeSdk.state().tables.Item ?? [];
     const statusOf = (id: string) => itemRows().find((row) => String(row.ROWID) === id)?.Status;
@@ -189,7 +202,9 @@ test('a generated record action writes in live mode and previews in dry-run mode
     store.setDatastore(datastore);
 
     // Grant checks run before any store read.
-    assert.equal((await invoke(action.default, { body: { ROWID: rowId } })).status, 401);
+    const anonymous = await invoke(action.default, { body: { ROWID: rowId } });
+    assert.equal(anonymous.status, 401);
+    assert.equal(anonymous.body.dryRun, false, 'a live reply never claims dry run');
     assert.equal((await invoke(action.default, { ...stranger, body: { ROWID: rowId } })).status, 403);
 
     // A row the caller cannot see is a 404 and untouched.
@@ -211,6 +226,14 @@ test('a generated record action writes in live mode and previews in dry-run mode
     assert.equal(statusOf(rowId), 'Open', 'a denied action must not write');
     assert.equal(updateCalls(), 0);
 
+    // View All without Modify All: another user's row reads but is not the
+    // caller's to modify, so the action is refused and the function never runs.
+    const foreign = await invoke(action.default, { ...staff, body: { ROWID: otherId } });
+    assert.equal(foreign.status, 403, JSON.stringify(foreign.body));
+    assert.equal(foreign.body.wrote, false);
+    assert.equal(statusOf(otherId), 'Open', "another user's row must not be written");
+    assert.equal(updateCalls(), 0);
+
     // The permitted action: the reply claim must match the store.
     const ran = await invoke(action.default, { ...staff, body: { ROWID: rowId } });
     assert.equal(ran.status, 200, JSON.stringify(ran.body));
@@ -218,6 +241,8 @@ test('a generated record action writes in live mode and previews in dry-run mode
     assert.equal(ran.body.wrote, true);
     assert.equal(updateCalls(), 1, 'the field write must reach the adapter exactly once');
     assert.equal(statusOf(rowId), 'Lost', 'the function did not persist its write');
+    assert.equal(statusOf(otherId), 'Open');
+    assert.equal('result' in ran.body, false, 'the reply must not echo the function result');
 
     // A live runtime with no update adapter fails closed: 500, never wrote:true.
     store.setDatastore({ query: datastore.query });

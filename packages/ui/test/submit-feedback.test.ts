@@ -190,20 +190,100 @@ test('a custom action whose endpoint is a dry-run stub is turned off and named',
   assert.equal(doc.querySelector('[data-action-preview]')?.textContent, 'Not available yet, so turned off: Export All, Mark as Lost.');
 });
 
-test('every generated custom action is a counted stub: preview in the model and a todo per action', () => {
-  const source = readFileSync('fixtures/redistributable/library-application-system/library_application.ds', 'utf8');
-  const built = buildUi(deriveIr(parse(source)));
-  const report = built.model.reports.find((item) => item.name === 'All_Book_Transactions')!;
-  const names = report.customActions.map((action) => action.name);
-  assert.ok(names.includes('Mark as Lost'), names.join(', '));
-  assert.ok(report.customActions.every((action) => action.preview === true), 'each stub action is marked preview');
-  for (const name of names) {
-    assert.ok(
-      built.model.todos.some((todo) => todo.area === 'report' && todo.name === 'All_Book_Transactions' && todo.reason.includes(`"${name}"`)),
-      `the migration todos count ${name}`,
-    );
-  }
-  // The emitted endpoint is still the dry-run stub the flag describes.
-  const stub = built.files.find((file) => file.path === 'functions/reports/all-book-transactions-action-mark-as-lost.mjs');
-  assert.match(String(stub?.data), /Dry run: the workflow is not executed/);
+const ACTION_APP = [
+  'application "Actions"',
+  '{',
+  '\tform Item',
+  '\t{',
+  '\t\tName',
+  '\t\t(',
+  '\t\t\ttype = text',
+  '\t\t)',
+  '\t\tStatus',
+  '\t\t(',
+  '\t\t\ttype = text',
+  '\t\t)',
+  '\t}',
+  '\tlist All_Items',
+  '\t{',
+  '\t\tshow all rows from Item',
+  '\t\t(',
+  '\t\t\tName',
+  '\t\t\tStatus',
+  '\t\t\tcustom action "Mark as Lost"',
+  '\t\t\t(',
+  '\t\t\t\tworkflow = Mark_Lost',
+  '\t\t\t\tcolumn header = "Mark as Lost"',
+  '\t\t\t)',
+  '\t\t\tcustom action "Archive"',
+  '\t\t\t(',
+  '\t\t\t\tworkflow = Not_A_Function',
+  '\t\t\t\tcolumn header = "Archive"',
+  '\t\t\t)',
+  '\t\t)',
+  '\t}',
+  '\tworkflow',
+  '\t{',
+  '\tfunctions',
+  '\t{',
+  '\t\tMark_Lost as "Mark Lost"',
+  '\t\t{',
+  '\t\t\ttype = functions',
+  '\t\t\tform = Item',
+  '\t\t\texecution type = for each record',
+  '\t\t\ton start',
+  '\t\t\t{',
+  '\t\t\t\tactions',
+  '\t\t\t\t{',
+  '\t\t\t\t\trec.Status = "Lost";',
+  '\t\t\t\t}',
+  '\t\t\t}',
+  '\t\t}',
+  '\t}',
+  '\t}',
+  '}',
+  '',
+].join('\n');
+
+test('only an action with no generated function is a counted stub: the model, the todos, the report and the endpoint agree', () => {
+  const built = buildUi(deriveIr(parse(ACTION_APP)));
+  const report = built.model.reports.find((item) => item.name === 'All_Items')!;
+  const byName = new Map(report.customActions.map((action) => [action.name, action]));
+  assert.equal(byName.get('Mark as Lost')?.preview, undefined, 'a dispatchable action is not a preview');
+  assert.equal(byName.get('Archive')?.preview, true, 'an action with no generated function is a preview');
+  const actionTodos = built.model.todos.filter((todo) => todo.area === 'report' && /^Custom action /.test(todo.reason));
+  assert.deepEqual(actionTodos.map((todo) => todo.reason), ['Custom action "Archive" is not migrated; its button is turned off.']);
+  // migration-report.json counts the same UI stubs the model lists.
+  const migration = built.files.find((file) => file.path.endsWith('migration-report.json'));
+  assert.ok(migration, 'migration-report.json was generated');
+  assert.equal((JSON.parse(String(migration.data)) as { uiTodoCount: number }).uiTodoCount, built.model.todos.length);
+  // The endpoint follows the same predicate: the live dispatch, or a refusal.
+  const live = String(built.files.find((file) => file.path === 'functions/reports/all-items-action-mark-as-lost.mjs')?.data);
+  const stub = String(built.files.find((file) => file.path === 'functions/reports/all-items-action-archive.mjs')?.data);
+  assert.match(live, /ctx\.shim\.thisapp\.call/);
+  assert.doesNotMatch(stub, /thisapp/);
+  assert.match(stub, /has no generated function to run/);
+});
+
+test('the client draws a dispatchable action enabled and turns off only the stub', async () => {
+  const runtime = await loadRuntime();
+  const built = buildUi(deriveIr(parse(ACTION_APP)));
+  const report = built.model.reports.find((item) => item.name === 'All_Items')!;
+  const model = modelWith(report.customActions as unknown as Record<string, unknown>[], [
+    { field: 'Mark as Lost', label: 'Mark as Lost', action: '/reports/All_Items/actions/mark-as-lost' },
+    { field: 'Archive', label: 'Archive', action: '/reports/All_Items/actions/archive' },
+  ]);
+  const { win, doc, calls } = setup('#/report/R', live);
+  await runtime.boot(model, doc);
+  await settle();
+  const buttonFor = (endpoint: string) => doc.querySelector(`[data-rows] tbody tr button[data-action="${endpoint}"]`) as HTMLButtonElement | null;
+  const lost = buttonFor('/reports/All_Items/actions/mark-as-lost');
+  const archive = buttonFor('/reports/All_Items/actions/archive');
+  assert.ok(lost && archive, 'both row actions are drawn');
+  assert.equal(lost.disabled, false, 'the dispatchable action is enabled');
+  assert.equal(archive.disabled, true, 'the stub action is turned off');
+  archive.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+  await settle();
+  assert.equal(calls.filter((c) => c.url.includes('/actions/archive')).length, 0, 'a turned-off action posts nothing');
+  assert.equal(doc.querySelector('[data-action-preview]')?.textContent, 'Not available yet, so turned off: Archive.');
 });
