@@ -9,34 +9,238 @@
   "cases": [
     {
       "id": "baseline-all-users",
-      "steps": [],
-      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
-      "tags": [
-        "superseded"
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Maple",
+              "last_name": "Bravo"
+            },
+            "Mail_ID": "mail-id.689@example.com",
+            "Phone": "+1555013901",
+            "Role": "Technician/Designer"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "All_Users",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Mail_ID": "mail-id.689@example.com",
+              "Phone": "+1555013901",
+              "Role": "Technician/Designer",
+              "Name_first_name": "Maple",
+              "Name_last_name": "Bravo"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "Creator's baseline read held one record left by the earlier session ('mail-id.689@example.com'); replayed as a setup write so the stored state matches the capture."
       ]
     },
     {
       "id": "add-user-valid-submit",
-      "steps": [],
-      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Maple",
+              "last_name": "Bravo"
+            },
+            "Mail_ID": "mail-id.421@example.com",
+            "Phone": "+1555011444",
+            "Role": "Technician/Designer"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "User Added Successfully",
+            "error": [
+              "Error details: Error in executing On Add - On Success script User Limit Reached Line:(3)"
+            ]
+          },
+          "tags": [
+            "env-artifact:trial-user-limit"
+          ],
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Mail_ID": "mail-id.421@example.com",
+              "Phone": "+1555011444",
+              "Role": "Technician/Designer",
+              "Name_first_name": "Maple",
+              "Name_last_name": "Bravo"
+            }
+          ]
+        }
+      },
       "tags": [
-        "superseded"
+        "env-artifact:trial-user-limit"
+      ],
+      "notes": [
+        "Creator returned 3000 with an embedded 'On Add - On Success script User Limit Reached' error (trial-account user cap): the insert is not blocked."
       ]
     },
     {
       "id": "add-user-invalid-duplicate-mail-id",
-      "steps": [],
-      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
-      "tags": [
-        "superseded"
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Maple",
+              "last_name": "Bravo"
+            },
+            "Mail_ID": "mail-id.421@example.com",
+            "Phone": "+1555011444",
+            "Role": "Technician/Designer"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Lumen",
+              "last_name": "North"
+            },
+            "Mail_ID": "mail-id.421@example.com",
+            "Phone": "+1555015985",
+            "Role": "Technician/Designer"
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Mail_ID": "This value already exists. Enter a unique value."
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Mail_ID": "mail-id.421@example.com",
+              "Phone": "+1555011444",
+              "Role": "Technician/Designer",
+              "Name_first_name": "Maple",
+              "Name_last_name": "Bravo"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "The duplicate attempt used a different Phone so only the Mail_ID collision is exercised, as captured."
       ]
     },
     {
       "id": "post-all-users",
-      "steps": [],
-      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
-      "tags": [
-        "superseded"
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Maple",
+              "last_name": "Bravo"
+            },
+            "Mail_ID": "mail-id.689@example.com",
+            "Phone": "+1555013901",
+            "Role": "Technician/Designer"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Maple",
+              "last_name": "Bravo"
+            },
+            "Mail_ID": "mail-id.421@example.com",
+            "Phone": "+1555011444",
+            "Role": "Technician/Designer"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "All_Users",
+          "expect": {
+            "outcome": "rows",
+            "count": 2
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 2
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Mail_ID": "mail-id.689@example.com",
+              "Phone": "+1555013901",
+              "Role": "Technician/Designer",
+              "Name_first_name": "Maple",
+              "Name_last_name": "Bravo"
+            },
+            {
+              "Mail_ID": "mail-id.421@example.com",
+              "Phone": "+1555011444",
+              "Role": "Technician/Designer",
+              "Name_first_name": "Maple",
+              "Name_last_name": "Bravo"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "Both records carry Name 'Maple Bravo' \u2014 the r3 baseline record and the r4 valid submit used the same first/last names per their plans; a plan-data coincidence, not a bug."
       ]
     }
   ]
