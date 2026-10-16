@@ -218,7 +218,11 @@ export function checkCell(column: WriteRuleColumn, value: unknown): { value: unk
   if (isMissingCell(value)) return { value };
   if (column.dataType === 'Date') {
     if (typeof value !== 'string') return { rule: 'date-format' };
-    const next = normalizeDate(value);
+    // A Deluge date a script assigns (`input.D = input.End.subDay(n)`) reaches
+    // the write as its serial form, yyyy-MM-ddT00:00:00. Creator stores the
+    // day; only midnight is folded, so a time of day is never dropped silently.
+    const serial = /^(\d{4}-\d{2}-\d{2})T00:00:00$/.exec(value.trim());
+    const next = normalizeDate(serial ? serial[1]! : value);
     return next.ok ? { value: next.value } : { rule: 'date-format' };
   }
   if (column.dataType === 'DateTime') {

@@ -183,3 +183,22 @@ test('insertRow drops caller system columns the same way', async () => {
     assert.equal(row[key], undefined, `caller ${key} persisted`);
   }
 });
+
+test('a script-computed Deluge date is stored as its day in a Date column', async () => {
+  const { runtime, calls } = live();
+  const ctx = runtime.context({});
+  const end = runtime.shim.date.parse('25-Oct-2026', ctx);
+  const when = runtime.shim.date.subDay(end, 294, ctx);
+  await runtime.shim.datastore.insert(ctx, 'Orders', { Name: 'ok', When: when });
+  const insert = calls.find((c) => c.op === 'insert');
+  assert.equal(insert?.rows?.[0]?.When, '2026-01-04');
+});
+
+test('a Date column still refuses a date-time that carries a time of day', async () => {
+  const { runtime, calls } = live();
+  const ctx = runtime.context({});
+  const err = await refused(runtime.shim.datastore.insert(ctx, 'Orders', { Name: 'ok', When: '2026-01-04T10:30:00' }));
+  assert.equal(err.field, 'When');
+  assert.equal(err.rule, 'date-format');
+  assert.equal(calls.some((c) => c.op === 'insert'), false);
+});
