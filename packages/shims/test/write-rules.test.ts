@@ -61,6 +61,10 @@ test('dates normalize unambiguous Creator formats and refuse the rest', () => {
   assert.equal(refused({ name: 'When', dataType: 'DateTime' }, '2024-01-05T13:45:00Z'), 'date-format');
   assert.equal(refused({ name: 'When', dataType: 'DateTime' }, '2024-01-05 13:45:00+05:30'), 'date-format');
   assert.equal(refused(col, ''), null);
+  // The serial form of a Deluge date (script-assigned) folds to its day; a time of day does not.
+  assert.deepEqual(checkCell(col, '2026-01-04T00:00:00'), { value: '2026-01-04' });
+  assert.equal(refused(col, '2026-01-04T10:30:00'), 'date-format');
+  assert.equal(refused(col, '2026-02-30T00:00:00'), 'date-format');
 });
 
 test('checkRow: insert refuses an absent required column; update tolerates absence but not emptiness', () => {
