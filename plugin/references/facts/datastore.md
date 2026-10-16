@@ -352,3 +352,24 @@ against the CSV length as a health check — it counts every input row,
 failed ones included. Reconcile a bulk job by re-counting the table and
 downloading the error CSV; a `Completed` job with a non-empty error
 report is a partial success, not a failure.
+
+## Creator MCP tools
+
+### Read Creator form structure over MCP via ZohoCreator_getFormMetadata
+
+Recipe: [TESTED] `ZohoCreator_getForm` requires the development environment; on a duplicated app it returns error 30150 or 30180.
+
+Rule: [TESTED] use `ZohoCreator_getFormMetadata` to retrieve form structure and fields instead of `ZohoCreator_getForm`.
+
+### Read Creator application inventory via ZohoCreator_getApplicationSummary
+
+Recipe: [TESTED] guessed tool name `getAppMetadata` does not exist in the Creator MCP connector.
+
+Rule: [TESTED] use `ZohoCreator_getApplicationSummary` to read the application structure and component inventory.
+
+### Throttle Creator app duplication to 8 calls per minute
+
+Recipe: [TESTED] `ZohoCreator_duplicateApplication` calls exceeding approximately 8 calls per minute return error code 2955.
+
+Rule: [TESTED] space application duplication requests to stay within 8 calls per minute and back off when error code 2955 is returned.
+
