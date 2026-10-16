@@ -29,6 +29,7 @@ import { Slot, useCustomization } from '../runtime/extend';
 import { hrefFor } from '../runtime/router';
 import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
 import { criteriaTodo, matchCriteria } from './criteria';
+import { multiValueItems } from '../form/value';
 
 type Row = Record<string, unknown>;
 type Load = { state: 'loading' } | { state: 'error'; status: number } | { state: 'ready'; rows: Row[]; notice?: string };
@@ -260,7 +261,7 @@ function ReportList({ report }: { report: ReportSpec }) {
   const needle = query.trim().toLowerCase();
   // The endpoint answers `q` itself; the local pass keeps lookup display
   // values and a harness fake (which answers every query alike) searchable.
-  const shown = needle ? live.filter((row) => report.columns.some((c) => formatValue(row[c.field]).toLowerCase().includes(needle))) : live;
+  const shown = needle ? live.filter((row) => report.columns.some((c) => formatValue(c.multiValue ? multiValueItems(row[c.field]) : row[c.field]).toLowerCase().includes(needle))) : live;
 
   const runAction = useCallback(
     (name: string, endpoint: string, recordId?: string) => {
@@ -340,7 +341,7 @@ function ReportList({ report }: { report: ReportSpec }) {
         );
       }
       const paint = rowStyles(report, row).get(index);
-      const text = own?.cells?.[column.field]?.(value, row) ?? formatValue(value);
+      const text = own?.cells?.[column.field]?.(value, row) ?? formatValue(column.multiValue ? multiValueItems(value) : value);
       if (report.detail && index === 0 && row.ROWID !== undefined && row.ROWID !== '') {
         return (
           <a href={hrefFor('report', report.name, 'row', String(row.ROWID))} data-row-link="">
@@ -654,7 +655,7 @@ function RecordDetail({ report, rowId }: { report: ReportSpec; rowId: string }) 
                 .map((column) => (
                   <div key={column.field}>
                     <dt>{column.label}</dt>
-                    <dd>{own?.cells?.[column.field]?.(detail.record[column.field], detail.record) ?? formatValue(detail.record[column.field])}</dd>
+                    <dd>{own?.cells?.[column.field]?.(detail.record[column.field], detail.record) ?? formatValue(column.multiValue ? multiValueItems(detail.record[column.field]) : detail.record[column.field])}</dd>
                   </div>
                 ))}
             </dl>

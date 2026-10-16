@@ -193,7 +193,7 @@ export {
   type WriteRule,
   type WriteRuleColumn,
 } from './write-rules.js';
-export { encodeMultiValue, isDelugeListText, multiValueCell, multiValueDefault, parseDelugeList } from './multi-value.js';
+export { decodeMultiValue, encodeMultiValue, isDelugeListText, multiValueCell, multiValueDefault, parseDelugeList, splitMultiValueText } from './multi-value.js';
 export {
   FILE_NAME_MAX,
   FILE_OBJECT_KEY,

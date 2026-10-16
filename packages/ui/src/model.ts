@@ -17,6 +17,7 @@ import { CURRENCY_CODES, fieldTypeRow, normalizeType, type FieldTypeRow } from '
 import { criteriaHasTodo, sealRelativeCriteria } from '../../shims/src/criteria.js';
 import { LIMITS } from '../../shims/src/index.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
+import { isMultiChoiceField } from '../../schema/src/generator.js';
 import {
   droppedStyleReason,
   carriedStyleRules,
@@ -139,7 +140,7 @@ export interface UiReport {
   todo?: string;
   /** A generated report that renders differently from the export's view type (map/pivot fallback to list) carries the reason here; it is not a todo. */
   note?: string;
-  columns: { field: string; label: string; lookup?: { form: string; field: string }; numeric?: boolean; action?: string }[];
+  columns: { field: string; label: string; lookup?: { form: string; field: string }; numeric?: boolean; multiValue?: boolean; action?: string }[];
   /** Phone record card fields in card order (decorations/report-views.ts); the list columns are the web layout. */
   phoneColumns?: { field: string; label: string }[];
   filters: { field?: string; label?: string }[];
@@ -868,6 +869,8 @@ function buildReport(app: App, report: Report, todos: UiTodo[]): UiReport {
     ...column,
     ...lookupOf(form, column.field),
     ...(numericColumn(form, column.field) ? { numeric: true as const } : {}),
+    // A multi select or checkboxes cell is stored list text: the report shows its choices.
+    ...(multiValueColumn(form, column.field) ? { multiValue: true as const } : {}),
   }));
   // A custom action with `column header` renders as a record column, not a
   // toolbar button. The cell's button posts to the action endpoint.
@@ -979,6 +982,11 @@ function numericColumn(form: Form | undefined, fieldName: string): boolean {
   const field = formField(form, fieldName);
   const id = field ? resolveRow(field)?.id : undefined;
   return id === 'number' || id === 'decimal' || id === 'percent' || id === 'currency';
+}
+
+function multiValueColumn(form: Form | undefined, fieldName: string): boolean {
+  const field = formField(form, fieldName);
+  return !!field && isMultiChoiceField(field);
 }
 
 function choiceField(form: Form | undefined, fieldName: string): boolean {

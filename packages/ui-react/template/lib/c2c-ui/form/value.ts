@@ -112,3 +112,31 @@ export function canonicalNumber(text: string, scale: number | null): string | nu
   const zero = whole === 0n && !/[1-9]/.test(frac);
   return `${m[1] && !zero ? '-' : ''}${whole}${frac ? `.${frac}` : ''}`;
 }
+
+/**
+ * The choices of a stored multi-value cell: a list, JSON list text (["No"]),
+ * a Deluge list literal ({"No"}), the legacy unquoted list ([No]) or one bare
+ * choice. The edit form prefills from it, so saving without touching the field
+ * keeps its choices, and a legacy shape is posted back as a list.
+ */
+export function multiValueItems(value: unknown): string[] {
+  const clean = (items: readonly unknown[]) => items.filter((item) => item !== null && item !== undefined).map((item) => String(item).trim()).filter((item) => item.length > 0);
+  const bare = (text: string) => clean(text.slice(1, -1).split(',').map((item) => item.trim().replace(/^(["'])([\s\S]*)\1$/, '$2')));
+  if (value === undefined || value === null) return [];
+  if (Array.isArray(value)) return clean(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return [String(value)];
+  if (typeof value !== 'string') return [];
+  const text = value.trim();
+  if (!text) return [];
+  if (text.startsWith('[') && text.endsWith(']')) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return bare(text);
+    }
+    if (Array.isArray(parsed) && parsed.every((item) => item === null || typeof item !== 'object')) return clean(parsed);
+  }
+  if (text.startsWith('{') && text.endsWith('}')) return bare(text);
+  return [text];
+}

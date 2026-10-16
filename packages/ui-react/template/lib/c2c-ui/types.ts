@@ -122,6 +122,8 @@ export interface ColumnSpec {
   phone: boolean;
   /** Number-family column (number, decimal, percent, currency): right-aligned and sorted as a number. */
   numeric?: boolean;
+  /** Multi select or checkboxes: the cell is stored list text, shown as its choices. */
+  multiValue?: boolean;
   /** A `column header` custom action: the cell is a per-record button posting here, not a value. */
   action?: string;
 }

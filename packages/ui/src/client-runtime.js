@@ -414,15 +414,31 @@ function fieldDomId(field, prefix) {
   return raw || 'f-field';
 }
 
-/** The items of a stored multi-value cell (JSON list text); any other text is one item. */
-function initialListOf(text) {
-  if (text === '') return [];
-  try {
-    const parsed = JSON.parse(text);
-    if (Array.isArray(parsed)) return parsed.map((item) => String(item));
-  } catch {
-    // Not JSON list text: one choice.
+/**
+ * The choices of a stored multi-value cell, the browser twin of the shims
+ * decodeMultiValue: a list, JSON list text (["No"]), a Deluge list literal
+ * ({"No"}), the legacy unquoted list ([No]) or one bare choice. An edit form
+ * prefills from it, so saving without touching the field keeps its choices.
+ */
+export function multiValueItems(value) {
+  const clean = (items) => items.filter((item) => item !== null && item !== undefined).map((item) => String(item).trim()).filter((item) => item.length > 0);
+  const bare = (text) => clean(text.slice(1, -1).split(',').map((item) => item.trim().replace(/^(["'])([\s\S]*)\1$/, '$2')));
+  if (value === undefined || value === null) return [];
+  if (Array.isArray(value)) return clean(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return [String(value)];
+  if (typeof value !== 'string') return [];
+  const text = value.trim();
+  if (!text) return [];
+  if (text.startsWith('[') && text.endsWith(']')) {
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return bare(text);
+    }
+    if (Array.isArray(parsed) && parsed.every((item) => item === null || typeof item !== 'object')) return clean(parsed);
   }
+  if (text.startsWith('{') && text.endsWith('}')) return bare(text);
   return [text];
 }
 
@@ -457,7 +473,7 @@ function fieldControl(field, id, describedBy) {
     const lookup = field.lookup ? ` data-lookup="${escapeHtml(field.lookup.endpoint)}"` : '';
     const initialValue = field.initialValue != null ? String(field.initialValue) : '';
     // A multi select initial value is the stored JSON list text (["No"]); each item is selected.
-    const initialItems = field.widget === 'multiselect' ? initialListOf(initialValue) : initialValue !== '' ? [initialValue] : [];
+    const initialItems = field.widget === 'multiselect' ? multiValueItems(initialValue) : initialValue !== '' ? [initialValue] : [];
     const mark = (choice) => (initialItems.includes(String(choice)) ? ' selected' : '');
     const listed = new Set((field.choices || []).map((choice) => String(choice)));
     const options = (field.choices || []).map((choice) => `<option value="${escapeHtml(choice)}"${mark(choice)}>${escapeHtml(choice)}</option>`).join('');
@@ -1710,7 +1726,7 @@ export function renderReportRows(report, rows) {
             // `column header` custom action: a per-record button, not a value.
             return `<td${head}${primary}${numeric}${style}><button type="button" data-action="${escapeHtml(column.action)}">${escapeHtml(column.label || column.field)}</button></td>`;
           }
-          const text = source[column.field] != null ? String(source[column.field]) : '';
+          const text = column.multiValue ? multiValueItems(source[column.field]).join(', ') : source[column.field] != null ? String(source[column.field]) : '';
           if (report.detail && id && index === 0) {
             return `<td${head}${primary}${numeric}${style}><a href="#/report/${encodeURIComponent(report.name)}/row/${encodeURIComponent(id)}" data-row-link="">${escapeHtml(text)}</a></td>`;
           }
@@ -2002,7 +2018,8 @@ function fillFormValues(formEl, form, record) {
       if (box && typeof fillSubformRows === 'function') fillSubformRows(box, Array.isArray(value) ? value : []);
       continue;
     }
-    writeFieldValue(formEl, field.name, value);
+    // A multi-value cell is stored as list text (["No"]): select each choice it holds.
+    writeFieldValue(formEl, field.name, field.widget === 'multiselect' ? multiValueItems(value) : value);
   }
 }
 

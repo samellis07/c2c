@@ -347,6 +347,48 @@ test('a numeric column keeps the exact decimal order of the server', { skip: SKI
   assert.deepEqual(view.textOf('Total'), ['-3', '2', '10.25', '10.5'], 'ascending is exact, not text');
 });
 
+const MULTI_SOURCE = `application "Library"
+{
+form Book
+{
+Title
+(
+type = text
+)
+Mark_as_Featured
+(
+type = checkboxes
+values = {"Yes", "No"}
+)
+Genres
+(
+type = multiselect
+values = {"Fiction", "History"}
+)
+}
+list Book_Report
+{
+show all rows from Book
+(
+Title
+Mark_as_Featured
+Genres
+)
+}
+}`;
+
+test('a multi-value column shows its choices, whichever stored shape the row holds', { skip: SKIP }, async (t) => {
+  const report = reactAppSpec(appOf(MULTI_SOURCE)).reports.Book_Report!;
+  assert.deepEqual(report.columns.map((c) => [c.field, c.multiValue === true]), [['Title', false], ['Mark_as_Featured', true], ['Genres', true]]);
+  const out = await compileOnly(t, 'multi');
+  const view = await mount(out, report, [
+    { ROWID: '1', Title: 'Dune', Mark_as_Featured: '["No"]', Genres: '["Fiction","History"]' },
+    { ROWID: '2', Title: 'Emma', Mark_as_Featured: '[No]', Genres: '{"History"}' },
+  ], new Set());
+  assert.deepEqual(view.textOf('Mark_as_Featured'), ['No', 'No']);
+  assert.deepEqual(view.textOf('Genres'), ['Fiction, History', 'History']);
+});
+
 test('a blank cell keeps the endpoint place in the order across pages', { skip: SKIP }, async (t) => {
   const out = await compileOnly(t, 'blank');
   const spec = reactAppSpec(appOf());
