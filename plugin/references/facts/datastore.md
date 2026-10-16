@@ -393,3 +393,9 @@ Rule: [TESTED] use `ZohoCreator_getApplicationSummary` to read the application s
 Recipe: [TESTED] `ZohoCreator_duplicateApplication` calls exceeding approximately 8 calls per minute return error code 2955.
 
 Rule: [TESTED] space application duplication requests to stay within 8 calls per minute and back off when error code 2955 is returned.
+
+### Import a Creator .ds file only in the Creator console
+
+Recipe: [TESTED] the Creator MCP connector lists no application import tool; the Creator console import (Create Application > Import from file) accepts a `.ds`/`.zds` only through a native file-picker selection, and a file set programmatically on the upload input is ignored.
+
+Rule: [TESTED] do not attempt to import a `.ds` over MCP; when a workflow needs one imported, it is a human step done in the Creator console.
