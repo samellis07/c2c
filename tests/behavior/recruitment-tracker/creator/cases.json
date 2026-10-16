@@ -1,0 +1,267 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Recruitment Tracker",
+  "source": {
+    "file": "Recruitment_Tracker.ds",
+    "origin": "Creator gallery app recruitment-tracker, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-organization-details",
+      "steps": [
+        {
+          "op": "report",
+          "report": "Organization_Details",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "add-organization-details-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Organization_Details",
+          "record": {
+            "Organization_Name": "Organization_Name lumen 495",
+            "Phone_Number": "+1555017417",
+            "Mail": "mail.101@example.com",
+            "Website": "https://example.com/website/852",
+            "Address": {
+              "address_line_1": "344 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Alpha",
+              "postal_Code": "72265",
+              "country": "United States"
+            },
+            "Postcode": "Postcode prairie 493"
+          },
+          "creator": {
+            "code": 3001,
+            "error": [
+              "'Postcode' has exceeded the maximum character length."
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Organization_Details": []
+        }
+      }
+    },
+    {
+      "id": "add-organization-details-invalid-duplicate-mail",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Organization_Details",
+          "record": {
+            "Organization_Name": "Organization_Name juniper 632",
+            "Phone_Number": "+1555015830",
+            "Mail": "mail.101@example.com",
+            "Website": "https://example.com/website/224",
+            "Address": {
+              "address_line_1": "654 North Way",
+              "district_city": "Lumen",
+              "state_province": "Grain",
+              "postal_Code": "14844",
+              "country": "United States"
+            },
+            "Postcode": "Postcode fable 275"
+          },
+          "creator": {
+            "code": 3001,
+            "error": [
+              "'Postcode' has exceeded the maximum character length."
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Organization_Details": []
+        }
+      }
+    },
+    {
+      "id": "add-organization-details-update-organization-name",
+      "steps": [
+        {
+          "op": "update",
+          "report": "Organization_Details",
+          "where": {
+            "Mail": "mail.101@example.com"
+          },
+          "record": {
+            "Organization_Name": "Organization Name updated 331"
+          },
+          "expect": {
+            "body": {
+              "matched": 0,
+              "updated": 0,
+              "refused": 0
+            }
+          },
+          "creator": {
+            "code": 3100,
+            "message": "No Data Available"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Organization_Details": []
+        }
+      }
+    },
+    {
+      "id": "add-organization-details-boundary-submit",
+      "steps": [
+        {
+          "op": "update",
+          "report": "Organization_Details",
+          "where": {
+            "Mail": "mail.101@example.com"
+          },
+          "record": {
+            "Organization_Name": "Organization Name updated 331"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Organization_Details",
+          "record": {
+            "Organization_Name": "OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",
+            "Phone_Number": "+1555017417",
+            "Mail": "b-mail.101@example.com",
+            "Website": "https://example.com/website/852",
+            "Address": {
+              "address_line_1": "344 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Alpha",
+              "postal_Code": "72265",
+              "country": "United States"
+            },
+            "Postcode": "PPPPPPPPPPPPPPP"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Organization details has been saved"
+          },
+          "bind": {
+            "r_add_organization_details_boundary_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Organization_Details": [
+            {
+              "Mail": "b-mail.101@example.com",
+              "Address_address_line_1": "344 Grain Way",
+              "Address_district_city": "Onyx",
+              "Address_state_province": "Alpha",
+              "Address_postal_Code": "72265",
+              "Address_country": "United States",
+              "Organization_Name": "OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",
+              "Website": "https://example.com/website/852",
+              "Phone_Number": "+1555017417",
+              "Postcode": "PPPPPPPPPPPPPPP"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-organization-details",
+      "steps": [
+        {
+          "op": "update",
+          "report": "Organization_Details",
+          "where": {
+            "Mail": "mail.101@example.com"
+          },
+          "record": {
+            "Organization_Name": "Organization Name updated 331"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Organization_Details",
+          "record": {
+            "Organization_Name": "OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",
+            "Phone_Number": "+1555017417",
+            "Mail": "b-mail.101@example.com",
+            "Website": "https://example.com/website/852",
+            "Address": {
+              "address_line_1": "344 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Alpha",
+              "postal_Code": "72265",
+              "country": "United States"
+            },
+            "Postcode": "PPPPPPPPPPPPPPP"
+          },
+          "bind": {
+            "r_add_organization_details_boundary_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Organization_Details",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_Organization_Details": [
+            {
+              "Mail": "b-mail.101@example.com",
+              "Address_country": "United States",
+              "Address_district_city": "Onyx",
+              "Address_address_line_1": "344 Grain Way",
+              "Address_state_province": "Alpha",
+              "Organization_Name": "OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",
+              "Website": "https://example.com/website/852",
+              "Postcode": "PPPPPPPPPPPPPPP"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
