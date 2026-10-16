@@ -262,6 +262,119 @@
           ]
         }
       }
+    },
+    {
+      "id": "r4-add-organization-details-valid-submit",
+      "steps": [],
+      "skip": "env-artifact:form-entry-limit: Creator refused every Add_Organization_Details submit in the r4 batch with 2965 'maximum number of allowed entries has been reached' -- a per-form entry cap on this golden app, not an app behaviour; the case's planned behaviour was never reached",
+      "tags": [
+        "env-artifact:form-entry-limit"
+      ]
+    },
+    {
+      "id": "r4-add-organization-details-invalid-duplicate-mail",
+      "steps": [],
+      "skip": "env-artifact:form-entry-limit: Creator refused every Add_Organization_Details submit in the r4 batch with 2965 'maximum number of allowed entries has been reached' -- a per-form entry cap on this golden app, not an app behaviour; the case's planned behaviour was never reached",
+      "tags": [
+        "env-artifact:form-entry-limit"
+      ]
+    },
+    {
+      "id": "r4-add-organization-details-update-organization-name",
+      "steps": [
+        {
+          "op": "update",
+          "report": "Organization_Details",
+          "where": {
+            "Mail": "mail.r4-2101@example.com"
+          },
+          "record": {
+            "Organization_Name": "Organization Name updated r4 2331"
+          },
+          "expect": {
+            "body": {
+              "matched": 0,
+              "updated": 0,
+              "refused": 0
+            }
+          },
+          "creator": {
+            "code": 3100,
+            "message": "No Data Available"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Organization_Details": []
+        }
+      },
+      "notes": [
+        "3100 encoded as captured: no r4 record with this Mail exists because the 2965 entry cap blocked both r4 submits"
+      ]
+    },
+    {
+      "id": "r4-post-organization-details",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Organization_Details",
+          "record": {
+            "Organization_Name": "OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",
+            "Phone_Number": "+1555017417",
+            "Mail": "b-mail.101@example.com",
+            "Website": "https://example.com/website/852",
+            "Address": {
+              "address_line_1": "344 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Alpha",
+              "postal_Code": "72265",
+              "country": "United States"
+            },
+            "Postcode": "PPPPPPPPPPPPPPP"
+          },
+          "bind": {
+            "r_add_organization_details_boundary_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Organization_Details",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_Organization_Details": [
+            {
+              "Mail": "b-mail.101@example.com",
+              "Address_address_line_1": "344 Grain Way",
+              "Address_district_city": "Onyx",
+              "Address_state_province": "Alpha",
+              "Address_postal_Code": "72265",
+              "Address_country": "United States",
+              "Organization_Name": "OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",
+              "Website": "https://example.com/website/852",
+              "Phone_Number": "+1555017417",
+              "Postcode": "PPPPPPPPPPPPPPP"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "only the pre-existing r3 boundary record was present; no r4 record exists because the 2965 entry cap blocked both r4 submits"
+      ]
     }
   ]
 }
