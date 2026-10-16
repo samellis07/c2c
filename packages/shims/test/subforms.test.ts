@@ -146,3 +146,27 @@ test('a constructed { __row } subform row writes its values, not the wrapper', a
   assert.deepEqual(saved.map((r) => [r.Item, r.Qty]), [['Bolt', 3]]);
   assert.ok(saved.every((r) => !('__row' in r) && !('values' in r) && !('form' in r)));
 });
+
+test('a grid linked to another form saves and reads its rows with no order column', async () => {
+  const linked: SubformTables = { Quote: [{ field: 'Products', table: 'Product_Line', parentColumn: 'Quote_id' }] };
+  const store = memoryStore();
+  const { parent, children } = splitSubforms({ Title: 'q', Products: [{ Product: '7', Qty: 2 }, { Product: '8', Qty: 1, ROWID: '5' }] }, linked, 'Quote');
+  assert.deepEqual(parent, { Title: 'q' });
+  await saveSubforms(store, '4400000000000000123', children);
+  const rows = store.tables.get('Product_Line')!;
+  assert.deepEqual(rows.map(({ ROWID: _id, ...rest }) => rest), [
+    { Product: '7', Qty: 2, Quote_id: '4400000000000000123' },
+    { Product: '8', Qty: 1, Quote_id: '4400000000000000123' },
+  ]);
+  assert.equal(rows.some((row) => Object.hasOwn(row, 'undefined')), false);
+  const orders: string[] = [];
+  const reading: SubformStore = {
+    async query(table, where, limit, offset, orderBy) {
+      orders.push(String(orderBy));
+      return store.query!(table, where, limit, offset);
+    },
+  };
+  const [read] = await attachSubforms(reading, linked, 'Quote', [{ ROWID: '4400000000000000123' }]);
+  assert.deepEqual(orders, ['ORDER BY ROWID']);
+  assert.deepEqual((read!.Products as Record<string, unknown>[]).map((row) => [row.Product, Object.hasOwn(row, 'Quote_id')]), [['7', false], ['8', false]]);
+});

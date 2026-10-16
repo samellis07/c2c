@@ -11,7 +11,7 @@
  *   Stratus object key the column stores (`storeFileKeys`), and the key must
  *   belong to this form and field.
  */
-import type { App } from '../../core/src/ir.js';
+import type { App, Field } from '../../core/src/ir.js';
 import { fileColumnsOf, generateSchema, subformTablesOf, type SchemaPlan } from '../../schema/src/generator.js';
 import type { SubformTable } from '../../shims/src/subforms.js';
 
@@ -36,7 +36,42 @@ function planOf(app: App): SchemaPlan {
 /** The child tables of one form, in schema order. Empty when it has no inline subform. */
 export function subformLinksFor(app: App, form: string): SubformTable[] {
   const map = subformTablesOf(planOf(app));
-  return Object.hasOwn(map, form) ? map[form]! : [];
+  return [...(Object.hasOwn(map, form) ? map[form]! : []), ...linkedGridLinksFor(app, form)];
+}
+
+/**
+ * A grid whose `values` names another form (`values = Product_Subform.ID`)
+ * keeps its rows as records of that form: the schema gives the linked table a
+ * foreign key to the parent ROWID (ON-DELETE-CASCADE). Each such grid is a
+ * subform link onto that table with no order column; rows read back in ROWID
+ * order. A grid whose foreign key cannot be told apart (two grids of one form
+ * linking the same form) is left out rather than guessed.
+ */
+function linkedGridLinksFor(app: App, form: string): SubformTable[] {
+  const parentForm = app.forms.find((item) => item.name === form);
+  if (!parentForm) return [];
+  const plan = planOf(app);
+  const parentTable = plan.tables.find((table) => table.role === 'form' && table.form === form);
+  if (!parentTable || parentTable.nosql) return [];
+  const links: SubformTable[] = [];
+  for (const field of parentForm.fields) {
+    const target = linkedGridForm(app, field);
+    if (!target) continue;
+    const targetTable = plan.tables.find((table) => table.role === 'form' && table.form === target && !table.nosql);
+    const backs = (targetTable?.columns ?? []).filter((column) => column.creatorType === 'subform' && column.relation?.table === parentTable.name);
+    if (!targetTable || backs.length !== 1) continue;
+    const grids = parentForm.fields.filter((item) => linkedGridForm(app, item) === target);
+    if (grids.length !== 1) continue;
+    links.push({ field: field.name, table: targetTable.name, parentColumn: backs[0]!.name });
+  }
+  return links;
+}
+
+/** The linked form of a `grid` field whose `values` names another form, else undefined. */
+export function linkedGridForm(app: App, field: Field): string | undefined {
+  const token = (field.type ?? '').trim().toLowerCase();
+  if (token !== 'grid' || !field.lookup?.form) return undefined;
+  return app.forms.some((item) => item.name === field.lookup!.form) ? field.lookup.form : undefined;
 }
 
 /** Stratus-key columns of the form's own table. */

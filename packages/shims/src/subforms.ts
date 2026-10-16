@@ -20,8 +20,11 @@ export interface SubformTable {
   table: string;
   /** Foreign key to the parent ROWID. */
   parentColumn: string;
-  /** 0-based row position. */
-  orderColumn: string;
+  /**
+   * 0-based row position. Absent for a grid linked to another form: its rows
+   * are that form's records and read back in ROWID order.
+   */
+  orderColumn?: string;
 }
 
 /** Parent form → its inline subforms. */
@@ -125,7 +128,7 @@ export function childRowsFor(link: SubformTable, parentRowId: unknown, rows: rea
       out[key] = row[key];
     }
     out[link.parentColumn] = parent;
-    out[link.orderColumn] = index;
+    if (link.orderColumn) out[link.orderColumn] = index;
     return out;
   });
 }
@@ -224,6 +227,7 @@ function stripLink(link: SubformTable, row: Record<string, unknown>): Record<str
 }
 
 function orderOf(link: SubformTable, row: Record<string, unknown>): number {
+  if (!link.orderColumn) return 0;
   const raw = row[link.orderColumn];
   const n = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN;
   return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
@@ -263,7 +267,7 @@ export async function attachSubforms(
       const parentWhere = `${ident(link.parentColumn)} IN (${chunk.map((id) => `'${id}'`).join(', ')})`;
       const where = scope && scope.criteria && scope.criteria !== 'true' ? `(${parentWhere}) AND (${scope.criteria})` : parentWhere;
       for (let offset = 0; ; offset += SUBFORM_READ_PAGE) {
-        const page = await store.query(link.table, where, SUBFORM_READ_PAGE, offset, `ORDER BY ${ident(link.orderColumn)}, ROWID`);
+        const page = await store.query(link.table, where, SUBFORM_READ_PAGE, offset, link.orderColumn ? `ORDER BY ${ident(link.orderColumn)}, ROWID` : 'ORDER BY ROWID');
         for (const row of page) {
           const key = String(row[link.parentColumn] ?? '');
           const list = byParent.get(key) ?? [];
