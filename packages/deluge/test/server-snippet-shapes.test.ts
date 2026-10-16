@@ -105,12 +105,19 @@ content
   assert.doesNotMatch(compiled.html ?? '', /#\/form\/Sales|#Form:Sales/);
 });
 
-test('shape page-embed iframe: <%=zoho.appuri%>page-embed/<own page>?<constant params> compiles to the generated page route', () => {
+test('shape page-embed iframe: <%=zoho.appuri%>page-embed/<own page> compiles to an inline include', () => {
+  const app = appOf(`${SALES}\n${PRODUCTS_PAGE}`);
+  const compiled = compileHtmlpage(app, 'Product_Catalogue', 'HTML Snippet', embedSnippet('<%=zoho.appuri%>page-embed/Products'));
+  assert.equal(compiled.ok, true, `refused: ${compiled.reason}`);
+  assert.deepEqual(compiled.includes, ['Products']);
+  assert.match(compiled.html ?? '', /data-zml="page-include:Products"/);
+  assert.doesNotMatch(compiled.html ?? '', /page-embed|<%/);
+});
+
+test('shape page-embed iframe guard: constant non-zc_ parameters stay refused', () => {
   const app = appOf(`${SALES}\n${PRODUCTS_PAGE}`);
   const compiled = compileHtmlpage(app, 'Product_Catalogue', 'HTML Snippet', embedSnippet('<%=zoho.appuri%>page-embed/Products?category_var=&start=1&end=12'));
-  assert.equal(compiled.ok, true, `refused: ${compiled.reason}`);
-  assert.match(compiled.html ?? '', /#\/page\/Products\b/);
-  assert.doesNotMatch(compiled.html ?? '', /page-embed|<%/);
+  assert.equal(compiled.ok, false);
 });
 
 test('shape page-embed iframe guard: a page the app does not define stays refused', () => {
