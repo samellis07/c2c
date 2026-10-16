@@ -23,3 +23,9 @@ App: c2c-conn-cliq
 ## Manual steps
 
 - none
+
+## Hidden from end users
+
+0
+
+- none

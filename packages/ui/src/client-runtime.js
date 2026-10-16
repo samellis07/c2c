@@ -552,7 +552,9 @@ function groupLabelFor(field, id) {
 
 function fieldBlock(field, prefix) {
   const id = fieldDomId(field, prefix);
-  const todo = field.status === 'todo' ? `<p class="todo">${escapeHtml(field.todo || '')}</p>` : '';
+  // Why a field is not generated is a migration note for the developer: it
+  // stays in the migration report and goes to the console, never the form.
+  if (field.status === 'todo' && field.widget !== 'section' && field.widget !== 'notes') console.info(`[c2c] field "${field.name}" is not generated: ${field.todo || field.widget}`);
   const errors = `<p class="error" data-error-for="${escapeHtml(field.name)}"></p>`;
   // A Section pseudo-field with no display name draws no heading at all.
   if (field.widget === 'section') return field.titled === false ? '' : `<h2 data-span="all">${escapeHtml(field.label)}</h2>`;
@@ -562,14 +564,14 @@ function fieldBlock(field, prefix) {
     return `<div class="notes" data-field="${escapeHtml(field.name)}" data-span="all">${clean}</div>`;
   }
   if (field.widget === 'unsupported') {
-    return `<div class="field" data-field="${escapeHtml(field.name)}" data-widget="${escapeHtml(field.widget)}"><span class="field-title">${escapeHtml(field.label)}</span><p class="todo">${escapeHtml(field.todo || 'Not generated.')}</p>${todo}${errors}</div>`;
+    return `<div class="field" data-field="${escapeHtml(field.name)}" data-widget="${escapeHtml(field.widget)}"><span class="field-title">${escapeHtml(field.label)}</span><p class="unavailable-note">This field is not available yet.</p>${errors}</div>`;
   }
   const wide = field.widget === 'subform' || field.widget === 'textarea' || field.widget === 'richtext' ? ' data-span="all"' : '';
   // Name and address parts carry their own labels; the fieldset legend names the group.
   const label = field.widget === 'name' || field.widget === 'address'
     ? ''
     : `<label for="${groupLabelFor(field, id)}">${escapeHtml(field.label)}${field.required ? '<span class="req" aria-hidden="true"> *</span>' : ''}</label>`;
-  return `<div class="field"${wide} data-field="${escapeHtml(field.name)}" data-widget="${escapeHtml(field.widget)}">${label}${fieldControl(field, id)}${todo}${errors}</div>`;
+  return `<div class="field"${wide} data-field="${escapeHtml(field.name)}" data-widget="${escapeHtml(field.widget)}">${label}${fieldControl(field, id)}${errors}</div>`;
 }
 
 export function renderForm(form) {
@@ -741,14 +743,17 @@ function chartPanel(report, heading) {
 
 export function renderReport(report) {
   if (report.status === 'todo') {
-    return `<section class="card" data-report="${escapeHtml(report.name)}" data-view="todo"><h1>${escapeHtml(report.label || report.name)}</h1><p class="todo">${escapeHtml(report.todo || 'Not generated.')}</p></section>`;
+    // The screen keeps its heading and a neutral line; the reason is a
+    // migration note, kept in the migration report and the console only.
+    console.info(`[c2c] report "${report.name}" is not generated: ${report.todo || ''}`);
+    return `<section class="card" data-report="${escapeHtml(report.name)}" data-view="todo"><h1>${escapeHtml(report.label || report.name)}</h1><p class="unavailable-note">This part of the page is not available yet.</p></section>`;
   }
   if (report.view === 'chart') return chartPanel(report, 'h1');
-  // A conditional format whose condition did not translate is noted, never
-  // silently un-painted.
-  const formatNote = (report.conditionalFormats || []).some((format) => criteriaTodo(format && format.criteria))
-    ? '<p class="todo">A conditional formatting rule was not migrated; its highlighting is off.</p>'
-    : '';
+  // A conditional format whose condition did not translate is a migration
+  // note: listed in the migration report and the console, never the screen.
+  if ((report.conditionalFormats || []).some((format) => criteriaTodo(format && format.criteria))) {
+    console.info(`[c2c] report "${report.name}": a conditional formatting rule was not migrated; its highlighting is off`);
+  }
   // A map/pivot that fell back to a list view says so, never silently.
   const viewNote = report.note ? `<p class="notes" data-report-note>${escapeHtml(report.note)}</p>` : '';
   const cols = (report.columns || [])
@@ -788,7 +793,7 @@ export function renderReport(report) {
     : '';
   // Toolbar, grid, and pagination start hidden: the export's default controls
   // appear only after a successful non-empty load (see setReportChrome).
-  return `<section class="card" data-report="${escapeHtml(report.name)}" data-view="${escapeHtml(report.view)}" data-endpoint="${escapeHtml(report.queryEndpoint)}" data-page-size="${report.pageSize || PAGE_SIZE}"${detailAttr}${formAttr}><h1>${escapeHtml(report.label || report.name)}</h1>${formatNote}${viewNote}${bulk}<div class="report-tools" data-report-tools hidden><form data-report-search><input name="q" type="search" aria-label="Search"><button type="submit">Search</button></form>${filterSelect}${actions}</div><div data-state></div><div data-rows hidden>${rowsHtml}</div><nav data-pages aria-label="Report pages" hidden><button type="button" data-prev>Previous</button><span data-page-label>Page 1</span><button type="button" data-next>Next</button></nav></section>`;
+  return `<section class="card" data-report="${escapeHtml(report.name)}" data-view="${escapeHtml(report.view)}" data-endpoint="${escapeHtml(report.queryEndpoint)}" data-page-size="${report.pageSize || PAGE_SIZE}"${detailAttr}${formAttr}><h1>${escapeHtml(report.label || report.name)}</h1>${viewNote}${bulk}<div class="report-tools" data-report-tools hidden><form data-report-search><input name="q" type="search" aria-label="Search"><button type="submit">Search</button></form>${filterSelect}${actions}</div><div data-state></div><div data-rows hidden>${rowsHtml}</div><nav data-pages aria-label="Report pages" hidden><button type="button" data-prev>Previous</button><span data-page-label>Page 1</span><button type="button" data-next>Next</button></nav></section>`;
 }
 
 /** The model this page renders with: the boot argument, else the module import. */

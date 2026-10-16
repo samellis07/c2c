@@ -4,9 +4,6 @@
  * Phone layout: below 768px every page column takes the full width.
  */
 .c2c-page-body { display: flex; flex-direction: column; gap: var(--space-4); }
-.c2c-page-todos { margin: 0 0 var(--space-4); }
-.c2c-page-todos summary { cursor: pointer; font-weight: 600; }
-.c2c-page-todos ul { margin: var(--space-2) 0 0; padding-left: var(--space-5); }
 
 .c2c-zml-box { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
 .c2c-zml-row { display: flex; flex-wrap: wrap; align-items: stretch; gap: var(--space-4); min-width: 0; }

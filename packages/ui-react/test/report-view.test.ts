@@ -20,7 +20,7 @@ import { test } from 'node:test';
 import ts from 'typescript';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { compareCells, compareDecimalCells } from '../../shims/src/criteria.js';
-import { TEMPLATE_DIR, reactAppSpec } from '../src/index.js';
+import { TEMPLATE_DIR, hiddenParts, reactAppSpec } from '../src/index.js';
 import type { FormSpec, ReportSpec } from '../template/lib/c2c-ui/types.js';
 
 function source(): string {
@@ -437,7 +437,7 @@ test('an action column header offers no sort and posts no ORDER BY', { skip: SKI
   assert.equal(customBtn?.getAttribute('aria-label'), 'Approve: Sign Off', 'differing action name preserves visible text in accessible name');
 });
 
-test('a todo-marked report and its field-only filters are visible, not silent', { skip: SKIP }, async (t) => {
+test('a todo-marked report and its field-only filters are listed for the developer, not drawn on the screen', { skip: SKIP }, async (t) => {
   const out = await compileOnly(t, 'todo');
   const spec = reactAppSpec(appOf());
   const feed = await mount(out, spec.reports.Feed!, ROWS, new Set(['Total']));
@@ -447,7 +447,8 @@ test('a todo-marked report and its field-only filters are visible, not silent', 
 
   const orders = await mount(out, spec.reports.Orders!, ROWS, new Set(['Total']));
   const dropped = [...orders.container.querySelectorAll('p.todo')].map((p) => p.textContent ?? '').join(' ');
-  assert.match(dropped, /Status/, `the field-only filter is named: ${dropped}`);
+  assert.doesNotMatch(dropped, /not offered/, `the field-only filter is not a note on the screen: ${dropped}`);
+  assert.ok(hiddenParts(spec).some((part) => part.location === 'report Orders' && /Status/.test(part.reason)), 'the field-only filter is listed for the developer');
 });
 
 test('record controls have a real destination and custom row actions post the ROWID', { skip: SKIP }, async (t) => {

@@ -726,12 +726,17 @@ export function ComputedField({ field, value }: FieldProps) {
   );
 }
 
-/** A field the generator cannot draw yet: visible, labelled and counted, never silently dropped. */
+/**
+ * A field the generator cannot draw yet: its label stays so the form still
+ * reads as the user knows it, with a neutral line in place of the control.
+ * The reason is a migration note, listed in `c2c analyze` and the migration
+ * report, never on the form.
+ */
 export function TodoField({ field }: FieldProps) {
   return (
-    <Box field={field} className="todo">
+    <Box field={field} className="c2c-unavailable">
       <span className={`${inputStyles.label} field-title`}>{field.label}</span>
-      <p className="c2c-todo-reason">Not generated yet: {field.todo ?? field.widget}</p>
+      <p className="c2c-unavailable-note">This field is not available yet.</p>
     </Box>
   );
 }
