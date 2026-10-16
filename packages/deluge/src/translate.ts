@@ -298,6 +298,14 @@ interface Fx {
    * by one batched `IN` query instead of a per-row call.
    */
   rowReads?: RowRead[];
+  /**
+   * Record-state keys this expression reads: `input` / `old` for the whole
+   * record and `input.<field>` / `old.<field>` for one field. A handler write
+   * to a key before this point makes a prefetch evaluation of the read stale:
+   * the prefetch snapshot predates the handler, but the program saw the
+   * handler's own update. See {@link staleRead}.
+   */
+  stateReads?: string[];
 }
 
 interface SimpleKeyLookup {
@@ -388,6 +396,8 @@ interface Binding {
    */
   localCopy?: boolean;
   rowReads?: RowRead[];
+  /** Record-state keys the bound expression reads; replay is refused when a write to one predates this binding. */
+  stateReads?: string[];
 }
 
 /** One `for each` whose elements the client already iterates. */
@@ -477,6 +487,18 @@ interface Scope {
   loops: { frame: number; assigned: Set<string> }[];
   /** The binding object already replayed into the prefetch function per name. */
   emitted: Map<string, Binding>;
+  /**
+   * Record-state writes the handler emitted so far — `input.<field>` or
+   * `old.<field>` assignments, a computed-key write under the record root
+   * (`input` / `old`), an `input.<subform>` insert/clear, and `rec.<row>`
+   * field writes on a prefetched row — mapped to the clock seq of the first
+   * write. The prefetch snapshot predates the handler, so a slot or replayed
+   * binding that reads a written key serves the pre-update value: it refuses
+   * instead ({@link staleRead}).
+   */
+  stateWrites: Map<string, number>;
+  /** Earliest write seq under each record root (`input`, `old`), for whole-record reads. */
+  stateRootSeq: Map<string, number>;
   /** List updates (`L.add(x)`) in the `for each` body being translated, for {@link loopListUpdate}. */
   listUpdates?: { name: string; value: Fx }[];
   /** Names bound in the prefetch module without a replayed assignment (params, `row`). */
@@ -596,6 +618,7 @@ function mergeFx(code: string, parts: Fx[], flags: Partial<Fx> = {}): Fx {
     sideEffect: parts.some((p) => p.sideEffect) || !!flags.sideEffect,
     ranged: parts.some((p) => p.ranged) || !!flags.ranged,
     rowReads: [...parts.flatMap((p) => p.rowReads ?? []), ...(flags.rowReads ?? [])],
+    stateReads: [...new Set([...parts.flatMap((p) => p.stateReads ?? []), ...(flags.stateReads ?? [])])],
   });
 }
 
@@ -754,7 +777,7 @@ function rowBindingOk(name: string, scope: Scope, rows: Set<string>, stack: Set<
 }
 
 function rowVersionOk(name: string, binding: Binding, scope: Scope, rows: Set<string>, seen: Set<Binding>): boolean {
-  if (binding.appFunction || binding.todo || binding.sideEffect || binding.unboundReads.length) return false;
+  if (binding.appFunction || binding.todo || binding.sideEffect || binding.unboundReads.length || staleBinding(binding, scope)) return false;
   if (!flowOk(binding, scope)) return false;
   for (const loop of scope.loops) {
     if (loop.assigned.has(name) && binding.flow < loop.frame) return false;
@@ -867,7 +890,7 @@ function closureReplayRefused(names: readonly string[], scope: Scope, rows: Set<
     seen.add(name);
     const binding = scope.bindings.get(name);
     if (!binding) return false;
-    if (binding.appFunction || binding.todo || (nonRead && bindingNonRead(binding)) || useBeforeDef(binding, scope)) return true;
+    if (binding.appFunction || binding.todo || (nonRead && bindingNonRead(binding)) || useBeforeDef(binding, scope) || staleBinding(binding, scope)) return true;
     return binding.reads.some((dep) => walk(dep));
   };
   return names.some((name) => walk(name));
@@ -884,7 +907,7 @@ function closureReplayRefused(names: readonly string[], scope: Scope, rows: Set<
  * would otherwise be invisible to the walk.
  */
 function collectionReplayRefused(col: Fx, scope: Scope): boolean {
-  if (col.appFunction || col.todo || nonReadReplay(col.code)) return true;
+  if (col.appFunction || col.todo || nonReadReplay(col.code) || staleFx(col, scope)) return true;
   const seen = new Set<string>();
   const walk = (name: string): boolean => {
     if (seen.has(name)) return false;
@@ -893,7 +916,7 @@ function collectionReplayRefused(col: Fx, scope: Scope): boolean {
     if (!binding) {
       return !(scope.clientData.has(name) || scope.row.has(name) || scope.prefetchBound.has(name));
     }
-    if (binding.appFunction || binding.todo || bindingNonRead(binding) || useBeforeDef(binding, scope)) return true;
+    if (binding.appFunction || binding.todo || bindingNonRead(binding) || useBeforeDef(binding, scope) || staleBinding(binding, scope)) return true;
     return binding.reads.some((dep) => walk(dep));
   };
   return col.reads.some((name) => walk(name));
@@ -923,7 +946,8 @@ function loopBindings(value: Fx, scope: Scope, rows: Set<string>): { lines: stri
       binding.sideEffect ||
       binding.unboundReads.length ||
       bindingReplayRefused(binding) ||
-      useBeforeDef(binding, scope)
+      useBeforeDef(binding, scope) ||
+      staleBinding(binding, scope)
     ) {
       refused = true;
       return;
@@ -969,17 +993,17 @@ function queueRowMap(value: Fx, rows: readonly string[], scope: Scope): string |
     if (stack.has(name) || rows.includes(name)) return false;
     const binding = scope.bindings.get(name);
     if (!binding) return false;
-    if (binding.appFunction || binding.todo || binding.sideEffect || binding.unboundReads.length) return true;
+    if (binding.appFunction || binding.todo || binding.sideEffect || binding.unboundReads.length || staleBinding(binding, scope)) return true;
     stack.add(name);
     const yes = binding.reads.some((dep) => {
       const recorded = binding.deps.get(dep);
-      if (recorded && (recorded.appFunction || recorded.todo || recorded.sideEffect || recorded.unboundReads.length)) return true;
+      if (recorded && (recorded.appFunction || recorded.todo || recorded.sideEffect || recorded.unboundReads.length || staleBinding(recorded, scope))) return true;
       return refused(dep, stack);
     });
     stack.delete(name);
     return yes;
   };
-  if (value.appFunction || value.todo || value.sideEffect || value.unboundReads.length || value.reads.some((name) => refused(name, new Set()))) return null;
+  if (value.appFunction || value.todo || value.sideEffect || value.unboundReads.length || staleFx(value, scope) || value.reads.some((name) => refused(name, new Set()))) return null;
   const rowSet = new Set(rows);
   const frames: LoopFrame[] = [];
   for (const frame of scope.rowFrames) {
@@ -1417,7 +1441,7 @@ function flushMaps(scope: Scope, force: boolean): void {
 function slotExpr(value: Fx, scope: Scope): string | null {
   // An expression that writes, calls out, or reads a name bound only
   // later stays a todo: the prefetch would run the effect or the later value.
-  if (value.sideEffect || value.appFunction || value.todo || value.unboundReads.length || nonReadReplay(value.code) || valueUseBeforeDef(value, scope)) return null;
+  if (value.sideEffect || value.appFunction || value.todo || value.unboundReads.length || nonReadReplay(value.code) || valueUseBeforeDef(value, scope) || staleFx(value, scope)) return null;
   for (const name of value.reads) if (!prefetchable(name, scope, new Set())) return null;
   const mark = scope.prefetch.length;
   const emittedMark = new Map(scope.emitted);
@@ -1477,8 +1501,48 @@ function flowOk(binding: Binding, scope: Scope): boolean {
  * binding was created. That write makes the read loop-carried: one prefetch
  * assignment would repeat a single iteration.
  */
+/**
+ * Records a record-state write the prefetch snapshot cannot see. The clock
+ * seq orders it against bindings: a binding that read the key BEFORE the
+ * write captured the value the prefetch serves, so it may still replay.
+ */
+function recordStateWrite(key: string, scope: Scope): void {
+  const seq = scope.clock.seq++;
+  if (!scope.stateWrites.has(key)) scope.stateWrites.set(key, seq);
+  const root = key.includes('.') ? key.slice(0, key.indexOf('.')) : key;
+  const cur = scope.stateRootSeq.get(root);
+  if (cur === undefined || seq < cur) scope.stateRootSeq.set(root, seq);
+}
+
+/**
+ * True when a read of `key` at program point `at` (a clock seq; the current
+ * point is `Infinity`) can see a write the prefetch snapshot predates. A
+ * computed-key write under the root (`input[expr] = …` records the bare
+ * `input` key) makes every field read stale; a field write makes a
+ * whole-record read stale.
+ */
+function staleRead(key: string, at: number, scope: Scope): boolean {
+  const w = scope.stateWrites.get(key);
+  if (w !== undefined && w < at) return true;
+  const dot = key.indexOf('.');
+  const rw = dot < 0 ? scope.stateRootSeq.get(key) : scope.stateWrites.get(key.slice(0, dot));
+  return rw !== undefined && rw < at;
+}
+
+/** The record-state keys an expression reads, plus `rec.<row>` for each row variable it reads. */
+function staleFx(value: Fx, scope: Scope): boolean {
+  if (value.stateReads?.some((key) => staleRead(key, Number.POSITIVE_INFINITY, scope))) return true;
+  return value.reads.some((r) => staleRead(`rec.${r}`, Number.POSITIVE_INFINITY, scope));
+}
+
+/** A binding replays a stale value when a write to a key it reads predates its assignment. */
+function staleBinding(binding: Binding, scope: Scope): boolean {
+  if (binding.stateReads?.some((key) => staleRead(key, binding.seq, scope))) return true;
+  return binding.reads.some((r) => staleRead(`rec.${r}`, binding.seq, scope));
+}
+
 function dominates(name: string, binding: Binding, scope: Scope): boolean {
-  if (binding.sideEffect || binding.appFunction || binding.todo || binding.unboundReads.length || bindingNonRead(binding) || !flowOk(binding, scope)) return false;
+  if (binding.sideEffect || binding.appFunction || binding.todo || binding.unboundReads.length || bindingNonRead(binding) || staleBinding(binding, scope) || !flowOk(binding, scope)) return false;
   for (const loop of scope.loops) {
     if (loop.assigned.has(name) && binding.flow < loop.frame) return false;
   }
@@ -1862,7 +1926,7 @@ function clientCallCode(code: string, scope: Scope): string | null {
  * the slot to a todo.
  */
 function elementSlot(value: Fx, element: string, scope: Scope): string | null {
-  if (value.sideEffect || value.appFunction || value.todo || value.unboundReads.length) return null;
+  if (value.sideEffect || value.appFunction || value.todo || value.unboundReads.length || staleFx(value, scope)) return null;
   const collection = scope.elementCollections.get(element);
   if (collection === undefined) return null;
   const pending: string[] = [];
@@ -2102,6 +2166,8 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     flowStack: [0],
     loops: [],
     emitted: new Map(),
+    stateWrites: new Map(),
+    stateRootSeq: new Map(),
     prefetchBound: new Set(options.prefetchBound ?? []),
     formNames: new Set(options.formNames ?? []),
     functions: new Set((options.functions ?? []).map((n) => n.toLowerCase())),
@@ -2797,7 +2863,7 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
  */
 function rangeSlotFor(col: Fx, scope: Scope): { slot: string; from: string; to: string } | null {
   const range = col.clientRange;
-  if (!range || !col.query || col.todo) return null;
+  if (!range || !col.query || col.todo || staleFx(col, scope)) return null;
   if (range.from.todo || range.to.todo || range.from.serverOnly || range.to.serverOnly) return null;
   const rangeReads = new Set([...range.from.reads, ...range.to.reads]);
   for (const name of rangeReads) {
@@ -3113,6 +3179,7 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
       todo: value.todo,
       sideEffect: value.sideEffect,
       rowReads: value.rowReads,
+      stateReads: value.stateReads,
       deps,
       seq: scope.clock.seq++,
       flow: scope.flowStack[scope.flowStack.length - 1]!,
@@ -3131,6 +3198,7 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
       ? `shim.input.set(ctx, ${JSON.stringify(path.path)}, ${value.code});`
       : `shim.record.set(${jsIdent(path.root)}, ${JSON.stringify(path.path)}, ${value.code});`;
     void code;
+    recordStateWrite(path.root === 'input' ? `input.${path.path[0]}` : `rec.${path.root}`, scope);
     account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
     return { server: fixed, client: value.serverOnly ? '' : fixed };
   }
@@ -3142,6 +3210,7 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
   }
   if (path && scope.row.has(path.root)) {
     if (path.path.some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
+    recordStateWrite(`rec.${path.root}`, scope);
     account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
     const line = `shim.record.set(${jsIdent(path.root)}, ${JSON.stringify(path.path)}, ${value.code});`;
     // The row itself is a server value: the client cannot write to it even when the value is client-side.
@@ -3153,12 +3222,14 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     const rowFields = scope.rowFields;
     if (rowFields?.names.has(path.root) && scope.row.has(rowFields.row)) {
       if ([path.root, ...path.path].some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
+      recordStateWrite(`rec.${rowFields.row}`, scope);
       account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
       const line = `shim.record.set(${jsIdent(rowFields.row)}, ${JSON.stringify([path.root, ...path.path])}, ${value.code});`;
       return { server: line, client: value.serverOnly || scope.serverOnly.has(rowFields.row) ? '' : line };
     }
     if (scope.inputFields.has(path.root)) {
       if ([path.root, ...path.path].some((k) => UNSAFE_PATH_KEYS.has(k))) return unsafePathRefusal(span, stats, todos);
+      recordStateWrite(`input.${path.root}`, scope);
       account(stats, todos, { todo: value.todo, shim: true, constructs: value.constructs }, span);
       const line = `shim.input.set(ctx, ${JSON.stringify([path.root, ...path.path])}, ${value.code});`;
       return { server: line, client: value.serverOnly ? '' : line };
@@ -3174,6 +3245,8 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     // the runtime key guard instead of indexing the record object raw.
     const segFxs = indexed.segments.map((seg) => (seg.key !== undefined ? fx({ code: JSON.stringify(seg.key) }) : expr(seg.index!, scope)));
     account(stats, todos, mergeFx('', [...segFxs, value]), span);
+    // A computed segment can name any field, so the write keys the record root.
+    recordStateWrite(indexed.segments[0]?.key !== undefined ? `${indexed.root}.${indexed.segments[0].key}` : indexed.root, scope);
     const api = indexed.root === 'input' ? 'shim.input.set' : 'shim.old.set';
     const line = `${api}(ctx, [${segFxs.map((seg) => seg.code).join(', ')}], ${value.code});`;
     const serverOnly = value.serverOnly || segFxs.some((seg) => seg.serverOnly);
@@ -3269,7 +3342,7 @@ function heldElsewhere(name: string, scope: Scope): boolean {
  * The previous value is a dep key, as for a self-assign, so the replay emits
  * the earlier binding first. `before` resolves the other reads.
  */
-function listUpdateBinding(name: string, prior: Binding, code: string, reads: readonly string[], before: Map<string, Binding>, scope: Scope): Binding {
+function listUpdateBinding(name: string, prior: Binding, code: string, reads: readonly string[], stateReads: readonly string[] | undefined, before: Map<string, Binding>, scope: Scope): Binding {
   const key = `\0${name}#${scope.depSeq.next++}`;
   scope.bindings.set(key, { ...prior, emitAs: name, origin: prior.origin ?? prior });
   const recorded = [key];
@@ -3287,6 +3360,7 @@ function listUpdateBinding(name: string, prior: Binding, code: string, reads: re
     seq: scope.clock.seq++,
     flow: scope.flowStack[scope.flowStack.length - 1]!,
     localCopy: true,
+    stateReads: stateReads?.length ? [...stateReads] : undefined,
   };
 }
 
@@ -3322,7 +3396,7 @@ function recordListUpdate(e: Expr, value: Fx, scope: Scope): boolean {
   }
   const id = jsIdent(name);
   const code = `await (async (${id}) => {\n  ${value.code};\n  return ${id};\n})(shim.list.duplicate(${id}))`;
-  scope.bindings.set(name, listUpdateBinding(name, prior, code, value.reads, scope.bindings, scope));
+  scope.bindings.set(name, listUpdateBinding(name, prior, code, value.reads, value.stateReads, scope.bindings, scope));
   return true;
 }
 
@@ -3432,7 +3506,7 @@ function loopListUpdate(
   if (name === s.name || updates.some((u) => u.name !== name)) return null;
   const prior = before.get(name);
   if (!prior || !(scope.list.has(name) || scope.map.has(name)) || heldElsewhere(name, scope)) return null;
-  if (col.todo || col.appFunction || col.sideEffect || col.unboundReads.length || col.reads.includes(name) || NON_READ_EFFECT.test(col.code)) return null;
+  if (col.todo || col.appFunction || col.sideEffect || col.unboundReads.length || col.reads.includes(name) || NON_READ_EFFECT.test(col.code) || staleFx(col, scope)) return null;
   if (!updates.every((u) => listUpdateReadOnly(u.value, s.name))) return null;
   const body = serverBody
     .split('\n')
@@ -3442,7 +3516,8 @@ function loopListUpdate(
   const reads = [...col.reads, ...updates.flatMap((u) => u.value.reads)].filter((r) => r !== s.name);
   const id = jsIdent(name);
   const code = `await (async (${id}) => {\n${indent(`${head} {\n${indent(body)}\n}`)}\n  return ${id};\n})(shim.list.duplicate(${id}))`;
-  scope.bindings.set(name, listUpdateBinding(name, prior, code, reads, before, scope));
+  const stateReads = [...(col.stateReads ?? []), ...updates.flatMap((u) => u.value.stateReads ?? [])];
+  scope.bindings.set(name, listUpdateBinding(name, prior, code, reads, stateReads, before, scope));
   return name;
 }
 
@@ -3467,6 +3542,7 @@ function exprStmt(e: Expr, span: { start: number; end: number }, scope: Scope, s
     const clientArgs = values.map((v) => clientExpr(v, scope));
     const constructs = values.flatMap((v) => v.constructs);
     if (clientArgs.some((c) => c.todo)) constructs.push('client-condition-uses-server');
+    recordStateWrite(`input.${mutate.path[0]}`, scope);
     account(stats, todos, { todo: values.some((v) => v.todo) || clientArgs.some((c) => c.todo), shim: true, constructs }, span);
     const path = JSON.stringify(mutate.path);
     const server =
@@ -4159,6 +4235,7 @@ function exprBody(e: Expr, scope: Scope): Fx {
           shim: true,
           decimal: decimalLeaf([e.index.value], scope),
           lookup: e.object.name === 'input' && scope.lookupFields.has(e.index.value),
+          stateReads: [`${e.object.name}.${e.index.value}`],
         });
       }
       const o = expr(e.object, scope);
@@ -4268,8 +4345,8 @@ function applyBindingFlags(name: string, scope: Scope, value: Fx): Fx {
 
 function readName(name: string, scope: Scope): Fx {
   if (name === 'true' || name === 'false' || name === 'null') return fx({ code: name });
-  if (name === 'input') return fx({ code: 'shim.input.root(ctx)', shim: true });
-  if (name === 'old') return fx({ code: 'ctx.old', shim: true });
+  if (name === 'input') return fx({ code: 'shim.input.root(ctx)', shim: true, stateReads: ['input'] });
+  if (name === 'old') return fx({ code: 'ctx.old', shim: true, stateReads: ['old'] });
   const reads = localReads(name, scope);
   const onClient = scope.clientData.has(name) || scope.clientDeclared.has(name);
   const carried = carriedFlags(name, scope);
@@ -4302,6 +4379,7 @@ function readName(name: string, scope: Scope): Fx {
       shim: true,
       decimal: scope.decimalFields.has(name),
       lookup: scope.lookupFields.has(name),
+      stateReads: [`input.${name}`],
     });
   }
   if (!scope.local.has(name) && name === 'REMOVE_ALL') {
@@ -4782,6 +4860,7 @@ function memberExpr(e: Extract<Expr, { kind: 'member' }>, scope: Scope): Fx {
       shim: true,
       decimal: decimalLeaf(path.path, scope),
       lookup: path.root === 'input' && path.path.length === 1 && scope.lookupFields.has(path.path[0]!),
+      stateReads: [`${path.root}.${path.path[0]}`],
     });
   }
   if (path && path.path.length && !scope.local.has(path.root)) {
@@ -4809,6 +4888,7 @@ function memberExpr(e: Extract<Expr, { kind: 'member' }>, scope: Scope): Fx {
       code: `shim.input.get(ctx, ${[path.root, ...path.path].map((p) => JSON.stringify(p)).join(', ')})`,
       shim: true,
       decimal: decimalLeaf(path.path, scope),
+      stateReads: [`input.${path.root}`],
     });
   }
   if (path && scope.row.has(path.root)) {
