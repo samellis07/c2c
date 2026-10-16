@@ -20,8 +20,10 @@ import { FIDELITY_JSON, FIDELITY_MD, LOADER_REPORT, formatCsvPlan, hasReportJson
 import { readSourceBackup } from './backup.js';
 import { ALLOWED_ENV, GuardError, assertProtectedName, assertProtectedProject, catalystProjectName, checkGuards, confirmGuardLines, planScopeLines, type GuardOk } from './guards.js';
 import { parseJsonExact } from './json-exact.js';
-import { APP_URL_LINE, applyAuthProvision, formatAuthProvision, slateUrlFrom } from './auth.js';
+import { APP_URL_LINE, applyAuthProvision, formatAuthProvision, projectUsers, roleIdFromUsers, slateUrlFrom } from './auth.js';
 import { slateHost } from '../../auth/src/slate-host.js';
+import { authPlan } from '../../auth/src/plan.js';
+import { canonicalUserIdentity } from '../../schema/src/identity.js';
 import { API_FUNCTION, FUNCTION_DIR, appOrigins, envVariables, secretEnvValues } from './function-dir.js';
 import { buildDeploy, commandLine, deployFiles, migrateCatalystJson, writeDeployTree, type DeployCommand, type DeployFile, type DeployUi } from './plan.js';
 import { asyncLaneBlocker } from './events.js';
@@ -62,14 +64,18 @@ import {
 import { DcNotConfiguredError, catalystBaseFor, dcEndpoints, deployMailRecipients, findDeployConfig, readCliActiveDc, readCliActiveOrg, readDeployConfig, resolveDeployDc, type DeployConfigFile } from './dc.js';
 import { matchListedProject, missingProjectGuide, resolveOrgId, resolveProjectChoice } from './target.js';
 import {
+  backupUserIdMap,
   formatInviteResult,
+  formatManageResult,
+  formatUserList,
   inviteUsers,
+  listProjectUsers,
+  manageProjectUser,
   newUsersSalt,
   parseSocialList,
-  plusAddressIds,
-  PLUS_EMAIL_REASON,
   readBackupUsers,
   readUsersState,
+  roleIdFallback,
   userRefId,
   usersInvitesCsv,
   usersPlan,
@@ -1647,6 +1653,13 @@ export async function seedMigrateCli(args: readonly string[], io: Io): Promise<n
       tables,
       ...(foreignKeys ? { foreignKeys } : {}),
       ...(knownTables ? { knownTables } : {}),
+      userColumnsByTable: seedPlan
+        ? Object.fromEntries(
+            seedPlan.tables
+              .map((table) => [table.name, table.columns.filter((column) => column.matrixId === 'users').map((column) => column.name)] as const)
+              .filter(([, names]) => names.length > 0),
+          )
+        : {},
       uniqueColumnsByTable: uniqueColumnsByTableOf(provisioned.schema),
       dc: guard.dc,
       catalystBase: flag(args, '--catalyst-base') ?? catalystBaseFor(guard.dc),
@@ -1960,6 +1973,12 @@ export async function sourceBackupCli(args: readonly string[], io: Io): Promise<
       checkpoint = parsed;
     }
     const scope = await resolveScope(io, guard.org, guard.projectId);
+    // Users-field cells hold the Creator ZUID: remap each to the Catalyst
+    // user_id the invite run recorded (users state file). A ZUID with no
+    // recorded invite loads as the source wrote it.
+    const usersStatePath = flag(args, '--users-state') ?? join('c2c-out', USERS_STATE_FILE);
+    const userIds = backupUserIdMap(source, readUsersState(usersStatePath));
+    if (userIds.size) io.stdout(`users: ${userIds.size} source user id(s) remap to the invited Catalyst user\n`);
     const result = await migrateLoaded({
       app,
       loaded,
@@ -1970,6 +1989,7 @@ export async function sourceBackupCli(args: readonly string[], io: Io): Promise<
       saveCheckpoint: checkpointPath ? (next) => writeCheckpointFile(checkpointPath, next) : undefined,
       scope,
       constraints: provisioned.decisions,
+      ...(userIds.size ? { userIds } : {}),
     });
     writeLoaderReport(statSync(source).isDirectory() ? source : dirname(source), result.integrity);
     logRefusals(io, result.integrity);
@@ -2442,14 +2462,22 @@ function usersRoleIds(args: readonly string[]): Record<string, string> {
  */
 export async function usersCli(args: readonly string[], io: Io): Promise<number> {
   const [sub, ...rest] = args;
+  if (sub === 'list' || sub === 'add' || sub === 'disable' || sub === 'enable' || sub === 'set-role') {
+    return usersManageCli(sub, rest, io);
+  }
   const source = flag(rest, '--source-backup');
   const ds = flag(rest, '--ds');
   if ((sub !== 'plan' && sub !== 'invite') || !source || !ds) {
     io.stderr(
       'usage: c2c users plan --source-backup <zip|dir> --ds <file|dir> [--app <link>] [--out <dir>] [--state <file>] [--salt <s>] [--social <a,b>] [--json]\n' +
         '       c2c users invite --source-backup <zip|dir> --ds <file|dir> --project <id> --org <org> [--app <link>] [--slate-domain <host>] [--role-ids <name=id,...>] [--state <file>] [--salt <s>] --confirm [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
+        '       c2c users list --ds <file|dir> --project <id> --org <org>\n' +
+        '       c2c users add --ds <file|dir> --project <id> --org <org> --email <e> --role <name> [--first-name <n>] [--last-name <n>] [--slate-domain <host>] [--role-ids <name=id,...>] --confirm\n' +
+        '       c2c users disable|enable --ds <file|dir> --project <id> --org <org> --user-id <id> --confirm\n' +
+        '       c2c users set-role --ds <file|dir> --project <id> --org <org> --user-id <id> --role <name> [--role-ids <name=id,...>] --confirm\n' +
         '       identities are read from the backup at run time only; plans and reports name users by usr_<hash> id\n' +
-        '       invite sends POST /project-user per pending user (the console Add User call) with redirect_url = the Slate app URL\n',
+        '       invite sends POST /project-user per pending user (the console Add User call) with redirect_url = the Slate app URL\n' +
+        '       list/add/disable/enable/set-role manage users after go-live; writes need --confirm\n',
     );
     return 2;
   }
@@ -2493,11 +2521,6 @@ export async function usersCli(args: readonly string[], io: Io): Promise<number>
     const social = parseSocialList(flag(rest, '--social'));
     const backupUsers = readBackupUsers(source);
     const plan = usersPlan(app, backupUsers, { salt, invited: new Set((state?.invited ?? []).map((entry) => entry.id)), social });
-    // Catalyst refuses a '+' address on Add User; refuse it here, before any
-    // file or request, naming users by id only.
-    const plannedIds = new Set(plan.users.map((user) => user.id));
-    const plus = plusAddressIds(backupUsers.map((user) => ({ id: userRefId(user.identity.trim().toLowerCase(), salt), identity: user.identity })).filter((user) => plannedIds.has(user.id)));
-    if (plus.length) throw new GuardError('configuration', `users ${plus.join(', ')}: the email contains '+' — ${PLUS_EMAIL_REASON}; fix the backup user list, then re-run`);
     // Keep the salt (and any previously invited ids) in the state file so the
     // next run reuses them — nothing else may carry the salt.
     writeUsersState(statePath, { version: 1, project: state?.project ?? '', salt, invited: state?.invited ?? [] });
@@ -2535,8 +2558,12 @@ export async function usersCli(args: readonly string[], io: Io): Promise<number>
     const seen = new Set<string>();
     const targets: InviteTarget[] = backupUsers
       .map((user) => {
-        const id = userRefId(user.identity.trim().toLowerCase(), salt);
-        return { id, role: planned.get(id) ?? '', identity: user.identity, first: user.first, last: user.last };
+        // The invite carries the one normalised identity (schema identity
+        // rules): Catalyst cannot store a '+' alias and a Gmail dot variant is
+        // the same mailbox — the migrated rows are rewritten to it too.
+        const identity = canonicalUserIdentity(user.identity);
+        const id = userRefId(identity, salt);
+        return { id, role: planned.get(id) ?? '', identity, first: user.first, last: user.last };
       })
       .filter((target) => {
         // Users not in the plan (inactive, no identity) carry no role and are
@@ -2673,6 +2700,155 @@ export async function verifyBehaviorCli(args: readonly string[], io: Io): Promis
     } finally {
       await backend.close();
     }
+  } catch (err) {
+    return fail(io, err);
+  }
+}
+
+/**
+ * `c2c users list|add|disable|enable|set-role` — user management after
+ * go-live, over the same REST hook as invite (GET/POST/PUT /project-user).
+ * list is a read; every write needs --confirm (which also puts the run behind
+ * the doctor gate in c2c.ts). Guard, credential, org, project and DC resolve
+ * exactly like a provision/deploy step: X_ZC_CREDENTIAL_PATH must be set, the
+ * project is proven live before any call, and no row is written for a
+ * dry print.
+ *
+ * list/add print a user by its Catalyst user_id only — the sign-in address
+ * stays inside the request and is never printed, stored or returned.
+ */
+async function usersManageCli(sub: 'list' | 'add' | 'disable' | 'enable' | 'set-role', rest: readonly string[], io: Io): Promise<number> {
+  const ds = flag(rest, '--ds');
+  if (!ds) {
+    io.stderr(`c2c: users ${sub} needs --ds <file|dir> so the run binds the app, project and role names\n`);
+    return 2;
+  }
+  if (rest.includes('--dry-run')) {
+    io.stderr(`c2c: users ${sub} does not take --dry-run; omit --confirm for a dry print\n`);
+    return 2;
+  }
+  try {
+    const app = loadApp(ds);
+    const named = flag(rest, '--app');
+    const appLink = named ?? app.name?.trim();
+    if (!appLink) throw new GuardError('name-mismatch', 'application name is missing');
+    if (named && app.name?.trim() !== named) throw new GuardError('name-mismatch', 'application name does not match --app');
+    const confirm = rest.includes('--confirm');
+    const guard = await prepareGuard(ds, rest, appLink, io);
+    const restFn: RestFn = io.rest ?? ((call: RestCall) => catalystRestCall(io.env, guard.org, guard.projectId, call, { log: (line) => io.stderr(`${line}\n`) }));
+
+    // The names a role flag may carry: the export's planned roles, the two
+    // built-ins, anything a live project user already holds, and --role-ids
+    // keys. Anything else is refused, never sent.
+    const roleIds = usersRoleIds(rest);
+    const plannedRoles = new Set<string>(['App User', 'App Administrator', ...authPlan(app).roles.map((role) => role.role_name), ...Object.keys(roleIds)]);
+    const listRows = async (): Promise<Record<string, unknown>[]> => {
+      const res = await restWithRetry(restFn, { method: 'GET', path: `/baas/v1/project/${guard.projectId}/project-user` }, retryLog(io));
+      if (res.result.status < 200 || res.result.status >= 300) throw new Error(`GET /project-user failed: HTTP ${res.result.status}`);
+      return projectUsers(res.result.body) ?? [];
+    };
+    const liveRoleNames = (rows: readonly Record<string, unknown>[]): Set<string> => {
+      const names = new Set<string>();
+      for (const row of rows) {
+        const details = (row.role_details ?? row.roleDetails ?? {}) as Record<string, unknown>;
+        for (const value of [details.role_name, details.roleName, row.role_name]) {
+          if (typeof value === 'string' && value.trim()) names.add(value.trim());
+        }
+      }
+      return names;
+    };
+
+    if (sub === 'list') {
+      await assertLiveProject(io, guard.org, guard.projectId);
+      await resolveScope(io, guard.org, guard.projectId);
+      const result = await listProjectUsers(restFn, guard.projectId, retryLog(io));
+      io.stdout(formatUserList(result));
+      return result.ok ? 0 : 1;
+    }
+
+    // From here every sub writes; a run without --confirm is a dry print.
+    const email = flag(rest, '--email');
+    const role = flag(rest, '--role');
+    const userId = flag(rest, '--user-id');
+    if (sub === 'add' && (!email || !role)) {
+      io.stderr('c2c: users add needs --email <e> and --role <name>\n');
+      return 2;
+    }
+    if ((sub === 'disable' || sub === 'enable') && !userId) {
+      io.stderr(`c2c: users ${sub} needs --user-id <id>\n`);
+      return 2;
+    }
+    if (sub === 'set-role' && (!userId || !role)) {
+      io.stderr('c2c: users set-role needs --user-id <id> and --role <name>\n');
+      return 2;
+    }
+    if (userId !== undefined && !/^[0-9]+$/.test(userId)) {
+      io.stderr('c2c: --user-id must be a Catalyst user id (digits)\n');
+      return 2;
+    }
+    const intent =
+      sub === 'add'
+        ? `add --email (hidden) role ${role}`
+        : sub === 'set-role'
+          ? `set-role user ${userId} role ${role}`
+          : `${sub} user ${userId}`;
+    if (!confirm) {
+      io.stdout(`users ${sub}: ${intent} — dry print; pass --confirm to apply\n`);
+      return 0;
+    }
+
+    await assertLiveProject(io, guard.org, guard.projectId);
+    await resolveScope(io, guard.org, guard.projectId);
+
+    // A role name must be known before it is sent: planned by the export,
+    // carried by a live project user, or named in --role-ids.
+    let roleId: string | undefined;
+    if (sub === 'add' || sub === 'set-role') {
+      const rows = await listRows();
+      const known = new Set([...plannedRoles, ...liveRoleNames(rows)]);
+      if (!known.has(role!)) {
+        throw new GuardError(
+          'configuration',
+          `unknown role "${role}" — it is not a role the export plans, a built-in, or a role a project user holds; check Authentication > Roles (role_id via the MCP List_All_Roles tool) and pass --role-ids '${role}=<id>' if it exists there`,
+        );
+      }
+      roleId = roleIds[role!] ?? roleIdFromUsers(rows, role!);
+    }
+
+    if (sub === 'add') {
+      // Operator-typed address: the same normalisation the backup users get,
+      // and it stays inside the request — the result names the user id only.
+      const identity = canonicalUserIdentity(email!);
+      if (identity !== email!.trim().toLowerCase()) io.stderr(`c2c: inviting the normalised address (the ${email!.trim().includes('+') ? "'+' tag is dropped" : 'alias folds'})\n`);
+      const slateFlag = flag(rest, '--slate-domain');
+      if (slateFlag !== undefined && !slateHost(slateFlag)) throw new Error('--slate-domain must be a Slate app host — a bare hostname or the https App Url slate:link prints');
+      const redirectUrl = slateFlag ? `https://${slateHost(slateFlag)}` : usersSlateUrl(ds, guard.projectId);
+      const result = await inviteUsers(restFn, {
+        projectId: guard.projectId,
+        targets: [{ id: 'usr_add', role: role!, identity, first: flag(rest, '--first-name') ?? '', last: flag(rest, '--last-name') ?? '' }],
+        prior: [],
+        roleIds,
+        ...(redirectUrl ? { redirectUrl } : {}),
+        retry: retryLog(io),
+      });
+      io.stdout(formatInviteResult(result));
+      return result.ok ? 0 : 1;
+    }
+
+    if (sub === 'set-role' && !roleId) {
+      io.stdout(`users set-role: ${userId} — pending — ${roleIdFallback(role!)}\n`);
+      return 1;
+    }
+    const result = await manageProjectUser(restFn, {
+      projectId: guard.projectId,
+      userId: userId!,
+      action: sub,
+      ...(roleId ? { roleId } : {}),
+      ...(role ? { role } : {}),
+      retry: retryLog(io),
+    });
+    io.stdout(formatManageResult(result));
+    return result.status === 'applied' || result.status === 'verified' ? 0 : 1;
   } catch (err) {
     return fail(io, err);
   }

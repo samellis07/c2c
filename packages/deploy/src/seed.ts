@@ -421,6 +421,10 @@ export async function migrateSeed(opts: {
   columnsByTable?: Readonly<Record<string, readonly IntegrityColumn[]>>;
   /** Per table: lookup column → source record id → destination ROWID, the remap this load applied. */
   lookupSourceIds?: Readonly<Record<string, Readonly<Record<string, ReadonlyMap<string, string>>>>>;
+  /** Per table: Creator Users-field column names — their ZUID cells remap through `userIds`. */
+  userColumnsByTable?: Readonly<Record<string, readonly string[]>>;
+  /** Creator ZUID → invited Catalyst user_id (from the backup user lists + the users state file). */
+  userIds?: ReadonlyMap<string, string>;
   /** Store-unique column names per table, from the schema the source produced. */
   uniqueColumnsByTable?: Readonly<Record<string, readonly string[]>>;
   /** Stratus-key columns, keyed by seed table (the form link name). */
@@ -528,12 +532,14 @@ export async function migrateSeed(opts: {
         table: table.table,
         ...(columnsByTable[table.table] ? { integrityColumns: columnsByTable[table.table] } : {}),
         ...(opts.lookupSourceIds?.[table.table] ? { lookupSourceIds: opts.lookupSourceIds[table.table] } : {}),
+        ...(opts.userColumnsByTable?.[table.table]?.length ? { userColumns: opts.userColumnsByTable[table.table] } : {}),
       }],
       dryRun: opts.dryRun,
       fetch: fetchSeed,
       checkpoint,
       saveCheckpoint: opts.saveCheckpoint,
       ...(opts.scope ? { scope: opts.scope } : {}),
+      ...(opts.userIds?.size ? { userIds: opts.userIds } : {}),
     });
     singles.push(single);
     if (!single.ok) break;

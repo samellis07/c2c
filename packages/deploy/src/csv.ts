@@ -582,6 +582,8 @@ export async function migrateCsv(opts: {
   format?: 'csv' | 'json';
   /** Decisions the provisioned project recorded. Given, the load replays them instead of re-measuring the source. */
   constraints?: readonly ConstraintDecision[];
+  /** Creator ZUID → invited Catalyst user_id, for Users-field cells. */
+  userIds?: ReadonlyMap<string, string>;
 }): Promise<CsvMigrateResult> {
   const loaded = (opts.format === 'json' ? readSourceJson : readSourceCsv)(opts.dir, opts.app, opts.allowEmpty === true);
   return migrateLoaded({ ...opts, loaded });
@@ -604,6 +606,8 @@ export async function migrateLoaded(opts: {
    * any write regardless of what this source would have measured.
    */
   constraints?: readonly ConstraintDecision[];
+  /** Creator ZUID → invited Catalyst user_id, for Users-field cells. */
+  userIds?: ReadonlyMap<string, string>;
 }): Promise<CsvMigrateResult> {
   if (!opts.scope?.org || !opts.scope.projectId || !opts.scope.token) throw new Error('migrate requires the guarded org, project, and token');
   const loaded = opts.loaded;
@@ -617,6 +621,14 @@ export async function migrateLoaded(opts: {
       ? generateSchema(opts.app, { source: loaded.sourceData })
       : applyConstraintDecisions(generateSchema(opts.app), loaded.constraints ?? []);
   const columnsByTable = loaderColumns(schema, loaded.tables, loaded.foreignKeys);
+  // Creator Users-field columns hold a ZUID; the load rewrites the cell to the
+  // invited Catalyst user id (MigrateOptions.userIds) so ownership and
+  // transition-owner checks keep working after the move.
+  const userColumnsByTable: Record<string, readonly string[]> = Object.fromEntries(
+    schema.tables
+      .map((table) => [table.name, table.columns.filter((column) => column.matrixId === 'users').map((column) => column.name)] as const)
+      .filter(([, names]) => names.length > 0),
+  );
   const deferred = cyclicForeignKeys(
     loaded.tables.map((table) => table.table),
     loaded.foreignKeys,
@@ -699,6 +711,8 @@ export async function migrateLoaded(opts: {
       saveCheckpoint: opts.saveCheckpoint,
       scope: opts.scope,
       columnsByTable,
+      userColumnsByTable,
+      ...(opts.userIds?.size ? { userIds: opts.userIds } : {}),
       ...(Object.keys(lookupSourceIds).length ? { lookupSourceIds: { [table.table]: lookupSourceIds } } : {}),
     });
     written.push(...result.tables);

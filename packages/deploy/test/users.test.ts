@@ -973,17 +973,21 @@ function backupWith(from: string, to: string): string {
   return dir;
 }
 
-test("users plan and invite refuse a planned '+' address before any file or request, naming the user by id", async () => {
-  const backup = backupWith('user-002', 'user+tag-002');
+test("a planned '+' address is invited under its normalised mailbox, naming the user by id", async () => {
+  const backup = backupWith('user-002', 'User.Tag+Team@Example.COM');
   const ds = dsFile();
   const out = mkdtempSync(join(tmpdir(), 'c2c-users-plus-'));
   let { io, err, out: stdout } = makeIo();
-  assert.equal(await usersCli(['plan', '--source-backup', backup, '--ds', ds, '--out', out, '--salt', 's'], io), 2);
-  assert.match(err(), /^c2c: users usr_[0-9a-f]{16}: the email contains '\+'/);
-  assert.match(err(), /Email Id cannot contain '\+' character/);
-  assert.ok(!err().includes('user+tag'), 'the identity is never printed');
-  assert.ok(!stdout().includes('user+tag'));
-  assert.deepEqual(readdirSync(out), [], 'nothing is written');
+  assert.equal(await usersCli(['plan', '--source-backup', backup, '--ds', ds, '--out', out, '--salt', 's'], io), 0);
+  const planJson = JSON.parse(readFileSync(join(out, 'users', 'plan.json'), 'utf8')) as { counts: { aliases: number }; users: { id: string; aliasRules?: string[] }[] };
+  assert.equal(planJson.counts.aliases, 1);
+  const aliased = planJson.users.find((user) => user.aliasRules?.length);
+  assert.deepEqual(aliased?.aliasRules, ['plus-tag']);
+  for (const file of walkFiles(out)) {
+    const text = readFileSync(file, 'utf8');
+    assert.ok(!text.includes('@'), `${file} carries an identity`);
+    assert.ok(!text.includes('User.Tag'));
+  }
 
   const { rest, calls } = fakeRest();
   ({ io, err } = makeIo({ rest }));
@@ -991,9 +995,11 @@ test("users plan and invite refuse a planned '+' address before any file or requ
     ['invite', '--source-backup', backup, '--ds', ds, '--salt', 's', '--org', ORG, '--project', PROJECT, '--dc', 'in', '--slate-domain', SLATE, '--role-ids', 'Staff=1,Customers=2,App User=3,App Administrator=4', '--state', join(out, 'state.json'), '--confirm'],
     io,
   );
-  assert.equal(code, 2);
-  assert.equal(calls.length, 0, 'no request is sent');
-  assert.match(err(), /Catalyst Add User rejects a '\+'/);
+  assert.equal(code, 0);
+  const posts = calls.filter((call) => call.method === 'POST' && call.path === `${BASE}/project-user`);
+  const sent = posts.map((call) => (call.body as { user_details: { email_id: string } }).user_details.email_id);
+  assert.ok(sent.includes('user.tag@example.com'), `the plain mailbox was invited: ${JSON.stringify(sent)}`);
+  assert.ok(!sent.some((identity) => identity.includes('+')), 'no + address is ever sent');
 });
 
 test("a '+' on a user the plan skips (inactive) does not block the plan", async () => {
@@ -1053,4 +1059,152 @@ test('role ids parsed from MCP/REST text stay exact strings; a rounded JSON numb
   assert.equal(idString(10000000000000005), undefined);
   assert.equal(idString('10000000000000005'), '10000000000000005');
   assert.equal(idString(3001), '3001');
+});
+
+test('gmail dot and googlemail variants fold to the one invited mailbox', async () => {
+  const backup = backupWith('user-002', 'Crazy.Citizen+Ops@Googlemail.com');
+  const ds = dsFile();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-users-gmail-'));
+  const { io } = makeIo();
+  assert.equal(await usersCli(['plan', '--source-backup', backup, '--ds', ds, '--out', out, '--salt', 's'], io), 0);
+  const planJson = JSON.parse(readFileSync(join(out, 'users', 'plan.json'), 'utf8')) as { counts: { aliases: number }; users: { aliasRules?: string[] }[] };
+  assert.equal(planJson.counts.aliases, 1);
+  assert.deepEqual(planJson.users.find((user) => user.aliasRules)?.aliasRules, ['plus-tag', 'gmail-dot', 'googlemail-domain']);
+
+  const { rest, calls } = fakeRest();
+  const run = makeIo({ rest });
+  const code = await usersCli(
+    ['invite', '--source-backup', backup, '--ds', ds, '--salt', 's', '--org', ORG, '--project', PROJECT, '--dc', 'in', '--slate-domain', SLATE, '--role-ids', 'Staff=1,Customers=2,App User=3,App Administrator=4', '--state', join(out, 'state.json'), '--confirm'],
+    run.io,
+  );
+  assert.equal(code, 0);
+  const sent = calls
+    .filter((call) => call.method === 'POST' && call.path === `${BASE}/project-user`)
+    .map((call) => (call.body as { user_details: { email_id: string } }).user_details.email_id);
+  assert.ok(sent.includes('crazycitizen@gmail.com'));
+  assert.ok(!sent.some((identity) => identity.includes('+') || identity.includes('googlemail')));
+});
+
+test('two alias spellings of one mailbox collapse to a single invite', async () => {
+  const backup = backupWith('user-003', 'user.002@gmail.com');
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-users-fold-'));
+  const { io } = makeIo();
+  assert.equal(await usersCli(['plan', '--source-backup', backup, '--ds', dsFile(), '--out', dir, '--salt', 's'], io), 0);
+  const planJson = JSON.parse(readFileSync(join(dir, 'users', 'plan.json'), 'utf8')) as { counts: { duplicates: number; aliases: number }; users: unknown[] };
+  assert.equal(planJson.counts.aliases, 1);
+  // 'user.002@gmail.com' folds to 'user002@gmail.com' — no second user appears.
+  assert.equal(planJson.users.length, 4);
+});
+
+/** Fake admin REST for the post-go-live manage commands. */
+function manageRest(users: Record<string, unknown>[]): { rest: RestFn; calls: Recorded[]; store: Map<string, Record<string, unknown>> } {
+  const calls: Recorded[] = [];
+  const store = new Map(users.map((user) => [String(user.user_id), { ...user }]));
+  const rest: RestFn = async (call: RestCall) => {
+    calls.push({ method: call.method, path: call.path, body: call.body });
+    if (call.method === 'GET' && call.path === BASE) {
+      return { status: 200, body: { data: { id: PROJECT, org_id: ORG } } };
+    }
+    if (call.method === 'GET' && call.path === `${BASE}/project-user`) {
+      return { status: 200, body: [...store.values()] };
+    }
+    const rowMatch = call.path.match(/^\/baas\/v1\/project\/\d+\/project-user\/(\d+)$/);
+    if (rowMatch) {
+      const row = store.get(rowMatch[1]!);
+      if (!row) return { status: 404, body: {} };
+      if (call.method === 'GET') return { status: 200, body: { data: row } };
+      if (call.method === 'PUT') {
+        const body = (call.body ?? {}) as Record<string, unknown>;
+        if (typeof body.status === 'string') row.status = body.status === 'disable' ? 'DISABLED' : 'ENABLED';
+        const roleDetails = body.role_details as Record<string, unknown> | undefined;
+        if (roleDetails?.role_id) row.role_details = { ...(row.role_details as Record<string, unknown>), role_id: roleDetails.role_id };
+        return { status: 200, body: { data: row } };
+      }
+    }
+    if (call.method === 'POST' && call.path === `${BASE}/project-user`) {
+      return { status: 200, body: { user_id: '10000000000000009', status: 'INVITED' } };
+    }
+    return { status: 404, body: {} };
+  };
+  return { rest, calls, store };
+}
+
+const LIVE_USER = { user_id: '10000000000000007', email_id: 'hidden-1', status: 'ENABLED', is_confirmed: true, role_details: { role_name: 'Staff', role_id: '10000000000000005' } };
+
+test('users list prints user_id, role and status — never the address', async () => {
+  const { rest } = manageRest([LIVE_USER]);
+  const { io, out } = makeIo({ rest });
+  const code = await usersCli(['list', '--ds', dsFile(), '--org', ORG, '--project', PROJECT, '--dc', 'in'], io);
+  assert.equal(code, 0);
+  assert.match(out(), /10000000000000007 role=Staff status=ENABLED confirmed=true/);
+  assert.ok(!out().includes('hidden-1'), 'the sign-in address is never printed');
+});
+
+test('users disable --confirm PUTs the status and verifies it on read-back', async () => {
+  const { rest, calls, store } = manageRest([LIVE_USER]);
+  const { io, out } = makeIo({ rest });
+  const code = await usersCli(['disable', '--ds', dsFile(), '--org', ORG, '--project', PROJECT, '--dc', 'in', '--user-id', '10000000000000007', '--confirm'], io);
+  assert.equal(code, 0);
+  const put = calls.find((call) => call.method === 'PUT');
+  assert.deepEqual(put?.body, { status: 'disable' });
+  assert.equal(store.get('10000000000000007')?.status, 'DISABLED');
+  assert.match(out(), /verified/);
+});
+
+test('users enable --confirm flips a disabled user back', async () => {
+  const { rest, store } = manageRest([{ ...LIVE_USER, status: 'DISABLED' }]);
+  const { io, out } = makeIo({ rest });
+  const code = await usersCli(['enable', '--ds', dsFile(), '--org', ORG, '--project', PROJECT, '--dc', 'in', '--user-id', '10000000000000007', '--confirm'], io);
+  assert.equal(code, 0);
+  assert.equal(store.get('10000000000000007')?.status, 'ENABLED');
+  assert.match(out(), /verified/);
+});
+
+test('users set-role --confirm sends role_details.role_id and verifies the stored role', async () => {
+  const { rest, calls, store } = manageRest([LIVE_USER]);
+  const { io, out } = makeIo({ rest });
+  const code = await usersCli(
+    ['set-role', '--ds', dsFile(), '--org', ORG, '--project', PROJECT, '--dc', 'in', '--user-id', '10000000000000007', '--role', 'Customers', '--role-ids', 'Customers=10000000000000006', '--confirm'],
+    io,
+  );
+  assert.equal(code, 0);
+  const put = calls.find((call) => call.method === 'PUT');
+  assert.deepEqual(put?.body, { role_details: { role_id: '10000000000000006' } });
+  assert.equal((store.get('10000000000000007')?.role_details as { role_id: string }).role_id, '10000000000000006');
+  assert.match(out(), /verified/);
+});
+
+test('users set-role refuses an unknown role before any request (MUST-FAIL)', async () => {
+  const { rest, calls } = manageRest([LIVE_USER]);
+  const { io, err } = makeIo({ rest });
+  const code = await usersCli(
+    ['set-role', '--ds', dsFile(), '--org', ORG, '--project', PROJECT, '--dc', 'in', '--user-id', '10000000000000007', '--role', 'Ghost', '--confirm'],
+    io,
+  );
+  assert.equal(code, 2);
+  assert.match(err(), /unknown role "Ghost"/);
+  assert.equal(calls.filter((call) => call.method === 'PUT').length, 0, 'no write is sent');
+});
+
+test('users add --confirm invites the operator address under a known role', async () => {
+  const { rest, calls } = manageRest([LIVE_USER]);
+  const { io, out } = makeIo({ rest });
+  const code = await usersCli(
+    ['add', '--ds', dsFile(), '--org', ORG, '--project', PROJECT, '--dc', 'in', '--email', 'new.user@example.com', '--role', 'Staff', '--role-ids', 'Staff=10000000000000005', '--slate-domain', SLATE, '--confirm'],
+    io,
+  );
+  assert.equal(code, 0);
+  const post = calls.find((call) => call.method === 'POST' && call.path === `${BASE}/project-user`);
+  assert.equal((post?.body as { user_details: { email_id: string; role_id: string } }).user_details.email_id, 'new.user@example.com');
+  assert.equal((post?.body as { user_details: { role_id: string } }).user_details.role_id, '10000000000000005');
+  assert.match(out(), /invited/);
+});
+
+test('users manage writes are dry prints without --confirm (nothing is sent)', async () => {
+  const { rest, calls } = manageRest([LIVE_USER]);
+  const { io, out } = makeIo({ rest });
+  const code = await usersCli(['disable', '--ds', dsFile(), '--org', ORG, '--project', PROJECT, '--dc', 'in', '--user-id', '10000000000000007'], io);
+  assert.equal(code, 0);
+  assert.match(out(), /dry print/);
+  assert.equal(calls.filter((call) => call.method !== 'GET').length, 0);
 });
