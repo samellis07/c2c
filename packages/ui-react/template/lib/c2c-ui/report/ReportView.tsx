@@ -28,7 +28,7 @@ import { useEnv } from '../runtime/env';
 import { Slot, useCustomization } from '../runtime/extend';
 import { hrefFor } from '../runtime/router';
 import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
-import { criteriaTodo, matchCriteria } from './criteria';
+import { matchCriteria } from './criteria';
 import { multiValueItems } from '../form/value';
 
 type Row = Record<string, unknown>;
@@ -187,7 +187,6 @@ function ViewStub({ report }: { report: ReportSpec }) {
       <div data-view-stub={report.view}>
         <EmptyState title="View not available" description={`${report.label} is a ${report.view} view, which this app does not draw yet.`} />
       </div>
-      {report.todo ? <p className="todo">{report.todo}</p> : null}
       <Slot>{own?.slots?.after}</Slot>
     </section>
   );
@@ -437,8 +436,6 @@ function ReportList({ report }: { report: ReportSpec }) {
   const Empty = custom.components?.EmptyState;
   const named = report.filters.map((f) => f.label).filter((label): label is string => !!label);
   // A field-only filter has no criteria to offer; name it instead of dropping it silently.
-  const unoffered = report.filters.filter((f) => !f.label).map((f) => f.field).filter((field): field is string => !!field);
-  const unmigrated = report.conditionalFormats.some((f) => criteriaTodo(f.criteria));
   const groupField = report.groupBy[0]?.field;
   const groups = groupField ? groupRows(shown, groupField) : null;
   const showPages = load.state === 'ready' && (page > 0 || live.length >= report.pageSize);
@@ -516,14 +513,7 @@ function ReportList({ report }: { report: ReportSpec }) {
           {actionNote}
         </p>
       ) : null}
-      {unmigrated ? <p className="todo">A conditional formatting rule was not migrated; its highlighting is off.</p> : null}
       {report.note ? <p className="todo" data-report-note>{report.note}</p> : null}
-      {report.todo ? <p className="todo">{report.todo}</p> : null}
-      {unoffered.length ? (
-        <p className="todo">
-          {unoffered.length === 1 ? `A field filter without criteria is not offered: ${unoffered[0]}.` : `Field filters without criteria are not offered: ${unoffered.join(', ')}.`}
-        </p>
-      ) : null}
       {load.state === 'loading' ? (
         <p className="c2c-loading" data-state="loading" role="status">
           Loading records…

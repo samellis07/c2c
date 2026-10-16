@@ -486,6 +486,40 @@
       ]
     }
   ],
+  "hiddenParts": [
+    {
+      "location": "report Book_by_Genre",
+      "reason": "the kanban view is not drawn"
+    },
+    {
+      "location": "page DashBoard",
+      "reason": "<search>: ZML <search> has no generated component"
+    },
+    {
+      "location": "page DashBoard",
+      "reason": "<searchbar>: ZML <searchbar> has no generated component"
+    },
+    {
+      "location": "page DashBoard",
+      "reason": "<searchbutton>: ZML <searchbutton> has no generated component"
+    },
+    {
+      "location": "page DashBoard",
+      "reason": "<button>: the VIEW button opens without its values (View all Books)"
+    },
+    {
+      "location": "page DashBoard",
+      "reason": "<text>: the value distinctcount is not generated yet"
+    },
+    {
+      "location": "page DashBoard",
+      "reason": "<button>: the View button opens without its values (Overdue transactions)"
+    },
+    {
+      "location": "page DashBoard",
+      "reason": "<button>: the Staff Activity Log button opens without its values (Staff Activity Log)"
+    }
+  ],
   "deluge": {
     "units": 14,
     "statements": 65,

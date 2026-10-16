@@ -58,5 +58,6 @@
       "check": "pivot-analytics",
       "count": 1
     }
-  ]
+  ],
+  "hiddenParts": []
 }

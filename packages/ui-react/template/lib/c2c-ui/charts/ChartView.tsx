@@ -82,9 +82,6 @@ export function ChartBody({ chart }: { chart: ChartSpec }) {
       {chart.notes.map((note) => (
         <p key={note} className="c2c-chart-note">{note}</p>
       ))}
-      {chart.todos.map((todo) => (
-        <p key={todo} className="todo">{todo}</p>
-      ))}
       {load.state === 'loading' ? (
         <p className="c2c-loading" data-state="loading" role="status">Loading chart…</p>
       ) : load.state === 'error' ? (
@@ -125,7 +122,7 @@ export function ChartReport({ report }: { report: ReportSpec }) {
     <section className="c2c-card" data-report={report.name} data-view="chart">
       <h1>{report.label}</h1>
       <RowsScope>
-        {report.chart ? <ChartBody chart={report.chart} /> : <p className="todo">The chart settings of this report are not generated.</p>}
+        {report.chart ? <ChartBody chart={report.chart} /> : <p className="c2c-unavailable-note">This chart is not available yet.</p>}
       </RowsScope>
     </section>
   );

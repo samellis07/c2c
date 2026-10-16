@@ -31,6 +31,8 @@ export interface FixtureMigrationReport {
   todoCount: number;
   todoKinds: { construct: string; count: number }[];
   manualSteps: ManualStep[];
+  /** Parts the generated app does not show to end users, with the reason each is hidden. */
+  hiddenParts: { location: string; reason: string }[];
 }
 
 export interface InRepoFixture {
@@ -87,6 +89,7 @@ export function buildFixtureMigrationReport(fixture: InRepoFixture): FixtureMigr
     todoCount: analysis.determinism.todoCount,
     todoKinds: analysis.determinism.todoKinds.map((kind) => ({ construct: kind.construct, count: kind.count })),
     manualSteps: manualStepsOf(ir, source),
+    hiddenParts: analysis.hiddenParts.map((part) => ({ location: part.location, reason: part.reason })),
   };
 }
 
@@ -97,6 +100,7 @@ export function fixtureMigrationReportAsJson(report: FixtureMigrationReport): st
 export function fixtureMigrationReportAsMarkdown(report: FixtureMigrationReport): string {
   const todos = report.todoKinds.length ? report.todoKinds.map((kind) => `- ${kind.count} ${kind.construct}`) : ['- none'];
   const manual = report.manualSteps.length ? report.manualSteps.map((step) => `- ${step.count} ${step.severity} ${step.check}`) : ['- none'];
+  const hidden = report.hiddenParts.length ? report.hiddenParts.map((part) => `- ${part.location}: ${part.reason}`) : ['- none'];
   return [
     `# Migration report: ${report.fixture}`,
     '',
@@ -115,6 +119,12 @@ export function fixtureMigrationReportAsMarkdown(report: FixtureMigrationReport)
     '## Manual steps',
     '',
     ...manual,
+    '',
+    '## Hidden from end users',
+    '',
+    String(report.hiddenParts.length),
+    '',
+    ...hidden,
     '',
   ].join('\n');
 }

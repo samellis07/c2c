@@ -23,3 +23,16 @@ App: Library_System_Application
 ## Manual steps
 
 - none
+
+## Hidden from end users
+
+8
+
+- report Book_by_Genre: the kanban view is not drawn
+- page DashBoard: <search>: ZML <search> has no generated component
+- page DashBoard: <searchbar>: ZML <searchbar> has no generated component
+- page DashBoard: <searchbutton>: ZML <searchbutton> has no generated component
+- page DashBoard: <button>: the VIEW button opens without its values (View all Books)
+- page DashBoard: <text>: the value distinctcount is not generated yet
+- page DashBoard: <button>: the View button opens without its values (Overdue transactions)
+- page DashBoard: <button>: the Staff Activity Log button opens without its values (Staff Activity Log)
