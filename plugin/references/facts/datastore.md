@@ -99,17 +99,19 @@ Rule: [TESTED] model the migration idempotency key (numeric Creator ids fit in
 int64) as a unique bigint. `c2c plan` fails closed when more than two
 unique text fields are required and enforces the rest at app level.
 
-Rule: [TESTED 2026-10-16] a `date` or `datetime` column created with
-`is_unique: true` refuses EVERY insert: `400 INVALID_INPUT` "Invalid input
+Rule: [TESTED] a `date` or `datetime` column created with
+`is_unique: true` refuses EVERY insert (live probe 2026-10-16):
+`400 INVALID_INPUT` "Invalid input
 value for <col>. date value expected" — the same ISO value a non-unique date
 column accepts. Never set `is_unique` on a date/datetime column; enforce a
 Creator "no duplicate values" date field in the app layer (a read-before-write
 check on the same value) and state that Data Store-level uniqueness is not
 enforced for dates.
 
-Rule: [TESTED 2026-10-16] a column create naming `To` returns
+Rule: [TESTED] a column create naming `To` returns
 `403 INVALID_OPERATION` "You cannot perform this operation. Column name
-cannot contain reserved keywords" — the same refusal as `priority`, `table`,
+cannot contain reserved keywords" (live probe 2026-10-16) — the same refusal
+as `priority`, `table`,
 and `time`. The whole batch is lost, so refuse or rename before the POST
 (stored as `To_col` by c2c). The Data Store system column names `ROWID`,
 `CREATORID`, `CREATEDTIME`, `MODIFIEDTIME` are treated as reserved too
