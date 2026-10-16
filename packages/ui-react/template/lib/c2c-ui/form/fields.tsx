@@ -14,7 +14,7 @@ import { Input } from '../arc/components/input/input';
 import { Textarea } from '../arc/components/textarea/textarea';
 import { Button } from '../arc/components/button/button';
 import inputStyles from '../arc/components/input/input.module.css';
-import { canonicalNumber, fractionDigits, localDay, parseLocalDay, toCanonicalDecimal, toMinorUnits } from './value';
+import { canonicalNumber, fractionDigits, localDay, multiValueItems, parseLocalDay, toCanonicalDecimal, toMinorUnits } from './value';
 import type { FieldSpec, FormSpec } from '../types';
 import { useCustomization, type FieldProps } from '../runtime/extend';
 import { useEnv } from '../runtime/env';
@@ -57,12 +57,6 @@ function num(value: unknown): number | undefined {
   if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return undefined;
   const n = Number(value);
   return Number.isFinite(n) ? n : undefined;
-}
-
-function list(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(String);
-  const one = text(value);
-  return one !== undefined ? [one] : [];
 }
 
 function optionsOf(field: FieldSpec): { value: string; label: string }[] {
@@ -400,7 +394,8 @@ export function SelectField({ field, error, value }: FieldProps) {
 
 export function MultiSelectField({ field, error, value }: FieldProps) {
   const id = useId();
-  const [current, setCurrent] = useState<string[]>(list(value));
+  // The stored cell is list text (["No"]); each choice it holds starts selected.
+  const [current, setCurrent] = useState<string[]>(multiValueItems(value));
   const all = optionsOf(field);
   // The record reader takes the select's selectedOptions in document order,
   // so the chosen options lead in the order they were picked and a

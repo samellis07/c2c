@@ -81,7 +81,7 @@ import {
 } from '../../data/src/integrity.js';
 import { decimalShadow } from '../../shims/src/criteria.js';
 import { quantizeDecimal } from '../../shims/src/decimal.js';
-import { encodeMultiValue } from '../../shims/src/multi-value.js';
+import { encodeMultiValue, splitMultiValueText } from '../../shims/src/multi-value.js';
 import { exactId, parseJsonExact } from './json-exact.js';
 import { confirmGuardLines, planScopeLines } from './guards.js';
 import {
@@ -1811,7 +1811,7 @@ function convertCell(label: string, raw: string, column: ColSpec, file: string, 
     case 'bool':
       return formatBool(text, label, file, labels?.displayTrue, labels?.displayFalse);
     case 'multi':
-      return encodeMultiValue(splitMulti(text));
+      return encodeMultiValue(splitMultiValueText(text));
     case 'lookup':
       return text;
     case 'number':

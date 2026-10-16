@@ -16,6 +16,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { TEMPLATE_DIR } from '../src/index.js';
 import type { FieldSpec, FormSpec } from '../template/lib/c2c-ui/types.js';
+import { readRecord } from '../template/lib/c2c-ui/form/record.js';
+import { multiValueCell } from '../../shims/src/multi-value.js';
 
 interface Bundle {
   react: Record<string, any>;
@@ -233,6 +235,22 @@ test('a multi choice field is a real named multi-select', async () => {
   assert.ok(select, 'a multiselect posts its values through a named multi-select');
   renderedLabel(el, 'Tags');
   requiredMarked(el, 'Tags');
+});
+
+test('editing a stored multi choice record and saving untouched keeps every choice', async () => {
+  // A multi choice cell is stored as list text (["No"]); older rows hold [No] or {"No"}.
+  const fields = [field('Featured', 'multiselect', { choices: ['Yes', 'No'] }), field('Tags', 'multiselect', { choices: ['a', 'b', 'c'] })];
+  for (const [featured, tags] of [['["No"]', '["a","c"]'], ['[No]', '[a, c]'], ['{"No"}', '{"a","c"}']]) {
+    const { doc } = await render(fields, { Featured: featured, Tags: tags });
+    const selected = (name: string) => [...doc.querySelector<HTMLSelectElement>(`select[name="${name}"]`)!.selectedOptions].map((option) => option.value);
+    assert.deepEqual(selected('Featured'), ['No'], `${featured} preselects its choice`);
+    assert.deepEqual(selected('Tags'), ['a', 'c'], `${tags} preselects its choices`);
+    const formEl = doc.querySelector('form') as HTMLFormElement;
+    formEl.setAttribute('data-mode', 'edit');
+    const record = readRecord(formEl, spec(fields));
+    assert.equal(multiValueCell(record.Featured), '["No"]', `${featured} saves back canonical, never []`);
+    assert.equal(multiValueCell(record.Tags), '["a","c"]');
+  }
 });
 
 test('radio options are real radio inputs', async () => {

@@ -114,31 +114,72 @@ export function multiValueDefault(raw: string | undefined): string | undefined {
 }
 
 /**
- * A multi-value cell in its stored shape, for a write: a list (a posted array
- * or a Deluge list) is encoded; JSON list text is re-encoded canonically; a
- * Deluge list literal is parsed; any other text is one choice. An empty or
- * blank value is null. A value of another kind (an object) is returned as is
- * for the store to refuse.
+ * The choices of a multi-value cell in any shape a row may hold: a list, the
+ * canonical JSON list text (`["No"]`), a Deluge list literal (`{"No"}`), the
+ * legacy unquoted list text (`[No]`, `[Red, Blue]`), or one bare choice. Items
+ * are trimmed text with empty items dropped; no value is an empty list. The
+ * edit forms prefill from this, so a load and save never drops a stored choice.
  */
-export function multiValueCell(value: unknown): unknown {
-  if (value === undefined || value === null) return value;
-  if (Array.isArray(value)) return encodeMultiValue(value) ?? null;
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return encodeMultiValue([value]) ?? null;
-  if (typeof value !== 'string') return value;
+export function decodeMultiValue(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (Array.isArray(value)) return listItems(value);
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return [String(value)];
+  if (typeof value !== 'string') return [];
   const text = value.trim();
-  if (!text) return null;
-  if (text.startsWith('[')) {
+  if (!text) return [];
+  if (text.startsWith('[') && text.endsWith(']')) {
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
     } catch {
       parsed = undefined;
     }
-    if (Array.isArray(parsed) && parsed.every((item) => item === null || typeof item !== 'object')) return encodeMultiValue(parsed) ?? null;
+    if (Array.isArray(parsed) && parsed.every((item) => item === null || typeof item !== 'object')) return listItems(parsed);
+    if (parsed === undefined) return bareItems(text);
   }
-  if (isDelugeListText(text)) {
-    const list = parseDelugeList(text);
-    if (list) return encodeMultiValue(list) ?? null;
+  if (isDelugeListText(text)) return listItems(parseDelugeList(text) ?? bareItems(text));
+  return [text];
+}
+
+/**
+ * The choices of an export or backup cell: a list-shaped cell (`["No"]`,
+ * `[No]`, `{"No"}`) decodes as decodeMultiValue does; any other text is the
+ * Creator export form, choices split on `;` (or `,` when there is no `;`).
+ */
+export function splitMultiValueText(text: string): string[] {
+  const trimmed = text.trim();
+  if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || isDelugeListText(trimmed)) return decodeMultiValue(trimmed);
+  return listItems(trimmed.includes(';') ? trimmed.split(';') : trimmed.split(','));
+}
+
+function listItems(items: readonly unknown[]): string[] {
+  const list: string[] = [];
+  for (const item of items) {
+    if (item === null || item === undefined) continue;
+    const text = String(item).trim();
+    if (text.length > 0) list.push(text);
   }
-  return encodeMultiValue([text]) ?? null;
+  return list;
+}
+
+/** `[No]` / `{a, "b"}`: the text between the brackets split on commas, one quote pair stripped per item. */
+function bareItems(text: string): string[] {
+  return listItems(
+    text
+      .slice(1, -1)
+      .split(',')
+      .map((item) => item.trim().replace(/^(["'])([\s\S]*)\1$/, '$2')),
+  );
+}
+
+/**
+ * A multi-value cell in its stored shape, for a write: every shape
+ * decodeMultiValue reads is re-encoded as canonical JSON list text. An empty
+ * or blank value is null. A value of another kind (an object) is returned as
+ * is for the store to refuse.
+ */
+export function multiValueCell(value: unknown): unknown {
+  if (value === undefined || value === null) return value;
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  return encodeMultiValue(decodeMultiValue(value)) ?? null;
 }

@@ -7,7 +7,7 @@ import { deriveIr, parse } from '../../core/src/index.js';
 import { integrityColumns } from '../../data/src/integrity.js';
 import { generateSchema } from '../../schema/src/generator.js';
 import { applyInitialValues, type WriteField } from '../../shims/src/access.js';
-import { encodeMultiValue, multiValueCell, multiValueDefault, parseDelugeList } from '../../shims/src/multi-value.js';
+import { encodeMultiValue, multiValueCell, multiValueDefault, parseDelugeList, splitMultiValueText } from '../../shims/src/multi-value.js';
 import { createRuntime } from '../../shims/src/runtime.js';
 import { checkRow, type WriteRuleColumn } from '../../shims/src/write-rules.js';
 import { generateUi } from '../../ui/src/generate.js';
@@ -201,4 +201,22 @@ test('no generated file carries a Deluge list literal as a default', () => {
   const prefill = new Map(model.fields.map((field) => [field.name, field.initialValue]));
   assert.equal(prefill.get('Featured'), '["No"]', 'the form prefill is the stored shape');
   assert.equal(prefill.get('Cleared'), undefined);
+});
+
+test('migrate-data reads a list-shaped export cell as its choices, never as one choice', () => {
+  for (const cell of ['[No]', '{"No"}', '["No"]', 'No']) assert.deepEqual(splitMultiValueText(cell), ['No'], cell);
+  assert.deepEqual(splitMultiValueText('Red;Blue'), ['Red', 'Blue']);
+  assert.deepEqual(splitMultiValueText('[Red, Blue]'), ['Red', 'Blue']);
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-multi-legacy-'));
+  try {
+    writeFileSync(join(dir, 'Book.csv'), 'ID,Title,Featured,Tags\n1,A,[No],"[plain]"\n2,B,"{""No""}","[""plain""]"\n3,C,"[""No""]",plain\n');
+    const rows = readSourceCsv(dir, app).tables.find((table) => table.table === 'Book')!.rows;
+    assert.deepEqual(rows.map((row) => [row.columns.Featured, row.columns.Tags]), [
+      ['["No"]', '["plain"]'],
+      ['["No"]', '["plain"]'],
+      ['["No"]', '["plain"]'],
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
