@@ -4,6 +4,7 @@ export {
   gateRefusalMessage,
   doctorStamp,
   GATE_EXIT,
+  INTEGRITY_EXIT,
   GATE_REQUIRED_CHECKS,
   DOCTOR_MAX_AGE_MS,
   type GateScope,

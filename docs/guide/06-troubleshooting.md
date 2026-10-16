@@ -11,6 +11,24 @@ says how solid it is: **proven** (seen in testing),
 **documented** (in the platform docs), or **not yet proven**
 (assumed until a probe proves it).
 
+## Exit codes: what the number means
+
+Every c2c command finishes with an exit code: `0` means it
+worked, anything else means something specific. This is the
+complete list — find your number, then do the step next to it.
+(You can paste the number and the last lines of the output into
+the chat and the AI takes it from there.)
+
+| Code | What it means | What to do |
+|---|---|---|
+| 0 | OK | Nothing — the step finished. |
+| 1 | Findings or blockers in the report, a failed step, or drift (something missing or changed); for every command except `precheck`, `cutover-checklist`, `proof` and `iac-drift`, also an export file that was not found | If the output says "no such file or directory", check the path to the `.ds` file. Otherwise read the report file named in the output and fix what it lists, starting with anything marked blocking. |
+| 2 | Usage error, a locked Marketplace export, a refused TODO fill, or drift that is only extra items | Usage: read the usage line; most often a missing option such as `--project`, `--org`, or `--out` — the AI corrects the command. Locked Marketplace export: this app cannot be converted; ask the app's vendor for the source `.ds` or an unlocked copy. Refused TODO fill: the message names the TODO; tell the AI. Extra items only: Catalyst has items the plan does not list and nothing is missing; decide whether to keep them. |
+| 3 | An input file that was not found or could not be read, for `precheck`, `cutover-checklist`, `proof` and `iac-drift` (including a template that is not valid JSON) | Check the file path — the file is not where stated. For `iac-drift`, export the template again. |
+| 4 | `precheck`: the file is not a readable Creator export; `smoke`: waiting for you to do the check in your own browser | `precheck`: re-export the app from Creator (app → Settings → Export) and try again. If Creator's own export comes out blank, tell the AI — one component in the app is breaking the export. `smoke`: open the page the output names, signed in to the app, wait for Done or Failed, and paste the result code into the chat. |
+| 5 | Doctor gate: a `--confirm` command was refused because the environment check is not green, current, or same-scope | This is a safety stop, not a failure in your app: ask the AI to run the doctor check and follow the fix printed next to each failed check (see "The doctor is red" below). |
+| 6 | Node or plugin integrity problem | The tool installation itself has a problem (the wrong Node version or a damaged install). Tell the AI — it needs Node 20 or 22, or the plugin reinstalled. |
+
 ## The doctor is red
 
 The doctor prints the exact fix next to each failed check

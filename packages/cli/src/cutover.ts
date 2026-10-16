@@ -35,6 +35,7 @@ import {
 import { doubleColumns } from '../../deploy/src/row-delta.js';
 import { generateSchema } from '../../schema/src/index.js';
 import { analyze } from './analyze.js';
+import { CLI_EXIT } from './exit-codes.js';
 
 export const PROOF_JSON = 'c2c-proof.json';
 export const PROOF_MD = 'c2c-proof.md';
@@ -634,7 +635,7 @@ export function cutoverCli(args: readonly string[], io: Pick<Io, 'stdout' | 'std
     const code = (err as { code?: unknown } | null)?.code;
     if (code === 'ENOENT' || code === 'ENOTDIR') {
       io.stderr(`c2c: no such file or directory: ${target}\n`);
-      return 3;
+      return CLI_EXIT.inputUnreadable;
     }
     // Let the regular loader produce its established error for an existing
     // target the preflight could not read. EISDIR is expected for directory
