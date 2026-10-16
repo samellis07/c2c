@@ -22,8 +22,8 @@ import { basename } from 'node:path';
 import { runDoctorChecks, type DoctorContext } from './checks.js';
 import { listCatalystProjects, peekCliTokenTag, refreshCliAccessToken } from '../../deploy/src/rest.js';
 import { EvidenceRejected, EvidenceStale, mcpRecord, parseEvidence, type McpEvidence } from './evidence.js';
-import { beginMcpRequest, closeMcpRequest, mcpRequestInstructions, parseObservation, readStdinBounded, type Observed } from './observed.js';
-import { clearPendingCleanup, deleteProbeNonce, probeDeleteCall, probeNameOf, probeNonceCleanup, readPendingCleanups, verifyProbe, writePendingCleanup, type ProbeNonceCleanup, type ProbeTarget } from './mcp-probe.js';
+import { beginMcpRequest, closeMcpRequest, mcpRequestInstructions, ObservationRejected, parseObservation, readStdinBounded, type Observed } from './observed.js';
+import { clearPendingCleanup, deleteProbeNonce, probeDeleteCall, probeNameOf, probeNonceCleanup, probeScopeOf, readPendingCleanups, verifyProbe, writePendingCleanup, type ProbeNonceCleanup, type ProbeScope, type ProbeTarget } from './mcp-probe.js';
 import { catalystRestCall } from '../../deploy/src/rest.js';
 import { c2cVersion, detectHost, workspaceDir, writeDoctorFile } from './report.js';
 import { formatAge, loadMcpEvidence, MCP_EVIDENCE_MAX_AGE_HOURS, writeMcpEvidence, type McpEvidenceReuse } from './mcp-state.js';
@@ -254,6 +254,23 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
         // read-back and the cleanup track the bucket that was actually
         // created, even if the scope flags drifted since the begin run.
         const probe = result.probe ?? probeNameOf(result.observed.request, probeTarget);
+        // The request pins the scope --mcp-begin ran under (fail closed):
+        // an org-scoped begin is never completed by a project-scoped binding,
+        // which could create the org-named bucket inside the project, and the
+        // same in reverse. A scope the begin could not pin ('request' kind,
+        // no numeric org/project) carries no drift check.
+        if (result.scope && result.scope.kind !== 'request') {
+          const runScope = probeScopeOf(probeTarget);
+          const drift =
+            result.scope.kind !== runScope.kind ||
+            (result.scope.org !== undefined && result.scope.org !== probeTarget.org) ||
+            (result.scope.project !== undefined && result.scope.project !== probeTarget.project);
+          if (drift) {
+            const describe = (scope: ProbeScope): string =>
+              scope.kind === 'project' ? `project-scoped (project ${scope.project})` : scope.kind === 'org' ? `org-scoped (org ${scope.org})` : 'unscoped';
+            throw new ObservationRejected(`the MCP request was opened ${describe(result.scope)} but this run is ${describe(runScope)}; run c2c doctor --mcp-begin again in the same scope`);
+          }
+        }
         const projectScoped = probeTarget.project !== undefined && /^[0-9]+$/.test(probeTarget.project);
         const rest = io.rest ?? ((call: { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; path: string; body?: unknown }) => catalystRestCall(io.env, probeTarget.org ?? '', probeTarget.project ?? '', call));
         // A project-scoped request with no nonce must not fall back to "the

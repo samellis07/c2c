@@ -528,8 +528,10 @@ test('mcp-observed: a project-scoped request with no nonce does not accept the b
   const { request } = await begin(env);
   const path = join(dir, 'c2c-out', '.c2c', 'mcp-request.json');
   const open = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
-  delete open.nonce;
-  writeFileSync(path, JSON.stringify(open));
+  // A nonce-less request is only reachable as an older file, which has no
+  // scope or digest to authenticate: a nonce removed from a current file
+  // breaks its digest and is refused as edited.
+  writeFileSync(path, JSON.stringify({ schema: open.schema, request: open.request, at: open.at, probe: open.probe }));
   const seen: { path: string }[] = [];
   const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, fakeRest({ [PROBE]: {} }, seen));
   assert.equal(run.code, 1, run.out + run.err);
@@ -932,28 +934,24 @@ test('mcp-observed: an already-exists probe create is accepted; any other probe 
   }
 });
 
-test('mcp-observed: the observation reads back the bucket --mcp-begin named, even if the scope flags drifted', async () => {
+test('mcp-observed: the request pins the scope --mcp-begin ran under, so drifted scope flags are refused', async () => {
   const { dir, env } = workspace();
   const { request } = await begin(env);
   // The scope flags drift after begin: the config now names another project.
   const other = '10000000000000001';
   writeFileSync(join(dir, DEPLOY_CONFIG), JSON.stringify({ dc: 'in', org: ORG, project: other, env: 'Development', ui: 'vanilla' }));
-  // Only the begin-time project holds the bucket; the drifted project is empty.
+  // Fail closed: the drift is refused before any REST read-back — the
+  // begin-time project is the only scope this request can complete in, and
+  // no phantom record for the drifted scope's bucket is tracked.
   const seen: { path: string }[] = [];
   const rest: NonNullable<DoctorIo['rest']> = async (call) => {
     seen.push({ path: call.path });
-    if (call.path === `/baas/v1/project/${PROJECT}/bucket`) {
-      return { status: 200, body: { status: 'success', data: [{ bucket_name: PROBE, bucket_url: 'https://x-development.zohostratus.in' }] } };
-    }
     return { status: 200, body: { status: 'success', data: [] } };
   };
   const run = await observe(env, observation(request, { host_of_url: undefined, transport: 'stdio' }), [], NO_HOOKS, rest);
-  // Fail closed: the read-back goes to the currently selected project, where
-  // the bucket is absent — and no phantom record for the drifted scope's
-  // bucket (which was never created) is tracked.
   assert.equal(run.code, 1, run.out + run.err);
-  assert.equal(seen[0]?.path, `/baas/v1/project/${other}/bucket`);
-  assert.match(run.out, /FAIL D-B1 .*not proved bound/);
+  assert.equal(seen.length, 0);
+  assert.match(run.err, /opened project-scoped/);
   assert.doesNotMatch(run.out, new RegExp(`c2cprobe-p${other}`));
   const cleanupFile = join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json');
   if (existsSync(cleanupFile)) {
@@ -1121,6 +1119,88 @@ test('mcp-observed: a tampered observation is rejected before any write', async 
   }
 });
 
+test('mcp-observed: a begin in one scope cannot be completed in another', async () => {
+  // Org-scoped begin, project-scoped completion: the org-named bucket could
+  // be created inside the project and a bucket-list read-back would pass —
+  // the request pins the begin scope, so the drift is refused before any
+  // REST verification.
+  {
+    const { dir, env } = workspace();
+    writeFileSync(join(dir, DEPLOY_CONFIG), JSON.stringify({ dc: 'in', org: ORG, env: 'Development', ui: 'vanilla' }));
+    const { request, out } = await begin(env);
+    assert.match(out, new RegExp(`c2cprobe-o${ORG}`));
+    const open = JSON.parse(readFileSync(mcpRequestPath(dir), 'utf8')) as { scope?: { kind?: string; org?: string } };
+    assert.equal(open.scope?.kind, 'org');
+    assert.equal(open.scope?.org, ORG);
+    writeFileSync(join(dir, DEPLOY_CONFIG), JSON.stringify({ dc: 'in', org: ORG, project: PROJECT, env: 'Development', ui: 'vanilla' }));
+    const seen: { path: string }[] = [];
+    const run = await observe(env, observation(request), [], NO_HOOKS, fakeRest({ [`c2cprobe-o${ORG}`]: {} }, seen, request));
+    assert.equal(run.code, 1, run.out + run.err);
+    assert.match(run.err, /opened org-scoped.*project-scoped/);
+    assert.equal(seen.length, 0, 'scope drift is refused before any REST read-back');
+    assert.ok(!existsSync(doctorJsonPath(dir)), 'a refused observation must not write doctor.json');
+  }
+  // Project-scoped begin, org-scoped completion: the project probe was
+  // promised, so an org-only run must not fall back to the org read.
+  {
+    const { dir, env } = workspace();
+    const { request } = await begin(env);
+    const open = JSON.parse(readFileSync(mcpRequestPath(dir), 'utf8')) as { scope?: { kind?: string; project?: string } };
+    assert.equal(open.scope?.kind, 'project');
+    assert.equal(open.scope?.project, PROJECT);
+    writeFileSync(join(dir, DEPLOY_CONFIG), JSON.stringify({ dc: 'in', org: ORG, env: 'Development', ui: 'vanilla' }));
+    const run = await observe(env, observation(request));
+    assert.equal(run.code, 1, run.out + run.err);
+    assert.match(run.err, /opened project-scoped.*org-scoped/);
+    assert.ok(!existsSync(doctorJsonPath(dir)));
+  }
+  // Target drift inside one scope kind: a begin for another project id does
+  // not verify against this one.
+  {
+    const { dir, env } = workspace();
+    const { request } = await begin(env);
+    writeFileSync(join(dir, DEPLOY_CONFIG), JSON.stringify({ dc: 'in', org: ORG, project: '10000000000013003', env: 'Development', ui: 'vanilla' }));
+    const run = await observe(env, observation(request));
+    assert.equal(run.code, 1, run.out + run.err);
+    assert.match(run.err, /opened project-scoped.*project 10000000000013003/);
+  }
+});
+
+test('mcp-observed: an edited request file never completes', async () => {
+  const edits: ((open: Record<string, unknown>) => Record<string, unknown>)[] = [
+    // A moved probe bucket.
+    (open) => ({ ...open, probe: 'c2cprobe-p10000000000013003' }),
+    // A swapped nonce.
+    (open) => ({ ...open, nonce: 'f'.repeat(32) }),
+    // A rewritten scope that would turn the org begin into a project one.
+    (open) => ({ ...open, scope: { kind: 'org', org: ORG } }),
+    // A dropped scope.
+    (open) => {
+      const { scope: _scope, ...rest } = open;
+      return rest;
+    },
+    // A dropped digest cannot strip the authentication.
+    (open) => {
+      const { digest: _digest, ...rest } = open;
+      return rest;
+    },
+    // A re-pointed request id.
+    (open) => ({ ...open, request: 'e'.repeat(32) }),
+  ];
+  for (const edit of edits) {
+    const { dir, env } = workspace();
+    const { request } = await begin(env);
+    const path = mcpRequestPath(dir);
+    const open = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    assert.match(open.digest as string, /^sha256:[0-9a-f]{64}$/);
+    writeFileSync(path, JSON.stringify(edit(open)));
+    const run = await observe(env, observation(request));
+    assert.equal(run.code, 1, run.out + run.err);
+    assert.match(run.err, /edited after --mcp-begin|did not issue/);
+    assert.ok(!existsSync(doctorJsonPath(dir)), 'an edited request must not write doctor.json');
+  }
+});
+
 test('mcp-observed: a replayed observation is rejected once its request was used', async () => {
   const { env } = workspace();
   const { request } = await begin(env);
@@ -1136,7 +1216,9 @@ test('mcp-observed: a stale request fails as stale/incomplete', async () => {
   const { request } = await begin(env);
   const path = join(dir, 'c2c-out', '.c2c', 'mcp-request.json');
   const open = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
-  writeFileSync(path, JSON.stringify({ ...open, at: new Date(Date.now() - 20 * 60 * 1000).toISOString() }));
+  // Age the request as an older file would carry it: moving `at` in a
+  // current file breaks its digest and is refused as edited.
+  writeFileSync(path, JSON.stringify({ schema: open.schema, request: open.request, at: new Date(Date.now() - 20 * 60 * 1000).toISOString(), probe: open.probe, nonce: open.nonce }));
   const run = await observe(env, observation(request));
   assert.equal(run.code, 1);
   assert.match(run.err, /MCP evidence is stale\/incomplete: .*re-record/);

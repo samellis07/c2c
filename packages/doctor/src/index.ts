@@ -42,7 +42,7 @@ export {
   type Observed,
   type McpRequest,
 } from './observed.js';
-export { isProbeName, probeNameFor, probeNameOf, verifyProbe, deleteProbeNonce, probeNonceCleanup, probeObjectCall, IN_PROJECT_PROBE_REQUIRED, probeCreateCall, probeDeleteCall, readPendingCleanups, PROBE_PREFIX, PROBE_CREATE_CALL, PROBE_DELETE_CALL, PROBE_OBJECT_CALL, type PendingCleanup, type ProbeNonceCleanup, type ProbeResult, type ProbeTarget } from './mcp-probe.js';
+export { isProbeName, probeNameFor, probeNameOf, probeScopeOf, probeScopeOfName, verifyProbe, deleteProbeNonce, probeNonceCleanup, probeObjectCall, IN_PROJECT_PROBE_REQUIRED, probeCreateCall, probeDeleteCall, readPendingCleanups, PROBE_PREFIX, PROBE_CREATE_CALL, PROBE_DELETE_CALL, PROBE_OBJECT_CALL, type PendingCleanup, type ProbeNonceCleanup, type ProbeResult, type ProbeScope, type ProbeTarget } from './mcp-probe.js';
 export { writeMcpEvidence, loadMcpEvidence, mcpCarryRefusal, mcpStatePath, mcpStateKeyPath, formatAge, MCP_EVIDENCE_MAX_AGE_HOURS, MCP_EVIDENCE_MAX_AGE_MS, type McpEvidenceReuse } from './mcp-state.js';
 export { writeDoctorFile, doctorJsonPath, c2cVersion, detectHost, workspaceDir } from './report.js';
 export { verifyVendorDir, MANIFEST_NAME, type VendorVerdict } from './vendor.js';
