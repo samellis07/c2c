@@ -498,7 +498,6 @@ function inlinePageEmbeds(template: string, app: App, page: string): { template:
   return { template: out + template.slice(at), includes };
 }
 
-const ZC_COMPONENT = /\belname[ \t\n\f\r]*=[ \t\n\f\r]*(["'])zc-component\1(?:[ \t\n\f\r]|$)/i;
 const ZC_LINK = /^(form|view|report|page)linkname$/i;
 const ZC_PARAMS = /^params$/i;
 const SAFE_COMPONENT_NAME = /^[A-Za-z_]\w*$/;
