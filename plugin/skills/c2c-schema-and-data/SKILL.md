@@ -86,6 +86,7 @@ Default: the user's own Creator report exports as **JSON** — the JSON export a
 - Read application inventory and components via MCP `ZohoCreator_getApplicationSummary` (there is no `getAppMetadata` tool in the Creator MCP connector) ([fact](../../references/facts/datastore.md#read-creator-application-inventory-via-zohocreator_getapplicationsummary) [TESTED]).
 - On a duplicated app, `ZohoCreator_getForm` returned code 30150 with the `environment: development` header and code 30180 without it ([fact](../../references/facts/datastore.md#read-creator-form-structure-over-mcp-via-zohocreator_getformmetadata) [TESTED]); `ZohoCreator_getFormMetadata` is the listed form-structure tool, not yet exercised ([MCP-LISTED]).
 - Throttle application duplication via MCP `ZohoCreator_duplicateApplication` to approximately 8 calls per minute to avoid error code 2955 ([fact](../../references/facts/datastore.md#throttle-creator-app-duplication-to-8-calls-per-minute) [TESTED]).
+- Never try to import a `.ds` over MCP: the Creator MCP connector has no import tool and the console import takes only a native file-picker selection; if a workflow ever needs an import, it is a human step in the Creator console ([fact](../../references/facts/datastore.md#import-a-creator-ds-file-only-in-the-creator-console) [TESTED]).
 
 ### Path decision
 
