@@ -2655,7 +2655,7 @@ function clientToLong(value, ctx, name = 'toLong') {
   if (typeof value === 'object' && typeof value.y === 'number' && typeof value.m === 'number' && typeof value.d === 'number') {
     return clientEpochMillis(value, clientAppZone(ctx));
   }
-  if (typeof value === 'object' && value !== null && typeof value.digits === 'bigint' && typeof value.toString === 'function') {
+  if (typeof value === 'object' && typeof value.digits === 'bigint' && typeof value.toString === 'function') {
     return clientTruncLong(value.toString());
   }
   if (typeof value === 'number') {
