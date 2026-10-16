@@ -52,11 +52,20 @@ test('a missing cases.json fails the run and names the schema', async () => {
 });
 
 test('the golden rejects a malformed file', () => {
-  assert.throws(() => assertGolden({ version: 'nope', cases: [] }), /c2c-behavior-golden\/1/);
-  assert.throws(() => assertGolden({ version: 'c2c-behavior-golden/1', cases: [{ id: 'a', steps: [] }, { id: 'a', steps: [] }] }), /duplicate case id/);
+  assert.throws(() => assertGolden({ version: 'nope', cases: [] }), /c2c-behavior-golden\/2/);
+  assert.throws(() => assertGolden({ version: 'c2c-behavior-golden/1', cases: [] }), /c2c-behavior-golden\/2/);
+  assert.throws(() => assertGolden({ version: 'c2c-behavior-golden/2', cases: [{ id: 'a', steps: [] }, { id: 'a', steps: [] }] }), /duplicate case id/);
   assert.throws(
-    () => assertGolden({ version: 'c2c-behavior-golden/1', cases: [{ id: 'a', steps: [{ op: 'teleport' }] }] }),
+    () => assertGolden({ version: 'c2c-behavior-golden/2', cases: [{ id: 'a', steps: [{ op: 'teleport' }] }] }),
     /unknown op/,
+  );
+  assert.throws(
+    () => assertGolden({ version: 'c2c-behavior-golden/2', cases: [{ id: 'a', steps: [{ op: 'request', method: 'GET', path: '/x', expect: { unordered: 'yes' } }] }] }),
+    /expect\.unordered must be a boolean/,
+  );
+  assert.throws(
+    () => assertGolden({ version: 'c2c-behavior-golden/2', cases: [{ id: 'a', steps: [], expect: { unordered: 1 } }] }),
+    /expect\.unordered must be a boolean/,
   );
 });
 
@@ -109,10 +118,12 @@ test('normalization: ids, timestamps, ordering and the text/number boundary', as
   } finally {
     await backend.close();
   }
-  // Row order is a normalization: the same rows in a different order still match.
+  // Row order is significant by default: a golden that declares the table
+  // unordered still matches rows whose field order or row order differs.
   const reordered = JSON.parse(readFileSync(join(GOLDENS, 'cases.json'), 'utf8')) as ReturnType<typeof loadGoldens>;
+  reordered.cases[0].expect!.unordered = true;
   reordered.cases[0].expect!.tables!.Book = [
-    { Qty: '2', Title: 'Dune', CREATEDTIME: '<timestamp>', ROWID: '<id>' },
+    { Qty: '2', Title: 'Dune', Added_User: '<any>', Added_Time: '<timestamp>', CREATEDTIME: '<timestamp>', MODIFIEDTIME: '<timestamp>', ROWID: '<id>' },
   ];
   const backend2 = await startOfflineBackend(app);
   try {
@@ -120,6 +131,93 @@ test('normalization: ids, timestamps, ordering and the text/number boundary', as
     assert.equal(report.ok, true, JSON.stringify(report.findings));
   } finally {
     await backend2.close();
+  }
+});
+
+/** Golden fixture for the ordering/strictness MUST-FAIL cases below. */
+function mutatedGolden(mutate: (golden: ReturnType<typeof loadGoldens>) => void): ReturnType<typeof loadGoldens> {
+  const golden = JSON.parse(readFileSync(join(GOLDENS, 'cases.json'), 'utf8')) as ReturnType<typeof loadGoldens>;
+  mutate(golden);
+  return golden;
+}
+
+test('MUST-FAIL: a reordered report row list is a finding unless the step declares unordered', async () => {
+  const app = deriveIr(parse(readFileSync(APP_DS, 'utf8')));
+  // Two rows in the store; the golden lists them against insertion order.
+  const twoRows = (first: string, second: string) => [
+      { op: 'submit', form: 'Book', record: { Title: 'Dune', Qty: 2 } },
+      { op: 'submit', form: 'Book', record: { Title: 'Foundation', Qty: 5 } },
+      {
+        op: 'report',
+        report: 'All_Books',
+        expect: {
+          status: 200,
+          body: {
+            dryRun: false,
+            rows: [
+              { ROWID: '<id>', Title: first, Qty: first === 'Dune' ? 2 : 5, Added_User: '<any>', Added_Time: '<timestamp>', Modified_Time: null },
+              { ROWID: '<id>', Title: second, Qty: second === 'Dune' ? 2 : 5, Added_User: '<any>', Added_Time: '<timestamp>', Modified_Time: null },
+            ],
+            fields: null,
+            queryShape: 'SELECT ROWID, Title, Qty, Added_User, Added_Time, Modified_User, Modified_Time, c2c_source_id FROM Book ORDER BY ROWID LIMIT 1, 300',
+            criteria: { op: 'true' },
+            page: 0,
+            pageSize: 300,
+          },
+        },
+      },
+    ];
+  const backend = await startOfflineBackend(app);
+  try {
+    const ordered = mutatedGolden((g) => {
+      g.cases = [{ id: 'reordered-report', steps: twoRows('Foundation', 'Dune') as never[] }];
+    });
+    const { report } = await runBehavior(app, ordered, backend, 'offline');
+    assert.equal(report.ok, false, 'reordered rows in a sorted report must be a finding');
+    assert.ok(report.findings.some((f) => f.pointer === 'body.rows[0].Title' && f.expected === 'Foundation' && f.actual === 'Dune'));
+    const unordered = mutatedGolden((g) => {
+      const steps = twoRows('Foundation', 'Dune');
+      (steps[2].expect as { unordered?: boolean }).unordered = true;
+      g.cases = [{ id: 'reordered-report', steps: steps as never[] }];
+    });
+    const { report: report2 } = await runBehavior(app, unordered, backend, 'offline');
+    assert.equal(report2.ok, true, JSON.stringify(report2.findings));
+  } finally {
+    await backend.close();
+  }
+});
+
+test('MUST-FAIL: extra, missing and absent-volatile fields are findings', async () => {
+  const app = deriveIr(parse(readFileSync(APP_DS, 'utf8')));
+  const backend = await startOfflineBackend(app);
+  try {
+    // Extra field on the Catalyst side: the golden omits `wrote`, which is
+    // not volatile, so the response key set no longer matches.
+    const extra = mutatedGolden((g) => {
+      const values = (g.cases[0].steps[0] as { expect: { body: Record<string, unknown> } }).expect.body;
+      delete values.wrote;
+    });
+    const { report } = await runBehavior(app, extra, backend, 'offline');
+    assert.equal(report.ok, false, 'a dropped expected key must surface the extra actual field');
+    assert.ok(report.findings.some((f) => f.pointer === 'body.wrote' && f.expected === '(absent)' && f.actual === true));
+    // Missing field: the golden asserts a key the response does not carry.
+    const missing = mutatedGolden((g) => {
+      const values = ((g.cases[0].steps[0] as { expect: { body: { values: Record<string, unknown> } } }).expect.body.values);
+      values.No_Such_Field = 'x';
+    });
+    const { report: report2 } = await runBehavior(app, missing, backend, 'offline');
+    assert.equal(report2.ok, false);
+    assert.ok(report2.findings.some((f) => f.pointer === 'body.values.No_Such_Field' && f.actual === '(absent)'));
+    // Volatile field absent: a marker still requires the key to be present.
+    const absentVolatile = mutatedGolden((g) => {
+      const values = ((g.cases[0].steps[0] as { expect: { body: { values: Record<string, unknown> } } }).expect.body.values);
+      values.GHOST_ID = '<id>';
+    });
+    const { report: report3 } = await runBehavior(app, absentVolatile, backend, 'offline');
+    assert.equal(report3.ok, false);
+    assert.ok(report3.findings.some((f) => f.pointer === 'body.values.GHOST_ID' && f.expected === '<id>' && f.actual === '(absent)'));
+  } finally {
+    await backend.close();
   }
 });
 
