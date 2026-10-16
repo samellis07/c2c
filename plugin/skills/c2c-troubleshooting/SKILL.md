@@ -95,15 +95,19 @@ For a fact-backed error, open its exact entry in the [errors facts ledger](../..
 
 ## c2c exit codes
 
+Canonical table: `docs/guide/06-troubleshooting.md` ("Exit codes:
+what the number means"). The mirror below must match it code for
+code — if they ever differ, the guide wins.
+
 | Code | Meaning | Next |
 |---|---|---|
 | 0 | OK | — |
-| 1 | Findings/blockers (precheck), a failed live step, verify drift | Read the report file named in the output |
-| 2 | Usage error | Read the usage line; most often a missing `--project`/`--org`/`--out` |
-| 3 | Input file missing | Path to the `.ds` |
-| 4 | Not a parseable `.ds` | Re-export from Creator |
-| 5 | Doctor not green / stale / different scope (planned) | `/c2c:doctor` |
-| 6 | Node or plugin integrity problem (bin/c2c) | Node 20 or 22 (>=20.20 <23); reinstall the plugin |
+| 1 | Findings or blockers in the report, a failed step, or drift (something missing or changed); for every command except `precheck`, `cutover-checklist`, `proof` and `iac-drift`, also an export file that was not found | "no such file or directory": check the path to the `.ds`; otherwise read the report file named in the output |
+| 2 | Usage error, a locked Marketplace export, a refused TODO fill, or drift that is only extra items | Usage: read the usage line; most often a missing `--project`/`--org`/`--out`. Locked Marketplace export: ask for the vendor's source `.ds` or an unlocked copy. Refused TODO fill: read the named TODO. Drift with extra items only: decide whether to keep them |
+| 3 | An input file that was not found or could not be read, for `precheck`, `cutover-checklist`, `proof` and `iac-drift` (including a template that is not valid JSON) | Check the path; for `iac-drift`, re-export the template |
+| 4 | `precheck`: the file is not a readable Creator export; `smoke`: waiting for you to do the check in your own browser | `precheck`: re-export from Creator. `smoke`: ask the user to run the smoke page and paste the result code |
+| 5 | Doctor gate: a `--confirm` command was refused because the environment check is not green, current, or same-scope | Run `/c2c:doctor` and follow the fix printed next to each failed check |
+| 6 | Node or plugin integrity problem | Node 20 or 22 (>=20.20 <23); reinstall the plugin |
 
 ## Doctor check failures
 

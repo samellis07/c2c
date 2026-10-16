@@ -184,8 +184,7 @@ import { analyze, analyzeAsJson, analyzeAsText } from './analyze.js';
 import { precheck, precheckAsJson, precheckAsText } from './precheck.js';
 import { DISPATCH_COMMANDS } from './commands.js';
 
-/** precheck exit codes: input errors never share a code with "has blockers". */
-const PRECHECK_EXIT = { clean: 0, blockers: 1, missing: 3, unparsable: 4 } as const;
+import { CLI_EXIT, PRECHECK_EXIT } from './exit-codes.js';
 import { analyzeQuality, qualityAsText } from './analyze-quality.js';
 import { migrationReportAsJson, migrationReportAsText, migrationReportForDir } from './migration-report.js';
 import { readLock } from '../../deluge/src/index.js';
@@ -685,8 +684,8 @@ function main(argv: string[]): number {
   };
   if (cmd === 'analyze') {
     const { ir, locked } = loadIrOrLocked(target);
-    if (locked) return 2;
-    if (!ir) return 1;
+    if (locked) return CLI_EXIT.lockedExport;
+    if (!ir) return CLI_EXIT.inputMissing;
     const lockPath = flag('--lock');
     if (rest.includes('--lock') && !lockPath) {
       process.stderr.write('c2c: needs a value\n');
@@ -731,7 +730,7 @@ function main(argv: string[]): number {
     } catch (err) {
       if (err instanceof LockedExportError) {
         process.stderr.write(`c2c: ${err.message}\n`);
-        return 2;
+        return CLI_EXIT.lockedExport;
       }
       process.stderr.write(
         `c2c: cannot parse ${target}: ${err instanceof Error ? err.message : String(err)}\nnext step: re-export the app from Creator (Settings -> Export) and confirm the file is non-empty\n`,
@@ -780,15 +779,15 @@ function main(argv: string[]): number {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'ENOENT' || code === 'ENOTDIR') {
         process.stderr.write(`c2c: no such file or directory: ${target}\n`);
-        return 1;
+        return CLI_EXIT.inputMissing;
       }
       if (err instanceof NotFileError) {
         process.stderr.write(`c2c: ${err.message}\n`);
-        return 1;
+        return CLI_EXIT.inputMissing;
       }
       if (err instanceof LockedExportError) {
         process.stderr.write(`c2c: ${err.message}\n`);
-        return 2;
+        return CLI_EXIT.lockedExport;
       }
       throw err;
     }
@@ -829,8 +828,8 @@ function main(argv: string[]): number {
   }
   if (cmd === 'schema') {
     const { ir, locked } = loadIrOrLocked(target);
-    if (locked) return 2;
-    if (!ir) return 1;
+    if (locked) return CLI_EXIT.lockedExport;
+    if (!ir) return CLI_EXIT.inputMissing;
     const srcBackup = flag('--source-backup');
     const srcCsv = flag('--source-csv');
     const srcJson = flag('--source-json');
@@ -860,7 +859,7 @@ function main(argv: string[]): number {
       report = diffTemplate(JSON.parse(readFileSync(target, 'utf8')), JSON.parse(readFileSync(exported, 'utf8')));
     } catch (err) {
       process.stderr.write(`c2c iac-drift: ${err instanceof Error ? err.message : String(err)}\n`);
-      return 3;
+      return CLI_EXIT.inputUnreadable;
     }
     process.stdout.write(formatDrift(report));
     return report.exitCode;
@@ -872,8 +871,8 @@ function main(argv: string[]): number {
   }
   if (cmd === 'seed') {
     const { ir, locked } = loadIrOrLocked(target);
-    if (locked) return 2;
-    if (!ir) return 1;
+    if (locked) return CLI_EXIT.lockedExport;
+    if (!ir) return CLI_EXIT.inputMissing;
     const n = flag('--n');
     const parsedN = n === undefined ? undefined : Number(n);
     const problem = seedArgsProblem(rest);
@@ -970,8 +969,8 @@ function main(argv: string[]): number {
   }
   if (cmd === 'ui') {
     const { ir, locked } = loadIrOrLocked(target);
-    if (locked) return 2;
-    if (!ir) return 1;
+    if (locked) return CLI_EXIT.lockedExport;
+    if (!ir) return CLI_EXIT.inputMissing;
     const out = flag('--out');
     if (!out) {
       process.stderr.write('c2c ui: --out directory is required\n');
@@ -991,8 +990,8 @@ function main(argv: string[]): number {
   }
   if (cmd === 'score-ui') {
     const { ir, locked } = loadIrOrLocked(target);
-    if (locked) return 2;
-    if (!ir) return 1;
+    if (locked) return CLI_EXIT.lockedExport;
+    if (!ir) return CLI_EXIT.inputMissing;
     const uiDir = flag('--ui');
     let bundle;
     try {
@@ -1020,8 +1019,8 @@ function main(argv: string[]): number {
   }
   if (cmd === 'ui-react') {
     const { ir, locked } = loadIrOrLocked(target);
-    if (locked) return 2;
-    if (!ir) return 1;
+    if (locked) return CLI_EXIT.lockedExport;
+    if (!ir) return CLI_EXIT.inputMissing;
     const out = flag('--out');
     if (!out) {
       process.stderr.write('c2c ui-react: --out directory is required\n');
@@ -1043,8 +1042,8 @@ function main(argv: string[]): number {
   }
   if (cmd === 'auth') {
     const { ir, locked } = loadIrOrLocked(target);
-    if (locked) return 2;
-    if (!ir) return 1;
+    if (locked) return CLI_EXIT.lockedExport;
+    if (!ir) return CLI_EXIT.inputMissing;
     const plan = authPlan(ir);
     const out = rest.includes('--apply') ? authApplyReport(authApplyPlan(plan)) : rest.includes('--json') ? authAsJson(plan) : authAsReport(plan);
     writeOut(out, flag('--out'));
@@ -1073,10 +1072,10 @@ try {
 } catch (err) {
   if (err instanceof LockedExportError) {
     process.stderr.write(`c2c: ${err.message}\n`);
-    code = 2;
+    code = CLI_EXIT.lockedExport;
   } else if (err instanceof FillTodoError) {
     process.stderr.write(`c2c: ${err.message}\n`);
-    code = 2;
+    code = CLI_EXIT.fillTodoRefused;
   } else if (err instanceof DomUnavailableError || (err instanceof Error && err.name === 'DomUnavailableError')) {
     process.stderr.write(`c2c: ${err.message}\n`);
     code = 1;

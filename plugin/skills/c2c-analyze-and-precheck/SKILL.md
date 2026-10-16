@@ -19,7 +19,7 @@ Creator lets latent faults into an app and its runtime tolerates them, but whole
    ```sh
    c2c precheck exports/<app>.ds --json > c2c-out/<app>/precheck.json
    ```
-   Exit codes: `0` no blockers, `1` blockers, `2` usage, `3` missing file, `4` not a parseable `.ds`.
+   Exit codes: see [Exit codes](#exit-codes) below (canonical table: `docs/guide/06-troubleshooting.md`).
    - Exit 3/4: stop. Ask the user to re-export (Creator: app → Settings → Export). If Creator's export is blank, the app has a component that breaks export; run precheck on an earlier export if they have one.
 2. **Read the findings.** Each has `rule`, `severity` (BLOCKING / WARN / INFO), `component`, `line`, and `creatorText` (the message Creator itself would show). Group them by rule for the user.
 3. **Analyze.**
@@ -30,6 +30,22 @@ Creator lets latent faults into an app and its runtime tolerates them, but whole
    Report: feature verdicts, Deluge statements (translated / shimmed / todo), estimated tables, functions, pages, score, and **deterministic** flag.
 4. **Do not trust the score alone.** A high readiness score does not prove the app can save a record [TESTED]: the score does not see deploy/runtime limits. Always continue to the plan (budgets) before saying "ready".
 5. **Present** the result as three lists: *must fix in Creator first* (BLOCKING), *c2c will convert with a TODO* (with the TODO count), *Catalyst limits to decide on in the plan*.
+
+## Exit codes
+
+Canonical table: `docs/guide/06-troubleshooting.md` ("Exit codes:
+what the number means"). The mirror below must match it code for
+code — if they ever differ, the guide wins.
+
+| Code | Meaning | Next |
+|---|---|---|
+| 0 | OK | — |
+| 1 | Findings or blockers in the report, a failed step, or drift (something missing or changed); for every command except `precheck`, `cutover-checklist`, `proof` and `iac-drift`, also an export file that was not found | Read the findings in the JSON report; for "no such file or directory", check the path to the `.ds` |
+| 2 | Usage error, a locked Marketplace export, a refused TODO fill, or drift that is only extra items | Usage: read the usage line (most often a missing `--out`). Locked Marketplace export: stop; ask the user for the vendor's source `.ds` or an unlocked copy |
+| 3 | An input file that was not found or could not be read, for `precheck`, `cutover-checklist`, `proof` and `iac-drift` (including a template that is not valid JSON) | Stop; check the path, or ask the user to re-export (step 1) |
+| 4 | `precheck`: the file is not a readable Creator export; `smoke`: waiting for you to do the check in your own browser | `precheck`: stop; ask the user to re-export (step 1) |
+| 5 | Doctor gate: a `--confirm` command was refused because the environment check is not green, current, or same-scope | Precheck and analyze are allowed with a red doctor; any `--confirm` write is refused — run `/c2c:doctor` |
+| 6 | Node or plugin integrity problem | Node 20 or 22 (>=20.20 <23); reinstall the plugin |
 
 ## Latent-fault rules (BLOCKING unless noted)
 

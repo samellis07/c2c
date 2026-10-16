@@ -31,7 +31,7 @@ import { cliStoreHooks, resolveScope, type ScopeHooks } from './scope.js';
 import { verifyVendorDir } from './vendor.js';
 import { readRegularFile } from './read-file.js';
 import { isDirectoryPath, listDsFiles } from '../../core/src/index.js';
-import { GATE_EXIT, carriedMcpRecord, doctorStamp, evaluateGate, gateRefusalMessage, type GateScope } from './gate.js';
+import { GATE_EXIT, INTEGRITY_EXIT, carriedMcpRecord, doctorStamp, evaluateGate, gateRefusalMessage, type GateScope } from './gate.js';
 import type { CheckResult, DoctorFile, DoctorIo, SpawnResult } from './types.js';
 
 export function flag(args: readonly string[], name: string): string | undefined {
@@ -453,7 +453,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
       io.stdout(`cleanup: remove the probe nonce object ${nonceCleanup.nonce} from bucket ${nonceCleanup.bucket} — PUT ${nonceCleanup.path} body ${JSON.stringify(nonceCleanup.body)}\n`);
     }
   }
-  if (run.integrityFailed) return 6;
+  if (run.integrityFailed) return INTEGRITY_EXIT;
   return run.green ? 0 : 1;
 }
 
@@ -473,11 +473,11 @@ export function verifyVendorCli(args: readonly string[], io: DoctorIo): number {
   const verdict = verifyVendorDir(dir);
   if (verdict.error) {
     io.stderr(`c2c: ${verdict.error}\n`);
-    return 6;
+    return INTEGRITY_EXIT;
   }
   if (!verdict.ok) {
     io.stderr(`c2c: the c2c plugin files were modified or are incomplete (${verdict.mismatched.length} files differ). Reinstall the plugin.\n`);
-    return 6;
+    return INTEGRITY_EXIT;
   }
   return 0;
 }

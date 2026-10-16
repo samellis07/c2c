@@ -18,6 +18,8 @@ import type { CheckResult, DoctorFile } from './types.js';
 
 export const DOCTOR_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 export const GATE_EXIT = 5;
+/** Node version or plugin-file integrity failure (doctor, --verify-vendor, bin/c2c). */
+export const INTEGRITY_EXIT = 6;
 
 /**
  * The checks a gate-green doctor.json must contain with status pass or warn.
