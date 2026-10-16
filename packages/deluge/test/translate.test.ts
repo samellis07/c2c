@@ -4,7 +4,7 @@ import type { Expr } from '../src/ast.js';
 import { compileCriteria, matchRow, type Criteria } from '../../shims/src/criteria.js';
 import { createRuntime } from '../../shims/src/runtime.js';
 import { parse } from '../src/parser.js';
-import { reportCriteria, translate } from '../src/translate.js';
+import { reportCriteria, singleReturnText, translate } from '../src/translate.js';
 function stripComments(s: string) { return (s || '').replace(/^\s*\/\/ Deluge: .*\n?/gm, ''); }
 
 function kinds(src: string): string[] {
@@ -4832,4 +4832,26 @@ test('a bare-form loop range is a 1-based, inclusive record window', async () =>
   assert.equal(await run(1, 3), 'ABC');
   assert.equal(await run(0, 2), 'ABC');
   assert.equal(await run(5, 5), 'E');
+});
+
+test('singleReturnText matches the former return-body pattern on every shape', () => {
+  const former = (body: string) => /^\s*return\b([\s\S]*?);?\s*$/.exec(body)?.[1]?.trim();
+  const bodies = [
+    '', 'return', 'return;', 'return x', 'return x;', '  return x ;  ', 'return x;\n', '\treturn a.b;\r\n',
+    'return x;;', 'return x ; \n ;', 'returnx', 'return_x;', 'return1', 'return(x)', 'return\tx', 'x = 1;\nreturn x;',
+    'return a;\nb', 'return "a;b"', 'return ;', ' return ; ; ', 'return\u00a0x;\u00a0', 'return \u2028x;',
+  ];
+  for (const body of bodies) assert.equal(singleReturnText(body), former(body), JSON.stringify(body));
+});
+
+test('singleReturnText stays linear on long whitespace and semicolon runs', () => {
+  const inputs = [
+    'return' + ' '.repeat(200_000) + 'x',
+    'return x' + ' ;'.repeat(100_000),
+    ' '.repeat(100_000) + 'return' + '\n'.repeat(100_000) + ';' + ' '.repeat(100_000) + 'y',
+  ];
+  const start = process.hrtime.bigint();
+  for (const body of inputs) singleReturnText(body);
+  const ms = Number(process.hrtime.bigint() - start) / 1e6;
+  assert.ok(ms < 250, `took ${ms} ms`);
 });
