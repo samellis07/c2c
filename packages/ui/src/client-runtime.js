@@ -2378,7 +2378,25 @@ function clientAddMonths(value, months) {
   return clientDate(y, m, Math.min(value.d, dim), value.hh || 0, value.mm || 0, value.ss || 0);
 }
 
-/** Shifted clock fields with the day carry, as the server's add and sub methods. */
+/** Hour shifts move hh only and carry mm/ss raw, like the server's addHour/subHour. */
+function clientShiftHours(value, hours) {
+  const total = value.hh + hours;
+  const days = Math.floor(total / 24);
+  const hh = ((total % 24) + 24) % 24;
+  const base = clientAddDays(value, days);
+  return clientDate(base.y, base.m, base.d, hh, value.mm || 0, value.ss || 0);
+}
+
+/** Minute shifts move hh:mm and carry ss raw, like the server's addMinutes/subMinutes. */
+function clientShiftMinutes(value, minutes) {
+  const total = value.hh * 60 + value.mm + minutes;
+  const days = Math.floor(total / (24 * 60));
+  const mins = ((total % (24 * 60)) + 24 * 60) % (24 * 60);
+  const base = clientAddDays(value, days);
+  return clientDate(base.y, base.m, base.d, Math.floor(mins / 60), mins % 60, value.ss || 0);
+}
+
+/** Second shifts fold the whole clock into total seconds, like the server's addSeconds/subSeconds. */
 function clientShiftTime(value, totalSeconds) {
   const total = value.hh * 3600 + value.mm * 60 + value.ss + totalSeconds;
   const days = Math.floor(total / 86400);
@@ -3512,11 +3530,11 @@ export function browserShimSurface(fetchImpl) {
       },
       addHour(value, n) {
         const d = clientAsDate(value);
-        return d ? clientShiftTime(d, Number(n) * 3600) : null;
+        return d ? clientShiftHours(d, Number(n)) : null;
       },
       addMinutes(value, n) {
         const d = clientAsDate(value);
-        return d ? clientShiftTime(d, Number(n) * 60) : null;
+        return d ? clientShiftMinutes(d, Number(n)) : null;
       },
       addSeconds(value, n) {
         const d = clientAsDate(value);
@@ -3540,11 +3558,11 @@ export function browserShimSurface(fetchImpl) {
       },
       subHour(value, n) {
         const d = clientAsDate(value);
-        return d ? clientShiftTime(d, -Number(n) * 3600) : null;
+        return d ? clientShiftHours(d, -Number(n)) : null;
       },
       subMinutes(value, n) {
         const d = clientAsDate(value);
-        return d ? clientShiftTime(d, -Number(n) * 60) : null;
+        return d ? clientShiftMinutes(d, -Number(n)) : null;
       },
       subSeconds(value, n) {
         const d = clientAsDate(value);
