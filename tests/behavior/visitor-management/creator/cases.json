@@ -347,7 +347,13 @@
             "messages": [
               "Data Updated Successfully"
             ]
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Purpose"
+          ]
         }
       ],
       "expect": {
@@ -437,7 +443,13 @@
           "record": {
             "Purpose": "Purpose updated 714"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Purpose"
+          ]
         },
         {
           "op": "submit",
@@ -469,7 +481,13 @@
           },
           "expect": {
             "outcome": "refused"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Blacklist"
+          ]
         }
       ],
       "expect": {
@@ -548,7 +566,13 @@
           "record": {
             "Purpose": "Purpose updated 714"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Purpose"
+          ]
         },
         {
           "op": "submit",
@@ -690,7 +714,13 @@
           "record": {
             "Purpose": "Purpose updated 714"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Purpose"
+          ]
         },
         {
           "op": "submit",
@@ -833,7 +863,13 @@
           "record": {
             "Purpose": "Purpose updated 714"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Purpose"
+          ]
         },
         {
           "op": "submit",

@@ -650,7 +650,14 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Live_Contracts",
+            "Total_spend"
+          ]
         }
       ],
       "expect": {
@@ -786,7 +793,14 @@
           "bind": {
             "r_add_vendor_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Live_Contracts",
+            "Total_spend"
+          ]
         },
         {
           "op": "submit",
@@ -949,7 +963,14 @@
           "bind": {
             "r_add_vendor_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Live_Contracts",
+            "Total_spend"
+          ]
         },
         {
           "op": "submit",
@@ -1112,7 +1133,14 @@
           "bind": {
             "r_add_vendor_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Live_Contracts",
+            "Total_spend"
+          ]
         },
         {
           "op": "submit",
@@ -1275,7 +1303,14 @@
           "bind": {
             "r_add_vendor_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Live_Contracts",
+            "Total_spend"
+          ]
         },
         {
           "op": "submit",
@@ -1442,7 +1477,14 @@
           "bind": {
             "r_add_vendor_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Live_Contracts",
+            "Total_spend"
+          ]
         },
         {
           "op": "submit",
@@ -1621,7 +1663,14 @@
           "bind": {
             "r_add_vendor_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Live_Contracts",
+            "Total_spend"
+          ]
         },
         {
           "op": "submit",
@@ -1822,7 +1871,14 @@
           "bind": {
             "r_add_vendor_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Live_Contracts",
+            "Total_spend"
+          ]
         },
         {
           "op": "submit",
@@ -2021,7 +2077,14 @@
           "bind": {
             "r_add_vendor_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Live_Contracts",
+            "Total_spend"
+          ]
         },
         {
           "op": "submit",
@@ -2200,7 +2263,14 @@
           "bind": {
             "r_add_vendor_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Live_Contracts",
+            "Total_spend"
+          ]
         },
         {
           "op": "submit",

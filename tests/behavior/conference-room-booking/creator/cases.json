@@ -73,7 +73,13 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         }
       ],
       "expect": {
@@ -122,7 +128,13 @@
           "bind": {
             "r_add_room_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         },
         {
           "op": "submit",
@@ -157,7 +169,11 @@
             "outcome": "saved"
           },
           "tags": [
-            "env-artifact:trial-user-limit"
+            "env-artifact:trial-user-limit",
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
           ]
         }
       ],
@@ -210,7 +226,13 @@
           "bind": {
             "r_add_room_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         },
         {
           "op": "submit",
@@ -234,7 +256,13 @@
           "bind": {
             "r_add_user_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "submit",
@@ -263,7 +291,13 @@
           },
           "expect": {
             "outcome": "refused"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         }
       ],
       "expect": {
@@ -312,7 +346,13 @@
           "bind": {
             "r_add_room_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         },
         {
           "op": "submit",
@@ -336,7 +376,13 @@
           "bind": {
             "r_add_user_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "submit",
@@ -360,7 +406,15 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Official_Email",
+            "Status",
+            "Reason_to_Cancelled"
+          ]
         }
       ],
       "expect": {
@@ -407,7 +461,13 @@
           "bind": {
             "r_add_room_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         },
         {
           "op": "submit",
@@ -431,7 +491,13 @@
           "bind": {
             "r_add_user_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "submit",
@@ -449,7 +515,15 @@
           "bind": {
             "r_booking_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Official_Email",
+            "Status",
+            "Reason_to_Cancelled"
+          ]
         },
         {
           "op": "submit",
@@ -473,7 +547,15 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Official_Email",
+            "Status",
+            "Reason_to_Cancelled"
+          ]
         }
       ],
       "expect": {
@@ -533,7 +615,13 @@
           "bind": {
             "r_add_room_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         },
         {
           "op": "submit",
@@ -557,7 +645,13 @@
           "bind": {
             "r_add_user_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "submit",
@@ -575,7 +669,15 @@
           "bind": {
             "r_booking_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Official_Email",
+            "Status",
+            "Reason_to_Cancelled"
+          ]
         },
         {
           "op": "submit",
@@ -593,7 +695,15 @@
           "bind": {
             "r_booking_form_invalid_rule_0": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Official_Email",
+            "Status",
+            "Reason_to_Cancelled"
+          ]
         },
         {
           "op": "update",
@@ -677,7 +787,13 @@
           "bind": {
             "r_add_room_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         },
         {
           "op": "submit",
@@ -701,7 +817,13 @@
           "bind": {
             "r_add_user_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "submit",
@@ -719,7 +841,15 @@
           "bind": {
             "r_booking_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Official_Email",
+            "Status",
+            "Reason_to_Cancelled"
+          ]
         },
         {
           "op": "submit",
@@ -737,7 +867,15 @@
           "bind": {
             "r_booking_form_invalid_rule_0": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Official_Email",
+            "Status",
+            "Reason_to_Cancelled"
+          ]
         },
         {
           "op": "update",
@@ -779,7 +917,13 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         }
       ],
       "expect": {
@@ -837,7 +981,13 @@
           "bind": {
             "r_add_room_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         },
         {
           "op": "submit",
@@ -861,7 +1011,13 @@
           "bind": {
             "r_add_user_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "submit",
@@ -879,7 +1035,15 @@
           "bind": {
             "r_booking_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Official_Email",
+            "Status",
+            "Reason_to_Cancelled"
+          ]
         },
         {
           "op": "submit",
@@ -897,7 +1061,15 @@
           "bind": {
             "r_booking_form_invalid_rule_0": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Official_Email",
+            "Status",
+            "Reason_to_Cancelled"
+          ]
         },
         {
           "op": "update",
@@ -933,7 +1105,13 @@
           "bind": {
             "r_add_room_boundary_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         },
         {
           "op": "report",
@@ -994,7 +1172,13 @@
           "bind": {
             "r_add_room_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         },
         {
           "op": "submit",
@@ -1018,7 +1202,13 @@
           "bind": {
             "r_add_user_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "submit",
@@ -1036,7 +1226,15 @@
           "bind": {
             "r_booking_form_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Official_Email",
+            "Status",
+            "Reason_to_Cancelled"
+          ]
         },
         {
           "op": "submit",
@@ -1054,7 +1252,15 @@
           "bind": {
             "r_booking_form_invalid_rule_0": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Official_Email",
+            "Status",
+            "Reason_to_Cancelled"
+          ]
         },
         {
           "op": "update",
@@ -1090,7 +1296,13 @@
           "bind": {
             "r_add_room_boundary_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         },
         {
           "op": "report",

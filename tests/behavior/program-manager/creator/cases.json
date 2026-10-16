@@ -327,7 +327,16 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         }
       ],
       "expect": {
@@ -409,7 +418,16 @@
           "bind": {
             "r_add_program_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         },
         {
           "op": "update",
@@ -509,7 +527,16 @@
           "bind": {
             "r_add_program_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         },
         {
           "op": "update",
@@ -618,7 +645,16 @@
           "bind": {
             "r_add_program_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         },
         {
           "op": "update",
@@ -739,7 +775,16 @@
           "bind": {
             "r_add_program_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         },
         {
           "op": "update",
@@ -810,7 +855,13 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Users"
+          ]
         }
       ],
       "expect": {
@@ -893,7 +944,16 @@
           "bind": {
             "r_add_program_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         },
         {
           "op": "update",
@@ -958,7 +1018,13 @@
           "bind": {
             "r_add_participant_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Users"
+          ]
         },
         {
           "op": "submit",
@@ -986,7 +1052,16 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         }
       ],
       "expect": {
@@ -1076,7 +1151,16 @@
           "bind": {
             "r_add_program_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         },
         {
           "op": "update",
@@ -1141,7 +1225,13 @@
           "bind": {
             "r_add_participant_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Users"
+          ]
         },
         {
           "op": "submit",
@@ -1163,7 +1253,16 @@
           "bind": {
             "r_add_program_boundary_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         },
         {
           "op": "report",
@@ -1255,7 +1354,16 @@
           "bind": {
             "r_add_program_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         },
         {
           "op": "update",
@@ -1320,7 +1428,13 @@
           "bind": {
             "r_add_participant_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Users"
+          ]
         },
         {
           "op": "submit",
@@ -1342,7 +1456,16 @@
           "bind": {
             "r_add_program_boundary_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         },
         {
           "op": "report",
@@ -1415,7 +1538,16 @@
           "bind": {
             "r_add_program_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         },
         {
           "op": "update",
@@ -1480,7 +1612,13 @@
           "bind": {
             "r_add_participant_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Users"
+          ]
         },
         {
           "op": "submit",
@@ -1502,7 +1640,16 @@
           "bind": {
             "r_add_program_boundary_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         },
         {
           "op": "report",
@@ -1575,7 +1722,16 @@
           "bind": {
             "r_add_program_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         },
         {
           "op": "update",
@@ -1640,7 +1796,13 @@
           "bind": {
             "r_add_participant_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Users"
+          ]
         },
         {
           "op": "submit",
@@ -1662,7 +1824,16 @@
           "bind": {
             "r_add_program_boundary_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Admin",
+            "ManagerEmail",
+            "Status",
+            "Users"
+          ]
         },
         {
           "op": "report",

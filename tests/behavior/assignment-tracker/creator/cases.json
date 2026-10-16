@@ -585,7 +585,15 @@
           },
           "expect": {
             "outcome": "refused"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Faculty",
+            "Status",
+            "Submissions"
+          ]
         }
       ],
       "expect": {
@@ -706,7 +714,15 @@
           },
           "expect": {
             "outcome": "refused"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Faculty",
+            "Status",
+            "Submissions"
+          ]
         }
       ],
       "expect": {
@@ -811,7 +827,13 @@
           "creator": {
             "code": 3100,
             "message": "No Data Available"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Submissions"
+          ]
         }
       ],
       "expect": {
@@ -903,7 +925,13 @@
           "record": {
             "Submissions": "Submissions updated 976"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Submissions"
+          ]
         },
         {
           "op": "submit",
@@ -930,7 +958,20 @@
           },
           "expect": {
             "outcome": "refused"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "recID",
+            "Submitted_By",
+            "Student",
+            "Status",
+            "Reviewer",
+            "Remarks",
+            "Marks",
+            "Reviewed_On"
+          ]
         }
       ],
       "expect": {
@@ -1025,7 +1066,13 @@
           "record": {
             "Submissions": "Submissions updated 976"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Submissions"
+          ]
         },
         {
           "op": "update",
@@ -1138,7 +1185,13 @@
           "record": {
             "Submissions": "Submissions updated 976"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Submissions"
+          ]
         },
         {
           "op": "update",
@@ -1170,7 +1223,13 @@
           "creator": {
             "code": 3100,
             "message": "No Data Available"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         }
       ],
       "expect": {
@@ -1262,7 +1321,13 @@
           "record": {
             "Submissions": "Submissions updated 976"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Submissions"
+          ]
         },
         {
           "op": "update",
@@ -1284,7 +1349,13 @@
           "record": {
             "Status": "Reviewed"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "submit",
@@ -1321,7 +1392,15 @@
           },
           "expect": {
             "outcome": "refused"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Faculty",
+            "Status",
+            "Submissions"
+          ]
         }
       ],
       "expect": {
@@ -1416,7 +1495,13 @@
           "record": {
             "Submissions": "Submissions updated 976"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Submissions"
+          ]
         },
         {
           "op": "update",
@@ -1438,7 +1523,13 @@
           "record": {
             "Status": "Reviewed"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "report",
@@ -1552,7 +1643,13 @@
           "record": {
             "Submissions": "Submissions updated 976"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Submissions"
+          ]
         },
         {
           "op": "update",
@@ -1574,7 +1671,13 @@
           "record": {
             "Status": "Reviewed"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "report",
@@ -1672,7 +1775,13 @@
           "record": {
             "Submissions": "Submissions updated 976"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Submissions"
+          ]
         },
         {
           "op": "update",
@@ -1694,7 +1803,13 @@
           "record": {
             "Status": "Reviewed"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "report",
