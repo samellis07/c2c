@@ -525,158 +525,109 @@
     "statements": 65,
     "translated": 5,
     "shimmed": 60,
-    "todo": 0,
-    "todoLocations": []
+    "todo": 6,
+    "todoLocations": [
+      {
+        "location": "report Book_Report",
+        "construct": "Custom action \"Mark as Featured\" is not migrated; its button is turned off.",
+        "scope": "ui"
+      },
+      {
+        "location": "report Book_Report",
+        "construct": "Custom action \"Publication year\" is not migrated; its button is turned off.",
+        "scope": "ui"
+      },
+      {
+        "location": "report All_Book_Transactions",
+        "construct": "Custom action \"Overdue Books Report\" is not migrated; its button is turned off.",
+        "scope": "ui"
+      },
+      {
+        "location": "report All_Book_Transactions",
+        "construct": "Custom action \"Group By  Member.\" is not migrated; its button is turned off.",
+        "scope": "ui"
+      },
+      {
+        "location": "report All_Book_Transactions",
+        "construct": "Custom action \"Mark as Lost\" is not migrated; its button is turned off.",
+        "scope": "ui"
+      },
+      {
+        "location": "report All_Book_Transactions",
+        "construct": "Custom action \"Overdue Books\" is not migrated; its button is turned off.",
+        "scope": "ui"
+      }
+    ]
   },
   "blockers": [
     {
-      "kind": "deluge",
-      "label": "silent drop field-property: Book_Transaction.Book property displayformat",
-      "detail": "Field Book_Transaction.Book property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
+      "kind": "ui",
+      "label": "report All_Book_Transactions",
+      "detail": "Custom action \"Group By  Member.\" is not migrated; its button is turned off.",
+      "scope": "ui"
     },
     {
-      "kind": "deluge",
-      "label": "silent drop field-property: Book_Transaction.Book property sortorder",
-      "detail": "Field Book_Transaction.Book property sortorder is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
+      "kind": "ui",
+      "label": "report All_Book_Transactions",
+      "detail": "Custom action \"Mark as Lost\" is not migrated; its button is turned off.",
+      "scope": "ui"
     },
     {
-      "kind": "deluge",
-      "label": "silent drop field-property: Book_Transaction.Issue_date property alloweddays",
-      "detail": "Field Book_Transaction.Issue_date property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
+      "kind": "ui",
+      "label": "report All_Book_Transactions",
+      "detail": "Custom action \"Overdue Books Report\" is not migrated; its button is turned off.",
+      "scope": "ui"
     },
     {
-      "kind": "deluge",
-      "label": "silent drop field-property: Book_Transaction.Member property displayformat",
-      "detail": "Field Book_Transaction.Member property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
+      "kind": "ui",
+      "label": "report All_Book_Transactions",
+      "detail": "Custom action \"Overdue Books\" is not migrated; its button is turned off.",
+      "scope": "ui"
     },
     {
-      "kind": "deluge",
-      "label": "silent drop field-property: Book_Transaction.Member property sortorder",
-      "detail": "Field Book_Transaction.Member property sortorder is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
+      "kind": "ui",
+      "label": "report Book_Report",
+      "detail": "Custom action \"Mark as Featured\" is not migrated; its button is turned off.",
+      "scope": "ui"
     },
     {
-      "kind": "deluge",
-      "label": "silent drop field-property: Book_Transaction.Return_date property alloweddays",
-      "detail": "Field Book_Transaction.Return_date property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: Book.Genre property others option",
-      "detail": "Field Book.Genre property others option is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: Member_Info.Membership_Start_Date property alloweddays",
-      "detail": "Field Member_Info.Membership_Start_Date property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: Staff_Members.Phone_Number property defaultcountry",
-      "detail": "Field Staff_Members.Phone_Number property defaultcountry is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: Staff_Members.Phone_Number property personal data",
-      "detail": "Field Staff_Members.Phone_Number property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: Staff_Members.Staff_Email property personal data",
-      "detail": "Field Staff_Members.Staff_Email property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: Staff_Members.Staff_Name property personal data",
-      "detail": "Field Staff_Members.Staff_Name property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop page-element: DashBoard.All_Book_Transactions",
-      "detail": "ZML element <button> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop page-element: DashBoard.All_Book_Transactions",
-      "detail": "ZML element <text> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop page-element: DashBoard.Book_Report",
-      "detail": "ZML element <button> Book_Report on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop page-element: DashBoard.Book_Report",
-      "detail": "ZML element <search> Book_Report on page DashBoard is generated without its criteria. Add one: either emit the element or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop report-feature: All_Book_Transactions block options",
-      "detail": "Report All_Book_Transactions block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop report-feature: All_Member_Infos block options",
-      "detail": "Report All_Member_Infos block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop report-feature: All_Staff_Members block options",
-      "detail": "Report All_Staff_Members block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop report-feature: Book_by_Genre block options",
-      "detail": "Report Book_by_Genre block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop report-feature: Book_Report block options",
-      "detail": "Report Book_Report block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "scope": "app"
+      "kind": "ui",
+      "label": "report Book_Report",
+      "detail": "Custom action \"Publication year\" is not migrated; its button is turned off.",
+      "scope": "ui"
     }
   ],
   "determinism": {
     "deterministic": false,
-    "todoCount": 0,
+    "todoCount": 6,
     "fillLockEntries": 0,
-    "todoKinds": [],
-    "uiTodoCount": 0,
-    "silentDrops": 21,
-    "silentDropKinds": [
+    "todoKinds": [
       {
-        "construct": "field-property",
-        "count": 12
+        "construct": "Custom action \"Group By  Member.\" is not migrated; its button is turned off.",
+        "count": 1
       },
       {
-        "construct": "report-feature",
-        "count": 5
+        "construct": "Custom action \"Mark as Featured\" is not migrated; its button is turned off.",
+        "count": 1
       },
       {
-        "construct": "page-element",
-        "count": 4
+        "construct": "Custom action \"Mark as Lost\" is not migrated; its button is turned off.",
+        "count": 1
+      },
+      {
+        "construct": "Custom action \"Overdue Books Report\" is not migrated; its button is turned off.",
+        "count": 1
+      },
+      {
+        "construct": "Custom action \"Overdue Books\" is not migrated; its button is turned off.",
+        "count": 1
+      },
+      {
+        "construct": "Custom action \"Publication year\" is not migrated; its button is turned off.",
+        "count": 1
       }
-    ]
+    ],
+    "uiTodoCount": 6
   },
   "score": {
     "readiness": 78,

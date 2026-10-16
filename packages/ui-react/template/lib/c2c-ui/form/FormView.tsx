@@ -16,7 +16,13 @@
  * saved to sessionStorage under the route, and the same route restores them
  * once after the sign-in round trip. An edit screen whose record read fails
  * shows why and never opens the form. The server's text for 401, 403 and 5xx
- * is never shown; a 4xx validation answer still is.
+ * is never shown; a 4xx validation answer still is. A failure after the row
+ * was written (`wrote: true`) says the record was saved, with the error text
+ * the server reports for a failed after-save script.
+ *
+ * A saved add shows the form's `success message` (else Creator's default)
+ * and clears the form for the next record; a saved edit shows the update
+ * wording, never the add message.
  */
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Alert } from '../arc/components/alert/alert';
@@ -34,6 +40,21 @@ import { subformRows, validateSubforms } from '../subform/rows';
 interface Banner {
   tone: 'success' | 'danger' | 'info';
   title: string;
+}
+
+/** Creator's banner after a saved add when the form sets no `success message`. */
+export const DEFAULT_ADD_MESSAGE = 'Data Added Successfully!';
+/** The banner after a saved edit: the form's `success message` names the add. */
+export const DEFAULT_UPDATE_MESSAGE = 'Data Updated Successfully!';
+
+/** The banner for a submit the server refused or failed. */
+export function submitFailure(status: number, body: { error?: unknown; message?: unknown; wrote?: unknown } | undefined): string {
+  const server = typeof body?.message === 'string' && body.message.trim() ? body.message.trim() : typeof body?.error === 'string' ? body.error.trim() : '';
+  // The row is stored; only a step after the write failed. A resubmit would add it twice.
+  // The generic "request failed" adds nothing; a Deluge runtime error's text does.
+  if (body?.wrote === true) return `The record was saved, but a step after saving failed${server && server !== 'request failed' ? `: ${server}` : '.'}`;
+  // 401, 5xx and a dropped network get the app's copy; only a validation answer carries the server's words.
+  return failureText(status) || server || 'The record was not saved.';
 }
 
 interface WriteReply {
@@ -430,27 +451,32 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
         deny();
         return;
       }
-      if (!committed) {
-        // 401, 5xx and a dropped network get the app's copy; only a validation answer carries the server's words.
-        const server = failureText(reply.status) ? undefined : reply.body?.message ?? reply.body?.error;
-        setBanner({ tone: 'danger', title: failureText(reply.status) || (typeof server === 'string' && server.trim() ? server : 'The record was not saved.') });
+      if (!reply.ok) {
+        // A stored row whose after-save step failed (`wrote: true`) still lands here:
+        // it is committed for idempotency, but the banner must not claim a clean save.
+        setBanner({ tone: 'danger', title: submitFailure(reply.status, reply.body) });
       } else {
         // On success may set its own `success message`; the default banner
         // only shows when no handler claimed it.
         const success = await run('success');
         if (!success.includes('success')) {
-          const done = form.successMessage || (mode === 'edit' ? 'Record updated.' : 'Record added.');
+          const done = mode === 'edit' ? DEFAULT_UPDATE_MESSAGE : form.successMessage || DEFAULT_ADD_MESSAGE;
           setBanner({ tone: 'success', title: dryRun ? `${done} Dry run: nothing was saved.` : done });
         }
+        // A saved add clears the form for the next record but keeps the
+        // success banner (a user reset clears it, this one must not); the
+        // remount also blanks the widgets a native reset cannot reach.
         if (mode === 'add' && !dryRun) {
-          // Clear the fields for the next record but keep the success banner:
-          // a user reset clears it, this one must not.
           submitReset.current = true;
           try {
             formEl.reset();
           } finally {
             submitReset.current = false;
           }
+          live.current.record = {};
+          published.current = {};
+          setRecord({});
+          setLoaded((n) => n + 1);
         }
         const mailNotes = Array.isArray(reply.body?.mail)
           ? reply.body.mail.map(mailNoticeText).filter(Boolean)

@@ -154,6 +154,8 @@ export interface CustomActionSpec {
   endpoint: string;
   /** `show action in view header`: a toolbar button, else a per-record action. */
   header?: boolean;
+  /** The endpoint is a dry-run stub: the button renders turned off with a note. */
+  preview?: true;
 }
 
 export interface ReportSpec {

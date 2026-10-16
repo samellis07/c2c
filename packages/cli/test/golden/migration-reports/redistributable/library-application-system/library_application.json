@@ -40,8 +40,33 @@
       "label": "not applicable (out of scope)"
     }
   ],
-  "todoCount": 0,
-  "todoKinds": [],
+  "todoCount": 6,
+  "todoKinds": [
+    {
+      "construct": "Custom action \"Group By  Member.\" is not migrated; its button is turned off.",
+      "count": 1
+    },
+    {
+      "construct": "Custom action \"Mark as Featured\" is not migrated; its button is turned off.",
+      "count": 1
+    },
+    {
+      "construct": "Custom action \"Mark as Lost\" is not migrated; its button is turned off.",
+      "count": 1
+    },
+    {
+      "construct": "Custom action \"Overdue Books Report\" is not migrated; its button is turned off.",
+      "count": 1
+    },
+    {
+      "construct": "Custom action \"Overdue Books\" is not migrated; its button is turned off.",
+      "count": 1
+    },
+    {
+      "construct": "Custom action \"Publication year\" is not migrated; its button is turned off.",
+      "count": 1
+    }
+  ],
   "manualSteps": [],
   "hiddenParts": [
     {
