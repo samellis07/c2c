@@ -21,7 +21,7 @@
  * production io.rest wraps the Catalyst CLI's own authenticated client).
  */
 import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { slateHost } from '../../auth/src/slate-host.js';
 import { assertLiveProject, flag, type Io } from './cli.js';
 import { resolveProvisionScope, type ProvisionScope } from './provision-config.js';
@@ -38,6 +38,9 @@ import { restWithRetry, spawnWithRetry, type ReRead, type RestRetry, type RetryO
 import { assertProtectedProject } from './guards.js';
 import { ACTIVATION_SERVICES, checkGate, FIRST_USE_GATES, gateConsoleLine, gateForStep, type FirstUseGate, type GateCheck } from './first-use.js';
 import { iacImportBundle, runProjectImport, ImportEndedError, StuckImportError, type ImportFetch } from './iac-import.js';
+import { IN_PROJECT_PROBE_REQUIRED, probeCreateCall, verifyProbe } from '../../doctor/src/mcp-probe.js';
+import { loadMcpEvidence } from '../../doctor/src/mcp-state.js';
+import { workspaceDir } from '../../doctor/src/report.js';
 
 const USAGE =
   'usage: c2c provision --out <dir> [--status | --next | --confirm --run <id> | --record <id> [--result <file>] [--applied]]\n' +
@@ -78,6 +81,8 @@ export interface ProvisionState {
     importName?: string;
     /** Import attempts by name — a stuck import keeps its name blocked, so a retry never reuses it. */
     imports?: Record<string, { importId?: string; status: 'completed' | 'stuck' }>;
+    /** The in-project D-B1 re-probe, recorded once the org-scoped-created project read back the probe bucket. */
+    inProjectProbe?: { name: string; projectId: string; at: string };
     byName: Record<string, string>;
   };
   steps: Record<string, StepRecord>;
@@ -1705,6 +1710,78 @@ async function gatesBefore(ctx: Ctx, id: string): Promise<string | undefined> {
   return undefined;
 }
 
+
+/**
+ * The workspace the doctor state lives in: a plan --out is
+ * <workspace>/c2c-out/<app>, so the workspace is two levels up when the
+ * layout matches; C2C_WORKSPACE (what the doctor itself resolves) wins.
+ */
+function probeWorkspace(ctx: Ctx): string {
+  const named = ctx.io.env.C2C_WORKSPACE;
+  if (typeof named === 'string' && named.trim() !== '') return named;
+  if (basename(dirname(ctx.out)) === 'c2c-out') return dirname(dirname(ctx.out));
+  return workspaceDir(ctx.io.env);
+}
+
+/**
+ * The probe bucket name still owed an in-project read-back, or undefined.
+ * The doctor that gated `--run import` was org-scoped: its signed MCP
+ * evidence carries a verified binding whose detail is the
+ * `in-project-probe-required` marker. Anything else — a project-scoped
+ * record, another scope, no record, a non-marker binding — owes nothing and
+ * leaves the existing-project path exactly as strict as before.
+ */
+function pendingInProjectProbe(ctx: Ctx): string | undefined {
+  const projectId = ctx.scope.projectId ?? ctx.state.learned.projectId;
+  if (!projectId || !/^[0-9]+$/.test(projectId) || !ctx.scope.org) return undefined;
+  const orgScope: { dc?: string; org: string } = { org: ctx.scope.org };
+  if (ctx.scope.dc) orgScope.dc = ctx.scope.dc;
+  let reuse: ReturnType<typeof loadMcpEvidence>;
+  try {
+    reuse = loadMcpEvidence(probeWorkspace(ctx), orgScope, { env: ctx.io.env });
+  } catch {
+    return undefined;
+  }
+  if (reuse.status !== 'reused') return undefined;
+  const binding = reuse.evidence.binding;
+  if (binding?.status !== 'verified' || binding.detail !== IN_PROJECT_PROBE_REQUIRED) return undefined;
+  const done = ctx.state.learned.inProjectProbe;
+  if (done && done.name === binding.name && done.projectId === projectId) return undefined;
+  return binding.name;
+}
+
+/**
+ * The mandatory re-probe after an import created the project under an
+ * org-scoped doctor: the nonce bucket the session was asked to write must be
+ * read back INSIDE the new project over the Catalyst REST API before any
+ * table, function or deploy step may run. Fail closed — any answer but
+ * `verified` stops the step and names the exact Create_Bucket call to make,
+ * then re-run.
+ */
+async function inProjectProbeRefusal(ctx: Ctx): Promise<string | undefined> {
+  const name = pendingInProjectProbe(ctx);
+  if (name === undefined) return undefined;
+  const projectId = (ctx.scope.projectId ?? ctx.state.learned.projectId)!;
+  const org = ctx.scope.org!;
+  const rest = ctx.rest ?? ((call: RestCall) => catalystRestCall(ctx.io.env, org, projectId, call));
+  const result = await verifyProbe(rest, { org, project: projectId }, name);
+  if (result.status === 'verified') {
+    ctx.state.learned.inProjectProbe = { name, projectId, at: ctx.now() };
+    writeProvisionState(ctx.out, ctx.state);
+    return undefined;
+  }
+  return `the in-project MCP probe is not verified for project ${projectId}: ${result.detail} — in this session call ${JSON.stringify(probeCreateCall(name, { org, project: projectId }))} , then re-run`;
+}
+
+/** After the import mints the project under an org-scoped doctor: name the probe call that must land before the next step. */
+function printInProjectProbeAsk(ctx: Ctx): void {
+  const name = pendingInProjectProbe(ctx);
+  if (name === undefined) return;
+  const projectId = (ctx.scope.projectId ?? ctx.state.learned.projectId)!;
+  ctx.io.stdout(`in-project probe: the org-scoped doctor probe must now land inside project ${projectId} — in this session call ${JSON.stringify(probeCreateCall(name, { org: ctx.scope.org!, project: projectId }))}
+`);
+}
+
 async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> {
   const step = findStep(ctx.plan, id);
   if (!step) {
@@ -1722,7 +1799,10 @@ async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> 
   const current = stepStatus(ctx.state, id);
   if (current === 'done' || current === 'existing') {
     ctx.io.stdout(`${JSON.stringify({ step: id, ran: false, status: current, note: 'already recorded; nothing to do' }, null, 2)}\n`);
-    if (id === 'import') printImportFields(ctx);
+    if (id === 'import') {
+      printImportFields(ctx);
+      printInProjectProbeAsk(ctx);
+    }
     return 0;
   }
   if (id === 'import' && ctx.scope.projectId) {
@@ -1759,6 +1839,11 @@ async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> 
       const waiting = await gatesBefore(ctx, id);
       if (waiting) {
         ctx.io.stderr(`c2c provision: ${waiting}\n`);
+        return 1;
+      }
+      const probeRefusal = await inProjectProbeRefusal(ctx);
+      if (probeRefusal) {
+        ctx.io.stderr(`c2c provision: ${probeRefusal}\n`);
         return 1;
       }
     }
@@ -1813,7 +1898,10 @@ async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> 
     ctx.io.stdout(
       `${JSON.stringify({ step: id, ran: true, applied, status: ctx.state.steps[id]!.status, verified, result: rel, next: next ? next.id : null }, null, 2)}\n`,
     );
-    if (id === 'import') printImportFields(ctx);
+    if (id === 'import') {
+      printImportFields(ctx);
+      printInProjectProbeAsk(ctx);
+    }
     return 0;
   } catch (err) {
     ctx.io.stderr(`c2c provision: ${err instanceof Error ? redactString(err.message) : 'run failed'}\n`);
@@ -1826,6 +1914,13 @@ async function recordStep(ctx: Ctx, id: string, resultPath: string | undefined, 
   if (!step) {
     ctx.io.stderr(`c2c provision: no step "${id}" in provision/plan.json\n`);
     return 2;
+  }
+  if (id !== 'import') {
+    const probeRefusal = await inProjectProbeRefusal(ctx);
+    if (probeRefusal) {
+      ctx.io.stderr(`c2c provision: ${probeRefusal}\n`);
+      return 1;
+    }
   }
   const prior = ctx.state.steps[id];
   if (appliedFlag && !resultPath) {

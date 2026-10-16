@@ -21,6 +21,8 @@ import { type Io } from '../src/cli.js';
 import type { RestCall, RestResult } from '../src/tables.js';
 import { FIRST_USE_GATES, type FirstUseGateId } from '../src/first-use.js';
 import { CUSTOMER_STEPS } from '../src/customer-steps.js';
+import { writeMcpEvidence } from '../../doctor/src/mcp-state.js';
+import { IN_PROJECT_PROBE_REQUIRED } from '../../doctor/src/mcp-probe.js';
 
 const ORG = '10000000000';
 const PROJECT = '10000000000013200';
@@ -147,6 +149,7 @@ function sandboxRest(sandbox: Sandbox): { rest: (call: RestCall) => Promise<Rest
       for (const item of bodies) table.columns.add(String((item as { column_name?: string }).column_name));
       return { status: 200, body: { data: { added: bodies.length } } };
     }
+    if (call.method === 'GET' && path === '/bucket') return { status: 200, body: { data: [...sandbox.buckets] } };
     const auth = /^\/authentication\/enable\?auth_type=(hosted|embedded)$/.exec(path);
     if (call.method === 'POST' && auth) {
       if (auth[1] === 'hosted') sandbox.hosted = true;
@@ -3445,8 +3448,7 @@ const IMPORT_PLAN: PlanFile = {
   ],
 };
 
-function writeImportPlan(): string {
-  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-import-'));
+function writeImportPlan(out: string = mkdtempSync(join(tmpdir(), 'c2c-prov-import-'))): string {
   mkdirSync(join(out, 'provision', 'iac', 'functions'), { recursive: true });
   writeFileSync(join(out, 'provision', 'plan.json'), `${JSON.stringify(IMPORT_PLAN, null, 2)}\n`);
   writeFileSync(
@@ -3487,6 +3489,96 @@ test('--run import creates the project through one IaC import and learns its id'
   const roles = writeResult(out, 'import-roles', mcpResult(sandbox, 'CatalystbyZoho_List_All_Roles'));
   assert.equal(await provisionCli(['--out', out, '--record', 'import-roles', '--result', roles, '--org', ORG, '--dc', 'in'], cap(sandbox).io), 0);
   rmSync(out, { recursive: true, force: true });
+});
+
+test('an org-scoped doctor probe must land inside the created project before any table step', async () => {
+  const ws = mkdtempSync(join(tmpdir(), 'c2c-prov-ws-'));
+  const home = mkdtempSync(join(tmpdir(), 'c2c-prov-home-'));
+  const env = { HOME: home, C2C_WORKSPACE: ws };
+  const out = writeImportPlan(join(ws, 'c2c-out', 'widget'));
+  const probeName = `c2cprobe${'a1b2c3d4'.repeat(4)}`;
+  // The doctor that gated --run import was org-scoped: a verified binding
+  // whose detail is the in-project-probe-required marker.
+  writeMcpEvidence(
+    ws,
+    {
+      at: new Date().toISOString(),
+      binding: { kind: 'bucket', name: probeName, status: 'verified', detail: IN_PROJECT_PROBE_REQUIRED },
+    },
+    { dc: 'in', org: ORG },
+    { source: 'operator' },
+    { env },
+  );
+  const api = fakeImportApi();
+  const c1 = cap(undefined, api.fetch);
+  c1.io.env = env;
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import', '--org', ORG, '--dc', 'in'], c1.io), 0, c1.err());
+  // The import closes, then names the exact probe call that must land inside the new project.
+  assert.match(c1.out(), /in-project probe/);
+  assert.ok(c1.out().includes(probeName), c1.out());
+  assert.ok(c1.out().includes(`"projectId":"${PROJECT}"`), c1.out());
+
+  // MUST-FAIL: the probe bucket is not in the new project, so --run tables
+  // stops before any table call leaves.
+  const sandbox = emptySandbox();
+  const c2 = cap(sandbox, api.fetch);
+  c2.io.env = env;
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'tables', '--org', ORG, '--dc', 'in'], c2.io), 1);
+  assert.match(c2.err(), /in-project MCP probe is not verified/);
+  assert.ok(c2.err().includes(probeName), c2.err());
+  assert.ok(!c2.restCalls.some((line) => line.startsWith('POST')), c2.restCalls.join('\n'));
+  assert.equal(readState(out).steps.tables, undefined);
+
+  // --record is held to the same probe: it cannot close a step either.
+  const roles = writeResult(out, 'import-roles', mcpResult(sandbox, 'CatalystbyZoho_List_All_Roles'));
+  const cRec = cap(sandbox, api.fetch);
+  cRec.io.env = env;
+  assert.equal(await provisionCli(['--out', out, '--record', 'import-roles', '--result', roles, '--org', ORG, '--dc', 'in'], cRec.io), 1);
+  assert.match(cRec.err(), /in-project MCP probe is not verified/);
+  assert.equal(readState(out).steps['import-roles'], undefined);
+
+  // The session wrote the probe bucket: the in-project read-back verifies and
+  // the step runs — recorded so no later step re-probes.
+  sandbox.buckets.push({ bucket_name: probeName });
+  const c3 = cap(sandbox, api.fetch);
+  c3.io.env = env;
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'tables', '--org', ORG, '--dc', 'in'], c3.io), 0, c3.err());
+  assert.ok(c3.restCalls.some((line) => line === `GET /baas/v1/project/${PROJECT}/bucket`), c3.restCalls.join('\n'));
+  assert.equal(readState(out).learned.inProjectProbe?.name, probeName);
+  assert.equal(readState(out).learned.inProjectProbe?.projectId, PROJECT);
+  rmSync(ws, { recursive: true, force: true });
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('a project-scoped or absent MCP record never triggers the in-project probe gate', async () => {
+  const ws = mkdtempSync(join(tmpdir(), 'c2c-prov-ws-'));
+  const home = mkdtempSync(join(tmpdir(), 'c2c-prov-home-'));
+  const env = { HOME: home, C2C_WORKSPACE: ws };
+  const out = writeImportPlan(join(ws, 'c2c-out', 'widget'));
+  // An existing project's doctor bound the probe inside it — no marker, and
+  // the record is scoped to the project, so the org-scoped lookup misses.
+  writeMcpEvidence(
+    ws,
+    {
+      at: new Date().toISOString(),
+      binding: { kind: 'bucket', name: `c2cprobe${'e5f6a7b8'.repeat(4)}`, status: 'verified', detail: `probe bucket found in project ${PROJECT}` },
+    },
+    { dc: 'in', org: ORG, project: PROJECT },
+    { source: 'operator' },
+    { env },
+  );
+  const api = fakeImportApi();
+  const c1 = cap(undefined, api.fetch);
+  c1.io.env = env;
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'import', '--org', ORG, '--dc', 'in'], c1.io), 0, c1.err());
+  assert.ok(!c1.out().includes('in-project probe'), c1.out());
+  const sandbox = emptySandbox();
+  const c2 = cap(sandbox, api.fetch);
+  c2.io.env = env;
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'tables', '--org', ORG, '--dc', 'in'], c2.io), 0, c2.err());
+  assert.ok(!c2.restCalls.some((line) => line === `GET /baas/v1/project/${PROJECT}/bucket`), 'no probe read-back may run');
+  rmSync(ws, { recursive: true, force: true });
+  rmSync(home, { recursive: true, force: true });
 });
 
 test('--run import refuses a missing target org before making any Catalyst request', async () => {

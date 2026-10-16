@@ -25,6 +25,7 @@ import compat from '../data/compat.json' with { type: 'json' };
 import { MCP_TOOLS_GUIDANCE, REQUIRED_MCP_TOOLS } from './required-tools.js';
 import { dcOfCreatorHost, dcOfMcpHost, normalizeDc, type ResolvedScopeValues } from './scope.js';
 import { missingRequiredTools, shortToolName, type McpEvidence } from './evidence.js';
+import { IN_PROJECT_PROBE_REQUIRED } from './mcp-probe.js';
 import { verifyVendorDir, MANIFEST_NAME } from './vendor.js';
 import { entryKind, isAbsentError, isSymlinkRefusedError } from '../../core/src/fs-kind.js';
 import { readRegularFile, type FileRead } from './read-file.js';
@@ -1113,13 +1114,17 @@ function checkB(ctx: DoctorContext, evidence: McpEvidence, cliProjects: string[]
   // the only proof the connector is bound to this org/DC/project is the
   // doctor's own REST read-back of the nonce-named probe write.
   const bound = evidence.binding?.status === 'verified';
+  // An org-scoped binding (the project did not exist yet) is verified for the
+  // create step only — the in-project probe is still owed, so it is labelled,
+  // never described as a project write probe.
+  const orgScopedOnly = bound && evidence.binding?.detail === IN_PROJECT_PROBE_REQUIRED;
   const bindingFix = 'run c2c doctor --mcp-begin, make every call it names (the probe write first), then c2c doctor --mcp-observed -';
   if (localTransport && ctx.evidenceSource !== 'observed') {
     out.push(fail('D-B1', 'stdio/local MCP evidence must come from an observed live tool call; run c2c doctor --mcp-begin and --mcp-observed', 'run /c2c:doctor again and record the live MCP call with c2c doctor --mcp-begin'));
   } else if (localTransport && !bound) {
     out.push(fail('D-B1', `stdio/local MCP is not proved bound to this org/DC/project: ${evidence.binding?.detail ?? 'no server-side probe was read back'}`, bindingFix));
   } else if (localTransport) {
-    out.push(pass('D-B1', `catalyst MCP: ${evidence.server ?? 'catalyst-by-zoho'} (${evidence.transport}) — bound by the probe write`));
+    out.push(pass('D-B1', `catalyst MCP: ${evidence.server ?? 'catalyst-by-zoho'} (${evidence.transport}) — ${orgScopedOnly ? 'bound org-scoped for project creation; the in-project read-back happens after the project exists' : 'bound by the probe write'}`));
   } else if (!hostOfUrl) {
     out.push(
       fail('D-B1', evidence.host_of_url === undefined ? 'no Catalyst MCP server was recorded' : 'the recorded MCP host is not a host name; re-record the evidence', mcpFix),
@@ -1129,7 +1134,7 @@ function checkB(ctx: DoctorContext, evidence: McpEvidence, cliProjects: string[]
   }
 
   let mcpDc = dcOfMcpHost(hostOfUrl);
-  let dcSource: 'MCP host' | 'project write probe' = 'MCP host';
+  let dcSource: 'MCP host' | 'project write probe' | 'org read-back' = 'MCP host';
   if (localTransport) {
     // A verified probe write places the nonce inside the very project the
     // CLI credential sees — that read-back is the org/DC proof. Caller-
@@ -1137,7 +1142,7 @@ function checkB(ctx: DoctorContext, evidence: McpEvidence, cliProjects: string[]
     // connector, so without the probe the DC stays unproven.
     if (bound) {
       mcpDc = normalizeDc(ctx.scope.dc);
-      dcSource = 'project write probe';
+      dcSource = orgScopedOnly ? 'org read-back' : 'project write probe';
     }
   }
   if (!mcpDc) {

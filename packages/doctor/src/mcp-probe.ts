@@ -27,6 +27,14 @@ import { join } from 'node:path';
 import { readBucketList, type RestFn } from '../../deploy/src/tables.js';
 
 export const PROBE_PREFIX = 'c2cprobe';
+/**
+ * The detail an org-scoped verified probe carries: the org read proved the
+ * binding is reachable, but the nonce bucket probe inside the project is
+ * still owed once the project exists. Only the project-creating step may
+ * treat this status as green — deploy, smoke and every project-scoped verb
+ * stay strict.
+ */
+export const IN_PROJECT_PROBE_REQUIRED = 'in-project-probe-required';
 export const PROBE_CREATE_CALL = 'CatalystbyZoho_Create_Bucket';
 export const PROBE_DELETE_CALL = 'CatalystbyZoho_Delete_Bucket';
 
@@ -75,6 +83,8 @@ export interface ProbeResult {
   name: string;
   status: ProbeStatus;
   detail: string;
+  /** HTTP status of the failed read-back, when there was one. */
+  httpStatus?: number;
 }
 
 /**
@@ -97,7 +107,7 @@ export async function verifyProbe(rest: RestFn, target: ProbeTarget, name: strin
   if (!target.project) {
     try {
       const read = await rest({ method: 'GET', path: '/baas/v1/project' });
-      if (read.status >= 200 && read.status < 300) return { ...base, status: 'verified', detail: `org ${target.org} is readable through the Catalyst REST API; in-project probe required after creation` };
+      if (read.status >= 200 && read.status < 300) return { ...base, status: 'verified', detail: IN_PROJECT_PROBE_REQUIRED };
       return { ...base, status: 'unverifiable', httpStatus: read.status, detail: `the REST org project list answered HTTP ${read.status}` };
     } catch (err) {
       return { ...base, status: 'unverifiable', detail: `the REST org read-back failed: ${err instanceof Error ? err.message : String(err)}` };

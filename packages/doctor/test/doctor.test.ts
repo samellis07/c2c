@@ -31,6 +31,7 @@ import {
   checkMailSender,
   verifyVendorCli,
   verifyProbe,
+  IN_PROJECT_PROBE_REQUIRED,
   verifyVendorDir,
   writeDoctorFile,
   dcTld,
@@ -2016,6 +2017,8 @@ test('mcp probe: org-only creation probe reads the org, while invalid scopes nev
   }
   const orgResult = await verifyProbe(counting, { org: ORG }, 'c2cprobex');
   assert.equal(orgResult.status, 'verified');
+  // The marker deploy/smoke/existing-project must never read as green.
+  assert.equal(orgResult.detail, IN_PROJECT_PROBE_REQUIRED);
   assert.equal(calls, 1);
   const failing = await verifyProbe(
     async () => {
@@ -2026,6 +2029,27 @@ test('mcp probe: org-only creation probe reads the org, while invalid scopes nev
   );
   assert.equal(failing.status, 'unverifiable');
   assert.match(failing.detail, /REST read-back failed: socket hang up/);
+  // A project-scoped probe never reports the org-scoped marker: an absent
+  // nonce bucket means the MCP write did not land in this project.
+  const absent = await verifyProbe(counting, { org: ORG, project: PROJECT }, 'c2cprobe0');
+  assert.equal(absent.status, 'absent');
+  assert.notEqual(absent.detail, IN_PROJECT_PROBE_REQUIRED);
+});
+
+test('gate: the org-scoped creation doctor never satisfies a project-scoped command', () => {
+  const orgScope = { dc: 'in', org: ORG };
+  const orgOnly = (): DoctorFile => doctorFile({ scope: { ...orgScope }, mcp: { server: 'catalyst-by-zoho', host: 'catalystbyzoho.zohomcp.in', at: new Date().toISOString(), scope: { ...orgScope } } });
+  const dir = tmp();
+  writeDoctorFile(dir, orgOnly());
+  // Deploy/smoke/existing-project stay strict: dc+org+project is required.
+  assert.equal(evaluateGate({ workspace: dir, scope: SCOPE }).status, 'scope-mismatch');
+  assert.equal(evaluateGate({ workspace: dir, scope: SCOPE, createsProject: true }).status, 'scope-mismatch');
+  // A project-scoped doctor.json whose MCP record stayed org-scoped is a
+  // refusal, not a pass — the binding never moved into the project.
+  const mcpOrg = tmp();
+  writeDoctorFile(mcpOrg, doctorFile({ mcp: { server: 'catalyst-by-zoho', host: 'catalystbyzoho.zohomcp.in', at: new Date().toISOString(), scope: { ...orgScope } } }));
+  assert.equal(evaluateGate({ workspace: mcpOrg, scope: SCOPE }).status, 'mcp-scope');
+  assert.equal(evaluateGate({ workspace: mcpOrg, scope: SCOPE, createsProject: true }).status, 'mcp-scope');
 });
 
 test('vendor: a non-file entry, an unreadable directory or an unreadable listed file is refused', (t) => {
