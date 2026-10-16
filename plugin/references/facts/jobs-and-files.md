@@ -102,7 +102,13 @@ Rule: [UNVERIFIED] confirm a bucket exists by listing
 `GET /baas/v1/project/<project-id>/bucket` and matching `bucket_name`
 exactly (follow a page token when one is returned). Never treat a 404 from
 the per-bucket path as "bucket absent". The `c2c doctor` MCP probe
-read-back uses the list route.
+read-back uses the list route, then the nonce-object list below.
+
+### Read the doctor probe nonce object back by exact key
+
+Recipe: [DOC] `GET /baas/v1/project/<project-id>/bucket/objects?bucket_name=<bucket>&prefix=<key>&max_keys=50` returns `data.contents[].key` and `data.next_continuation_token`. Follow that token. `truncated` or `more_records` without a token does not prove the key is absent. Match `key` exactly. Do not use `GET .../bucket/<name>`.
+
+Rule: [DOC] A project-scoped `c2c doctor` probe lists that exact object key — a fresh 32-hex nonce for the run — inside the reused probe bucket. A bucket without this run's key does not pass. Delete the object with `PUT /baas/v1/project/<project-id>/bucket/object?bucket_name=<bucket>` and body `{"objects":[{"key":"<nonce>"}]}`. The CLI token's objects delete scope is [UNVERIFIED], so the doctor still prints that PUT when the delete may not have landed. The bucket stays until `CatalystbyZoho_Delete_Bucket`.
 
 ### Assume 250 GB per single object
 

@@ -23,7 +23,7 @@ import { runDoctorChecks, type DoctorContext } from './checks.js';
 import { listCatalystProjects, peekCliTokenTag, refreshCliAccessToken } from '../../deploy/src/rest.js';
 import { EvidenceRejected, EvidenceStale, mcpRecord, parseEvidence, type McpEvidence } from './evidence.js';
 import { beginMcpRequest, closeMcpRequest, mcpRequestInstructions, parseObservation, readStdinBounded, type Observed } from './observed.js';
-import { clearPendingCleanup, probeDeleteCall, probeNameOf, readPendingCleanups, verifyProbe, writePendingCleanup, type ProbeTarget } from './mcp-probe.js';
+import { clearPendingCleanup, deleteProbeNonce, probeDeleteCall, probeNameOf, probeNonceCleanup, readPendingCleanups, verifyProbe, writePendingCleanup, type ProbeNonceCleanup, type ProbeTarget } from './mcp-probe.js';
 import { catalystRestCall } from '../../deploy/src/rest.js';
 import { c2cVersion, detectHost, workspaceDir, writeDoctorFile } from './report.js';
 import { formatAge, loadMcpEvidence, MCP_EVIDENCE_MAX_AGE_HOURS, writeMcpEvidence, type McpEvidenceReuse } from './mcp-state.js';
@@ -216,11 +216,15 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
       io.stdout(
         `MCP request ${ask.request} (answer before ${ask.expires})\n` +
           `1. In this session, make these calls; approve each call when asked. Never call ${ask.neverCall.join(' or ')}: they return project secrets into the transcript, and the doctor lists projects through the Catalyst CLI.\n${callLines}\n` +
-          `   The first call writes the probe bucket (${ask.probe}; one per project, reused across runs — an already-exists answer means an earlier run left it: carry on and still send the observation) the doctor reads back over the Catalyst REST API with your CLI credential — the echoed nonce alone proves nothing.\n` +
+          (ask.objectCleanup
+            ? `   The probe bucket (${ask.probe}) is one per project and is reused across runs — an already-exists answer means an earlier run left it, and that bucket alone does not pass. Write an object whose key is this run's nonce (${ask.nonce}) with CatalystbyZoho_Create_Upload_Signature, then PUT the nonce text to the signed URL. The doctor lists objects in that bucket and requires that exact key. Echoed call results prove nothing. The observation must include Create_Bucket and List_All_Organizations; Create_Upload_Signature may be included and is not required.\n`
+            : `   The first call writes the probe bucket (${ask.probe}; one per project, reused across runs — an already-exists answer means an earlier run left it: carry on and still send the observation) the doctor reads back over the Catalyst REST API with your CLI credential — the echoed nonce alone proves nothing.\n`) +
           `2. Pipe the observation — this request id, the Catalyst server, host and tool names the session lists, and each call's result verbatim — into:\n` +
           `   ${ask.command}\n` +
           `${JSON.stringify(ask.observation, null, 2)}\n` +
-          `3. Afterwards remove the probe bucket: call ${JSON.stringify(ask.cleanup)}\n` +
+          (ask.objectCleanup
+            ? `3. Afterwards delete this run's nonce object (the bucket stays): PUT ${ask.objectCleanup.path} with body ${JSON.stringify(ask.objectCleanup.body)}. Then remove the probe bucket: call ${JSON.stringify(ask.cleanup)}\n`
+            : `3. Afterwards remove the probe bucket: call ${JSON.stringify(ask.cleanup)}\n`) +
           pending.map((p) => `cleanup still pending from an earlier run: call ${JSON.stringify(probeDeleteCall(p.name, p))}\n`).join(''),
       );
     }
@@ -228,6 +232,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
   }
 
   let evidence: McpEvidence | undefined;
+  let nonceCleanup: ProbeNonceCleanup | undefined;
   let origin: { source: 'observed'; observed: Observed } | { source: 'operator' } | undefined;
   if (parsed.mcpObserved !== undefined) {
     if (parsed.mcpObserved !== '-' || !io.stdin) {
@@ -242,19 +247,31 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
       // the run that writes doctor.json closes it first (fail closed), atomically.
       if (!parsed.local) {
         // The submitted results are caller-controlled: the binding is the
-        // doctor's own REST read-back of the probe bucket, not the echoed
-        // nonce. Runs before closeMcpRequest so a rejected observation can
-        // never consume the request (parse already threw by this point).
+        // doctor's own REST read-back of this run's nonce object, not the
+        // echoed nonce. Runs before closeMcpRequest so a rejected observation
+        // can never consume the request (parse already threw by this point).
         // The bucket --mcp-begin named, pinned in the request file: the
         // read-back and the cleanup track the bucket that was actually
         // created, even if the scope flags drifted since the begin run.
         const probe = result.probe ?? probeNameOf(result.observed.request, probeTarget);
-        const rest = io.rest ?? ((call: { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; path: string }) => catalystRestCall(io.env, probeTarget.org ?? '', probeTarget.project ?? '', call));
-        const binding = await verifyProbe(rest, probeTarget, probe);
+        const projectScoped = probeTarget.project !== undefined && /^[0-9]+$/.test(probeTarget.project);
+        const rest = io.rest ?? ((call: { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; path: string; body?: unknown }) => catalystRestCall(io.env, probeTarget.org ?? '', probeTarget.project ?? '', call));
+        // A project-scoped request with no nonce must not fall back to "the
+        // bucket exists": an older file, or a file whose nonce was removed,
+        // cannot prove this run.
+        const binding = projectScoped && !result.nonce
+          ? { kind: 'bucket' as const, name: probe, status: 'unverifiable' as const, detail: 'the MCP request has no per-run nonce, so the probe cannot be verified' }
+          : result.nonce && projectScoped
+            ? await verifyProbe(rest, probeTarget, probe, result.nonce)
+            : await verifyProbe(rest, probeTarget, probe);
         evidence.binding = binding;
-        if (binding.status === 'absent') {
+        // Absent means the bucket itself is gone, so the pending delete can
+        // drop. A missing nonce object leaves the reusable bucket in place:
+        // that detail names the nonce object and the cleanup record stays.
+        const bucketGone = binding.status === 'absent' && !binding.detail.includes('nonce object');
+        if (bucketGone) {
           clearPendingCleanup(workspace, probe);
-        } else if (probeTarget.project !== undefined && /^[0-9]+$/.test(probeTarget.project)) {
+        } else if (projectScoped) {
           writePendingCleanup(workspace, probe, probeTarget);
           if (binding.status === 'verified') {
             // A verified in-project probe supersedes the pre-project probe:
@@ -264,7 +281,11 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
             for (const pending of readPendingCleanups(workspace)) {
               if (!pending.project && (pending.org === undefined || pending.org === probeTarget.org)) clearPendingCleanup(workspace, pending.name);
             }
+            if (result.nonce) await deleteProbeNonce(rest, probeTarget.project as string, probe, result.nonce);
           }
+        }
+        if (projectScoped && result.nonce && binding.status !== 'absent') {
+          nonceCleanup = probeNonceCleanup(probe, result.nonce, probeTarget.project as string);
         }
         // A verified probe without a project tracks nothing: no bucket was
         // provably created inside a project, and its delete call would carry
@@ -393,7 +414,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
   if (!parsed.quiet) {
     if (parsed.json) {
       io.stdout(
-        `${JSON.stringify({ ...file, ...(path ? { doctorJson: path } : {}), ...(pendingCleanups.length ? { pendingCleanup: pendingCleanups.map((p) => probeDeleteCall(p.name, p)) } : {}) }, null, 2)}\n`,
+        `${JSON.stringify({ ...file, ...(path ? { doctorJson: path } : {}), ...(pendingCleanups.length ? { pendingCleanup: pendingCleanups.map((p) => probeDeleteCall(p.name, p)) } : {}), ...(nonceCleanup ? { nonceCleanup } : {}) }, null, 2)}\n`,
       );
     } else {
       io.stdout(formatTable(run.checks, file, reuseNote));
@@ -403,6 +424,9 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
     }
     for (const pending of pendingCleanups) {
       io.stdout(`cleanup: remove the probe bucket ${pending.name} — in this session call ${JSON.stringify(probeDeleteCall(pending.name, pending))}\n`);
+    }
+    if (nonceCleanup) {
+      io.stdout(`cleanup: remove the probe nonce object ${nonceCleanup.nonce} from bucket ${nonceCleanup.bucket} — PUT ${nonceCleanup.path} body ${JSON.stringify(nonceCleanup.body)}\n`);
     }
   }
   if (run.integrityFailed) return 6;

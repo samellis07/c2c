@@ -47,20 +47,26 @@ The plugin never asks the user for an evidence file. `/c2c:doctor` runs:
    `CatalystbyZoho_Create_Bucket`, the probe bucket (`c2cprobe-p<project-id>`
    — one bucket per project, reused across runs, so a repeated doctor run
    never creates a second bucket; an already-exists answer means an earlier
-   run left it), then `CatalystbyZoho_List_All_Organizations` —
+   run left it), then `CatalystbyZoho_Create_Upload_Signature` to write an
+   object whose key is this run's nonce, then
+   `CatalystbyZoho_List_All_Organizations` —
    and the user approves each call at the host's normal prompt. No setting
    changes. The agent never calls `CatalystbyZoho_List_All_Projects` or
    `CatalystbyZoho_Get_Project_By_Id`: they return project secrets
    (jwtSecret, clientSecret) into the transcript, and an observation quoting
    either is refused. Projects come from the Catalyst CLI (`project:list`).
    The probe write is the security check: a submitted JSON can echo the
-   request id, so the doctor instead reads the probe bucket back over the
-   Catalyst REST API with the user's own CLI credential
-   (the bucket list `GET /baas/v1/project/<id>/bucket`, matched on the exact
-   probe name). A match proves the MCP
-   connector is bound to the same org/DC/project as the CLI — the only
-   evidence a stdio/local connector can offer. Afterwards the agent removes
-   the probe with `CatalystbyZoho_Delete_Bucket` (the delete call is printed
+   request id, so the doctor instead reads this run's nonce object back over
+   the Catalyst REST API with the user's own CLI credential
+   (the bucket list `GET /baas/v1/project/<id>/bucket`, then
+   `GET /baas/v1/project/<id>/bucket/objects` matched on the exact object
+   key). A pre-existing bucket without this run's key does not pass. A match
+   proves the MCP connector is bound to the same org/DC/project as the CLI —
+   the only evidence a stdio/local connector can offer. The observation must
+   include the bucket create and the org list; the upload-signature result
+   may be included and is not required. Afterwards the agent deletes that
+   nonce object (the bucket stays) and removes the probe bucket with
+   `CatalystbyZoho_Delete_Bucket` (the delete call is printed
    on every run while the probe may still exist, and D-B8 warns until a
    read-back shows the bucket gone).
 3. The agent pipes one observation into `c2c doctor --mcp-observed -` (with
