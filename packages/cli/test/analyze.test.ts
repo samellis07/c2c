@@ -240,7 +240,9 @@ function residualBlockers(report: AnalyzeReport) {
 }
 
 function assertCountedOnce(report: AnalyzeReport): void {
-  const blockers = residualBlockers(report);
+  // Silent-drop blockers are coverage-ledger drops, not residual TODO items:
+  // they do not count toward determinism.todoCount and have no todoLocation.
+  const blockers = residualBlockers(report).filter((blocker) => !blocker.label.startsWith('silent drop '));
   const listed = blockers.map((blocker) => `${blocker.scope ?? ''}|${blocker.label}|${blocker.detail}`);
   assert.equal(new Set(listed).size, listed.length);
   assert.equal(report.deluge.todo, report.determinism.todoCount);
