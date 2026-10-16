@@ -8,7 +8,7 @@
  * mode is "live" and a datastore adapter is installed.
  */
 
-import { scheduleAnchorFieldType, unquote, type App } from '../../core/src/ir.js';
+import { closedChoices, scheduleAnchorFieldType, unquote, type App, type Field } from '../../core/src/ir.js';
 import { clientRuntimeSource as bundledClientRuntime } from './client-runtime-parts.js';
 import { toolchainBannerLines, toolchainHeader } from '../../core/src/toolchain.js';
 import { accessPolicyFor, administratorProfiles, appUniqueColumnsOf, decimalColumnsOf, fieldRuleDenials, flowSpecs, generate as generateDeluge, blueprintFieldSpecs, type GeneratedFile } from '../../deluge/src/generate.js';
@@ -1940,7 +1940,10 @@ ${requirePrincipal()}
 `;
 }
 
-function fieldNamesOf(fields: UiModel['forms'][number]['fields']): { names: string[]; readonlyNames: string[]; hiddenNames: string[]; fields: WriteField[] } {
+function fieldNamesOf(
+  fields: UiModel['forms'][number]['fields'],
+  closed: ReadonlyMap<string, string[]> = new Map(),
+): { names: string[]; readonlyNames: string[]; hiddenNames: string[]; fields: WriteField[] } {
   const names: string[] = [];
   const readonlyNames: string[] = [];
   const hiddenNames: string[] = [];
@@ -1953,7 +1956,7 @@ function fieldNamesOf(fields: UiModel['forms'][number]['fields']): { names: stri
     }
   };
   walk(fields);
-  return { names, readonlyNames, hiddenNames, fields: fields.map(writeFieldOf) };
+  return { names, readonlyNames, hiddenNames, fields: fields.map((field) => writeFieldOf(field, closed)) };
 }
 
 /**
@@ -1994,7 +1997,26 @@ function staticDisplayDefault(raw: string | undefined): string | undefined {
   return text;
 }
 
-function writeFieldOf(field: UiModel['forms'][number]['fields'][number]): WriteField {
+/**
+ * Closed choice lists of a form's single-choice fields, keyed by link name
+ * (subform columns as `Subform.Field`). The submit stub refuses a client value
+ * outside the list, as Creator does.
+ */
+function closedChoicesOf(app: App, formName: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const form = app.forms.find((item) => item.name === formName);
+  const walk = (fields: readonly Field[], prefix: string) => {
+    for (const field of fields) {
+      const choices = closedChoices(field);
+      if (choices) out.set(`${prefix}${field.name}`, choices);
+      if (field.subfields.length) walk(field.subfields, `${prefix}${field.name}.`);
+    }
+  };
+  if (form) walk(form.fields, '');
+  return out;
+}
+
+function writeFieldOf(field: UiModel['forms'][number]['fields'][number], closed: ReadonlyMap<string, string[]> = new Map(), prefix = ''): WriteField {
   const node: WriteField = {
     name: field.name,
     ...(field.readonly ? { readOnly: true } : {}),
@@ -2006,13 +2028,15 @@ function writeFieldOf(field: UiModel['forms'][number]['fields'][number]): WriteF
     node.kind = 'file';
   } else if (field.widget === 'subform') {
     node.kind = 'subform';
-    node.fields = (field.subfields ?? []).map(writeFieldOf);
+    node.fields = (field.subfields ?? []).map((child) => writeFieldOf(child, closed, `${prefix}${field.name}.`));
   } else if (field.widget === 'name' || field.widget === 'address') {
     node.kind = 'composite';
-    node.fields = (field.subfields ?? []).map(writeFieldOf);
+    node.fields = (field.subfields ?? []).map((child) => writeFieldOf(child));
   } else {
     const scalar = scalarOf(field.widget);
     if (scalar) node.scalar = scalar;
+    const choices = closed.get(`${prefix}${field.name}`);
+    if (choices) node.choices = choices;
     // A multi select initial value is already the stored JSON list text (model.ts).
     const initial = field.widget === 'multiselect' ? field.initialValue : staticDisplayDefault(field.initialValue);
     if (initial !== undefined) node.defaultValue = initial;
@@ -2021,7 +2045,7 @@ function writeFieldOf(field: UiModel['forms'][number]['fields'][number]): WriteF
 }
 
 function submitStub(app: App, form: UiModel['forms'][number], path: string, delugeFiles: GeneratedFile[], schema?: SchemaPlan, deferSuccess = false): string {
-  const fields = fieldNamesOf(form.fields);
+  const fields = fieldNamesOf(form.fields, closedChoicesOf(app, form.name));
   const ruleDenied = fieldRuleDenials(app, form.name);
   const zone = appTimeZone(app);
   const validate = siblingSpecs(delugeFiles, form.name, 'validate');
@@ -2127,7 +2151,9 @@ export const readonlyFields = ${JSON.stringify(fields.readonlyNames)};
 export const hiddenFields = ${JSON.stringify(fields.hiddenNames)};
 export const fields = ${JSON.stringify(fields.fields)};${ruleDenied.length ? `\nexport const fieldRuleDenied = ${JSON.stringify(ruleDenied)};` : ''}
 function unhideField(field) {
-  const { hidden, ...rest } = field;
+  // The closed choice list screens the client body only; values the
+  // on-validate scripts set are re-checked without it.
+  const { hidden, choices, ...rest } = field;
   return rest.fields ? { ...rest, fields: rest.fields.map(unhideField) } : rest;
 }
 const storeFields = fields.map(unhideField);
