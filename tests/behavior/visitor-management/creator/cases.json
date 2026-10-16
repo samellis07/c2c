@@ -1,0 +1,903 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Visitor Management",
+  "source": {
+    "file": "Visitor_Management.ds",
+    "origin": "Creator gallery app visitor-management, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-company-staff-list",
+      "steps": [
+        {
+          "op": "report",
+          "report": "Company_Staff_List",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "baseline-all-visit-requests",
+      "steps": [
+        {
+          "op": "report",
+          "report": "All_Visit_Requests",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "staff-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Staff",
+          "record": {
+            "Name": {
+              "first_name": "Ember",
+              "last_name": "Grain"
+            },
+            "Email": "email.543@example.com",
+            "Mobile": "+1555011339",
+            "Department": "Department cedar 918",
+            "Job_Title": "Job_Title bravo 949",
+            "Work_Location": "Work_Location ridge 971",
+            "Address": {
+              "address_line_1": "920 Onyx Way",
+              "district_city": "Quartz",
+              "state_province": "Quartz",
+              "postal_Code": "95547",
+              "country": "United States"
+            }
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Staff Details Added Successfully!"
+          },
+          "bind": {
+            "r_staff_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Staff": [
+            {
+              "Department": "Department cedar 918",
+              "Email": "email.543@example.com",
+              "Work_Location": "Work_Location ridge 971",
+              "Address_address_line_1": "920 Onyx Way",
+              "Address_district_city": "Quartz",
+              "Address_state_province": "Quartz",
+              "Address_postal_Code": "95547",
+              "Address_country": "United States",
+              "Job_Title": "Job_Title bravo 949",
+              "Mobile": "+1555011339",
+              "Name_first_name": "Ember",
+              "Name_last_name": "Grain"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "staff-update-department",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Staff",
+          "record": {
+            "Name": {
+              "first_name": "Ember",
+              "last_name": "Grain"
+            },
+            "Email": "email.543@example.com",
+            "Mobile": "+1555011339",
+            "Department": "Department cedar 918",
+            "Job_Title": "Job_Title bravo 949",
+            "Work_Location": "Work_Location ridge 971",
+            "Address": {
+              "address_line_1": "920 Onyx Way",
+              "district_city": "Quartz",
+              "state_province": "Quartz",
+              "postal_Code": "95547",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_staff_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Company_Staff_List",
+          "where": {
+            "Email": "email.543@example.com"
+          },
+          "record": {
+            "Department": "Department updated 220"
+          },
+          "expect": {
+            "body": {
+              "matched": 1,
+              "updated": 1,
+              "refused": 0
+            }
+          },
+          "creator": {
+            "codes": [
+              3000
+            ],
+            "messages": [
+              "Data Updated Successfully"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Staff": [
+            {
+              "Department": "Department updated 220",
+              "Email": "email.543@example.com",
+              "Work_Location": "Work_Location ridge 971",
+              "Address_address_line_1": "920 Onyx Way",
+              "Address_district_city": "Quartz",
+              "Address_state_province": "Quartz",
+              "Address_postal_Code": "95547",
+              "Address_country": "United States",
+              "Job_Title": "Job_Title bravo 949",
+              "Mobile": "+1555011339",
+              "Name_first_name": "Ember",
+              "Name_last_name": "Grain"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "new-visit-request-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Staff",
+          "record": {
+            "Name": {
+              "first_name": "Ember",
+              "last_name": "Grain"
+            },
+            "Email": "email.543@example.com",
+            "Mobile": "+1555011339",
+            "Department": "Department cedar 918",
+            "Job_Title": "Job_Title bravo 949",
+            "Work_Location": "Work_Location ridge 971",
+            "Address": {
+              "address_line_1": "920 Onyx Way",
+              "district_city": "Quartz",
+              "state_province": "Quartz",
+              "postal_Code": "95547",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_staff_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Company_Staff_List",
+          "where": {
+            "Email": "email.543@example.com"
+          },
+          "record": {
+            "Department": "Department updated 220"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "New_Visit_Request",
+          "record": {
+            "Name": {
+              "first_name": "Grain",
+              "last_name": "Maple"
+            },
+            "Email": "email.178@example.com",
+            "Status": "Pending",
+            "Person_To_Meet": "<ref:r_staff_valid_submit>",
+            "Purpose": "Sample Purpose note 145 generated for capture.",
+            "Date_and_time_of_visit": "17-Oct-2026 17:04:00",
+            "Mobile": "+1555015676"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "New Visit Request Added Successfully"
+          },
+          "bind": {
+            "r_new_visit_request_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "New_Visit_Request": [
+            {
+              "Status": "Pending",
+              "Date_and_time_of_visit": "2026-10-17 17:04:00",
+              "Email": "email.178@example.com",
+              "Purpose": "Sample Purpose note 145 generated for capture.",
+              "Person_To_Meet": "<ref:r_staff_valid_submit>",
+              "Mobile": "+1555015676",
+              "Name_first_name": "Grain",
+              "Name_last_name": "Maple"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "new-visit-request-update-purpose",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Staff",
+          "record": {
+            "Name": {
+              "first_name": "Ember",
+              "last_name": "Grain"
+            },
+            "Email": "email.543@example.com",
+            "Mobile": "+1555011339",
+            "Department": "Department cedar 918",
+            "Job_Title": "Job_Title bravo 949",
+            "Work_Location": "Work_Location ridge 971",
+            "Address": {
+              "address_line_1": "920 Onyx Way",
+              "district_city": "Quartz",
+              "state_province": "Quartz",
+              "postal_Code": "95547",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_staff_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Company_Staff_List",
+          "where": {
+            "Email": "email.543@example.com"
+          },
+          "record": {
+            "Department": "Department updated 220"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "New_Visit_Request",
+          "record": {
+            "Name": {
+              "first_name": "Grain",
+              "last_name": "Maple"
+            },
+            "Email": "email.178@example.com",
+            "Status": "Pending",
+            "Person_To_Meet": "<ref:r_staff_valid_submit>",
+            "Purpose": "Sample Purpose note 145 generated for capture.",
+            "Date_and_time_of_visit": "17-Oct-2026 17:04:00",
+            "Mobile": "+1555015676"
+          },
+          "bind": {
+            "r_new_visit_request_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Visit_Requests",
+          "where": {
+            "Email": "email.178@example.com"
+          },
+          "record": {
+            "Purpose": "Purpose updated 714"
+          },
+          "expect": {
+            "body": {
+              "matched": 1,
+              "updated": 1,
+              "refused": 0
+            }
+          },
+          "creator": {
+            "codes": [
+              3000
+            ],
+            "messages": [
+              "Data Updated Successfully"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "New_Visit_Request": [
+            {
+              "Status": "Pending",
+              "Date_and_time_of_visit": "2026-10-17 17:04:00",
+              "Email": "email.178@example.com",
+              "Purpose": "Purpose updated 714",
+              "Person_To_Meet": "<ref:r_staff_valid_submit>",
+              "Mobile": "+1555015676",
+              "Name_first_name": "Grain",
+              "Name_last_name": "Maple"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "visitor-refusal-required-file",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Staff",
+          "record": {
+            "Name": {
+              "first_name": "Ember",
+              "last_name": "Grain"
+            },
+            "Email": "email.543@example.com",
+            "Mobile": "+1555011339",
+            "Department": "Department cedar 918",
+            "Job_Title": "Job_Title bravo 949",
+            "Work_Location": "Work_Location ridge 971",
+            "Address": {
+              "address_line_1": "920 Onyx Way",
+              "district_city": "Quartz",
+              "state_province": "Quartz",
+              "postal_Code": "95547",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_staff_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Company_Staff_List",
+          "where": {
+            "Email": "email.543@example.com"
+          },
+          "record": {
+            "Department": "Department updated 220"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "New_Visit_Request",
+          "record": {
+            "Name": {
+              "first_name": "Grain",
+              "last_name": "Maple"
+            },
+            "Email": "email.178@example.com",
+            "Status": "Pending",
+            "Person_To_Meet": "<ref:r_staff_valid_submit>",
+            "Purpose": "Sample Purpose note 145 generated for capture.",
+            "Date_and_time_of_visit": "17-Oct-2026 17:04:00",
+            "Mobile": "+1555015676"
+          },
+          "bind": {
+            "r_new_visit_request_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Visit_Requests",
+          "where": {
+            "Email": "email.178@example.com"
+          },
+          "record": {
+            "Purpose": "Purpose updated 714"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Visitor",
+          "record": {
+            "Name": {
+              "first_name": "Ridge",
+              "last_name": "Ember"
+            },
+            "Email": "email.936@example.com",
+            "Person_To_Meet": "<ref:r_staff_valid_submit>",
+            "Purpose": "Sample Purpose note 596 generated for capture.",
+            "IN_Date_Time": "17-Oct-2026 23:13:00",
+            "Mobile": "+1555012960",
+            "Address": {
+              "address_line_1": "26 Onyx Way",
+              "district_city": "Delta",
+              "state_province": "Cedar",
+              "postal_Code": "42106",
+              "country": "United States"
+            },
+            "Blacklist": true
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Picture": "Enter a Source value for Picture"
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Visitor": []
+        }
+      }
+    },
+    {
+      "id": "staff-boundary-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Staff",
+          "record": {
+            "Name": {
+              "first_name": "Ember",
+              "last_name": "Grain"
+            },
+            "Email": "email.543@example.com",
+            "Mobile": "+1555011339",
+            "Department": "Department cedar 918",
+            "Job_Title": "Job_Title bravo 949",
+            "Work_Location": "Work_Location ridge 971",
+            "Address": {
+              "address_line_1": "920 Onyx Way",
+              "district_city": "Quartz",
+              "state_province": "Quartz",
+              "postal_Code": "95547",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_staff_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Company_Staff_List",
+          "where": {
+            "Email": "email.543@example.com"
+          },
+          "record": {
+            "Department": "Department updated 220"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "New_Visit_Request",
+          "record": {
+            "Name": {
+              "first_name": "Grain",
+              "last_name": "Maple"
+            },
+            "Email": "email.178@example.com",
+            "Status": "Pending",
+            "Person_To_Meet": "<ref:r_staff_valid_submit>",
+            "Purpose": "Sample Purpose note 145 generated for capture.",
+            "Date_and_time_of_visit": "17-Oct-2026 17:04:00",
+            "Mobile": "+1555015676"
+          },
+          "bind": {
+            "r_new_visit_request_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Visit_Requests",
+          "where": {
+            "Email": "email.178@example.com"
+          },
+          "record": {
+            "Purpose": "Purpose updated 714"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Staff",
+          "record": {
+            "Name": {
+              "first_name": "Ember",
+              "last_name": "Grain"
+            },
+            "Email": "b-email.543@example.com",
+            "Mobile": "+1555011339",
+            "Department": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+            "Job_Title": "JJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJ",
+            "Work_Location": "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
+            "Address": {
+              "address_line_1": "920 Onyx Way",
+              "district_city": "Quartz",
+              "state_province": "Quartz",
+              "postal_Code": "95547",
+              "country": "United States"
+            }
+          },
+          "creator": {
+            "code": 3000,
+            "error": [
+              "Error details: Error in executing On Add - On Success script SOMETHING_WENT_WRONG Line:(1)"
+            ],
+            "message": "Staff Details Added Successfully!"
+          },
+          "bind": {
+            "r_staff_boundary_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved-with-warning"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Staff": [
+            {
+              "Department": "Department updated 220",
+              "Email": "email.543@example.com",
+              "Work_Location": "Work_Location ridge 971",
+              "Address_address_line_1": "920 Onyx Way",
+              "Address_district_city": "Quartz",
+              "Address_state_province": "Quartz",
+              "Address_postal_Code": "95547",
+              "Address_country": "United States",
+              "Job_Title": "Job_Title bravo 949",
+              "Mobile": "+1555011339",
+              "Name_first_name": "Ember",
+              "Name_last_name": "Grain"
+            },
+            {
+              "Department": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+              "Email": "b-email.543@example.com",
+              "Work_Location": "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
+              "Job_Title": "JJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJ",
+              "Name_first_name": "Ember",
+              "Name_last_name": "Grain",
+              "Address_address_line_1": "920 Onyx Way",
+              "Address_district_city": "Quartz",
+              "Address_state_province": "Quartz",
+              "Address_postal_Code": "95547",
+              "Address_country": "United States"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-company-staff-list",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Staff",
+          "record": {
+            "Name": {
+              "first_name": "Ember",
+              "last_name": "Grain"
+            },
+            "Email": "email.543@example.com",
+            "Mobile": "+1555011339",
+            "Department": "Department cedar 918",
+            "Job_Title": "Job_Title bravo 949",
+            "Work_Location": "Work_Location ridge 971",
+            "Address": {
+              "address_line_1": "920 Onyx Way",
+              "district_city": "Quartz",
+              "state_province": "Quartz",
+              "postal_Code": "95547",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_staff_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Company_Staff_List",
+          "where": {
+            "Email": "email.543@example.com"
+          },
+          "record": {
+            "Department": "Department updated 220"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "New_Visit_Request",
+          "record": {
+            "Name": {
+              "first_name": "Grain",
+              "last_name": "Maple"
+            },
+            "Email": "email.178@example.com",
+            "Status": "Pending",
+            "Person_To_Meet": "<ref:r_staff_valid_submit>",
+            "Purpose": "Sample Purpose note 145 generated for capture.",
+            "Date_and_time_of_visit": "17-Oct-2026 17:04:00",
+            "Mobile": "+1555015676"
+          },
+          "bind": {
+            "r_new_visit_request_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Visit_Requests",
+          "where": {
+            "Email": "email.178@example.com"
+          },
+          "record": {
+            "Purpose": "Purpose updated 714"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Staff",
+          "record": {
+            "Name": {
+              "first_name": "Ember",
+              "last_name": "Grain"
+            },
+            "Email": "b-email.543@example.com",
+            "Mobile": "+1555011339",
+            "Department": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+            "Job_Title": "JJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJ",
+            "Work_Location": "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
+            "Address": {
+              "address_line_1": "920 Onyx Way",
+              "district_city": "Quartz",
+              "state_province": "Quartz",
+              "postal_Code": "95547",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_staff_boundary_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Company_Staff_List",
+          "expect": {
+            "outcome": "rows",
+            "count": 2
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 2
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Staff": [
+            {
+              "Department": "Department updated 220",
+              "Email": "email.543@example.com",
+              "Address_country": "United States",
+              "Address_district_city": "Quartz",
+              "Address_address_line_1": "920 Onyx Way",
+              "Address_state_province": "Quartz",
+              "Address_postal_Code": "95547",
+              "Job_Title": "Job_Title bravo 949",
+              "Name_last_name": "Grain",
+              "Name_first_name": "Ember"
+            },
+            {
+              "Department": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+              "Email": "b-email.543@example.com",
+              "Address_country": "United States",
+              "Address_district_city": "Quartz",
+              "Address_address_line_1": "920 Onyx Way",
+              "Address_state_province": "Quartz",
+              "Address_postal_Code": "95547",
+              "Job_Title": "JJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJ",
+              "Name_last_name": "Grain",
+              "Name_first_name": "Ember"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-all-visit-requests",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Staff",
+          "record": {
+            "Name": {
+              "first_name": "Ember",
+              "last_name": "Grain"
+            },
+            "Email": "email.543@example.com",
+            "Mobile": "+1555011339",
+            "Department": "Department cedar 918",
+            "Job_Title": "Job_Title bravo 949",
+            "Work_Location": "Work_Location ridge 971",
+            "Address": {
+              "address_line_1": "920 Onyx Way",
+              "district_city": "Quartz",
+              "state_province": "Quartz",
+              "postal_Code": "95547",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_staff_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Company_Staff_List",
+          "where": {
+            "Email": "email.543@example.com"
+          },
+          "record": {
+            "Department": "Department updated 220"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "New_Visit_Request",
+          "record": {
+            "Name": {
+              "first_name": "Grain",
+              "last_name": "Maple"
+            },
+            "Email": "email.178@example.com",
+            "Status": "Pending",
+            "Person_To_Meet": "<ref:r_staff_valid_submit>",
+            "Purpose": "Sample Purpose note 145 generated for capture.",
+            "Date_and_time_of_visit": "17-Oct-2026 17:04:00",
+            "Mobile": "+1555015676"
+          },
+          "bind": {
+            "r_new_visit_request_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "All_Visit_Requests",
+          "where": {
+            "Email": "email.178@example.com"
+          },
+          "record": {
+            "Purpose": "Purpose updated 714"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Staff",
+          "record": {
+            "Name": {
+              "first_name": "Ember",
+              "last_name": "Grain"
+            },
+            "Email": "b-email.543@example.com",
+            "Mobile": "+1555011339",
+            "Department": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+            "Job_Title": "JJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJ",
+            "Work_Location": "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
+            "Address": {
+              "address_line_1": "920 Onyx Way",
+              "district_city": "Quartz",
+              "state_province": "Quartz",
+              "postal_Code": "95547",
+              "country": "United States"
+            }
+          },
+          "bind": {
+            "r_staff_boundary_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "All_Visit_Requests",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "New_Visit_Request": [
+            {
+              "Date_and_time_of_visit": "2026-10-17 17:04:00",
+              "Email": "email.178@example.com",
+              "Person_To_Meet": "<ref:r_staff_valid_submit>",
+              "Mobile": "+1555015676",
+              "Name_last_name": "Maple",
+              "Name_first_name": "Grain"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "visitor-happy-path",
+      "tags": [
+        "unreachable-via-api"
+      ],
+      "skip": "unreachable via API: Visitor.Picture is a mandatory image/file field and addRecords cannot upload a file, so Creator never stored a Visitor record",
+      "steps": []
+    }
+  ]
+}
