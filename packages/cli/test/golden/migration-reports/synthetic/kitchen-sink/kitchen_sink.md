@@ -22,4 +22,4 @@ App: Kitchen_Sink_Studio
 
 ## Manual steps
 
-- none
+- 1 warning pivot-analytics

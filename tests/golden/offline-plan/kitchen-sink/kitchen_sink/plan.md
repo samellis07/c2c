@@ -4,7 +4,7 @@ dc: in (from --dc)
 doctor: not-run (plan is offline; provision and deploy need a green doctor)
 budgets: ok
 
-tables: 9 (95 columns)  functions: 0  schedules: 2  reports: 7  pages: 1  roles: 4  custom APIs: 0
+tables: 9 (95 columns)  functions: 0  schedules: 2  reports: 8  pages: 1  roles: 4  custom APIs: 0
 mail: none
 integrations: none
 files: 5 Stratus-backed fields
