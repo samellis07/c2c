@@ -1492,11 +1492,6 @@ function countClientGaps(stats: TranslateStats, todos: TodoItem[], tr: { clientG
   todos.push(...shift(tr.clientGaps.map((gap) => gap.todo), raw));
 }
 
-function shift(items: TodoItem[], raw: RawDeluge | null): TodoItem[] {
-  if (!raw) return items;
-  return items.map((t) => ({ ...t, start: t.start + raw.span.start, end: t.end + raw.span.start }));
-}
-
 /**
  * `zoho.<env>` constants in shipped client code are server-evaluated reads:
  * the browser shim answers `shim.zoho.<env>(ctx)` from `ctx.slots["zoho.<env>"]`,
@@ -1516,7 +1511,11 @@ export function zohoSlotLines(client: string): string {
   return lines.join('\n');
 }
 
-/** A condition that does not translate is a counted `field-rule-condition` TODO, like gateAction. */
+function shift(items: TodoItem[], raw: RawDeluge | null): TodoItem[] {
+  if (!raw) return items;
+  return items.map((t) => ({ ...t, start: t.start + raw.span.start, end: t.end + raw.span.start }));
+}
+
 function fieldRuleSource(app: App, w: Workflow, todos: TodoItem[]): string {
   const rules = w.fieldRules;
   if (!rules?.length) return '';

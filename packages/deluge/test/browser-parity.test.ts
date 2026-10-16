@@ -222,3 +222,50 @@ test('every allowlisted method has a real implementation, and dropping one fails
     }
   }
 });
+
+test('the between-days family agrees on both runtimes, blank ends included', async () => {
+  const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const server = runtime.shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const ctx = { appTimeZone: 'America/New_York' };
+  const pairs: [unknown, unknown][] = [
+    [new DelugeDate(1990, 6, 14), new DelugeDate(2026, 10, 16)],
+    [new DelugeDate(2026, 10, 16, 9, 30, 45), new DelugeDate(2026, 10, 15, 9, 30, 45)],
+    [new DelugeDate(2024, 2, 29), new DelugeDate(2023, 2, 28)], // leap day, negative
+    ['15-Oct-2026', '16-Oct-2026'],
+    ['15-Oct-2026 07:05:03', '2026-10-15 07:05:03'],
+    [null, new DelugeDate(2026, 10, 16)],
+    [new DelugeDate(2026, 10, 16), ''],
+    ['not a date', new DelugeDate(2026, 10, 16)],
+  ];
+  for (const name of ['daysBetween', 'monthsBetween', 'yearsBetween', 'days360']) {
+    for (const [a, b] of pairs) {
+      const run = (api: Record<string, (...args: unknown[]) => unknown>) => {
+        try {
+          return { ok: plain(api[name]!(a, b, ctx)) };
+        } catch (err) {
+          return { error: (err as Error).message };
+        }
+      };
+      assert.deepEqual(run(browser.date), run(server.date), `${name}(${JSON.stringify(plain(a))}, ${JSON.stringify(plain(b))})`);
+    }
+  }
+});
+
+test('record.system reads the stored system columns the same on both runtimes', async () => {
+  const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const server = runtime.shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const rows: unknown[] = [
+    { Added_User: 'sam', Added_Time: 'x', Modified_User: 'kim', Modified_Time: 'y' },
+    { added_user: 'sam', createdtime: 'x', modified_user: 'kim', modifiedtime: 'y' },
+    { __row: true, form: 'F', values: { Added_User: 'sam' } },
+    { Name: 'no system columns' },
+    [{ Added_User: 'first' }, { Added_User: 'second' }],
+    null,
+    'text',
+  ];
+  for (const name of ['Added_User', 'Added_Time', 'Modified_User', 'Modified_Time', 'added_user', 'Missing']) {
+    for (const row of rows) {
+      assert.deepEqual(browser.record.system!(row, name), server.record.system!(row, name), `record.system(${JSON.stringify(row)}, ${name})`);
+    }
+  }
+});
