@@ -6866,7 +6866,7 @@ test('generated prefetch handler for app.users and app.userEmailIds refuses low-
     name: 'Employee',
     type: 'Users_Permissions',
     properties: [],
-    modules: [],
+    modules: [grantModule('Orders', 'create, edit, viewall')],
     span: Z,
   };
   const g = generate(
