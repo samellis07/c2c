@@ -94,6 +94,7 @@ html[data-menu="rail"] #nav .navitem{font-size:var(--c2c-font-size-xs2)}
 input:not([type="checkbox"]):not([type="radio"]),select,textarea{width:100%;min-height:var(--c2c-input-height);font:inherit;color:var(--c2c-ink);background:var(--c2c-surface);border:1px solid var(--c2c-border);border-radius:var(--c2c-radius-s);padding:var(--c2c-space-2) var(--c2c-space-3)}
 textarea{min-height:calc(var(--c2c-input-height)*2);resize:none}
 .field>input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),.field>select,.field>textarea{max-width:var(--c2c-field-w)}
+.c2c-lookup-search{display:block;margin-bottom:var(--c2c-space-1)}
 .field .field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),.field .field select,.field .field textarea{max-width:var(--c2c-field-w)}
 .field>.money{max-width:var(--c2c-field-w)}
 .visually-hidden{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}

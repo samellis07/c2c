@@ -843,15 +843,15 @@ async function readLibrary(staged: boolean, profile: Record<string, Grant>): Pro
 /** What a row reveals about the Author lookup: the fk cell, and whether any value is the parent display. */
 function authorView(row: Record<string, unknown>): { fk: string; display: string } {
   const shown = Object.values(row).filter((value) => value === 'Ada Lovelace' || value === 'Grace Hopper');
-  const fk = !Object.hasOwn(row, 'Author') ? 'absent' : row.Author === '1' || row.Author === '2' ? 'id' : 'display';
+  const fk = !Object.hasOwn(row, 'Author') ? 'absent' : row.Author === '1' || row.Author === '2' ? 'id' : row.Author === '' ? 'blank' : 'display';
   return { fk, display: shown.length ? 'shown' : 'hidden' };
 }
 
-test('a staged report hides a lookup display the parent form denies and keeps the lookup id', async () => {
+test('a staged report hides a lookup display the parent form denies and shows the lookup cell empty, never the id', async () => {
   const rows = await readLibrary(true, libraryProfile(true, false));
   assert.equal(rows.length, 2);
   const row = rows[0]!;
-  assert.equal(row.Author, '1');
+  assert.equal(row.Author, '');
   assert.equal(Object.hasOwn(row, 'Author.Author_Name'), false, JSON.stringify(row));
   assert.equal(JSON.stringify(rows).includes('Ada Lovelace'), false);
   assert.equal(row['L1.Name'], 'L1-1');
@@ -878,14 +878,14 @@ test('staged and unstaged reports reveal the same lookup values for every fk and
       );
       if (fk && !display) {
         assert.deepEqual(staged, plain, label);
-        assert.deepEqual(staged[0], { fk: 'id', display: 'hidden' }, label);
+        assert.deepEqual(staged[0], { fk: 'blank', display: 'hidden' }, label);
       }
       table.push(`${label}: ${staged.map((view) => `${view.fk}/${view.display}`).join(' ')}`);
     }
   }
   assert.deepEqual(table, [
     'fk granted, parent display granted: id/shown id/shown',
-    'fk granted, parent display denied: id/hidden id/hidden',
+    'fk granted, parent display denied: blank/hidden blank/hidden',
     'fk denied, parent display granted: absent/hidden absent/hidden',
     'fk denied, parent display denied: absent/hidden absent/hidden',
   ]);
@@ -897,9 +897,9 @@ test('a staged lookup display obeys the parent record filter as the unstaged rea
   const plain = await readLibrary(false, libraryProfile(true, true, author));
   assert.equal(staged[0]!['Author.Author_Name'], 'Ada Lovelace');
   assert.equal(plain[0]!.Author, 'Ada Lovelace');
-  assert.equal(staged[1]!.Author, '2');
+  assert.equal(staged[1]!.Author, '', 'an out-of-scope parent shows an empty cell, never its id');
   assert.equal(Object.hasOwn(staged[1]!, 'Author.Author_Name'), false, JSON.stringify(staged[1]));
-  assert.equal(plain[1]!.Author, '2');
+  assert.equal(plain[1]!.Author, '');
   assert.deepEqual(
     staged.map((row) => authorView(row).display),
     plain.map((row) => authorView(row).display),

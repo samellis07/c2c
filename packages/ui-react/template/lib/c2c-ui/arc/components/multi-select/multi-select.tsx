@@ -36,6 +36,8 @@ export interface MultiSelectProps {
   footer?: ReactNode;
   /** Called when the menu opens or closes. */
   onOpenChange?: (open: boolean) => void;
+  /** Called with the typed search text, so a host can search records it has not read yet. */
+  onQueryChange?: (query: string) => void;
   /** Marks the control invalid after a failed submit. */
   invalid?: boolean;
   /** Ids of elements that describe the control, such as its error message. */
@@ -74,7 +76,7 @@ function CheckMark({ reduce }: { reduce: boolean | null }) {
   </svg>;
 }
 
-export function MultiSelect({ label, options: allOptions, value, defaultValue = [], onValueChange, placeholder = "Select options", description, maxVisible = 2, disabled = false, className, searchable = false, emptyMessage = "No matches found", hideLabel = false, footer, onOpenChange, invalid, describedBy }: MultiSelectProps) {
+export function MultiSelect({ label, options: allOptions, value, defaultValue = [], onValueChange, placeholder = "Select options", description, maxVisible = 2, disabled = false, className, searchable = false, emptyMessage = "No matches found", hideLabel = false, footer, onOpenChange, onQueryChange, invalid, describedBy }: MultiSelectProps) {
   const id = useId();
   const labelId = `${id}-label`;
   const valueId = `${id}-value`;
@@ -168,7 +170,7 @@ export function MultiSelect({ label, options: allOptions, value, defaultValue = 
         initial={reduce ? { opacity: 0 } : { opacity: 0, y: -6, scale: .97 }}
         animate={{ opacity: 1, y: 0, scale: 1, transition: reduce ? { duration: motionTokens.duration.instant } : { ...motionTokens.spring.snappy, opacity: { duration: motionTokens.duration.fast, ease: enter } } }}
         exit={{ opacity: 0, ...(reduce ? {} : { y: -4, scale: .98 }), transition: { duration: motionTokens.duration.instant, ease: standard } }}>
-        {searchable && <label className={styles.search}><Search size={16} strokeWidth={1.75} aria-hidden="true" /><input ref={searchRef} type="search" aria-label={`Search ${label}`} aria-controls={`${id}-listbox`} aria-activedescendant={active} placeholder="Search" value={query} onChange={(event) => { setQuery(event.target.value); setActiveIndex(-1); }} onKeyDown={onKeyDown} /></label>}
+        {searchable && <label className={styles.search}><Search size={16} strokeWidth={1.75} aria-hidden="true" /><input ref={searchRef} type="search" aria-label={`Search ${label}`} aria-controls={`${id}-listbox`} aria-activedescendant={active} placeholder="Search" value={query} onChange={(event) => { setQuery(event.target.value); onQueryChange?.(event.target.value); setActiveIndex(-1); }} onKeyDown={onKeyDown} /></label>}
         <div id={`${id}-listbox`} role="listbox" aria-label={label} aria-multiselectable="true" className={styles.listbox}>
         {options.length === 0 && <div className={styles.empty} role="status">{emptyMessage}</div>}
         {options.map((option, index) => <button type="button" role="option" id={optionId(`${id}-listbox`, index)} tabIndex={-1} aria-selected={selectedSet.has(option.value)} aria-disabled={option.disabled || undefined} key={option.value} className={styles.option} data-active={activeIndex === index} disabled={option.disabled} onPointerMove={() => { if (activeIndex !== index) setActiveIndex(index); }} onClick={() => toggle(option)}>

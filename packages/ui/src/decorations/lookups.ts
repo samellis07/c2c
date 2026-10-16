@@ -3,7 +3,10 @@
  * field that the select and the report cell show; the lookup endpoint and the
  * report's parent read use that field instead of the `values = Form.Field`
  * link field. An expression format over one composite field (`[" " + Name.first_name + ...]`)
- * keeps its part refs on `displayFields` so the client can join them.
+ * keeps its part refs on `displayFields` so the client can join them. A format
+ * over several fields (`[Member_ID + " - " + Name.first_name]`) keys the
+ * lookup by its first field and carries the whole format as `displayFormat`
+ * terms: the server composes the text from the parent row.
  *
  * Column properties also carry display meaning: `displaytrue` / `displayfalse`
  * replace a boolean cell, `field =` is a cell formula shown when every name it
@@ -13,7 +16,8 @@
 import { unquote, type App, type Field, type Property, type ReportColumn } from '../../../core/src/ir.js';
 import type { UiField, UiModel, UiReport } from '../model.js';
 
-type DisplayLookup = { form: string; field?: string; endpoint?: string; displayFields?: string[] };
+export type DisplayTerm = { ref: string } | { text: string };
+type DisplayLookup = { form: string; field?: string; endpoint?: string; displayFields?: string[]; displayFormat?: DisplayTerm[] };
 type DisplayColumn = UiReport['columns'][number] & {
   displayTrue?: string;
   displayFalse?: string;
@@ -35,14 +39,28 @@ export function displayRefs(format: string): string[] {
   return code.match(/[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]+)*/g) ?? [];
 }
 
+/** A `displayformat` bracket as field refs and string literals, in order. */
+export function displayTerms(format: string): DisplayTerm[] {
+  const inner = format.trim().replace(/^\[/, '').replace(/\]$/, '');
+  const terms: DisplayTerm[] = [];
+  const re = /"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]+)*)/g;
+  for (const match of inner.matchAll(re)) {
+    if (match[3] !== undefined) terms.push({ ref: match[3] });
+    else terms.push({ text: (match[1] ?? match[2] ?? '').replace(/\\(.)/g, '$1') });
+  }
+  return terms;
+}
+
 /**
  * The parent field the lookup should read: the single bracket name in
- * `displayformat`, the shared top field of an expression format, or the
- * `values =` field when the format names nothing or spans several fields.
+ * `displayformat`, the shared top field of an expression format, the first
+ * field of a format over several fields (with the format's terms), or the
+ * `values =` field when the format names nothing.
  */
 export function displayChoice(lookup: { form: string; field?: string; displayFormat?: string }): {
   field: string;
   displayFields?: string[];
+  displayFormat?: DisplayTerm[];
 } {
   const base = lookup.field || lookup.form;
   const refs = lookup.displayFormat ? displayRefs(lookup.displayFormat) : [];
@@ -50,15 +68,41 @@ export function displayChoice(lookup: { form: string; field?: string; displayFor
   const top = refs[0]!.split('.')[0]!;
   const shared = refs.every((ref) => ref.split('.')[0] === top);
   return {
-    field: shared ? top : base,
+    field: top,
     ...(refs.length > 1 ? { displayFields: refs } : {}),
+    ...(shared ? {} : { displayFormat: displayTerms(lookup.displayFormat!) }),
   };
 }
 
-function decorateLookup(target: DisplayLookup | undefined, choice: { field: string; displayFields?: string[] }): void {
+/**
+ * Parent form -> lookup key field -> format terms, for every lookup in the
+ * app whose `displayformat` spans several parent fields. The lookup endpoint
+ * and the report's parent read compose the display text from these terms.
+ * The first lookup (form order, then field order) wins a shared key.
+ */
+export function lookupFormats(app: App): Record<string, Record<string, DisplayTerm[]>> {
+  const out: Record<string, Record<string, DisplayTerm[]>> = {};
+  const visit = (fields: readonly Field[]): void => {
+    for (const field of fields) {
+      if (field.lookup) {
+        const choice = displayChoice(field.lookup);
+        if (choice.displayFormat) {
+          const byField = (out[field.lookup.form] ??= {});
+          if (!Object.hasOwn(byField, choice.field)) byField[choice.field] = choice.displayFormat;
+        }
+      }
+      if (field.subfields) visit(field.subfields);
+    }
+  };
+  for (const form of app.forms) visit(form.fields);
+  return out;
+}
+
+function decorateLookup(target: DisplayLookup | undefined, choice: ReturnType<typeof displayChoice>): void {
   if (!target) return;
   target.field = choice.field;
   if (choice.displayFields) target.displayFields = choice.displayFields;
+  if (choice.displayFormat) target.displayFormat = choice.displayFormat;
   if (target.endpoint) {
     target.endpoint = `/lookups/${encodeURIComponent(target.form)}/${encodeURIComponent(choice.field)}`;
   }
