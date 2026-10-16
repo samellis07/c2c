@@ -42,5 +42,11 @@
   ],
   "todoCount": 0,
   "todoKinds": [],
-  "manualSteps": []
+  "manualSteps": [
+    {
+      "severity": "warning",
+      "check": "pivot-analytics",
+      "count": 1
+    }
+  ]
 }
