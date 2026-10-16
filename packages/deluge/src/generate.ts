@@ -32,7 +32,7 @@ import { applyFillLock, reportLock, type FillLock, type StaleFill } from './fill
 import { afterCommitModule, ASYNC_ON_SUCCESS_WARNING, assertAsyncSuccessDeferrable, deadLetterModule, EVENT_FUNCTION_MODULE, eventSweeperModule, successSpecs, type AsyncCandidate } from './events.js';
 import { EVENT_SWEEPER_MODULE, JOB_LIVE_IMPORTS, jobLiveHelpers, planSchedules, schedulingConfig, sweeperModule, SWEEPER_MODULE, type SchedulePlan } from './schedules.js';
 import { unsupportedClientShims } from './client-shim.js';
-import { emittedReadOnly, emittedThisappCalls, jsIdent, reportCriteria, translate, type AlertEventClass, type ClientGap, type CriteriaFunction, type TodoItem, type TranslateOptions, type TranslateStats } from './translate.js';
+import { emittedReadOnly, emittedThisappCalls, jsIdent, reportCriteria, translate, type AlertEventClass, type ClientGap, type CriteriaFunction, type StatementCover, type TodoItem, type TranslateOptions, type TranslateStats } from './translate.js';
 import { normType } from './types.js';
 import { mutatesParameters } from './param-mutation.js';
 import { withoutDecimalAudit } from './audit.js';
@@ -58,6 +58,13 @@ export interface GenerateResult {
    * `form-event-server-uninvoked`.
    */
   coverage: WorkflowCoverage[];
+  /**
+   * Statement coverage ledger: one row per script statement the generators
+   * visited, absolute `.ds` spans. The no-silent-drop audit reconciles every
+   * declared statement against these rows; a statement with no row, or a row
+   * counted 'skipped', is a silent drop.
+   */
+  statementCoverage: CoverageEntry[];
 }
 
 /**
@@ -131,6 +138,18 @@ export function formEventServerPath(form: string, kind: string): string {
  */
 function runtimeReachesFormEvent(kind: string): boolean {
   return kind === 'success' || kind === 'validate' || kind === 'delete';
+}
+
+/** One visited statement and the stats bucket it counted into (translate.ts records rows; emitters shift them). */
+export interface CoverageEntry {
+  /** The unit the statement belongs to: `workflow <name>`, `function <name>`, `blueprint <transition> / <phase>`, ... */
+  unit: string;
+  /** The parsed statement kind. */
+  kind: string;
+  /** Absolute `.ds` span. */
+  start: number;
+  end: number;
+  bucket: 'translated' | 'shimmed' | 'todo' | 'skipped';
 }
 
 /**
@@ -248,6 +267,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
   const used = new Set<string>();
   const stats = EMPTY_STATS();
   const todos: TodoItem[] = [];
+  const statementCoverage: CoverageEntry[] = [];
   const alertDiagnostics: AlertDiagnostic[] = [];
   const put = (path: string, source: string): string => {
     let p = path;
@@ -294,7 +314,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
   }
   const emitHandlers = (w: Workflow): void => {
     const group = handlerGroups.get(`${w.form || 'form'}${eventKind(w.event)}`);
-    if (group && group[0] === w) emitFormHandler(app, group, put, stats, todos, alertDiagnostics, warnings, clientCalls.names, calledFunctions, options?.schema, !!options?.asyncOnSuccess, recordHandler, coverage, files, successServerForms, submitFixups);
+    if (group && group[0] === w) emitFormHandler(app, group, put, stats, todos, statementCoverage, alertDiagnostics, warnings, clientCalls.names, calledFunctions, options?.schema, !!options?.asyncOnSuccess, recordHandler, coverage, files, successServerForms, submitFixups);
   };
   const thisappEntries: ThisappEntry[] = [];
   const warnings: GenerateWarning[] = [];
@@ -310,13 +330,13 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
       continue;
     }
     if (workflowKind(w) === 'blueprint') {
-      emitBlueprint(app, w, specOf.get(w), put, stats, todos, alertDiagnostics, options?.schema);
+      emitBlueprint(app, w, specOf.get(w), put, stats, todos, statementCoverage, alertDiagnostics, options?.schema);
       emitHandlers(w);
     } else if (workflowKind(w) === 'approval') {
       const key = w.name || `approval:${w.form ?? ''}`;
       const group = approvalGroups.get(key)!;
-      if (group[0] === w) emitApproval(app, group, specOf.get(w)!, put, stats, todos, alertDiagnostics, options?.schema);
-    } else if (workflowKind(w) === 'schedule') emitSchedule(app, w, schedulePlans.get(w)!, put, stats, todos, alertDiagnostics, options?.schema);
+      if (group[0] === w) emitApproval(app, group, specOf.get(w)!, put, stats, todos, statementCoverage, alertDiagnostics, options?.schema);
+    } else if (workflowKind(w) === 'schedule') emitSchedule(app, w, schedulePlans.get(w)!, put, stats, todos, statementCoverage, alertDiagnostics, options?.schema);
     else emitHandlers(w);
   }
   // A submit-kind module emitted before its form's success module looked
@@ -348,7 +368,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
   emitScheduling(app, schedulePlans, put, options?.schema, asyncSuccess);
   const publishers = apiPublishers(app);
   const admins = administratorProfiles(app);
-  for (const fn of app.functions) emitFunction(app, fn, put, stats, todos, alertDiagnostics, thisappEntries, publishers.get(fn.name), admins, warnings, options?.schema);
+  for (const fn of app.functions) emitFunction(app, fn, put, stats, todos, statementCoverage, alertDiagnostics, thisappEntries, publishers.get(fn.name), admins, warnings, options?.schema);
   const callAccess = app.profiles.length ? accessPolicyFor(app) : undefined;
   for (const fn of app.functions) {
     const body = clientCalls.bodies.get(fn.name);
@@ -458,7 +478,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
       for (const item of stale) options.stale.push(item);
     }
   }
-  return { files, stats, todos, constructs, coverage };
+  return { files, stats, todos, constructs, coverage, statementCoverage };
 }
 
 /**
@@ -555,6 +575,7 @@ function emitFormHandler(
   put: (path: string, source: string) => string,
   stats: TranslateStats,
   todos: TodoItem[],
+  statementCoverage: CoverageEntry[],
   alertDiagnostics: AlertDiagnostic[],
   warnings: GenerateWarning[],
   clientCallFunctions: ReadonlySet<string>,
@@ -595,6 +616,7 @@ function emitFormHandler(
     slot = translated.nextSlot || slot;
     addStats(stats, translated.stats);
     todos.push(...shift(translated.todos, w.deluge));
+    statementCoverage.push(...coverShift(translated.coverage, w.deluge, `workflow ${w.name || w.form || 'workflow'} (${w.event})`));
     recordAlertDiags(translated.todos, w.deluge, w, alertDiagnostics);
     countClientGaps(stats, todos, translated, w.deluge);
     const guarded = gateAction(app, w, translated, todos, true);
@@ -790,12 +812,14 @@ function emitSchedule(
   put: (path: string, source: string) => void,
   stats: TranslateStats,
   todos: TodoItem[],
+  statementCoverage: CoverageEntry[],
   alertDiagnostics: AlertDiagnostic[],
   schema?: SchemaPlan,
 ): void {
   const translated = w.deluge ? translateInApp(app, w.deluge.text, scheduleScriptOptions(app, w.form)) : emptyTranslate();
   addStats(stats, translated.stats);
   todos.push(...shift(translated.todos, w.deluge));
+  statementCoverage.push(...coverShift(translated.coverage, w.deluge, `schedule ${w.name || w.form || 'workflow'}`));
   recordAlertDiags(translated.todos, w.deluge, w, alertDiagnostics);
   const guarded = gateAction(app, w, translated, todos);
   // scheduleBody reports an untranslated selector criteria itself.
@@ -1115,6 +1139,7 @@ function emitApproval(
   put: (path: string, source: string) => void,
   stats: TranslateStats,
   todos: TodoItem[],
+  statementCoverage: CoverageEntry[],
   alertDiagnostics: AlertDiagnostic[],
   schema?: SchemaPlan,
 ): void {
@@ -1149,6 +1174,7 @@ function emitApproval(
     const translated = translateInApp(app, deluge.text, approvalScriptOptions());
     addStats(stats, translated.stats);
     todos.push(...shift(translated.todos, deluge));
+    statementCoverage.push(...coverShift(translated.coverage, deluge, `approval ${spec.name}`));
     recordAlertDiags(translated.todos, deluge, { form: spec.form, event: w.event, name: spec.name }, alertDiagnostics);
     return gateAction(app, w, translated, todos).server;
   };
@@ -1217,6 +1243,7 @@ function emitBlueprint(
   put: (path: string, source: string) => void,
   stats: TranslateStats,
   todos: TodoItem[],
+  statementCoverage: CoverageEntry[],
   alertDiagnostics: AlertDiagnostic[],
   schema?: SchemaPlan,
 ): void {
@@ -1325,6 +1352,7 @@ function emitBlueprint(
         const tr = translateInApp(app, d.text, serverScriptOptions(app, w.form));
         addStats(stats, tr.stats);
         todos.push(...shift(tr.todos, d));
+        statementCoverage.push(...coverShift(tr.coverage, d, `blueprint ${t.name} / ${p.phase}`));
         recordAlertDiags(tr.todos, d, { form: w.form, event: w.event, name: `${t.name} / ${p.phase}` }, alertDiagnostics);
         return tr.server;
       });
@@ -1548,6 +1576,7 @@ function emitFunction(
   put: (path: string, source: string) => string,
   stats: TranslateStats,
   todos: TodoItem[],
+  statementCoverage: CoverageEntry[],
   alertDiagnostics: AlertDiagnostic[],
   thisappEntries: ThisappEntry[],
   api: ApiPublish[] | undefined,
@@ -1562,6 +1591,7 @@ function emitFunction(
     slot = tr.nextSlot;
     addStats(stats, tr.stats);
     todos.push(...shift(tr.todos, d));
+    statementCoverage.push(...coverShift(tr.coverage, d, `function ${fn.name}`));
     countClientGaps(stats, todos, tr, d);
     recordAlertDiags(tr.todos, d, { form: fn.form, event: fn.name, name: fn.name }, alertDiagnostics);
     return tr;
@@ -1657,8 +1687,8 @@ function emitFunction(
   }
 }
 
-function emptyTranslate(): { server: string; client: string; prefetch: string; usesElement?: boolean; nextSlot: number; stats: TranslateStats; todos: TodoItem[]; clientGaps: ClientGap[] } {
-  return { server: '', client: '', prefetch: '', nextSlot: 0, stats: EMPTY_STATS(), todos: [], clientGaps: [] };
+function emptyTranslate(): { server: string; client: string; prefetch: string; usesElement?: boolean; nextSlot: number; stats: TranslateStats; todos: TodoItem[]; clientGaps: ClientGap[]; coverage: StatementCover[] } {
+  return { server: '', client: '', prefetch: '', nextSlot: 0, stats: EMPTY_STATS(), todos: [], clientGaps: [], coverage: [] };
 }
 
 /** Client statements the browser cannot run, counted where the client part ships (translate.ts gateClientShims). */
@@ -1694,6 +1724,12 @@ export function zohoSlotLines(client: string): string {
 function shift(items: TodoItem[], raw: RawDeluge | null): TodoItem[] {
   if (!raw) return items;
   return items.map((t) => ({ ...t, start: t.start + raw.span.start, end: t.end + raw.span.start }));
+}
+
+/** Shift script-relative coverage rows to absolute `.ds` spans, labelled with the unit. */
+function coverShift(items: readonly StatementCover[], raw: RawDeluge | null, unit: string): CoverageEntry[] {
+  if (!raw) return [];
+  return items.map((c) => ({ unit, kind: c.kind, start: c.start + raw.span.start, end: c.end + raw.span.start, bucket: c.bucket }));
 }
 
 function fieldRuleSource(app: App, w: Workflow, todos: TodoItem[]): string {

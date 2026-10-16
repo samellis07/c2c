@@ -27,6 +27,7 @@ import { fieldGapsOf, generateSchema, type FieldGap } from '../../schema/src/ind
 import { buildUi, type SnippetReason, type UiTodo } from '../../ui/src/index.js';
 import { FEATURE_MATRIX, MATRIX_SNAPSHOT, type MatrixSnapshot } from './feature-matrix.js';
 import { ownerScope, type ScopeEntry } from './scope-labels.js';
+import { auditApp, collectOutputs } from '../../quality/src/no-silent-drop.js';
 
 export type Verdict = 'supported' | 'adapter' | 'needs-assessment' | 'gap' | 'blocker';
 
@@ -133,6 +134,11 @@ export interface DeterminismInfo {
    * `todoCount` and an app with any stub is not deterministic.
    */
   uiTodoCount: number;
+  /**
+   * Coverage-ledger violations (C3): declared constructs that are neither
+   * emitted nor counted. Any silent drop disqualifies the app.
+   */
+  silentDrops: number;
 }
 
 export interface AnalyzeReport {
@@ -404,9 +410,17 @@ export function analyze(app: App, options?: { lock?: FillLock }): AnalyzeReport 
   const uiLocations = locateUiTodos(uiBundle.model.todos);
   const todoLocations = locateTodos(app, units, delugeResidual).concat(uiLocations);
 
+  const schema = generateSchema(app);
+  // C3 coverage invariant: walk every declared construct; a construct that is
+  // neither emitted nor counted is a named silent drop and fails the app.
+  const silentDrops = auditApp(app, collectOutputs(app, { gen: whole, schema, model: uiBundle.model }));
+
   const blockers: Blocker[] = [];
   for (const u of feat.used) {
     if (u.verdict === 'blocker') blockers.push({ kind: 'feature', label: `${u.area} / ${u.feature}`, detail: `matrix status ${u.status}` });
+  }
+  for (const drop of silentDrops) {
+    blockers.push({ kind: 'deluge', label: `silent drop ${drop.kind}: ${drop.name}`, detail: drop.note, scope: 'app' });
   }
   for (const t of todoLocations) {
     blockers.push({ kind: t.scope === 'ui' ? 'ui' : 'deluge', label: t.location, detail: t.construct, scope: t.scope, ...manualFields(t) });
@@ -421,7 +435,6 @@ export function analyze(app: App, options?: { lock?: FillLock }): AnalyzeReport 
   const readiness = Math.round(0.5 * featureScore + 0.5 * delugeScore);
   const band: AnalyzeReport['score']['band'] = readiness >= 85 && blockers.length === 0 ? 'ready' : readiness >= 60 ? 'needs-work' : 'blocked';
 
-  const schema = generateSchema(app);
   const cronJobs = app.workflows.filter((w) => w.container === 'schedule').length;
   const hours =
     feat.used.reduce((s, u) => s + EFFORT_WEIGHTS.hoursPerFeature[u.verdict], 0) +
@@ -464,7 +477,14 @@ export function analyze(app: App, options?: { lock?: FillLock }): AnalyzeReport 
       todoLocations,
     },
     blockers,
-    determinism: { deterministic: determinism.deterministic, todoCount: determinism.todoCount, fillLockEntries, todoKinds, uiTodoCount: determinism.uiTodoCount },
+    determinism: {
+      deterministic: determinism.deterministic && silentDrops.length === 0,
+      todoCount: determinism.todoCount,
+      fillLockEntries,
+      todoKinds,
+      uiTodoCount: determinism.uiTodoCount,
+      silentDrops: silentDrops.length,
+    },
     score: { readiness, band, features: Math.round(featureScore), deluge: Math.round(delugeScore) },
     effort: { estimate: true, hours: Math.round(hours * 10) / 10, weights: EFFORT_WEIGHTS },
     catalyst: {
@@ -494,7 +514,7 @@ export function analyzeAsText(r: AnalyzeReport): string {
     `field behavior gaps: ${r.fieldGaps.reduce((total, gap) => total + gap.count, 0)} across ${r.fieldGaps.length} types`,
     ...r.fieldGaps.map((gap) => `  ${gap.matrixId}: ${gap.count} (${gap.fields.map((field) => `${field.form}.${field.field}`).join(', ')}) — ${gap.reason}`),
     `deluge: ${r.deluge.statements} statements  translated ${r.deluge.translated}  shimmed ${r.deluge.shimmed}  todo ${r.deluge.todo}  (${r.deluge.units} units)`,
-    `deterministic: ${r.determinism.deterministic ? 'yes' : 'no'}  (todo items ${r.determinism.todoCount}, lock fills ${r.determinism.fillLockEntries}; UI TODO stubs ${r.determinism.uiTodoCount}, included in the todo items)`,
+    `deterministic: ${r.determinism.deterministic ? 'yes' : 'no'}  (todo items ${r.determinism.todoCount}, lock fills ${r.determinism.fillLockEntries}; UI TODO stubs ${r.determinism.uiTodoCount}, included in the todo items; silent drops ${r.determinism.silentDrops})`,
     `blockers: ${r.blockers.length}`,
     ...r.blockers.flatMap((b) => [`  ${b.kind}: ${b.label} (${b.detail})`, ...(b.manualStep ? [`    step: ${b.manualStep}`] : [])]),
     `effort (estimate, not a quote): ${r.effort.hours} h`,

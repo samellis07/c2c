@@ -67,7 +67,12 @@ for (const c of cases) {
     );
     assert.equal(r.deluge.todoLocations.length, r.deluge.todo);
     assert.equal(r.deluge.todo, r.determinism.todoCount);
-    assert.equal(r.blockers.filter((blocker) => blocker.kind !== 'feature').length, r.determinism.todoCount);
+    const coverage = r.blockers.filter((blocker) => blocker.label.startsWith('silent drop '));
+    assert.equal(coverage.length, r.determinism.silentDrops);
+    assert.equal(
+      r.blockers.filter((blocker) => blocker.kind !== 'feature' && !blocker.label.startsWith('silent drop ')).length,
+      r.determinism.todoCount,
+    );
   });
 
   test(`analyze ${c.name} score stays in range and matches band rule`, () => {

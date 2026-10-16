@@ -14,6 +14,7 @@ export { checkCompiles, materialize, typecheck, withCtxTypes, type CompilesRepor
 export { smokeApp, classify, handlerNames, normalizeMessage, DEFAULT_ITERATIONS, DEFAULT_SEED, type SmokeCleanReport, type SmokeFinding } from './smoke.js';
 export { rng, hashSeed, recordFor, fieldValue, family, VARIANTS, ROW_COUNTS } from './inputs.js';
 export { checkPrefetchReads, isPrefetchModule, PREFETCH_NON_READ, type PrefetchNonRead, type PrefetchReadsReport } from './prefetch-reads.js';
+export { assertCovered, auditApp, collectOutputs, coverageLedger, groupDrops, renderNoSilentDrop, SilentDropError, type AuditOutputs, type ClassCount, type CoverageRow, type DropKind, type SilentDrop } from './no-silent-drop.js';
 
 export interface QualityResult {
   compiles: CompilesReport;

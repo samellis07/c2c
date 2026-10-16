@@ -89,11 +89,23 @@ test('kitchen sink parses losslessly with nothing unknown', () => {
   assert.deepEqual(app.unmodelled, []);
 });
 
-test('kitchen sink analyzes to the counted Booking_Edit server-half TODO, deterministically', () => {
+test('kitchen sink analyzes to the counted Booking_Edit server-half TODO and names settings the field model omits, deterministically', () => {
   const r = analyze(load());
   assert.equal(r.deluge.todo, 1);
   assert.equal(r.determinism.todoCount, 1);
-  assert.deepEqual(r.blockers, [{ kind: 'deluge', label: 'workflow Booking_Edit:1', detail: 'form-event-server-uninvoked', scope: 'unit' }]);
+  assert.equal(r.determinism.deterministic, false);
+  assert.equal(r.determinism.silentDrops, 5);
+  assert.deepEqual(
+    r.blockers,
+    [
+      { kind: 'deluge', label: 'silent drop field-property: Booking.Gear_Refs property displayformat', detail: 'Field Booking.Gear_Refs property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app' },
+      { kind: 'deluge', label: 'silent drop field-property: Booking.Intro property value', detail: 'Field Booking.Intro property value is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app' },
+      { kind: 'deluge', label: 'silent drop field-property: Booking.Room_Ref property displayformat', detail: 'Field Booking.Room_Ref property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app' },
+      { kind: 'deluge', label: 'silent drop field-property: Media_Kit.Booking_Ref property displayformat', detail: 'Field Media_Kit.Booking_Ref property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app' },
+      { kind: 'deluge', label: 'silent drop field-property: Media_Kit.Total_Hours property value', detail: 'Field Media_Kit.Total_Hours property value is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app' },
+      { kind: 'deluge', label: 'workflow Booking_Edit:1', detail: 'form-event-server-uninvoked', scope: 'unit' },
+    ],
+  );
   assert.equal(analyzeAsJson(analyze(load())), analyzeAsJson(r));
   assert.equal(analyzeAsText(analyze(load())), analyzeAsText(r));
 });

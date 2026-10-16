@@ -30,6 +30,8 @@ export interface MigrationAppEntry {
   fieldGaps: FieldGap[];
   /** UI stubs still marked TODO. Each one is included in `todoCount`. */
   uiTodoCount: number;
+  /** Coverage-ledger violations: constructs neither emitted nor counted. Any one disqualifies the app. */
+  silentDrops: number;
   readiness: number;
   band: 'ready' | 'needs-work' | 'blocked';
 }
@@ -59,6 +61,8 @@ export interface MigrationReport {
     fieldGapTotal: number;
     /** Deterministic apps that still have UI TODO stubs. A stub is a residual hole, so this stays zero. */
     deterministicWithUiTodos: { apps: number; uiTodos: number };
+    /** Coverage-ledger violations across the corpus (constructs neither emitted nor counted). */
+    silentDrops: number;
   };
 }
 
@@ -108,6 +112,7 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
       todoKinds: report.determinism.todoKinds,
       fieldGaps: report.fieldGaps,
       uiTodoCount: report.determinism.uiTodoCount,
+      silentDrops: report.determinism.silentDrops,
       readiness: report.score.readiness,
       band: report.score.band,
     };
@@ -154,6 +159,7 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
       fieldGaps,
       fieldGapTotal: fieldGaps.reduce((total, gap) => total + gap.count, 0),
       deterministicWithUiTodos: { apps: withUi.length, uiTodos: withUi.reduce((sum, app) => sum + app.uiTodoCount, 0) },
+      silentDrops: apps.reduce((sum, app) => sum + app.silentDrops, 0),
     },
   };
 }
