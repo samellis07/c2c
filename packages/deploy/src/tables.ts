@@ -17,7 +17,7 @@ import { UNIQUE_VARCHAR_MAX_PER_TABLE, isReservedColumnName } from '../../schema
 import { restWithRetry, type RetryOptions } from './retry.js';
 
 export interface RestCall {
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
   path: string;
   body?: unknown;
   /** 'zgraphql' sends the call to the Slate origin instead of the admin origin. */

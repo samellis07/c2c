@@ -26,6 +26,7 @@ const ROOTS: Record<string, string[]> = {
   deploy: ['doctorGateForArgs', 'deployCli'],
   provision: ['doctorGateForArgs', 'provisionCreatesProject', 'provisionCli'],
   smoke: ['doctorGateForArgs', 'smokeCli'],
+  users: ['doctorGateForArgs', 'usersCli', 'usersManageCli'],
   'migrate-data': ['doctorGateForArgs', 'sourceBackupCli', 'sourceCsvCli', 'seedMigrateCli', 'migrateCli'],
   seed: ['seedArgsProblem'],
   doctor: ['doctorCli'],

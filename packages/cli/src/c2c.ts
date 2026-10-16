@@ -81,6 +81,9 @@
  *                    [--slate-domain <host>] [--role-ids <name=id,...>] [--state <file>] [--salt <s>]
  *                                   POST /project-user per pending user with redirect_url = the Slate URL;
  *                                   each landed invite is recorded in the state file so a re-run skips it.
+ *   c2c users list|add|disable|enable|set-role --ds <file|dir> --project <id> --org <org> [--confirm]
+ *                                   user management after go-live over the same REST hook;
+ *                                   writes need --confirm and pass the doctor gate.
  *   c2c sync-delta --source-json|--source-csv <dir>|--source-backup <zip|dir> --ds <file|dir> --since <state-file|dir>
  *                                   [--project <id>] [--org <org>] [--confirm] [--apply-deletes] [--allow-mass-delete] [--max-delete-percent <pct>]
  *                                   new, changed and deleted records against the checkpoint in the project's state file.
@@ -204,6 +207,7 @@ const USAGE =
       '       c2c migrate-data --source-backup <zip|dir> --ds <file|dir> [--project <id-or-name>] [--org <id>] [--app <link>] [--confirm] [--allow-empty] [--checkpoint <file>]\n' +
       '       c2c users plan --source-backup <zip|dir> --ds <file|dir> [--out <dir>] [--state <file>] [--salt <s>] [--social <a,b>] [--json]\n' +
       '       c2c users invite --source-backup <zip|dir> --ds <file|dir> --project <id> --org <org> --confirm [--slate-domain <host>] [--role-ids <name=id,...>] [--state <file>]\n' +
+      '       c2c users list|add|disable|enable|set-role --ds <file|dir> --project <id> --org <org> [--email <e>] [--role <name>] [--user-id <id>] [--confirm]\n' +
       '       c2c sync-delta --source-json <dir> --ds <file|dir> --since <state-file|dir> [--project <id>] [--org <org>] [--confirm] [--apply-deletes] [--allow-mass-delete] [--max-delete-percent <pct>]\n' +
       '              (--source-csv <dir> and --source-backup <zip|dir> read the same reports)\n' +
       '       c2c cutover-checklist <file|dir> [--source-json|--source-csv <dir>|--source-backup <zip|dir>] [--since <state-file|dir>] [--smoke <file>] [--rollback-export <dir|file>] [--project <id>] [--dc <dc>] [--config <c2c-deploy.json>] [--out <dir>]\n' +

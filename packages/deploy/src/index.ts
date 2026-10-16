@@ -59,8 +59,14 @@ export { formatCsvPlan, migrateCsv, migrateLoaded, parseCsv, readSourceCsv, read
 export type { CsvLoad, CsvMigrateResult } from './csv.js';
 export { readBackupUserLists, readSourceBackup } from './backup.js';
 export {
+  backupUserIdMap,
   formatInviteResult,
+  formatManageResult,
+  formatUserList,
   inviteUsers,
+  listProjectUsers,
+  manageProjectUser,
+  summarizeProjectUser,
   parseSocialList,
   plusAddressIds,
   PLUS_EMAIL_REASON,
@@ -80,7 +86,7 @@ export {
   USERS_PLAN_MD,
   USERS_STATE_FILE,
 } from './users.js';
-export type { BackupUser, InviteTarget, PlanUser, RoleMapRow, SocialPlan, SocialProvider, UsersInviteResult, UsersPlan, UsersState } from './users.js';
+export type { BackupUser, InviteTarget, ListedUser, ManageUserAction, ManageUserResult, PlanUser, RoleMapRow, SocialPlan, SocialProvider, UsersInviteResult, UsersListResult, UsersPlan, UsersState } from './users.js';
 export { readZip } from './zipfile.js';
 export type { ZipEntry, ZipLimits } from './zipfile.js';
 export { applyTablePlan, columnBody, cyclicForeignKeyComponents, cyclicForeignKeys, foreignKeyId, formatMandatoryRelaxed, mandatoryRelaxedColumns, formatTableCreate, formatTableDiff, mandatoryRelaxedLine, nonDeferrableKeys, provisionedConstraints, tableCreatePlan } from './tables.js';

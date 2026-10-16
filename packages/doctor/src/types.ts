@@ -31,7 +31,7 @@ export interface DoctorIo {
   /** Standard input, for `--mcp-observed -`. */
   stdin?: () => string;
   /** One Catalyst REST call with the user's CLI credential (the probe read-back); defaults to the CLI-token hook. */
-  rest?: (call: { method: 'GET' | 'POST'; path: string; body?: unknown }) => Promise<{ status: number; body: unknown; retryAfterMs?: number }>;
+  rest?: (call: { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; path: string; body?: unknown }) => Promise<{ status: number; body: unknown; retryAfterMs?: number }>;
   /** A one-way tag of the token in the Catalyst CLI credential store, read without a refresh; undefined when none is fresh. */
   tokenTag?: () => Promise<string | undefined>;
   /** Forces one Catalyst CLI token refresh (nothing is kept). Used only with C2C_ALLOW_LOCAL_REFRESH=1. */

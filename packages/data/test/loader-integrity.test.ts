@@ -633,3 +633,64 @@ test('prepareCell returns only the rule for a refused cell, and the canonical va
   assert.deepEqual(prepareCell(date, '31-Jan-2024'), { value: '2024-01-31' });
   assert.deepEqual(prepareCell(date, 'soon'), { rule: 'date-format' });
 });
+
+test('migrateData normalises Added_User/Modified_User to the invited mailbox', async () => {
+  const store = quirkRowServer({});
+  const result = await migrateData({
+    ...bases,
+    dryRun: false,
+    fetch: route(creator([{ ID: 's1', Name: 'Ada', Added_User: 'Owner+Tag@Example.com', Modified_User: 'Owner.Name+Ops@Gmail.com' }]), store),
+    checkpoint: emptyCheckpoint(),
+  });
+  assert.equal(result.ok, true);
+  const stored = store.stored.get('Vendor\0s1');
+  assert.equal(stored?.Added_User, 'owner@example.com');
+  assert.equal(stored?.Modified_User, 'ownername@gmail.com');
+});
+
+test('a Creator username that is not an email is stored unchanged (MUST-NOT-REWRITE)', async () => {
+  const store = quirkRowServer({});
+  const result = await migrateData({
+    ...bases,
+    dryRun: false,
+    fetch: route(creator([{ ID: 's1', Name: 'Ada', Added_User: 'crazy+citizen' }]), store),
+    checkpoint: emptyCheckpoint(),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(store.stored.get('Vendor\0s1')?.Added_User, 'crazy+citizen');
+});
+
+test('a stored pre-remap alias is corrected by ROWID update, not refused', async () => {
+  const store = quirkRowServer({});
+  // A previous run stored the raw alias; this run's payload carries the canonical form.
+  store.addStored('Vendor', { c2c_source_id: 's1', ROWID: '10000000000000009', Name: 'Ada', Added_User: 'owner+tag@example.com' });
+  const result = await migrateData({
+    ...bases,
+    dryRun: false,
+    fetch: route(creator([{ ID: 's1', Name: 'Ada', Added_User: 'owner+tag@example.com' }]), store),
+    checkpoint: emptyCheckpoint(),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(store.puts.length > 0, true, 'the correction is a ROWID update');
+  assert.equal(store.stored.get('Vendor\0s1')?.Added_User, 'owner@example.com');
+});
+
+test('Users-field cells remap Creator ZUID to the invited Catalyst user id', async () => {
+  const store = quirkRowServer({});
+  const userColumns = ['Assignee'];
+  const withUsers = {
+    ...bases,
+    userIds: new Map([['9001', '10000000000000007']]),
+    tables: [{ report: 'All_Vendors', table: 'Vendor', integrityColumns: [...columns, { name: 'Assignee', dataType: 'BigInt' as const }], userColumns }],
+  };
+  const result = await migrateData({
+    ...withUsers,
+    dryRun: false,
+    fetch: route(creator([{ ID: 's1', Name: 'Ada', Assignee: '9001' }, { ID: 's2', Name: 'Bob', Assignee: '9002' }]), store),
+    checkpoint: emptyCheckpoint(),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(store.stored.get('Vendor\0s1')?.Assignee, '10000000000000007');
+  // An unmapped ZUID loads as the source wrote it — never invented.
+  assert.equal(store.stored.get('Vendor\0s2')?.Assignee, '9002');
+});

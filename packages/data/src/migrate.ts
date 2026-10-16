@@ -71,6 +71,7 @@ import { parseJsonLossless } from '../../shims/src/ids.js';
 import { DC_ENDPOINTS, KNOWN_DCS, normalizeDc } from '../../core/src/dc.js';
 import { canonRow, changedColumns, groupRefusals, isEmptyCell, prepareColumns, type IntegrityColumn, type IntegrityRefusal, type IntegrityReport } from './integrity.js';
 import { SOURCE_ID_COLUMN, SOURCE_ID_MAX_LENGTH, SYSTEM_FIELD_COLUMNS, SYSTEM_FIELD_COVERAGE_GAP, systemFieldColumn } from '../../schema/src/mapping.js';
+import { canonicalUserIdentity } from '../../schema/src/identity.js';
 
 export const MAX_BATCH = 200;
 /** Catalyst rejects a ZCQL IN list longer than this. */
@@ -241,6 +242,13 @@ export interface MigrateTable {
    * Any other stored difference stays a silent-change refusal.
    */
   lookupSourceIds?: Readonly<Record<string, ReadonlyMap<string, string>>>;
+  /**
+   * Columns of a Creator Users field (schema `matrixId === 'users'`): the cell
+   * holds a Creator ZUID and is rewritten to the invited Catalyst user id this
+   * run was given in `MigrateOptions.userIds`. A ZUID no invite recorded is
+   * left as the source wrote it.
+   */
+  userColumns?: readonly string[];
 }
 
 export interface MigrateOptions {
@@ -265,6 +273,13 @@ export interface MigrateOptions {
   lockTtlMs?: number;
   /** When set, Catalyst reads and writes use /baas/v1/project/<id>/ and the CLI auth headers. */
   scope?: CatalystScope;
+  /**
+   * Creator ZUID → invited Catalyst user_id, built from the backup's user lists
+   * and the users state file by the CLI. Cells of a table's `userColumns` are
+   * rewritten through it; without it (or for an unmapped ZUID) the cell is
+   * stored as the source wrote it.
+   */
+  userIds?: ReadonlyMap<string, string>;
 }
 
 export interface TableMigrationResult {
@@ -533,6 +548,10 @@ interface WriteTarget {
   fillNulls?: ReadonlySet<string>;
   /** Lookup column → source record id → destination ROWID, for correcting stored raw ids. */
   lookupIds?: ReadonlyMap<string, ReadonlyMap<string, string>>;
+  /** Users-field column names (Creator ZUID cells are remapped to the invited Catalyst user id). */
+  userColumns?: ReadonlySet<string>;
+  /** Creator ZUID → invited Catalyst user_id for this run. */
+  userIds?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -547,6 +566,49 @@ interface PreparedRow {
   refusals: IntegrityRefusal[];
   canon: string;
   keys: string[];
+  /** User-identity cells this row rewrote (column → the source's raw value), for correcting a stored pre-remap value. */
+  userRewrites: { column: string; from: string }[];
+}
+
+/**
+ * The one identity rewrite the load applies, the same rule `c2c users` invites
+ * by: Added_User/Modified_User cells carrying an email are normalised to the
+ * canonical mailbox (see schema/src/identity.ts), and Users-field cells trade
+ * the Creator ZUID for the invited Catalyst user id when a map was given.
+ * Every rewrite is recorded on the row so a stored pre-remap value is corrected
+ * by ROWID instead of tripping the silent-change refusal.
+ */
+function rewriteUserCells(
+  columns: Record<string, unknown>,
+  target: WriteTarget,
+): { columns: Record<string, unknown>; rewrites: { column: string; from: string }[] } {
+  const rewrites: { column: string; from: string }[] = [];
+  let out = columns;
+  const set = (column: string, value: string): void => {
+    if (out === columns) out = { ...columns };
+    out[column] = value;
+  };
+  for (const column of ['Added_User', 'Modified_User']) {
+    const value = out[column];
+    if (typeof value !== 'string' || !value.includes('@')) continue;
+    const canonical = canonicalUserIdentity(value);
+    if (canonical !== value) {
+      set(column, canonical);
+      rewrites.push({ column, from: value });
+    }
+  }
+  if (target.userColumns?.size && target.userIds?.size) {
+    for (const column of target.userColumns) {
+      const value = out[column];
+      if (value === undefined || value === null || value === '') continue;
+      const mapped = target.userIds.get(String(value));
+      if (mapped && mapped !== value) {
+        set(column, mapped);
+        rewrites.push({ column, from: String(value) });
+      }
+    }
+  }
+  return { columns: out, rewrites };
 }
 
 function prepareRow(
@@ -555,7 +617,8 @@ function prepareRow(
   shadows: Readonly<Record<string, string>> | undefined,
   files: MigrateTable['files'],
 ): PreparedRow {
-  const prepared = prepareColumns(target.columns, withShadowColumns(withFileKeys(row.id, row.columns, files), shadows));
+  const rewritten = rewriteUserCells(withShadowColumns(withFileKeys(row.id, row.columns, files), shadows), target);
+  const prepared = prepareColumns(target.columns, rewritten.columns);
   const payload = { ...prepared.cells, [SOURCE_ID_COLUMN]: row.id };
   const keys = dataKeys(payload);
   return {
@@ -564,7 +627,21 @@ function prepareRow(
     refusals: prepared.refusals.map((item) => ({ table: target.table, column: item.column, sourceId: row.id, rule: item.rule })),
     canon: canonRow(payload, keys, target.columns),
     keys,
+    userRewrites: rewritten.rewrites,
   };
+}
+
+/** column → the raw source values this run's rows rewrote, for stored-cell correction. */
+function userRewriteMap(rows: readonly PreparedRow[]): Map<string, Set<string>> | undefined {
+  const out = new Map<string, Set<string>>();
+  for (const item of rows) {
+    for (const rewrite of item.userRewrites) {
+      const set = out.get(rewrite.column) ?? new Set<string>();
+      set.add(rewrite.from);
+      out.set(rewrite.column, set);
+    }
+  }
+  return out.size ? out : undefined;
 }
 
 /** Keys that carry a cell value. ROWID and c2c_source_id are not compared. */
@@ -682,6 +759,7 @@ function silentRefusals(
   columns: readonly IntegrityColumn[] | undefined,
   fillable?: ReadonlySet<string>,
   lookupIds?: ReadonlyMap<string, ReadonlyMap<string, string>>,
+  userRewrites?: ReadonlyMap<string, ReadonlySet<string>>,
 ): { refusals: IntegrityRefusal[]; missing: string[]; fills: NullFill[]; corrections: NullFill[] } {
   const refusals: IntegrityRefusal[] = [];
   const missing: string[] = [];
@@ -713,6 +791,13 @@ function silentRefusals(
       // A stored cell still holding a raw source record id is the pre-remap
       // defect: this load writes the parent's ROWID. Correct it by ROWID update.
       if (lookupIds?.get(column)?.has(String(row[column] ?? '')) && rowid) {
+        corrections.push({ sourceId: id, rowid, column, value: payload[column] });
+        continue;
+      }
+      // A stored user cell still holding the pre-normalisation identity (a '+'
+      // alias, a Gmail dot variant, or a raw Creator ZUID) is corrected to the
+      // value this run sent — same ROWID update path as a lookup correction.
+      if (userRewrites?.get(column)?.has(String(row[column] ?? '')) && rowid) {
         corrections.push({ sourceId: id, rowid, column, value: payload[column] });
         continue;
       }
@@ -837,7 +922,7 @@ async function writeBatch(
     } catch {
       throw failure;
     }
-    const diff = silentRefusals(target.table, payloads, stored, target.columns);
+    const diff = silentRefusals(target.table, payloads, stored, target.columns, undefined, undefined, userRewriteMap(rows));
     if (diff.refusals.length) return { ids: [], unknownIds: [], refusals: diff.refusals };
     if (diff.missing.length) throw failure;
     const ids = rows.map((item) => item.row.id);
@@ -883,7 +968,7 @@ async function alreadyStoredRefusals(
     dc,
     scope,
   );
-  const diff = silentRefusals(target.table, payloads, stored, target.columns, target.fillNulls, target.lookupIds);
+  const diff = silentRefusals(target.table, payloads, stored, target.columns, target.fillNulls, target.lookupIds, userRewriteMap(rows));
   if (diff.refusals.length || (!diff.fills.length && !diff.corrections.length)) {
     return { refusals: diff.refusals, filled: 0, corrected: 0 };
   }
@@ -1029,6 +1114,8 @@ export async function migrateData(opts: MigrateOptions): Promise<MigrateResult> 
       columns: table.integrityColumns,
       fillNulls: new Set([...FILLABLE_NULL_COLUMNS, ...(table.fillNullColumns ?? [])]),
       ...(table.lookupSourceIds ? { lookupIds: new Map(Object.entries(table.lookupSourceIds)) } : {}),
+      ...(table.userColumns?.length ? { userColumns: new Set(table.userColumns) } : {}),
+      ...(opts.userIds?.size ? { userIds: opts.userIds } : {}),
     };
     let tableFilledNulls = 0;
     let tableCorrectedLookups = 0;

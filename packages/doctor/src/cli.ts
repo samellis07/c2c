@@ -246,7 +246,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
         // nonce. Runs before closeMcpRequest so a rejected observation can
         // never consume the request (parse already threw by this point).
         const probe = probeNameOf(result.observed.request);
-        const rest = io.rest ?? ((call: { method: 'GET' | 'POST'; path: string }) => catalystRestCall(io.env, probeTarget.org ?? '', probeTarget.project ?? '', call));
+        const rest = io.rest ?? ((call: { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; path: string }) => catalystRestCall(io.env, probeTarget.org ?? '', probeTarget.project ?? '', call));
         const binding = await verifyProbe(rest, probeTarget, probe);
         evidence.binding = binding;
         if (binding.status === 'absent') clearPendingCleanup(workspace, probe);

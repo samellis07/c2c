@@ -33,6 +33,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { App } from '../../core/src/index.js';
+import { canonicalUserIdentity, userIdentityAliasRules } from '../../schema/src/identity.js';
 import { authPlan, type PlannedRole } from '../../auth/src/index.js';
 import { readBackupUserLists } from './backup.js';
 import { parseCsv } from './csv.js';
@@ -67,6 +68,8 @@ export interface BackupUser {
   profile: string;
   /** ROLE_NAME — the data-hierarchy role; informational, never assigned. */
   hierarchy: string;
+  /** ZUID — the Creator account id a Users-field cell stores. */
+  zuid: string;
   source: 'appUsers' | 'appAdmins';
 }
 
@@ -74,7 +77,7 @@ function userSheet(file: string, bytes: Buffer): BackupUser[] {
   const parsed = parseCsv(bytes.toString('utf8')).filter((record) => record.some((cell) => cell.trim() !== ''));
   const headers = (parsed[0] ?? []).map((cell) => headKey(cell));
   const at = (key: string): number => headers.indexOf(key);
-  const col = { email: at('useremail'), name: at('name'), first: at('firstname'), last: at('lastname'), type: at('usertype'), status: at('userstatus'), profile: at('profilename'), role: at('rolename') };
+  const col = { email: at('useremail'), name: at('name'), first: at('firstname'), last: at('lastname'), type: at('usertype'), status: at('userstatus'), profile: at('profilename'), role: at('rolename'), zuid: at('zuid') };
   if (col.email < 0) throw new Error(`${file} has no USER_EMAIL column`);
   const cell = (record: string[], index: number): string => (index < 0 ? '' : (record[index] ?? '').trim());
   return parsed.slice(1).map((record) => ({
@@ -86,6 +89,7 @@ function userSheet(file: string, bytes: Buffer): BackupUser[] {
     status: cell(record, col.status),
     profile: cell(record, col.profile),
     hierarchy: cell(record, col.role),
+    zuid: cell(record, col.zuid),
     source: file === 'appAdmins.csv' ? ('appAdmins' as const) : ('appUsers' as const),
   }));
 }
@@ -134,6 +138,12 @@ export interface PlanUser {
   /** Hierarchy role the backup recorded for the user (empty for admins). */
   hierarchy: string;
   state: 'pending' | 'invited';
+  /**
+   * Set when the backup identity normalises to a different invited address
+   * (the schema identity rules: dropped '+tag', folded Gmail dots). The rules
+   * that fired; the alias address itself is never written.
+   */
+  aliasRules?: string[];
 }
 
 export interface SocialPlan {
@@ -156,6 +166,8 @@ export interface UsersPlan {
     duplicates: number;
     /** Rows with no identity value at all — uninvitable, counted not listed. */
     noIdentity: number;
+    /** Users whose invited address is a normalised form of the backup identity. */
+    aliases: number;
     perRole: Record<string, number>;
   };
   /** Profiles seen in the backup that the export does not model -> mapped to App User. */
@@ -224,7 +236,11 @@ export function usersPlan(app: App, users: readonly BackupUser[], opts: { salt: 
   const unmapped = new Set<string>();
   const out: PlanUser[] = [];
   for (const user of users) {
-    const identity = user.identity.trim().toLowerCase();
+    // The one identity Catalyst can hold: aliases ('+tag', Gmail dot variants)
+    // fold to the mailbox the invite carries, so a source listing two spellings
+    // of one mailbox produces one user and one invite — the same value
+    // migrate-data writes into Added_User/Modified_User.
+    const identity = canonicalUserIdentity(user.identity);
     if (!identity) {
       noIdentity.n += 1;
       continue;
@@ -234,6 +250,7 @@ export function usersPlan(app: App, users: readonly BackupUser[], opts: { salt: 
       continue;
     }
     seen.add(identity);
+    const aliasRules = userIdentityAliasRules(user.identity);
     if (user.source === 'appUsers' && user.status && user.status.toLowerCase() !== 'active') {
       inactive.n += 1;
       continue;
@@ -256,6 +273,7 @@ export function usersPlan(app: App, users: readonly BackupUser[], opts: { salt: 
       via: user.source,
       hierarchy: user.hierarchy,
       state: invited.has(userRefId(identity, opts.salt)) ? 'invited' : 'pending',
+      ...(aliasRules.length ? { aliasRules } : {}),
     });
   }
   out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -331,6 +349,12 @@ export function usersPlan(app: App, users: readonly BackupUser[], opts: { salt: 
     'POST /project-user (the console Add User call) carries redirect_url = the Slate app URL; an invite is never sent without it because the mailed link would land on a page that does not exist.',
     ...(social.length ? [] : ['Social sign-in is not enabled by this plan; pass --social <providers> to list the console steps (it cannot be enabled by API with this token).']),
   ];
+  const aliased = out.filter((user) => user.aliasRules?.length);
+  if (aliased.length) {
+    notes.push(
+      `${aliased.length} user(s) sign in under a normalised address: a '+' tag is dropped (Catalyst Add User rejects '+' — INVALID_INPUT, so the plain mailbox is the only invitable form) and Gmail dot/googlemail variants fold to one mailbox; [UNVERIFIED] whether a non-Google provider delivers the plain address to the same mailbox — confirm the invitee received the mail. migrate-data writes the same normalised identity into Added_User/Modified_User and remaps Users-field cells to the invited Catalyst user id.`,
+    );
+  }
   if (inactive.n) notes.push(`${inactive.n} user(s) with a non-Active status are skipped — only Active users are invited.`);
   if (duplicates.n) notes.push(`${duplicates.n} repeated identit${duplicates.n === 1 ? 'y' : 'ies'} collapsed — a user appearing in both lists is invited once.`);
   if (noIdentity.n) notes.push(`${noIdentity.n} row(s) had no identity value and cannot be invited.`);
@@ -351,6 +375,7 @@ export function usersPlan(app: App, users: readonly BackupUser[], opts: { salt: 
       inactive: inactive.n,
       duplicates: duplicates.n,
       noIdentity: noIdentity.n,
+      aliases: out.filter((user) => user.aliasRules?.length).length,
       perRole: sortedPerRole,
     },
     unmapped: [...unmapped].sort(),
@@ -372,6 +397,7 @@ export function usersPlanMarkdown(plan: UsersPlan): string {
     `- app: ${plan.app || '(unnamed)'}`,
     `- users: ${plan.counts.total} seen, ${plan.counts.pending} to invite, ${plan.counts.invited} already invited`,
     `- skipped: ${plan.counts.inactive} non-active, ${plan.counts.duplicates} repeated, ${plan.counts.noIdentity} no identity`,
+    `- aliases normalised: ${plan.counts.aliases}`,
     '',
     '## Role mapping',
     '',
@@ -393,7 +419,10 @@ export function usersPlanMarkdown(plan: UsersPlan): string {
     '',
     '## Users',
     '',
-    ...plan.users.map((user) => `- ${user.id} -> ${user.role} (${user.via}${user.hierarchy ? `, reports under ${user.hierarchy}` : ''}) — ${user.state}`),
+    ...plan.users.map(
+      (user) =>
+        `- ${user.id} -> ${user.role} (${user.via}${user.hierarchy ? `, reports under ${user.hierarchy}` : ''}) — ${user.state}${user.aliasRules?.length ? ` — alias folded: ${user.aliasRules.join(', ')}` : ''}`,
+    ),
     '',
     '## Notes',
     '',
@@ -713,4 +742,198 @@ export function formatInviteResult(result: UsersInviteResult): string {
     for (const step of result.consoleSteps) lines.push(`- ${step}`);
   }
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Post-go-live user management over the same admin hook as invite
+ * (GET/POST/PUT/DELETE /project-user): `c2c users list|add|disable|enable|set-role`.
+ * `list` and every report name a user by its Catalyst user_id only — the
+ * sign-in address stays inside the request, never printed or stored.
+ *
+ * The update calls are [UNVERIFIED] for the CLI token (the recorded runs
+ * covered GET/POST/DELETE): a write is accepted on a 2xx and then confirmed
+ * by re-reading the user; a refusal or an unchanged read-back becomes a
+ * console step, never a silent claim.
+ */
+export interface ListedUser {
+  userId: string;
+  role: string;
+  status: string;
+  confirmed?: boolean;
+}
+
+function rowText(user: Record<string, unknown>, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = user[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+/** One project-user row as printable facts — id, role, status; never the address. */
+export function summarizeProjectUser(user: Record<string, unknown>): ListedUser | undefined {
+  const details = (user.role_details ?? user.roleDetails ?? {}) as Record<string, unknown>;
+  const role = rowText(details, ['role_name', 'roleName', 'name']) ?? rowText(user, ['role_name', 'roleName']) ?? '';
+  const status = rowText(user, ['status', 'user_status', 'userStatus']) ?? '';
+  const confirmedRaw = user.is_confirmed ?? user.isConfirmed ?? user.confirmed;
+  const confirmed = confirmedRaw === true || confirmedRaw === 'true' ? true : confirmedRaw === false || confirmedRaw === 'false' ? false : undefined;
+  const userId = idString(user.user_id ?? user.userId ?? user.id);
+  if (!userId) return undefined;
+  return { userId, role, status, ...(confirmed !== undefined ? { confirmed } : {}) };
+}
+
+export interface UsersListResult {
+  users: ListedUser[];
+  ok: boolean;
+  detail?: string;
+}
+
+/** GET /project-user → id/role/status per user. */
+export async function listProjectUsers(rest: RestFn, projectId: string, retry?: RetryOptions): Promise<UsersListResult> {
+  try {
+    const res = await restWithRetry(rest, { method: 'GET', path: `/baas/v1/project/${projectId}/project-user` }, retry ?? {});
+    if (res.result.status < 200 || res.result.status >= 300) {
+      const code = errorCode(res.result.body);
+      return { users: [], ok: false, detail: `HTTP ${res.result.status}${code ? ` ${code}` : ''}` };
+    }
+    const users = (projectUsers(res.result.body) ?? []).map(summarizeProjectUser).filter((user): user is ListedUser => user !== undefined);
+    users.sort((a, b) => (a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0));
+    return { users, ok: true };
+  } catch (err) {
+    return { users: [], ok: false, detail: `transport error — ${sanitizeMessage(err instanceof Error ? err.message : 'request failed', [])}` };
+  }
+}
+
+export function formatUserList(result: UsersListResult): string {
+  const lines = ['users list:'];
+  for (const user of result.users) {
+    lines.push(`- ${user.userId} role=${user.role || '(none)'} status=${user.status || '(unknown)'}${user.confirmed === undefined ? '' : ` confirmed=${user.confirmed}`}`);
+  }
+  if (!result.users.length && result.ok) lines.push('- (no project users)');
+  if (result.detail) lines.push(`- ${result.detail}`);
+  return `${lines.join('\n')}\n`;
+}
+
+export type ManageUserAction = 'disable' | 'enable' | 'set-role';
+
+export interface ManageUserResult {
+  userId: string;
+  action: ManageUserAction;
+  status: 'applied' | 'verified' | 'pending' | 'failed';
+  detail?: string;
+  console?: string;
+}
+
+function projectUserFromBody(body: unknown): Record<string, unknown> | undefined {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
+  const record = body as Record<string, unknown>;
+  for (const key of ['data', 'user', 'project_user']) {
+    const inner = record[key];
+    if (inner && typeof inner === 'object' && !Array.isArray(inner)) return inner as Record<string, unknown>;
+  }
+  return record;
+}
+
+/**
+ * PUT /project-user/<id> for disable/enable (`{status}`) and set-role
+ * (`{role_details:{role_id}}`) — [UNVERIFIED] shapes for the CLI token, so the
+ * result is proven by re-reading the user afterwards, not by the reply alone.
+ */
+export async function manageProjectUser(
+  rest: RestFn,
+  input: {
+    projectId: string;
+    userId: string;
+    action: ManageUserAction;
+    /** Catalyst role id for set-role (resolved by the caller from --role-ids or role_details). */
+    roleId?: string;
+    /** Role name for messages. */
+    role?: string;
+    retry?: RetryOptions;
+  },
+): Promise<ManageUserResult> {
+  const base = `/baas/v1/project/${input.projectId}`;
+  const label = input.action === 'set-role' ? `set role ${input.role ?? input.roleId}` : input.action;
+  const consoleStep = `Authentication > Users: ${label} for user ${input.userId} in the console — the API update was refused or did not hold`;
+  const body =
+    input.action === 'set-role'
+      ? { role_details: { role_id: input.roleId } }
+      : { status: input.action === 'disable' ? 'disable' : 'enable' };
+
+  const call = async (spec: RestCall): Promise<{ status: number; body: unknown } | { transport: string }> => {
+    try {
+      return (await restWithRetry(rest, spec, input.retry ?? {})).result;
+    } catch (err) {
+      return { transport: err instanceof Error ? err.message : 'request failed' };
+    }
+  };
+
+  const put = await call({ method: 'PUT', path: `${base}/project-user/${input.userId}`, body });
+  if ('transport' in put) return { userId: input.userId, action: input.action, status: 'failed', detail: `transport error — ${put.transport}`, console: consoleStep };
+  if (put.status === 404) return { userId: input.userId, action: input.action, status: 'failed', detail: 'HTTP 404 — no project user with that id' };
+  if (put.status < 200 || put.status >= 300) {
+    const code = errorCode(put.body);
+    return {
+      userId: input.userId,
+      action: input.action,
+      status: 'pending',
+      detail: `HTTP ${put.status}${code ? ` ${code}` : ''}`,
+      console: consoleStep,
+    };
+  }
+
+  // Read-back: the write is verified only when the stored row shows it.
+  const get = await call({ method: 'GET', path: `${base}/project-user/${input.userId}` });
+  if (!('transport' in get) && get.status >= 200 && get.status < 300) {
+    const row = projectUserFromBody(get.body);
+    if (row) {
+      if (input.action === 'set-role') {
+        const details = (row.role_details ?? row.roleDetails ?? {}) as Record<string, unknown>;
+        const storedId = idString(details.role_id ?? details.roleId ?? details.id);
+        if (storedId && storedId === input.roleId) {
+          return { userId: input.userId, action: input.action, status: 'verified', detail: 'role id confirmed by GET /project-user/<id>' };
+        }
+        const storedName = rowText(details, ['role_name', 'roleName', 'name']);
+        if (storedName && input.role && storedName === input.role) {
+          return { userId: input.userId, action: input.action, status: 'verified', detail: `role ${storedName} confirmed by GET /project-user/<id>` };
+        }
+        return { userId: input.userId, action: input.action, status: 'pending', detail: 'the update returned 2xx but the stored role did not change', console: consoleStep };
+      }
+      const status = (rowText(row, ['status', 'user_status', 'userStatus']) ?? '').toLowerCase();
+      const want = input.action === 'disable' ? 'disabl' : 'enabl';
+      const activeWords = input.action === 'disable' ? [] : ['active', 'enabled'];
+      if (status.includes(want) || activeWords.includes(status)) {
+        return { userId: input.userId, action: input.action, status: 'verified', detail: `status ${status || 'updated'} confirmed by GET /project-user/<id>` };
+      }
+      if (!status) return { userId: input.userId, action: input.action, status: 'applied', detail: 'the update returned 2xx; the read-back row carries no status field to confirm against' };
+      return { userId: input.userId, action: input.action, status: 'pending', detail: `the update returned 2xx but the stored status reads ${status}`, console: consoleStep };
+    }
+  }
+  return { userId: input.userId, action: input.action, status: 'applied', detail: 'the update returned 2xx; the read-back was unavailable to confirm it' };
+}
+
+export function formatManageResult(result: ManageUserResult): string {
+  const lines = [`users ${result.action}: ${result.userId} — ${result.status}${result.detail ? ` — ${result.detail}` : ''}`];
+  if (result.console) lines.push(`console step: ${result.console}`);
+  return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Creator ZUID → invited Catalyst user_id, from the backup's user lists and
+ * the users state file: a ZUID maps when the user's canonical identity was
+ * invited and the state recorded the Catalyst id. Never written to disk —
+ * migrate-data holds it in memory for the run.
+ */
+export function backupUserIdMap(source: string, state: UsersState | undefined): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!state?.salt || !state.invited.length) return out;
+  const userIdByRef = new Map(state.invited.filter((entry) => entry.userId).map((entry) => [entry.id, entry.userId!]));
+  if (!userIdByRef.size) return out;
+  for (const user of readBackupUsers(source)) {
+    if (!user.zuid) continue;
+    const ref = userRefId(canonicalUserIdentity(user.identity), state.salt);
+    const userId = userIdByRef.get(ref);
+    if (userId) out.set(user.zuid, userId);
+  }
+  return out;
 }
