@@ -25,7 +25,7 @@ Requires a **green doctor** for this DC/org/project (the CLI refuses with exit 5
   3. Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
   4. Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
   Service first-use gates are provision plan steps, not customer checklist items. Slate needs no first-open console step: Catalyst CLI 1.28.0 runs `slate:link` and `deploy slate` with `-ni` on a fresh project. Other gated services still appear in the provision plan:
-  - Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring (only when the app has file fields)
+  - Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name) and wait until it shows in the Stratus bucket list — click Create again if nothing happens after a few seconds (only when the app has file fields)
   - SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring (only when the app renders PDF)
 - **Teardown boundary (C2C.md rule 15). A failed step never deletes the project. Teardown happens only on the user's explicit request or on a failure before the first human or console step; once any human or console step has run, the project is kept — stop and report.
 

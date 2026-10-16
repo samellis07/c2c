@@ -328,6 +328,22 @@ function isAlreadyExistsResult(result: unknown): boolean {
   return /already[\s_-]*exists|duplicate|conflict|\b409\b/i.test(text);
 }
 
+/**
+ * The Stratus first-use refusal: on a project that never opened Stratus the
+ * Create_Bucket call (and any bucket write) answers OPERATION_NOT_ALLOWED
+ * "in session when accessing Stratus for the first time". Retrying cannot
+ * help — the fix is the one console bucket — so the rejection names it.
+ */
+function isStratusFirstUseResult(result: unknown): boolean {
+  let text: string;
+  try {
+    text = typeof result === 'string' ? result : JSON.stringify(result);
+  } catch {
+    return false;
+  }
+  return /in session when accessing Stratus/i.test(text);
+}
+
 /** A DC is retained only after it is derived from an org's observed console/API host. */
 function orgHostDc(entry: Record<string, unknown>): Dc | undefined {
   for (const key of ['console_url', 'consoleUrl', 'console_host', 'consoleHost', 'api_url', 'apiUrl', 'api_host', 'apiHost']) {
@@ -463,7 +479,14 @@ export function parseObservation(text: string, input: { workspace: string; now?:
       try {
         rejectIfErrorFlag(result, short);
       } catch (err) {
-        if (short !== shortToolName(PROBE_CALL) || !isAlreadyExistsResult(result)) throw err;
+        if (short !== shortToolName(PROBE_CALL) || !isAlreadyExistsResult(result)) {
+          if (isStratusFirstUseResult(result)) {
+            throw new ObservationRejected(
+              `the ${short} call was refused with OPERATION_NOT_ALLOWED — "in session when accessing Stratus" means this project has never opened Stratus and no retry helps: in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name) and wait until it shows in the bucket list (click Create again if nothing happens after a few seconds); then run c2c doctor --mcp-begin again and repeat the calls`,
+            );
+          }
+          throw err;
+        }
       }
     } else throw new ObservationRejected(`calls[${index}] is not a call the MCP request asked for`);
     calls.push({ tool: short, digest: resultDigest(result) });

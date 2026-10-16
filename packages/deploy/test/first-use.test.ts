@@ -24,6 +24,13 @@ test('probe answers: the access-the-service refusal is closed, a success envelop
   assert.equal(classifyGateProbe({ status: 404, body: { status: 'failure', data: { error_code: 'INVALID_URL_PATTERN' } } }), 'closed');
   assert.equal(classifyGateProbe({ status: 200, body: { status: 'success', data: [] } }), 'open');
   assert.equal(classifyGateProbe({ status: 200, body: { status: 'failure', data: { message: 'Please access the Stratus service' } } }), 'closed');
+  // The Stratus first-use refusal (OPERATION_NOT_ALLOWED, "in session … first
+  // time") is the closed gate, not an unknown answer — it needs the one
+  // console bucket, never a retry.
+  assert.equal(classifyGateProbe({ status: 400, body: { status: 'failure', data: { error_code: 'OPERATION_NOT_ALLOWED', message: 'User needs to be in session when accessing Stratus for the first time' } } }), 'closed');
+  assert.equal(classifyGateProbe({ status: 405, body: { status: 'failure', data: { error_code: 'OPERATION_NOT_ALLOWED', message: 'You are not allowed to perform this operation. User needs to be in session when accessing Stratus for the first time' } } }), 'closed');
+  // An OPERATION_NOT_ALLOWED that does not name the first-session refusal stays unverified.
+  assert.equal(classifyGateProbe({ status: 400, body: { status: 'failure', data: { error_code: 'OPERATION_NOT_ALLOWED', message: 'You are not allowed to perform this operation' } } }), 'unknown');
   assert.equal(classifyGateProbe({ status: 200, body: { status: 'error', data: {} } }), 'unknown');
   assert.equal(classifyGateProbe({ status: 401, body: { data: { error_code: 'AUTHENTICATION_FAILURE' } } }), 'unknown');
   assert.equal(classifyGateProbe({ status: 500, body: {} }), 'unknown');

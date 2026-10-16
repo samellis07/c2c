@@ -934,6 +934,29 @@ test('mcp-observed: an already-exists probe create is accepted; any other probe 
   }
 });
 
+test('mcp-observed: the Stratus first-use refusal names the one console bucket, never a retry', async () => {
+  const firstUse = {
+    isError: true,
+    content: [{ type: 'text', text: JSON.stringify({ status: 'failure', data: { error_code: 'OPERATION_NOT_ALLOWED', message: 'User needs to be in session when accessing Stratus for the first time' } }) }],
+  };
+  const { dir, env } = workspace();
+  const { request } = await begin(env);
+  const run = await observe(
+    env,
+    observation(request, {
+      calls: [
+        { tool: 'CatalystbyZoho_Create_Bucket', result: firstUse },
+        { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG]) },
+      ],
+    }),
+  );
+  assert.equal(run.code, 1, run.out + run.err);
+  assert.match(run.err, /OPERATION_NOT_ALLOWED/);
+  assert.match(run.err, /Cloud Scale → Stratus → Start Exploring/);
+  assert.match(run.err, /Create your First Bucket/);
+  assert.ok(!existsSync(doctorJsonPath(dir)), 'a refused observation must not write doctor.json');
+});
+
 test('mcp-observed: the request pins the scope --mcp-begin ran under, so drifted scope flags are refused', async () => {
   const { dir, env } = workspace();
   const { request } = await begin(env);
