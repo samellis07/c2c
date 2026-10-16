@@ -1,0 +1,224 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Loaner",
+  "source": {
+    "file": "Loaner.ds",
+    "origin": "Creator gallery app loaner, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-all-users",
+      "steps": [
+        {
+          "op": "report",
+          "report": "All_Users",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "add-user-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Lumen",
+              "last_name": "Maple"
+            },
+            "Email": "email.359@example.com",
+            "Phone_Number": "+1555015705",
+            "Address": {
+              "address_line_1": "794 Ember Way",
+              "district_city": "Ridge",
+              "state_province": "Ridge",
+              "postal_Code": "69052",
+              "country": "United States"
+            },
+            "Verified_User": true
+          },
+          "creator": {
+            "code": 3000,
+            "error": [
+              "Error details: Error in executing On Add - On Success script User Limit Reached Line:(2)"
+            ],
+            "message": "User Added Successfully"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          },
+          "tags": [
+            "env-artifact:trial-user-limit"
+          ]
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Email": "email.359@example.com",
+              "Address_address_line_1": "794 Ember Way",
+              "Address_district_city": "Ridge",
+              "Address_state_province": "Ridge",
+              "Address_postal_Code": "69052",
+              "Address_country": "United States",
+              "Phone_Number": "+1555015705",
+              "Verified_User": "true",
+              "Name_first_name": "Lumen",
+              "Name_last_name": "Maple"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "env-artifact:trial-user-limit"
+      ]
+    },
+    {
+      "id": "add-user-invalid-duplicate-email",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Lumen",
+              "last_name": "Maple"
+            },
+            "Email": "email.359@example.com",
+            "Phone_Number": "+1555015705",
+            "Address": {
+              "address_line_1": "794 Ember Way",
+              "district_city": "Ridge",
+              "state_province": "Ridge",
+              "postal_Code": "69052",
+              "country": "United States"
+            },
+            "Verified_User": true
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Kestrel",
+              "last_name": "Onyx"
+            },
+            "Email": "email.359@example.com",
+            "Phone_Number": "+1555017280",
+            "Address": {
+              "address_line_1": "805 Onyx Way",
+              "district_city": "Cedar",
+              "state_province": "Quartz",
+              "postal_Code": "18903",
+              "country": "United States"
+            },
+            "Verified_User": true
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Email": "This value already exists. Enter a unique value."
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Email": "email.359@example.com",
+              "Address_address_line_1": "794 Ember Way",
+              "Address_district_city": "Ridge",
+              "Address_state_province": "Ridge",
+              "Address_postal_Code": "69052",
+              "Address_country": "United States",
+              "Phone_Number": "+1555015705",
+              "Verified_User": "true",
+              "Name_first_name": "Lumen",
+              "Name_last_name": "Maple"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-all-users",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Lumen",
+              "last_name": "Maple"
+            },
+            "Email": "email.359@example.com",
+            "Phone_Number": "+1555015705",
+            "Address": {
+              "address_line_1": "794 Ember Way",
+              "district_city": "Ridge",
+              "state_province": "Ridge",
+              "postal_Code": "69052",
+              "country": "United States"
+            },
+            "Verified_User": true
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "All_Users",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Email": "email.359@example.com",
+              "Phone_Number": "+1555015705",
+              "Verified_User": "true",
+              "Name_last_name": "Maple",
+              "Name_first_name": "Lumen"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
