@@ -357,13 +357,13 @@ report is a partial success, not a failure.
 
 ### Read Creator form structure over MCP via ZohoCreator_getFormMetadata
 
-Recipe: [TESTED] `ZohoCreator_getForm` requires the development environment; on a duplicated app it returns error 30150 or 30180.
+Recipe: [TESTED] on a duplicated app, `ZohoCreator_getForm` sent with the `environment: development` header returned code 30150 ("The requested operation is supported only in the development environment"); sent without that header it returned code 30180 ("The 'environment' header is required").
 
-Rule: [TESTED] use `ZohoCreator_getFormMetadata` to retrieve form structure and fields instead of `ZohoCreator_getForm`.
+Rule: [MCP-LISTED] `ZohoCreator_getFormMetadata` is listed in the Creator MCP connector as the form-structure read; no successful call has been recorded yet.
 
 ### Read Creator application inventory via ZohoCreator_getApplicationSummary
 
-Recipe: [TESTED] guessed tool name `getAppMetadata` does not exist in the Creator MCP connector.
+Recipe: [TESTED] guessed tool name `getAppMetadata` does not exist in the Creator MCP connector; `ZohoCreator_getApplicationSummary` (query `id_required: false`) returned `status: success`, code 3000, with the app's `app_info` on duplicated apps.
 
 Rule: [TESTED] use `ZohoCreator_getApplicationSummary` to read the application structure and component inventory.
 
@@ -372,4 +372,3 @@ Rule: [TESTED] use `ZohoCreator_getApplicationSummary` to read the application s
 Recipe: [TESTED] `ZohoCreator_duplicateApplication` calls exceeding approximately 8 calls per minute return error code 2955.
 
 Rule: [TESTED] space application duplication requests to stay within 8 calls per minute and back off when error code 2955 is returned.
-
