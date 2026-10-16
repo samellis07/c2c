@@ -370,6 +370,22 @@ function looksLikeDeluge(g: Group): boolean {
 }
 
 /**
+ * `on <gesture> ( ... )` or `custom deluge script ( ... )` handlers inside an
+ * `actions { ... }` body. A brace holding one stays structured so the IR can
+ * split each handler out; marking it raw would fuse the wrapper header text
+ * into the event's Deluge script.
+ */
+function hasDelugeHandlers(g: Group): boolean {
+  for (const s of splitStatements(g.children)) {
+    if (!isStatement(s)) continue;
+    const items = sig(s);
+    const h = headerLength(items);
+    if (h > 0 && isGroupOf(items[h], '(') && isRawParenHeader(headerWords(s).map(textOf))) return true;
+  }
+  return false;
+}
+
+/**
  * Events that wrap an `actions { ... }` list: the record events
  * (`on add { actions { ... } }`) and a button's `on click`.
  */
@@ -404,7 +420,8 @@ function structureStatement(s: Statement, inRecordEvent = false): void {
       const prev = items[k - 1];
       const criteriaActions = header === 'actions' && isGroup(prev) && prev.open.text === '(';
       const recordActions = inRecordEvent && header === 'actions';
-      if (!criteriaActions && !recordActions) {
+      const handlerActions = header === 'actions' && hasDelugeHandlers(g);
+      if (!criteriaActions && !recordActions && !handlerActions) {
         g.raw = true; // `void name(args) { ... }`, `on load { input.X = 1; }`
         continue;
       }
