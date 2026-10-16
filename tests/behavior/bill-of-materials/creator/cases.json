@@ -1,0 +1,43 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Bill Of Materials",
+  "source": {
+    "file": "Bill_Of_Materials.ds",
+    "origin": "Creator gallery app bill-of-materials, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-all-users",
+      "steps": [],
+      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
+      "tags": [
+        "superseded"
+      ]
+    },
+    {
+      "id": "add-user-valid-submit",
+      "steps": [],
+      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
+      "tags": [
+        "superseded"
+      ]
+    },
+    {
+      "id": "add-user-invalid-duplicate-mail-id",
+      "steps": [],
+      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
+      "tags": [
+        "superseded"
+      ]
+    },
+    {
+      "id": "post-all-users",
+      "steps": [],
+      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
+      "tags": [
+        "superseded"
+      ]
+    }
+  ]
+}
