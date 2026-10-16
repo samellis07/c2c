@@ -54,11 +54,20 @@ Every generated API call needs a signed-in Catalyst app user with role App Admin
 - **Redirect loops** can trip the per-project URL throttle for 10+ hours [UNVERIFIED]: generated auth redirects are capped; never script repeated sign-in attempts.
 - **Rule — default settings only (C2C.md rule 13).** Never drive a browser or console and never sign in for the user; every sign-in, consent and console click is a guided ask the user performs, verified by the named read-back.
 
+## Managing users after go-live
+
+`c2c users` runs the management ops over the same `project-user` REST hook as invite — no console needed. Every write needs the user's yes plus `--confirm` (doctor-gated) and is proven by a read-back; `--confirm` runs refuse when doctor.json is not green for the org/project scope.
+
+- `c2c users list --ds <file|dir> --project <id> --org <org>` — user_id, role, status, confirmed per user (addresses are never printed).
+- `c2c users add --ds <file|dir> --project <id> --org <org> --email <e> --role <name> --confirm` — POST /project-user with `redirect_url` = the Slate app URL (same rules as invite; `--role-ids`/`--slate-domain` as needed).
+- `c2c users disable|enable --ds <file|dir> --project <id> --org <org> --user-id <id> --confirm` — `PUT /project-user/<id>` `{status}` ([UNVERIFIED] shape for the CLI token — the result is verified by re-reading the user).
+- `c2c users set-role --ds <file|dir> --project <id> --org <org> --user-id <id> --role <name> --confirm` — role must be one the export plans, a built-in, or one a project user holds (`--role-ids <name=id>` supplies the id); an unknown role is refused before any request.
+
 ## Stop conditions
 
 - Any read-back mismatch (e.g. `embedded_auth:false` after enable).
 - `PUBLIC_SIGNUP_ERROR` on invite → do not turn public signup on to get around it; use `POST /project-user` / `Add_User` or the console.
-- A `+` in an invitee email → Add User rejects it (`Email Id cannot contain '+' character` [TESTED]); `c2c users` refuses it before any request. Ask for the plain address; never suggest a plus-alias.
+- A `+` in an invitee email → Add User rejects it (`Email Id cannot contain '+' character` [TESTED]); `c2c users` normalises the identity instead — the plain mailbox is invited and `migrate-data` rewrites `Added_User`/`Modified_User` to it (dot/plus variants fold to one invite; non-Google `+tag` delivery is [UNVERIFIED] — confirm the invitee got the mail).
 - `users invite` says a role has no id (GET /role → `401 OAUTH_SCOPE_MISMATCH` [TESTED]) → read `role_id` with MCP `List_All_Roles` (a string; copy it exactly) or the console, then re-run with `--role-ids 'App Administrator=<id>'`.
 - A preflight without ACAO after adding the domain.
 - The user has not confirmed the invite: everything after (smoke, parity through the UI) waits.

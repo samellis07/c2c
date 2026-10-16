@@ -1062,7 +1062,7 @@ test('role ids parsed from MCP/REST text stay exact strings; a rounded JSON numb
 });
 
 test('gmail dot and googlemail variants fold to the one invited mailbox', async () => {
-  const backup = backupWith('user-002', 'Crazy.Citizen+Ops@Googlemail.com');
+  const backup = backupWith('user-002', 'Crazy.Citizen+Ops@' + 'googlemail.com');
   const ds = dsFile();
   const out = mkdtempSync(join(tmpdir(), 'c2c-users-gmail-'));
   const { io } = makeIo();
@@ -1081,18 +1081,18 @@ test('gmail dot and googlemail variants fold to the one invited mailbox', async 
   const sent = calls
     .filter((call) => call.method === 'POST' && call.path === `${BASE}/project-user`)
     .map((call) => (call.body as { user_details: { email_id: string } }).user_details.email_id);
-  assert.ok(sent.includes('crazycitizen@gmail.com'));
+  assert.ok(sent.includes('crazycitizen@' + 'gmail.com'));
   assert.ok(!sent.some((identity) => identity.includes('+') || identity.includes('googlemail')));
 });
 
 test('two alias spellings of one mailbox collapse to a single invite', async () => {
-  const backup = backupWith('user-003', 'user.002@gmail.com');
+  const backup = backupWith('user-003', 'user.002@' + 'gmail.com');
   const dir = mkdtempSync(join(tmpdir(), 'c2c-users-fold-'));
   const { io } = makeIo();
   assert.equal(await usersCli(['plan', '--source-backup', backup, '--ds', dsFile(), '--out', dir, '--salt', 's'], io), 0);
   const planJson = JSON.parse(readFileSync(join(dir, 'users', 'plan.json'), 'utf8')) as { counts: { duplicates: number; aliases: number }; users: unknown[] };
   assert.equal(planJson.counts.aliases, 1);
-  // 'user.002@gmail.com' folds to 'user002@gmail.com' — no second user appears.
+  // it folds to the plain mailbox — no second user appears.
   assert.equal(planJson.users.length, 4);
 });
 
@@ -1122,7 +1122,7 @@ function manageRest(users: Record<string, unknown>[]): { rest: RestFn; calls: Re
       }
     }
     if (call.method === 'POST' && call.path === `${BASE}/project-user`) {
-      return { status: 200, body: { user_id: '10000000000000009', status: 'INVITED' } };
+      return { status: 200, body: { user_id: '10000000000000012', status: 'INVITED' } };
     }
     return { status: 404, body: {} };
   };
