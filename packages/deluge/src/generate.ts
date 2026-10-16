@@ -234,9 +234,10 @@ export interface GenerateOptions {
   /**
    * The generated UI stubs, supplied by the caller that builds the UI (the UI
    * package depends on this one, so its stub list arrives through the
-   * options). Each stub is one residual hole in migration-report.json.
+   * options). Each stub is one residual hole in migration-report.json. A
+   * function receives the generated files, for stubs that depend on them.
    */
-  uiTodos?: readonly UiStubTodo[];
+  uiTodos?: readonly UiStubTodo[] | ((files: readonly GeneratedFile[]) => readonly UiStubTodo[]);
   /**
    * Opt-in async on-success lane: emit the after-commit event-function module,
    * the dead-letter store and its sweep Job, and defer the live post-write
@@ -482,7 +483,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
   // residual is every distinct Deluge hole plus each generated UI stub the
   // caller supplies, the same accounting analyze and the migration report use.
   const fillLockEntries = options?.lock ? reportLock(app, options.lock).matched.length : 0;
-  const determinism = residualDeterminism(dedupeTodos(todos).length, options?.uiTodos?.length ?? 0, fillLockEntries);
+  const determinism = residualDeterminism(dedupeTodos(todos).length, uiStubCount(options?.uiTodos, files), fillLockEntries);
   put(
     'migration-report.json',
     JSON.stringify(
@@ -1898,6 +1899,12 @@ export function functionRowOptions(app: App, fn: FunctionDef): Pick<TranslateOpt
   if (!rowFields.includes('ID')) rowFields.push('ID');
   const form = formLink(fn.form).name;
   return { rowNames: [row, ...params.filter((n) => n !== row)], rowFields, ...(form ? { rowAlias: { name: form, row } } : {}) };
+}
+
+/** The UI stub count: a list as given, or resolved from the generated files. */
+function uiStubCount(uiTodos: GenerateOptions['uiTodos'], files: readonly GeneratedFile[]): number {
+  if (!uiTodos) return 0;
+  return (typeof uiTodos === 'function' ? uiTodos(files) : uiTodos).length;
 }
 
 /** How the function's rows are bound: none, `rec` (for each record) or `recs` (collection of records). */

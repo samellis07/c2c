@@ -16,14 +16,9 @@ App: Library_System_Application
 
 ## TODO counts
 
-6
+0
 
-- 1 Custom action "Group By  Member." is not migrated; its button is turned off.
-- 1 Custom action "Mark as Featured" is not migrated; its button is turned off.
-- 1 Custom action "Mark as Lost" is not migrated; its button is turned off.
-- 1 Custom action "Overdue Books Report" is not migrated; its button is turned off.
-- 1 Custom action "Overdue Books" is not migrated; its button is turned off.
-- 1 Custom action "Publication year" is not migrated; its button is turned off.
+- none
 
 ## Manual steps
 
