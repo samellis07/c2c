@@ -46,7 +46,7 @@ These rules apply to every host (Claude Code, OpenAI Codex, Cursor) and every c2
 |---|---|---|---|---|
 | `doctor/preflight` | `commands/doctor.md` | `skills/c2c-preflight/SKILL.md` | `doctor` | none |
 | `analyze/plan` | `commands/analyze.md` | `skills/c2c-analyze-and-precheck/SKILL.md` | `analyze`, `precheck` | none |
-| `analyze/plan` | `commands/plan.md` | `skills/c2c-migrate/SKILL.md` | `plan` | none |
+| `analyze/plan` | `commands/plan.md` | `skills/c2c-migrate/SKILL.md` | `plan`, `report` | none |
 | `analyze/plan` | none | `skills/c2c-edit/SKILL.md` | `edit` | none |
 | `provision/deploy` | `commands/migrate.md` | `skills/c2c-migrate/SKILL.md` | `provision`, `deploy` | Start services once, Accept the admin invite, Sign in once, Verify the mail sender (only if your app sends mail) |
 | `provision/deploy` | none | `skills/c2c-provision-and-deploy/SKILL.md` | `provision`, `deploy` | Start services once |

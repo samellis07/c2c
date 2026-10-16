@@ -29,7 +29,8 @@ Creator lets latent faults into an app and its runtime tolerates them, but whole
    ```
    Report: feature verdicts, Deluge statements (translated / shimmed / todo), estimated tables, functions, pages, score, and **deterministic** flag.
 4. **Do not trust the score alone.** A high readiness score does not prove the app can save a record [TESTED]: the score does not see deploy/runtime limits. Always continue to the plan (budgets) before saying "ready".
-5. **Present** the result as three lists: *must fix in Creator first* (BLOCKING), *c2c will convert with a TODO* (with the TODO count), *Catalyst limits to decide on in the plan*.
+5. After the plan, generate the business report with `c2c report <app.ds> --out c2c-out/<app> --dc <dc>`; give the user `migration-report.md`, not the internal JSON, when explaining what converted and what needs a person.
+6. **Present** the result as three lists: *must fix in Creator first* (BLOCKING), *c2c will convert with a TODO* (with the TODO count), *Catalyst limits to decide on in the plan*.
 
 ## Latent-fault rules (BLOCKING unless noted)
 

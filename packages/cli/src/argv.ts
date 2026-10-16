@@ -223,6 +223,19 @@ export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
       '--json': 'bool',
     },
   },
+  report: {
+    positional: 'required',
+    flags: {
+      '--allow-empty': 'bool',
+      '--dc': 'value',
+      '--json': 'bool',
+      '--mail': 'bool',
+      '--out': 'value',
+      '--source-backup': 'value',
+      '--source-csv': 'value',
+      '--source-json': 'value',
+    },
+  },
   'rollback-export': {
     positional: 'none',
     flags: {
