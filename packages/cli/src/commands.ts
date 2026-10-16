@@ -2,7 +2,7 @@
 export const DISPATCH_COMMANDS = [
   'doctor', 'deploy', 'edit', 'plan', 'provision', 'users', 'smoke', 'sync-delta',
   'rollback-export', 'verify', 'status', 'cutover-checklist', 'proof', 'fill-todos',
-  'migrate-data', 'analyze', 'precheck', 'migration-report', 'parse', 'corpus',
+  'migrate-data', 'analyze', 'precheck', 'report', 'migration-report', 'parse', 'corpus',
   'features', 'schema', 'iac-drift', 'schema-corpus', 'seed', 'deluge', 'ui',
   'score-ui', 'ui-react', 'auth', 'ui-corpus', '--verify-vendor',
 ] as const;

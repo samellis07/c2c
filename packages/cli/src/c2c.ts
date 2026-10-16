@@ -185,6 +185,7 @@ import { DISPATCH_COMMANDS } from './commands.js';
 const PRECHECK_EXIT = { clean: 0, blockers: 1, missing: 3, unparsable: 4 } as const;
 import { analyzeQuality, qualityAsText } from './analyze-quality.js';
 import { migrationReportAsJson, migrationReportAsText, migrationReportForDir } from './migration-report.js';
+import { businessReportCli } from './business-report.js';
 import { readLock } from '../../deluge/src/index.js';
 import { bundleFromDir, bundleFromFiles, scoreFileOf, scoreUi, uiScoreAsText } from '../../ui-score/src/score.js';
 
@@ -222,6 +223,7 @@ const USAGE =
       '       c2c smoke <file|dir> --result <file|-> [--project <id>] [--url <app-url>] [--max-age <minutes>] [--report <file>]\n' +
       '       c2c analyze <file|dir> [--json] [--lock <file>] [--quality]\n' +
       '       c2c precheck <file.ds> [--json]\n' +
+      '       c2c report <file|dir> [--dc <dc>] [--out <dir>] [--json] [--mail] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--allow-empty]\n' +
       '       c2c doctor [--app <file.ds|dir>] [--dc <dc>] [--org <id>] [--project <id>] [--json] [--local] [--quiet]\n' +
       '       c2c doctor --mcp-begin [--json]\n' +
       '       c2c doctor --mcp-observed - [--dc <dc>] [--org <id>] [--project <id>]\n' +
@@ -707,6 +709,19 @@ function main(argv: string[]): number {
     const report = precheck(ir, source);
     process.stdout.write(rest.includes('--json') ? stampedJson(precheckAsJson(report)) : `${precheckAsText(report)}\n`);
     return report.counts.blocker > 0 ? PRECHECK_EXIT.blockers : PRECHECK_EXIT.clean;
+  }
+  if (cmd === 'report') {
+    businessReportCli(restAll, defaultIo()).then(
+      (code) => {
+        process.exitCode = code;
+      },
+      (err: unknown) => {
+        const message = err instanceof Error ? err.message : 'report failed';
+        process.stderr.write(`c2c: ${message}\n`);
+        process.exitCode = 1;
+      },
+    );
+    return 0;
   }
   if (cmd === 'migration-report') {
     const st = statSync(target, { throwIfNoEntry: false });

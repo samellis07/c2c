@@ -6,4 +6,5 @@ Load `c2c-migrate`, then the sub-skills the plan touches (`c2c-schema-and-data`,
 
 1. Choose a stable app directory under `c2c-out/`, then run `"${CLAUDE_PLUGIN_ROOT}/bin/c2c" plan $ARGUMENTS --out c2c-out/<app-link> --dc <dc>`. This is an offline dry run; it needs no project id, org, or `--confirm`. The data centre can instead come from `"dc"` in `c2c-deploy.json`; omit `--dc` only when that file already sets it.
 2. Walk the user through `c2c-out/<app-link>/plan.md` section by section. Resolve every budget decision (unique fields over the cap, side tables, async workflows, degraded views) and record them in `decisions.json`; re-plan until budgets pass.
-3. State the doctor status in the summary. If doctor is red, say clearly that nothing past this plan can run until it is green.
+3. Run `"${CLAUDE_PLUGIN_ROOT}/bin/c2c" report $ARGUMENTS --out c2c-out/<app-link> --dc <dc>` and give the user `migration-report.md`: the plain-language list of what converted, the guided human steps, unsupported items with workarounds, data checks and the go-live checklist.
+4. State the doctor status in the summary. If doctor is red, say clearly that nothing past this plan can run until it is green.

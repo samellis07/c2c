@@ -30,6 +30,7 @@ const ROOTS: Record<string, string[]> = {
   seed: ['seedArgsProblem'],
   doctor: ['doctorCli'],
   precheck: ['precheck'],
+  report: ['businessReportCli'],
   status: ['statusCli'],
   verify: ['verifyCli'],
   'rollback-export': ['doctorGateForArgs', 'rollbackExportCli'],

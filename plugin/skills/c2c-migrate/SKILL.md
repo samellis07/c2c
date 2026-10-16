@@ -15,7 +15,7 @@ This is the routing layer and the order of work. Do not do a step from memory: l
 |---|---|---|---|---|
 | 0 | **Doctor gate** | `c2c-preflight` | `c2c doctor` + MCP checks | `c2c-out/.c2c/doctor.json` green for this DC/org/project |
 | 1 | Precheck + analyze | `c2c-analyze-and-precheck` | `c2c precheck`, `c2c analyze` | 0 BLOCKING findings, or the user chose to fix them in Creator first |
-| 2 | Plan (offline) | `c2c-schema-and-data`, `c2c-logic`, `c2c-ui`, `c2c-auth-and-access`, `c2c-integrations` as the plan touches them | `c2c plan` | Plan reviewed by the user; budgets pass; TODO list accepted |
+| 2 | Plan + business report (offline) | `c2c-schema-and-data`, `c2c-logic`, `c2c-ui`, `c2c-auth-and-access`, `c2c-integrations` as the plan touches them | `c2c plan`, `c2c report` | Plan reviewed by the user; budgets pass; TODO list accepted; `migration-report.md` reviewed |
 | 3 | Provision (infra) | `c2c-provision-and-deploy` | `c2c provision` + MCP tools + guided console steps | Every item `done` with a read-back |
 | 4 | Deploy (code) | `c2c-provision-and-deploy` | `c2c deploy --confirm --function-env …` | Functions + Slate live; App URL recorded; 401 probe passes |
 | 5 | Auth + access | `c2c-auth-and-access` | CLI + MCP + guided | Auth config, authorized domain, roles/permissions, first admin read back |
