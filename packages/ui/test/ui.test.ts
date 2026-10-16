@@ -2013,7 +2013,7 @@ test('a currency record filter on the parent is exact in the lookup endpoint and
       const shown = await invoke(report.default, { ...small, body: { op: 'query' } });
       assert.equal(shown.status, 200);
       const rows = shown.body.rows as Record<string, unknown>[];
-      assert.deepEqual(rows.map((row) => row.Vendor), ['Acme', '1002', '1002']);
+      assert.deepEqual(rows.map((row) => row.Vendor), ['Acme', '', ''], 'an out-of-scope parent shows an empty cell, never its ROWID');
       assert.ok(!JSON.stringify(shown.body).includes('Beta'), 'an out-of-filter parent display leaked');
       const parents = log.filter((call) => call.form === 'Vendor');
       for (const call of parents) assert.doesNotMatch(call.where, /\bCredit_Limit </, `raw varchar compared: ${call.where}`);
@@ -2042,7 +2042,7 @@ test('lookup and report display scopes hold per profile, one parent query per co
 
       log.length = 0;
       const shown = await invoke(report.default, { ...staff, body: { op: 'query' } });
-      assert.deepEqual((shown.body.rows as Record<string, unknown>[]).map((row) => row.Vendor), ['Acme', '1002', '1002']);
+      assert.deepEqual((shown.body.rows as Record<string, unknown>[]).map((row) => row.Vendor), ['Acme', '', ''], 'an out-of-scope parent shows an empty cell, never its ROWID');
       assert.equal(log.filter((call) => call.form === 'Vendor').length, 1);
       log.length = 0;
       await invoke(report.default, { user: { profile: 'Stranger' }, body: { op: 'query' } });
@@ -2230,7 +2230,7 @@ ${field('Secret', 'text')}
 \t}`;
 }
 
-test('a hidden parent display stays a ROWID in the report', async () => {
+test('a hidden parent display shows an empty cell, never the ROWID, in the report', async () => {
   const built = await loadBuilt(hiddenParentShopBody());
   try {
     const staff = { user: { profile: 'Staff' } };
@@ -2247,7 +2247,7 @@ test('a hidden parent display stays a ROWID in the report', async () => {
         const shown = await invoke(report.default, { ...staff, body: { op: 'query' } });
         assert.equal(shown.status, 200);
         const rows = shown.body.rows as Record<string, unknown>[];
-        assert.deepEqual(rows.map((row) => row.Vendor), ['1001']);
+        assert.deepEqual(rows.map((row) => row.Vendor), ['']);
         assert.ok(!JSON.stringify(shown.body).includes('Acme'), 'hidden parent display leaked into the report');
       },
     );
@@ -2364,7 +2364,7 @@ ${field('Vendor', 'picklist', '\t\t\tvalues = Vendor.Secret')}
 \t}`;
 }
 
-test('a profile-hidden display stays a ROWID, a visible one resolves', async () => {
+test('a profile-hidden display shows an empty cell, never the ROWID, a visible one resolves', async () => {
   const built = await loadBuilt(secretDisplayShopBody());
   try {
     const report = await import(pathToFileURL(join(built.dir, 'functions/reports/all-orders.mjs')).href);
@@ -2378,7 +2378,7 @@ test('a profile-hidden display stays a ROWID, a visible one resolves', async () 
       async () => {
         const staff = await invoke(report.default, { user: { profile: 'Staff' }, body: { op: 'query' } });
         assert.equal(staff.status, 200);
-        assert.deepEqual((staff.body.rows as Record<string, unknown>[]).map((row) => row.Vendor), ['1001']);
+        assert.deepEqual((staff.body.rows as Record<string, unknown>[]).map((row) => row.Vendor), ['']);
         assert.ok(!JSON.stringify(staff.body).includes('s-acme'), 'profile-hidden display leaked into the report');
         const boss = await invoke(report.default, { user: { profile: 'Boss' }, body: { op: 'query' } });
         assert.equal(boss.status, 200);

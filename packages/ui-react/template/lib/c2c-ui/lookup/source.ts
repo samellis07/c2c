@@ -6,7 +6,9 @@
  * the display value. Pages are 300 rows (the measured ZCQL row cap), read only
  * when the user opens the control or asks for more, so a large parent table is
  * never read in full. Search filters the pages already read; when it finds
- * nothing and more pages exist, the control offers the next page.
+ * nothing and more pages exist, the endpoint is asked for the records whose
+ * display matches (?q=, server-side and scoped to what the caller may read),
+ * and the control still offers the next page.
  *
  * One source per endpoint and API: every lookup on the screen that points at
  * the same parent (a subform column on ten rows) shares its pages.
@@ -14,6 +16,8 @@
 import type { Api, ApiReply } from '../runtime/api.js';
 
 export const LOOKUP_PAGE_SIZE = 300;
+/** The longest search text the lookup endpoint accepts. */
+export const LOOKUP_SEARCH_MAX = 100;
 
 export interface LookupOption {
   value: string;
@@ -27,7 +31,15 @@ export function lookupPageUrl(endpoint: string, page: number, pageSize = LOOKUP_
   return `${endpoint}${endpoint.includes('?') ? '&' : '?'}page=${page}&pageSize=${pageSize}`;
 }
 
-/** Options from one reply. Rows without a ROWID (by the lookupIds rule) are not options; a row with no display value shows its ROWID. */
+/** The URL of the first page of options whose display matches `query`. */
+export function lookupSearchUrl(endpoint: string, query: string, pageSize = LOOKUP_PAGE_SIZE): string {
+  return `${lookupPageUrl(endpoint, 0, pageSize)}&q=${encodeURIComponent(query)}`;
+}
+
+/** The option text of a record with no display value: neutral, never its ROWID. */
+export const LOOKUP_BLANK_LABEL = '(blank)';
+
+/** Options from one reply. Rows without a ROWID (by the lookupIds rule) are not options; a row with no display value shows LOOKUP_BLANK_LABEL. */
 export function lookupOptions(body: unknown): LookupOption[] {
   const reply = body && typeof body === 'object' ? (body as { rows?: unknown; field?: unknown }) : {};
   const rows = Array.isArray(reply.rows) ? reply.rows : [];
@@ -38,7 +50,7 @@ export function lookupOptions(body: unknown): LookupOption[] {
     const id = rowIdText((row as Record<string, unknown>).ROWID);
     if (id === undefined) continue;
     const shown = field ? (row as Record<string, unknown>)[field] : undefined;
-    const label = shown === null || shown === undefined || shown === '' ? id : String(shown);
+    const label = shown === null || shown === undefined || shown === '' ? LOOKUP_BLANK_LABEL : String(shown);
     out.push({ value: id, label });
   }
   return out;
@@ -112,6 +124,7 @@ export class LookupSource {
   private state: LookupState = 'idle';
   private status: number | null = null;
   private pending: Promise<void> | undefined;
+  private searched = new Set<string>();
   private listeners = new Set<() => void>();
   private snap: LookupSnapshot = { state: 'idle', options: [], done: false, pages: 0, status: null };
 
@@ -177,6 +190,33 @@ export class LookupSource {
         this.emit();
       });
     return this.pending;
+  }
+
+  /**
+   * Ask the endpoint for the records whose display matches `query` when the
+   * pages read hold no match and more pages exist. Found records join the
+   * options (no duplicates); the paging is unchanged. Each text is asked once.
+   */
+  search(query: string): Promise<void> {
+    const text = query.trim();
+    const key = text.toLocaleLowerCase();
+    if (!text || text.length > LOOKUP_SEARCH_MAX || this.done || this.searched.has(key)) return Promise.resolve();
+    if (filterLookupOptions(this.options, text).length) return Promise.resolve();
+    this.searched.add(key);
+    return this.get(lookupSearchUrl(this.endpoint, text, this.pageSize)).then(
+      (reply) => {
+        if (!reply.ok) return;
+        let added = false;
+        for (const option of lookupOptions(reply.body)) {
+          if (this.seen.has(option.value)) continue;
+          this.seen.add(option.value);
+          this.options.push(option);
+          added = true;
+        }
+        if (added) this.emit();
+      },
+      () => undefined,
+    );
   }
 
   /** Try again after a failed page. */
