@@ -1728,7 +1728,10 @@ function planWriteReplay(value: Fx, scope: Scope): ReplayWrite[] | null {
       if (!w.replayable) return false;
       seenW.add(w);
       if (!writesFor(writeStateReads(w), w.seq)) return false;
-      for (const b of w.deps.values()) if (b !== undefined && !walkB(b)) return false;
+      for (const name of [...w.deps.keys()].sort()) {
+        const b = w.deps.get(name);
+        if (b !== undefined && !walkB(b)) return false;
+      }
       for (const g of w.guards) if (!walkB(g.binding)) return false;
       planned.push(w);
     }
