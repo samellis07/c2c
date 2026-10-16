@@ -443,6 +443,75 @@ test('ir v1: a pre-success openUrl inside actions is kept as the event script', 
   assert.match(direct.deluge?.text ?? '', /openURL\("#Report:Active","new window"\)/);
 });
 
+test('ir v1: actions braces holding `on X (...)` / `custom deluge script (...)` handlers stay structured', () => {
+  const { app: a } = load(
+    app(`\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tDirect as "Direct"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Item
+\t\t\t\ton success
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\t\topenURL("#Form:Item","new window");
+\t\t\t\t\t\tcustom deluge script
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\topenUrl("#Script:page.refresh","same window");
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`),
+  );
+  assert.deepEqual(
+    a.workflows.map((w) => [w.event, w.deluge?.text.trim()]),
+    [
+      ['on success', 'openURL("#Form:Item","new window");'],
+      ['on success', 'openUrl("#Script:page.refresh","same window");'],
+    ],
+  );
+});
+
+test('ir v1: an `on click` handler inside a gesture event `actions` block is split out', () => {
+  const { app: a } = load(
+    app(`\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tDirect as "Direct"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Item
+\t\t\t\tbutton = Add
+\t\t\t\ton click
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\t\ton click
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\trow = Item[ID == input.ID];
+\t\t\t\t\t\t)
+\t\t\t\t\t\topenURL("#Script:page.close","new window");
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`),
+  );
+  assert.deepEqual(
+    a.workflows.map((w) => [w.event, w.deluge?.text.trim()]),
+    [
+      ['on click', 'row = Item[ID == input.ID];'],
+      ['on click', 'openURL("#Script:page.close","new window");'],
+    ],
+  );
+});
+
 test('ir v1: form settings blocks with key : value pairs (payment)', () => {
   const { app: a, preserved } = load(
     app(`\tform Order

@@ -6791,3 +6791,138 @@ test('a workflow aio module embeds the form field-rule denials and passes them t
   assert.match(server.source, /export const fieldRuleDenied = \[\{"field":"Secret","action":"hide","ops":\["insert"\]\}\];/);
   assert.match(server.source, /authorizeWrite\(access, principal, formName, record, \{ readonlyFields, fieldNames, fields, ruleDenied: fieldRuleDenied \}/);
 });
+
+test('handler wrappers inside a button or success actions block generate their scripts, not a task TODO', () => {
+  const ir = snippet(`\tform Item
+\t{
+\t\tFine
+\t\t(
+\t\t\ttype = number
+\t\t)
+\t}
+\tworkflow
+\t{
+\tform
+\t{
+\t\tAdd_Click as "Add click"
+\t\t{
+\t\t\ttype = form
+\t\t\tform = Item
+\t\t\tbutton = Add
+\t\t\ton click
+\t\t\t{
+\t\t\t\tactions
+\t\t\t\t{
+\t\t\t\ton click
+\t\t\t\t(
+\t\t\t\t\tinput.Fine = 1;
+\t\t\t\t)
+\t\t\t\t\topenURL("#Script:page.close","new window");
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t\tAfter_Add as "After add"
+\t\t{
+\t\t\ttype = form
+\t\t\tform = Item
+\t\t\trecord event = on add
+\t\t\ton success
+\t\t\t{
+\t\t\t\tactions
+\t\t\t\t{
+\t\t\t\t\topenURL("#Form:Item","new window");
+\t\t\t\t\tcustom deluge script
+\t\t\t\t\t(
+\t\t\t\t\t\topenUrl("#Script:page.refresh","same window");
+\t\t\t\t\t)
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}
+\t}`);
+  const generated = generate(ir);
+  assert.deepEqual(generated.todos, []);
+  const sources = generated.files.map((file) => file.source).join('\n');
+  assert.doesNotMatch(sources, /shim\.todo\(ctx, "task:(on|custom)"/);
+  const click = generated.files.find((file) => file.path === 'functions/aio/item/on-click.mjs');
+  assert.ok(click);
+  assert.match(stripComments(click.source), /shim\.input\.set\(ctx, \["Fine"\], 1\)/);
+  const clientOpens = generated.files
+    .filter((file) => file.path.startsWith('client/handlers/item/'))
+    .flatMap((file) => [...file.source.matchAll(/op: "openUrl", args: \["([^"]+)"/g)].map((m) => m[1]))
+    .sort();
+  assert.deepEqual(clientOpens, ['#Form:Item', '#Script:page.close', '#Script:page.refresh']);
+});
+
+test('generated prefetch handler for app.users and app.userEmailIds refuses low-privilege callers and admits admin', async () => {
+  const script = [
+    'u = app.users();',
+    'e = app.userEmailIds();',
+    'if (u.length > 0 && e.length > 0) {',
+    '  alert "found";',
+    '}',
+  ].join('\n');
+  const employeeProfile = {
+    name: 'Employee',
+    type: 'Users_Permissions',
+    properties: [],
+    modules: [],
+    span: Z,
+  };
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Status')])],
+      profiles: [ADMIN, employeeProfile],
+      workflows: [workflow({ name: 'on load', form: 'Orders', event: 'on load', deluge: { text: script, span: Z } })],
+    }),
+  );
+  const prefetch = g.files.find((f) => f.path.endsWith('-prefetch.mjs'));
+  assert.ok(prefetch, 'prefetch module generated');
+  const mod = (await loadModule(prefetch.source, 'orders-prefetch.mjs')) as Record<string, (req: unknown, res: unknown) => unknown>;
+  assert.ok(typeof mod.default === 'function', 'handler is default export');
+
+  // Low-privilege caller (Employee) -> 403 refusal
+  const lowPriv = await invoke(mod.default, {
+    method: 'POST',
+    user: { profile: 'Employee', email: 'emp@example.test' },
+    body: { record: {} },
+  });
+  assert.equal(lowPriv.status, 403);
+  assert.match(String(lowPriv.body.error), /record access: profile Employee cannot list users/);
+  // No emails or IDs leaked in error text
+  assert.equal(JSON.stringify(lowPriv.body).includes('example.test'), false);
+
+  for (const profile of ['Non-Admin', 'Admin Assistant', 'Developer Support']) {
+    const lookalike = await invoke(mod.default, {
+      method: 'POST', user: { profile }, body: { record: {} },
+    });
+    assert.equal(lookalike.status, 403, `${profile} must not list users`);
+  }
+
+  // Unauthenticated caller -> 401
+  const unauth = await invoke(mod.default, {
+    method: 'POST',
+    body: { record: {} },
+  });
+  assert.equal(unauth.status, 401);
+
+  // Administrator caller with users -> 200 and slot is true
+  const admin = await invoke(mod.default, {
+    method: 'POST',
+    user: { profile: 'Administrator', email: 'admin@example.test' },
+    appUsers: [{ user_id: '100', email: 'admin@example.test' }],
+    body: { record: {} },
+  });
+  assert.equal(admin.status, 200);
+  assert.deepEqual(admin.body.slots, { c0: true });
+
+  // Administrator caller without users -> 200 and slot is false
+  const adminEmpty = await invoke(mod.default, {
+    method: 'POST',
+    user: { profile: 'Administrator', email: 'admin@example.test' },
+    appUsers: [],
+    body: { record: {} },
+  });
+  assert.equal(adminEmpty.status, 200);
+  assert.deepEqual(adminEmpty.body.slots, { c0: false });
+});
