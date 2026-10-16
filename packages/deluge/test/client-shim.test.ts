@@ -79,3 +79,29 @@ test('the form handler emitter counts a client gap; a server-only script does no
   const ok = generate({ ...emptyApp('empty'), name: 'Demo_App', workflows: [{ ...handler, deluge: { text: 'l = {"a"};\nif (input.Name not in l) { alert "missing"; }', span } }] });
   assert.deepEqual(ok.todos, []);
 });
+
+test('a server-only for each over a form criteria is not a client gap', () => {
+  // The field write needs string.trim, which the browser shim does not
+  // implement, so a unit that ships a client half still counts that one gap.
+  // The form fetch is in the same script: serverOnly keeps its server loop and
+  // counts nothing, because that client half is thrown away.
+  const src = `input.Name = input.Name.trim();
+for each rec in Orders[ID != 0] sort by Added_Time desc
+{
+  n = rec.Name;
+  alert n;
+}`;
+  const opts = { formNames: ['Orders'], formFields: { Orders: ['ID', 'Added_Time', 'Name'] }, inputFields: ['Name'] };
+  const only = translate(src, { ...opts, serverOnly: true });
+  assert.equal(only.clientGaps.length, 0);
+  assert.equal(only.client, '');
+  assert.match(only.server, /for \(var /);
+  assert.match(only.server, /shim\.datastore\.rows/);
+
+  const open = translate(src, opts);
+  assert.equal(open.clientGaps.length, 1);
+  assert.equal(open.clientGaps[0]!.todo.construct, 'client-shim-unsupported');
+  assert.equal(src.slice(open.clientGaps[0]!.todo.start, open.clientGaps[0]!.todo.end), 'input.Name = input.Name.trim()');
+  assert.match(open.client, /for \(var /);
+  assert.doesNotMatch(open.client, /shim\.datastore/);
+});

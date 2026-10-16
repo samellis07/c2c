@@ -2595,6 +2595,8 @@ function stmts(list: Stmt[], scope: Scope, stats: TranslateStats, todos: TodoIte
  * later client condition on them is prefetched, or is its own counted todo.
  * A dropped simple statement with no client effect beyond those local
  * values (no action, no field write, no round trip) is therefore not a gap.
+ * A server-only unit (`scope.noClient`) throws the whole client half away, so
+ * a statement counted here would be a gap for code that never ships.
  */
 const COMPOUND_KINDS = new Set<Stmt['kind']>(['if', 'forEach', 'while', 'try']);
 /** Client code with an effect outside its own locals: a queued action, a field or row write, a server round trip, an early return. */
@@ -2611,6 +2613,11 @@ function gateClientShims(s: Stmt, o: Out, scope: Scope, stats: TranslateStats, b
   if (root) written.add(root);
   for (const name of [...written].sort()) if (scope.local.has(name)) scope.serverOnly.add(name);
   if (!COMPOUND_KINDS.has(s.kind) && !CLIENT_EFFECT.test(dropped)) return;
+  // The client half is discarded at the end of a server-only unit. Counting
+  // the gap would todo a `for each` form fetch (and any other dropped client
+  // statement) that no browser runs. When the client half ships, a statement
+  // whose client code still needs an unimplemented shim is still a gap.
+  if (scope.noClient) return;
   const bucket = stats.todo > before.todo ? 'todo' : stats.shimmed > before.shimmed ? 'shimmed' : stats.translated > before.translated ? 'translated' : 'todo';
   scope.clientGaps.push({ todo: { construct: 'client-shim-unsupported', start: s.span.start, end: s.span.end }, bucket });
 }
