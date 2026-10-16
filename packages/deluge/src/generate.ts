@@ -253,11 +253,10 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
   for (const fn of app.functions) emitFunction(app, fn, put, stats, todos, alertDiagnostics, thisappEntries, publishers.get(fn.name), admins, warnings, options?.schema);
   const callAccess = app.profiles.length ? accessPolicyFor(app) : undefined;
   for (const fn of app.functions) {
-    const key = fn.name.toLowerCase();
-    const body = clientCalls.bodies.get(key);
-    if (!calledFunctions.has(key) || body === undefined) continue;
+    const body = clientCalls.bodies.get(fn.name);
+    if (!calledFunctions.has(fn.name.toLowerCase()) || body === undefined) continue;
     const name = slug(fn.name || 'function');
-    const readForms = [...clientCalls.reads.get(key)!];
+    const readForms = [...clientCalls.reads.get(fn.name)!];
     // A caller-scoped read sees only the rows the caller's profile grant
     // allows. When a grant is owner- or criteria-scoped the callee's counts
     // and lookups cover fewer rows than Creator's, so a condition can decide
@@ -1942,11 +1941,11 @@ export function functionScriptOptions(app: App, fn: FunctionDef, slotStart: numb
 }
 
 interface ClientCallCatalog {
-  /** Dotted callee names proved read-only, lower-cased for lookup. */
+  /** Dotted callee names proved read-only, keyed by the exact declared name. */
   names: Set<string>;
-  /** Emitted server body for each read-only function with a generated module. */
+  /** Emitted server body for each read-only function, keyed by the exact declared name. */
   bodies: Map<string, string>;
-  /** Transitive form reads for each read-only function. */
+  /** Transitive form reads for each read-only function, keyed by the exact declared name. */
   reads: Map<string, Set<string>>;
 }
 
@@ -1961,6 +1960,31 @@ interface ClientCallCatalog {
 function clientCallFunctions(app: App): ClientCallCatalog {
   const bodies = new Map<string, string>();
   const forms = new Map<string, Set<string>>();
+  // The runtime registry (functions/thisapp.mjs) dispatches exact-name-first,
+  // then the first case-folded declaration. A name whose case-folded form is
+  // declared more than once cannot be pinned to one body at a call site, so it
+  // is refused outright: never proved read-only, never given a call endpoint.
+  // The catalog is keyed by the exact declared name so no lookup ever lets a
+  // last-wins overwrite decide which body a call reaches.
+  const foldedCount = new Map<string, number>();
+  for (const fn of app.functions) {
+    const folded = fn.name.toLowerCase();
+    foldedCount.set(folded, (foldedCount.get(folded) ?? 0) + 1);
+  }
+  // Call-path resolution mirroring the generated registry: the first
+  // declaration of each exact name is kept (thisappModule dedupes), then a
+  // lookup hits the exact key or the first declaration folding to it.
+  const seen = new Set<string>();
+  const dispatch = new Map<string, FunctionDef>();
+  for (const fn of app.functions) {
+    if (seen.has(fn.name)) continue;
+    seen.add(fn.name);
+    dispatch.set(fn.name, fn);
+    const folded = fn.name.toLowerCase();
+    if (!dispatch.has(folded)) dispatch.set(folded, fn);
+  }
+  const dispatchTarget = (path: readonly string[]): FunctionDef | undefined =>
+    dispatch.get(path.join('.')) ?? dispatch.get(path.join('.').toLowerCase());
   for (const fn of app.functions) {
     let slot = 0;
     const server = fn.deluge
@@ -1976,7 +2000,8 @@ function clientCallFunctions(app: App): ClientCallCatalog {
     // A write into a parameter list or map is visible to the Deluge caller;
     // a client call runs on deserialized copies and would hide it.
     if (mutatesParameters(fn.deluge.map((d) => d.text), fnSignatureParams(fn.signature))) continue;
-    const key = fn.name.toLowerCase();
+    if ((foldedCount.get(fn.name.toLowerCase()) ?? 0) > 1) continue;
+    const key = fn.name;
     const reads = emittedReadForms(server);
     if (reads === null) continue;
     const own = new Set(reads);
@@ -1990,10 +2015,10 @@ function clientCallFunctions(app: App): ClientCallCatalog {
     let changed = false;
     for (const [key, body] of bodies) {
       if (names.has(key)) continue;
-      if (!emittedReadOnly(body, (path) => names.has(path.join('.').toLowerCase()))) continue;
+      if (!emittedReadOnly(body, (path) => names.has(dispatchTarget(path)?.name ?? ''))) continue;
       const all = new Set(forms.get(key));
       for (const path of emittedThisappCalls(body) ?? []) {
-        for (const form of reads.get(path.join('.').toLowerCase()) ?? []) all.add(form);
+        for (const form of reads.get(dispatchTarget(path)?.name ?? '') ?? []) all.add(form);
       }
       names.add(key);
       reads.set(key, all);
@@ -4860,6 +4885,17 @@ export default async function handler(req, res) {
   }
   const deploy = deployConfig();
   const live = deploy.mode === "live";
+  // Dispatch must reach the declared name this endpoint was proved for: the
+  // same exact-then-folded lookup the runtime performs, required to land on
+  // the exact registry key.
+  const callName = ${pathArgs}.join(".");
+  const resolvedKey = functions[callName] !== undefined
+    ? callName
+    : Object.keys(functions).find((key) => key.toLowerCase() === callName.toLowerCase());
+  if (resolvedKey !== callName) {
+    send(res, 403, { ok: false, error: "client call: target did not resolve to its declared name" });
+    return;
+  }
   try {
     for (const form of readForms) authorizeRead(access, principal, form, { op: "true" });
     const datastore = live && ${needsRows ? 'true' : 'false'} ? await liveDatastore() : null;
