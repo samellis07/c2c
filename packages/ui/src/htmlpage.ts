@@ -592,13 +592,14 @@ function embeddedComponents(template: string, app: App): { template: string; com
     const attrs = componentAttributes(tag);
     const componentAttr = attrs?.get('elname');
     if (!attrs || !componentAttr || componentAttr.toLowerCase() !== 'zc-component') return tag;
-    const linkEntry = [...attrs.entries()].find(([key]) => ZC_LINK.test(key));
+    const attrKeys = [...attrs.keys()].sort();
+    const linkEntry = [...attrs.entries()].sort().find(([key]) => ZC_LINK.test(key));
     const linkKind = linkEntry?.[0].replace(/linkname$/i, '').toLowerCase() ?? '';
     const kind = linkKind === 'view' || linkKind === 'report' ? 'report' : linkKind;
     const name = linkEntry?.[1] ?? '';
     const known = SAFE_COMPONENT_NAME.test(name) && (kind === 'form' ? app.forms.some((form) => form.name === name) : kind === 'report' ? app.reports.some((report) => report.name === name) : false);
-    const hostile = [...attrs.keys()].some((key) => /^on/i.test(key)) || [...attrs.values()].some(hostileUrlValue);
-    if (known && !hostile && ![...attrs.keys()].some((key) => ZC_PARAMS.test(key))) {
+    const hostile = attrKeys.some((key) => /^on/i.test(key)) || [...attrs.values()].sort().some(hostileUrlValue);
+    if (known && !hostile && !attrKeys.some((key) => ZC_PARAMS.test(key))) {
       const component = { kind: kind as 'form' | 'report', name };
       components.push(component);
       return tag.replace(/>$/, ` data-zml="component-${component.kind}:${component.name}">`);

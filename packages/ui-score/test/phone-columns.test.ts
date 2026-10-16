@@ -121,7 +121,9 @@ test('the painted row keeps the desktop cells first and orders the card by the p
   };
   const report = buildUi(app).model.reports.find((item) => item.name === 'Staff_Details');
   const html = mod.renderReportRows(report, [{ ROWID: '1', Name: 'Ann', Code: 'C1', City: 'Springfield', Phone: '9', Email: 'a@x', Branch: 'B', Notes: 'N' }]);
-  const cells = Array.from(html.matchAll(/<td([^>]*)>/g)).map((m) => {
+  const cells = Array.from(html.matchAll(/<td([^>]*)>/g))
+    .filter((m) => !/data-bulk-select-cell/.test(m[1]!))
+    .map((m) => {
     const attr = (name: string) => new RegExp(`${name}="([^"]*)"`).exec(m[1]!)?.[1];
     return [attr('data-th'), attr('data-phone') ?? null, /data-phone-only/.test(m[1]!)];
   });
