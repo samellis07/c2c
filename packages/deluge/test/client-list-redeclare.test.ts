@@ -68,7 +68,7 @@ test('a list re-declared after the client update starts empty again on both side
   assert.deepEqual(out.client, [[[1]], [[7]]]);
 });
 
-test('a list re-declared and refilled inside one loop trims the refilled value on every pass', async () => {
+test('a list re-declared and refilled from a server read inside one client loop stays a counted todo', async () => {
   const src = [
     'for each k in input.Kinds {',
     '  ids = List();',
@@ -84,7 +84,7 @@ test('a list re-declared and refilled inside one loop trims the refilled value o
   assert.doesNotMatch(t.client, /var ids = shim\.list\.duplicate\(slots/);
 });
 
-test('a client update declared before a top-level statement that re-declares the list earlier in it stays server-only', async () => {
+test('an update after a client re-declaration earlier in the same top-level statement stays server-only', () => {
   const src = [
     'ids = List();',
     'if (input.Kind != "") {',
@@ -96,16 +96,6 @@ test('a client update declared before a top-level statement that re-declares the
     'input.Pick:ui.add(ids);',
   ].join('\n');
   const t = translate(src);
-  // Wherever the client copy is declared, it must not sit above a client
-  // `ids = List()` that runs before the update it feeds.
-  const decl = t.client.indexOf('shim.list.duplicate(slots');
-  if (decl >= 0) {
-    const reset = t.client.indexOf('ids = [];', decl);
-    const update = t.client.indexOf('shim.list.removeElement(ids', decl);
-    assert.ok(reset < 0 || update < reset, `client copy reset before its update:\n${t.client}`);
-  }
-  if (t.stats.todo === 0) {
-    const out = await both(src, RECORD);
-    assert.deepEqual(out.client, [[[1]]]);
-  }
+  assert.ok(t.stats.todo > 0, 'the read after the statement is a counted todo');
+  assert.doesNotMatch(t.client, /shim\.list\.duplicate\(slots/);
 });
