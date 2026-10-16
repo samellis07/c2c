@@ -529,6 +529,7 @@ test(
 
   const management = analyze(galleryDs('employee-management', 'Employee_Management.ds'));
   assertCountedOnce(management);
+  // e4d07e1de translates the Dashboard snippet's relative-date fetch (Add_Holiday[Date_field in this year]), removing the Dashboard blocker.
   assert.deepEqual(management.deluge.todoLocations, [
     {
       location: 'page Employee_Profile.dsp',
