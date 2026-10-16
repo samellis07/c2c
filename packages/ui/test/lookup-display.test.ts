@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { buildModel, buildUi, type UiField, type UiModel, type UiReport } from '../src/index.js';
+import { displayRefs, displayTerms, lookupFormats } from '../src/decorations/lookups.js';
 
 /**
  * Lookup display values. `displayformat = [Field]` picks the display field for
@@ -743,4 +744,51 @@ test('the vanilla lookup select gets a server search box that finds a member by 
   assert.ok(!texts.some((text) => text === ADA.ROWID || text === ALAN.ROWID), 'no option shows a ROWID');
   await runtime.fillLookups({}, formEl, view);
   assert.equal(document.querySelectorAll('input[data-lookup-search]').length, 1, 'one search box per select');
+});
+
+test('displayformat terms: refs and literals in order, escapes kept, a stray quote skipped', () => {
+  assert.deepEqual(displayTerms('[Member_ID + " - " + Name.first_name]'), [{ ref: 'Member_ID' }, { text: ' - ' }, { ref: 'Name.first_name' }]);
+  assert.deepEqual(displayTerms(`[" " + Name.first_name + ' ' + Name.last_name]`), [{ text: ' ' }, { ref: 'Name.first_name' }, { text: ' ' }, { ref: 'Name.last_name' }]);
+  assert.deepEqual(displayTerms('["a\\"b" + Code]'), [{ text: 'a"b' }, { ref: 'Code' }]);
+  assert.deepEqual(displayTerms('[Title]'), [{ ref: 'Title' }]);
+  assert.deepEqual(displayTerms('["open + Name'), [{ ref: 'open' }, { ref: 'Name' }], 'a quote that never closes is skipped');
+  assert.deepEqual(displayTerms('["a\\\n" + "b"]'), [{ ref: 'a' }, { text: ' + ' }, { ref: 'b' }], 'a backslash before a line break ends the literal');
+  assert.deepEqual(displayRefs('[Member_ID + " - x.y " + Name.first_name]'), ['Member_ID', 'Name.first_name']);
+});
+
+test('displayformat scanning stays linear on an unclosed quote full of escaped quotes', () => {
+  const hostile = '"' + '\\"!'.repeat(16_667);
+  assert.ok(hostile.length >= 50_000);
+  const started = performance.now();
+  const terms = displayTerms(hostile);
+  const refs = displayRefs(hostile);
+  const elapsed = performance.now() - started;
+  assert.deepEqual(terms, []);
+  assert.deepEqual(refs, []);
+  assert.ok(elapsed < 500, `scanning took ${elapsed.toFixed(0)} ms`);
+});
+
+test('lookupFormats leaves out prototype keys and never touches Object.prototype', () => {
+  const lookupField = (name: string, form: string, displayFormat: string) => ({ name, lookup: { form, field: 'Code', displayFormat } });
+  const app = {
+    forms: [
+      {
+        name: 'Loan',
+        fields: [
+          lookupField('A', '__proto__', '[polluted + " - " + Other.part]'),
+          lookupField('B', 'Members', '[__proto__ + " - " + Other.part]'),
+          lookupField('C', 'Members', '[constructor + " - " + Other.part]'),
+          lookupField('D', 'prototype', '[Code + " - " + Other.part]'),
+          lookupField('E', 'Members', '[Member_ID + " - " + Name.first_name]'),
+        ],
+      },
+    ],
+  } as unknown as App;
+  const formats = lookupFormats(app);
+  assert.equal(({} as Record<string, unknown>).polluted, undefined);
+  assert.equal(Object.prototype.hasOwnProperty.call(Object.prototype, 'polluted'), false);
+  assert.deepEqual(Object.keys(formats), ['Members']);
+  assert.deepEqual(Object.keys(formats.Members!), ['Member_ID']);
+  assert.equal(Object.getPrototypeOf(formats), null);
+  assert.equal(Object.getPrototypeOf(formats.Members), null);
 });
