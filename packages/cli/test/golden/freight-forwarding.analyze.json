@@ -1449,10 +1449,10 @@
     "uiTodoCount": 1
   },
   "score": {
-    "readiness": 77,
+    "readiness": 78,
     "band": "needs-work",
     "features": 75,
-    "deluge": 79
+    "deluge": 80
   },
   "effort": {
     "estimate": true,
