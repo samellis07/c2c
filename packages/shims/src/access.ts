@@ -7,6 +7,7 @@
  */
 
 import { criteriaHasRecordQuery, criteriaHasTodo, type Criteria } from './criteria.js';
+import { WriteRuleError } from './write-rules.js';
 
 export class RecordAccessError extends Error {
   readonly code = 'RECORD_ACCESS_DENIED';
@@ -154,6 +155,13 @@ export interface WriteField {
   fields?: readonly WriteField[];
   /** Storage family of a plain leaf field; marks blank-to-null candidates. */
   scalar?: WriteScalar;
+  /**
+   * Closed choice list of a single-choice picklist or radio. A posted value
+   * outside it is refused (400 INVALID_INPUT naming the field), as Creator
+   * refuses it from a client. Only the client-facing write schema carries it;
+   * values a script sets are not screened against it.
+   */
+  choices?: readonly string[];
   /**
    * Static Creator initial value (unquoted literal text), applied by the
    * submit handler to fields absent from the request on insert.
@@ -447,6 +455,7 @@ interface DepthField {
   hidden: boolean;
   kind?: WriteFieldKind;
   scalar?: WriteScalar;
+  choices?: readonly string[];
   children: DepthField[];
 }
 
@@ -487,6 +496,7 @@ function toDepth(field: WriteField, readonlyNames: readonly string[]): DepthFiel
     hidden: !!field.hidden,
     ...(field.kind ? { kind: field.kind } : {}),
     ...(field.scalar ? { scalar: field.scalar } : {}),
+    ...(field.choices?.length ? { choices: field.choices } : {}),
     children: (field.fields ?? []).map((child) => toDepth(child, readonlyNames)),
   };
 }
@@ -662,6 +672,9 @@ function screenFieldValue(
   // text is the empty string). This runs on insert and on update alike:
   // clearing a typed cell posts null either way.
   if (field.scalar && typeof value === 'string' && value.trim() === '') return null;
+  if (field.choices && !(typeof value === 'string' && value === '') && !field.choices.includes(String(value))) {
+    throw new WriteRuleError(form, [{ column: field.name, rule: 'not-a-choice' }]);
+  }
   return screenScalar(form, dotted, value, principal);
 }
 

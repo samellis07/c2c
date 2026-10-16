@@ -25,7 +25,7 @@ export const VARCHAR_DEFAULT_LENGTH = 255;
 export const DOUBLE_SIGNIFICANT_DIGITS = 15;
 
 /** Every rule a write check can raise. Detection-only rules (silent-change, duplicate id) live with the caller. */
-export type WriteRule = 'text-length' | 'decimal-scale' | 'date-format' | 'significant-digits' | 'mandatory-missing';
+export type WriteRule = 'text-length' | 'decimal-scale' | 'date-format' | 'significant-digits' | 'mandatory-missing' | 'not-a-choice';
 
 export interface WriteRuleColumn {
   name: string;

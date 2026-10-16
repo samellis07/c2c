@@ -515,6 +515,25 @@ export function unquote(s: string): string {
  * expression source as a cell. A doubled quote inside a quoted literal
  * ('it''s') is one literal quote.
  */
+/** Single-choice tokens whose `values = {...}` list closes the field. */
+const CLOSED_CHOICE_TOKENS = new Set(['picklist', 'dropdown', 'radio', 'radiobuttons']);
+
+/**
+ * The choice list a client value must come from, or undefined when the field
+ * takes free values: a single-choice picklist or radio with a literal
+ * `values = {...}` list, no lookup and no users module. An "allow other"
+ * option (key or flag) opens the list. Creator refuses an out-of-list value
+ * from the API (code 3001 "Invalid column value for <Field>").
+ */
+export function closedChoices(field: Field): string[] | undefined {
+  const token = (field.type ?? '').trim().toLowerCase();
+  if (!CLOSED_CHOICE_TOKENS.has(token) || field.lookup || !field.choices?.length) return undefined;
+  if (field.properties.some((p) => p.key.toLowerCase() === 'module')) return undefined;
+  const other = /^allow\s*other/i;
+  if (field.properties.some((p) => other.test(p.key)) || field.flags.some((flag) => other.test(flag))) return undefined;
+  return field.choices;
+}
+
 export function staticDefault(raw: string | undefined): string | undefined {
   if (raw === undefined) return undefined;
   const text = raw.trim();
