@@ -27,7 +27,7 @@ import { LIMITS, jobPoolName } from '../../shims/src/index.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
 import { blueprintFieldSpec, isConsumedPhaseProperty, isOwnerBlockName, isOwnerKey, isStageFieldProperty, phaseFieldKind, transitionOwnerProperties, type BlueprintFieldSpec } from './blueprint-rules.js';
 import { analyzeConnections, connectionsChecklist, declaredConnections } from './connections.js';
-import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, writeLiveSource, type FieldStoreShape } from './field-store.js';
+import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, linkedGridForm, writeLiveSource, type FieldStoreShape } from './field-store.js';
 import { applyFillLock, reportLock, type FillLock, type StaleFill } from './fill-todos.js';
 import { afterCommitModule, ASYNC_ON_SUCCESS_WARNING, assertAsyncSuccessDeferrable, deadLetterModule, EVENT_FUNCTION_MODULE, eventSweeperModule, successSpecs, type AsyncCandidate } from './events.js';
 import { EVENT_SWEEPER_MODULE, JOB_LIVE_IMPORTS, jobLiveHelpers, planSchedules, schedulingConfig, sweeperModule, SWEEPER_MODULE, type SchedulePlan } from './schedules.js';
@@ -3910,7 +3910,7 @@ function formWriteSchema(app: App, formName: string): { names: string[]; readonl
     }
   };
   walk(form.fields);
-  return { names, readonlyNames, fields: form.fields.map(writeField), ruleDenied: fieldRuleDenials(app, formName) };
+  return { names, readonlyNames, fields: form.fields.map((field) => writeField(field, app)), ruleDenied: fieldRuleDenials(app, formName) };
 }
 
 /**
@@ -4016,11 +4016,20 @@ function writeScalar(rowId: string | undefined): WriteScalar | undefined {
   }
 }
 
-function writeField(field: Field): WriteField {
+function writeField(field: Field, app?: App): WriteField {
   const readOnly = isReadonlyMatrix(field.type);
   const node: WriteField = { name: field.name, ...(readOnly ? { readOnly: true } : {}) };
   const row = fieldTypeRow(field.type);
   const token = (field.type ?? '').trim().toLowerCase();
+  // A grid linked to another form: its rows are that form's records, posted
+  // as row objects (a lookup column carries the record id), and are screened
+  // against that form's fields like an inline subform's.
+  const linked = app ? linkedGridForm(app, field) : undefined;
+  if (linked) {
+    node.kind = 'subform';
+    node.fields = (app!.forms.find((item) => item.name === linked)?.fields ?? []).map((child) => writeField(child));
+    return node;
+  }
   if (field.lookup) {
     node.kind = 'lookup';
     return node;
@@ -4033,12 +4042,12 @@ function writeField(field: Field): WriteField {
     const defaults = row?.id === 'address' || token === 'address' ? ADDRESS_PARTS : NAME_PARTS;
     const parts = field.subfields.length ? field.subfields : defaults.map(partField);
     node.kind = 'composite';
-    node.fields = parts.map(writeField);
+    node.fields = parts.map((part) => writeField(part));
     return node;
   }
   if (row?.id === 'subform' || token === 'grid' || token === 'subform' || token === 'inline subform') {
     node.kind = 'subform';
-    node.fields = field.subfields.map(writeField);
+    node.fields = field.subfields.map((child) => writeField(child));
     return node;
   }
   const scalar = writeScalar(row?.id);
