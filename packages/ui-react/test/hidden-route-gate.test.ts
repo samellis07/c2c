@@ -20,8 +20,6 @@ import { after, test, type TestContext } from 'node:test';
 import ts from 'typescript';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { generateUi } from '../../ui/src/generate.js';
-import { buildUi } from '../../ui/src/index.js';
-import { pageSpecs } from '../src/charts.js';
 import { TEMPLATE_DIR, reactAppSpec } from '../src/index.js';
 import type { AppSpec, NavSection, PageElement } from '../template/lib/c2c-ui/types.js';
 
