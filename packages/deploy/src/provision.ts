@@ -1544,6 +1544,46 @@ function statusOf(state: ProvisionState, step: ProvisionStep): StepStatus {
   return stepStatus(state, step.id);
 }
 
+/**
+ * The derivable function env a provision run knows: the app bucket name from
+ * the bucket step's spec, and a TABLE_* id only for the plan's real tables.
+ * learned.byName also holds project, role and job-pool names — none of them
+ * are table ids, so they must never become TABLE_* keys.
+ */
+export function provisionFunctionEnvInput(args: {
+  out: string;
+  plan: ProvisionPlanFile;
+  learned: Record<string, string>;
+}): { bucketName?: string; tables: { name: string; id?: string }[] } {
+  const bucketStep = args.plan.steps.find((step) => step.id === 'bucket');
+  const matchName = bucketStep?.readBack?.match?.bucket_name;
+  const body = isRecord(bucketStep?.args?.body) ? bucketStep.args.body : undefined;
+  const argName = body?.bucket_name;
+  const bucketName = typeof matchName === 'string' && matchName ? matchName : typeof argName === 'string' && argName ? argName : undefined;
+
+  const tablesStep = args.plan.steps.find((step) => step.id === 'tables');
+  const spec = typeof tablesStep?.args?.plan === 'string' ? tablesStep.args.plan : 'provision/tables.json';
+  const names: string[] = [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(join(args.out, spec), 'utf8'));
+  } catch {
+    parsed = undefined;
+  }
+  if (Array.isArray(parsed)) {
+    for (const item of parsed) {
+      if (isRecord(item) && typeof item.table === 'string' && item.table) names.push(item.table);
+    }
+  }
+  return {
+    ...(bucketName ? { bucketName } : {}),
+    tables: names.map((name) => {
+      const id = ownDecimalId(args.learned, name);
+      return id ? { name, id } : { name };
+    }),
+  };
+}
+
 function updateFunctionEnvFromCtx(ctx: Ctx): void {
   try {
     const domain = slateDomainFor(ctx);
@@ -1554,7 +1594,7 @@ function updateFunctionEnvFromCtx(ctx: Ctx): void {
       dc: ctx.scope.dc ?? ctx.plan.dc,
       projectId,
       appUrl,
-      learnedByName: ctx.state.learned.byName,
+      ...provisionFunctionEnvInput({ out: ctx.out, plan: ctx.plan, learned: ctx.state.learned.byName }),
       ...(secretKeys?.length
         ? { connectionSecrets: secretKeys.map((k) => ({ connectionName: '', propertyKey: '', envKey: k })) }
         : {}),

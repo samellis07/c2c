@@ -869,7 +869,9 @@ interface LiveTable {
 function provisionStore() {
   const tables = new Map<string, LiveTable>();
   const restCalls: { method: string; path: string }[] = [];
-  let functionVariables: Record<string, string> = { C2C_DEPLOY_MODE: 'live', C2C_MAIL_FROM: 'owner@example.test', API_KEY: '' };
+  // APP_LIVE has a file column, so the provisioned function env carries the
+  // app bucket name — the post-deploy read-back requires C2C_STRATUS_BUCKET.
+  let functionVariables: Record<string, string> = { C2C_DEPLOY_MODE: 'live', C2C_STRATUS_BUCKET: 'c2c-test-app-00000000', C2C_MAIL_FROM: 'owner@example.test', API_KEY: '' };
   let seq = 1;
   const prefix = `/baas/v1/project/${SCOPE.projectId}`;
   const columnDetails = (table: LiveTable) =>
