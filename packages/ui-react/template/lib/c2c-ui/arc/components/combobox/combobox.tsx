@@ -40,6 +40,8 @@ export interface ComboboxProps
   footer?: ReactNode;
   /** Called when the menu opens or closes. */
   onOpenChange?: (open: boolean) => void;
+  /** Called with the typed search text, so a host can search records it has not read yet. */
+  onQueryChange?: (query: string) => void;
 }
 
 /** Follows the listbox height with a critically damped spring, so filtering never snaps the menu. */
@@ -76,6 +78,7 @@ export const Combobox = forwardRef<HTMLInputElement, ComboboxProps>(function Com
     hideLabel,
     footer,
     onOpenChange,
+    onQueryChange,
     ...inputProps
   },
   forwardedRef,
@@ -246,6 +249,7 @@ export const Combobox = forwardRef<HTMLInputElement, ComboboxProps>(function Com
           onClick={openMenu}
           onChange={(event) => {
             setQuery(event.target.value);
+            onQueryChange?.(event.target.value);
             setOpen(true);
             setActiveIndex(-1);
           }}
