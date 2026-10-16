@@ -1,0 +1,43 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Employee Onboarding",
+  "source": {
+    "file": "Employee_Onboarding.ds",
+    "origin": "Creator gallery app employee-onboarding, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-asset-types",
+      "steps": [],
+      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
+      "tags": [
+        "superseded"
+      ]
+    },
+    {
+      "id": "add-asset-type-valid-submit",
+      "steps": [],
+      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
+      "tags": [
+        "superseded"
+      ]
+    },
+    {
+      "id": "add-asset-type-invalid-duplicate-asset-type",
+      "steps": [],
+      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
+      "tags": [
+        "superseded"
+      ]
+    },
+    {
+      "id": "post-asset-types",
+      "steps": [],
+      "skip": "superseded: a concurrent replay overwrote this capture (duplicate refusal recorded in place of the planned outcome); re-captured in a later run",
+      "tags": [
+        "superseded"
+      ]
+    }
+  ]
+}
