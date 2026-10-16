@@ -1,5 +1,5 @@
 {
-  "version": "c2c-behavior-golden/1",
+  "version": "c2c-behavior-golden/2",
   "app": "behavior-sample",
   "cases": [
     {
@@ -12,7 +12,20 @@
           "record": { "Title": "Dune", "Qty": 2 },
           "expect": {
             "status": 200,
-            "body": { "values": { "Title": "Dune" } }
+            "body": {
+              "dryRun": false,
+              "wrote": true,
+              "values": {
+                "Title": "Dune",
+                "Qty": 2,
+                "Added_User": "<any>",
+                "Added_Time": "<timestamp>",
+                "ID": "<id>",
+                "ROWID": "<id>",
+                "CREATEDTIME": "<timestamp>",
+                "MODIFIEDTIME": "<timestamp>"
+              }
+            }
           }
         },
         {
@@ -20,14 +33,39 @@
           "report": "All_Books",
           "expect": {
             "status": 200,
-            "body": { "rows": [ { "Title": "Dune", "Qty": "2", "ROWID": "<id>" } ] }
+            "body": {
+              "dryRun": false,
+              "rows": [
+                {
+                  "ROWID": "<id>",
+                  "Title": "Dune",
+                  "Qty": 2,
+                  "Added_User": "<any>",
+                  "Added_Time": "<timestamp>",
+                  "Modified_Time": null
+                }
+              ],
+              "fields": null,
+              "queryShape": "SELECT ROWID, Title, Qty, Added_User, Added_Time, Modified_User, Modified_Time, c2c_source_id FROM Book ORDER BY ROWID LIMIT 1, 300",
+              "criteria": { "op": "true" },
+              "page": 0,
+              "pageSize": 300
+            }
           }
         }
       ],
       "expect": {
         "tables": {
           "Book": [
-            { "Title": "Dune", "Qty": "2", "ROWID": "<id>", "CREATEDTIME": "<timestamp>" }
+            {
+              "Title": "Dune",
+              "Qty": "2",
+              "Added_User": "<any>",
+              "Added_Time": "<timestamp>",
+              "ROWID": "<id>",
+              "CREATEDTIME": "<timestamp>",
+              "MODIFIEDTIME": "<timestamp>"
+            }
           ]
         }
       }
@@ -42,7 +80,14 @@
           "record": { "Qty": 1 },
           "expect": {
             "status": 422,
-            "body": { "code": "MANDATORY_MISSING", "message": "field \"Title\" is required.", "field": "Title", "wrote": false }
+            "body": {
+              "code": "MANDATORY_MISSING",
+              "message": "field \"Title\" is required.",
+              "dryRun": false,
+              "requestId": "<any>",
+              "field": "Title",
+              "wrote": false
+            }
           }
         }
       ],

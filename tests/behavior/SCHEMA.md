@@ -18,7 +18,7 @@ here and the runner together — never invent per-app formats.
 tests/behavior/<app>/
   app.ds                 the Creator export the golden was captured against
   creator/
-    cases.json           one JSON document, version c2c-behavior-golden/1
+    cases.json           one JSON document, version c2c-behavior-golden/2
 ```
 
 `<app>` is the Creator application link name.
@@ -27,7 +27,7 @@ tests/behavior/<app>/
 
 ```json
 {
-  "version": "c2c-behavior-golden/1",
+  "version": "c2c-behavior-golden/2",
   "app": "behavior-sample",
   "cases": [
     {
@@ -40,14 +40,23 @@ tests/behavior/<app>/
           "record": { "Title": "Dune", "Qty": 2 },
           "expect": {
             "status": 200,
-            "body": { "values": { "Title": "Dune", "ROWID": "<id>" } }
+            "body": {
+              "dryRun": false,
+              "wrote": true,
+              "values": {
+                "Title": "Dune", "Qty": 2,
+                "Added_User": "<any>", "Added_Time": "<timestamp>",
+                "ID": "<id>", "ROWID": "<id>",
+                "CREATEDTIME": "<timestamp>", "MODIFIEDTIME": "<timestamp>"
+              }
+            }
           }
         }
       ],
       "expect": {
         "tables": {
           "Book": [
-            { "Title": "Dune", "Qty": "2", "ROWID": "<id>", "CREATEDTIME": "<timestamp>" }
+            { "Title": "Dune", "Qty": "2", "Added_User": "<any>", "ROWID": "<id>", "CREATEDTIME": "<timestamp>" }
           ]
         }
       }
@@ -58,7 +67,7 @@ tests/behavior/<app>/
 
 Top level:
 
-- `version` — required, exactly `c2c-behavior-golden/1`.
+- `version` — required, exactly `c2c-behavior-golden/2`.
 - `app` — optional application link name; the runner refuses a golden that
   names a different app than the `.ds` under test.
 - `cases` — required array; `id` is unique across the file.
@@ -67,10 +76,14 @@ Each case runs against a fresh store (all tables are emptied first):
 
 - `steps` — ordered calls, the same shape the generated client makes.
 - `expect.tables` — optional; names a Catalyst table and its **complete**
-  expected contents after the steps run. Every expected row must match a
-  distinct stored row and vice versa (count included). Expected rows list only
-  the fields the case asserts — stored system columns it does not list are
-  ignored. Tables not named are not checked.
+  expected contents after the steps run: expected row `i` is compared with
+  stored row `i` (count included), unless `expect.unordered: true` matches
+  rows as a multiset instead. Expected rows must list every stored field the
+  case asserts; stored fields whose value is volatile (id- or
+  timestamp-shaped, e.g. `Added_Time`) may be left unlisted. Tables not named
+  are not checked.
+- `expect.unordered` — optional boolean, default `false`; opt the case's
+  `tables` into multiset row matching for stores with no meaningful order.
 
 ## Step ops
 
@@ -86,16 +99,27 @@ Each step's optional `expect`:
 - `status` — HTTP status, default `200`. A `4xx` expectation captures a
   Creator validation refusal; pair it with `body` to pin the message.
 - `body` — expected JSON response, compared by the matching rules below.
+- `unordered` — optional boolean, default `false`; opt this step's `body`
+  arrays into multiset matching. Leave it off for sorted reports and ordered
+  lists — a reordered row list is then a finding.
 
 ## Matching and normalization
 
 Deterministic: same app + same golden always produce the same findings in the
 same order (case order, then step order, then pointer).
 
-- **Objects** match as subsets: every expected key must be present and match;
-  extra actual keys are ignored.
-- **Arrays and table rows** match as multisets — ordering is a normalization.
-  Lengths must agree after matching.
+- **Objects** match with exact key sets: every expected key must be present
+  and match, and every actual key must be expected — an extra or missing
+  field is a finding. The only exception is volatile system values: an actual
+  key whose value is id- or timestamp-shaped (the `<id>`/`<timestamp>`
+  classes below) may appear unlisted, because such columns are generated per
+  run. A volatile field the golden does list — usually via a marker — must
+  still be present.
+- **Arrays and table rows** compare **in order** by default: expected
+  element `i` is compared with actual element `i`. A golden opts into
+  multiset matching only where it explicitly declares `unordered: true` (on
+  the step `expect` for `body` arrays, on the case `expect` for `tables`
+  rows). Lengths must agree after matching.
 - **Numbers vs numeric strings** compare equal across the text/number
   boundary (`"2"` equals `2`): Creator cells are text, Catalyst columns are
   typed.

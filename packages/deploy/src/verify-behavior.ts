@@ -35,7 +35,7 @@ import { emptyRegistry } from './registry.js';
 
 // ---------- golden schema ----------
 
-export const GOLDEN_VERSION = 'c2c-behavior-golden/1';
+export const GOLDEN_VERSION = 'c2c-behavior-golden/2';
 export const REPORT_VERSION = 'c2c-behavior-report/1';
 
 /** Normalization markers an expected value may use (tests/behavior/SCHEMA.md). */
@@ -43,8 +43,13 @@ export const MARKERS = ['<any>', '<id>', '<timestamp>'] as const;
 
 export interface GoldenStepExpect {
   status?: number;
-  /** Recursive subset match against the JSON response body (ordering normalized). */
+  /**
+   * Recursive match against the JSON response body. Arrays compare in order;
+   * set `unordered: true` to match them as multisets instead.
+   */
   body?: unknown;
+  /** Match arrays in `body` as multisets (opt-in; default is ordered). */
+  unordered?: boolean;
 }
 
 export type GoldenStep =
@@ -58,8 +63,10 @@ export interface GoldenCase {
   name?: string;
   steps: GoldenStep[];
   expect?: {
-    /** Catalyst table -> complete expected contents; each listed field must match. */
+    /** Catalyst table -> complete expected contents; rows match in order unless `unordered`. */
     tables?: Record<string, Record<string, unknown>[]>;
+    /** Match `tables` rows as multisets (opt-in; default is ordered). */
+    unordered?: boolean;
   };
 }
 
@@ -104,9 +111,14 @@ export function assertGolden(parsed: unknown): GoldenFile {
       if (step.op === 'call' && typeof step.function !== 'string') throw new Error(`${at2}: call needs function`);
       if (step.op === 'request' && (typeof step.method !== 'string' || typeof step.path !== 'string')) throw new Error(`${at2}: request needs method + path`);
       if (!['submit', 'report', 'call', 'request'].includes(step.op)) throw new Error(`${at2}: unknown op ${step.op}`);
+      const stepExpect = (step as { expect?: GoldenStepExpect }).expect;
+      if (stepExpect?.unordered !== undefined && typeof stepExpect.unordered !== 'boolean') {
+        throw new Error(`${at2}.expect.unordered must be a boolean`);
+      }
     }
     const expect = (entry as unknown as GoldenCase).expect;
     if (expect?.tables !== undefined && !isObject(expect.tables)) throw new Error(`${at}.expect.tables must be an object`);
+    if (expect?.unordered !== undefined && typeof expect.unordered !== 'boolean') throw new Error(`${at}.expect.unordered must be a boolean`);
   }
   return parsed as unknown as GoldenFile;
 }
@@ -134,13 +146,25 @@ export interface BehaviorFinding {
 }
 
 /**
- * Recursive subset match: every expected key/element must exist in actual;
- * actual may carry extra object keys. Arrays match as multisets (ordering is a
- * documented normalization). Scalar equality is strict; expected marker
- * strings match a value class instead of a literal.
- * Returns true when actual satisfies expected; findings are appended.
+ * Volatile system values — ids and timestamps — are the only extra object
+ * keys an actual value may carry unlisted: they are generated per run, so the
+ * golden names them with markers when it asserts them, and they are ignored
+ * otherwise. Any other extra or missing key is a finding.
  */
-function matchValue(expected: unknown, actual: unknown, pointer: string, findings: Omit<BehaviorFinding, 'case'>[]): boolean {
+function isVolatile(value: unknown): boolean {
+  return markerMatches('<id>', value) || markerMatches('<timestamp>', value);
+}
+
+/**
+ * Recursive match with exact key sets: every expected key/element must exist
+ * in actual and match, and every actual key must be expected unless its value
+ * is volatile (id/timestamp-shaped). Arrays compare in order; `unordered`
+ * opts into multiset matching for the golden that declares it. Scalar
+ * equality is strict; expected marker strings match a value class instead of
+ * a literal. Returns true when actual satisfies expected; findings are
+ * appended.
+ */
+function matchValue(expected: unknown, actual: unknown, pointer: string, findings: Omit<BehaviorFinding, 'case'>[], unordered: boolean): boolean {
   if (typeof expected === 'string' && (MARKERS as readonly string[]).includes(expected)) {
     if (markerMatches(expected, actual)) return true;
     findings.push({ pointer, expected, actual });
@@ -152,16 +176,27 @@ function matchValue(expected: unknown, actual: unknown, pointer: string, finding
       return false;
     }
     let ok = true;
-    const used = new Set<number>();
-    expected.forEach((want, i) => {
-      const at = actual.findIndex((got, j) => !used.has(j) && matchSilent(want, got));
-      if (at < 0) {
-        findings.push({ pointer: `${pointer}[${i}]`, expected: want, actual: 'no matching element' });
-        ok = false;
-      } else {
-        used.add(at);
+    if (unordered) {
+      const used = new Set<number>();
+      expected.forEach((want, i) => {
+        const at = actual.findIndex((got, j) => !used.has(j) && matchSilent(want, got, unordered));
+        if (at < 0) {
+          findings.push({ pointer: `${pointer}[${i}]`, expected: want, actual: 'no matching element' });
+          ok = false;
+        } else {
+          used.add(at);
+        }
+      });
+    } else {
+      const count = Math.min(expected.length, actual.length);
+      for (let i = 0; i < count; i++) {
+        if (!matchValue(expected[i], actual[i], `${pointer}[${i}]`, findings, unordered)) ok = false;
       }
-    });
+      for (let i = count; i < expected.length; i++) {
+        findings.push({ pointer: `${pointer}[${i}]`, expected: expected[i], actual: '(absent)' });
+        ok = false;
+      }
+    }
     if (actual.length > expected.length) {
       findings.push({ pointer, expected: `${expected.length} elements`, actual: `${actual.length} elements` });
       ok = false;
@@ -178,7 +213,13 @@ function matchValue(expected: unknown, actual: unknown, pointer: string, finding
       if (!(key in actual)) {
         findings.push({ pointer: `${pointer}.${key}`, expected: want, actual: '(absent)' });
         ok = false;
-      } else if (!matchValue(want, actual[key], `${pointer}.${key}`, findings)) {
+      } else if (!matchValue(want, actual[key], `${pointer}.${key}`, findings, unordered)) {
+        ok = false;
+      }
+    }
+    for (const [key, got] of Object.entries(actual)) {
+      if (!(key in expected) && !isVolatile(got)) {
+        findings.push({ pointer: `${pointer}.${key}`, expected: '(absent)', actual: got });
         ok = false;
       }
     }
@@ -194,24 +235,37 @@ function matchValue(expected: unknown, actual: unknown, pointer: string, finding
 }
 
 /** Diff-free probe used by multiset array matching. */
-function matchSilent(expected: unknown, actual: unknown): boolean {
+function matchSilent(expected: unknown, actual: unknown, unordered: boolean): boolean {
   const scratch: Omit<BehaviorFinding, 'case'>[] = [];
-  return matchValue(expected, actual, '', scratch);
+  return matchValue(expected, actual, '', scratch, unordered);
 }
 
-function matchRows(expectedRows: Record<string, unknown>[], actualRows: Record<string, unknown>[], pointer: string, findings: Omit<BehaviorFinding, 'case'>[]): void {
-  const used = new Set<number>();
-  expectedRows.forEach((want, i) => {
-    const at = actualRows.findIndex((got, j) => !used.has(j) && matchSilent(want, got));
-    if (at < 0) {
-      findings.push({ pointer: `${pointer}[${i}]`, expected: want, actual: 'no matching row' });
-    } else {
-      used.add(at);
+function matchRows(expectedRows: Record<string, unknown>[], actualRows: Record<string, unknown>[], pointer: string, findings: Omit<BehaviorFinding, 'case'>[], unordered: boolean): void {
+  if (unordered) {
+    const used = new Set<number>();
+    expectedRows.forEach((want, i) => {
+      const at = actualRows.findIndex((got, j) => !used.has(j) && matchSilent(want, got, unordered));
+      if (at < 0) {
+        findings.push({ pointer: `${pointer}[${i}]`, expected: want, actual: 'no matching row' });
+      } else {
+        used.add(at);
+      }
+    });
+    const extra = actualRows.length - used.size;
+    if (extra > 0) {
+      findings.push({ pointer, expected: `${expectedRows.length} rows`, actual: `${actualRows.length} rows (${extra} unexpected)` });
     }
-  });
-  const extra = actualRows.length - used.size;
-  if (extra > 0) {
-    findings.push({ pointer, expected: `${expectedRows.length} rows`, actual: `${actualRows.length} rows (${extra} unexpected)` });
+    return;
+  }
+  const count = Math.min(expectedRows.length, actualRows.length);
+  for (let i = 0; i < count; i++) {
+    matchValue(expectedRows[i], actualRows[i], `${pointer}[${i}]`, findings, unordered);
+  }
+  for (let i = count; i < expectedRows.length; i++) {
+    findings.push({ pointer: `${pointer}[${i}]`, expected: expectedRows[i], actual: '(absent)' });
+  }
+  if (actualRows.length > expectedRows.length) {
+    findings.push({ pointer, expected: `${expectedRows.length} rows`, actual: `${actualRows.length} rows` });
   }
 }
 
@@ -436,14 +490,14 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
       if (res.status !== wantStatus) at({ step: stepNo, pointer: `${endpoint.path} status`, expected: wantStatus, actual: res.status });
       if (want.body !== undefined) {
         const diffs: Omit<BehaviorFinding, 'case'>[] = [];
-        matchValue(want.body, res.body, 'body', diffs);
+        matchValue(want.body, res.body, 'body', diffs, want.unordered === true);
         for (const d of diffs) at({ step: stepNo, ...d });
       }
     }
     for (const [table, expectedRows] of Object.entries(kase.expect?.tables ?? {})) {
       const actualRows = await backend.tableRows(table);
       const diffs: Omit<BehaviorFinding, 'case'>[] = [];
-      matchRows(expectedRows, actualRows, `tables.${table}`, diffs);
+      matchRows(expectedRows, actualRows, `tables.${table}`, diffs, kase.expect?.unordered === true);
       for (const d of diffs) at(d);
     }
   }

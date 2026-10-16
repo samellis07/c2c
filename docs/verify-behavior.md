@@ -46,11 +46,13 @@ For every golden case (schema in `tests/behavior/SCHEMA.md`):
 
 ## Normalization
 
-Comparisons normalize ids, timestamps and ordering (`<id>`, `<timestamp>`,
-`<any>` markers; arrays and table rows match as multisets), and compare
-numeric text across the text/number boundary — see
-`tests/behavior/SCHEMA.md` for the exact rules. Everything else is strict, so
-a changed validation message is a finding.
+Comparisons are strict by default — objects match with exact key sets and
+arrays/table rows compare in order — and normalize only what a golden
+explicitly declares: `<id>`, `<timestamp>` and `<any>` markers for volatile
+values, `unordered: true` for multiset matching, and numeric text across the
+text/number boundary — see `tests/behavior/SCHEMA.md` for the exact rules.
+Everything else is strict, so a reordered report or a changed validation
+message is a finding.
 
 ## Findings and reports
 
