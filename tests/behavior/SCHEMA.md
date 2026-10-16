@@ -203,6 +203,11 @@ minimal repro is the case id plus the pointer (`body.values.Title`,
 `tables.Book[0].Qty`, `… status`). `--report <file>` writes deterministic
 JSON (`c2c-behavior-report/1`; `summary.skipped`, and `skipped` /
 `envArtifacts` when present); `--report-md <file>` writes the markdown
-table; both are printed to stdout regardless. Exit code is `1` on any
-finding, `0` on none, `2` on usage. The KPI line is
-`behavior-equivalent apps: N` — `1` when the app ran clean, `0` otherwise.
+table; both are printed to stdout regardless. `status` is `equivalent`
+(every case replayed, no finding), `not-equivalent` (a finding, or any
+skipped case — a skip is never a pass) or `not-run` (no case replayed); the
+markdown states it as `equivalent on N of M cases, K skipped`. Exit code is
+`0` when equivalent, `1` on a finding or a skipped case, `2` on usage, `3`
+when nothing was replayed. The KPI line is `behavior-equivalent apps: N` —
+`1` only when the app ran clean with 0 findings and 0 skipped cases, `0`
+otherwise.

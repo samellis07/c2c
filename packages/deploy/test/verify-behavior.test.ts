@@ -14,7 +14,7 @@ import { test } from 'node:test';
 import { deriveIr, parse } from '../../core/src/index.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { verifyBehaviorCli, type Io } from '../src/cli.js';
-import { assertGolden, formatBehaviorMarkdown, loadGoldens, runBehavior, startOfflineBackend, textBoundaryEqual } from '../src/verify-behavior.js';
+import { assertGolden, formatBehaviorMarkdown, loadGoldens, runBehavior, startOfflineBackend, textBoundaryEqual, type BehaviorBackend, type BehaviorCall } from '../src/verify-behavior.js';
 
 const root = repoRoot();
 const APP_DS = join(root, 'tests/behavior/behavior-sample/app.ds');
@@ -270,10 +270,16 @@ function sampleApp() {
   return deriveIr(parse(readFileSync(APP_DS, 'utf8')));
 }
 
-async function replay(cases: unknown[]) {
+/** Rewrites replies of the offline backend, to stand in for Creator answers the harness never gives. */
+type Rewrite = (method: string, path: string, body: unknown, res: BehaviorCall) => BehaviorCall;
+
+async function replay(cases: unknown[], rewrite?: Rewrite) {
   const app = sampleApp();
   const golden = assertGolden({ version: 'c2c-behavior-golden/2', app: 'behavior-sample', cases });
-  const backend = await startOfflineBackend(app);
+  const offline = await startOfflineBackend(app);
+  const backend: BehaviorBackend = rewrite
+    ? { ...offline, call: async (method, path, body) => rewrite(method, path, body, await offline.call(method, path, body)), tableRows: (t) => offline.tableRows(t), reset: offline.reset && (() => offline.reset!()), close: () => offline.close() }
+    : offline;
   try {
     return (await runBehavior(app, golden, backend, 'offline')).report;
   } finally {
@@ -356,12 +362,18 @@ test('a skipped case is reported as skipped, never as passing; env-artifact step
       expect: { partial: true, tables: { Book: [{ Title: 'Dune' }] } },
     },
   ]);
-  assert.equal(report.ok, true, JSON.stringify(report.findings));
-  assert.equal(report.summary.skipped, 1);
+  // The replayed case is clean, but one case was skipped: never equivalent.
+  assert.deepEqual(report.findings, []);
+  assert.equal(report.status, 'not-equivalent');
+  assert.equal(report.ok, false);
+  assert.equal(report.behaviorEquivalentApps, 0);
+  assert.deepEqual([report.summary.replayed, report.summary.equivalentCases, report.summary.skipped], [1, 1, 1]);
   assert.deepEqual(report.skipped, [{ case: 'unreachable', reason: 'unreachable via API: mandatory image field' }]);
   assert.deepEqual(report.envArtifacts, [{ case: 'artifact', step: 1, tags: ['env-artifact:trial-user-limit'] }]);
   const md = formatBehaviorMarkdown(report);
   assert.match(md, /skipped: 1/);
+  assert.match(md, /status: not-equivalent — equivalent on 1 of 2 cases, 1 skipped/);
+  assert.match(md, /behavior-equivalent apps: 0/);
   assert.match(md, /- unreachable: unreachable via API/);
   assert.match(md, /- artifact step 1: env-artifact:trial-user-limit/);
   // MUST-FAIL: without the tag the same refusal expectation is a finding.
@@ -390,4 +402,109 @@ test('the text boundary: numbers by value, booleans as true/false text, strings 
     { id: 'n', steps: [{ op: 'submit', form: 'Book', record: { Title: 'Dune', Qty: 2 } }, { op: 'request', method: 'POST', path: '/reports/All_Books', body: { op: 'query' }, expect: { partial: true, body: { rows: [{ Qty: '2.5' }] } } }] },
   ]);
   assert.deepEqual(bad.findings.map((f) => f.pointer), ['body.rows[0].Qty']);
+});
+
+// ---------- skipped goldens never pass ----------
+
+test('MUST-FAIL: an all-skipped golden is not run: ok false, KPI 0, exit 3', async () => {
+  const report = await replay([
+    { id: 'a', skip: 'unreachable via API', steps: [{ op: 'submit', form: 'Book', record: { Title: 'x' } }] },
+  ]);
+  assert.equal(report.status, 'not-run');
+  assert.equal(report.ok, false);
+  assert.equal(report.behaviorEquivalentApps, 0);
+  assert.deepEqual([report.summary.replayed, report.summary.equivalentCases], [0, 0]);
+  assert.match(formatBehaviorMarkdown(report), /status: not-run — equivalent on 0 of 1 cases, 1 skipped/);
+
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-behavior-skip-'));
+  try {
+    writeFileSync(join(dir, 'cases.json'), JSON.stringify({ version: 'c2c-behavior-golden/2', cases: [{ id: 'a', skip: 'unreachable via API', steps: [{ op: 'submit', form: 'Book', record: { Title: 'x' } }] }] }));
+    const cap = capture();
+    const code = await verifyBehaviorCli([APP_DS, '--goldens', dir], cap.io);
+    assert.equal(code, 3, cap.stdout() + cap.stderr());
+    assert.match(cap.stdout(), /behavior-equivalent apps: 0/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('MUST-FAIL: a partly skipped golden with a clean replay exits 1, not 0', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-behavior-skip-'));
+  try {
+    writeFileSync(join(dir, 'cases.json'), JSON.stringify({ version: 'c2c-behavior-golden/2', cases: [
+      { id: 'skipped', skip: 'unreachable via API', steps: [{ op: 'submit', form: 'Book', record: { Title: 'x' } }] },
+      { id: 'clean', steps: [{ op: 'submit', form: 'Book', record: { Title: 'Dune' }, expect: { outcome: 'saved' } }] },
+    ] }));
+    const cap = capture();
+    const code = await verifyBehaviorCli([APP_DS, '--goldens', dir], cap.io);
+    assert.equal(code, 1, cap.stdout() + cap.stderr());
+    assert.match(cap.stdout(), /equivalent on 1 of 2 cases, 1 skipped/);
+    assert.match(cap.stdout(), /behavior-equivalent apps: 0/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a golden with no skipped case and no finding is equivalent', async () => {
+  const report = await replay([{ id: 'clean', steps: [{ op: 'submit', form: 'Book', record: { Title: 'Dune' }, expect: { outcome: 'saved' } }] }]);
+  assert.equal(report.status, 'equivalent');
+  assert.equal(report.ok, true, JSON.stringify(report.findings));
+  assert.equal(report.behaviorEquivalentApps, 1);
+});
+
+// ---------- saved-with-warning, bind, setup, update refused ----------
+
+/** Creator's code 3000 with an on-success error array: stored, with a warning. */
+const withWarning: Rewrite = (_m, path, _b, res) =>
+  /\/forms\/Book\/submit$/.test(path) && res.body && typeof res.body === 'object' ? { ...res, body: { ...(res.body as object), warning: ['User Limit Reached'] } } : res;
+
+test('saved-with-warning needs a warning; saved refuses one (MUST-FAIL both ways)', async () => {
+  const dune = (outcome: string) => [{ id: 'w', steps: [{ op: 'submit', form: 'Book', record: { Title: 'Dune' }, expect: { outcome } }] }];
+  assert.equal((await replay(dune('saved-with-warning'), withWarning)).ok, true);
+  assert.equal((await replay(dune('saved'))).ok, true);
+  // A plain save is not saved-with-warning.
+  const noWarning = await replay(dune('saved-with-warning'));
+  assert.deepEqual(noWarning.findings.map((f) => [f.pointer, f.expected, f.actual]), [['/forms/Book/submit outcome', 'saved-with-warning', '200 wrote']]);
+  // A save with a warning is not a plain save.
+  const warned = await replay(dune('saved'), withWarning);
+  assert.deepEqual(warned.findings.map((f) => [f.pointer, f.expected, f.actual]), [['/forms/Book/submit outcome', 'saved', '200 wrote warning']]);
+});
+
+test('MUST-FAIL: a bind whose pointer is absent in the reply is a finding', async () => {
+  const report = await replay([
+    { id: 'b', steps: [{ op: 'submit', form: 'Book', record: { Title: 'Dune' }, bind: { dune: 'body.values.NO_SUCH' }, expect: { outcome: 'saved' } }] },
+  ]);
+  assert.equal(report.ok, false);
+  assert.deepEqual(report.findings.map((f) => [f.step, f.pointer, f.actual]), [[1, 'bind dune <- body.values.NO_SUCH', '(absent)']]);
+});
+
+test('a setup step is replayed but its reply is never compared', async () => {
+  // The setup submit is refused (Title is mandatory) — compared, the default 200 would be a finding.
+  const report = await replay([
+    { id: 's', steps: [{ op: 'submit', form: 'Book', record: { Qty: 1 }, setup: true }, { op: 'submit', form: 'Book', record: { Title: 'Dune' }, expect: { outcome: 'saved' } }] },
+  ]);
+  assert.equal(report.ok, true, JSON.stringify(report.findings));
+  assert.equal(report.summary.steps, 2);
+  // MUST-FAIL: the same step without setup is compared.
+  const compared = await replay([{ id: 's', steps: [{ op: 'submit', form: 'Book', record: { Qty: 1 } }] }]);
+  assert.deepEqual(compared.findings.map((f) => [f.pointer, f.expected]), [['/forms/Book/submit status', 200]]);
+});
+
+test('MUST-FAIL: an update whose edit is refused counts it under refused', async () => {
+  const seen: string[] = [];
+  const refuseEdits: Rewrite = (_m, path, body, res) => {
+    if (body && typeof body === 'object' && 'ROWID' in body) {
+      seen.push(path);
+      return { status: 422, body: { code: 'RULE', message: 'refused by rule' } };
+    }
+    return res;
+  };
+  const update = (refused: number) => [
+    { id: 'u', steps: [SAVE_DUNE, { op: 'update', report: 'All_Books', where: { Title: 'Dune' }, record: { Qty: 7 }, expect: { body: { matched: 1, updated: 0, refused } } }] },
+  ];
+  const report = await replay(update(1), refuseEdits);
+  assert.equal(seen.length, 1, 'the edit went through the backend');
+  assert.equal(report.ok, true, JSON.stringify(report.findings));
+  const wrong = await replay(update(0), refuseEdits);
+  assert.deepEqual(wrong.findings.map((f) => [f.pointer, f.expected, f.actual]), [['body.refused', 0, 1]]);
 });

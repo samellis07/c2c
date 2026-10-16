@@ -564,13 +564,21 @@ export interface BehaviorRunResult {
   findings: BehaviorFinding[];
 }
 
+export type BehaviorStatus = 'equivalent' | 'not-equivalent' | 'not-run';
+
 export interface BehaviorReport {
   version: typeof REPORT_VERSION;
   app: string;
   mode: 'offline' | 'live';
+  /**
+   * `equivalent`: every case replayed with no finding. `not-equivalent`: a
+   * finding, or any skipped case (a skip is never a pass). `not-run`: no case
+   * was replayed (every case skipped, or none at all).
+   */
+  status: BehaviorStatus;
   ok: boolean;
   behaviorEquivalentApps: 0 | 1;
-  summary: { cases: number; steps: number; findings: number; skipped: number };
+  summary: { cases: number; steps: number; findings: number; skipped: number; replayed: number; equivalentCases: number };
   findings: BehaviorFinding[];
   /** Cases the golden marks `skip` (not replayed, never counted as passing). */
   skipped?: { case: string; reason: string }[];
@@ -667,11 +675,13 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
   const skipped: { case: string; reason: string }[] = [];
   const envArtifacts: { case: string; step: number; tags: string[] }[] = [];
   let stepCount = 0;
+  let equivalentCases = 0;
   for (const kase of golden.cases) {
     if (kase.skip) {
       skipped.push({ case: kase.id, reason: kase.skip });
       continue;
     }
+    const findingsBefore = findings.length;
     const caseTags = kase.tags ?? [];
     const at = (f: Omit<BehaviorFinding, 'case'>, stepTags: string[] = []) => {
       const tags = [...new Set([...caseTags, ...stepTags])];
@@ -733,14 +743,18 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
       matchRows(expectedRows, actualRows, `tables.${table}`, diffs, kase.expect?.unordered === true, kase.expect?.partial === true);
       for (const d of diffs) at(d);
     }
+    if (findings.length === findingsBefore) equivalentCases += 1;
   }
+  const replayed = golden.cases.length - skipped.length;
+  const status: BehaviorStatus = replayed === 0 ? 'not-run' : findings.length === 0 && skipped.length === 0 ? 'equivalent' : 'not-equivalent';
   const report: BehaviorReport = {
     version: REPORT_VERSION,
     app: app.name || 'app',
     mode,
-    ok: findings.length === 0,
-    behaviorEquivalentApps: findings.length === 0 ? 1 : 0,
-    summary: { cases: golden.cases.length, steps: stepCount, findings: findings.length, skipped: skipped.length },
+    status,
+    ok: status === 'equivalent',
+    behaviorEquivalentApps: status === 'equivalent' ? 1 : 0,
+    summary: { cases: golden.cases.length, steps: stepCount, findings: findings.length, skipped: skipped.length, replayed, equivalentCases },
     findings,
     ...(skipped.length ? { skipped } : {}),
     ...(envArtifacts.length ? { envArtifacts } : {}),
@@ -761,6 +775,7 @@ export function formatBehaviorMarkdown(report: BehaviorReport, goldenDir?: strin
     '',
     `mode: ${report.mode}${goldenDir ? ` · goldens: ${goldenDir}` : ''}`,
     `cases: ${report.summary.cases} · steps: ${report.summary.steps} · findings: ${report.summary.findings} · skipped: ${report.summary.skipped}`,
+    `status: ${report.status} — equivalent on ${report.summary.equivalentCases} of ${report.summary.cases} cases, ${report.summary.skipped} skipped`,
     '',
   ];
   if (report.findings.length) {
