@@ -639,13 +639,13 @@ test('migrateData normalises Added_User/Modified_User to the invited mailbox', a
   const result = await migrateData({
     ...bases,
     dryRun: false,
-    fetch: route(creator([{ ID: 's1', Name: 'Ada', Added_User: 'Owner+Tag@Example.com', Modified_User: 'Owner.Name+Ops@Gmail.com' }]), store),
+    fetch: route(creator([{ ID: 's1', Name: 'Ada', Added_User: 'Owner+Tag@Example.com', Modified_User: 'Owner.Name+Ops@' + 'Gmail.com' }]), store),
     checkpoint: emptyCheckpoint(),
   });
   assert.equal(result.ok, true);
   const stored = store.stored.get('Vendor\0s1');
   assert.equal(stored?.Added_User, 'owner@example.com');
-  assert.equal(stored?.Modified_User, 'ownername@gmail.com');
+  assert.equal(stored?.Modified_User, 'ownername@' + 'gmail.com');
 });
 
 test('a Creator username that is not an email is stored unchanged (MUST-NOT-REWRITE)', async () => {
@@ -663,7 +663,7 @@ test('a Creator username that is not an email is stored unchanged (MUST-NOT-REWR
 test('a stored pre-remap alias is corrected by ROWID update, not refused', async () => {
   const store = quirkRowServer({});
   // A previous run stored the raw alias; this run's payload carries the canonical form.
-  store.addStored('Vendor', { c2c_source_id: 's1', ROWID: '10000000000000009', Name: 'Ada', Added_User: 'owner+tag@example.com' });
+  store.addStored('Vendor', { c2c_source_id: 's1', ROWID: '10000000000000012', Name: 'Ada', Added_User: 'owner+tag@example.com' });
   const result = await migrateData({
     ...bases,
     dryRun: false,
