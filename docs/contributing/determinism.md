@@ -52,6 +52,26 @@ it by hand (the status test fails when it is stale and the local corpus is
 present). The same applies to `docs/deluge-builtins.json` — see
 [deluge-builtin.md](deluge-builtin.md).
 
+## Rebasing a branch that carries regen commits
+
+A regeneration commit must be the last commit of its pull request, and the
+branch is rebased onto the main tip at the time it finishes — not the tip
+it started from. Run `npm run det:rebase-regen` right before opening or
+updating the pull request. The tool fetches `origin`, replays the branch's
+commits onto `origin/main` while dropping every commit whose only changes
+are generated files (the manifests, `docs/determinism-status.md`,
+`docs/decimal-audit.md`, `docs/quality-gate.md`, `docs/coverage-gate.md`,
+`docs/deluge-builtins.json` and `tests/ratchet/todo-kinds.json` — detected
+by changed paths, not by subject), regenerates the artifacts, and commits
+`Regenerate determinism manifests` last. It prints one summary line —
+`det:rebase-regen: base=<sha> dropped=<n> regen=<sha|none>` — to paste
+into the report; reviewers check that line against the diff.
+
+A conflict on any non-generated path stops the run with the previous HEAD
+restored: resolve it with a manual rebase, never by hand-editing around
+the tool. The tool refuses a TODO-ratchet rise unless you pass
+`--allow-increase "<reason>"`, and it never pushes.
+
 ## Known limits
 
 `determinism:status --sites <file>` pins the output directory before the

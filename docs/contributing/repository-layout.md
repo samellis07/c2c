@@ -46,6 +46,7 @@ npm run check                  # npm test + tools/determinism-gate.sh
 npm run check:hygiene          # scripts/check-hygiene.mjs alone
 npm run determinism:update     # rewrite committed manifests (only with a reason)
 npm run determinism:check      # fail on drift from committed manifests
+npm run det:rebase-regen       # rebase on origin/main, drop old regens, regen last
 npm run build                  # tsc only
 node dist/cli/src/c2c.js ...   # the CLI against a local checkout
 ```

@@ -50,6 +50,7 @@ tests/plugin/frontmatter.test.mjs
 tests/plugin/orphan-tests.test.mjs
 tests/plugin/doctor-troubleshooting-parity.test.mjs
 tests/plugin/doctor-command-fixes.test.mjs
+tests/det-rebase-regen/det-rebase-regen.test.mjs
 tests/docs/links.test.mjs
 tests/ratchet/todo-kinds.test.mjs
 tests/plugin/vendor-fs-checks.test.mjs

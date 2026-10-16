@@ -40,7 +40,8 @@
     "golden:baseline": "npm run build && node tests/golden/baseline.mjs",
     "golden:offline-plan:update": "npm run build && node tests/golden/update-offline-plan.mjs",
     "c2c": "node dist/cli/src/c2c.js",
-    "ratchet:update": "npm run build && node scripts/update-todo-kinds-ratchet.mjs"
+    "ratchet:update": "npm run build && node scripts/update-todo-kinds-ratchet.mjs",
+    "det:rebase-regen": "node scripts/det-rebase-regen.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
