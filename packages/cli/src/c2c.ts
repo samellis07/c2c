@@ -231,7 +231,8 @@ const USAGE =
       '       c2c doctor [--app <file.ds|dir>] [--dc <dc>] [--org <id>] [--project <id>] [--json] [--local] [--quiet]\n' +
       '       c2c doctor --mcp-begin [--json]\n' +
       '       c2c doctor --mcp-observed - [--dc <dc>] [--org <id>] [--project <id>]\n' +
-      '       c2c doctor --record-mcp <file> --operator   (operator-only)\n' +
+      // Operator-only `doctor --record-mcp <file> --operator` stays dispatchable
+      // but out of customer help; see plugin/references/doctor-spec.md.
       '       c2c --verify-vendor <dir>\n' +
       '       c2c migration-report <dir> [--label name] [--out file] [--json]\n' +
       '       c2c deluge <dir> [--label name] [--out file] [--top n]\n' +
@@ -243,8 +244,8 @@ const USAGE =
       '       c2c fill-todos <file|dir> --emit <dir>\n' +
       '       c2c fill-todos <file|dir> --accept <task-id> <fill-file> [--lock c2c.lock.json]\n' +
       '       c2c fill-todos <file|dir> --lock <file> --report\n' +
-      '       c2c doctor [--local] [--quiet]\n' +
-      '       c2c --verify-vendor <dir>\n' +
+      // (No trailing `doctor [--local] [--quiet]` / `--verify-vendor` repeats:
+      // both are already covered above. The census test fails repeats.)
       '       c2c status --project <id> [--org <id>] [--app <name>] [--json] [--fake] [--table-budget <n>]\n';
 
 function helpRequested(cmd: string, args: readonly string[]): boolean {

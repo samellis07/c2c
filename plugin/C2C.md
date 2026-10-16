@@ -54,12 +54,13 @@ These rules apply to every host (Claude Code, OpenAI Codex, Cursor) and every c2
 | `provision/deploy` | none | `skills/c2c-ui/SKILL.md` | `ui`, `ui-react` | Sign in once |
 | `provision/deploy` | none | `skills/c2c-integrations/SKILL.md` | `deploy` | Verify the mail sender (only if your app sends mail) |
 | `data/cutover` | none | `skills/c2c-schema-and-data/SKILL.md` | `schema`, `migrate-data`, `seed`, `sync-delta` | none |
-| `data/cutover` | `commands/verify.md` | `skills/c2c-verify-and-cutover/SKILL.md` | `smoke`, `proof`, `cutover-checklist` | Run the in-app check and paste its code |
+| `data/cutover` | `commands/verify.md` | `skills/c2c-verify-and-cutover/SKILL.md` | `smoke`, `proof`, `cutover-checklist`, `verify`, `verify-behavior` | Run the in-app check and paste its code |
 | `data/cutover` | `commands/rollback.md` | `skills/c2c-verify-and-cutover/SKILL.md` | `rollback-export` | none |
 | `fill-todos` | none | `skills/c2c-logic/SKILL.md` | `fill-todos` | none |
 | `status/troubleshoot` | `commands/troubleshoot.md` | `skills/c2c-troubleshooting/SKILL.md` | none | none |
 | `status/troubleshoot` | none | `skills/c2c-status/SKILL.md` | `status` | none |
+| `maintainer-only` | none | none | `parse`, `corpus`, `features`, `iac-drift`, `schema-corpus`, `migration-report`, `deluge`, `score-ui`, `ui-corpus`, `--verify-vendor` | none |
 
-The command map lists the current public CLI surface and all public command and skill files. Probe and verification work is guided by the verify skill; data rollback export is `c2c rollback-export`.
+The command map lists the current public CLI surface and all public command and skill files. Corpus and aggregate verbs live in the maintainer-only row: they are maintainer and CI tools, not customer steps. Operator-only `c2c doctor --record-mcp <file> --operator` stays out of customer help on purpose (see `references/doctor-spec.md`); the plugin path is `doctor --mcp-begin` plus `doctor --mcp-observed -`. `c2c --help` is the source of truth for exact flags. Probe and verification work is guided by the verify skill; data rollback export is `c2c rollback-export`.
 
 Run the CLI as `"${CLAUDE_PLUGIN_ROOT}/bin/c2c"` in Claude Code and `<plugin-root>/bin/c2c` (or `npx -y creator-to-catalyst@<version>`) elsewhere.
