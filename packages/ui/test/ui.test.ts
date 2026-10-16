@@ -2899,12 +2899,12 @@ test('browser form: a committed submit whose on-success failed (200 + warning) s
   assert.deepEqual(form.toasts(), [{ kind: 'success', text: 'Item Added Successfully' }]);
 });
 
-test('browser form: a 5xx that says wrote true is a stored row and shows the success confirmation, not a failure', async () => {
+test('browser form: a 5xx that says wrote true is a stored row and says the save landed but a step after it failed', async () => {
   const form = await bootSubmitForm(() => jsonResponse(500, { code: 'INTERNAL_ERROR', message: 'Internal server error', correlationId: 'c', wrote: true }));
   form.submit();
   await form.tick();
-  assert.equal(form.banner(), 'Item Added Successfully');
-  assert.deepEqual(form.toasts().map((toast) => toast.kind), ['success']);
+  assert.equal(form.banner(), 'The record was saved, but a step after saving failed: Internal server error');
+  assert.deepEqual(form.toasts().map((toast) => toast.kind), ['failure']);
 });
 
 test('browser form: submit is disabled while in flight; a second press posts nothing', async () => {

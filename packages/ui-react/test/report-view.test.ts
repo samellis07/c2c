@@ -182,6 +182,8 @@ type Row = Record<string, unknown>;
 
 interface Mounted {
   container: HTMLElement;
+  /** The jsdom window the screen renders in (its confirm is the delete dialog). */
+  win: Record<string, unknown>;
   calls: Record<string, unknown>[];
   posted: { endpoint: string; body: Record<string, unknown> }[];
   /** Display text of one column's cells, top to bottom. */
@@ -278,6 +280,7 @@ async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: 
 
   return {
     container,
+    win: view as unknown as Record<string, unknown>,
     calls,
     posted,
     textOf: (key) => [...container.querySelectorAll(`tbody td[data-th="${key}"]`)].map((cell) => (cell.textContent ?? '').trim()),
@@ -593,4 +596,58 @@ test('non-list reports keep their visible pending-view stub', { skip: SKIP }, as
   assert.ok(board.container.querySelector('[data-view-stub="kanban"]'));
   assert.match(board.container.textContent ?? '', /view, which this app does not draw yet/);
   assert.equal(board.container.querySelector('table'), null, 'pending views are not silently rendered as lists');
+});
+
+test('a row Delete asks first and Cancel sends nothing', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'delete-confirm');
+  const spec = reactAppSpec(appOf());
+  const report = { ...spec.reports.Orders!, deleteEndpoint: '/forms/Order/delete' };
+  const view = await mount(out, report, ROWS, new Set(['Total']));
+  const asked: string[] = [];
+  let answer = false;
+  view.win.confirm = (text: string) => {
+    asked.push(text);
+    return answer;
+  };
+  const deletes = () => view.posted.filter((p) => p.endpoint === '/forms/Order/delete');
+  const button = view.container.querySelector('button[data-row-delete]');
+  assert.ok(button, 'the report draws a row Delete');
+  await view.click(button);
+  assert.deepEqual(asked, ['Are you sure you want to delete this record?'], 'Delete asks with the confirm text');
+  assert.equal(deletes().length, 0, 'Cancel sends no delete');
+  assert.equal(view.textOf('Title').length, ROWS.length, 'Cancel keeps the row');
+
+  answer = true;
+  await view.click(view.container.querySelector('button[data-row-delete]'));
+  assert.equal(asked.length, 2);
+  assert.equal(deletes().length, 1, 'OK posts the delete once');
+  assert.ok(ROWS.some((r) => r.ROWID === deletes()[0]!.body.ROWID), 'the delete names a drawn row');
+});
+
+test('a custom action whose endpoint is a dry-run stub is turned off and named, never run', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'action-preview');
+  const spec = reactAppSpec(appOf());
+  // The generated spec marks every stub endpoint: the Approve column action included.
+  assert.equal(spec.reports.Orders!.customActions.every((a) => a.preview === true), true, 'stub actions carry preview in the spec');
+  const report = {
+    ...spec.reports.Orders!,
+    customActions: [
+      ...spec.reports.Orders!.customActions,
+      { name: 'Mark as Lost', endpoint: '/reports/Orders/actions/mark-as-lost', preview: true as const },
+      { name: 'Export All', endpoint: '/reports/Orders/actions/export-all', header: true, preview: true as const },
+    ],
+  };
+  const view = await mount(out, report, ROWS, new Set(['Total']));
+  const buttons = [...view.container.querySelectorAll('button[data-action]')] as HTMLButtonElement[];
+  assert.ok(buttons.some((b) => b.getAttribute('data-action') === '/reports/Orders/actions/mark-as-lost'), 'the record action is drawn');
+  assert.ok(buttons.some((b) => b.getAttribute('data-action') === '/reports/Orders/actions/export-all'), 'the header action is drawn');
+  assert.ok(buttons.some((b) => b.getAttribute('data-action') === '/reports/Orders/actions/approve'), 'the column action is drawn');
+  for (const button of buttons) {
+    assert.equal(button.disabled, true, `${button.getAttribute('data-action')} is turned off`);
+    await view.click(button);
+  }
+  assert.equal(view.posted.filter((p) => p.endpoint.includes('/actions/')).length, 0, 'a turned-off action posts nothing');
+  assert.doesNotMatch(view.container.textContent ?? '', /ran\./, 'no run is reported');
+  const note = view.container.querySelector('[data-action-preview]')?.textContent ?? '';
+  assert.match(note, /Not available yet, so turned off: .*Mark as Lost.*Export All/);
 });

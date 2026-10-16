@@ -16,7 +16,7 @@
 import assert from 'node:assert/strict';
 import { test, after } from 'node:test';
 import { JSDOM } from 'jsdom';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -215,7 +215,17 @@ interface Rendered {
  * like the emitted src/generated/handlers.ts registry. `posts` records the
  * api.post calls the submit makes.
  */
-async function renderForm(spec: FormSpec, allHandlers: FormHandlers): Promise<Rendered> {
+interface Reply {
+  ok: boolean;
+  status: number;
+  body: Record<string, unknown>;
+}
+
+async function renderForm(
+  spec: FormSpec,
+  allHandlers: FormHandlers,
+  opts: { reply?: (endpoint: string, body: unknown) => Reply; edit?: string } = {},
+): Promise<Rendered> {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://127.0.0.1/', pretendToBeVisual: true });
   const win = dom.window as any;
   installGlobals(win);
@@ -243,7 +253,7 @@ async function renderForm(spec: FormSpec, allHandlers: FormHandlers): Promise<Re
     api: {
       post: async (endpoint: string, body: unknown) => {
         posts.push({ endpoint, body });
-        return { ok: true, status: 200, body: { dryRun: true, record: {} } };
+        return opts.reply ? opts.reply(endpoint, body) : { ok: true, status: 200, body: { dryRun: true, record: {} } };
       },
     },
     navigator: { onLine: true },
@@ -256,7 +266,7 @@ async function renderForm(spec: FormSpec, allHandlers: FormHandlers): Promise<Re
         h(
           EnvContext.Provider,
           { value: env },
-          h(FormView, { form: spec, handlers }, spec.fields.map((item) => h(Field, { key: item.name, name: item.name }))),
+          h(FormView, { form: spec, handlers, ...(opts.edit ? { edit: opts.edit } : {}) }, spec.fields.map((item) => h(Field, { key: item.name, name: item.name }))),
         ),
       ),
     ),
@@ -813,4 +823,84 @@ test('subform row add and delete fire addrow/deleterow handlers with the row bou
   const name = rendered.container.querySelector('input[name="Name"]') as HTMLInputElement | null;
   assert.equal(name?.value, '7', 'the deleterow handler ran with the removed row bound');
   assert.doesNotMatch(rendered.container.textContent ?? '', /Client handler failed/);
+});
+
+/** The library export's Staff_Members form: name, email, required Role and Phone, a configured success message. */
+function libraryForms(): Generated {
+  return generated(deriveIr(parse(readFileSync('fixtures/redistributable/library-application-system/library_application.ds', 'utf8'))));
+}
+
+/** Answer every Staff_Members field the way a person fills the form. */
+async function fillStaff(rendered: Rendered): Promise<void> {
+  enter(rendered, 'Staff_Name.first_name', 'Ada');
+  enter(rendered, 'Staff_Name.last_name', 'Lovelace');
+  enter(rendered, 'Staff_Email', 'ada@example.com');
+  enter(rendered, 'Role', 'Librarian');
+  const phone = rendered.formEl.querySelector('[name="Phone_Number"]') as HTMLInputElement;
+  Object.getOwnPropertyDescriptor(rendered.win.HTMLInputElement.prototype, 'value')!.set!.call(phone, '9876543210');
+  await rendered.flush();
+}
+
+const banner = (rendered: Rendered) => rendered.container.querySelector('.c2c-banner')?.textContent ?? '';
+const live = (body: Record<string, unknown> = {}): Reply => ({ ok: true, status: 200, body: { dryRun: false, wrote: true, ...body } });
+
+test('a saved add shows the form success message and clears the form; the banner survives the reset', async () => {
+  const { spec, handlers } = libraryForms();
+  const form = spec.forms['Staff_Members']!;
+  assert.equal(form.successMessage, 'Staff Member Added Successfully');
+  const rendered = await renderForm(form, handlers, { reply: () => live() });
+  await fillStaff(rendered);
+  await submit(rendered);
+  assert.equal(rendered.posts.filter((p) => p.endpoint === form.submitEndpoint).length, 1, 'the valid submit posts once');
+  assert.deepEqual((rendered.posts[0]!.body as { record: Record<string, unknown> }).record.Role, 'Librarian');
+  assert.equal(banner(rendered), 'Staff Member Added Successfully', 'the configured success message is shown, exact text');
+  const first = rendered.formEl.querySelector('[name="Staff_Name.first_name"]') as HTMLInputElement;
+  assert.equal(first.value, '', 'the saved add clears the form for the next record');
+});
+
+test('a saved add without a configured message shows Creator\'s default, exact text', async () => {
+  const app = appOf(`\tform Note\n\t{\n\t\tTitle\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t}\n`);
+  const { spec, handlers } = generated(app);
+  const form = spec.forms['Note']!;
+  assert.equal(form.successMessage, undefined);
+  const rendered = await renderForm(form, handlers, { reply: () => live() });
+  enter(rendered, 'Title', 'Hello');
+  await submit(rendered);
+  assert.equal(banner(rendered), 'Data Added Successfully!');
+});
+
+test('a saved edit says the update wording, never the add success message', async () => {
+  const { spec, handlers } = libraryForms();
+  const form = spec.forms['Staff_Members']!;
+  const record = { ROWID: '7', Staff_Name: { first_name: 'Ada', last_name: 'Lovelace' }, Staff_Email: 'ada@example.com', Role: 'Librarian', Phone_Number: '9876543210' };
+  const rendered = await renderForm(form, handlers, {
+    edit: '7',
+    reply: (endpoint) => (endpoint === form.recordEndpoint ? { ok: true, status: 200, body: { record } } : live()),
+  });
+  await submit(rendered);
+  const submits = rendered.posts.filter((p) => p.endpoint === form.submitEndpoint);
+  assert.equal(submits.length, 1, 'the edit posts once');
+  assert.equal((submits[0]!.body as { ROWID?: string }).ROWID, '7');
+  assert.equal(banner(rendered), 'Data Updated Successfully!');
+  assert.doesNotMatch(banner(rendered), /Added/);
+});
+
+test('a refused or failed submit always says so, with the server\'s words for a refusal', async () => {
+  const { spec, handlers } = libraryForms();
+  const form = spec.forms['Staff_Members']!;
+  const cases: { reply: Reply; expected: RegExp }[] = [
+    { reply: { ok: false, status: 409, body: { dryRun: false, wrote: false, error: 'duplicate value for field "Phone": use a different value.' } }, expected: /^duplicate value for field "Phone": use a different value\.$/ },
+    { reply: { ok: false, status: 422, body: { dryRun: false, wrote: false } }, expected: /^The record was not saved\.$/ },
+    { reply: { ok: false, status: 500, body: { dryRun: false, wrote: false, error: 'request failed' } }, expected: /unavailable/ },
+    // The row was written; a step after it failed. Never "not saved" (a resubmit would add it twice).
+    { reply: { ok: false, status: 500, body: { dryRun: false, wrote: true, error: 'request failed' } }, expected: /^The record was saved, but a step after saving failed\.$/ },
+    { reply: { ok: false, status: 500, body: { dryRun: false, wrote: true, error: 'Fine rule refused' } }, expected: /^The record was saved, but a step after saving failed: Fine rule refused$/ },
+  ];
+  for (const { reply, expected } of cases) {
+    const rendered = await renderForm(form, handlers, { reply: () => reply });
+    await fillStaff(rendered);
+    await submit(rendered);
+    assert.equal(rendered.posts.length, 1, `${reply.status} posted once`);
+    assert.match(banner(rendered), expected, `${reply.status} ${JSON.stringify(reply.body)}`);
+  }
 });
