@@ -77,5 +77,6 @@
       "check": "unique-varchar-budget",
       "count": 1
     }
-  ]
+  ],
+  "hiddenParts": []
 }

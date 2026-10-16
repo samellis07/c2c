@@ -305,7 +305,8 @@ test('the built app draws the dashboard from the report rows', { skip: haveBuild
     assert.equal(page.querySelector('[data-metric="sum"]')?.getAttribute('data-value'), '120.5');
     assert.match(page.querySelector('[data-metric="sum"]')?.textContent ?? '', /Today's Sales/);
     assert.equal(page.querySelectorAll('.c2c-chart figure').length, 2, 'the donut and the chart report draw');
-    assert.equal(page.querySelector('[data-page] details.todo')?.getAttribute('data-todo-count'), '2');
+    assert.equal(page.querySelector('[data-todo-count]'), null, 'page TODOs are not drawn for end users');
+    assert.doesNotMatch(page.textContent ?? '', /not generated|ZML/);
     assert.ok(page.querySelector('[data-embed="report"] [data-report="All_Orders"]'), 'the report embed shows the records');
     assert.equal(page.querySelector('a.c2c-page-button')?.getAttribute('href'), '#/form/Add_Order');
     // The metric and the embedded list read All_Orders rows; the donut and the

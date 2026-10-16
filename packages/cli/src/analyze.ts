@@ -24,6 +24,7 @@ import { FEATURES, appFacts, widgetManualItems, type App, type Dialect, type Raw
 import { compareEnUs } from '../../core/src/order.js';
 import { dedupeTodos, generate, reportLock, residualDeterminism, type FillLock, type TodoItem } from '../../deluge/src/index.js';
 import { fieldGapsOf, generateSchema, type FieldGap } from '../../schema/src/index.js';
+import { hiddenParts, reactAppSpec, type HiddenPart } from '../../ui-react/src/index.js';
 import { buildUi, type SnippetReason, type UiTodo } from '../../ui/src/index.js';
 import { FEATURE_MATRIX, MATRIX_SNAPSHOT, type MatrixSnapshot } from './feature-matrix.js';
 import { ownerScope, type ScopeEntry } from './scope-labels.js';
@@ -151,6 +152,8 @@ export interface AnalyzeReport {
   };
   /** Partial and unsupported field behavior, listed by schema mapping id. */
   fieldGaps: FieldGap[];
+  /** Parts the generated app does not show to end users, each with the reason; counted here instead of on the page. */
+  hiddenParts: HiddenPart[];
   deluge: {
     units: number;
     statements: number;
@@ -455,6 +458,7 @@ export function analyze(app: App, options?: { lock?: FillLock }): AnalyzeReport 
       notObservable: feat.notObservable,
     },
     fieldGaps: fieldGapsOf(schema.fields),
+    hiddenParts: hiddenParts(reactAppSpec(app)),
     deluge: {
       units: units.length,
       statements: whole.stats.statements,
@@ -493,6 +497,8 @@ export function analyzeAsText(r: AnalyzeReport): string {
     ...r.features.scope.map((item) => `scope: ${item.feature} — ${item.label}`),
     `field behavior gaps: ${r.fieldGaps.reduce((total, gap) => total + gap.count, 0)} across ${r.fieldGaps.length} types`,
     ...r.fieldGaps.map((gap) => `  ${gap.matrixId}: ${gap.count} (${gap.fields.map((field) => `${field.form}.${field.field}`).join(', ')}) — ${gap.reason}`),
+    `hidden from end users: ${r.hiddenParts.length}`,
+    ...r.hiddenParts.map((part) => `  ${part.location}: ${part.reason}`),
     `deluge: ${r.deluge.statements} statements  translated ${r.deluge.translated}  shimmed ${r.deluge.shimmed}  todo ${r.deluge.todo}  (${r.deluge.units} units)`,
     `deterministic: ${r.determinism.deterministic ? 'yes' : 'no'}  (todo items ${r.determinism.todoCount}, lock fills ${r.determinism.fillLockEntries}; UI TODO stubs ${r.determinism.uiTodoCount}, included in the todo items)`,
     `blockers: ${r.blockers.length}`,

@@ -31,7 +31,6 @@ function Extra({ metric, onValue }: { metric: MetricSpec; onValue: (text: string
 
 export function MetricTile({ label, value: main, extra = [], icon }: { label: string; value: MetricSpec; extra?: MetricSpec[]; icon?: ReactNode }) {
   const { value, error, retry } = useMetric(main);
-  const todos = [main, ...extra].flatMap((m) => m.todos);
   // The card mounts once its value is known, so its text never swaps while loading.
   const context = !main.report ? 'No report to read' : main.filter.length ? 'Matching records' : 'All records';
   const loading = value === undefined && !error && !!main.report;
@@ -58,9 +57,6 @@ export function MetricTile({ label, value: main, extra = [], icon }: { label: st
           ))}
         </p>
       ) : null}
-      {todos.map((todo) => (
-        <p key={todo} className="todo">{todo}</p>
-      ))}
     </div>
   );
 }

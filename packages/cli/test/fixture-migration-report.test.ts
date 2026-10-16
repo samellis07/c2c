@@ -169,11 +169,13 @@ test('markdown report spells out an empty TODO list, no manual steps, and a name
     todoCount: 0,
     todoKinds: [],
     manualSteps: [],
+    hiddenParts: [],
   };
   const md = fixtureMigrationReportAsMarkdown(report);
   assert.match(md, /^# Migration report: empty\/app\n\nApp: \(none\)\n/);
   assert.match(md, /## TODO counts\n\n0\n\n- none\n/);
-  assert.match(md, /## Manual steps\n\n- none\n$/);
+  assert.match(md, /## Manual steps\n\n- none\n\n/);
+  assert.match(md, /## Hidden from end users\n\n0\n\n- none\n$/);
 });
 
 test('writing the goldens replaces stale reports, keeps dotfiles, and is byte-stable', (t) => {

@@ -23,3 +23,9 @@ App: Kitchen_Sink_Studio
 ## Manual steps
 
 - 1 warning pivot-analytics
+
+## Hidden from end users
+
+0
+
+- none
