@@ -474,13 +474,15 @@ test(
   );
   assert.deepEqual(
     course.deluge.todoLocations.filter((item) => item.scope === 'unit' && item.construct === 'criteria-dynamic'),
-    [{ location: 'workflow Run_Scripts_On_Click_of_Y:14', construct: 'criteria-dynamic', scope: 'unit' }],
+    [],
   );
 
   const crm = analyze(galleryDs('customer-relationship-manager', 'Customer_Relationship_Manager.ds'));
   assertCountedOnce(crm);
-  assert.equal(crm.determinism.todoCount, 7);
-  assert.equal(crm.determinism.uiTodoCount, 7);
+  // 1c9611919 counts static <style> rules the page sanitizer drops, and 2acdf2f86 counts
+  // client statements that need a shim the browser runtime lacks instead of shipping a stub.
+  assert.equal(crm.determinism.todoCount, 26);
+  assert.equal(crm.determinism.uiTodoCount, 11);
   assert.deepEqual(
     crm.deluge.todoLocations.filter((item) => item.scope === 'app').map((item) => `${item.location}|${item.construct}`),
     [],
@@ -502,12 +504,15 @@ test(
   () => {
   const education = analyze(galleryDs('education-management', 'Education_Management.ds'));
   assertCountedOnce(education);
-  // The 21 pin predates f2eff2275; current 29 is a regression in criteria translation and is intentionally not re-pinned.
-  assert.equal(education.determinism.todoCount, 21);
+  // The 21 pin predates three honest counting changes: 1c9611919 counts static <style>
+  // rules the page sanitizer drops, 2acdf2f86 counts client statements that need a shim
+  // the browser runtime lacks instead of shipping a stub, and 15f9c923f keeps conditions
+  // that would read a stale prefetch slot counted as client-split todos.
+  assert.equal(education.determinism.todoCount, 29);
   assert.equal(education.deluge.todoLocations.filter((item) => item.scope === 'app').length, 0);
-  const registration = education.deluge.todoLocations.filter((item) => item.location.startsWith('workflow Create_record_scripts12:'));
-  assert.equal(registration.length, 2);
-  assert.equal(new Set(registration.map((item) => item.location)).size, 2);
+  const fieldScripts8 = education.deluge.todoLocations.filter((item) => item.location === 'workflow Field_scripts8:21');
+  assert.equal(fieldScripts8.length, 2);
+  assert.equal(new Set(fieldScripts8.map((item) => item.construct)).size, 2);
 
   const emergency = analyze(galleryDs('employee-emergency-check-in', 'Employee_Emergency_Check_In.ds'));
   assertCountedOnce(emergency);
@@ -525,14 +530,6 @@ test(
   const management = analyze(galleryDs('employee-management', 'Employee_Management.ds'));
   assertCountedOnce(management);
   assert.deepEqual(management.deluge.todoLocations, [
-    {
-      location: 'page Dashboard.dsp',
-      construct: 'Server-side Deluge snippet requires manual translation',
-      scope: 'ui',
-      manualReasons: ['sanitizer-loss', 'untranslated'],
-      manualStep:
-        'snippet HTML Snippet on page Dashboard: The sanitizer drops part of its static markup (<style>). Move its CSS and other dropped markup into the app stylesheet or supported components. The compiler stopped at a Deluge construct with no verified translation (island needs manual translation). Rebuild the section with supported components, or translate the construct by hand with a test. Keep this TODO open until the rebuilt section is verified.',
-    },
     {
       location: 'page Employee_Profile.dsp',
       construct: 'Server-side Deluge snippet requires manual translation',
