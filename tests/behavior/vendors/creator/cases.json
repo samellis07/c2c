@@ -1,0 +1,2296 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Vendors",
+  "source": {
+    "file": "Vendors.ds",
+    "origin": "Creator gallery app vendors, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-add-users-report",
+      "steps": [
+        {
+          "op": "report",
+          "report": "Add_Users_Report",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "baseline-vendor-spend-report",
+      "steps": [
+        {
+          "op": "report",
+          "report": "Vendor_Spend_Report",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 2930,
+            "message": "Error Occurred. We are sorry for the inconvenience."
+          }
+        }
+      ]
+    },
+    {
+      "id": "baseline-vendors-report",
+      "steps": [
+        {
+          "op": "report",
+          "report": "Vendors_Report",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "add-contract-category1-setup-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "New Contract Category Added Successfully!"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Contract_Category1": [
+            {
+              "Contract_Category": "Contract_Category ivory 918"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-contract-category-setup-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "New Contract Type Added Successfully!"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Contract_Category": [
+            {
+              "Contract_Type": "Contract_Type delta 345"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-product-setup-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Data Added Successfully!"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Product": [
+            {
+              "Product_Service_Name": "Product_Service_Name grain 659"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-user-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "Profile juniper 112",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "creator": {
+            "code": 3000,
+            "error": [
+              "Error details: Error in executing On Add - On Success script User Limit Reached Line:(8)"
+            ],
+            "message": "New User Added Successfully!"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          },
+          "tags": [
+            "env-artifact:trial-user-limit"
+          ]
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Official_Email": "official-email.628@example.com",
+              "Profile": "Profile juniper 112",
+              "Name_first_name": "Cedar",
+              "Name_last_name": "Harbor"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "env-artifact:trial-user-limit"
+      ]
+    },
+    {
+      "id": "add-user-invalid-duplicate-official-email",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "Profile juniper 112",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Ridge",
+              "last_name": "Delta"
+            },
+            "Profile": "Profile north 154",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Official_Email": "This value already exists. Enter a unique value."
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Official_Email": "official-email.628@example.com",
+              "Profile": "Profile juniper 112",
+              "Name_first_name": "Cedar",
+              "Name_last_name": "Harbor"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-user-update-profile",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "Profile juniper 112",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Add_Users_Report",
+          "where": {
+            "Official_Email": "official-email.628@example.com"
+          },
+          "record": {
+            "Profile": "Profile updated 976"
+          },
+          "expect": {
+            "body": {
+              "matched": 1,
+              "updated": 1,
+              "refused": 0
+            }
+          },
+          "creator": {
+            "codes": [
+              3000
+            ],
+            "messages": [
+              "Data Updated Successfully"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Official_Email": "official-email.628@example.com",
+              "Profile": "Profile updated 976",
+              "Name_first_name": "Cedar",
+              "Name_last_name": "Harbor"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-vendor-type-setup-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "Profile juniper 112",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Add_Users_Report",
+          "where": {
+            "Official_Email": "official-email.628@example.com"
+          },
+          "record": {
+            "Profile": "Profile updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor_Type",
+          "record": {
+            "Vendor_Type": "Vendor_Type north 374"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "New Vendor Type Added Successfully!"
+          },
+          "bind": {
+            "r_add_vendor_type_setup_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Vendor_Type": [
+            {
+              "Vendor_Type": "Vendor_Type north 374"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-vendor-setup-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "Profile juniper 112",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Add_Users_Report",
+          "where": {
+            "Official_Email": "official-email.628@example.com"
+          },
+          "record": {
+            "Profile": "Profile updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor_Type",
+          "record": {
+            "Vendor_Type": "Vendor_Type north 374"
+          },
+          "bind": {
+            "r_add_vendor_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor",
+          "record": {
+            "Name": "Name delta 612",
+            "Type": "<ref:r_add_vendor_type_setup_submit>",
+            "Status": "Pipeline",
+            "Live_Contracts": 445,
+            "Total_spend": 154,
+            "Country_of_Registration": "Country_of_Registration sable 992",
+            "Company_Registration": "Company_Registration_Number alpha 531",
+            "Stock_Symbol": "Stock_Symbol tundra 465",
+            "Company_Website": "https://example.com/company-website/819",
+            "Deals_with": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Internal_Manager": "<ref:r_add_user_valid_submit>",
+            "Relationship_Since": "24-Oct-2026",
+            "Main_Contact_Person": {
+              "first_name": "Onyx",
+              "last_name": "Cedar"
+            },
+            "Official_Email": "official-email.564@example.com",
+            "Personal_Email": "personal-email.961@example.com",
+            "Mobile_Number": "+1555011920"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "New Vendor added successfully!!!"
+          },
+          "bind": {
+            "r_add_vendor_setup_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Vendor": [
+            {
+              "Status": "Pipeline",
+              "Company_Registration": "Company_Registration_Number alpha 531",
+              "Relationship_Since": "2026-10-24",
+              "Official_Email": "official-email.564@example.com",
+              "Name": "Name delta 612",
+              "Type": "<ref:r_add_vendor_type_setup_submit>",
+              "Company_Website": "https://example.com/company-website/819",
+              "Main_Contact_Person_first_name": "Onyx",
+              "Main_Contact_Person_last_name": "Cedar",
+              "Stock_Symbol": "Stock_Symbol tundra 465",
+              "Country_of_Registration": "Country_of_Registration sable 992",
+              "Mobile_Number": "+1555011920",
+              "Personal_Email": "personal-email.961@example.com",
+              "Live_Contracts": "445",
+              "Total_spend": "154.00",
+              "Internal_Manager": "<ref:r_add_user_valid_submit>"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "Deals_with is not a stored column of Add_Vendor (report/display field); not asserted",
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "add-contract-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "Profile juniper 112",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Add_Users_Report",
+          "where": {
+            "Official_Email": "official-email.628@example.com"
+          },
+          "record": {
+            "Profile": "Profile updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor_Type",
+          "record": {
+            "Vendor_Type": "Vendor_Type north 374"
+          },
+          "bind": {
+            "r_add_vendor_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor",
+          "record": {
+            "Name": "Name delta 612",
+            "Type": "<ref:r_add_vendor_type_setup_submit>",
+            "Status": "Pipeline",
+            "Live_Contracts": 445,
+            "Total_spend": 154,
+            "Country_of_Registration": "Country_of_Registration sable 992",
+            "Company_Registration": "Company_Registration_Number alpha 531",
+            "Stock_Symbol": "Stock_Symbol tundra 465",
+            "Company_Website": "https://example.com/company-website/819",
+            "Deals_with": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Internal_Manager": "<ref:r_add_user_valid_submit>",
+            "Relationship_Since": "24-Oct-2026",
+            "Main_Contact_Person": {
+              "first_name": "Onyx",
+              "last_name": "Cedar"
+            },
+            "Official_Email": "official-email.564@example.com",
+            "Personal_Email": "personal-email.961@example.com",
+            "Mobile_Number": "+1555011920"
+          },
+          "bind": {
+            "r_add_vendor_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract",
+          "record": {
+            "Contract": "New",
+            "Start_Date": "26-Oct-2026",
+            "Vendor": "<ref:r_add_vendor_setup_submit>",
+            "End_Date": "13-Oct-2026",
+            "Contract_Number": "Contract_Number_Correct north 223",
+            "Contract_Number_Dropdown": "-",
+            "Contract_Title": "Contract_Title harbor 231",
+            "Notify_Contract_Expiry": true,
+            "Contract_Type": "<ref:r_add_contract_category_setup_submit>",
+            "Notify_From_Date": "10-Oct-2026",
+            "Category": "<ref:r_add_contract_category1_setup_submit>",
+            "Notify_Before_Days": 493,
+            "Product": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Notify_to_vendor_also": true,
+            "Hidden_Email": "hidden-email.70@example.com",
+            "Total_Spend1": 259,
+            "Add_to_History": true,
+            "Status": "Current",
+            "Description": "Sample Description note 403 generated for capture.",
+            "Renewed": true,
+            "if_from_popup": true
+          },
+          "creator": {
+            "code": 3001,
+            "error": [
+              {
+                "task": "alert",
+                "alert_message": [
+                  "End date must be greater than the start date!!!"
+                ]
+              },
+              {
+                "task": "cancel_submit",
+                "message": "Failed to add data."
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Contract": []
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "add-contract-invalid-rule-0",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "Profile juniper 112",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Add_Users_Report",
+          "where": {
+            "Official_Email": "official-email.628@example.com"
+          },
+          "record": {
+            "Profile": "Profile updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor_Type",
+          "record": {
+            "Vendor_Type": "Vendor_Type north 374"
+          },
+          "bind": {
+            "r_add_vendor_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor",
+          "record": {
+            "Name": "Name delta 612",
+            "Type": "<ref:r_add_vendor_type_setup_submit>",
+            "Status": "Pipeline",
+            "Live_Contracts": 445,
+            "Total_spend": 154,
+            "Country_of_Registration": "Country_of_Registration sable 992",
+            "Company_Registration": "Company_Registration_Number alpha 531",
+            "Stock_Symbol": "Stock_Symbol tundra 465",
+            "Company_Website": "https://example.com/company-website/819",
+            "Deals_with": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Internal_Manager": "<ref:r_add_user_valid_submit>",
+            "Relationship_Since": "24-Oct-2026",
+            "Main_Contact_Person": {
+              "first_name": "Onyx",
+              "last_name": "Cedar"
+            },
+            "Official_Email": "official-email.564@example.com",
+            "Personal_Email": "personal-email.961@example.com",
+            "Mobile_Number": "+1555011920"
+          },
+          "bind": {
+            "r_add_vendor_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract",
+          "record": {
+            "Contract": "New",
+            "Start_Date": "10-Oct-2026",
+            "Vendor": "<ref:r_add_vendor_setup_submit>",
+            "End_Date": "05-Oct-2026",
+            "Contract_Number": "Contract_Number_Correct ridge 185",
+            "Contract_Number_Dropdown": "-",
+            "Contract_Title": "Contract_Title cedar 434",
+            "Notify_Contract_Expiry": true,
+            "Contract_Type": "<ref:r_add_contract_category_setup_submit>",
+            "Notify_From_Date": "09-Oct-2026",
+            "Category": "<ref:r_add_contract_category1_setup_submit>",
+            "Notify_Before_Days": 406,
+            "Product": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Notify_to_vendor_also": true,
+            "Hidden_Email": "hidden-email.465@example.com",
+            "Total_Spend1": 10,
+            "Add_to_History": true,
+            "Status": "Current",
+            "Description": "Sample Description note 402 generated for capture.",
+            "Renewed": true,
+            "if_from_popup": true
+          },
+          "creator": {
+            "code": 3001,
+            "error": [
+              {
+                "task": "alert",
+                "alert_message": [
+                  "End date must be greater than the start date!!!"
+                ]
+              },
+              {
+                "task": "cancel_submit",
+                "message": "Failed to add data."
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Contract": []
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "add-contract-invalid-rule-1",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "Profile juniper 112",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Add_Users_Report",
+          "where": {
+            "Official_Email": "official-email.628@example.com"
+          },
+          "record": {
+            "Profile": "Profile updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor_Type",
+          "record": {
+            "Vendor_Type": "Vendor_Type north 374"
+          },
+          "bind": {
+            "r_add_vendor_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor",
+          "record": {
+            "Name": "Name delta 612",
+            "Type": "<ref:r_add_vendor_type_setup_submit>",
+            "Status": "Pipeline",
+            "Live_Contracts": 445,
+            "Total_spend": 154,
+            "Country_of_Registration": "Country_of_Registration sable 992",
+            "Company_Registration": "Company_Registration_Number alpha 531",
+            "Stock_Symbol": "Stock_Symbol tundra 465",
+            "Company_Website": "https://example.com/company-website/819",
+            "Deals_with": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Internal_Manager": "<ref:r_add_user_valid_submit>",
+            "Relationship_Since": "24-Oct-2026",
+            "Main_Contact_Person": {
+              "first_name": "Onyx",
+              "last_name": "Cedar"
+            },
+            "Official_Email": "official-email.564@example.com",
+            "Personal_Email": "personal-email.961@example.com",
+            "Mobile_Number": "+1555011920"
+          },
+          "bind": {
+            "r_add_vendor_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract",
+          "record": {
+            "Contract": "New",
+            "Start_Date": "12-Oct-2026",
+            "Vendor": "<ref:r_add_vendor_setup_submit>",
+            "End_Date": "09-Oct-2026",
+            "Contract_Number": "Contract_Number_Correct sable 673",
+            "Contract_Number_Dropdown": "-",
+            "Contract_Title": "Contract_Title sable 381",
+            "Notify_Contract_Expiry": true,
+            "Contract_Type": "<ref:r_add_contract_category_setup_submit>",
+            "Notify_From_Date": "14-Oct-2026",
+            "Category": "<ref:r_add_contract_category1_setup_submit>",
+            "Notify_Before_Days": 230,
+            "Product": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Notify_to_vendor_also": true,
+            "Hidden_Email": "hidden-email.305@example.com",
+            "Total_Spend1": 41,
+            "Add_to_History": true,
+            "Status": "Current",
+            "Description": "Sample Description note 524 generated for capture.",
+            "Renewed": true,
+            "if_from_popup": true
+          },
+          "creator": {
+            "code": 3001,
+            "error": [
+              {
+                "task": "alert",
+                "alert_message": [
+                  "End date must be greater than the start date!!!"
+                ]
+              },
+              {
+                "task": "cancel_submit",
+                "message": "Failed to add data."
+              }
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Contract": []
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "add-contract-invalid-rule-2",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "Profile juniper 112",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Add_Users_Report",
+          "where": {
+            "Official_Email": "official-email.628@example.com"
+          },
+          "record": {
+            "Profile": "Profile updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor_Type",
+          "record": {
+            "Vendor_Type": "Vendor_Type north 374"
+          },
+          "bind": {
+            "r_add_vendor_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor",
+          "record": {
+            "Name": "Name delta 612",
+            "Type": "<ref:r_add_vendor_type_setup_submit>",
+            "Status": "Pipeline",
+            "Live_Contracts": 445,
+            "Total_spend": 154,
+            "Country_of_Registration": "Country_of_Registration sable 992",
+            "Company_Registration": "Company_Registration_Number alpha 531",
+            "Stock_Symbol": "Stock_Symbol tundra 465",
+            "Company_Website": "https://example.com/company-website/819",
+            "Deals_with": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Internal_Manager": "<ref:r_add_user_valid_submit>",
+            "Relationship_Since": "24-Oct-2026",
+            "Main_Contact_Person": {
+              "first_name": "Onyx",
+              "last_name": "Cedar"
+            },
+            "Official_Email": "official-email.564@example.com",
+            "Personal_Email": "personal-email.961@example.com",
+            "Mobile_Number": "+1555011920"
+          },
+          "bind": {
+            "r_add_vendor_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract",
+          "record": {
+            "Contract": "New",
+            "Start_Date": "23-Oct-2026",
+            "Vendor": "<ref:r_add_vendor_setup_submit>",
+            "End_Date": "25-Oct-2026",
+            "Contract_Number": "Contract_Number_Correct bravo 615",
+            "Contract_Number_Dropdown": "-",
+            "Contract_Title": "Contract_Title tundra 925",
+            "Notify_Contract_Expiry": true,
+            "Contract_Type": "<ref:r_add_contract_category_setup_submit>",
+            "Notify_From_Date": "06-Oct-2026",
+            "Category": "<ref:r_add_contract_category1_setup_submit>",
+            "Notify_Before_Days": 294,
+            "Product": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Notify_to_vendor_also": true,
+            "Hidden_Email": "hidden-email.145@example.com",
+            "Total_Spend1": 168,
+            "Add_to_History": true,
+            "Status": "Current",
+            "Description": "Sample Description note 960 generated for capture.",
+            "Renewed": true,
+            "if_from_popup": true
+          },
+          "creator": {
+            "code": 3000,
+            "message": "New Contract Added Successfully!"
+          },
+          "bind": {
+            "r_add_contract_invalid_rule_2": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Contract": [
+            {
+              "Status": "Current",
+              "Contract_Title": "Contract_Title tundra 925",
+              "Vendor": "<ref:r_add_vendor_setup_submit>",
+              "Start_Date": "2026-10-23",
+              "End_Date": "2026-10-25",
+              "Contract": "New",
+              "Contract_Number": "Contract_Number_Correct bravo 615",
+              "Contract_Type": "<ref:r_add_contract_category_setup_submit>",
+              "Category": "<ref:r_add_contract_category1_setup_submit>"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "add-contract-update-contract-number",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "Profile juniper 112",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Add_Users_Report",
+          "where": {
+            "Official_Email": "official-email.628@example.com"
+          },
+          "record": {
+            "Profile": "Profile updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor_Type",
+          "record": {
+            "Vendor_Type": "Vendor_Type north 374"
+          },
+          "bind": {
+            "r_add_vendor_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor",
+          "record": {
+            "Name": "Name delta 612",
+            "Type": "<ref:r_add_vendor_type_setup_submit>",
+            "Status": "Pipeline",
+            "Live_Contracts": 445,
+            "Total_spend": 154,
+            "Country_of_Registration": "Country_of_Registration sable 992",
+            "Company_Registration": "Company_Registration_Number alpha 531",
+            "Stock_Symbol": "Stock_Symbol tundra 465",
+            "Company_Website": "https://example.com/company-website/819",
+            "Deals_with": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Internal_Manager": "<ref:r_add_user_valid_submit>",
+            "Relationship_Since": "24-Oct-2026",
+            "Main_Contact_Person": {
+              "first_name": "Onyx",
+              "last_name": "Cedar"
+            },
+            "Official_Email": "official-email.564@example.com",
+            "Personal_Email": "personal-email.961@example.com",
+            "Mobile_Number": "+1555011920"
+          },
+          "bind": {
+            "r_add_vendor_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract",
+          "record": {
+            "Contract": "New",
+            "Start_Date": "23-Oct-2026",
+            "Vendor": "<ref:r_add_vendor_setup_submit>",
+            "End_Date": "25-Oct-2026",
+            "Contract_Number": "Contract_Number_Correct bravo 615",
+            "Contract_Number_Dropdown": "-",
+            "Contract_Title": "Contract_Title tundra 925",
+            "Notify_Contract_Expiry": true,
+            "Contract_Type": "<ref:r_add_contract_category_setup_submit>",
+            "Notify_From_Date": "06-Oct-2026",
+            "Category": "<ref:r_add_contract_category1_setup_submit>",
+            "Notify_Before_Days": 294,
+            "Product": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Notify_to_vendor_also": true,
+            "Hidden_Email": "hidden-email.145@example.com",
+            "Total_Spend1": 168,
+            "Add_to_History": true,
+            "Status": "Current",
+            "Description": "Sample Description note 960 generated for capture.",
+            "Renewed": true,
+            "if_from_popup": true
+          },
+          "bind": {
+            "r_add_contract_invalid_rule_2": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Vendor_Spend_Report",
+          "where": {
+            "Hidden_Email": "hidden-email.70@example.com"
+          },
+          "record": {
+            "Contract_Number": "Contract Number Correct updated 833"
+          },
+          "expect": {
+            "body": {
+              "matched": 0,
+              "updated": 0,
+              "refused": 0
+            }
+          },
+          "creator": {
+            "code": 2930,
+            "message": "Error Occurred. We are sorry for the inconvenience."
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Contract": [
+            {
+              "Status": "Current",
+              "Contract_Title": "Contract_Title tundra 925",
+              "Vendor": "<ref:r_add_vendor_setup_submit>",
+              "Start_Date": "2026-10-23",
+              "End_Date": "2026-10-25",
+              "Contract": "New",
+              "Contract_Number": "Contract_Number_Correct bravo 615",
+              "Contract_Type": "<ref:r_add_contract_category_setup_submit>",
+              "Category": "<ref:r_add_contract_category1_setup_submit>"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-user-boundary-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "Profile juniper 112",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Add_Users_Report",
+          "where": {
+            "Official_Email": "official-email.628@example.com"
+          },
+          "record": {
+            "Profile": "Profile updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor_Type",
+          "record": {
+            "Vendor_Type": "Vendor_Type north 374"
+          },
+          "bind": {
+            "r_add_vendor_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor",
+          "record": {
+            "Name": "Name delta 612",
+            "Type": "<ref:r_add_vendor_type_setup_submit>",
+            "Status": "Pipeline",
+            "Live_Contracts": 445,
+            "Total_spend": 154,
+            "Country_of_Registration": "Country_of_Registration sable 992",
+            "Company_Registration": "Company_Registration_Number alpha 531",
+            "Stock_Symbol": "Stock_Symbol tundra 465",
+            "Company_Website": "https://example.com/company-website/819",
+            "Deals_with": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Internal_Manager": "<ref:r_add_user_valid_submit>",
+            "Relationship_Since": "24-Oct-2026",
+            "Main_Contact_Person": {
+              "first_name": "Onyx",
+              "last_name": "Cedar"
+            },
+            "Official_Email": "official-email.564@example.com",
+            "Personal_Email": "personal-email.961@example.com",
+            "Mobile_Number": "+1555011920"
+          },
+          "bind": {
+            "r_add_vendor_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract",
+          "record": {
+            "Contract": "New",
+            "Start_Date": "23-Oct-2026",
+            "Vendor": "<ref:r_add_vendor_setup_submit>",
+            "End_Date": "25-Oct-2026",
+            "Contract_Number": "Contract_Number_Correct bravo 615",
+            "Contract_Number_Dropdown": "-",
+            "Contract_Title": "Contract_Title tundra 925",
+            "Notify_Contract_Expiry": true,
+            "Contract_Type": "<ref:r_add_contract_category_setup_submit>",
+            "Notify_From_Date": "06-Oct-2026",
+            "Category": "<ref:r_add_contract_category1_setup_submit>",
+            "Notify_Before_Days": 294,
+            "Product": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Notify_to_vendor_also": true,
+            "Hidden_Email": "hidden-email.145@example.com",
+            "Total_Spend1": 168,
+            "Add_to_History": true,
+            "Status": "Current",
+            "Description": "Sample Description note 960 generated for capture.",
+            "Renewed": true,
+            "if_from_popup": true
+          },
+          "bind": {
+            "r_add_contract_invalid_rule_2": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Vendor_Spend_Report",
+          "where": {
+            "Hidden_Email": "hidden-email.70@example.com"
+          },
+          "record": {
+            "Contract_Number": "Contract Number Correct updated 833"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP",
+            "Official_Email": "b-official-email.628@example.com"
+          },
+          "creator": {
+            "code": 3000,
+            "error": [
+              "Error details: Error in executing On Add - On Success script User Limit Reached Line:(8)"
+            ],
+            "message": "New User Added Successfully!"
+          },
+          "bind": {
+            "r_add_user_boundary_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          },
+          "tags": [
+            "env-artifact:trial-user-limit"
+          ]
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Official_Email": "official-email.628@example.com",
+              "Profile": "Profile updated 976",
+              "Name_first_name": "Cedar",
+              "Name_last_name": "Harbor"
+            },
+            {
+              "Official_Email": "b-official-email.628@example.com",
+              "Profile": "PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP",
+              "Name_first_name": "Cedar",
+              "Name_last_name": "Harbor"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "env-artifact:trial-user-limit"
+      ]
+    },
+    {
+      "id": "post-add-users-report",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "Profile juniper 112",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Add_Users_Report",
+          "where": {
+            "Official_Email": "official-email.628@example.com"
+          },
+          "record": {
+            "Profile": "Profile updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor_Type",
+          "record": {
+            "Vendor_Type": "Vendor_Type north 374"
+          },
+          "bind": {
+            "r_add_vendor_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor",
+          "record": {
+            "Name": "Name delta 612",
+            "Type": "<ref:r_add_vendor_type_setup_submit>",
+            "Status": "Pipeline",
+            "Live_Contracts": 445,
+            "Total_spend": 154,
+            "Country_of_Registration": "Country_of_Registration sable 992",
+            "Company_Registration": "Company_Registration_Number alpha 531",
+            "Stock_Symbol": "Stock_Symbol tundra 465",
+            "Company_Website": "https://example.com/company-website/819",
+            "Deals_with": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Internal_Manager": "<ref:r_add_user_valid_submit>",
+            "Relationship_Since": "24-Oct-2026",
+            "Main_Contact_Person": {
+              "first_name": "Onyx",
+              "last_name": "Cedar"
+            },
+            "Official_Email": "official-email.564@example.com",
+            "Personal_Email": "personal-email.961@example.com",
+            "Mobile_Number": "+1555011920"
+          },
+          "bind": {
+            "r_add_vendor_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract",
+          "record": {
+            "Contract": "New",
+            "Start_Date": "23-Oct-2026",
+            "Vendor": "<ref:r_add_vendor_setup_submit>",
+            "End_Date": "25-Oct-2026",
+            "Contract_Number": "Contract_Number_Correct bravo 615",
+            "Contract_Number_Dropdown": "-",
+            "Contract_Title": "Contract_Title tundra 925",
+            "Notify_Contract_Expiry": true,
+            "Contract_Type": "<ref:r_add_contract_category_setup_submit>",
+            "Notify_From_Date": "06-Oct-2026",
+            "Category": "<ref:r_add_contract_category1_setup_submit>",
+            "Notify_Before_Days": 294,
+            "Product": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Notify_to_vendor_also": true,
+            "Hidden_Email": "hidden-email.145@example.com",
+            "Total_Spend1": 168,
+            "Add_to_History": true,
+            "Status": "Current",
+            "Description": "Sample Description note 960 generated for capture.",
+            "Renewed": true,
+            "if_from_popup": true
+          },
+          "bind": {
+            "r_add_contract_invalid_rule_2": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Vendor_Spend_Report",
+          "where": {
+            "Hidden_Email": "hidden-email.70@example.com"
+          },
+          "record": {
+            "Contract_Number": "Contract Number Correct updated 833"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP",
+            "Official_Email": "b-official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_boundary_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Add_Users_Report",
+          "expect": {
+            "outcome": "rows",
+            "count": 2
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 2
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Official_Email": "b-official-email.628@example.com",
+              "Profile": "PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP",
+              "Name_last_name": "Harbor",
+              "Name_first_name": "Cedar"
+            },
+            {
+              "Official_Email": "official-email.628@example.com",
+              "Profile": "Profile updated 976",
+              "Name_last_name": "Harbor",
+              "Name_first_name": "Cedar"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-vendor-spend-report",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "Profile juniper 112",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Add_Users_Report",
+          "where": {
+            "Official_Email": "official-email.628@example.com"
+          },
+          "record": {
+            "Profile": "Profile updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor_Type",
+          "record": {
+            "Vendor_Type": "Vendor_Type north 374"
+          },
+          "bind": {
+            "r_add_vendor_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor",
+          "record": {
+            "Name": "Name delta 612",
+            "Type": "<ref:r_add_vendor_type_setup_submit>",
+            "Status": "Pipeline",
+            "Live_Contracts": 445,
+            "Total_spend": 154,
+            "Country_of_Registration": "Country_of_Registration sable 992",
+            "Company_Registration": "Company_Registration_Number alpha 531",
+            "Stock_Symbol": "Stock_Symbol tundra 465",
+            "Company_Website": "https://example.com/company-website/819",
+            "Deals_with": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Internal_Manager": "<ref:r_add_user_valid_submit>",
+            "Relationship_Since": "24-Oct-2026",
+            "Main_Contact_Person": {
+              "first_name": "Onyx",
+              "last_name": "Cedar"
+            },
+            "Official_Email": "official-email.564@example.com",
+            "Personal_Email": "personal-email.961@example.com",
+            "Mobile_Number": "+1555011920"
+          },
+          "bind": {
+            "r_add_vendor_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract",
+          "record": {
+            "Contract": "New",
+            "Start_Date": "23-Oct-2026",
+            "Vendor": "<ref:r_add_vendor_setup_submit>",
+            "End_Date": "25-Oct-2026",
+            "Contract_Number": "Contract_Number_Correct bravo 615",
+            "Contract_Number_Dropdown": "-",
+            "Contract_Title": "Contract_Title tundra 925",
+            "Notify_Contract_Expiry": true,
+            "Contract_Type": "<ref:r_add_contract_category_setup_submit>",
+            "Notify_From_Date": "06-Oct-2026",
+            "Category": "<ref:r_add_contract_category1_setup_submit>",
+            "Notify_Before_Days": 294,
+            "Product": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Notify_to_vendor_also": true,
+            "Hidden_Email": "hidden-email.145@example.com",
+            "Total_Spend1": 168,
+            "Add_to_History": true,
+            "Status": "Current",
+            "Description": "Sample Description note 960 generated for capture.",
+            "Renewed": true,
+            "if_from_popup": true
+          },
+          "bind": {
+            "r_add_contract_invalid_rule_2": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Vendor_Spend_Report",
+          "where": {
+            "Hidden_Email": "hidden-email.70@example.com"
+          },
+          "record": {
+            "Contract_Number": "Contract Number Correct updated 833"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP",
+            "Official_Email": "b-official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_boundary_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Vendor_Spend_Report",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 2930,
+            "message": "Error Occurred. We are sorry for the inconvenience."
+          }
+        }
+      ]
+    },
+    {
+      "id": "post-vendors-report",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category1",
+          "record": {
+            "Contract_Category": "Contract_Category ivory 918"
+          },
+          "bind": {
+            "r_add_contract_category1_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract_Category",
+          "record": {
+            "Contract_Type": "Contract_Type delta 345"
+          },
+          "bind": {
+            "r_add_contract_category_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Product",
+          "record": {
+            "Product_Service_Name": "Product_Service_Name grain 659"
+          },
+          "bind": {
+            "r_add_product_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "Profile juniper 112",
+            "Official_Email": "official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Add_Users_Report",
+          "where": {
+            "Official_Email": "official-email.628@example.com"
+          },
+          "record": {
+            "Profile": "Profile updated 976"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor_Type",
+          "record": {
+            "Vendor_Type": "Vendor_Type north 374"
+          },
+          "bind": {
+            "r_add_vendor_type_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Vendor",
+          "record": {
+            "Name": "Name delta 612",
+            "Type": "<ref:r_add_vendor_type_setup_submit>",
+            "Status": "Pipeline",
+            "Live_Contracts": 445,
+            "Total_spend": 154,
+            "Country_of_Registration": "Country_of_Registration sable 992",
+            "Company_Registration": "Company_Registration_Number alpha 531",
+            "Stock_Symbol": "Stock_Symbol tundra 465",
+            "Company_Website": "https://example.com/company-website/819",
+            "Deals_with": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Internal_Manager": "<ref:r_add_user_valid_submit>",
+            "Relationship_Since": "24-Oct-2026",
+            "Main_Contact_Person": {
+              "first_name": "Onyx",
+              "last_name": "Cedar"
+            },
+            "Official_Email": "official-email.564@example.com",
+            "Personal_Email": "personal-email.961@example.com",
+            "Mobile_Number": "+1555011920"
+          },
+          "bind": {
+            "r_add_vendor_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Contract",
+          "record": {
+            "Contract": "New",
+            "Start_Date": "23-Oct-2026",
+            "Vendor": "<ref:r_add_vendor_setup_submit>",
+            "End_Date": "25-Oct-2026",
+            "Contract_Number": "Contract_Number_Correct bravo 615",
+            "Contract_Number_Dropdown": "-",
+            "Contract_Title": "Contract_Title tundra 925",
+            "Notify_Contract_Expiry": true,
+            "Contract_Type": "<ref:r_add_contract_category_setup_submit>",
+            "Notify_From_Date": "06-Oct-2026",
+            "Category": "<ref:r_add_contract_category1_setup_submit>",
+            "Notify_Before_Days": 294,
+            "Product": [
+              "<ref:r_add_product_setup_submit>"
+            ],
+            "Notify_to_vendor_also": true,
+            "Hidden_Email": "hidden-email.145@example.com",
+            "Total_Spend1": 168,
+            "Add_to_History": true,
+            "Status": "Current",
+            "Description": "Sample Description note 960 generated for capture.",
+            "Renewed": true,
+            "if_from_popup": true
+          },
+          "bind": {
+            "r_add_contract_invalid_rule_2": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Vendor_Spend_Report",
+          "where": {
+            "Hidden_Email": "hidden-email.70@example.com"
+          },
+          "record": {
+            "Contract_Number": "Contract Number Correct updated 833"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "Harbor"
+            },
+            "Profile": "PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP",
+            "Official_Email": "b-official-email.628@example.com"
+          },
+          "bind": {
+            "r_add_user_boundary_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Vendors_Report",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_Vendor": [
+            {
+              "Status": "Pipeline",
+              "Main_Contact_Person_last_name": "Cedar",
+              "Main_Contact_Person_first_name": "Onyx",
+              "Official_Email": "official-email.564@example.com",
+              "Total_spend": "168.00",
+              "Name": "Name delta 612"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
