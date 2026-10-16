@@ -92,6 +92,23 @@ export interface TranslateResult {
    * emitter that ships the client part counts them (`client-shim-unsupported`).
    */
   clientGaps: ClientGap[];
+  /**
+   * Coverage ledger: one row per statement the translator visited, in source
+   * order, script-relative spans. `bucket` is the stats bucket the statement
+   * counted into; 'skipped' means the statement was visited but accounted
+   * nowhere — a generator bug the no-silent-drop audit fails on.
+   */
+  coverage: StatementCover[];
+}
+
+/** One visited statement and the stats bucket it counted into. */
+export interface StatementCover {
+  /** The parsed statement kind (`assign`, `if`, `forEach`, ...). */
+  kind: string;
+  /** Statement span, relative to the translated script. */
+  start: number;
+  end: number;
+  bucket: 'translated' | 'shimmed' | 'todo' | 'skipped';
 }
 
 /** One dropped client statement and the stats bucket it was counted in. */
@@ -499,6 +516,8 @@ interface Scope {
   elementSlots: number;
   /** Client statements dropped by gateClientShims. */
   clientGaps: ClientGap[];
+  /** Coverage ledger: one row per statement the translator visited (see TranslateResult.coverage). */
+  cover: StatementCover[];
   declaredServer: Set<string>;
   declaredClient: Set<string>;
   /** Form fields that a bare name reads via `input`. */
@@ -2424,6 +2443,7 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     elementCollections: new Map(),
     elementSlots: 0,
     clientGaps: [],
+    cover: [],
     clock: { seq: 0, flow: 1 },
     flowStack: [0],
     loops: [],
@@ -2473,8 +2493,8 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     ? `if (ctx.rangeSlot) {\n${scope.deferred.join('\n')}\n}${eager.trim() ? ` else {\n${eager}\n}` : ''}`
     : eager;
   const client = [scope.clientDecls.join('\n'), out.client].filter((s) => s.trim()).join('\n');
-  if (scope.noClient) return { server: out.server, client: '', prefetch: '', usesElement: false, nextSlot: scope.slot, stats, todos, clientGaps: scope.clientGaps };
-  return { server: out.server, client, prefetch, usesElement: scope.elementSlots > 0, nextSlot: scope.slot, stats, todos, clientGaps: scope.clientGaps };
+  if (scope.noClient) return { server: out.server, client: '', prefetch: '', usesElement: false, nextSlot: scope.slot, stats, todos, clientGaps: scope.clientGaps, coverage: scope.cover };
+  return { server: out.server, client, prefetch, usesElement: scope.elementSlots > 0, nextSlot: scope.slot, stats, todos, clientGaps: scope.clientGaps, coverage: scope.cover };
 }
 
 /** Line-start offsets of lines that directly follow a `//` comment-only line. */
@@ -2565,6 +2585,9 @@ function stmts(list: Stmt[], scope: Scope, stats: TranslateStats, todos: TodoIte
         : s.kind === 'cancelSubmit'
           ? cancelSubmitOut(s, alertText, stats, todos)
           : statement(s, scope, stats, todos);
+    if (s.kind === 'cancelDelete' || s.kind === 'cancelSubmit') {
+      scope.cover.push({ kind: s.kind, start: s.span.start, end: s.span.end, bucket: coverBucket(before, stats) });
+    }
     gateClientShims(s, o, scope, stats, before, declared);
     if (s.kind !== 'block') {
       const comment = delugeComment(s, scope.src);
@@ -2615,7 +2638,28 @@ function gateClientShims(s: Stmt, o: Out, scope: Scope, stats: TranslateStats, b
   scope.clientGaps.push({ todo: { construct: 'client-shim-unsupported', start: s.span.start, end: s.span.end }, bucket });
 }
 
+/** The stats bucket a statement counted into between `before` and now. */
+function coverBucket(before: TranslateStats, stats: TranslateStats): StatementCover['bucket'] {
+  if (stats.todo > before.todo) return 'todo';
+  if (stats.shimmed > before.shimmed) return 'shimmed';
+  if (stats.translated > before.translated) return 'translated';
+  return 'skipped';
+}
+
+/**
+ * Every statement node the translator visits is wrapped here so the coverage
+ * ledger records one row for it: the bucket it counted into, or 'skipped'
+ * when the visit accounted nothing. `cancelDelete`/`cancelSubmit` bypass this
+ * wrapper in `stmts` and record their own row.
+ */
 function statement(s: Stmt, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
+  const before = { ...stats };
+  const o = statementBody(s, scope, stats, todos);
+  scope.cover.push({ kind: s.kind, start: s.span.start, end: s.span.end, bucket: coverBucket(before, stats) });
+  return o;
+}
+
+function statementBody(s: Stmt, scope: Scope, stats: TranslateStats, todos: TodoItem[]): Out {
   switch (s.kind) {
     case 'block':
       return stmts(s.body, scope, stats, todos);

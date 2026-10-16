@@ -14,7 +14,7 @@ import { blueprintFieldSpecs, type GeneratedFile } from '../../deluge/src/genera
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { requiredCompositePart } from '../../schema/src/composite-parts.js';
 import { CURRENCY_CODES, fieldTypeRow, normalizeType, type FieldTypeRow } from '../../schema/src/mapping.js';
-import { criteriaHasTodo, sealRelativeCriteria } from '../../shims/src/criteria.js';
+import { criteriaHasTodo, sealRelativeCriteria, type Criteria } from '../../shims/src/criteria.js';
 import { LIMITS } from '../../shims/src/index.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
 import { isMultiChoiceField } from '../../schema/src/generator.js';
@@ -140,6 +140,8 @@ export interface UiReport {
   todo?: string;
   /** A generated report that renders differently from the export's view type (map/pivot fallback to list) carries the reason here; it is not a todo. */
   note?: string;
+  /** Compiled `show all rows from Form [criteria]`. Same predicate the report stub exports as `baseCriteria`. `{ op: 'todo' }` when it did not translate. */
+  criteria?: Criteria;
   columns: { field: string; label: string; lookup?: { form: string; field: string }; numeric?: boolean; multiValue?: boolean; action?: string }[];
   /** Phone record card fields in card order (decorations/report-views.ts); the list columns are the web layout. */
   phoneColumns?: { field: string; label: string }[];
@@ -843,13 +845,20 @@ function buildReport(app: App, report: Report, todos: UiTodo[]): UiReport {
   if (view === 'todo') todo = `Report type ${report.type || '(none)'} is not generated.`;
   // A criteria that did not translate must not widen the report to all rows.
   // The generated endpoint fails closed (zero rows, "filter not migrated"),
-  // and the report renders this notice instead of a table.
-  if (report.criteria?.trim() && criteriaHasTodo(reportCriteria(report.criteria, app.functions))) {
+  // and the report renders this notice instead of a table. The compiled
+  // predicate is stored on the model so a later audit can see that this
+  // report's criteria was actually emitted.
+  let compiledCriteria: Criteria | undefined;
+  if (report.criteria?.trim()) {
+    const parsed = reportCriteria(report.criteria, app.functions);
+    compiledCriteria = criteriaHasTodo(parsed) ? { op: 'todo', construct: 'report-criteria' } : parsed;
+  }
+  if (compiledCriteria?.op === 'todo') {
     status = 'todo';
     todo = [todo, 'Filter not migrated: dynamic or unsupported criteria need manual translation; the report returns no rows.'].filter(Boolean).join(' ');
     // zoho.adminuserid is the application owner's email; the generated app
     // is not configured with one, so the comparison is left to the developer.
-    if (/\bzoho\.adminuserid\b/i.test(report.criteria)) {
+    if (report.criteria && /\bzoho\.adminuserid\b/i.test(report.criteria)) {
       todo += ' It compares with zoho.adminuserid (the application owner email), which the migrated app does not know: replace it with the owner address, or with zoho.loginuserid if the report is meant for the signed-in user.';
     }
   }
@@ -889,6 +898,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[]): UiReport {
     status,
     ...(todo ? { todo } : {}),
     ...(status === 'generated' && note ? { note } : {}),
+    ...(compiledCriteria ? { criteria: compiledCriteria } : {}),
     columns: builtColumns,
     filters: report.filters.map((filter) => ({
       ...(filter.field ? { field: filter.field } : {}),

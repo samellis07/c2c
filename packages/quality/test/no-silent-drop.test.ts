@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { emptyApp, type App, type Field, type Workflow } from '../../core/src/index.js';
 import { FORM_EVENT_SERVER_UNINVOKED, clientPostsServerPath } from '../../deluge/src/generate.js';
-import { auditApp, collectOutputs, groupDrops, renderNoSilentDrop } from '../src/no-silent-drop.js';
+import { assertCovered, auditApp, collectOutputs, coverageLedger, groupDrops, renderNoSilentDrop, SilentDropError } from '../src/no-silent-drop.js';
 
 const Z = { start: 0, end: 0 };
 
@@ -610,4 +610,306 @@ test('a translation block with several languages is named as a block and listed 
   const deOut = collectOutputs(de);
   deOut.warnings = [{ construct: 'translation-not-migrated', name: 'translation fr' } as (typeof deOut.warnings)[number]];
   assert.deepEqual(auditApp(de, deOut).map((d) => d.name), ['translation de']);
+});
+
+/** App with one emitted workflow whose script has two assign statements. */
+function twoStatementApp(): App {
+  const base = coveredApp();
+  return app({
+    ...base,
+    workflows: [workflow({ name: 'Stamp', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'x = 1;\ny = 2;', span: Z } })],
+  });
+}
+
+test('every declared statement is emitted or counted (C3)', () => {
+  const a = twoStatementApp();
+  const rows = coverageLedger(a);
+  const stmts = rows.filter((r) => r.kind === 'statement');
+  assert.equal(stmts.length, 2);
+  assert.ok(stmts.every((r) => r.status === 'emitted'));
+  assert.deepEqual(auditApp(a), []);
+});
+
+test('a fake generator that skips a statement fails generation', () => {
+  const a = twoStatementApp();
+  const out = collectOutputs(a);
+  // The handler module still exists, but the ledger has no row for `y = 2;`.
+  out.statementCoverage = out.statementCoverage.filter((c) => !(c.kind === 'assign' && c.start === 7));
+  const drops = auditApp(a, out);
+  assert.equal(drops.length, 1);
+  assert.equal(drops[0]!.kind, 'statement');
+  assert.match(drops[0]!.name, /Stamp/);
+  assert.throws(() => assertCovered(a, out), SilentDropError);
+});
+
+test('a statement visited but accounted nowhere fails generation', () => {
+  const a = twoStatementApp();
+  const out = collectOutputs(a);
+  out.statementCoverage = out.statementCoverage.map((c) => (c.kind === 'assign' && c.start === 7 ? { ...c, bucket: 'skipped' as const } : c));
+  const drops = auditApp(a, out);
+  assert.equal(drops.length, 1);
+  assert.equal(drops[0]!.kind, 'statement');
+  assert.match(drops[0]!.note, /silent drop/);
+});
+
+test('a todo-bucket statement with no covering TODO item fails generation', () => {
+  const a = app({
+    ...coveredApp(),
+    workflows: [workflow({ name: 'Gap', container: 'form', form: 'Orders', event: 'on load', deluge: { text: 'x = 1;\nzoho.unknownthing.go("x");', span: Z } })],
+  });
+  const out = collectOutputs(a);
+  // Force the second statement into the todo bucket without any TODO item.
+  const second = out.statementCoverage.find((c) => c.start === 7);
+  assert.ok(second);
+  second.bucket = 'todo';
+  out.todos = out.todos.filter((t) => t.end <= 7 || t.start >= 30);
+  const drops = auditApp(a, out);
+  assert.deepEqual(drops.filter((d) => d.kind === 'statement').map((d) => d.name), ['workflow Gap (on load) expr statement']);
+});
+
+const SPAN = {
+  report: { start: 1000, end: 2000 },
+  column: { start: 1100, end: 1200 },
+  filter: { start: 1300, end: 1400 },
+  action: { start: 1500, end: 1600 },
+  format: { start: 1700, end: 1800 },
+  field: { start: 2000, end: 2600 },
+  type: { start: 2010, end: 2050 },
+  max: { start: 2100, end: 2200 },
+  initial: { start: 2300, end: 2400 },
+  page: { start: 3000, end: 3400 },
+  panel: { start: 3010, end: 3080 },
+};
+
+/** Report, page, and field whose generated artefacts carry every declared feature. */
+function richApp(): App {
+  const title = field('Title', 'text');
+  title.span = SPAN.field;
+  title.initialValue = '"Hello"';
+  title.properties = [
+    { key: 'type', value: 'text', span: SPAN.type },
+    { key: 'max char', value: '40', span: SPAN.max },
+    { key: 'initial value', value: '"Hello"', span: SPAN.initial },
+  ];
+  return app({
+    forms: [{ name: 'Orders', properties: [], fields: [title], actions: [], blocks: [], span: SPAN.field }],
+    reports: [
+      {
+        name: 'All_Orders',
+        type: 'list',
+        modifiers: [],
+        form: 'Orders',
+        flags: [],
+        properties: [],
+        criteria: 'Title == "Open"',
+        columns: [{ field: 'Title', properties: [], subcolumns: [], span: SPAN.column }],
+        customActions: [{ name: 'Export', column: false, properties: [], flags: [], blocks: [], span: SPAN.action }],
+        conditionalFormats: [{ name: 'Hot', condition: 'Title == "Open"', properties: [], span: SPAN.format }],
+        filters: [{ field: 'Title', span: SPAN.filter }],
+        groupBy: [],
+        sortBy: [],
+        blocks: [],
+        views: [],
+        span: SPAN.report,
+      },
+    ],
+    pages: [
+      {
+        name: 'Dash',
+        properties: [],
+        zml: [{ tag: 'panel', attributes: { elementName: 'Panel' }, children: [], start: SPAN.panel.start, end: SPAN.panel.end }],
+        references: [],
+        span: SPAN.page,
+      },
+    ],
+  });
+}
+
+function cloneOutputs(out: ReturnType<typeof collectOutputs>): ReturnType<typeof collectOutputs> {
+  return {
+    ...out,
+    schema: JSON.parse(JSON.stringify(out.schema)) as ReturnType<typeof collectOutputs>['schema'],
+    model: JSON.parse(JSON.stringify(out.model)) as ReturnType<typeof collectOutputs>['model'],
+    todos: [...out.todos],
+  };
+}
+
+function dropNames(appUnderTest: App, out: ReturnType<typeof collectOutputs>): string[] {
+  return auditApp(appUnderTest, out).map((drop) => drop.name);
+}
+
+test('a report feature, page element, or field setting is emitted only when the generated artefact contains it', () => {
+  const source = richApp();
+  const out = collectOutputs(source);
+  const rows = coverageLedger(source, out);
+  const dropped = rows.filter((row) => row.status === 'dropped').map((row) => `${row.kind}: ${row.name}`);
+  assert.deepEqual(dropped, []);
+  for (const name of [
+    'All_Orders column Title',
+    'All_Orders filter Title',
+    'All_Orders custom action Export',
+    'All_Orders conditional format Hot',
+    'All_Orders criteria',
+    'Dash.Panel',
+    'Orders.Title property max char',
+    'Orders.Title property initial value',
+    'Orders.Title initial value',
+  ]) {
+    assert.equal(rows.find((row) => row.name === name)?.status, 'emitted', name);
+  }
+
+  const withoutColumn = cloneOutputs(out);
+  const columnReport = withoutColumn.model.reports[0]!;
+  columnReport.columns = columnReport.columns.filter((column) => column.field !== 'Title');
+  columnReport.phoneColumns = (columnReport.phoneColumns ?? []).filter((column) => column.field !== 'Title');
+  for (const block of columnReport.detailBlocks ?? []) block.fields = block.fields.filter((item) => item.field !== 'Title');
+  assert.deepEqual(dropNames(source, withoutColumn), ['All_Orders column Title']);
+
+  const withoutFilter = cloneOutputs(out);
+  withoutFilter.model.reports[0]!.filters = [];
+  assert.deepEqual(dropNames(source, withoutFilter), ['All_Orders filter Title']);
+
+  const withoutAction = cloneOutputs(out);
+  const actionReport = withoutAction.model.reports[0]!;
+  actionReport.customActions = [];
+  actionReport.columns = actionReport.columns.filter((column) => column.field !== 'Export');
+  assert.deepEqual(dropNames(source, withoutAction), ['All_Orders custom action Export']);
+
+  const withoutFormat = cloneOutputs(out);
+  delete withoutFormat.model.reports[0]!.conditionalFormats;
+  assert.deepEqual(dropNames(source, withoutFormat), ['All_Orders conditional format Hot']);
+
+  const withoutCriteria = cloneOutputs(out);
+  delete withoutCriteria.model.reports[0]!.criteria;
+  assert.deepEqual(dropNames(source, withoutCriteria), ['All_Orders criteria']);
+
+  const withoutPanel = cloneOutputs(out);
+  withoutPanel.model.pages[0]!.elements = [];
+  assert.deepEqual(dropNames(source, withoutPanel), ['Dash.Panel']);
+
+  const withoutMax = cloneOutputs(out);
+  const maxField = withoutMax.model.forms[0]!.fields.find((item) => item.name === 'Title')!;
+  delete maxField.maxLength;
+  for (const table of withoutMax.schema.tables) {
+    for (const column of table.columns) if (column.name === 'Title' || column.field === 'Title') delete column.length;
+  }
+  assert.deepEqual(dropNames(source, withoutMax), ['Orders.Title property max char']);
+
+  const withoutInitial = cloneOutputs(out);
+  const initialField = withoutInitial.model.forms[0]!.fields.find((item) => item.name === 'Title')!;
+  delete initialField.initialValue;
+  for (const table of withoutInitial.schema.tables) {
+    for (const column of table.columns) if (column.name === 'Title' || column.field === 'Title') delete column.defaultValue;
+  }
+  assert.deepEqual(dropNames(source, withoutInitial).sort(), ['Orders.Title initial value', 'Orders.Title property initial value']);
+
+  const counted = cloneOutputs(out);
+  const countedReport = counted.model.reports[0]!;
+  countedReport.columns = [];
+  countedReport.phoneColumns = [];
+  countedReport.detailBlocks = [];
+  counted.todos.push({ construct: 'manual', start: SPAN.column.start, end: SPAN.column.end });
+  const countedRow = coverageLedger(source, counted).find((row) => row.name === 'All_Orders column Title');
+  assert.equal(countedRow?.status, 'counted');
+  assert.equal(dropNames(source, counted).includes('All_Orders column Title'), false);
+});
+
+test('a page element whose payload was not generated is a drop even though the node exists', () => {
+  const element = (tag: string, attributes: Record<string, string>) => ({ tag, attributes, children: [], start: 10, end: 20 });
+  const source = app({
+    pages: [
+      {
+        name: 'Dash',
+        properties: [],
+        zml: [
+          element('panel', { elementName: 'Panel' }),
+          element('button', { elementName: 'Go', parameters: 'View all Books' }),
+          element('search', { elementName: 'Search', linkName: 'Book_Report', criteriaString: 'Title.contains(input.searchString)' }),
+          element('text', { elementName: 'Fine', type: 'form data', value: 'thisapp.Book.Fine_Amount.distinctCount' }),
+          element('text', { elementName: 'Total', type: 'form data', value: 'thisapp.Book.Fine_Amount.count' }),
+        ],
+        references: [],
+        span: { start: 1, end: 80 },
+      },
+    ],
+  });
+  const rows = coverageLedger(source);
+  assert.equal(rows.find((row) => row.name === 'Dash.Panel')?.status, 'emitted');
+  assert.equal(rows.find((row) => row.name === 'Dash.Total')?.status, 'emitted');
+  const drops = rows.filter((row) => row.status === 'dropped');
+  assert.deepEqual(
+    drops.map((drop) => drop.name).sort(),
+    ['Dash.Book_Report', 'Dash.Fine', 'Dash.Go'],
+  );
+  for (const drop of drops) assert.match(drop.note ?? '', /Add one:/);
+});
+
+test('a kanban view that the model does not keep, and an options icon, are drops', () => {
+  const genre = field('Genre', 'picklist');
+  genre.span = { start: 1, end: 40 };
+  genre.choices = ['Fiction', 'History'];
+  genre.properties = [
+    { key: 'type', value: 'picklist', span: { start: 2, end: 8 } },
+    { key: 'values', value: '{"Fiction","History"}', span: { start: 9, end: 16 } },
+  ];
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [genre], actions: [], blocks: [], span: { start: 1, end: 40 } }],
+    reports: [
+      {
+        name: 'Book_by_Genre',
+        type: 'kanban',
+        modifiers: [],
+        form: 'Orders',
+        flags: [],
+        properties: [],
+        columns: [{ field: 'Genre', properties: [], subcolumns: [], span: { start: 100, end: 120 } }],
+        customActions: [],
+        conditionalFormats: [],
+        filters: [],
+        groupBy: [],
+        sortBy: [],
+        blocks: [
+          {
+            name: 'options',
+            properties: [{ key: 'display field', value: 'Genre', span: { start: 130, end: 140 } }],
+            blocks: [],
+            items: [],
+            span: { start: 130, end: 150 },
+          },
+        ],
+        views: [],
+        span: { start: 90, end: 200 },
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  assert.equal(out.model.reports[0]!.view, 'kanban');
+  assert.deepEqual(dropNames(source, out), []);
+
+  const listed = cloneOutputs(out);
+  listed.model.reports[0]!.view = 'list';
+  delete listed.model.reports[0]!.note;
+  assert.deepEqual(dropNames(source, listed), ['Book_by_Genre view kanban']);
+
+  const icon = app({
+    ...source,
+    reports: [
+      {
+        ...source.reports[0]!,
+        blocks: [
+          {
+            name: 'options',
+            properties: [
+              { key: 'display field', value: 'Genre', span: { start: 130, end: 140 } },
+              { key: 'icon', value: 'books', span: { start: 141, end: 148 } },
+            ],
+            blocks: [],
+            items: [],
+            span: { start: 130, end: 150 },
+          },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(dropNames(icon, collectOutputs(icon)), ['Book_by_Genre block options']);
 });
