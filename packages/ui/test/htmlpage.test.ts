@@ -2558,7 +2558,8 @@ test('a record-summary frame generates a link to the authorized record route', (
   assert.equal(compiled.ok, true, compiled.reason);
   assert.match(compiled.file?.source ?? '', /#\/record\/Orders/);
   assert.match(compiled.file?.source ?? '', /shim\.datastore\.query/);
-test('one page with a <style>, a <script>, an ExecuteFunction button and a ZML image yields exactly the expected 4 TODOs once each', () => {
+});
+
 test('one page with carried <style> CSS, a <script>, an ExecuteFunction button and a ZML image counts only lost constructs', () => {
   const snippet = [
     '<style>.highlight { color: red; }</style>',
