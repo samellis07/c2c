@@ -512,8 +512,15 @@ interface Scope {
   /** Case-folded name → exact declared name for unambiguous `clientCallFunctions` entries. */
   clientCallFunctionsFolded: Map<string, string>;
   prefetch: string[];
-  /** Client `var` declarations for server-bound lists the client now mutates (see {@link clientListUpdateLine}). */
+  /**
+   * Client `var` declarations for server-bound lists the client now mutates
+   * (see {@link clientListUpdateLine}). {@link stmts} emits them right before
+   * the handler top-level statement that made them, so an earlier client
+   * `L = List()` of the same name runs first and cannot reset the copy.
+   */
   clientDecls: string[];
+  /** Names the client assigns (not mutates) in the handler top-level statement being translated. */
+  topClientAssigned: Set<string>;
   /** Server-bound locals the client declared from a prefetch slot: a name here is client-bound but not arm-class state. */
   clientDeclared: Set<string>;
   /** Server loops currently being translated, outermost first. */
@@ -2180,6 +2187,7 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     formFields: new Map(Object.entries(options.formFields ?? {}).sort().map(([k, v]) => [k, new Set(v)])),
     prefetch: [],
     clientDecls: [],
+    topClientAssigned: new Set(),
     clientDeclared: new Set(),
     rowFrames: [],
     knownLoops: [],
@@ -2291,6 +2299,9 @@ function stmts(list: Stmt[], scope: Scope, stats: TranslateStats, todos: TodoIte
     if (s.kind === 'alert') alertText = s.value.kind === 'string' ? s.value.value : null;
     const before = { ...stats };
     const declared = new Set(scope.declaredClient);
+    const top = scope.flowStack.length === 1 && s.kind !== 'block';
+    const declMark = scope.clientDecls.length;
+    if (top) scope.topClientAssigned.clear();
     const o =
       s.kind === 'cancelDelete'
         ? cancelDeleteOut(s, alertText, stats, todos)
@@ -2304,6 +2315,10 @@ function stmts(list: Stmt[], scope: Scope, stats: TranslateStats, todos: TodoIte
         if (o.server.trim()) o.server = `${comment}\n${o.server}`;
         if (o.client.trim()) o.client = `${comment}\n${o.client}`;
       }
+    }
+    if (top && scope.clientDecls.length > declMark) {
+      const decls = scope.clientDecls.splice(declMark).join('\n');
+      o.client = o.client.trim() ? `${decls}\n${o.client}` : decls;
     }
     if (o.server.trim()) server.push(o.server);
     if (o.client.trim()) client.push(o.client);
@@ -2449,6 +2464,7 @@ function statement(s: Stmt, scope: Scope, stats: TranslateStats, todos: TodoItem
           seq: scope.clock.seq++,
           flow: scope.flowStack[scope.flowStack.length - 1]!,
         });
+        scope.topClientAssigned.add(lhs);
         const line = `var ${jsIdent(lhs)} = ${call}`;
         return { server: line, client: line };
       }
@@ -3288,6 +3304,7 @@ function declare(name: string, code: string, where: Array<'server' | 'client'>, 
   const id = jsIdent(name);
   for (const side of where) {
     const set = side === 'server' ? scope.declaredServer : scope.declaredClient;
+    if (side === 'client') scope.topClientAssigned.add(name);
     const kw = set.has(name) ? '' : 'var ';
     set.add(name);
     out[side] = `${kw}${id} = ${code};`;
@@ -3423,6 +3440,9 @@ function clientListUpdateLine(e: Expr, v: Fx, prior: Binding | undefined, scope:
   if (scope.clientData.has(name) || scope.clientDeclared.has(name)) return `${v.code};`;
   if (!scope.serverOnly.has(name)) return null;
   if (v.todo || v.appFunction || v.sideEffect) return null;
+  // The copy is declared before the enclosing top-level statement: a client
+  // assignment of the name earlier in that statement would reset it.
+  if (scope.topClientAssigned.has(name)) return null;
   const clientBound = (r: string) =>
     r === 'input' || r === 'old' || scope.clientData.has(r) || scope.clientDeclared.has(r) || (scope.local.has(r) && !scope.serverOnly.has(r));
   if (!v.unboundReads.every(clientBound)) return null;
