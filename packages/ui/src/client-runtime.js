@@ -2392,6 +2392,14 @@ function clientEpochDay(value) {
   return Date.UTC(value.y, value.m - 1, value.d) / 86400000;
 }
 
+/** Both ends of a between-dates count; a blank end throws, like the server's datePair. */
+function clientDatePair(a, b) {
+  const da = clientAsDate(a);
+  const db = clientAsDate(b);
+  if (!da || !db) throw clientUnparsableDate();
+  return [da, db];
+}
+
 /** Milliseconds east of UTC for a GMT custom offset (`GMT-8`, `GMT+5:30`), like date.ts fixedGmtOffsetMs. */
 function clientGmtOffsetMs(timeZone) {
   const match = /^GMT([+-])(\d{1,2})(?::(\d{2}))?$/.exec(timeZone);
@@ -3308,6 +3316,26 @@ function identitySlot(ctx, name) {
   return slots[key];
 }
 
+/** Creator system column → keys a row may already use. Same table as SYSTEM_FIELD_KEYS in packages/shims/src/runtime.ts. */
+const CLIENT_SYSTEM_FIELD_KEYS = [
+  { name: 'Added_User', keys: ['Added_User', 'added_user'] },
+  { name: 'Modified_User', keys: ['Modified_User', 'modified_user'] },
+  { name: 'Added_Time', keys: ['Added_Time', 'CREATEDTIME', 'createdtime'] },
+  { name: 'Modified_Time', keys: ['Modified_Time', 'MODIFIEDTIME', 'modifiedtime'] },
+];
+
+/** First present system-column key wins, like systemValue in packages/shims/src/runtime.ts. */
+function clientSystemValue(row, name) {
+  const values = row && typeof row === 'object' && '__row' in row ? row.values : row;
+  if (!values || typeof values !== 'object') return undefined;
+  const spec = CLIENT_SYSTEM_FIELD_KEYS.find((item) => item.name.toLowerCase() === String(name).toLowerCase());
+  if (!spec) return undefined;
+  for (const key of spec.keys) {
+    if (Object.prototype.hasOwnProperty.call(values, key)) return values[key];
+  }
+  return undefined;
+}
+
 /** The error that makes a generated handler discard its queued actions. */
 function clientBlocked(body) {
   const message = body && typeof body.message === 'string' ? body.message : body && typeof body.error === 'string' ? body.error : CLIENT_BLOCKED;
@@ -3571,6 +3599,25 @@ export function browserShimSurface(fetchImpl) {
         const tb = ((db.hh || 0) * 60 + (db.mm || 0)) * 60000 + (db.ss || 0) * 1000;
         return days * 86400000 + (ta - tb);
       },
+      // Between-counts: whole calendar days first, then the kind's divisor,
+      // truncated toward zero — same rules as days360Count, daysBetweenCount,
+      // monthsBetweenCount and yearsBetweenCount in packages/shims/src/date.ts.
+      days360(a, b) {
+        const [da, db] = clientDatePair(a, b);
+        return clientEpochDay(db) - clientEpochDay(da);
+      },
+      daysBetween(a, b) {
+        const [da, db] = clientDatePair(a, b);
+        return clientEpochDay(db) - clientEpochDay(da);
+      },
+      monthsBetween(a, b) {
+        const [da, db] = clientDatePair(a, b);
+        return Math.trunc((clientEpochDay(db) - clientEpochDay(da)) / 30);
+      },
+      yearsBetween(a, b) {
+        const [da, db] = clientDatePair(a, b);
+        return Math.trunc((clientEpochDay(db) - clientEpochDay(da)) / 365);
+      },
     }),
     convert: withStubFallback({
       toLong(value, ctx) {
@@ -3635,6 +3682,10 @@ export function browserShimSurface(fetchImpl) {
             writeFieldValue(at.ctx.form, `${at.field}.${parts[0]}`, value, at.index);
           }
           return value;
+        },
+        // A stored system column (Added_User and the same), like the server's record.system.
+        system(row, name) {
+          return clientSystemValue(row, name);
         },
       };
     })(),
