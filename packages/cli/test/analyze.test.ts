@@ -466,9 +466,10 @@ test(
   const course = analyze(galleryDs('course-planner', 'Course_Planner.ds'));
   assertCountedOnce(course);
   // f2eff2275 translated the admin-user report criteria and removed the two residuals;
-  // the 12 UI todos are one per stub custom action endpoint, each turned off on screen.
-  assert.equal(course.determinism.todoCount, 12);
-  assert.equal(course.determinism.uiTodoCount, 12);
+  // the three UI todos are the custom actions whose workflow generated no function,
+  // each turned off on screen. The other nine actions run live.
+  assert.equal(course.determinism.todoCount, 3);
+  assert.equal(course.determinism.uiTodoCount, 3);
   assert.deepEqual(
     course.deluge.todoLocations.filter((item) => item.scope === 'app').map((item) => `${item.location}|${item.construct}`),
     [],
@@ -482,9 +483,8 @@ test(
   assertCountedOnce(crm);
   // 1c9611919 counts static <style> rules the page sanitizer drops, and 2acdf2f86 counts
   // client statements that need a shim the browser runtime lacks instead of shipping a stub.
-  // Seven of the UI todos are stub custom action endpoints turned off on screen.
-  assert.equal(crm.determinism.todoCount, 33);
-  assert.equal(crm.determinism.uiTodoCount, 18);
+  assert.equal(crm.determinism.todoCount, 26);
+  assert.equal(crm.determinism.uiTodoCount, 11);
   assert.deepEqual(
     crm.deluge.todoLocations.filter((item) => item.scope === 'app').map((item) => `${item.location}|${item.construct}`),
     [],
@@ -520,36 +520,6 @@ test(
   assertCountedOnce(emergency);
   assert.deepEqual(emergency.deluge.todoLocations, [
     {
-      location: 'report All_Crisis',
-      construct: 'Custom action "View Details" is not migrated; its button is turned off.',
-      scope: 'ui',
-    },
-    {
-      location: 'report All_Crisis',
-      construct: 'Custom action "Close Crisis" is not migrated; its button is turned off.',
-      scope: 'ui',
-    },
-    {
-      location: 'report Open_Crisis_In_Our_Branch',
-      construct: 'Custom action "Update Status" is not migrated; its button is turned off.',
-      scope: 'ui',
-    },
-    {
-      location: 'report My_Requests',
-      construct: 'Custom action "Close Request" is not migrated; its button is turned off.',
-      scope: 'ui',
-    },
-    {
-      location: 'report My_Requests',
-      construct: 'Custom action "Comment" is not migrated; its button is turned off.',
-      scope: 'ui',
-    },
-    {
-      location: 'report Requested_Helps',
-      construct: 'Custom action "Comment" is not migrated; its button is turned off.',
-      scope: 'ui',
-    },
-    {
       location: 'page Crisis_View_Page.dspZml',
       construct: 'Server-side Deluge snippet requires manual translation',
       scope: 'ui',
@@ -563,16 +533,6 @@ test(
   assertCountedOnce(management);
   // e4d07e1de translates the Dashboard snippet's relative-date fetch (Add_Holiday[Date_field in this year]), removing the Dashboard blocker.
   assert.deepEqual(management.deluge.todoLocations, [
-    {
-      location: 'report Leave_Requests',
-      construct: 'Custom action "Approve" is not migrated; its button is turned off.',
-      scope: 'ui',
-    },
-    {
-      location: 'report Leave_Requests',
-      construct: 'Custom action "Reject" is not migrated; its button is turned off.',
-      scope: 'ui',
-    },
     {
       location: 'page Employee_Profile.dsp',
       construct: 'Server-side Deluge snippet requires manual translation',

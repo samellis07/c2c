@@ -16,10 +16,9 @@ App: Freight Forwarding and Feeder Solution
 
 ## TODO counts
 
-13
+12
 
 - 11 client-condition-uses-server
-- 1 Custom action "Convert" is not migrated; its button is turned off.
 - 1 Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.
 
 ## Manual steps

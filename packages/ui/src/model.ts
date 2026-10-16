@@ -7,10 +7,10 @@ import { existsSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { App, Field, Form, Property, Report } from '../../core/src/ir.js';
+import type { App, Field, Form, FunctionDef, Property, Report } from '../../core/src/ir.js';
 import { unquote } from '../../core/src/ir.js';
 import type { BlueprintFieldSpec } from '../../deluge/src/blueprint-rules.js';
-import { blueprintFieldSpecs, type GeneratedFile } from '../../deluge/src/generate.js';
+import { blueprintFieldSpecs, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { requiredCompositePart } from '../../schema/src/composite-parts.js';
 import { CURRENCY_CODES, fieldTypeRow, normalizeType, type FieldTypeRow } from '../../schema/src/mapping.js';
@@ -129,8 +129,9 @@ export interface UiAction {
   /** `show action in view header = true` on the export: a toolbar button. */
   header?: boolean;
   /**
-   * The generated endpoint is a dry-run stub that runs nothing: the button
-   * renders turned off with a note, and the action is a counted todo.
+   * The action's workflow generated no function to dispatch, so its endpoint
+   * runs nothing: the button renders turned off with a note, and the action
+   * is a counted todo (see actionDispatchTarget).
    */
   preview?: true;
 }
@@ -417,10 +418,27 @@ export function uiSnippetFiles(model: UiModel): HtmlpageFile[] {
   return (((model as unknown) as Record<symbol, unknown>)[UI_SNIPPET_FILES] as HtmlpageFile[] | undefined) ?? [];
 }
 
-export function buildModel(app: App, delugeFiles: GeneratedFile[] = []): UiModel {
+/**
+ * The function a report custom action dispatches, or undefined when there is
+ * none: the action's workflow must name a declared function whose module
+ * generated (functions/custom/<slug>.mjs) and the thisapp registry
+ * (functions/thisapp.mjs) must exist. The action endpoint (actionStub in
+ * generate.ts) and the button state in the model both read this one
+ * predicate, so a button is enabled exactly when its endpoint can run.
+ */
+export function actionDispatchTarget(app: App, workflow: string | undefined, delugeFiles: readonly GeneratedFile[]): FunctionDef | undefined {
+  const wanted = (workflow ?? '').trim().toLowerCase();
+  const fn = wanted ? app.functions.find((item) => item.name.toLowerCase() === wanted) : undefined;
+  if (!fn) return undefined;
+  const module = `functions/custom/${delugeSlug(fn.name || 'function')}.mjs`;
+  const registered = delugeFiles.some((file) => file.path === 'functions/thisapp.mjs') && delugeFiles.some((file) => file.path === module);
+  return registered ? fn : undefined;
+}
+
+export function buildModel(app: App, delugeFiles: readonly GeneratedFile[] = []): UiModel {
   const todos: UiTodo[] = [];
   const forms = app.forms.map((form) => buildForm(form, todos, app));
-  const reports = app.reports.map((report) => buildReport(app, report, todos));
+  const reports = app.reports.map((report) => buildReport(app, report, todos, delugeFiles));
   const snippetFiles: HtmlpageFile[] = [];
   const componentViews = {
     forms: new Set(forms.filter((form) => formStatus(form) === 'generated').map((form) => form.name)),
@@ -780,7 +798,7 @@ function patternOf(field: Field): { value?: string; bad?: boolean } {
   return {};
 }
 
-function buildReport(app: App, report: Report, todos: UiTodo[]): UiReport {
+function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: readonly GeneratedFile[]): UiReport {
   const type = report.type.toLowerCase();
   let view = REPORT_VIEW[type] ?? 'todo';
   const form = report.form ? app.forms.find((item) => item.name === report.form) : undefined;
@@ -864,17 +882,19 @@ function buildReport(app: App, report: Report, todos: UiTodo[]): UiReport {
     }
   }
   if (todo) todos.push({ area: 'report', name: report.name, reason: todo });
-  // Every custom action endpoint is generated as a dry-run stub (see
-  // actionStub in generate.ts): a button that reported success would claim a
-  // workflow ran when nothing was saved.
+  // An action whose workflow generated no function has an endpoint that runs
+  // nothing (see actionStub in generate.ts): a button that reported success
+  // would claim a workflow ran when nothing was saved, so it is turned off and
+  // counted. A dispatchable action runs through the thisapp registry.
   const actions = report.customActions.map((action) => ({
     name: action.name,
     ...(action.workflow ? { workflow: action.workflow } : {}),
     endpoint: `/reports/${encodeURIComponent(report.name)}/actions/${slug(action.name)}`,
     ...(reportProp(action.properties, 'show action in view header') === 'true' ? { header: true as const } : {}),
-    preview: true as const,
+    ...(actionDispatchTarget(app, action.workflow, delugeFiles) ? {} : { preview: true as const }),
   }));
   for (const action of actions) {
+    if (!action.preview) continue;
     todos.push({ area: 'report', name: report.name, reason: `Custom action "${action.name.trim()}" is not migrated; its button is turned off.` });
   }
   const builtColumns: UiReport['columns'] = columns.map((column) => ({
@@ -1148,7 +1168,7 @@ interface HandlerMeta {
   recordEvent: string | null;
 }
 
-function handlersFrom(files: GeneratedFile[]): UiHandler[] {
+function handlersFrom(files: readonly GeneratedFile[]): UiHandler[] {
   const endpoints = new Set<string>();
   for (const file of files) {
     const match = /path:\s*"([^"]+)"/.exec(file.source);
