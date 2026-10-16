@@ -57,6 +57,13 @@ export type Outcome = (typeof OUTCOMES)[number];
 /** Case/step tags the runner acts on; other tags are carried into findings. */
 export const ENV_ARTIFACT_TAG = /^env-artifact:/;
 
+/**
+ * Step tag for a write the Creator REST API accepted but the Creator form
+ * would block: the record sets a field a field rule hides or disables. c2c
+ * refuses that client input by design; the step lists the fields in `apiOnly`.
+ */
+export const API_ONLY_TAG = 'api-only-acceptance';
+
 /** `<ref:name>` — a value an earlier step bound with `bind`. */
 const REF = /<ref:([A-Za-z0-9_.-]+)>/g;
 
@@ -89,6 +96,13 @@ export interface GoldenStepCommon {
   tags?: string[];
   /** The captured Creator reply (code, message, error) — documentation, not compared. */
   creator?: Record<string, unknown>;
+  /**
+   * With tag `api-only-acceptance`: the record's fields (`Sub.Field` for a
+   * subform column) a form field rule hides or disables. The record as
+   * captured must be refused; the step is then replayed without them, as the
+   * form submits it, and that reply is the one compared.
+   */
+  apiOnly?: string[];
 }
 
 export type GoldenStep = GoldenStepCommon &
@@ -192,6 +206,13 @@ export function assertGolden(parsed: unknown): GoldenFile {
       }
       if (step.setup !== undefined && typeof step.setup !== 'boolean') throw new Error(`${at2}.setup must be a boolean`);
       assertTags(step.tags, `${at2}.tags`);
+      const apiOnly = step.apiOnly;
+      const apiTagged = Array.isArray(step.tags) && step.tags.includes(API_ONLY_TAG);
+      if (apiOnly !== undefined && !(Array.isArray(apiOnly) && apiOnly.length > 0 && apiOnly.every((f) => typeof f === 'string' && f.length > 0))) {
+        throw new Error(`${at2}.apiOnly must be non-empty field names`);
+      }
+      if (apiTagged !== (apiOnly !== undefined)) throw new Error(`${at2}: tag ${API_ONLY_TAG} and apiOnly go together`);
+      if (apiOnly !== undefined && step.op !== 'submit' && step.op !== 'update') throw new Error(`${at2}.apiOnly needs a submit or update step`);
       if (step.creator !== undefined && !isObject(step.creator)) throw new Error(`${at2}.creator must be an object`);
     }
     const expect = (entry as unknown as GoldenCase).expect;
@@ -578,12 +599,17 @@ export interface BehaviorReport {
   status: BehaviorStatus;
   ok: boolean;
   behaviorEquivalentApps: 0 | 1;
-  summary: { cases: number; steps: number; findings: number; skipped: number; replayed: number; equivalentCases: number };
+  summary: { cases: number; steps: number; findings: number; skipped: number; replayed: number; equivalentCases: number; equivalentByDesign: number };
   findings: BehaviorFinding[];
   /** Cases the golden marks `skip` (not replayed, never counted as passing). */
   skipped?: { case: string; reason: string }[];
   /** Steps tagged `env-artifact:*`: replayed, reply not compared. */
   envArtifacts?: { case: string; step: number; tags: string[] }[];
+  /**
+   * Equivalent by design: the captured record was refused for client input
+   * (`api-only-acceptance`). Neither a finding nor a pass.
+   */
+  equivalentByDesign?: { case: string; step: number; class: typeof API_ONLY_TAG; fields: string[]; actual: string }[];
 }
 
 /**
@@ -650,6 +676,40 @@ function whereMatches(row: Record<string, unknown>, where: Record<string, unknow
   });
 }
 
+/** The record without the `apiOnly` fields: what the form submits. `Sub.Field` drops the column from every row. */
+function withoutApiOnly(record: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...record };
+  for (const field of fields) {
+    const [top, column] = field.split('.', 2) as [string, string | undefined];
+    if (column === undefined) {
+      delete out[top];
+      continue;
+    }
+    const rows = out[top];
+    if (Array.isArray(rows)) out[top] = rows.map((row) => (isObject(row) ? Object.fromEntries(Object.entries(row).filter(([k]) => k !== column)) : row));
+  }
+  return out;
+}
+
+/** True when the reply refused the write: a 4xx submit with nothing written, or an update that changed no matched row. */
+function refusedClientInput(step: GoldenStep, res: BehaviorCall): boolean {
+  const body = isObject(res.body) ? res.body : {};
+  if (step.op === 'update') return typeof body.matched === 'number' && body.matched > 0 && body.updated === 0;
+  return res.status >= 400 && res.status < 500 && body.wrote !== true;
+}
+
+/**
+ * True when Creator stored the captured write: a saved outcome, an update that
+ * changed rows, or a 3000 reply (an env-artifact step's reply is not compared).
+ */
+function creatorAccepted(step: GoldenStep): boolean {
+  const want = step.expect;
+  if (want?.outcome === 'saved' || want?.outcome === 'saved-with-warning') return true;
+  if (step.op === 'update' && isObject(want?.body) && typeof want.body.updated === 'number' && want.body.updated > 0) return true;
+  const codes = step.creator ? [step.creator.code, ...(Array.isArray(step.creator.codes) ? step.creator.codes : [])] : [];
+  return codes.includes(3000);
+}
+
 async function runUpdate(step: Extract<GoldenStep, { op: 'update' }>, model: UiModel, backend: BehaviorBackend): Promise<BehaviorCall> {
   const report = model.reports.find((r) => r.name === step.report);
   if (!report) throw new Error(`no report ${step.report} in the migrated app`);
@@ -674,6 +734,7 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
   const findings: BehaviorFinding[] = [];
   const skipped: { case: string; reason: string }[] = [];
   const envArtifacts: { case: string; step: number; tags: string[] }[] = [];
+  const equivalentByDesign: NonNullable<BehaviorReport['equivalentByDesign']> = [];
   let stepCount = 0;
   let equivalentCases = 0;
   for (const kase of golden.cases) {
@@ -688,6 +749,11 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
       findings.push({ case: kase.id, ...f, ...(tags.length ? { tags } : {}) });
     };
     const refs = new Map<string, unknown>();
+    // Client-sent values of apiOnly fields, per form: Creator stored them, the
+    // form could not have sent them, so a table column holding exactly that
+    // value is not compared. A different stored value (set by the app's own
+    // workflow) still is.
+    const apiOnlySent = new Map<string, Map<string, unknown[]>>();
     await backend.reset?.();
     for (const [i, raw] of kase.steps.entries()) {
       stepCount += 1;
@@ -699,15 +765,40 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
       for (const name of [...missing].sort()) at({ step: stepNo, pointer: `<ref:${name}>`, expected: 'a value bound by an earlier step', actual: '(unbound)' }, stepTags);
       let res: BehaviorCall;
       let path: string;
+      const send = async (sent: GoldenStep): Promise<BehaviorCall> => {
+        if (sent.op === 'update') return runUpdate(sent, model, backend);
+        const endpoint = stepEndpoint(sent, model);
+        return backend.call(endpoint.method, endpoint.path, endpoint.body);
+      };
       try {
-        if (step.op === 'update') {
-          path = `update ${step.report}`;
-          res = await runUpdate(step, model, backend);
-        } else {
-          const endpoint = stepEndpoint(step, model);
-          path = endpoint.path;
-          res = await backend.call(endpoint.method, endpoint.path, endpoint.body);
+        path = step.op === 'update' ? `update ${step.report}` : stepEndpoint(step, model).path;
+        let sent = step;
+        if (raw.apiOnly && (step.op === 'submit' || step.op === 'update')) {
+          const fields = raw.apiOnly;
+          const form = step.op === 'submit' ? step.form : model.reports.find((r) => r.name === step.report)?.form ?? step.report;
+          const byField = apiOnlySent.get(form) ?? new Map<string, unknown[]>();
+          apiOnlySent.set(form, byField);
+          for (const field of fields) {
+            const value = step.record[field];
+            if (value !== null && value !== undefined && typeof value !== 'object') byField.set(field, [...(byField.get(field) ?? []), value]);
+          }
+          // Only a write Creator stored is api-only acceptance; a setup step or
+          // a write Creator refused anyway is replayed as the form sends it.
+          if (!raw.setup && creatorAccepted(raw)) {
+            const captured = await send(step);
+            const seen = outcomeDiff('refused', undefined, captured) ?? `${captured.status} refused`;
+            if (refusedClientInput(step, captured)) {
+              const body = isObject(captured.body) ? captured.body : {};
+              const text = [body.code, body.message ?? body.error].filter((part) => typeof part === 'string').join(' ');
+              const said = text ? ` (${text})` : '';
+              equivalentByDesign.push({ case: kase.id, step: stepNo, class: API_ONLY_TAG, fields: [...fields], actual: step.op === 'update' ? `update refused ${String(body.refused)} of ${String(body.matched)}` : `${captured.status}${said}` });
+            } else {
+              at({ step: stepNo, pointer: `${path} client input ${fields.join(', ')}`, expected: 'refused for client input', actual: seen }, stepTags);
+            }
+          }
+          sent = { ...step, record: withoutApiOnly(step.record, fields) } as GoldenStep;
         }
+        res = await send(sent);
       } catch (err) {
         at({ step: stepNo, pointer: stepLabel(step), expected: 'a generated endpoint', actual: err instanceof Error ? err.message : 'unresolvable' }, stepTags);
         continue;
@@ -737,7 +828,11 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
     const missing = new Set<string>();
     const tables = resolveRefs(kase.expect?.tables ?? {}, refs, missing) as Record<string, Record<string, unknown>[]>;
     for (const name of [...missing].sort()) at({ pointer: `tables <ref:${name}>`, expected: 'a value bound by an earlier step', actual: '(unbound)' });
-    for (const [table, expectedRows] of Object.entries(tables)) {
+    for (const [table, listed] of Object.entries(tables)) {
+      const sentBy = apiOnlySent.get(table);
+      const expectedRows = sentBy
+        ? listed.map((row) => Object.fromEntries(Object.entries(row).filter(([column, value]) => !sentBy.get(column)?.some((sent) => sent === value || textBoundaryEqual(value, sent)))))
+        : listed;
       const actualRows = await backend.tableRows(table);
       const diffs: Omit<BehaviorFinding, 'case'>[] = [];
       matchRows(expectedRows, actualRows, `tables.${table}`, diffs, kase.expect?.unordered === true, kase.expect?.partial === true);
@@ -747,6 +842,7 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
   }
   const replayed = golden.cases.length - skipped.length;
   const status: BehaviorStatus = replayed === 0 ? 'not-run' : findings.length === 0 && skipped.length === 0 ? 'equivalent' : 'not-equivalent';
+  const equivalentByDesignCases = new Set(equivalentByDesign.map((e) => e.case));
   const report: BehaviorReport = {
     version: REPORT_VERSION,
     app: app.name || 'app',
@@ -754,10 +850,11 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
     status,
     ok: status === 'equivalent',
     behaviorEquivalentApps: status === 'equivalent' ? 1 : 0,
-    summary: { cases: golden.cases.length, steps: stepCount, findings: findings.length, skipped: skipped.length, replayed, equivalentCases },
+    summary: { cases: golden.cases.length, steps: stepCount, findings: findings.length, skipped: skipped.length, replayed, equivalentCases: equivalentCases - equivalentByDesignCases.size, equivalentByDesign: equivalentByDesign.length },
     findings,
     ...(skipped.length ? { skipped } : {}),
     ...(envArtifacts.length ? { envArtifacts } : {}),
+    ...(equivalentByDesign.length ? { equivalentByDesign } : {}),
   };
   return { report, findings };
 }
@@ -774,7 +871,7 @@ export function formatBehaviorMarkdown(report: BehaviorReport, goldenDir?: strin
     `# c2c verify-behavior — ${report.app}`,
     '',
     `mode: ${report.mode}${goldenDir ? ` · goldens: ${goldenDir}` : ''}`,
-    `cases: ${report.summary.cases} · steps: ${report.summary.steps} · findings: ${report.summary.findings} · skipped: ${report.summary.skipped}`,
+    `cases: ${report.summary.cases} · steps: ${report.summary.steps} · findings: ${report.summary.findings} · skipped: ${report.summary.skipped} · equivalent by design: ${report.summary.equivalentByDesign}`,
     `status: ${report.status} — equivalent on ${report.summary.equivalentCases} of ${report.summary.cases} cases, ${report.summary.skipped} skipped`,
     '',
   ];
@@ -795,6 +892,11 @@ export function formatBehaviorMarkdown(report: BehaviorReport, goldenDir?: strin
   if (report.envArtifacts?.length) {
     lines.push('Environment-artifact steps (replayed, reply not compared):', '');
     for (const e of report.envArtifacts) lines.push(`- ${e.case} step ${e.step}: ${e.tags.join(', ')}`);
+    lines.push('');
+  }
+  if (report.equivalentByDesign?.length) {
+    lines.push('Equivalent by design (refused for client input; not a finding, not a pass):', '');
+    for (const e of report.equivalentByDesign) lines.push(`- ${e.case} step ${e.step}: ${e.class} ${e.fields.join(', ')} — ${e.actual}`);
     lines.push('');
   }
   lines.push(`behavior-equivalent apps: ${report.behaviorEquivalentApps}`);

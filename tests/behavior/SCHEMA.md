@@ -125,6 +125,9 @@ Every step may also carry:
 - `tags` — strings carried into this step's findings (see Tags).
 - `creator` — the captured Creator reply (`code`, `message`, `error`):
   documentation for the reader, not compared.
+- `apiOnly` — with tag `api-only-acceptance` (and only with it): the
+  record's fields a form field rule hides or disables (`Sub.Field` for a
+  subform column). See Tags.
 
 Each step's optional `expect`:
 
@@ -195,19 +198,39 @@ carried into findings so a report can separate them:
   an exact replay). The golden keeps what Creator returned; the finding is
   an open question, not a c2c defect until confirmed.
 - `superseded` — the capture was overwritten; used with `skip`.
+- `api-only-acceptance` on a `submit` or `update` step, with `apiOnly` —
+  the captured record sets fields an unconditional Creator field rule hides
+  or disables. Hide and disable are form behaviours: the Creator REST API
+  ignores them and stores the value, while c2c refuses a client value for
+  such a field on the server. When Creator stored the captured write (a
+  saved outcome, an update that changed rows, or code 3000), the record is
+  first replayed as captured and must be refused: that is counted as
+  **equivalent by design** (`equivalentByDesign` in the report, never a
+  finding and never a pass); a captured record c2c accepts is a finding
+  (`client input <fields>`, expected `refused for client input`). The step
+  is then replayed without the `apiOnly` fields, as the form submits it, and
+  that reply is the one compared and bound. A setup step, or a write Creator
+  refused for another reason, is only replayed without them. In the case's
+  `tables`, a column of an `apiOnly` field whose expected value equals the
+  value the client sent (text/number boundary included) is not compared (Creator stored the client's
+  value); a different stored value — set by the app's own workflow, e.g. an
+  On Success `input.Status = "..."` — is still compared. The captured Creator
+  results stay as captured: the tag and `apiOnly` are the only additions.
 
 ## Findings and reports
 
 Every diff is a finding: `{case, step?, pointer, expected, actual}` — the
 minimal repro is the case id plus the pointer (`body.values.Title`,
 `tables.Book[0].Qty`, `… status`). `--report <file>` writes deterministic
-JSON (`c2c-behavior-report/1`; `summary.skipped`, and `skipped` /
-`envArtifacts` when present); `--report-md <file>` writes the markdown
+JSON (`c2c-behavior-report/1`; `summary.skipped`,
+`summary.equivalentByDesign`, and `skipped` / `envArtifacts` /
+`equivalentByDesign` when present); `--report-md <file>` writes the markdown
 table; both are printed to stdout regardless. `status` is `equivalent`
 (every case replayed, no finding), `not-equivalent` (a finding, or any
 skipped case — a skip is never a pass) or `not-run` (no case replayed); the
-markdown states it as `equivalent on N of M cases, K skipped`. Exit code is
-`0` when equivalent, `1` on a finding or a skipped case, `2` on usage, `3`
-when nothing was replayed. The KPI line is `behavior-equivalent apps: N` —
-`1` only when the app ran clean with 0 findings and 0 skipped cases, `0`
-otherwise.
+markdown states it as `equivalent on N of M cases, K skipped`.
+Equivalent-by-design replays are listed but are neither findings nor passes.
+Exit code is `0` when equivalent, `1` on a finding or a skipped case, `2` on
+usage, `3` when nothing was replayed. The KPI line is
+`behavior-equivalent apps: N` — `1` only when the app ran clean with 0
+findings and 0 skipped cases, `0` otherwise.

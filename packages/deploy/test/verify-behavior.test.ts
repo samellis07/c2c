@@ -508,3 +508,157 @@ test('MUST-FAIL: an update whose edit is refused counts it under refused', async
   const wrong = await replay(update(0), refuseEdits);
   assert.deepEqual(wrong.findings.map((f) => [f.pointer, f.expected, f.actual]), [['body.refused', 0, 1]]);
 });
+
+// ---------- api-only acceptance: a field a form rule hides, set through the Creator API ----------
+
+const RULE_DS = `application "rule-sample"
+{
+\ttime zone = "Asia/Kolkata"
+\tshare_settings
+\t{
+\t\t"Administrator"
+\t\t{
+\t\t\tname = "Administrator"
+\t\t\ttype = Users_Permissions
+\t\t\tdescription = "This profile will have all the permissions."
+\t\t}
+\t}
+\tsection S
+\t{
+\t\tform Item
+\t\t{
+\t\t\tmust have Title
+\t\t\t(
+\t\t\t\ttype = text
+\t\t\t)
+\t\t\tShelf
+\t\t\t(
+\t\t\t\ttype = text
+\t\t\t)
+\t\t\tStatus
+\t\t\t(
+\t\t\t\ttype = text
+\t\t\t)
+\t\t\tNote
+\t\t\t(
+\t\t\t\ttype = text
+\t\t\t)
+\t\t}
+\t\tlist All_Items
+\t\t{
+\t\t\tshow all rows from Item
+\t\t}
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tRules as "Rules"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Item
+\t\t\t\trecord event = on add
+\t\t\t\tfield rules
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\t\thide Shelf;
+\t\t\t\t\t\tdisable Status;
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t\tFile as "File"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Item
+\t\t\t\trecord event = on add
+\t\t\t\ton success
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\t\tcustom deluge script
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tinput.Status = "Filed";
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}
+}
+`;
+
+async function replayRule(cases: unknown[]) {
+  const app = deriveIr(parse(RULE_DS));
+  const golden = assertGolden({ version: 'c2c-behavior-golden/2', app: 'rule-sample', cases });
+  const backend = await startOfflineBackend(app);
+  try {
+    return (await runBehavior(app, golden, backend, 'offline')).report;
+  } finally {
+    await backend.close();
+  }
+}
+
+const CAPTURED = { op: 'submit', form: 'Item', record: { Title: 'Bolt', Shelf: 'S1', Status: 'Draft' }, creator: { code: 3000 }, expect: { outcome: 'saved' } };
+
+test('api-only acceptance: the captured record is refused for client input, the form replay is compared, the workflow value still counts', async () => {
+  const report = await replayRule([
+    {
+      id: 'add-item',
+      steps: [{ ...CAPTURED, tags: ['api-only-acceptance'], apiOnly: ['Shelf', 'Status'], bind: { item: 'body.values.ROWID' } }],
+      // Creator stored the client's Shelf (not compared) and the On Success Status (compared).
+      expect: { partial: true, tables: { Item: [{ ROWID: '<ref:item>', Title: 'Bolt', Shelf: 'S1', Status: 'Filed' }] } },
+    },
+    {
+      id: 'setup-only',
+      steps: [
+        { op: 'submit', form: 'Item', record: { Title: 'Nut', Shelf: 'S2' }, setup: true, tags: ['api-only-acceptance'], apiOnly: ['Shelf'] },
+        { op: 'report', report: 'All_Items', expect: { outcome: 'rows', count: 1 } },
+      ],
+    },
+  ]);
+  assert.equal(report.ok, true, JSON.stringify(report.findings));
+  assert.equal(report.summary.equivalentByDesign, 1);
+  assert.equal(report.equivalentByDesign?.length, 1);
+  const entry = report.equivalentByDesign![0]!;
+  assert.deepEqual([entry.case, entry.step, entry.class, entry.fields], ['add-item', 1, 'api-only-acceptance', ['Shelf', 'Status']]);
+  assert.match(entry.actual, /^403 .*Item\.(Shelf|Status) is (hidden|disabled) by a field rule/);
+  const md = formatBehaviorMarkdown(report);
+  assert.match(md, /equivalent by design: 1/);
+  assert.match(md, /- add-item step 1: api-only-acceptance Shelf, Status — 403/);
+  assert.match(md, /behavior-equivalent apps: 1/);
+});
+
+test('MUST-FAIL: api-only acceptance is never a plain pass or a silent skip', async () => {
+  // Untagged: the 403 is a finding.
+  const untagged = await replayRule([{ id: 'add-item', steps: [CAPTURED] }]);
+  assert.equal(untagged.ok, false);
+  assert.ok(untagged.findings.some((f) => f.pointer === '/forms/Item/success outcome' && /^403/.test(String(f.actual))), JSON.stringify(untagged.findings));
+  assert.equal(untagged.summary.equivalentByDesign, 0);
+  // Tagged on a field no rule denies: c2c accepting client input is a finding.
+  const wrongField = await replayRule([
+    { id: 'add-item', steps: [{ op: 'submit', form: 'Item', record: { Title: 'Bolt', Note: 'n' }, creator: { code: 3000 }, expect: { outcome: 'saved' }, tags: ['api-only-acceptance'], apiOnly: ['Note'] }] },
+  ]);
+  assert.equal(wrongField.ok, false);
+  const refusal = wrongField.findings.find((f) => f.expected === 'refused for client input');
+  assert.ok(refusal, JSON.stringify(wrongField.findings));
+  assert.equal(refusal.pointer, '/forms/Item/success client input Note');
+  assert.equal(wrongField.summary.equivalentByDesign, 0);
+  // A workflow value is still compared: Creator stored Filed, a wrong table expectation is a finding.
+  const workflow = await replayRule([
+    {
+      id: 'add-item',
+      steps: [{ ...CAPTURED, tags: ['api-only-acceptance'], apiOnly: ['Shelf', 'Status'] }],
+      expect: { partial: true, tables: { Item: [{ Title: 'Bolt', Status: 'Approved' }] } },
+    },
+  ]);
+  assert.ok(workflow.findings.some((f) => f.pointer === 'tables.Item[0].Status' && f.expected === 'Approved' && f.actual === 'Filed'), JSON.stringify(workflow.findings));
+});
+
+test('the schema pairs the api-only-acceptance tag with apiOnly on a write step', () => {
+  const bad = (step: Record<string, unknown>) => () => assertGolden({ version: 'c2c-behavior-golden/2', cases: [{ id: 'a', steps: [step] }] });
+  assert.throws(bad({ op: 'submit', form: 'Item', record: {}, tags: ['api-only-acceptance'] }), /tag api-only-acceptance and apiOnly go together/);
+  assert.throws(bad({ op: 'submit', form: 'Item', record: {}, apiOnly: ['Shelf'] }), /tag api-only-acceptance and apiOnly go together/);
+  assert.throws(bad({ op: 'submit', form: 'Item', record: {}, tags: ['api-only-acceptance'], apiOnly: [] }), /apiOnly must be non-empty/);
+  assert.throws(bad({ op: 'report', report: 'R', tags: ['api-only-acceptance'], apiOnly: ['Shelf'] }), /apiOnly needs a submit or update step/);
+});
