@@ -1,0 +1,101 @@
+{
+ "status": "success",
+ "data": {
+  "status": "success",
+  "data": [
+   {
+    "project_details": {
+     "project_name": "c2c-e2e-1015-35e5",
+     "id": "10000000000013200",
+     "project_type": "Live"
+    },
+    "name": "c2c_auth",
+    "created_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "modified_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "stack": "node20",
+    "type": "applogic",
+    "function_output": {},
+    "is_deployed": false,
+    "api_name": "c2c_auth",
+    "id": "10000000000013004",
+    "authentication": [],
+    "invoke_url": "https://c2c-e2e-1015-35e5-10000000000.development.catalystserverless.in/server/c2c_auth/",
+    "is_authenticated": true,
+    "configuration": {
+     "memory": 256,
+     "environment": {
+      "variables": {
+       "C2C_SLATE_ORIGIN": "https://example-app.onslate.in"
+      },
+      "last_updated_time": 1792167402231
+     }
+    }
+   },
+   {
+    "project_details": {
+     "project_name": "c2c-e2e-1015-35e5",
+     "id": "10000000000013200",
+     "project_type": "Live"
+    },
+    "name": "c2c_api",
+    "created_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "modified_by": {
+     "zuid": "<redacted>",
+     "is_confirmed": false,
+     "email_id": "<redacted>",
+     "first_name": "<redacted>",
+     "last_name": "<redacted>",
+     "user_type": "Admin",
+     "user_id": "<redacted>"
+    },
+    "stack": "node20",
+    "type": "applogic",
+    "function_output": {},
+    "is_deployed": false,
+    "api_name": "c2c_api",
+    "id": "10000000000013005",
+    "authentication": [],
+    "invoke_url": "https://c2c-e2e-1015-35e5-10000000000.development.catalystserverless.in/server/c2c_api/",
+    "is_authenticated": true,
+    "configuration": {
+     "memory": 256,
+     "environment": {
+      "variables": {
+       "TABLE_BOOK_ID": "10000000000013003",
+       "C2C_SMOKE_ENABLED": "1",
+       "C2C_ZOHO_DC": "in",
+       "C2C_DEPLOY_MODE": "live",
+       "...": "(other TABLE_* ids omitted)"
+      },
+      "last_updated_time": 1792167402231
+     }
+    }
+   }
+  ],
+  "total_size": 2
+ }
+}

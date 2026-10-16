@@ -111,6 +111,7 @@ export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
       '--domain': 'value',
       '--import': 'bool',
       '--name': 'value',
+      '--narrow-existing-security': 'bool',
       '--next': 'bool',
       '--out': 'value',
       '--record': 'value',

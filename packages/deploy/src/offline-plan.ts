@@ -901,6 +901,19 @@ function buildSteps(opts: {
     // Real List_All_Tables rows are {table_name, table_id, …} records.
     readBack: { via: 'mcp', tool: PLAN_STEP_TOOL.listTables, match: { table_name: tableNames } },
   });
+  if (!opts.newProject) {
+    // One runnable security pass for a console-created project: the same role,
+    // per-table permission/scope and function-rule set the IaC import writes on
+    // greenfield. The individual steps stay in the plan as the verification
+    // contract; a successful import-existing run closes them after read-back.
+    steps.push({
+      id: 'import-existing',
+      via: 'cli',
+      command: 'c2c provision --confirm --run import-existing',
+      args: { plan: 'provision/security.json', note: 'reads the MCP replies recorded under provision/evidence/import-existing/ (List_All_Roles, List_All_Tables, Get_Table_Permissions/Get_Table_Scopes per table, List_All_Functions); prints the Update_/Enable_ MCP calls and guided steps the diff needs, then a re-run verifies' },
+      readBack: { via: 'cli', command: 'c2c provision --confirm --run import-existing', match: { security: 'verified' } },
+    });
+  }
   // Update_Table_Permissions/Scopes accept only the two built-in roles;
   // grants on custom roles are console work, after custom-roles.
   const mcpGrants = opts.tablePermissions.filter((grant) => MCP_PERM_ROLES.has(grant.role));
@@ -1345,6 +1358,7 @@ const MATCH_FOR: Record<string, (match: unknown) => boolean> = {
   import: matchProject,
   'import-roles': matchRoleNames,
   'import-security-rule': (match) => matchExact(match, { c2c_api: { is_authenticated: true } }),
+  'import-existing': (match) => matchExact(match, { security: 'verified' }),
   production: (match) => matchStrings(match, 'env_name'),
   tables: (match) => matchStrings(match, 'table_name'),
   jobpool: (match) => matchString(match, 'name'),
@@ -1590,6 +1604,29 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
     { path: 'function-env.json', data: `${JSON.stringify(fenv, null, 2)}\n` },
     // Detail specs the cli steps execute; inputs.json is the file the customer fills.
     { path: 'provision/tables.json', data: `${JSON.stringify(tableCreatePlan(schema), null, 2)}\n` },
+    ...(newProject
+      ? []
+      : [
+          {
+            path: 'provision/security.json',
+            data: `${JSON.stringify(
+              {
+                roles: auth.roles,
+                // An explicit row for App User and every custom role on every
+                // table — the same rows the greenfield IaC template writes, so
+                // an unlisted role is never guessed at. App Administrator is
+                // out of scope (full access by design) and carries no row.
+                tablePermissions: schema.tables
+                  .filter((table) => !table.nosql)
+                  .flatMap((table) => importTableGrants(table.name, auth.roles, auth.tablePermissions))
+                  .filter((grant) => grant.role !== 'App Administrator'),
+                function: API_FUNCTION,
+              },
+              null,
+              2,
+            )}\n`,
+          },
+        ]),
     { path: 'provision/inputs.json', data: `${JSON.stringify({ slateDomain: '', senderEmail: '', users: [], projectName: '' }, null, 2)}\n` },
   ];
   if (newProject) {

@@ -310,3 +310,38 @@ test('--confirm still refuses a missing credential, another org and another proj
   assert.deepEqual(otherProject.calls, []);
   rmSync(dir, { recursive: true, force: true });
 });
+
+test('existing-project plan writes an explicit security.json row for App User and every custom role, none for App Administrator', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-plan-security-rows-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const ds = join(dir, 'widget.ds');
+  const profiles = `share_settings
+{
+"Read"
+{
+name = "Read"
+type = Users_Permissions
+}
+"Developer"
+{
+name = "Developer"
+type = Developer
+}
+}
+}
+`;
+  writeFileSync(ds, DS.replace(/}\n$/, profiles));
+  const { files } = buildOfflinePlan(loadApp(ds), { dc: 'in', dcSource: '--dc', mail: false, newProject: false });
+  const security = JSON.parse(files.find((file) => file.path === 'provision/security.json')!.data) as {
+    roles: { role_name: string }[];
+    tablePermissions: { table: string; role: string; permissions: string[]; scope: string }[];
+  };
+  const rowFor = (role: string) => security.tablePermissions.filter((grant) => grant.table === 'Item' && grant.role === role);
+  assert.deepEqual(security.roles.map((role) => role.role_name).sort(), ['Developer', 'Read']);
+  // App Administrator is out of scope: never diffed, so it carries no row.
+  assert.deepEqual(rowFor('App Administrator'), []);
+  for (const role of ['App User', 'Read', 'Developer']) assert.equal(rowFor(role).length, 1, role);
+  assert.deepEqual(rowFor('Read')[0]!.permissions, ['SELECT']);
+  // The same rows the greenfield IaC template writes (clone-base default where the plan grants nothing).
+  assert.deepEqual(rowFor('App User')[0], { table: 'Item', role: 'App User', permissions: ['SELECT'], scope: 'GLOBAL' });
+});
