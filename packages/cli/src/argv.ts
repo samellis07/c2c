@@ -46,6 +46,7 @@ export const DOCTOR_GATE_FLAGS: Readonly<Record<string, readonly string[]>> = {
   smoke: ['--confirm'],
   'sync-delta': ['--confirm'],
   'rollback-export': ['--confirm'],
+  'verify-behavior': ['--live', '--confirm'],
   edit: ['--apply', '--confirm'],
 };
 
@@ -183,6 +184,28 @@ export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
       '--source-backup': 'value',
       '--source-csv': 'value',
       '--source-json': 'value',
+    },
+  },
+  'verify-behavior': {
+    positional: 'required',
+    flags: {
+      '--app': 'value',
+      '--config': 'value',
+      '--dc': 'value',
+      '--org': 'value',
+      '--project': 'value',
+      '--projects': 'value',
+      '--auth-token': 'value',
+      '--catalyst-base': 'value',
+      '--confirm': 'bool',
+      '--ds': 'value',
+      '--env': 'value',
+      '--goldens': 'value',
+      '--live': 'bool',
+      '--report': 'value',
+      '--report-md': 'value',
+      '--session-cookie': 'value',
+      '--url': 'value',
     },
   },
   status: {

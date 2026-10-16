@@ -172,7 +172,7 @@ import { accumulate, emptyNumbers, formatCorpus } from '../../deluge/src/index.j
 import { authApplyPlan, authApplyReport, authAsJson, authAsReport, authPlan } from '../../auth/src/index.js';
 import { buildUi, DomUnavailableError, formatUiReport, uiCorpus } from '../../ui/src/index.js';
 import { generateReactApp, HandEditedError, writeReactApp } from '../../ui-react/src/index.js';
-import { defaultIo, deployCli, diffTemplate, editCli, formatDrift, hasReportJson, planCli, projectTemplateJson, provisionCli, readSourceBackup, readSourceCsv, readSourceJson, rollbackExportCli, seedMigrateCli, smokeCli, sourceBackupCli, sourceCsvCli, statusCli, syncDeltaCli, usersCli, verifyCli } from '../../deploy/src/index.js';
+import { defaultIo, deployCli, diffTemplate, editCli, formatDrift, hasReportJson, planCli, projectTemplateJson, provisionCli, readSourceBackup, readSourceCsv, readSourceJson, rollbackExportCli, seedMigrateCli, smokeCli, sourceBackupCli, sourceCsvCli, statusCli, syncDeltaCli, usersCli, verifyBehaviorCli, verifyCli } from '../../deploy/src/index.js';
 import { cutoverCli } from './cutover.js';
 import { ARGV_SPEC, argvShapeProblems, seedArgsProblem } from './argv.js';
 import { GATE_EXIT, defaultDoctorIo, doctorCli, doctorGateForArgs, doctorStamp, gateRefusalMessage, verifyVendorCli, workspaceDir, type DoctorStamp } from '../../doctor/src/index.js';
@@ -212,6 +212,8 @@ const USAGE =
       '       c2c rollback-export --ds <file|dir> --out <dir> [--project <id-or-name>] [--org <id>] [--app <link>] [--confirm] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
       '              (without --rows: plans the tables to read; --confirm reads the rows from the project)\n' +
       '       c2c verify --data-parity --ds <file|dir> (--source-json <dir> | --source-csv <dir> | --source-backup <zip|dir>) --rows <dir> [--json]\n' +
+      '       c2c verify-behavior <file|dir> --goldens <dir> [--report <file.json>] [--report-md <file.md>]\n' +
+      '       c2c verify-behavior <file|dir> --goldens <dir> --live --confirm --url <fn-base> [--project <id>] [--org <id>] [--auth-token <token> | --session-cookie <name=value>]\n' +
       '       c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address> --mail-sender-verified]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--slate-name <name>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--subset-shims] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>]\n' +
       '       c2c deploy <file|dir> --backfill-shadows [--confirm] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
       '       c2c plan <file|dir> --out <dir> [--dc <dc>] [--mail] [--allow-budget-fail]\n' +
@@ -544,6 +546,23 @@ function main(argv: string[]): number {
       process.stderr.write(`c2c: ${err instanceof Error ? err.message : 'verify failed'}\n`);
       return 1;
     }
+  }
+  if (cmd === 'verify-behavior') {
+    // --live --confirm writes and reads the deployed project, so it is gated
+    // like smoke --confirm; the default offline replay touches nothing live.
+    const refusal = restAll.includes('--live') ? doctorGateRefusal(restAll) : undefined;
+    if (refusal !== undefined) return refusal;
+    verifyBehaviorCli(restAll, defaultIo()).then(
+      (code) => {
+        process.exitCode = code;
+      },
+      (err: unknown) => {
+        const message = err instanceof Error ? err.message : `${cmd} failed`;
+        process.stderr.write(`c2c: ${message}\n`);
+        process.exitCode = 1;
+      },
+    );
+    return 0;
   }
   if (cmd === 'status') {
     statusCli(restAll, defaultIo()).then(

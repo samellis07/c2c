@@ -1,0 +1,31 @@
+application "behavior-sample"
+{
+	time zone = "Asia/Kolkata"
+	share_settings
+	{
+		"Administrator"
+		{
+			name = "Administrator"
+			type = Users_Permissions
+			description = "This profile will have all the permissions."
+		}
+	}
+	section S
+	{
+		form Book
+		{
+			Title
+			(
+				type = text
+			)
+			Qty
+			(
+				type = number
+			)
+		}
+		list All_Books
+		{
+			show all rows from Book
+		}
+	}
+}

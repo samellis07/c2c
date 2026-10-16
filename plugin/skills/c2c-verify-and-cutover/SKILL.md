@@ -58,7 +58,7 @@ Stratus gate line: after Start Exploring, on **Create your First Bucket** create
 
 ### A3. Parity
 
-The parity runner (planned) executes the app's given/when/then cases against the deployed app. Until it ships: pick 3–5 business rules with the user (a required field, a unique field, an initial value, a workflow side effect, an approval transition), state them as given/when/then, run them through the UI with the user, and verify in the store. Known traps: a duplicate is enforced by the store (`409 DUPLICATE_VALUE`) but can surface as `500 request failed` [TESTED].
+`c2c verify-behavior <ds> --goldens tests/behavior/<app>/creator` replays the captured Creator golden against the migrated app — offline in the in-process Catalyst harness by default, or `--live --confirm --url <fn-base>` against the deployed project — and reports every difference (stored rows, computed fields, validation outcomes and messages, workflow side effects, report outputs) after the documented normalization; exit 1 on any finding and the KPI line is `behavior-equivalent apps: N` [TESTED]. Without a captured golden: pick 3–5 business rules with the user (a required field, a unique field, an initial value, a workflow side effect, an approval transition), state them as given/when/then, run them through the UI with the user, and verify in the store. Known traps: a duplicate is enforced by the store (`409 DUPLICATE_VALUE`) but can surface as `500 request failed` [TESTED].
 
 ### A4. Structure and data
 

@@ -1,0 +1,56 @@
+{
+  "version": "c2c-behavior-golden/1",
+  "app": "behavior-sample",
+  "cases": [
+    {
+      "id": "submit-valid",
+      "name": "a valid submit stores the row and the report reads it back",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Book",
+          "record": { "Title": "Dune", "Qty": 2 },
+          "expect": {
+            "status": 200,
+            "body": { "values": { "Title": "Dune" } }
+          }
+        },
+        {
+          "op": "report",
+          "report": "All_Books",
+          "expect": {
+            "status": 200,
+            "body": { "rows": [ { "Title": "Dune", "Qty": "2", "ROWID": "<id>" } ] }
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Book": [
+            { "Title": "Dune", "Qty": "2", "ROWID": "<id>", "CREATEDTIME": "<timestamp>" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "submit-missing-mandatory",
+      "name": "a submit without the mandatory Title is refused",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Book",
+          "record": { "Qty": 1 },
+          "expect": {
+            "status": 422,
+            "body": { "code": "MANDATORY_MISSING", "message": "field \"Title\" is required.", "field": "Title", "wrote": false }
+          }
+        }
+      ],
+      "expect": {
+        "tables": {
+          "Book": []
+        }
+      }
+    }
+  ]
+}

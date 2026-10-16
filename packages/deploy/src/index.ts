@@ -1,4 +1,4 @@
-export { DEPLOY_REPORT, LOADER_REPORT, STATE_FILE, confirmedLoadExit, deployCli, hasReportJson, planGuard, seedMigrateArgsProblem, seedMigrateCli, sourceBackupCli, sourceCsvCli, smokeArgsProblems, smokeCli, sourceCsvArgsProblem, readFunctionEnv, usersCli, flag, loadApp, loadSource, loadRegistry, catalystSpawn, defaultIo } from './cli.js';
+export { DEPLOY_REPORT, LOADER_REPORT, STATE_FILE, confirmedLoadExit, deployCli, hasReportJson, planGuard, seedMigrateArgsProblem, seedMigrateCli, sourceBackupCli, sourceCsvCli, smokeArgsProblems, smokeCli, sourceCsvArgsProblem, readFunctionEnv, usersCli, verifyBehaviorCli, flag, loadApp, loadSource, loadRegistry, catalystSpawn, defaultIo } from './cli.js';
 export type { Io, SpawnFn, SpawnResult } from './cli.js';
 export { ALLOWED_ENV, ORG_HOW_TO_SET, PROJECT_HOW_TO_SET, GuardError, catalystProjectName, checkGuards, planScopeLines } from './guards.js';
 export type { GuardCode, GuardInput, GuardOk } from './guards.js';
@@ -150,3 +150,5 @@ export {
   isVerifiedMcpTool,
 } from './mcp-registry.js';
 export type { CapabilityMapping, McpRegistryEntry } from './mcp-registry.js';
+export { GOLDEN_VERSION, MARKERS, REPORT_VERSION, assertGolden, formatBehaviorJson, formatBehaviorMarkdown, liveBackend, loadGoldens, runBehavior, startOfflineBackend } from './verify-behavior.js';
+export type { BehaviorBackend, BehaviorCall, BehaviorFinding, BehaviorReport, BehaviorRunResult, GoldenCase, GoldenFile, GoldenStep, GoldenStepExpect, OfflineHarnessOptions } from './verify-behavior.js';
