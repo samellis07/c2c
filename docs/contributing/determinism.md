@@ -72,6 +72,13 @@ restored: resolve it with a manual rebase, never by hand-editing around
 the tool. The tool refuses a TODO-ratchet rise unless you pass
 `--allow-increase "<reason>"`, and it never pushes.
 
+The replay and the regen commit need a Git committer identity, so
+`user.name` and `user.email` must be configured before you run it —
+`git config user.name "<name>"` and `git config user.email "<email>"`
+(with `--global` for every repository, or without it for just this one).
+If they are missing the tool stops early and says so. CI sets them in
+its workflow; local machines need them set once.
+
 ## Known limits
 
 `determinism:status --sites <file>` pins the output directory before the
