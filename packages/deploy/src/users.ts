@@ -137,11 +137,16 @@ export interface PlanUser {
   via: 'appUsers' | 'appAdmins';
   /** Hierarchy role the backup recorded for the user (empty for admins). */
   hierarchy: string;
-  state: 'pending' | 'invited';
+  /**
+   * 'manual' marks a non-Google '+' address: Catalyst cannot invite it and
+   * folding it onto the plain mailbox could merge two different people, so
+   * inviting it is the admin's console step, never this run's.
+   */
+  state: 'pending' | 'invited' | 'manual';
   /**
    * Set when the backup identity normalises to a different invited address
-   * (the schema identity rules: dropped '+tag', folded Gmail dots). The rules
-   * that fired; the alias address itself is never written.
+   * (the schema identity rules: dropped Gmail '+tag', folded Gmail dots). The
+   * rules that fired; the alias address itself is never written.
    */
   aliasRules?: string[];
 }
@@ -168,6 +173,8 @@ export interface UsersPlan {
     noIdentity: number;
     /** Users whose invited address is a normalised form of the backup identity. */
     aliases: number;
+    /** Users with a non-Google '+' address — uninvitable, listed for the admin. */
+    manual: number;
     perRole: Record<string, number>;
   };
   /** Profiles seen in the backup that the export does not model -> mapped to App User. */
@@ -236,10 +243,12 @@ export function usersPlan(app: App, users: readonly BackupUser[], opts: { salt: 
   const unmapped = new Set<string>();
   const out: PlanUser[] = [];
   for (const user of users) {
-    // The one identity Catalyst can hold: aliases ('+tag', Gmail dot variants)
-    // fold to the mailbox the invite carries, so a source listing two spellings
-    // of one mailbox produces one user and one invite — the same value
-    // migrate-data writes into Added_User/Modified_User.
+    // The one identity Catalyst can hold: Gmail aliases ('+tag', dot
+    // variants) fold to the mailbox the invite carries, so a source listing
+    // two spellings of one mailbox produces one user and one invite — the
+    // same value migrate-data writes into Added_User/Modified_User. A '+' on
+    // any other domain survives as a distinct identity (it may be a different
+    // person) and is marked manual below — never folded, never invited.
     const identity = canonicalUserIdentity(user.identity);
     if (!identity) {
       noIdentity.n += 1;
@@ -272,7 +281,9 @@ export function usersPlan(app: App, users: readonly BackupUser[], opts: { salt: 
       role,
       via: user.source,
       hierarchy: user.hierarchy,
-      state: invited.has(userRefId(identity, opts.salt)) ? 'invited' : 'pending',
+      // A '+' survives canonicalisation only on a non-Google domain (Google
+      // folds it away): uninvitable and unmergeable — listed for the admin.
+      state: identity.includes('+') ? 'manual' : invited.has(userRefId(identity, opts.salt)) ? 'invited' : 'pending',
       ...(aliasRules.length ? { aliasRules } : {}),
     });
   }
@@ -352,7 +363,13 @@ export function usersPlan(app: App, users: readonly BackupUser[], opts: { salt: 
   const aliased = out.filter((user) => user.aliasRules?.length);
   if (aliased.length) {
     notes.push(
-      `${aliased.length} user(s) sign in under a normalised address: a '+' tag is dropped (Catalyst Add User rejects '+' — INVALID_INPUT, so the plain mailbox is the only invitable form) and Gmail dot/googlemail variants fold to one mailbox; [UNVERIFIED] whether a non-Google provider delivers the plain address to the same mailbox — confirm the invitee received the mail. migrate-data writes the same normalised identity into Added_User/Modified_User and remaps Users-field cells to the invited Catalyst user id.`,
+      `${aliased.length} user(s) sign in under a normalised address: gmail.com/googlemail.com '+tag' and dot variants fold to the one Google mailbox (Google's documented rule). migrate-data writes the same normalised identity into Added_User/Modified_User and remaps Users-field cells to the invited Catalyst user id.`,
+    );
+  }
+  const manual = out.filter((user) => user.state === 'manual');
+  if (manual.length) {
+    notes.push(
+      `${manual.length} user(s) carry a '+' address on a non-Google domain: Catalyst Add User rejects '+' outright (INVALID_INPUT) and whether the provider delivers it to the plain mailbox is [UNVERIFIED] — folding it could merge two different people, so they are NOT invited and their data keeps the '+' identity. Manual step: add the real mailbox in Authentication > Users (the console Add User form), then record this plan's usr_ id against the Catalyst user_id in the users state file so migrate-data remaps their rows — a row never remaps by guessing.`,
     );
   }
   if (inactive.n) notes.push(`${inactive.n} user(s) with a non-Active status are skipped — only Active users are invited.`);
@@ -376,6 +393,7 @@ export function usersPlan(app: App, users: readonly BackupUser[], opts: { salt: 
       duplicates: duplicates.n,
       noIdentity: noIdentity.n,
       aliases: out.filter((user) => user.aliasRules?.length).length,
+      manual: out.filter((user) => user.state === 'manual').length,
       perRole: sortedPerRole,
     },
     unmapped: [...unmapped].sort(),
@@ -398,6 +416,7 @@ export function usersPlanMarkdown(plan: UsersPlan): string {
     `- users: ${plan.counts.total} seen, ${plan.counts.pending} to invite, ${plan.counts.invited} already invited`,
     `- skipped: ${plan.counts.inactive} non-active, ${plan.counts.duplicates} repeated, ${plan.counts.noIdentity} no identity`,
     `- aliases normalised: ${plan.counts.aliases}`,
+    `- manual '+' addresses (non-Google, not invited): ${plan.counts.manual}`,
     '',
     '## Role mapping',
     '',
@@ -482,7 +501,7 @@ export function writeUsersState(path: string, state: UsersState): void {
 
 /** Why a '+' address is refused before any request (live Add User reply). */
 export const PLUS_EMAIL_REASON =
-  "Catalyst Add User rejects a '+' in the email (Email Id cannot contain '+' character, INVALID_INPUT) — invite the plain address without the +alias";
+  "Catalyst Add User rejects a '+' in the email (Email Id cannot contain '+' character, INVALID_INPUT) — the user was not invited; the admin chooses the real mailbox in the console (never a guessed plain address)";
 
 /**
  * The guided fallback when no role id is known: GET /role is refused for the

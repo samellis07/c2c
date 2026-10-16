@@ -634,7 +634,7 @@ test('prepareCell returns only the rule for a refused cell, and the canonical va
   assert.deepEqual(prepareCell(date, 'soon'), { rule: 'date-format' });
 });
 
-test('migrateData normalises Added_User/Modified_User to the invited mailbox', async () => {
+test('migrateData folds Gmail Added_User/Modified_User to the invited mailbox; a non-Google + is kept', async () => {
   const store = quirkRowServer({});
   const result = await migrateData({
     ...bases,
@@ -644,8 +644,32 @@ test('migrateData normalises Added_User/Modified_User to the invited mailbox', a
   });
   assert.equal(result.ok, true);
   const stored = store.stored.get('Vendor\0s1');
-  assert.equal(stored?.Added_User, 'owner@example.com');
+  // Non-Google: case folds, the '+tag' stays — it may be a different person.
+  assert.equal(stored?.Added_User, 'owner+tag@example.com');
+  // Google: '+tag' and dots fold to the one documented Gmail mailbox.
   assert.equal(stored?.Modified_User, 'ownername@' + 'gmail.com');
+});
+
+test("two '+' addresses on a custom domain never rewrite onto each other (MUST-NOT-MERGE)", async () => {
+  const store = quirkRowServer({});
+  const result = await migrateData({
+    ...bases,
+    dryRun: false,
+    fetch: route(
+      creator([
+        { ID: 's1', Name: 'Ada', Added_User: 'Jane+Sales@Corp.example.test', Modified_User: 'jane@corp.example.test' },
+        { ID: 's2', Name: 'Bob', Added_User: 'jane+support@corp.example.test' },
+      ]),
+      store,
+    ),
+    checkpoint: emptyCheckpoint(),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(store.stored.get('Vendor\0s1')?.Added_User, 'jane+sales@corp.example.test');
+  assert.equal(store.stored.get('Vendor\0s2')?.Added_User, 'jane+support@corp.example.test');
+  // Neither tagged address collapsed onto the plain mailbox or each other.
+  assert.notEqual(store.stored.get('Vendor\0s1')?.Added_User, store.stored.get('Vendor\0s1')?.Modified_User);
+  assert.notEqual(store.stored.get('Vendor\0s1')?.Added_User, store.stored.get('Vendor\0s2')?.Added_User);
 });
 
 test('a Creator username that is not an email is stored unchanged (MUST-NOT-REWRITE)', async () => {
@@ -662,17 +686,17 @@ test('a Creator username that is not an email is stored unchanged (MUST-NOT-REWR
 
 test('a stored pre-remap alias is corrected by ROWID update, not refused', async () => {
   const store = quirkRowServer({});
-  // A previous run stored the raw alias; this run's payload carries the canonical form.
-  store.addStored('Vendor', { c2c_source_id: 's1', ROWID: '10000000000000012', Name: 'Ada', Added_User: 'owner+tag@example.com' });
+  // A previous run stored the raw Gmail alias; this run's payload carries the canonical form.
+  store.addStored('Vendor', { c2c_source_id: 's1', ROWID: '10000000000000012', Name: 'Ada', Added_User: 'owner.name+tag@' + 'googlemail.com' });
   const result = await migrateData({
     ...bases,
     dryRun: false,
-    fetch: route(creator([{ ID: 's1', Name: 'Ada', Added_User: 'owner+tag@example.com' }]), store),
+    fetch: route(creator([{ ID: 's1', Name: 'Ada', Added_User: 'owner.name+tag@' + 'googlemail.com' }]), store),
     checkpoint: emptyCheckpoint(),
   });
   assert.equal(result.ok, true);
   assert.equal(store.puts.length > 0, true, 'the correction is a ROWID update');
-  assert.equal(store.stored.get('Vendor\0s1')?.Added_User, 'owner@example.com');
+  assert.equal(store.stored.get('Vendor\0s1')?.Added_User, 'ownername@' + 'gmail.com');
 });
 
 test('Users-field cells remap Creator ZUID to the invited Catalyst user id', async () => {

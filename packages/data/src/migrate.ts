@@ -794,8 +794,8 @@ function silentRefusals(
         corrections.push({ sourceId: id, rowid, column, value: payload[column] });
         continue;
       }
-      // A stored user cell still holding the pre-normalisation identity (a '+'
-      // alias, a Gmail dot variant, or a raw Creator ZUID) is corrected to the
+      // A stored user cell still holding the pre-normalisation identity (a
+      // Gmail '+'/dot variant, or a raw Creator ZUID) is corrected to the
       // value this run sent — same ROWID update path as a lookup correction.
       if (userRewrites?.get(column)?.has(String(row[column] ?? '')) && rowid) {
         corrections.push({ sourceId: id, rowid, column, value: payload[column] });

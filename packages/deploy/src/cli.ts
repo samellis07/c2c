@@ -73,6 +73,7 @@ import {
   manageProjectUser,
   newUsersSalt,
   parseSocialList,
+  PLUS_EMAIL_REASON,
   readBackupUsers,
   readUsersState,
   roleIdFallback,
@@ -2556,11 +2557,12 @@ export async function usersCli(args: readonly string[], io: Io): Promise<number>
     const redirectUrl = slateFlag ? `https://${slateHost(slateFlag)}` : usersSlateUrl(ds, guard.projectId);
     const planned = new Map(plan.users.map((user) => [user.id, user.role]));
     const seen = new Set<string>();
+    let manualAliases = 0;
     const targets: InviteTarget[] = backupUsers
       .map((user) => {
         // The invite carries the one normalised identity (schema identity
-        // rules): Catalyst cannot store a '+' alias and a Gmail dot variant is
-        // the same mailbox — the migrated rows are rewritten to it too.
+        // rules): a Gmail dot/'+' variant is the same mailbox — the migrated
+        // rows are rewritten to it too.
         const identity = canonicalUserIdentity(user.identity);
         const id = userRefId(identity, salt);
         return { id, role: planned.get(id) ?? '', identity, first: user.first, last: user.last };
@@ -2568,10 +2570,18 @@ export async function usersCli(args: readonly string[], io: Io): Promise<number>
       .filter((target) => {
         // Users not in the plan (inactive, no identity) carry no role and are
         // never targets; a duplicate row in the backup dedupes to one target.
+        // A '+' survives only on a non-Google domain — the plan marks that
+        // user 'manual' (the admin picks the real mailbox); it is never an
+        // invite target, and the plain mailbox is never guessed.
+        if (target.identity.includes('+')) {
+          manualAliases += 1;
+          return false;
+        }
         if (!target.role || seen.has(target.id)) return false;
         seen.add(target.id);
         return true;
       });
+    if (manualAliases) io.stderr(`c2c: ${manualAliases} user(s) with a non-Google '+' address are not invited — see the plan's manual step\n`);
     await assertLiveProject(io, guard.org, guard.projectId);
     await resolveScope(io, guard.org, guard.projectId);
     const restFn: RestFn = io.rest ?? ((call: RestCall) => catalystRestCall(io.env, guard.org, guard.projectId, call, { log: (line) => io.stderr(`${line}\n`) }));
@@ -2819,7 +2829,8 @@ async function usersManageCli(sub: 'list' | 'add' | 'disable' | 'enable' | 'set-
       // Operator-typed address: the same normalisation the backup users get,
       // and it stays inside the request — the result names the user id only.
       const identity = canonicalUserIdentity(email!);
-      if (identity !== email!.trim().toLowerCase()) io.stderr(`c2c: inviting the normalised address (the ${email!.trim().includes('+') ? "'+' tag is dropped" : 'alias folds'})\n`);
+      if (identity !== email!.trim().toLowerCase()) io.stderr('c2c: inviting the normalised address (the alias folds)\n');
+      if (identity.includes('+')) io.stderr(`c2c: ${PLUS_EMAIL_REASON}\n`);
       const slateFlag = flag(rest, '--slate-domain');
       if (slateFlag !== undefined && !slateHost(slateFlag)) throw new Error('--slate-domain must be a Slate app host — a bare hostname or the https App Url slate:link prints');
       const redirectUrl = slateFlag ? `https://${slateHost(slateFlag)}` : usersSlateUrl(ds, guard.projectId);
