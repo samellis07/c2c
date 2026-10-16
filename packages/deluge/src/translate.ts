@@ -465,8 +465,10 @@ interface Scope {
   formNames: Set<string>;
   formFields: Map<string, Set<string>>;
   functions: Set<string>;
-  /** Dotted `thisapp` names allowed to become `shim.client.call` in a client condition. */
+  /** Dotted `thisapp` names allowed to become `shim.client.call` in a client condition, exact declared case. */
   clientCallFunctions: Set<string>;
+  /** Case-folded name → exact declared name for unambiguous `clientCallFunctions` entries. */
+  clientCallFunctionsFolded: Map<string, string>;
   prefetch: string[];
   /** Server loops currently being translated, outermost first. */
   rowFrames: LoopFrame[];
@@ -1785,7 +1787,12 @@ const CLIENT_CALL_SHIM_ALLOW: ReadonlyMap<string, ReadonlySet<string> | true> = 
 function clientCallCode(code: string, scope: Scope): string | null {
   const calls = emittedThisappCalls(code);
   if (!calls?.length) return null;
-  if (calls.some((path) => !scope.clientCallFunctions.has(path.join('.').toLowerCase()))) return null;
+  // Dispatch is exact-name-first, then case-folded — the same order the
+  // generated thisapp registry resolves. A call is allowed only when the
+  // resolved target is itself a proved read-only name.
+  const resolvedCallee = (joined: string): string | undefined =>
+    scope.clientCallFunctions.has(joined) ? joined : scope.clientCallFunctionsFolded.get(joined.toLowerCase());
+  if (calls.some((path) => !scope.clientCallFunctions.has(resolvedCallee(path.join('.')) ?? ''))) return null;
   const rewritten = code.replace(THISAPP_CALL_PATH, (_match, prefix: string, pathJson: string) => {
     const path = JSON.parse(pathJson) as string[];
     return `${prefix}${JSON.stringify(path.join('.'))}`;
@@ -2062,7 +2069,12 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     prefetchBound: new Set(options.prefetchBound ?? []),
     formNames: new Set(options.formNames ?? []),
     functions: new Set((options.functions ?? []).map((n) => n.toLowerCase())),
-    clientCallFunctions: new Set((options.clientCallFunctions ?? []).map((n) => n.toLowerCase())),
+    clientCallFunctions: new Set(options.clientCallFunctions ?? []),
+    clientCallFunctionsFolded: new Map(
+      [...(options.clientCallFunctions ?? [])]
+        .reduce((acc, n) => acc.set(n.toLowerCase(), acc.has(n.toLowerCase()) ? '' : n), new Map<string, string>())
+        .entries(),
+    ),
     formFields: new Map(Object.entries(options.formFields ?? {}).sort().map(([k, v]) => [k, new Set(v)])),
     prefetch: [],
     rowFrames: [],

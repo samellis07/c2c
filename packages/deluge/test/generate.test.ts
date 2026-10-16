@@ -2682,6 +2682,146 @@ test('a callee that mutates a parameter list or map is not a read-only client ca
   }
 });
 
+test('case-folded duplicate function names are never read-only client calls', () => {
+  // The runtime registry resolves a call exact-name-first, then the first
+  // case-folded declaration. Two declared names that fold alike cannot be
+  // told apart at a call site, so neither may be proved read-only — a proof
+  // keyed on the folded name would mark one body while dispatch reaches the
+  // other (a read-only proof for `Util.Ok` must not open a client-call path
+  // that lands on the `Util.OK` writer).
+  const reader: FunctionDef = {
+    name: 'Util.Ok',
+    kind: 'deluge',
+    signature: 'bool Util.Ok(int n)',
+    deluge: [{ text: 'return n > 1;', span: Z }],
+    properties: [],
+    span: Z,
+  };
+  const writer: FunctionDef = {
+    name: 'Util.OK',
+    kind: 'deluge',
+    signature: 'bool Util.OK(int n)',
+    deluge: [{ text: 'insert into Orders [ Hours = n ];\nreturn true;', span: Z }],
+    properties: [],
+    span: Z,
+  };
+  for (const functions of [[reader, writer], [writer, reader]]) {
+    for (const call of ['thisapp.Util.Ok(input.Hours)', 'thisapp.Util.OK(input.Hours)', 'thisapp.util.ok(input.Hours)']) {
+      const label = `${functions[0]!.name} then ${functions[1]!.name}, call ${call}`;
+      const g = generate(
+        app({
+          forms: [plainForm('Orders', [plainField('Hours')])],
+          profiles: [ADMIN],
+          functions,
+          workflows: [
+            workflow({
+              name: 'Hours check',
+              form: 'Orders',
+              event: 'on user input',
+              deluge: { text: `if(${call}) { alert "ok"; }`, span: Z },
+            }),
+          ],
+        }),
+      );
+      assert.equal(g.files.some((f) => f.path.endsWith('-call.mjs')), false, label);
+      const client = g.files.find((f) => f.path === 'client/handlers/orders/on-user-input.mjs');
+      assert.equal(client !== undefined && /shim\.client\.call\(/.test(stripComments(client.source)), false, label);
+      assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), true, label);
+    }
+  }
+});
+
+test('repeated declarations of one function name are never read-only client calls', () => {
+  // The generated registry keeps the first declaration of a name; a later
+  // same-name declaration is unreachable through dispatch. The read-only
+  // proof must not mark the folded name from either body.
+  const writer: FunctionDef = {
+    name: 'Util.Ok',
+    kind: 'deluge',
+    signature: 'bool Util.Ok(int n)',
+    deluge: [{ text: 'insert into Orders [ Hours = n ];\nreturn true;', span: Z }],
+    properties: [],
+    span: Z,
+  };
+  const reader: FunctionDef = {
+    name: 'Util.Ok',
+    kind: 'deluge',
+    signature: 'bool Util.Ok(int n)',
+    deluge: [{ text: 'return n > 1;', span: Z }],
+    properties: [],
+    span: Z,
+  };
+  for (const functions of [[writer, reader], [reader, writer]]) {
+    const label = `${functions[0]!.deluge[0]!.text.split('\n')[0]} first`;
+    const g = generate(
+      app({
+        forms: [plainForm('Orders', [plainField('Hours')])],
+        profiles: [ADMIN],
+        functions,
+        workflows: [
+          workflow({
+            name: 'Hours check',
+            form: 'Orders',
+            event: 'on user input',
+            deluge: { text: 'if(thisapp.Util.Ok(input.Hours)) { alert "ok"; }', span: Z },
+          }),
+        ],
+      }),
+    );
+    assert.equal(g.files.some((f) => f.path.endsWith('-call.mjs')), false, label);
+    const client = g.files.find((f) => f.path === 'client/handlers/orders/on-user-input.mjs');
+    assert.equal(client !== undefined && /shim\.client\.call\(/.test(stripComments(client.source)), false, label);
+    assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), true, label);
+  }
+});
+
+test('a folded-name collision does not hide an unrelated read-only function', () => {
+  const g = generate(
+    app({
+      forms: [plainForm('Orders', [plainField('Hours')])],
+      profiles: [ADMIN],
+      functions: [
+        {
+          name: 'Util.Ok',
+          kind: 'deluge',
+          signature: 'bool Util.Ok(int n)',
+          deluge: [{ text: 'return n > 1;', span: Z }],
+          properties: [],
+          span: Z,
+        },
+        {
+          name: 'Util.OK',
+          kind: 'deluge',
+          signature: 'bool Util.OK(int n)',
+          deluge: [{ text: 'insert into Orders [ Hours = n ];\nreturn true;', span: Z }],
+          properties: [],
+          span: Z,
+        },
+        {
+          name: 'Util.Solo',
+          kind: 'deluge',
+          signature: 'bool Util.Solo(int n)',
+          deluge: [{ text: 'return n > 2;', span: Z }],
+          properties: [],
+          span: Z,
+        },
+      ],
+      workflows: [
+        workflow({
+          name: 'Hours check',
+          form: 'Orders',
+          event: 'on user input',
+          deluge: { text: 'if(thisapp.Util.Solo(input.Hours)) { alert "ok"; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  assert.ok(g.files.some((f) => f.path === 'functions/custom/util-solo-call.mjs'), 'the unique callee keeps its endpoint');
+  assert.equal(g.files.some((f) => f.path === 'functions/custom/util-ok-call.mjs'), false);
+  const client = g.files.find((f) => f.path === 'client/handlers/orders/on-user-input.mjs')!;
+  assert.match(stripComments(client.source), /await shim\.client\.call\(ctx, "Util\.Solo"/);
+});
+
 test('fresh collections may contain parameter values without aliasing the parameters', () => {
   const params = [
     { type: 'list', name: 'ids' },
