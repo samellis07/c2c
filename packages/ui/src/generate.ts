@@ -430,6 +430,53 @@ async function readScoped(datastore, form, criteria, offset, limit) {
 `;
 }
 
+/**
+ * Lookup display text composed from a parent row by a `displayformat` over
+ * several fields (decorations/lookups.ts lookupFormats). A ref reads the field,
+ * a composite part its stored part column; literals stay as written. A ref
+ * whose top field is hidden or outside the caller's field grant makes the
+ * whole text unreadable (undefined): no part of a hidden field is shown.
+ */
+function composeDisplaySource(): string {
+  return `function displayRefValue(row, ref, parts) {
+  if (!row || typeof row !== "object") return undefined;
+  if (Object.prototype.hasOwnProperty.call(row, ref)) return row[ref];
+  if (parts && Object.prototype.hasOwnProperty.call(parts, ref) && Object.prototype.hasOwnProperty.call(row, parts[ref])) return row[parts[ref]];
+  let value = row;
+  for (const key of ref.split(".")) value = value && typeof value === "object" ? value[key] : undefined;
+  return value;
+}
+
+function composeDisplay(row, terms, parts, readable) {
+  let text = "";
+  let filled = false;
+  for (const term of terms) {
+    if (typeof term.text === "string") {
+      text += term.text;
+      continue;
+    }
+    const top = String(term.ref).split(".")[0];
+    if (isHidden(top) || (Array.isArray(readable) && !readable.includes(top))) return undefined;
+    const value = displayRefValue(row, term.ref, parts);
+    let part = "";
+    if (value != null && typeof value === "object") {
+      const pieces = [];
+      for (const key of Object.keys(value)) {
+        const piece = value[key];
+        if (piece != null && piece !== "" && typeof piece !== "object") pieces.push(String(piece));
+      }
+      part = pieces.join(" ");
+    } else if (value != null) {
+      part = String(value);
+    }
+    if (part !== "") filled = true;
+    text += part;
+  }
+  return filled ? text.trim() : "";
+}
+`;
+}
+
 function filesModule(): string {
   return `${banner([
     'Stratus file store slot for upload and download signing.',
@@ -458,15 +505,23 @@ export async function fileStore(req) {
 }
 
 function lookupStub(app: App): string {
+  const formats = lookupFormats(app);
+  const parts = compositePartsOfParents(app, Object.fromEntries(app.forms.map((form) => [form.name, form.name])), schemaOf(app));
   return `${banner([
     'Lookup options for a form select. The path names the parent form and its display field.',
     `Page size ${LIMITS.zcqlRowsPerQuery} (measured ZCQL row cap).`,
     'authorizeRead applies functions/access-policy.json: only rows the caller can read,',
     'and only when the display field itself is readable. Hidden fields are not returned.',
+    '?q= searches the display field(s) server-side (contains, ANDed with the caller scope, at most 100 characters).',
     'A live query runs only when functions/c2c-deploy.json mode is "live" and a datastore adapter is installed.',
   ])}${policyPrelude('../access-policy.json', true, SCOPED_READ_IMPORT)}
 export const endpoint = { type: "advancedio", method: "GET", path: "/lookups/:form/:field", dryRun: true, pageSize: ${LIMITS.zcqlRowsPerQuery} };
 const parentDecimals = ${JSON.stringify(decimalColumnsOf(app))};
+/** Parent form -> lookup key field -> displayformat terms, for a format over several fields. */
+const lookupFormats = ${JSON.stringify(formats)};
+/** Parent form -> stored part column of each composite part: "Name.first_name" -> "Name_first_name". */
+const parentParts = ${JSON.stringify(parts)};
+const SEARCH_MAX = 100;
 
 ${deployHelpers('../c2c-deploy.json', '../c2c-store.mjs')}
 // ZCQL has no boolean literal predicate: "WHERE true" is a syntax error. An always-true read sends no WHERE clause.
@@ -503,9 +558,46 @@ function paging(req) {
   if (pageSize < 1) return { error: "pageSize must be between 1 and " + cap };
   if (pageSize > cap) pageSize = cap;
   if (page * pageSize > 100000) return { error: "page offset exceeds 100000" };
-  return { page, pageSize };
+  return { page, pageSize, q: query.get("q") };
 }
 
+// The search text of ?q=, trimmed; null for none. Longer than SEARCH_MAX is an error.
+function searchText(raw) {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (!text) return null;
+  if (text.length > SEARCH_MAX) return { error: "q must be at most " + SEARCH_MAX + " characters" };
+  return text;
+}
+
+// The stored columns a search on the display matches: each readable ref of a
+// format, or the display field itself (a composite display: each part column).
+// Only identifier names reach the criteria; the text is a criteria value.
+function searchColumns(form, display, terms, readable) {
+  const parts = Object.prototype.hasOwnProperty.call(parentParts, form) ? parentParts[form] : {};
+  const refs = terms ? terms.filter((term) => typeof term.ref === "string").map((term) => term.ref) : [display];
+  const out = [];
+  for (const ref of refs) {
+    const top = ref.split(".")[0];
+    if (isHidden(top) || (Array.isArray(readable) && !readable.includes(top))) continue;
+    const columns = ref.includes(".")
+      ? [Object.prototype.hasOwnProperty.call(parts, ref) ? parts[ref] : ""]
+      : Object.keys(parts).some((key) => key.startsWith(ref + "."))
+        ? Object.keys(parts).filter((key) => key.startsWith(ref + ".")).map((key) => parts[key])
+        : [ref];
+    for (const column of columns) {
+      if (column && /^[A-Za-z_][A-Za-z0-9_]*$/.test(column) && !out.includes(column)) out.push(column);
+    }
+  }
+  return out;
+}
+
+function searchCriteria(base, columns, text) {
+  if (!columns.length) return { op: "isNull", field: "ID" };
+  const match = columns.length === 1 ? { op: "contains", field: columns[0], value: text } : { op: "or", args: columns.map((field) => ({ op: "contains", field, value: text })) };
+  return !base || base.op === "true" ? match : { op: "and", args: [base, match] };
+}
+
+${composeDisplaySource()}
 // A composite display field (name, address) reads as an object; the option
 // text joins its non-empty scalar parts with a space.
 function displayText(value) {
@@ -523,11 +615,19 @@ function displayText(value) {
 // One option: the display value under its field name, keyed by ROWID. The
 // display value passes the caller's field allowlist; ROWID is the row key the
 // client submits back. Sibling fields never leave this endpoint.
-function toOption(row, fields, display) {
+// A display format over several fields is composed from the row; a format
+// with a part the caller may not read shows an empty text, never the ROWID.
+function toOption(row, fields, display, terms, form) {
   const source = row && typeof row === "object" ? row : {};
-  const shown = projectFields(source, fields);
   const out = {};
   if (source.ROWID != null && source.ROWID !== "") out.ROWID = String(source.ROWID);
+  if (terms) {
+    const parts = Object.prototype.hasOwnProperty.call(parentParts, form) ? parentParts[form] : {};
+    const text = composeDisplay(source, terms, parts, fields);
+    out[display] = text === undefined ? "" : text;
+    return out;
+  }
+  const shown = projectFields(source, fields);
   if (Object.prototype.hasOwnProperty.call(shown, display)) out[display] = displayText(shown[display]);
   return out;
 }
@@ -552,6 +652,14 @@ ${requirePrincipal()}
     const deploy = deployConfig();
     const scoped = authorizeRead(access, principal, route.form, { op: "true" }, route.field);
     const display = route.field;
+    const formats = Object.prototype.hasOwnProperty.call(lookupFormats, route.form) ? lookupFormats[route.form] : {};
+    const terms = Object.prototype.hasOwnProperty.call(formats, display) ? formats[display] : null;
+    const search = searchText(pagingArgs.q);
+    if (search && search.error) {
+      send(res, 400, { dryRun: true, error: search.error });
+      return;
+    }
+    const option = (row) => toOption(row, scoped.fields, display, terms, route.form);
     if (deploy.mode === "live") {
       const datastore = await liveDatastore();
       if (!datastore || typeof datastore.query !== "function") {
@@ -559,13 +667,15 @@ ${requirePrincipal()}
         return;
       }
       const { page, pageSize } = pagingArgs;
-      const queried = await readScoped(datastore, route.form, scoped.criteria, page * pageSize, pageSize);
-      const rows = (Array.isArray(queried) ? queried : []).map((row) => toOption(row, scoped.fields, display));
-      send(res, 200, { dryRun: false, rows, field: display, page, pageSize });
+      const criteria = search ? searchCriteria(scoped.criteria, searchColumns(route.form, display, terms, scoped.fields), search) : scoped.criteria;
+      const queried = await readScoped(datastore, route.form, criteria, page * pageSize, pageSize);
+      const rows = (Array.isArray(queried) ? queried : []).map(option);
+      send(res, 200, { dryRun: false, rows, field: display, page, pageSize, ...(search ? { q: search } : {}) });
       return;
     }
-    const rows = suppliedRows(req).map((row) => toOption(row, scoped.fields, display));
-    send(res, 200, { dryRun: true, rows, field: display, pageSize: ${LIMITS.zcqlRowsPerQuery} });
+    let rows = suppliedRows(req).map(option);
+    if (search) rows = rows.filter((row) => String(row[display] ?? "").toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+    send(res, 200, { dryRun: true, rows, field: display, pageSize: ${LIMITS.zcqlRowsPerQuery}, ...(search ? { q: search } : {}) });
   } catch (err) {
     fail(res, err);
   }
@@ -1030,7 +1140,7 @@ function stageReportSource(source: string, queries: readonly string[]): string {
       // A stage attaches Lookup.Display from the parent form. The parent check
       // is the unstaged lookup read's: lookupDisplayScope on the parent form,
       // then the parent record filter. A display that fails it is dropped and
-      // the lookup id stays.
+      // the lookup cell shows empty, as on the unstaged read: never the id.
       const parentScopes = {};
       const parentScope = (lookup, display) => {
         const key = lookup + "." + display;
@@ -1058,7 +1168,10 @@ function stageReportSource(source: string, queries: readonly string[]): string {
           const lookupOk = !grant || grant.includes(lookup);
           const displayOk = !grant || grant.includes(lookup) || grant.includes(display) || grant.includes(field);
           if (lookupOk && displayOk && parentScope(lookup, display).scoped) projected[field] = values[field];
-          else delete projected[field];
+          else {
+            delete projected[field];
+            if (lookupOk && typeof projected[lookup] === "string" && /^[0-9]+$/.test(projected[lookup])) projected[lookup] = "";
+          }
         }
         return projected;
       });
@@ -1085,7 +1198,9 @@ function stageReportSource(source: string, queries: readonly string[]): string {
         }
         for (let i = 0; i < rows.length; i++) {
           const id = queried[i] && queried[i].values ? queried[i].values[parent.lookup] : undefined;
-          if (!Object.prototype.hasOwnProperty.call(readable, String(id))) delete rows[i][field];
+          if (Object.prototype.hasOwnProperty.call(readable, String(id))) continue;
+          delete rows[i][field];
+          if (typeof rows[i][parent.lookup] === "string" && /^[0-9]+$/.test(rows[i][parent.lookup])) rows[i][parent.lookup] = "";
         }
       }
 ${bound ? '      const shown = relative ? rows.filter((row) => matchRow(row, resolved, decimalColumns)) : rows;\n' : ''}      const queryShape = zcqlStages.join("\\n");
@@ -1375,7 +1490,12 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
     ? ['Decimal, currency, and percent fields are varchar. Criteria and sort on them use the Double shadow column in ZCQL, then queryExact keeps and orders rows by the exact value (shim.decimal.cmp) and applies the page.']
     : [];
   const subformLinks = formName ? subformLinksFor(app, formName) : [];
-  const lookups = report.columns.filter((column) => column.lookup).map((column) => ({ column: column.field, form: column.lookup!.form, field: column.lookup!.field }));
+  const lookups = report.columns
+    .filter((column) => column.lookup)
+    .map((column) => {
+      const format = (column.lookup as { displayFormat?: unknown }).displayFormat;
+      return { column: column.field, form: column.lookup!.form, field: column.lookup!.field, ...(Array.isArray(format) ? { format } : {}) };
+    });
   const shimNames = ['criteriaHasTodo', 'needsExactRead', 'queryExact', ...(subformLinks.length ? ['attachSubforms'] : []), ...(wantsRelative ? ['criteriaHasRelative', 'bindRelativeCriteria', 'matchRow'] : [])];
   const shimImport = `import { ${shimNames.join(', ')} } from "creator-to-catalyst/shims";\n`;
   const subformConst = subformLinks.length
@@ -1646,6 +1766,7 @@ function combineCriteria(base, extras) {
 
 ${aggregateHelpers}
 ${scopedReadSource()}
+${composeDisplaySource()}
 // The parent read scope for one lookup display, or null when the caller may
 // not read that display: a hidden parent form or display field, a parent read
 // authorizeRead refuses, or a field allowlist without the display field
@@ -1664,13 +1785,15 @@ function lookupDisplayScope(principal, form, display, criteria) {
   return scoped;
 }
 
-// A lookup column stores the parent ROWID; the report shows the parent display
-// value instead. One ROWID IN query per lookup column, through the same
-// authorizeRead scope as the lookup endpoint: the caller's record filter is
-// ANDed into the parent query and the display field must be readable, so a
-// parent the caller cannot read keeps its ROWID in the cell. A hidden parent
-// form or display field, or a field allowlist without the display field, keeps
-// the ROWID too: the hidden value never reaches the report.
+// A lookup column stores the parent ROWID (a multi lookup a list of them); the
+// report shows the parent display value instead. One ROWID IN query per lookup
+// column, through the same authorizeRead scope as the lookup endpoint: the
+// caller's record filter is ANDed into the parent query and the display field
+// must be readable. A display format over several fields is composed from the
+// parent row, and every field it reads must be readable too. A parent the
+// caller cannot read, a hidden parent form or display field, or a field
+// allowlist without the display shows an empty cell: neither the hidden value
+// nor the ROWID reaches the report.
 async function resolveLookupDisplays(datastore, rows, columns, principal) {
   // A composite display field (name, address) reads as an object; the cell
   // text joins its non-empty scalar parts with a space.
@@ -1685,36 +1808,43 @@ async function resolveLookupDisplays(datastore, rows, columns, principal) {
     }
     return parts.join(" ");
   };
+  const isId = (value) => typeof value === "string" && /^[0-9]+$/.test(value);
   for (const column of columns || []) {
     if (!column || typeof column.column !== "string" || typeof column.form !== "string" || typeof column.field !== "string") continue;
     const seen = {};
     const ids = [];
     for (const row of rows) {
       const value = row ? row[column.column] : undefined;
-      if (typeof value !== "string" || !/^[0-9]+$/.test(value) || seen[value]) continue;
-      seen[value] = true;
-      ids.push(value);
+      for (const item of Array.isArray(value) ? value : [value]) {
+        if (!isId(item) || seen[item]) continue;
+        seen[item] = true;
+        ids.push(item);
+      }
     }
     if (!ids.length) continue;
     const display = column.field;
-    // A display the caller may not read resolves to nothing: the cell keeps
-    // the parent ROWID. The hidden value must never reach the report.
-    const scoped = lookupDisplayScope(principal, column.form, display, { op: "in", field: "ROWID", value: ids });
-    if (!scoped) continue;
-    let parents;
-    try {
-      parents = await readScoped(datastore, column.form, scoped.criteria, 0, ids.length);
-    } catch (err) {
-      continue;
-    }
+    const terms = Array.isArray(column.format) ? column.format : null;
+    const parts = Object.prototype.hasOwnProperty.call(parentParts, column.form) ? parentParts[column.form] : {};
     const names = {};
+    const scoped = lookupDisplayScope(principal, column.form, display, { op: "in", field: "ROWID", value: ids });
+    let parents = [];
+    if (scoped) {
+      try {
+        parents = await readScoped(datastore, column.form, scoped.criteria, 0, ids.length);
+      } catch (err) {
+        parents = [];
+      }
+    }
     for (const parent of Array.isArray(parents) ? parents : []) {
       if (!parent || typeof parent !== "object" || parent.ROWID == null || parent.ROWID === "") continue;
-      names[String(parent.ROWID)] = displayText(parent[display]);
+      const text = terms ? composeDisplay(parent, terms, parts, scoped.fields) : displayText(parent[display]);
+      names[String(parent.ROWID)] = text === undefined ? "" : text;
     }
+    const shown = (id) => (Object.prototype.hasOwnProperty.call(names, id) ? names[id] : "");
     for (const row of rows) {
-      const key = row && typeof row[column.column] === "string" ? row[column.column] : "";
-      if (Object.prototype.hasOwnProperty.call(names, key)) row[column.column] = names[key];
+      const value = row ? row[column.column] : undefined;
+      if (Array.isArray(value)) row[column.column] = value.map((item) => (isId(item) ? shown(item) : item));
+      else if (isId(value)) row[column.column] = shown(value);
     }
   }
 }
