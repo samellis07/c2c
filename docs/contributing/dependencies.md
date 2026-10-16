@@ -4,7 +4,8 @@
 
 Zero runtime dependencies. `package.json` carries only dev dependencies
 (`typescript`, `@types/node`, `jsdom` for the form smoke test) and the
-Node.js 20.20.1 pin in `engines`. Keep it that way — a runtime dependency
+Node.js support range in `engines` (`>=20.20 <23` — Node 20 or 22; the
+`.nvmrc` pins 20.20.1). Keep it that way — a runtime dependency
 would ship into every environment the CLI runs in.
 
 ## The generated React app

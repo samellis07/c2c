@@ -107,7 +107,6 @@ Verification is observable only by a live Catalyst read-back (`GET /baas/v1/proj
 | id | Check | Command | PASS | FAIL → fix |
 |---|---|---|---|---|
 | D-E1 | Node supported | `node --version` satisfies `compat.json.node.range` (`>=20.20 <23` — Node 20 or 22; also the repo `engines.node`) | `node v20.20.1 (pinned)` | `FAIL D-E1: Node <v> is not supported; c2c needs Node >=20.20 <23 (20 or 22).` → `install Node 20.20.1 (nvm install 20.20.1 && nvm use 20.20.1)` (or your installer). Exit 6. |
-| D-E2 | Node patch | equals `20.20.1` | — | `WARN D-E2: Node <v> is not the pinned 20.20.1; output is correct but byte-identical manifests are only guaranteed on 20.20.1.` |
 | D-E3 | Vendor integrity | recompute sha256 of `vendor/c2c/**` vs `MANIFEST.sha256` | `vendor ok (c2c 0.2.0)` | `FAIL D-E3: the c2c plugin files were modified (<n> files differ).` → reinstall the plugin (`/plugin uninstall c2c` then install). Exit 6. |
 | D-E4 | Workspace writable, plugin dir untouched | can create `c2c-out/.c2c/`; the plugin dir is not the cwd | `workspace ok` | `FAIL D-E4: run c2c from your own workspace folder, not from the plugin folder.` |
 
