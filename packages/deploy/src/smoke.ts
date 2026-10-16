@@ -349,7 +349,7 @@ function routeSkipReason(path: string): string {
   if (/^\/reports\/[^/]+\/actions\//.test(path)) return 'a custom action — it acts on selected records';
   if (path.startsWith('/flows/')) return 'a state-machine transition — it needs a record in a stage';
   if (path.startsWith('/functions/')) return 'a custom function — its arguments and effects are app-specific';
-  if (path === '/admin/smoke') return 'the in-app smoke run calls it for marker-checked deletes';
+  if (path === '/admin/smoke') return 'the in-app smoke run calls it for cleanup deletes';
   return 'no smoke contract for this route';
 }
 
@@ -508,7 +508,7 @@ export function planSmoke(_app: App, inputs: SmokeInputs): SmokeStep[] {
     claimed.add(`${method} ${report.queryEndpoint}`);
     steps.push({ kind: 'report', label: `report ${report.name}`, method, path: report.queryEndpoint });
   }
-  if (cleanup.some((step) => step.marker) && hasRoute(routes, 'POST', '/admin/smoke')) claimed.add('POST /admin/smoke');
+  if (cleanup.length && hasRoute(routes, 'POST', '/admin/smoke')) claimed.add('POST /admin/smoke');
   for (const key of Object.keys(routes).sort()) {
     if (claimed.has(key)) continue;
     const at = key.indexOf(' ');
