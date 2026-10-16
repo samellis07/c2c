@@ -4855,3 +4855,66 @@ test('singleReturnText stays linear on long whitespace and semicolon runs', () =
   const ms = Number(process.hrtime.bigint() - start) / 1e6;
   assert.ok(ms < 250, `took ${ms} ms`);
 });
+
+test('actions with condition parses as a conditional block and evaluates deterministically without call todos', async () => {
+  const script = `
+    x = 0;
+    actions (Status == "Approved")
+    {
+      x = 10;
+    }
+    actions (Status == "Moved To Sales")
+    {
+      x = 20;
+    }
+  `;
+  const t = translate(script, {
+    rowNames: ['rec'],
+    rowFields: ['Status'],
+  });
+  assert.equal(t.todos.length, 0);
+  assert.doesNotMatch(t.server, /shim\.todo|call:actions/);
+  assert.match(t.server, /if \(\(shim\.record\.get\(d_rec, "Status"\) == "Approved"\)\) \{/);
+  assert.match(t.server, /if \(\(shim\.record\.get\(d_rec, "Status"\) == "Moved To Sales"\)\) \{/);
+
+  const runtime = createRuntime({ dryRun: true });
+  const recApproved = { __row: true as const, form: 'New_Order_Request', values: { Status: 'Approved' } };
+  const ctx = runtime.context({ record: {}, row: recApproved });
+  const runCode = `const d_rec = ctx.row;\n${t.server}\nreturn x;`;
+  const resApproved = await body(runCode)(runtime.shim, ctx);
+  assert.equal(resApproved, 10);
+
+  const recMoved = { __row: true as const, form: 'New_Order_Request', values: { Status: 'Moved To Sales' } };
+  const ctxMoved = runtime.context({ record: {}, row: recMoved });
+  const resMoved = await body(runCode)(runtime.shim, ctxMoved);
+  assert.equal(resMoved, 20);
+
+  const recOther = { __row: true as const, form: 'New_Order_Request', values: { Status: 'Pending' } };
+  const ctxOther = runtime.context({ record: {}, row: recOther });
+  const resOther = await body(runCode)(runtime.shim, ctxOther);
+  assert.equal(resOther, 0);
+});
+
+test('an actions call with no following brace stays a counted call todo', () => {
+  const t = translate('x = actions(1);');
+  assert.ok(t.todos.some((item) => item.construct === 'call:actions'));
+});
+
+test('app.users and app.userEmailIds go through the app shim', () => {
+  const t = translate('ids = app.users();\nemails = app.userEmailIds();');
+  assert.equal(t.stats.todo, 0);
+  assert.match(stripComments(t.server), /await shim\.app\.users\(ctx\)/);
+  assert.match(stripComments(t.server), /await shim\.app\.userEmailIds\(ctx\)/);
+});
+
+test('app user listing stays a counted todo for other roots, methods, arities and a local named app', () => {
+  for (const [script, construct] of [
+    ['ids = portal.users();', 'method:users'],
+    ['ids = app.groups();', 'method:groups'],
+    ['ids = app.users(1);', 'method:users'],
+    ['app = Map();\nids = app.users();', 'method:users'],
+  ] as const) {
+    const t = translate(script);
+    assert.ok(t.todos.some((item) => item.construct === construct), `${script} -> ${construct}`);
+  }
+});

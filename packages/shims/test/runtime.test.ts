@@ -2582,3 +2582,85 @@ test('matchRow NULL and blank handling characterization', () => {
     assert.equal(actual, t.expected, `${t.rowVal} ${t.field} ${t.op} ${t.targetVal}`);
   }
 });
+
+test('app.users and app.userEmailIds require admin or developer profile and refuse low-privilege callers', async () => {
+  const runtime = createRuntime({
+    dryRun: false,
+    appTimeZone: 'UTC',
+    appUsers: async () => [
+      { user_id: '100', email: 'a@example.test' },
+      { zuid: '200', email_id: 'b@example.test' },
+      { username: 'fallback' },
+    ],
+  });
+
+  // Non-admin caller refused
+  const employeeCtx = runtime.context({ principal: { profile: 'Employee' } });
+  await assert.rejects(
+    () => runtime.shim.app.users(employeeCtx),
+    (err: unknown) => {
+      const e = err as { code?: string; message?: string };
+      assert.equal(e.code, 'RECORD_ACCESS_DENIED');
+      // No leak in error paths: error text does not contain any emails or user IDs
+      assert.equal(e.message?.includes('a@example.test'), false);
+      assert.equal(e.message?.includes('100'), false);
+      return true;
+    },
+  );
+  await assert.rejects(
+    () => runtime.shim.app.userEmailIds(employeeCtx),
+    (err: unknown) => {
+      const e = err as { code?: string; message?: string };
+      assert.equal(e.code, 'RECORD_ACCESS_DENIED');
+      assert.equal(e.message?.includes('a@example.test'), false);
+      return true;
+    },
+  );
+
+  // Unauthenticated caller refused
+  const unauthCtx = runtime.context({});
+  await assert.rejects(() => runtime.shim.app.users(unauthCtx), (err: unknown) => (err as { code?: string }).code === 'RECORD_ACCESS_DENIED');
+
+  // Lookalike profile and role names do not grant user listing.
+  for (const profile of ['Non-Admin', 'Admin Assistant', 'Developer Support']) {
+    const ctx = runtime.context({ principal: { profile } });
+    await assert.rejects(() => runtime.shim.app.users(ctx), (err: unknown) => (err as { code?: string }).code === 'RECORD_ACCESS_DENIED');
+  }
+  const roleOnly = runtime.context({ principal: { profile: 'Employee', role: 'Administrator' } });
+  await assert.rejects(() => runtime.shim.app.users(roleOnly), (err: unknown) => (err as { code?: string }).code === 'RECORD_ACCESS_DENIED');
+
+  // Admin gets list
+  const adminCtx = runtime.context({ principal: { profile: 'Administrator' } });
+  assert.deepEqual(await runtime.shim.app.users(adminCtx), ['100', '200', 'fallback']);
+  assert.deepEqual(await runtime.shim.app.userEmailIds(adminCtx), ['a@example.test', 'b@example.test']);
+
+  // Developer gets list
+  const devCtx = runtime.context({ principal: { profile: 'Developer' } });
+  assert.deepEqual(await runtime.shim.app.users(devCtx), ['100', '200', 'fallback']);
+  assert.deepEqual(await runtime.shim.app.userEmailIds(devCtx), ['a@example.test', 'b@example.test']);
+
+  // Error in adapter does not leak sensitive information
+  const failingRuntime = createRuntime({
+    dryRun: false,
+    appTimeZone: 'UTC',
+    appUsers: async () => {
+      throw new Error('connection reset by peer for secret_user@internal.example.test (id 9999)');
+    },
+  });
+  await assert.rejects(
+    () => failingRuntime.shim.app.users(adminCtx),
+    (err: unknown) => {
+      const msg = String(err);
+      assert.equal(msg.includes('secret_user@internal.example.test'), false);
+      assert.equal(msg.includes('9999'), false);
+      return true;
+    },
+  );
+
+  // Dry run behavior
+  const dry = createRuntime({ dryRun: true });
+  const dryAdminCtx = dry.context({ principal: { profile: 'Administrator' } });
+  assert.deepEqual(await dry.shim.app.users(dryAdminCtx), []);
+  const dryEmployeeCtx = dry.context({ principal: { profile: 'Employee' } });
+  await assert.rejects(() => dry.shim.app.users(dryEmployeeCtx), (err: unknown) => (err as { code?: string }).code === 'RECORD_ACCESS_DENIED');
+});
