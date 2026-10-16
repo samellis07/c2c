@@ -35,7 +35,7 @@ test('the customer steps are exactly the five, in order', () => {
 
 /** The exact activation sentence for each service: one pattern, the console page named. */
 const ACTIVATION = {
-  stratus: 'Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring',
+  stratus: 'Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name) and wait until it shows in the Stratus bucket list — click Create again if nothing happens after a few seconds',
   smartbrowz: 'SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring',
   slate: 'Slate — in the Catalyst console open the project → Slate → Start Exploring',
 } as const;

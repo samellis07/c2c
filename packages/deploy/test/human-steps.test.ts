@@ -100,7 +100,7 @@ test('the checklist is one numbered list: slate start, admin invite, sign in, se
 test('the start item names exactly the services the app uses, in the shared sentence', () => {
   const INVITE = 'Accept the admin invite: open the invite mail sent to the admin address and set the password.';
   const SIGN_IN = 'Sign in to the app once at the Slate app URL — the first sign-in finishes activating the login.';
-  const STRATUS = 'Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring';
+  const STRATUS = 'Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name) and wait until it shows in the Stratus bucket list — click Create again if nothing happens after a few seconds';
   const SMARTBROWZ = 'SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring';
   const SLATE = 'Slate — in the Catalyst console open the project → Slate → Start Exploring';
   assert.equal(

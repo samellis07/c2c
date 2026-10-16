@@ -153,7 +153,7 @@ Checks omitted from this table currently emit no `FAIL` result: D-A4, D-B4, D-B6
 
 `<Service> first-use gate is closed (GET … → …). Checklist: …` from `deploy --confirm`, `migrate-data --seed --confirm` or `c2c provision --out c2c-out/<app> --record <gate>-enable` means the project never opened a service the app uses. First activation has no API, CLI or MCP path: hand the user the one sentence for that service, then re-run (deploy: `--resume`) — c2c probes the gate again and continues only on an open answer.
 
-- Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring
+- Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name) and wait until it shows in the Stratus bucket list — click Create again if nothing happens after a few seconds [TESTED]
 - SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring
 - Slate — in the Catalyst console open the project → Slate → Start Exploring
 

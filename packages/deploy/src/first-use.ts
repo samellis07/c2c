@@ -55,7 +55,7 @@ export const FIRST_USE_GATES: Readonly<Record<FirstUseGateId, FirstUseGate>> = {
     stepId: 'stratus-enable',
     service: 'Stratus',
     page: 'Cloud Scale → Stratus',
-    console: `Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (${CONSOLE_PROJECT}#/cloudscale)`,
+    console: `Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (${CONSOLE_PROJECT}#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds)`,
     probe: '/baas/v1/project/<project>/bucket',
     doc: 'https://docs.catalyst.zoho.com/en/api/code-reference/cloud-scale/stratus/get-all-buckets/',
   },
@@ -107,10 +107,19 @@ export type ActivationServiceId = Extract<FirstUseGateId, 'stratus' | 'smartbrow
 
 export const ACTIVATION_SERVICES: readonly ActivationServiceId[] = ['stratus', 'smartbrowz', 'slate'];
 
-/** One sentence per service, always the same pattern: `<Service> — in the Catalyst console open the project → <page> → Start Exploring`. */
+/**
+ * One sentence per service, always the same pattern: `<Service> — in the
+ * Catalyst console open the project → <page> → Start Exploring`. Stratus adds
+ * its first-bucket clause: Start Exploring alone does not open it — the gate
+ * lifts only after one bucket exists, so the sentence names that step and its
+ * done signal.
+ */
 export function activationSentence(id: ActivationServiceId): string {
   const gate = FIRST_USE_GATES[id];
-  return `${gate.service} — in the Catalyst console open the project → ${gate.page} → Start Exploring`;
+  const sentence = `${gate.service} — in the Catalyst console open the project → ${gate.page} → Start Exploring`;
+  return id === 'stratus'
+    ? `${sentence}, then on Create your First Bucket create one bucket (any name) and wait until it shows in the Stratus bucket list — click Create again if nothing happens after a few seconds`
+    : sentence;
 }
 
 /** The services an app uses, in checklist order, from the plan signals. */
@@ -135,10 +144,13 @@ export type GateVerdict = 'open' | 'closed' | 'unknown';
  * Recorded closed shapes: `catalyst deploy slate` on a fresh project answers
  * 400 "Please access the Slate service in your project's console before
  * deploying via the CLI."; the Slate app list on an unopened service answers
- * INVALID_URL_PATTERN. Any "access the <service> service" refusal or
- * INVALID_URL_PATTERN on the probe path is read as closed.
+ * INVALID_URL_PATTERN; a Stratus write or bucket list on a project that never
+ * opened the service answers OPERATION_NOT_ALLOWED "in session when accessing
+ * Stratus for the first time". Any "access the <service> service" refusal,
+ * INVALID_URL_PATTERN or a first-session refusal on the probe path is read as
+ * closed.
  */
-const CLOSED_TEXT = /access the [\w ]+ service|INVALID_URL_PATTERN/i;
+const CLOSED_TEXT = /access the [\w ]+ service|INVALID_URL_PATTERN|in session when accessing [\w ]+/i;
 
 export function classifyGateProbe(result: Pick<RestResult, 'status' | 'body'>): GateVerdict {
   const text = typeof result.body === 'string' ? result.body : JSON.stringify(result.body ?? '');

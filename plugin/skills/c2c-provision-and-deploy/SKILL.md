@@ -26,7 +26,7 @@ Requires a **green doctor** for this DC/org/project (the CLI refuses with exit 5
   4. Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
   5. Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
   Step 1 has no API, CLI or MCP path, so it stays one guided console action. The printed checklist names only the services the app uses and has not started, one sentence each, in this order (an app that uses none has no step 1):
-  - Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring (only when the app has file fields)
+  - Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name) and wait until it shows in the Stratus bucket list — click Create again if nothing happens after a few seconds (only when the app has file fields)
   - SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring (only when the app renders PDF)
   - Slate — in the Catalyst console open the project → Slate → Start Exploring (only when the app ships a Slate web client)
 - **Teardown boundary (C2C.md rule 15). A failed step never deletes the project. Teardown happens only on the user's explicit request or on a failure before the Slate "Start Exploring" step; once any human or console step has run, the project is kept — stop and report.

@@ -11,7 +11,7 @@ The items, in order:
 1. **Start services** — first activation of Stratus, SmartBrowz and Slate has
    no API, CLI or MCP path, so it is one guided console action. The item names
    only the services the app uses, one sentence each, in this order:
-   - `Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name). Done when it shows in the Stratus bucket list [UNVERIFIED].`
+   - `Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name) and wait until it shows in the Stratus bucket list — click Create again if nothing happens after a few seconds.`
      (the app has file fields)
    - `SmartBrowz — in the Catalyst console open the project → SmartBrowz → Start Exploring`
      (the app renders PDF)
@@ -20,7 +20,7 @@ The items, in order:
 
    An app that uses none of them has no start item. Example for an app with
    file fields and a Slate web client:
-   `1. Start services: Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name). Done when it shows in the Stratus bucket list [UNVERIFIED]; Slate — in the Catalyst console open the project → Slate → Start Exploring`
+   `1. Start services: Stratus — in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name) and wait until it shows in the Stratus bucket list — click Create again if nothing happens after a few seconds; Slate — in the Catalyst console open the project → Slate → Start Exploring`
 2. **Accept the admin invite** — the invite mail went to the admin address the
    run was given; open it and set the password.
 3. **Sign in once** — open the Slate app URL and sign in; the first sign-in

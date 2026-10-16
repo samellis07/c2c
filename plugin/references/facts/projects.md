@@ -165,15 +165,15 @@ Rule: [UNVERIFIED] no API or CLI command opens a service on a project ("Start Ex
 | Gate | When | Console line | Probe c2c runs | Closed answer | Open answer |
 |---|---|---|---|---|---|
 | Cloud Scale (Data Store, Authentication) | every app | the project → Cloud Scale → Start Exploring | `GET /baas/v1/project/<project-id>/table` | an "access the … service" refusal or `INVALID_URL_PATTERN` | `200` success envelope |
-| Stratus | the app has file fields | the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name); done when it shows in the Stratus bucket list [UNVERIFIED] | `GET /baas/v1/project/<project-id>/bucket` | same | `200` with a bucket; an empty list does not complete the human step [UNVERIFIED] |
+| Stratus | the app has file fields | the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name); Start Exploring alone does not open the gate — bucket calls still answer `OPERATION_NOT_ALLOWED` "in session when accessing Stratus for the first time" until one bucket exists; done when it shows in the Stratus bucket list (the Create button can need a second click after a few seconds) [TESTED] (public tests: `packages/deploy/test/first-use.test.ts`, `packages/deploy/test/seed-bucket.test.ts`, `packages/doctor/test/observed.test.ts`) | `GET /baas/v1/project/<project-id>/bucket` | same | `200` with a bucket; an empty list does not complete the human step [TESTED] (public test: `packages/deploy/test/first-use.test.ts`) |
 | SmartBrowz | the app renders PDF | the project → SmartBrowz → Start Exploring | the SmartBrowz browser-grid list | same | `200` |
 | Slate | the app ships a Slate client | the project → Slate → Start Exploring | `GET /slate/v1/project/<project-id>/app` | `400` "Please access the Slate service in your project's console before deploying via the CLI." | `200` `{"status":"success","data":[...]}` |
 
 - Provision: `c2c provision --out c2c-out/<app> --record <gate>-enable` runs the probe; any later `--run` probes every unverified gate before it and stops on a closed one. Deploy `--confirm` and `migrate-data --seed --confirm` probe the gates they need before the first write; re-run (deploy: `--resume`) after the console step.
 - Data Store, Functions and Authentication calls usually work on a fresh project before any click, so the Cloud Scale probe normally answers open and no human step is printed.
 - An unrecognised probe answer (`401`, `5xx`, a failure envelope without the refusal text) is unverified, never open.
-- Project services are opt-in — the first console open of a service (Start Exploring) enables it for the project.
-- The customer's first step names only the services the app uses (Stratus, SmartBrowz, Slate — Cloud Scale normally answers open) and has not started, one sentence each. For Stratus, the line includes creating one bucket; the customer steps stay five at most. [UNVERIFIED]
+- Project services are opt-in — the first console open of a service (Start Exploring) enables it for the project; Stratus is the exception: it opens only once the first bucket exists (the gate row above).
+- The customer's first step names only the services the app uses (Stratus, SmartBrowz, Slate — Cloud Scale normally answers open) and has not started, one sentence each. For Stratus, the line includes creating one bucket; the customer steps stay five at most. [TESTED] (public test: `packages/deploy/test/customer-steps.test.ts`)
 
 ### Treat DevOps (APM, alerts, logs) as opt-in console observability
 
