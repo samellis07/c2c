@@ -32,7 +32,7 @@ import type { AppSpec, ChartSpec, FilterClause, MetricSpec, PageElement, ReportS
 import { foreignKeysForApp, orderTables, resolveForeignKeys } from './remap.js';
 import { parseSeed, seedStoreColumns } from './seed.js';
 import { startOfflineBackend, type BehaviorBackend } from './verify-behavior.js';
-import { readZip } from './zipfile.js';
+import { DEFAULT_MAX_ENTRY, readZip } from './zipfile.js';
 
 export const REPORT_CHECK_VERSION = 'c2c-report-check/1';
 
@@ -108,7 +108,7 @@ export function verifyCsvExport(file: string, header: readonly string[], rows: r
 
 /** Data rows of the first worksheet of an XLSX workbook (the header row excluded). */
 export function xlsxRowCount(bytes: Buffer): number {
-  const entries = readZip(bytes, { maxEntries: 512, maxEntryBytes: 64 * 1024 * 1024 });
+  const entries = readZip(bytes, { maxEntries: 512, maxEntryBytes: DEFAULT_MAX_ENTRY });
   const sheet = entries.find((entry) => /^xl\/worksheets\/sheet1\.xml$/.test(entry.name)) ?? entries.find((entry) => /^xl\/worksheets\/[^/]+\.xml$/.test(entry.name));
   if (!sheet) throw new Error('XLSX has no worksheet part');
   const rows = sheet.data.toString('utf8').match(/<(?:\w+:)?row[\s>]/g) ?? [];
@@ -128,19 +128,30 @@ export function verifyXlsxExport(bytes: Buffer, visibleRows: number): ScreenChec
     : { check: 'xlsx', status: 'fail', detail: 'XLSX row count differs from the visible rows', expected: visibleRows, actual: count };
 }
 
-/** Text shown by a PDF's content streams (Tj/TJ strings; Flate streams inflated). */
-export function pdfText(bytes: Buffer): string {
+/**
+ * Text shown by a PDF's content streams (Tj/TJ strings; Flate streams inflated).
+ * Inflated streams share one budget, the zip reader's member cap; past it this
+ * throws instead of inflating further.
+ */
+export function pdfText(bytes: Buffer, maxInflatedBytes = DEFAULT_MAX_ENTRY): string {
   const raw = bytes.toString('latin1');
   const parts: string[] = [];
+  let inflated = 0;
+  const overCap = `PDF content streams inflate past the ${maxInflatedBytes} byte cap`;
   const stream = /<<([^]*?)>>\s*stream\r?\n([^]*?)\r?\nendstream/g;
   for (let m = stream.exec(raw); m; m = stream.exec(raw)) {
     let body = m[2]!;
     if (/\/FlateDecode/.test(m[1]!)) {
+      let data: Buffer;
       try {
-        body = inflateSync(Buffer.from(body, 'latin1')).toString('latin1');
-      } catch {
+        data = inflateSync(Buffer.from(body, 'latin1'), { maxOutputLength: maxInflatedBytes - inflated + 1 });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ERR_BUFFER_TOO_LARGE') throw new Error(overCap);
         continue;
       }
+      inflated += data.length;
+      if (inflated > maxInflatedBytes) throw new Error(overCap);
+      body = data.toString('latin1');
     }
     const text = /\((?:\\.|[^\\)])*\)/g;
     for (let t = text.exec(body); t; t = text.exec(body)) parts.push(t[0].slice(1, -1).replace(/\\([()\\])/g, '$1'));
@@ -152,7 +163,12 @@ export function pdfText(bytes: Buffer): string {
 export function verifyPdfExport(bytes: Buffer, rowKeys: readonly string[]): ScreenCheck {
   const head = bytes.subarray(0, 5).toString('latin1');
   if (head !== '%PDF-') return { check: 'pdf', status: 'fail', detail: 'export is not a PDF file', actual: head };
-  const text = pdfText(bytes);
+  let text: string;
+  try {
+    text = pdfText(bytes);
+  } catch (err) {
+    return { check: 'pdf', status: 'fail', detail: `PDF is not readable: ${err instanceof Error ? err.message : String(err)}` };
+  }
   const shown = rowKeys.filter((key) => key && text.includes(key)).length;
   return shown === rowKeys.length
     ? { check: 'pdf', status: 'pass', detail: `PDF shows the ${rowKeys.length} visible rows` }

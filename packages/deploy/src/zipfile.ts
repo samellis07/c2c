@@ -66,7 +66,8 @@ const EOCD_LEN = 22;
 const EOCD_SEARCH = EOCD_LEN + 0xffff;
 
 const DEFAULT_MAX_ENTRIES = 4096;
-const DEFAULT_MAX_ENTRY = 64 * 1024 * 1024;
+/** Default cap on one inflated member; also bounds other inflates of untrusted bytes. */
+export const DEFAULT_MAX_ENTRY = 64 * 1024 * 1024;
 const DEFAULT_MAX_TOTAL = 512 * 1024 * 1024;
 const DEFAULT_MAX_RATIO = 100;
 
