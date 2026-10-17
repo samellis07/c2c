@@ -29,6 +29,7 @@ import { SOURCE_ID_COLUMN } from '../../schema/src/mapping.js';
 import { generateUi } from '../../ui/src/generate.js';
 import { pathToFileURL } from 'node:url';
 import { repoRoot } from '../../core/src/toolchain.js';
+import { generate } from '../../deluge/src/generate.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1355,9 +1356,10 @@ test('a scheduled cron body names c2c_jobs by its deployed id, which provision r
   const dir = mkdtempSync(join(tmpdir(), 'c2c-plan-cron-target-'));
   writeFileSync(join(dir, 'sched.ds'), SENDS_MAIL);
   const built = buildOfflinePlan(loadApp(join(dir, 'sched.ds')), { dc: 'in', dcSource: '--dc', mail: false });
-  const crons = JSON.parse(built.files.find((file) => file.path === 'provision/crons.json')?.data ?? '[]') as { body: { job_details: Record<string, unknown> } }[];
+  const crons = JSON.parse(built.files.find((file) => file.path === 'provision/crons.json')?.data ?? '[]') as { body: { job_meta: Record<string, unknown> } }[];
   assert.equal(crons.length, 1);
-  assert.deepEqual(crons[0]!.body.job_details, { job_name: 'job/daily', target_type: 'Function', target_id: '<function-id:c2c_jobs>' });
+  assert.equal(crons[0]!.body.job_meta.target_type, 'Function');
+  assert.equal(crons[0]!.body.job_meta.target_id, '<function-id:c2c_jobs>');
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -1424,4 +1426,208 @@ test('a plan with no data centre prints the plan prefix once', async (t) => {
   } finally {
     process.chdir(previous);
   }
+});
+
+const DS_SCHEDULES = `application "Roster"
+{
+	time zone = "Asia/Kolkata"
+	section S
+	{
+		form Shift
+		{
+			End_Date
+			(
+				type = date
+			)
+			Timer_Stop_At
+			(
+				type = datetime
+			)
+		}
+	}
+	workflow
+	{
+		schedule
+		{
+			Shift_Reminder as "Shift reminder"
+			{
+				type = schedule
+				form = Shift
+				start = before 1 days from End_Date at "16:00:00"
+				time zone = "Asia/Kolkata"
+				on start
+				{
+					actions
+					{
+					on load
+					(
+						x = 1;
+					)
+					}
+				}
+			}
+			Auto_Stop as "Auto stop"
+			{
+				type = schedule
+				form = Shift
+				start = Timer_Stop_At
+				time zone = "Asia/Kolkata"
+				on start
+				{
+					actions
+					{
+					on load
+					(
+						y = 1;
+					)
+					}
+				}
+			}
+			Attendance as "Attendance"
+			{
+				type = schedule
+				form = Shift
+				start = after 2 hours from Timer_Stop_At
+				time zone = "Asia/Kolkata"
+				on start
+				{
+					actions
+					{
+					on load
+					(
+						z = 1;
+					)
+					}
+				}
+			}
+			Share_Roster as "Share roster"
+			{
+				type = schedule
+				form = Shift
+				start = before 30 minutes from Timer_Stop_At at "08:00:00"
+				time zone = "Asia/Kolkata"
+				on start
+				{
+					actions
+					{
+					on load
+					(
+						w = 1;
+					)
+					}
+				}
+			}
+			Nightly_Cleanup as "Nightly cleanup"
+			{
+				type = schedule
+				start = "01-Jan-2030 02:00:00"
+				time zone = "Asia/Kolkata"
+				on start
+				{
+					actions
+					{
+					on load
+					(
+						v = 1;
+					)
+					}
+				}
+			}
+			Daily_Sweep as "Daily sweep"
+			{
+				type = schedule
+				start = "01-Jan-2026 06:00:00"
+				frequency = daily
+				time zone = "Asia/Kolkata"
+				on start
+				{
+					actions
+					{
+					on load
+					(
+						u = 1;
+					)
+					}
+				}
+			}
+		}
+	}
+}
+`;
+
+test('plan: record-relative schedules never become crons; absolute ones keep their recurrence and carry job_meta', async (t) => {
+  const ds = writeDs(DS_SCHEDULES);
+  const out = mkdtempSync(join(tmpdir(), 'c2c-plan-sched-'));
+  t.after(() => rmSync(out, { recursive: true, force: true }));
+  assert.equal(await planCli([ds, '--out', out, '--dc', 'in'], offlineIo({}).io), 0);
+  const crons = readJson(join(out, 'provision', 'crons.json')) as unknown as unknown[];
+  assert.equal(crons.length, 6, 'every schedule is listed, cron or not');
+  const relative = crons.filter((c) => (c as { recordRelative?: unknown }).recordRelative);
+  assert.equal(relative.length, 4, 'the four field-relative schedules are classified record-relative');
+  for (const entry of relative) {
+    const cron = entry as { name: string; body?: unknown; todo?: string; recordRelative: { field?: string; form?: string } };
+    assert.equal(cron.body, undefined, `${cron.name}: a record-relative schedule must never carry a cron body`);
+    assert.match(cron.todo ?? '', /runs relative to each record's .*; scheduling per record is not generated yet/);
+  }
+  // The counted TODO: the plan records each one by name and field.
+  const plan = readJson(join(out, 'plan.json')) as { recordRelativeSchedules?: { name: string; field?: string }[] };
+  assert.equal(plan.recordRelativeSchedules?.length, 4);
+  assert.deepEqual(
+    plan.recordRelativeSchedules?.map((s) => s.name),
+    ['Shift_Reminder', 'Auto_Stop', 'Attendance', 'Share_Roster'],
+  );
+  // The migration-report line in plan.md.
+  const md = readFileSync(join(out, 'plan.md'), 'utf8');
+  assert.match(md, /## Record-relative schedules \(4 — reported, never posted as crons\)/);
+  assert.match(md, /Shift_Reminder: runs relative to each record's End_Date on Shift; scheduling per record is not generated yet/);
+  type Body = { cron_name: string; cron_type: string; cron_status: boolean; cron_expression?: string; job_detail: Record<string, unknown>; job_meta: Record<string, unknown> };
+  const body = (name: string): Body => (crons.find((c) => (c as { name?: string }).name === name) as { body: Body }).body;
+  // A true one-shot is OneTime at the start instant (epoch seconds) in the schedule's zone.
+  const once = body('Nightly_Cleanup');
+  assert.equal(once.cron_type, 'OneTime');
+  assert.equal(once.job_detail.time_of_execution, 1893443400, "01-Jan-2030 02:00:00 Asia/Kolkata");
+  assert.equal(once.job_detail.timezone, 'Asia/Kolkata');
+  // A daily schedule stays recurring: the generator's CronExpression, never a one-shot.
+  const daily = body('Daily_Sweep');
+  assert.equal(daily.cron_type, 'CronExpression');
+  assert.equal(daily.cron_expression, '0 6 * * *');
+  assert.equal(daily.job_detail.time_of_execution, undefined);
+  // The same cron the generator writes to job-scheduling.json, so one mapping source.
+  const scheduling = JSON.parse(generate(deriveIr(parse(DS_SCHEDULES))).files.find((f) => f.path === 'job-scheduling.json')!.source) as { crons: { cron_name: string; cron_type: string }[] };
+  for (const cron of [once, daily]) {
+    const generated = scheduling.crons.find((c) => c.cron_name === cron.cron_name);
+    assert.ok(generated, `${cron.cron_name} is a job-scheduling.json cron`);
+    assert.equal(generated!.cron_type, cron.cron_type);
+    // Names follow the generator rule: c2c_<name>, no '/' or '-'.
+    assert.match(cron.cron_name, /^c2c_[A-Za-z0-9_]+$/);
+    assert.match(String(cron.job_meta.job_name), /^c2c_[A-Za-z0-9_]+$/);
+    assert.equal(cron.cron_status, false);
+    // The recorded job_meta shape: pool and target ids, resolved at provision time.
+    assert.equal(cron.job_meta.jobpool_id, '<id:Roster>');
+    assert.equal(cron.job_meta.target_type, 'Function');
+    assert.equal(cron.job_meta.target_id, '<function-id:c2c_jobs>');
+    assert.equal(cron.job_meta.source_type, 'Cron');
+  }
+  // The read-back only waits on crons that will actually be POSTed.
+  const steps = (readJson(join(out, 'provision', 'plan.json')) as { steps: ProvisionStep[] }).steps;
+  const cronStep = steps.find((step) => step.id === 'crons')!;
+  assert.deepEqual(cronStep.readBack.match, { cron_name: ['c2c_Nightly_Cleanup', 'c2c_Daily_Sweep'] });
+  assert.equal(cronStep.args.recordRelative, 4);
+});
+
+test('plan: an HRM-shaped app plans 3 record-relative TODOs and 1 absolute one-shot cron', async (t) => {
+  // Three form schedules plus one custom one-shot start long past, as the HRM gallery app has.
+  const cut = (src: string, name: string): string => src.replace(new RegExp(`\\t\\t\\t${name} as [\\s\\S]*?\\n\\t\\t\\t}\\n`), '');
+  const ds = writeDs(cut(cut(DS_SCHEDULES, 'Share_Roster'), 'Daily_Sweep').replace('"01-Jan-2030 02:00:00"', '"19-Jun-2017 16:00:00"'));
+  const out = mkdtempSync(join(tmpdir(), 'c2c-plan-sched-hrm-'));
+  t.after(() => rmSync(out, { recursive: true, force: true }));
+  assert.equal(await planCli([ds, '--out', out, '--dc', 'in'], offlineIo({}).io), 0);
+  const crons = readJson(join(out, 'provision', 'crons.json')) as unknown as { name: string; recordRelative?: unknown; body?: { cron_type: string; job_detail: { time_of_execution?: number } } }[];
+  assert.equal(crons.length, 4);
+  assert.deepEqual(crons.filter((c) => c.recordRelative).map((c) => c.name), ['Shift_Reminder', 'Auto_Stop', 'Attendance']);
+  const absolute = crons.filter((c) => c.body);
+  assert.equal(absolute.length, 1);
+  assert.equal(absolute[0]!.body!.cron_type, 'OneTime');
+  // Planned as written; provision refuses it because the instant is past.
+  assert.equal(absolute[0]!.body!.job_detail.time_of_execution, 1497868200);
 });

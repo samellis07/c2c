@@ -43,7 +43,7 @@ interface Sandbox {
   crons: { cron_name: string }[];
   /** Every cron POST body, as sent. */
   cronBodies: unknown[];
-  /** The project function list (deployed functions). */
+  /** The project's function list (`GET /function`); c2c_jobs is the cron target. */
   functions: { id: string; name: string }[];
 }
 
@@ -63,7 +63,7 @@ function emptySandbox(): Sandbox {
     buckets: [],
     crons: [],
     cronBodies: [],
-    functions: [],
+    functions: [{ id: '7001', name: 'c2c_jobs' }],
   };
 }
 
@@ -763,6 +763,17 @@ test('L1 provisions end to end in the fake project, every step read back', { ski
   rmSync(out, { recursive: true, force: true });
 });
 
+/** A cron POST body in the shape `c2c plan` writes (offline-plan cronPostBody). */
+function cronBody(name: string, schedule: Record<string, unknown>): Record<string, unknown> {
+  return {
+    cron_name: name,
+    cron_status: false,
+    cron_execution_type: 'pre-defined',
+    ...schedule,
+    job_meta: { jobpool_id: '1', job_name: name, source_type: 'Cron', target_type: 'Function', target_id: '<function-id:c2c_jobs>', params: { module: 'job/daily-report.mjs' } },
+  };
+}
+
 /** A two-step plan: the cli `crons` step plus a spec file keyed by display name. */
 function writeCronPlan(out: string): void {
   mkdirSync(join(out, 'provision'), { recursive: true });
@@ -792,7 +803,7 @@ function writeCronPlan(out: string): void {
         {
           name: 'Daily Report',
           jobModule: 'functions/job/daily-report.mjs',
-          body: { cron_name: 'daily_report', cron_type: 'OneTime', cron_status: false, cron_details: { time_of_execution: '2030-01-01T00:00:00Z' } },
+          body: cronBody('daily_report', { cron_type: 'OneTime', job_detail: { time_of_execution: 1893456000, timezone: 'UTC' } }),
         },
       ],
       null,
@@ -839,7 +850,10 @@ test('crons: the c2c_jobs id is read back from the function list and sent as the
   const out = mkdtempSync(join(tmpdir(), 'c2c-prov-cron-target-'));
   writeTargetedCronPlan(out);
   const sandbox = emptySandbox();
-  sandbox.functions.push({ id: '6001', name: 'c2c_api' }, { id: '6002', name: 'c2c_jobs' });
+  sandbox.functions = [
+    { id: '6001', name: 'c2c_api' },
+    { id: '6002', name: 'c2c_jobs' },
+  ];
   const c = cap(sandbox);
   assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'crons', ...SCOPE], c.io), 0, c.err());
   assert.deepEqual(sandbox.cronBodies.map((body) => (body as { job_details: unknown }).job_details), [
@@ -856,7 +870,7 @@ test('crons: a missing c2c_jobs refuses the step with the deploy next step and p
   writeTargetedCronPlan(out);
   const sandbox = emptySandbox();
   // c2c_api is deployed; c2c_jobs is not.
-  sandbox.functions.push({ id: '6001', name: 'c2c_api' });
+  sandbox.functions = [{ id: '6001', name: 'c2c_api' }];
   const c = cap(sandbox);
   assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'crons', ...SCOPE], c.io), 1);
   assert.match(c.err(), /cron target c2c_jobs is not deployed in project [0-9]+; no cron was posted/);
@@ -869,12 +883,174 @@ test('crons: a missing c2c_jobs refuses the step with the deploy next step and p
 
 test('crons: a spec with no function-id token never reads the function list', async () => {
   const out = mkdtempSync(join(tmpdir(), 'c2c-prov-cron-notoken-'));
-  writeCronPlan(out);
+  writeCronSpec(out, [{ name: 'Daily Report', cron_name: 'daily_report', body: { cron_name: 'daily_report', cron_type: 'CronExpression', cron_status: false, cron_expression: '0 5 * * *' } }], ['daily_report']);
   const sandbox = emptySandbox();
   const c = cap(sandbox);
   assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'crons', ...SCOPE], c.io), 0, c.err());
   assert.equal(c.restCalls.some((call) => /\/function$/.test(call)), false);
   rmSync(out, { recursive: true, force: true });
+});
+
+test('crons: record-relative schedules are reported, never POSTed — the step does not fail', async (t) => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-cron-rel-'));
+  t.after(() => rmSync(out, { recursive: true, force: true }));
+  mkdirSync(join(out, 'provision'), { recursive: true });
+  const plan: PlanFile = {
+    version: 1,
+    app: 'roster',
+    steps: [
+      {
+        id: 'crons',
+        via: 'cli',
+        command: 'c2c provision --confirm --run crons',
+        args: { plan: 'provision/crons.json', schedules: 2, recordRelative: 2, enabled: false },
+        readBack: { via: 'mcp', tool: 'CatalystbyZoho_List_All_Crons', match: { cron_name: [] } },
+      },
+    ],
+  };
+  writeFileSync(join(out, 'provision', 'plan.json'), `${JSON.stringify(plan, null, 2)}\n`);
+  writeFileSync(
+    join(out, 'provision', 'crons.json'),
+    `${JSON.stringify(
+      [
+        {
+          name: 'Shift_Reminder',
+          recordRelative: { form: 'Shift', field: 'End_Date' },
+          schedule: { form: 'Shift', start: 'before 1 days from End_Date at "16:00:00"' },
+          todo: "runs relative to each record's End_Date on Shift; scheduling per record is not generated yet",
+        },
+        {
+          name: 'Auto_Stop',
+          recordRelative: { form: 'Shift', field: 'Timer_Stop_At' },
+          schedule: { form: 'Shift', start: 'Timer_Stop_At' },
+          todo: "runs relative to each record's Timer_Stop_At on Shift; scheduling per record is not generated yet",
+        },
+      ],
+      null,
+      2,
+    )}\n`,
+  );
+  const sandbox = emptySandbox();
+  const c = cap(sandbox);
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'crons', ...SCOPE], c.io), 0, c.err());
+  assert.equal(c.restCalls.filter((call) => call.startsWith('POST')).length, 0, 'a record-relative schedule must never be POSTed as a cron');
+  assert.equal(sandbox.crons.length, 0);
+  assert.match(c.out(), /schedule shift_reminder: runs relative to each record's End_Date/);
+  assert.match(c.out(), /schedule auto_stop: runs relative to each record's Timer_Stop_At/);
+});
+
+test('crons: a record-relative schedule is reported while its absolute sibling posts to the deployed c2c_jobs id', async (t) => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-cron-mixed-'));
+  t.after(() => rmSync(out, { recursive: true, force: true }));
+  writeCronSpec(
+    out,
+    [
+      {
+        name: 'Shift_Reminder',
+        recordRelative: { form: 'Shift', field: 'End_Date' },
+        schedule: { form: 'Shift', start: 'before 1 days from End_Date at "16:00:00"' },
+        todo: "runs relative to each record's End_Date on Shift; scheduling per record is not generated yet",
+      },
+      { name: 'Nightly_Cleanup', cron_name: 'c2c_Nightly_Cleanup', body: cronBody('c2c_Nightly_Cleanup', { cron_type: 'CronExpression', cron_expression: '0 2 * * *', job_detail: {} }) },
+    ],
+    ['c2c_Nightly_Cleanup'],
+  );
+  const sandbox = emptySandbox();
+  const { io, posts, calls } = capturingIo(sandbox);
+  const log = { text: '' };
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'crons', ...SCOPE], { ...io, stdout: (text) => log.text += text }), 0, log.text);
+  assert.ok(calls.indexOf(`GET /baas/v1/project/${PROJECT}/function`) < calls.findIndex((call) => call.startsWith('POST')), 'the target is read back before the POST');
+  assert.equal(posts.length, 1, 'only the absolute schedule posts');
+  assert.equal((posts[0]!.job_meta as Record<string, unknown>).target_id, '7001');
+  assert.match(log.text, /schedule shift_reminder: runs relative to each record's End_Date/);
+});
+
+/** A one-step crons plan over the given spec entries. */
+function writeCronSpec(out: string, entries: unknown[], match: string[]): void {
+  mkdirSync(join(out, 'provision'), { recursive: true });
+  const plan: PlanFile = {
+    version: 1,
+    app: 'roster',
+    steps: [
+      {
+        id: 'crons',
+        via: 'cli',
+        command: 'c2c provision --confirm --run crons',
+        args: { plan: 'provision/crons.json', schedules: entries.length, enabled: false },
+        readBack: { via: 'mcp', tool: 'CatalystbyZoho_List_All_Crons', match: { cron_name: match } },
+      },
+    ],
+  };
+  writeFileSync(join(out, 'provision', 'plan.json'), `${JSON.stringify(plan, null, 2)}\n`);
+  writeFileSync(join(out, 'provision', 'crons.json'), `${JSON.stringify(entries, null, 2)}\n`);
+}
+
+/** The sandbox rest with every cron POST body captured. */
+function capturingIo(sandbox: Sandbox): { io: Io; posts: Record<string, unknown>[]; calls: string[] } {
+  const posts: Record<string, unknown>[] = [];
+  const calls: string[] = [];
+  const io = cap(sandbox).io;
+  const fake = sandboxRest(sandbox);
+  return {
+    posts,
+    calls,
+    io: {
+      ...io,
+      rest: async (call) => {
+        calls.push(`${call.method} ${call.path}`);
+        if (call.method === 'POST' && call.path.endsWith('/job_scheduling/cron')) posts.push(call.body as Record<string, unknown>);
+        return fake.rest(call);
+      },
+    },
+  };
+}
+
+test('crons: an absolute schedule POSTs job_detail + job_meta with the c2c_jobs id read back from the function list', async (t) => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-cron-abs-'));
+  t.after(() => rmSync(out, { recursive: true, force: true }));
+  writeCronSpec(out, [{ name: 'Nightly_Cleanup', cron_name: 'c2c_Nightly_Cleanup', body: cronBody('c2c_Nightly_Cleanup', { cron_type: 'CronExpression', cron_expression: '0 2 * * *', job_detail: { timezone: 'Asia/Kolkata' } }) }], ['c2c_Nightly_Cleanup']);
+  const sandbox = emptySandbox();
+  const { io, posts, calls } = capturingIo(sandbox);
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'crons', ...SCOPE], io), 0);
+  assert.equal(posts.length, 1);
+  assert.ok(calls.indexOf(`GET /baas/v1/project/${PROJECT}/function`) < calls.findIndex((call) => call.startsWith('POST')), 'the target is read back before the POST');
+  assert.equal(posts[0]!.cron_type, 'CronExpression');
+  assert.equal(posts[0]!.cron_expression, '0 2 * * *');
+  const meta = posts[0]!.job_meta as Record<string, unknown>;
+  assert.equal(meta.target_type, 'Function');
+  assert.equal(meta.target_id, '7001', 'target_id is the deployed c2c_jobs function id');
+  assert.equal(meta.jobpool_id, '1');
+});
+
+test('crons: no c2c_jobs function in the project refuses the step with the next step and posts nothing', async (t) => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-cron-nojobs-'));
+  t.after(() => rmSync(out, { recursive: true, force: true }));
+  writeCronPlan(out);
+  const sandbox = emptySandbox();
+  sandbox.functions = [{ id: '7000', name: 'c2c_api' }];
+  const c = cap(sandbox);
+  assert.notEqual(await provisionCli(['--out', out, '--confirm', '--run', 'crons', ...SCOPE], c.io), 0);
+  assert.match(c.err(), /cron target c2c_jobs is not deployed in project [0-9]+; no cron was posted/);
+  assert.equal(c.restCalls.filter((call) => call.startsWith('POST')).length, 0);
+  assert.equal(sandbox.crons.length, 0);
+});
+
+test('crons: a OneTime start in the past is refused with a clear message, never posted', async (t) => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-cron-past-'));
+  t.after(() => rmSync(out, { recursive: true, force: true }));
+  // 2017-06-19 16:00 Asia/Kolkata, the shape of a stale Creator one-shot.
+  writeCronSpec(out, [{ name: 'Attendance_schedule', cron_name: 'c2c_Attendance_schedule', body: cronBody('c2c_Attendance_schedule', { cron_type: 'OneTime', job_detail: { time_of_execution: 1497868200, timezone: 'Asia/Kolkata' } }) }], ['c2c_Attendance_schedule']);
+  const sandbox = emptySandbox();
+  const { io, posts } = capturingIo(sandbox);
+  const err: string[] = [];
+  assert.notEqual(await provisionCli(['--out', out, '--confirm', '--run', 'crons', ...SCOPE], { ...io, stderr: (text) => err.push(text) }, { now: () => '2026-10-17T00:00:00.000Z' }), 0);
+  assert.match(err.join(''), /cron .*: its one-time start 2017-06-19T10:30:00\.000Z is in the past, so the cron would never fire/);
+  assert.equal(posts.length, 0);
+  // The same cron one minute in the future posts.
+  writeCronSpec(out, [{ name: 'Attendance_schedule', cron_name: 'c2c_Attendance_schedule', body: cronBody('c2c_Attendance_schedule', { cron_type: 'OneTime', job_detail: { time_of_execution: 1497868200, timezone: 'Asia/Kolkata' } }) }], ['c2c_Attendance_schedule']);
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'crons', ...SCOPE], io, { now: () => '2017-06-19T10:29:00.000Z' }), 0);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0]!.cron_type, 'OneTime');
 });
 
 test('tables: a crons-shaped spec is refused by name, not a TypeError, and writes nothing', async () => {
@@ -1247,6 +1423,7 @@ test('crons: a 409 duplicate in the failure envelope is confirmed by the re-read
     env: {},
     rest: guardedRest(async (call: RestCall) => {
       const path = call.path.slice(`/baas/v1/project/${PROJECT}`.length);
+      if (call.method === 'GET' && path === '/function') return { status: 200, body: { data: [{ function_name: 'c2c_jobs', id: '7001' }] } };
       cronCalls.push(`${call.method} ${path}`);
       if (call.method === 'GET' && path === '/job_scheduling/cron') {
         return { status: 200, body: { data: landed ? [{ cron_name: 'daily_report' }] : [] } };
@@ -1292,6 +1469,7 @@ function dupEnvelopeRest(opts: {
       calls.push(`${call.method} ${call.path}`);
       const isCron = call.path.endsWith('/job_scheduling/cron');
       const isUser = call.path.endsWith('/project-user');
+      if (call.method === 'GET' && call.path.endsWith('/function')) return { status: 200, body: { data: [{ function_name: 'c2c_jobs', id: '7001' }] } };
       if (call.method === 'GET' && (isCron || isUser)) {
         reads++;
         if (opts.unreadableRead && reads > 1) return { status: 503, body: INTERNAL_500 };

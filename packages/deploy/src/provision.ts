@@ -276,8 +276,14 @@ function cliArgsError(stepId: string, args: Record<string, unknown>, readBack: b
     if (args.plan !== 'provision/tables.json' || !Array.isArray(args.tables) || args.tables.some((item) => typeof item !== 'string')) return fail('tables spec');
     return undefined;
   }
-  if (sameKeys(args, ['plan', 'schedules', 'enabled'])) {
-    if (args.plan !== 'provision/crons.json' || typeof args.schedules !== 'number' || typeof args.enabled !== 'boolean') return fail('crons spec');
+  if (sameKeys(args, ['plan', 'schedules', 'enabled']) || sameKeys(args, ['plan', 'schedules', 'recordRelative', 'enabled'])) {
+    if (
+      args.plan !== 'provision/crons.json' ||
+      typeof args.schedules !== 'number' ||
+      typeof args.enabled !== 'boolean' ||
+      (args.recordRelative !== undefined && typeof args.recordRelative !== 'number')
+    )
+      return fail('crons spec');
     return undefined;
   }
   if (sameKeys(args, ['invites', 'spec'])) {
@@ -1656,7 +1662,9 @@ async function executeCliStep(ctx: Ctx, step: ProvisionStep, args: Record<string
 
   if (step.id === 'crons') {
     const spec = typeof args.plan === 'string' ? args.plan : 'provision/crons.json';
-    const crons = readJsonFile<{ name?: string; cron_name?: string; body?: Record<string, unknown>; unsupported?: string }[]>(join(ctx.out, spec), 'cron spec');
+    const crons = readJsonFile<
+      { name?: string; cron_name?: string; body?: Record<string, unknown>; unsupported?: string; recordRelative?: { form?: string; field?: string }; todo?: string }[]
+    >(join(ctx.out, spec), 'cron spec');
     const cronPath = materialiseCliPath(PLAN_CLI_PATH.cron, projectId);
     const listed = (await rest({ method: 'GET', path: cronPath })).result;
     const existing = new Set<string>();
@@ -1699,10 +1707,29 @@ async function executeCliStep(ctx: Ctx, step: ProvisionStep, args: Record<string
       }
     }
     const created: string[] = [];
+    const recordRelative: string[] = [];
     for (const cron of pending) {
       const cronKey = keyOf(cron);
+      // A record-relative schedule fires per record; it is reported as a TODO
+      // and never becomes a cron POST — it can never satisfy the API.
+      if (cron.recordRelative) {
+        recordRelative.push(cronKey);
+        ctx.io.stdout(`c2c provision: schedule ${cronKey}: ${cron.todo ?? 'record-relative schedule — no cron posted'}\n`);
+        continue;
+      }
       if (existing.has(cronKey)) continue;
       if (cron.unsupported || !cron.body) throw new Error(`cron ${cronKey}: ${cron.unsupported ?? 'no body in provision/crons.json'}`);
+      // A OneTime cron in the past never fires: refuse it, never post it.
+      const detail = isRecord(cron.body.job_detail) ? cron.body.job_detail : {};
+      if (cron.body.cron_type === 'OneTime') {
+        const at = Number(detail.time_of_execution) * 1000;
+        if (!Number.isFinite(at)) throw new Error(`cron ${cronKey}: OneTime cron has no time_of_execution in provision/crons.json`);
+        if (at <= Date.parse(ctx.now())) {
+          throw new Error(
+            `cron ${cronKey}: its one-time start ${new Date(at).toISOString()} is in the past, so the cron would never fire; set a future start on the Creator schedule and re-run c2c plan, or schedule it by hand`,
+          );
+        }
+      }
       const missing: string[] = [];
       const body = resolveTokens(cron.body, ctx, missing) as Record<string, unknown>;
       if (missing.length) throw new Error(`cron ${cronKey}: unresolved ${missing.join(', ')} (record the earlier steps first)`);
@@ -1720,7 +1747,7 @@ async function executeCliStep(ctx: Ctx, step: ProvisionStep, args: Record<string
       });
       if (posted.applied !== undefined || !alreadyThere(posted.result)) created.push(cronKey);
     }
-    return { applied: created.length > 0, proven: true, result: { created, existing: [...existing] } };
+    return { applied: created.length > 0, proven: true, result: { created, existing: [...existing], ...(recordRelative.length ? { recordRelative } : {}) } };
   }
 
   // The path comes from the plan template, not from the resolved plan text.

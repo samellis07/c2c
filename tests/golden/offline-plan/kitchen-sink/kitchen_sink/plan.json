@@ -1433,6 +1433,7 @@
       "args": {
         "plan": "provision/crons.json",
         "schedules": 2,
+        "recordRelative": 1,
         "enabled": false
       },
       "readBack": {
@@ -1440,8 +1441,7 @@
         "tool": "CatalystbyZoho_List_All_Crons",
         "match": {
           "cron_name": [
-            "daily_sweep",
-            "session_reminder"
+            "c2c_Daily_Sweep"
           ]
         }
       }
@@ -1551,5 +1551,12 @@
     "maxJoins": 4,
     "selectWidthDoc": 20,
     "selectWidthUnverified": 30
-  }
+  },
+  "recordRelativeSchedules": [
+    {
+      "name": "Session_Reminder",
+      "form": "Booking",
+      "field": "Session_Date"
+    }
+  ]
 }

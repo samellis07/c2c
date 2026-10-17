@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { App } from '../../core/src/ir.js';
+import { FORM_SCHEDULE_START_RE, formLink, unquote, type App } from '../../core/src/ir.js';
 import { widgetCommandStatus, widgetManualItems, type WidgetManualItem } from '../../core/src/parse.js';
 import { LockedExportError } from '../../core/src/source.js';
 import { appFacts, integrationNamespaces } from '../../core/src/features.js';
@@ -23,6 +23,8 @@ import { constraintDecisionNote, fieldGapsOf, generateSchema, type ConstraintDec
 import { catalystLimit, limitValue, ORG_TABLE_LIMIT_RECOVERY } from '../../schema/src/limits.js';
 import { fieldTypeRow, UNIQUE_VARCHAR_MAX_PER_TABLE } from '../../schema/src/mapping.js';
 import { jobPoolName, LIMITS } from '../../shims/src/runtime.js';
+import { JOB_TARGET, type CronDefinition } from '../../deluge/src/schedules.js';
+import { schedulePlansFor } from '../../deluge/src/generate.js';
 import { buildUi } from '../../ui/src/generate.js';
 import { principalRoleMap } from '../../auth/src/apply.js';
 import { flag, hasReportJson, loadApp, type Io } from './cli.js';
@@ -107,6 +109,7 @@ export const PLAN_CLI_PATH = {
   connections: '/baas/v1/project/<project>/connections',
   projectUser: '/baas/v1/project/<project>/project-user',
   cron: '/baas/v1/project/<project>/job_scheduling/cron',
+  /** `--run crons` reads the c2c_jobs Job function id (the cron target) from this list. */
   function: '/baas/v1/project/<project>/function',
   environment: '/baas/v1/project/<project>/environment',
   // First-use gate probes (first-use.ts): documented reads c2c runs itself.
@@ -210,6 +213,12 @@ export interface OfflinePlan {
   probes: PlanProbe[];
   zcqlCaps: { rowsPerQuery: number; offsetBase: number; likeWildcard: string; maxJoins: number; selectWidthDoc: number; selectWidthUnverified: number };
   /**
+   * Record-relative schedules (`form = X`, `start = <date field> ± offset`).
+   * They fire per record, so provision never posts them as crons; each is a
+   * reported TODO line, not a silent drop. Omitted when empty.
+   */
+  recordRelativeSchedules?: { name: string; form?: string; field?: string }[];
+  /**
    * Widget packages and any other construct the plan does not generate.
    * Omitted when empty, so a plan with no such construct keeps the same bytes.
    */
@@ -300,6 +309,73 @@ export function projectKey(link: string): string {
 /** Canonical cron identifier: what Catalyst stores and lists as `cron_name` for a display name. */
 export function cronName(display: string): string {
   return display.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+}
+
+/** One schedule workflow reduced to its display name and `key = value` properties. */
+export interface PlanSchedule {
+  name: string;
+  properties: { key: string; value: unknown }[];
+  /** The generator's cron_name (`c2c_<name>`, deduped), as job-scheduling.json names it. */
+  cronName?: string;
+}
+
+/**
+ * The POST /job_scheduling/cron body of one generator-planned cron, in the
+ * Job Scheduling shape the facts ledger records ([UNVERIFIED]: jobs-and-files
+ * "Create crons through Job Scheduling with job_meta and job_detail"; a body
+ * without `job_meta` answered `400 Mandatory parameter job_meta is missing`):
+ *
+ * - `job_detail` carries the schedule: `time_of_execution` (epoch seconds) for
+ *   OneTime, the repetition fields for Periodic, plus `timezone`. A
+ *   CronExpression cron sends its `cron_expression` top-level.
+ * - `job_meta` binds the job to the learned pool (`<id:pool>`) and to the
+ *   deployed c2c_jobs Job function (`<id:c2c_jobs>`, read back by
+ *   `--run crons` from the project's function list before any POST).
+ *
+ * Crons are created disabled (`cron_status` false): the user enables each in
+ * the console.
+ */
+export function cronPostBody(cron: CronDefinition, pool: string): Record<string, unknown> {
+  const { cron_expression, ...detail } = cron.cron_detail;
+  const job_detail: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(detail)) {
+    job_detail[key] = key === 'time_of_execution' ? Math.floor(Number(value) / 1000) : value;
+  }
+  if (cron.c2c.timeZone) job_detail.timezone = cron.c2c.timeZone;
+  return {
+    cron_name: cron.cron_name,
+    cron_type: cron.cron_type,
+    cron_status: false,
+    cron_execution_type: 'pre-defined',
+    ...(typeof cron_expression === 'string' ? { cron_expression } : {}),
+    job_detail,
+    job_meta: {
+      jobpool_id: `<id:${pool}>`,
+      job_name: cron.job_meta.job_name,
+      source_type: 'Cron',
+      target_type: 'Function',
+      target_id: `<function-id:${JOB_TARGET}>`,
+      params: cron.job_meta.params,
+    },
+  };
+}
+
+function scheduleProp(schedule: PlanSchedule, key: string): string {
+  return String(schedule.properties.find((p) => p.key.toLowerCase() === key)?.value ?? '').trim();
+}
+
+/**
+ * A record-relative schedule — a Creator form schedule (`form = X[…]`) or one
+ * whose `start` is a field expression (`before 1 days from End_Date at
+ * "16:00:00"`, a bare `Timer_Stop_At`). It fires per record, so it can never be
+ * a Catalyst cron; the plan reports it instead of posting one.
+ */
+export function recordRelativeSchedule(schedule: PlanSchedule): { form?: string; field?: string } | null {
+  const formRaw = scheduleProp(schedule, 'form');
+  const form = formRaw ? formLink(formRaw).name : '';
+  const m = FORM_SCHEDULE_START_RE.exec(unquote(scheduleProp(schedule, 'start') || scheduleProp(schedule, 'time_of_execution')));
+  if (!formRaw && !m) return null;
+  return { ...(form ? { form } : {}), ...(m?.[4] ? { field: m[4] } : {}) };
 }
 
 /**
@@ -845,7 +921,7 @@ function buildSteps(opts: {
   sendmail: boolean;
   /** true when a sendmail ships a `template: … as pdf` attachment — the function calls SmartBrowz convertToPdf. */
   pdfMail?: boolean;
-  schedules: { name: string; properties: { key: string; value: unknown }[] }[];
+  schedules: PlanSchedule[];
   files: string[];
   /** The app renders PDF through SmartBrowz. */
   pdf?: boolean;
@@ -1208,14 +1284,22 @@ function buildSteps(opts: {
     );
   }
   if (opts.schedules.length > 0) {
+    // Only fixed-time schedules become crons; record-relative ones are
+    // reported by the crons step, never POSTed.
+    const absolute = opts.schedules.filter((schedule) => !recordRelativeSchedule(schedule));
     steps.push({
       id: 'crons',
       via: 'cli',
       command: 'c2c provision --confirm --run crons (crons are created disabled; the user enables each in the console)',
-      args: { plan: 'provision/crons.json', schedules: opts.schedules.length, enabled: false },
+      args: {
+        plan: 'provision/crons.json',
+        schedules: opts.schedules.length,
+        ...(absolute.length < opts.schedules.length ? { recordRelative: opts.schedules.length - absolute.length } : {}),
+        enabled: false,
+      },
       // List_All_Crons binds each cron to its cron_name key — match that, not
       // the display name (reruns must see the same identifier the POST used).
-      readBack: { via: 'mcp', tool: PLAN_STEP_TOOL.listCrons, match: { cron_name: opts.schedules.map((schedule) => cronName(schedule.name)) } },
+      readBack: { via: 'mcp', tool: PLAN_STEP_TOOL.listCrons, match: { cron_name: absolute.map((schedule) => schedule.cronName ?? cronName(schedule.name)) } },
     });
   }
   if (opts.production) {
@@ -1521,9 +1605,23 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
   const connectionSecretKeys = connectionSecrets.map((s) => s.envKey);
   const mailStep = opts.mail || signals.sendmail;
   const { budgets, ok } = buildBudgets(schema.tables, opts.source);
-  const schedules = app.workflows
-    .filter((workflow) => (workflow.container ?? '').toLowerCase() === 'schedule')
-    .map((workflow) => ({ name: workflow.name ?? 'schedule', properties: workflow.properties.map((p) => ({ key: p.key, value: p.value })) }));
+  // One mapping source: the generator's schedule plans (deluge
+  // schedulePlansFor) name every cron and pick OneTime vs CronExpression, the
+  // same plans job-scheduling.json carries.
+  const schedulePlans = schedulePlansFor(app);
+  const scheduleWorkflows = app.workflows.filter((workflow) => (workflow.container ?? '').toLowerCase() === 'schedule');
+  const schedules: PlanSchedule[] = scheduleWorkflows.map((workflow) => {
+    const planned = schedulePlans.get(workflow);
+    return {
+      name: workflow.name ?? 'schedule',
+      properties: workflow.properties.map((p) => ({ key: p.key, value: p.value })),
+      ...(planned?.kind === 'custom' && planned.cron ? { cronName: planned.cron.cron_name } : {}),
+    };
+  });
+  const recordRelative = schedules.flatMap((schedule) => {
+    const relative = recordRelativeSchedule(schedule);
+    return relative ? [{ name: schedule.name, ...relative }] : [];
+  });
   // A sendmail `template: … as pdf` attachment translates to a rendered pdf
   // descriptor in the generated function sources; that is what makes the
   // SmartBrowz console enable a planned step.
@@ -1596,6 +1694,7 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
       selectWidthDoc: SELECT_WIDTH_DOC,
       selectWidthUnverified: SELECT_WIDTH_UNVERIFIED,
     },
+    ...(recordRelative.length ? { recordRelativeSchedules: recordRelative } : {}),
     ...(manual.length ? { manual } : {}),
     ...(connectionSecretKeys.length ? { connectionSecretKeys } : {}),
   };
@@ -1687,26 +1786,35 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
   }
   if (schedules.length > 0) {
     const pool = jobPoolName(link);
-    const crons = schedules.map((schedule) => {
-      const start = String(schedule.properties.find((p) => /^start$/i.test(p.key))?.value ?? '');
-      const jobName = `job/${schedule.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'schedule'}`;
-      return {
+    const crons = schedules.map((schedule, i) => {
+      const base = {
         name: schedule.name,
-        jobModule: `functions/${jobName}.mjs`,
         pool,
         schedule: Object.fromEntries(schedule.properties.map((p) => [p.key, p.value])),
-        // Only the OneTime shape is [TESTED] on the CLI token; a recurring
-        // cron's cron_details differs per frequency — fill it before --run.
-        ...(start ? {} : { unsupported: 'no start property; fill cron_details' }),
-        body: {
-          cron_name: cronName(schedule.name),
-          cron_type: 'OneTime',
-          cron_status: false,
-          cron_details: { time_of_execution: start || '<fill>' },
-          jobpool_id: `<id:${pool}>`,
-          // The c2c_jobs id exists only after its deploy; the crons step reads it back.
-          job_details: { job_name: jobName, target_type: 'Function', target_id: `<function-id:${JOB_FUNCTION}>` },
-        },
+      };
+      const relative = recordRelativeSchedule(schedule);
+      if (relative) {
+        // A Creator form schedule fires per record — `before 1 days from
+        // End_Date` is a field expression, never a cron time. Report it,
+        // post nothing.
+        return {
+          ...base,
+          recordRelative: relative,
+          todo: `runs relative to each record's ${relative.field ?? 'date field'}${relative.form ? ` on ${relative.form}` : ''}; scheduling per record is not generated yet`,
+        };
+      }
+      const planned = schedulePlans.get(scheduleWorkflows[i]!);
+      if (planned?.kind !== 'custom' || !planned.cron) {
+        // The generator could not convert it (migration-report gap): no body.
+        const gap = planned?.gap ?? 'not a schedule the generator plans';
+        return { ...base, unsupported: `${gap}: the generator planned no cron for this schedule; fix the schedule in Creator or schedule it by hand` };
+      }
+      const cron = planned.cron;
+      return {
+        ...base,
+        cron_name: cron.cron_name,
+        jobModule: `functions/${cron.job_meta.params.module}`,
+        body: cronPostBody(cron, pool),
       };
     });
     files.push({ path: 'provision/crons.json', data: `${JSON.stringify(crons, null, 2)}\n` });
@@ -1772,6 +1880,12 @@ function formatPlanMd(
   if (nosql.length > 0) {
     lines.push('', '## NoSQL tables (console only, no MCP create)', '');
     for (const table of nosql) lines.push(`- ${table.name}${table.nosqlReason ? `: ${table.nosqlReason}` : ''}`);
+  }
+  if (plan.recordRelativeSchedules?.length) {
+    lines.push('', `## Record-relative schedules (${plan.recordRelativeSchedules.length} — reported, never posted as crons)`, '');
+    for (const schedule of plan.recordRelativeSchedules) {
+      lines.push(`- ${schedule.name}: runs relative to each record's ${schedule.field ?? 'date field'}${schedule.form ? ` on ${schedule.form}` : ''}; scheduling per record is not generated yet`);
+    }
   }
   lines.push('', '## Provision steps (provision/plan.json)', '');
   for (const step of plan.steps) lines.push(`- ${step.id} [${step.via}] ${stepRef(step)} → read back ${stepRef(step.readBack)}`);
