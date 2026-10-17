@@ -54,7 +54,22 @@ A Catalyst Job function must close its context. The generated `default` export c
 - **Sweep granularity.** A form schedule can fire up to 5 minutes late. A repeating form schedule with several occurrences in one window fires once.
 - **Cron time zone.** Whether Catalyst evaluates a CronExpression in the project time zone is not verified. The Creator zone is kept in `c2c.timeZone`.
 - **Start date.** A repeating custom schedule starts at deploy, not at the Creator start date. A OneTime cron in the past never fires.
-- **Deploy.** The deploy table steps create `C2CJobCheckpoint` for an app with a form schedule. Creating the `c2c_jobs` Job function, the pool and the crons is a deploy step. It is not done yet.
+- **Deploy.** The deploy table steps create `C2CJobCheckpoint` for an app with a form schedule. `c2c deploy` writes and deploys the `c2c_jobs` Job function (see Deploy tree below); the pool and the crons are `c2c provision` steps (`jobpool`, `crons`).
+
+## Deploy tree
+
+An app with schedules gets `functions/c2c_jobs/` next to `functions/c2c_api/`, and `catalyst.json`
+lists it as a function target. An app without schedules gets neither, and its tree is unchanged.
+
+- `catalyst-config.json`: `type: "job"`, the same stack and environment variables as `c2c_api`.
+- `index.js` (`packages/deploy/fn/jobs.js`): reads the `module` job parameter and runs that file only if a cron in
+  `job-scheduling.json` names it. Any other value closes the job with failure and loads nothing.
+  The datastore is the admin-scope SDK adapter, initialized from the job context.
+- The job modules and every file they import, at the same paths as in `c2c_api`, plus the vendored shims.
+  HTTP handlers, routes and the principal resolver stay out.
+- `job-scheduling.json`: the pool, crons and sweeper the generator wrote.
+
+`c2c deploy` runs `npm install` in `functions/c2c_jobs` and deploys it right after `c2c_api`.
 
 ## Not yet generated
 

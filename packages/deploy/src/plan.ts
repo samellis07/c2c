@@ -11,7 +11,7 @@ import { columnRenamesOf, constraintDecisionNote, generateSchema, schemaAsJson, 
 import { appTimeZone, authBridgeUrl, buildUi, slateConfigSource } from '../../ui/src/generate.js';
 import { mailTemplateCatalog } from '../../ui/src/decorations/print-templates.js';
 import { generateReactApp } from '../../ui-react/src/generate.js';
-import { API_FUNCTION, appOrigins, columnTypes, FUNCTION_DIR, functionDir, routeTable } from './function-dir.js';
+import { API_FUNCTION, appOrigins, columnTypes, FUNCTION_DIR, functionDir, JOB_FUNCTION, JOB_FUNCTION_DIR, jobFunctionDir, routeTable } from './function-dir.js';
 import { AUTH_FUNCTION, authBridgeFiles, slateOriginOf } from './auth-bridge.js';
 import { planSmoke } from './smoke.js';
 import { slateAppName } from './slate.js';
@@ -56,7 +56,7 @@ export type DeployUi = 'vanilla' | 'react';
 
 export interface DeployCommand {
   /** Step id recorded in the resume state. */
-  id: 'install' | 'functions' | 'functions-auth' | 'ui-deps' | 'ui-build' | 'slate-link' | 'slate';
+  id: 'install' | 'functions' | 'install-jobs' | 'functions-jobs' | 'functions-auth' | 'ui-deps' | 'ui-build' | 'slate-link' | 'slate';
   /** Program to spawn. Defaults to catalyst. */
   command?: 'catalyst' | 'npm';
   argv: string[];
@@ -117,12 +117,19 @@ export interface DeployBundle {
  * served Slate origin in its environment. The bridge cannot run safely before
  * the app URL is known.
  */
-export function deployCommands(slateName: string, org: string, projectId: string, dc: string, ui: DeployUi = 'react'): DeployCommand[] {
+export function deployCommands(slateName: string, org: string, projectId: string, dc: string, ui: DeployUi = 'react', jobs = false): DeployCommand[] {
   const scope = catalystScopeArgs(org, projectId);
   const slateScope = ['-p', projectId, '--org', org, '--dc', dc];
   return [
     { id: 'install', command: 'npm', argv: ['install', '--omit=dev', '--no-audit', '--no-fund'], cwd: FUNCTION_DIR },
     { id: 'functions', argv: [...scope, 'deploy', '--only', `functions:${API_FUNCTION}`, '-ni'] },
+    // An app with schedules also deploys c2c_jobs, the Job function its crons target.
+    ...(jobs
+      ? [
+          { id: 'install-jobs' as const, command: 'npm' as const, argv: ['install', '--omit=dev', '--no-audit', '--no-fund'], cwd: JOB_FUNCTION_DIR },
+          { id: 'functions-jobs' as const, argv: [...scope, 'deploy', '--only', `functions:${JOB_FUNCTION}`, '-ni'] },
+        ]
+      : []),
     // The React target deploys the built dist/, not its source: the app's
     // pinned dependencies are installed and `npm run build` writes web/dist
     // inside the deploy dir before the Slate steps.
@@ -224,7 +231,7 @@ export function deployFiles(
   mailEnabled: boolean,
   opts: DeployOptions = {},
   sender: MailSender = {},
-): { files: DeployFile[]; mail: MailConfig; schema: ReturnType<typeof generateSchema>; sendsMail: boolean; usesEvents: boolean } {
+): { files: DeployFile[]; mail: MailConfig; schema: ReturnType<typeof generateSchema>; sendsMail: boolean; usesEvents: boolean; usesJobs: boolean } {
   // A live tree without the app time zone fails every live handler at request
   // time (TimeZoneRequired inside createRuntime). Report it here, at generate
   // time, with the fix named — not as a runtime 500 "request failed".
@@ -237,7 +244,10 @@ export function deployFiles(
   const schema = generateSchema(app, opts.source ? { source: opts.source } : undefined);
   const ui = buildUi(app, { dc: guard.dc, schema, ...(opts.asyncOnSuccess ? { asyncOnSuccess: true } : {}) });
   const files: DeployFile[] = [];
-  files.push({ path: 'catalyst.json', data: `${JSON.stringify(catalystJson(guard, mail), null, 2)}\n` });
+  // job-scheduling.json and functions/job/* come together; both mean the app deploys c2c_jobs.
+  const scheduling = ui.files.find((file) => file.path === 'job-scheduling.json')?.data;
+  const usesJobs = typeof scheduling === 'string' && ui.files.some((file) => file.path.startsWith('functions/job/'));
+  files.push({ path: 'catalyst.json', data: `${JSON.stringify(catalystJson(guard, mail, usesJobs), null, 2)}\n` });
   files.push({
     path: '.catalystrc',
     data: `${JSON.stringify(catalystRc(guard), null, 2)}\n`,
@@ -292,8 +302,7 @@ export function deployFiles(
   // c2c_auth serves the bridge page on the function origin, where the Web SDK
   // works first-party, and hands the token back in a state-bound fragment.
   files.push(...authBridgeFiles(guard.dc, slateOriginOf(opts.slateDomain)));
-  files.push(
-    ...functionDir(generated, {
+  const apiTree = functionDir(generated, {
       mode: opts.mode ?? 'dry-run',
       columns: columnTypes(schema.tables),
       env: opts.functionEnv,
@@ -301,13 +310,14 @@ export function deployFiles(
       origins: appOrigins({ apiBase: opts.apiBase, slateDomain: opts.slateDomain }),
       ...(verifiedFrom ? { mailFrom: verifiedFrom } : {}),
       ...(opts.subsetShims !== undefined ? { subsetShims: opts.subsetShims } : {}),
-    }),
-  );
+  });
+  files.push(...apiTree);
+  if (usesJobs) files.push(...jobFunctionDir(apiTree, scheduling as string, { mode: opts.mode ?? 'dry-run', env: opts.functionEnv, ...(verifiedFrom ? { mailFrom: verifiedFrom } : {}) }));
   const widgetItems = widgetManualItems(app.widgets);
   if (widgetItems.length) {
     files.push({ path: 'manual/widgets.json', data: `${JSON.stringify({ widgets: widgetItems }, null, 2)}\n` });
   }
-  return { files, mail, schema, sendsMail: functionsSendMail(ui.files), usesEvents: ui.files.some((file) => file.path.startsWith('functions/events/')) };
+  return { files, mail, schema, sendsMail: functionsSendMail(ui.files), usesEvents: ui.files.some((file) => file.path.startsWith('functions/events/')), usesJobs };
 }
 
 /**
@@ -336,7 +346,7 @@ export function buildDeploy(
   subsetShims?: boolean,
   slateName: string = slateAppName(guard.projectName),
 ): DeployBundle {
-  const { files, mail, schema, sendsMail: mails, usesEvents } = deployFiles(
+  const { files, mail, schema, sendsMail: mails, usesEvents, usesJobs } = deployFiles(
     app,
     guard,
     mailEnabled,
@@ -353,7 +363,7 @@ export function buildDeploy(
     },
     sender,
   );
-  const commands = deployCommands(slateName, guard.org, guard.projectId, guard.dc, ui);
+  const commands = deployCommands(slateName, guard.org, guard.projectId, guard.dc, ui, usesJobs);
   const tableSteps = deployTableSteps(schema, mails, mail.enabled, usesEvents);
   const mailFindings = mailSenderPrecheck(app, mail);
   const widgetItems = widgetManualItems(app.widgets);
@@ -382,7 +392,7 @@ export function writeDeployTree(dir: string, files: readonly DeployFile[]): void
   }
 }
 
-function catalystJson(guard: GuardOk, mail: MailConfig) {
+function catalystJson(guard: GuardOk, mail: MailConfig, jobs = false) {
   // No `slate` key: `slate:link` registers the app and writes that entry
   // itself. A pre-written entry can make the CLI answer "already linked".
   return {
@@ -390,7 +400,7 @@ function catalystJson(guard: GuardOk, mail: MailConfig) {
     project_id: guard.projectId,
     org_id: guard.org,
     environment: guard.environment,
-    functions: { targets: [API_FUNCTION, AUTH_FUNCTION], ignore: [], source: 'functions' },
+    functions: { targets: jobs ? [API_FUNCTION, JOB_FUNCTION, AUTH_FUNCTION] : [API_FUNCTION, AUTH_FUNCTION], ignore: [], source: 'functions' },
     mail: { enabled: mail.enabled, allowlist: mail.allowlist },
   };
 }

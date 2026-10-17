@@ -17,6 +17,7 @@ import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { zohoConnectionHostModuleSource } from '../../core/src/dc.js';
 import { limitValue } from '../../schema/src/limits.js';
+import { JOB_TARGET } from '../../deluge/src/schedules.js';
 import { API_FUNCTION } from '../../ui/src/generate.js';
 
 export { API_FUNCTION };
@@ -570,4 +571,72 @@ export function functionDir(generated: readonly FunctionFile[], opts: FunctionDi
   return inner
     .sort((a, b) => byPath(a.path, b.path))
     .map((file) => ({ path: `${FUNCTION_DIR}/${file.path}`, data: file.data }));
+}
+
+/** The Catalyst Job function every cron targets (deluge schedules.ts JOB_TARGET). */
+export const JOB_FUNCTION = JOB_TARGET;
+export const JOB_FUNCTION_DIR = `functions/${JOB_FUNCTION}`;
+/** Data files and modules jobs.js reads itself; job modules add what they import. */
+const JOB_RUNTIME = ['c2c-columns.json', 'c2c-deploy.json', 'c2c-projections.json', 'c2c-renames.json', 'c2c-rules.json', 'c2c-schema.json', 'c2c-sdk-datastore.mjs', 'c2c-store.mjs'];
+const RELATIVE_IMPORT = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["'](\.{1,2}\/[^"']+)["']/g;
+
+/** The c2c_api files a job reaches: job modules, the runtime above, vendored shims, and every relative import of those. */
+function jobClosure(files: ReadonlyMap<string, FunctionFile>): string[] {
+  const keep = new Set<string>();
+  const queue = [...files.keys()].sort(byPath).filter((path) => path.startsWith('job/') || path.startsWith('vendor/') || JOB_RUNTIME.includes(path));
+  while (queue.length) {
+    const path = queue.pop() as string;
+    if (keep.has(path) || !files.has(path)) continue;
+    keep.add(path);
+    const data = files.get(path)?.data;
+    if (typeof data !== 'string' || !/\.m?js$/.test(path)) continue;
+    for (const match of data.matchAll(RELATIVE_IMPORT)) queue.push(posix.normalize(posix.join(posix.dirname(path), match[1] as string)));
+  }
+  return [...keep].sort(byPath);
+}
+
+/**
+ * Build functions/c2c_jobs from a built functions/c2c_api tree and the app's
+ * job-scheduling.json. The job modules and what they import keep the paths they
+ * have in c2c_api (job/<module>.mjs next to c2c-store.mjs, c2c-deploy.json and
+ * vendor/shims), so every relative import resolves the same way; HTTP handlers
+ * no job imports stay out. jobs.js becomes index.js.
+ * Returns [] when the app schedules no job.
+ */
+export function jobFunctionDir(apiTree: readonly FunctionFile[], scheduling: string | undefined, opts: Pick<FunctionDirOptions, 'mode' | 'env' | 'mailFrom'>): FunctionFile[] {
+  if (scheduling === undefined) return [];
+  const prefix = `${FUNCTION_DIR}/`;
+  const api = new Map<string, FunctionFile>();
+  for (const file of apiTree) {
+    if (file.path.startsWith(prefix)) api.set(file.path.slice(prefix.length), file);
+  }
+  if (![...api.keys()].sort(byPath).some((path) => path.startsWith('job/'))) return [];
+  const inner: FunctionFile[] = jobClosure(api).map((path) => ({ path, data: (api.get(path) as FunctionFile).data }));
+  const assets = assetDir();
+  inner.push({ path: 'index.js', data: readFileSync(join(assets, 'jobs.js'), 'utf8') });
+  inner.push({ path: 'job-scheduling.json', data: scheduling });
+  inner.push({
+    path: 'catalyst-config.json',
+    data: json({
+      deployment: {
+        name: JOB_FUNCTION,
+        stack: FUNCTION_STACK,
+        type: 'job',
+        env_variables: envVariables(opts.mode, { ...opts.env, ...(opts.mailFrom ? { C2C_MAIL_FROM: opts.mailFrom } : {}) }),
+      },
+      execution: { main: 'index.js' },
+    }),
+  });
+  inner.push({ path: 'package.json', data: json({ name: JOB_FUNCTION, version: '1.0.0', private: true, main: 'index.js', dependencies: FUNCTION_DEPENDENCIES }) });
+  // The same pinned lockfile as c2c_api, with the lock root renamed to this function.
+  const lock = JSON.parse(readFileSync(join(assets, 'package-lock.json'), 'utf8')) as { name: string; packages: Record<string, { name?: string }> };
+  lock.name = JOB_FUNCTION;
+  const root = lock.packages[''];
+  if (root) root.name = JOB_FUNCTION;
+  inner.push({ path: 'package-lock.json', data: json(lock) });
+  const paths = inner.map((file) => file.path).sort(byPath);
+  inner.push({ path: 'c2c-manifest.json', data: json({ function: JOB_FUNCTION, files: paths }) });
+  return inner
+    .sort((a, b) => byPath(a.path, b.path))
+    .map((file) => ({ path: `${JOB_FUNCTION_DIR}/${file.path}`, data: file.data }));
 }
