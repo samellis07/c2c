@@ -125,19 +125,28 @@ test('a hung test is stopped by the per-test timeout', () => {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-test-limits-hang-'));
   try {
     const hang = join(dir, 'hang.test.mjs');
-    writeFileSync(hang, "import test from 'node:test';\ntest('hangs', () => new Promise(() => {}));\n");
+    writeFileSync(hang, "import test from 'node:test';\ntest('hangs', () => new Promise(() => { setInterval(() => {}, 1000); }));\n");
     const env = { ...process.env, NODE_OPTIONS: '' };
     delete env.NODE_TEST_CONTEXT;
     const start = Date.now();
     const run = spawnSync(
       process.execPath,
       ['--max-old-space-size=2048', '--test-timeout=10000', '--test', hang],
-      { encoding: 'utf8', env, timeout: 300000 },
+      { encoding: 'utf8', env, timeout: 60000 },
     );
     const elapsed = Date.now() - start;
     assert.notEqual(run.status, 0, 'a hung test must fail');
-    assert.match(run.stdout + run.stderr, /hangs/);
-    assert.ok(elapsed < 120000, `the hung test was not stopped promptly (${elapsed} ms)`);
+    assert.match(run.stdout + run.stderr, /test timed out after 10000ms/);
+    assert.ok(elapsed < 60000, `the hung test was not stopped promptly (${elapsed} ms)`);
+
+    const noFlag = spawnSync(
+      process.execPath,
+      ['--max-old-space-size=2048', '--test', hang],
+      { encoding: 'utf8', env, timeout: 15000, killSignal: 'SIGKILL' },
+    );
+    assert.equal(noFlag.status, null, 'without --test-timeout the hung test must not finish by itself');
+    assert.equal(noFlag.signal, 'SIGKILL', 'the hung test was killed by the spawn timeout, not by node --test');
+    assert.doesNotMatch(noFlag.stdout + noFlag.stderr, /test timed out after/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
