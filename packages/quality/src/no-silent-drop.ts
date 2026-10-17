@@ -1299,9 +1299,10 @@ function translationLanguage(t: App['translations'][number]): string | undefined
 
 /**
  * Every declared function (`functions { ... }` / `deluge` / bare script)
- * either emits `functions/custom/<name>.mjs` or is listed — by a todo inside
- * its span or by a migration-report warning naming it
- * (`function-untranslated`, `custom-function-api-*`). Anything else is a drop.
+ * either emits `functions/custom/<name>.mjs` or is listed by a todo inside
+ * its span. A migration-report warning (`function-untranslated`,
+ * `custom-function-api-*`) is never coverage: warnings are not counted
+ * manual items, so a function that only carries a warning is a drop.
  */
 function auditFunction(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
   const paths = new Set(out.files.map((f) => f.path));
@@ -1312,19 +1313,19 @@ function auditFunction(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
       rows.push({ kind: 'function', name: fn.name, status: 'emitted', via: `functions/custom/${slug(name)}.mjs` });
       continue;
     }
-    const listed =
-      out.todos.some((t) => within(t, fn.span)) ||
-      out.warnings.some((w) => (w.construct === 'function-untranslated' || w.construct.startsWith('custom-function-api-')) && w.name === fn.name);
-    if (listed) {
-      rows.push({ kind: 'function', name: fn.name, status: 'counted', via: 'todo / migration-report warning' });
+    if (out.todos.some((t) => within(t, fn.span))) {
+      rows.push({ kind: 'function', name: fn.name, status: 'counted', via: 'todo' });
       continue;
     }
+    const warned = out.warnings.some(
+      (w) => (w.construct === 'function-untranslated' || w.construct.startsWith('custom-function-api-')) && w.name === fn.name,
+    );
     rows.push({
       kind: 'function',
       name: fn.name,
       status: 'dropped',
       via: 'none',
-      note: `Function ${fn.name} emitted no module and carries no todo or warning. Add one: either migrate the body or record the manual step.`,
+      note: `Function ${fn.name} emitted no module and carries no todo${warned ? ' — only a migration-report warning, which is not a counted manual item' : ''}. Add one: either migrate the body or record the manual step.`,
     });
   }
 }
