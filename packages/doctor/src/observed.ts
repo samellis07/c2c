@@ -95,6 +95,13 @@ export interface McpRequest {
   nonce: string;
   /** The scope kind and exact target ids --mcp-begin ran under; the verify step rejects any drift from it. */
   scope: ProbeScope;
+  /**
+   * Whether the probe bucket was already in the project when --mcp-begin
+   * ran (project-scoped begins only; absent when the list could not tell).
+   * Signed with the rest, so the "created by this run" marker the cleanup
+   * relies on can never be edited in.
+   */
+  bucketBefore?: 'present' | 'absent';
   /** HMAC-SHA256 over the request fields under the per-user key, recomputed when the file is read: an edited request never verifies. */
   mac: string;
 }
@@ -156,12 +163,18 @@ function scopeOfRequest(value: unknown): ProbeScope | undefined {
  * that creates the org-named bucket inside the project. The mac is
  * recomputed on read, so a request file edited after --mcp-begin is refused.
  */
-export function beginMcpRequest(workspace: string, now: Date = new Date(), target: ProbeTarget = {}, env: NodeJS.ProcessEnv = process.env): McpRequest {
+export function beginMcpRequest(
+  workspace: string,
+  now: Date = new Date(),
+  target: ProbeTarget = {},
+  env: NodeJS.ProcessEnv = process.env,
+  opts: { bucketBefore?: 'present' | 'absent' } = {},
+): McpRequest {
   const signer = mcpSigningKey(env, workspace, true);
   if ('refused' in signer) throw new ObservationRejected(`the MCP request cannot be authenticated: ${signer.refused}`);
   const id = randomBytes(16).toString('hex');
   const nonce = randomBytes(16).toString('hex');
-  const body = { schema: OBSERVATION_SCHEMA, request: id, at: now.toISOString(), probe: probeNameOf(id, target), nonce, scope: probeScopeOf(target) };
+  const body = { schema: OBSERVATION_SCHEMA, request: id, at: now.toISOString(), probe: probeNameOf(id, target), nonce, scope: probeScopeOf(target), ...(opts.bucketBefore ? { bucketBefore: opts.bucketBefore } : {}) };
   const request: McpRequest = { ...body, mac: requestMac(signer.key, body) };
   const path = mcpRequestPath(workspace);
   mkdirSync(dirname(path), { recursive: true });
@@ -188,7 +201,16 @@ function readMcpRequest(workspace: string, env: NodeJS.ProcessEnv): McpRequest |
       const probe = typeof parsed.probe === 'string' && isProbeName(parsed.probe) ? parsed.probe : undefined;
       const nonce = typeof parsed.nonce === 'string' && /^[0-9a-f]{32}$/.test(parsed.nonce) ? parsed.nonce : undefined;
       const scope = scopeOfRequest(parsed.scope);
-      const body: { schema: number; request: string; at: string; probe?: string; nonce?: string; scope?: ProbeScope } = { schema: Number(parsed.schema), request: parsed.request, at: parsed.at, ...(probe ? { probe } : {}), ...(nonce ? { nonce } : {}), ...(scope ? { scope } : {}) };
+      const bucketBefore = parsed.bucketBefore === 'present' || parsed.bucketBefore === 'absent' ? parsed.bucketBefore : undefined;
+      const body: { schema: number; request: string; at: string; probe?: string; nonce?: string; scope?: ProbeScope; bucketBefore?: 'present' | 'absent' } = {
+        schema: Number(parsed.schema),
+        request: parsed.request,
+        at: parsed.at,
+        ...(probe ? { probe } : {}),
+        ...(nonce ? { nonce } : {}),
+        ...(scope ? { scope } : {}),
+        ...(bucketBefore ? { bucketBefore } : {}),
+      };
       // Authenticate before trusting a single field: the mac is over the
       // canonical fields, so a moved probe or nonce, a rewritten scope or a
       // stripped field can never complete.
@@ -412,7 +434,10 @@ export function readStdinBounded(limit: number = OBSERVATION_MAX_BYTES, fd: numb
  * EvidenceStale for an expired request / an id-less entry). Does not close
  * the request; the caller closes it once the observation is accepted.
  */
-export function parseObservation(text: string, input: { workspace: string; now?: Date; env?: NodeJS.ProcessEnv }): { evidence: McpEvidence; observed: Observed; probe: string; nonce: string; scope: ProbeScope } {
+export function parseObservation(
+  text: string,
+  input: { workspace: string; now?: Date; env?: NodeJS.ProcessEnv },
+): { evidence: McpEvidence; observed: Observed; probe: string; nonce: string; scope: ProbeScope; createdThisRun: boolean } {
   const now = input.now ?? new Date();
   if (Buffer.byteLength(text, 'utf8') > OBSERVATION_MAX_BYTES) {
     throw new ObservationRejected(`the observation is larger than the ${OBSERVATION_MAX_BYTES}-byte limit`);
@@ -447,6 +472,7 @@ export function parseObservation(text: string, input: { workspace: string; now?:
   const calls: ObservedCall[] = [];
   let orgs: string[] | undefined;
   let orgDcs: Record<string, Dc> = {};
+  let probeAlreadyExisted = false;
   for (const [index, call] of record.calls.entries()) {
     if (!call || typeof call !== 'object' || Array.isArray(call)) throw new ObservationRejected(`calls[${index}] is not a call`);
     for (const key of Object.keys(call as Record<string, unknown>)) {
@@ -479,7 +505,9 @@ export function parseObservation(text: string, input: { workspace: string; now?:
       try {
         rejectIfErrorFlag(result, short);
       } catch (err) {
-        if (short !== shortToolName(PROBE_CALL) || !isAlreadyExistsResult(result)) {
+        const alreadyExists = short === shortToolName(PROBE_CALL) && isAlreadyExistsResult(result);
+        if (alreadyExists) probeAlreadyExisted = true;
+        if (!alreadyExists) {
           if (isStratusFirstUseResult(result)) {
             throw new ObservationRejected(
               `the ${short} call was refused with OPERATION_NOT_ALLOWED — "in session when accessing Stratus" means this project has never opened Stratus and no retry helps: in the Catalyst console open the project → Cloud Scale → Stratus → Start Exploring, then on Create your First Bucket create one bucket (any name) and wait until it shows in the bucket list (click Create again if nothing happens after a few seconds); then run c2c doctor --mcp-begin again and repeat the calls`,
@@ -508,7 +536,11 @@ export function parseObservation(text: string, input: { workspace: string; now?:
   // under, all pinned in the authenticated request file: the read-back, the
   // drift check and the cleanup track what was actually begun, even if the
   // scope flags drifted since the begin run.
-  return { evidence, observed: { request: open.request, orgs, calls }, probe: open.probe, nonce: open.nonce, scope: open.scope };
+  // Created by this run: the signed begin-time list did not show the bucket
+  // and the session's create did not answer already-exists. Only then may
+  // the cleanup delete the bucket; anything else leaves it alone.
+  const createdThisRun = open.bucketBefore === 'absent' && !probeAlreadyExisted;
+  return { evidence, observed: { request: open.request, orgs, calls }, probe: open.probe, nonce: open.nonce, scope: open.scope, createdThisRun };
 }
 
 /** What the agent is asked to do, for the --mcp-begin output. */

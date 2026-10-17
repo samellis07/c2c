@@ -108,7 +108,13 @@ read-back uses the list route, then the nonce-object list below.
 
 Recipe: [DOC] `GET /baas/v1/project/<project-id>/bucket/objects?bucket_name=<bucket>&prefix=<key>&max_keys=50` returns `data.contents[].key` and `data.next_continuation_token`. Follow that token. `truncated` or `more_records` without a token does not prove the key is absent. Match `key` exactly. Do not use `GET .../bucket/<name>`.
 
-Rule: [DOC] A project-scoped `c2c doctor` probe lists that exact object key — a fresh 32-hex nonce for the run — inside the reused probe bucket. A bucket without this run's key does not pass. Delete the object with `PUT /baas/v1/project/<project-id>/bucket/object?bucket_name=<bucket>` and body `{"objects":[{"key":"<nonce>"}]}`. The CLI token's objects delete scope is [UNVERIFIED], so the doctor still prints that PUT when the delete may not have landed. The bucket stays until `CatalystbyZoho_Delete_Bucket`.
+Rule: [DOC] A project-scoped `c2c doctor` probe lists that exact object key — a fresh 32-hex nonce for the run — inside the reused probe bucket. A bucket without this run's key does not pass. Delete the object with `PUT /baas/v1/project/<project-id>/bucket/object?bucket_name=<bucket>` and body `{"objects":[{"key":"<nonce>"}]}`. The CLI token's objects delete scope is [UNVERIFIED], so the doctor still prints that PUT when the delete may not have landed.
+
+### Delete the doctor probe bucket after the check
+
+Recipe: [DOC] `DELETE /baas/v1/project/<project-id>/bucket?bucket_name=<bucket>` deletes a bucket by name. Delete the nonce object first.
+
+Rule: [UNVERIFIED] the CLI token's bucket delete scope is not proven (the bucket create answers `401 OAUTH_SCOPE_MISMATCH`). `c2c doctor` deletes only a probe bucket the same run created, confirms with the bucket list, and on a refusal warns with the bucket name and the console step (project → Cloud Scale → Stratus → delete the bucket) or `CatalystbyZoho_Delete_Bucket`.
 
 ### Assume 250 GB per single object
 

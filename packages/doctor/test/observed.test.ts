@@ -1104,7 +1104,9 @@ test('mcp-observed: --mcp-begin asks for the probe write and the org list, and n
   assert.equal(await doctorCli(['--mcp-begin'], human.io, { hooks: NO_HOOKS }), 0);
   assert.match(human.out(), /Never call CatalystbyZoho_List_All_Projects or CatalystbyZoho_Get_Project_By_Id/);
   assert.match(human.out(), /Create_Upload_Signature/);
-  assert.match(human.out(), /Delete_Bucket/);
+  // The doctor removes what it created itself; the agent is not asked to.
+  assert.match(human.out(), /the doctor deletes this run's nonce object and, when this run created it, the probe bucket/);
+  assert.doesNotMatch(human.out(), /3\. .*Delete_Bucket/);
 });
 
 test('mcp-observed: a foreign-org result fails D-B7 and the gate', async () => {
@@ -1514,4 +1516,149 @@ test('mcp request: closing the same request twice is refused (a racing second ob
   const next = beginMcpRequest(dir, undefined, {}, env);
   assert.ok(existsSync(join(dir, 'c2c-out', '.c2c', `mcp-request.${request}.closed`)) === false);
   closeMcpRequest(dir, next.request, env);
+});
+
+/**
+ * A stateful fake Stratus for the cleanup after the check: the bucket list
+ * answers what `buckets` holds right now, the object list serves this run's
+ * nonce while it is stored, the nonce PUT removes it, and the bucket DELETE
+ * removes the bucket (unless `deleteAnswer` refuses it). Every call is logged.
+ */
+function cleanupRest(buckets: Set<string>, opts: { nonceDelete?: 'ok' | 'refuse'; deleteAnswer?: { status: number; body: unknown } } = {}) {
+  const calls: { method: string; path: string }[] = [];
+  const objects = new Set<string>();
+  const rest: NonNullable<DoctorIo['rest']> = async (call) => {
+    calls.push({ method: call.method, path: call.path });
+    if (call.method === 'GET' && /^\/baas\/v1\/project\/[0-9]+\/bucket$/.test(call.path)) {
+      return { status: 200, body: { status: 'success', data: [...buckets].map((bucket_name) => ({ bucket_name })) } };
+    }
+    if (call.method === 'GET' && /\/bucket\/objects\?/.test(call.path)) {
+      const query = new URLSearchParams(call.path.slice(call.path.indexOf('?') + 1));
+      const prefix = query.get('prefix') ?? '';
+      const keys = buckets.has(query.get('bucket_name') ?? '') && objects.has(prefix) ? [prefix] : [];
+      return { status: 200, body: { status: 'success', data: { contents: keys.map((key) => ({ key })), truncated: false } } };
+    }
+    if (call.method === 'PUT' && /\/bucket\/object\?/.test(call.path)) {
+      if (opts.nonceDelete === 'refuse') return { status: 401, body: { status: 'failure', data: { error_code: 'OAUTH_SCOPE_MISMATCH' } } };
+      for (const { key } of (call.body as { objects: { key: string }[] }).objects) objects.delete(key);
+      return { status: 200, body: { status: 'success', data: { message: 'Deletion successful' } } };
+    }
+    if (call.method === 'DELETE' && /\/bucket\?bucket_name=/.test(call.path)) {
+      if (opts.deleteAnswer) return opts.deleteAnswer;
+      buckets.delete(new URLSearchParams(call.path.slice(call.path.indexOf('?') + 1)).get('bucket_name') ?? '');
+      return { status: 200, body: { status: 'success' } };
+    }
+    return INVALID_URL_PATTERN;
+  };
+  /** The session's MCP writes: Create_Bucket, then the signed PUT of the nonce object. */
+  const sessionWrites = (bucket: string, nonce: string) => {
+    buckets.add(bucket);
+    objects.add(nonce);
+  };
+  return { rest, calls, sessionWrites };
+}
+
+async function beginWith(env: NodeJS.ProcessEnv, rest: NonNullable<DoctorIo['rest']>): Promise<{ request: string; nonce: string }> {
+  const { io, out } = fakeIo(env, undefined, rest);
+  assert.equal(await doctorCli(['--mcp-begin', '--json'], io, { hooks: NO_HOOKS }), 0);
+  return JSON.parse(out()) as { request: string; nonce: string };
+}
+
+const STDIO = { host_of_url: undefined, transport: 'stdio' as const };
+
+test('cleanup: a probe bucket this run created is removed after the check, nonce object first', async () => {
+  const { dir, env } = workspace();
+  const fake = cleanupRest(new Set());
+  const { request, nonce } = await beginWith(env, fake.rest);
+  fake.sessionWrites(PROBE, nonce);
+  const run = await observe(env, observation(request, STDIO), [], NO_HOOKS, fake.rest);
+  assert.equal(run.code, 0, run.out + run.err);
+  assert.match(run.out, /PASS D-B1 /);
+  assert.match(run.out, new RegExp(`PASS D-B8 +the probe bucket ${PROBE} and this check's object were removed after the check`));
+  assert.doesNotMatch(run.out, /^cleanup:/m);
+  const put = fake.calls.findIndex((c) => c.method === 'PUT' && c.path.includes('/bucket/object?'));
+  const del = fake.calls.findIndex((c) => c.method === 'DELETE');
+  assert.ok(put >= 0 && del > put, `nonce object deleted before the bucket: ${JSON.stringify(fake.calls)}`);
+  assert.equal(fake.calls[del]?.path, `/baas/v1/project/${PROJECT}/bucket?bucket_name=${PROBE}`);
+  assert.ok(!existsSync(join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json')), 'no cleanup is left pending');
+});
+
+test('cleanup: a probe bucket that was already in the project is left alone and reported', async () => {
+  const { dir, env } = workspace();
+  const fake = cleanupRest(new Set([PROBE]));
+  const { request, nonce } = await beginWith(env, fake.rest);
+  fake.sessionWrites(PROBE, nonce);
+  const run = await observe(env, observation(request, STDIO), [], NO_HOOKS, fake.rest);
+  assert.equal(run.code, 0, run.out + run.err);
+  assert.ok(!fake.calls.some((c) => c.method === 'DELETE'), 'a pre-existing bucket is never deleted');
+  assert.ok(fake.calls.some((c) => c.method === 'PUT'), 'this run\'s nonce object is still removed');
+  assert.match(run.out, new RegExp(`WARN D-B8 +the probe bucket ${PROBE} was already in the project before this check, so the doctor left it in place`));
+  assert.ok(existsSync(join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json')));
+});
+
+test('cleanup: an already-exists Create_Bucket answer is never treated as created by this run', async () => {
+  const { env } = workspace();
+  const fake = cleanupRest(new Set());
+  const { request, nonce } = await beginWith(env, fake.rest);
+  // Someone else created the same-name bucket between begin and the session's create.
+  fake.sessionWrites(PROBE, nonce);
+  const exists = { isError: true, content: [{ type: 'text', text: 'Bucket already exists' }] };
+  const run = await observe(env, observation(request, { ...STDIO, calls: [
+    { tool: 'CatalystbyZoho_Create_Bucket', result: exists },
+    { tool: 'CatalystbyZoho_List_All_Organizations', result: orgsResult([ORG]) },
+  ] }), [], NO_HOOKS, fake.rest);
+  assert.equal(run.code, 0, run.out + run.err);
+  assert.ok(!fake.calls.some((c) => c.method === 'DELETE'));
+  assert.match(run.out, /WARN D-B8 .*already in the project before this check/);
+});
+
+test('cleanup: a refused bucket delete is a WARN naming the bucket and the console step, never a FAIL', async () => {
+  const { dir, env } = workspace();
+  const fake = cleanupRest(new Set(), { deleteAnswer: { status: 401, body: { status: 'failure', data: { error_code: 'OAUTH_SCOPE_MISMATCH' } } } });
+  const { request, nonce } = await beginWith(env, fake.rest);
+  fake.sessionWrites(PROBE, nonce);
+  const run = await observe(env, observation(request, STDIO), [], NO_HOOKS, fake.rest);
+  assert.equal(run.code, 0, run.out + run.err);
+  assert.doesNotMatch(run.out, /FAIL D-B8/);
+  assert.match(run.out, new RegExp(`WARN D-B8 +the doctor could not remove the probe bucket ${PROBE} it created for this check; remove it yourself — in the Catalyst console open the project → Cloud Scale → Stratus, select the bucket ${PROBE} and delete it`));
+  assert.match(run.out, new RegExp(`cleanup: remove the probe bucket ${PROBE} — in the Catalyst console`));
+  assert.ok(existsSync(join(dir, 'c2c-out', '.c2c', 'mcp-cleanup.json')), 'the leftover stays tracked');
+});
+
+test('cleanup: a delete that answers success but leaves the bucket listed is not counted as removed', async () => {
+  const { env } = workspace();
+  const fake = cleanupRest(new Set(), { deleteAnswer: { status: 200, body: { status: 'success' } } });
+  const { request, nonce } = await beginWith(env, fake.rest);
+  fake.sessionWrites(PROBE, nonce);
+  const run = await observe(env, observation(request, STDIO), [], NO_HOOKS, fake.rest);
+  assert.equal(run.code, 0, run.out + run.err);
+  assert.match(run.out, new RegExp(`WARN D-B8 +the doctor could not remove the probe bucket ${PROBE}`));
+});
+
+test('cleanup: when the nonce object cannot be removed the bucket delete is not attempted', async () => {
+  const { env } = workspace();
+  const fake = cleanupRest(new Set(), { nonceDelete: 'refuse' });
+  const { request, nonce } = await beginWith(env, fake.rest);
+  fake.sessionWrites(PROBE, nonce);
+  const run = await observe(env, observation(request, STDIO), [], NO_HOOKS, fake.rest);
+  assert.equal(run.code, 0, run.out + run.err);
+  assert.ok(!fake.calls.some((c) => c.method === 'DELETE'));
+  assert.match(run.out, new RegExp(`WARN D-B8 +the doctor could not remove the probe bucket ${PROBE} \\(or its check object ${nonce}\\)`));
+  assert.match(run.out, new RegExp(`delete the object ${nonce}, then delete the bucket ${PROBE}`));
+  assert.match(run.out, new RegExp(`cleanup: remove the probe nonce object ${nonce}`));
+});
+
+test('cleanup: the begin-time "bucket was absent" marker is signed; editing it in is refused', async () => {
+  const { dir, env } = workspace();
+  const fake = cleanupRest(new Set([PROBE]));
+  const { request, nonce } = await beginWith(env, fake.rest);
+  const path = join(dir, 'c2c-out', '.c2c', 'mcp-request.json');
+  const file = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+  assert.equal(file.bucketBefore, 'present');
+  writeFileSync(path, JSON.stringify({ ...file, bucketBefore: 'absent' }));
+  fake.sessionWrites(PROBE, nonce);
+  const run = await observe(env, observation(request, STDIO), [], NO_HOOKS, fake.rest);
+  assert.notEqual(run.code, 0);
+  assert.match(run.err, /edited after --mcp-begin/);
+  assert.ok(!fake.calls.some((c) => c.method === 'DELETE'));
 });
