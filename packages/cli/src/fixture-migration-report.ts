@@ -15,6 +15,7 @@ import { decode } from '../../core/src/source.js';
 import { CUSTOMER_STEPS } from '../../deploy/src/customer-steps.js';
 import type { FieldGap } from '../../schema/src/index.js';
 import { analyze } from './analyze.js';
+import type { GuidedResidual } from './guided-residual.js';
 import { precheck, type Severity } from './precheck.js';
 import { ownerScope, type ScopeEntry } from './scope-labels.js';
 
@@ -46,6 +47,8 @@ export interface FixtureMigrationReport {
   /** Parts the generated app does not show to end users, with the reason each is hidden. */
   hiddenParts: { location: string; reason: string }[];
   humanSteps: string[];
+  silentDrops?: number;
+  residuals?: GuidedResidual[];
 }
 
 export interface InRepoFixture {
@@ -112,6 +115,8 @@ export function buildFixtureMigrationReport(fixture: InRepoFixture): FixtureMigr
     manualSteps: manualStepsOf(ir, source),
     hiddenParts: analysis.hiddenParts.map((part) => ({ location: part.location, reason: part.reason })),
     humanSteps: isEmpty ? [] : [...CUSTOMER_STEPS],
+    silentDrops: analysis.determinism.silentDrops,
+    residuals: analysis.residuals,
   };
 }
 
@@ -157,6 +162,9 @@ export function fixtureMigrationReportAsMarkdown(report: FixtureMigrationReport)
   const manual = manualStepLinesOf(report.manualSteps);
   const hidden = report.hiddenParts.length ? report.hiddenParts.map((part) => `- ${part.location}: ${part.reason}`) : ['- none'];
   const human = humanStepLinesOf(report.humanSteps);
+  const residuals = report.residuals?.length
+    ? report.residuals.flatMap((item) => [`- \`${item.id}\` — not converted. ${item.reason}`, `  - Step: ${item.step}`])
+    : ['- none'];
 
   return [
     `# Migration report: ${report.fixture}`,
@@ -194,6 +202,12 @@ export function fixtureMigrationReportAsMarkdown(report: FixtureMigrationReport)
     '## Human steps',
     '',
     ...human,
+    '',
+    '## Not converted',
+    '',
+    `Silent drops: ${report.silentDrops ?? 0} (still counted; each has a guided step below)`,
+    '',
+    ...residuals,
     '',
   ].join('\n');
 }

@@ -25,6 +25,7 @@ import { compareEnUs } from '../../core/src/order.js';
 import { dedupeTodos, generate, reportLock, residualDeterminism, type FillLock, type TodoItem } from '../../deluge/src/index.js';
 import { fieldGapsOf, generateSchema, type FieldGap } from '../../schema/src/index.js';
 import { hiddenParts, reactAppSpec, type HiddenPart } from '../../ui-react/src/index.js';
+import { guidedResiduals, type GuidedResidual } from './guided-residual.js';
 import { buildUi, type SnippetReason, type UiTodo } from '../../ui/src/index.js';
 import { FEATURE_MATRIX, MATRIX_SNAPSHOT, type MatrixSnapshot } from './feature-matrix.js';
 import { ownerScope, type ScopeEntry } from './scope-labels.js';
@@ -162,6 +163,11 @@ export interface AnalyzeReport {
   fieldGaps: FieldGap[];
   /** Parts the generated app does not show to end users, each with the reason; counted here instead of on the page. */
   hiddenParts: HiddenPart[];
+  /**
+   * One guided item per silent drop: what is not converted, why, and the
+   * customer's step. The drops are still counted in `determinism.silentDrops`.
+   */
+  residuals: GuidedResidual[];
   deluge: {
     units: number;
     statements: number;
@@ -424,9 +430,10 @@ export function analyze(app: App, options?: { lock?: FillLock }): AnalyzeReport 
   for (const u of feat.used) {
     if (u.verdict === 'blocker') blockers.push({ kind: 'feature', label: `${u.area} / ${u.feature}`, detail: `matrix status ${u.status}` });
   }
-  for (const drop of silentDrops) {
-    blockers.push({ kind: 'deluge', label: `silent drop ${drop.kind}: ${drop.name}`, detail: drop.note, scope: 'app' });
-  }
+  const residuals = guidedResiduals(silentDrops, schema.fields);
+  residuals.forEach((item, i) => {
+    blockers.push({ kind: 'deluge', label: `silent drop ${item.kind}: ${item.construct}`, detail: silentDrops[i]!.note, scope: 'app', manualStep: item.step });
+  });
   for (const t of todoLocations) {
     blockers.push({ kind: t.scope === 'ui' ? 'ui' : 'deluge', label: t.location, detail: t.construct, scope: t.scope, ...manualFields(t) });
   }
@@ -474,6 +481,7 @@ export function analyze(app: App, options?: { lock?: FillLock }): AnalyzeReport 
     },
     fieldGaps: fieldGapsOf(schema.fields),
     hiddenParts: hiddenParts(reactAppSpec(app)),
+    residuals,
     deluge: {
       units: units.length,
       statements: whole.stats.statements,
@@ -524,6 +532,7 @@ export function analyzeAsText(r: AnalyzeReport): string {
     ...r.hiddenParts.map((part) => `  ${part.location}: ${part.reason}`),
     `deluge: ${r.deluge.statements} statements  translated ${r.deluge.translated}  shimmed ${r.deluge.shimmed}  todo ${r.deluge.todo}  (${r.deluge.units} units)`,
     `deterministic: ${r.determinism.deterministic ? 'yes' : 'no'}  (todo items ${r.determinism.todoCount}, lock fills ${r.determinism.fillLockEntries}; UI TODO stubs ${r.determinism.uiTodoCount}, included in the todo items; silent drops ${r.determinism.silentDrops})`,
+    `guided residual items: ${r.residuals.length} (${r.residuals.filter((item) => item.stepSource === 'generic').length} with a generic manual step); each one is still a silent drop`,
     `blockers: ${r.blockers.length}`,
     ...r.blockers.flatMap((b) => [`  ${b.kind}: ${b.label} (${b.detail})`, ...(b.manualStep ? [`    step: ${b.manualStep}`] : [])]),
     `effort (estimate, not a quote): ${r.effort.hours} h`,
