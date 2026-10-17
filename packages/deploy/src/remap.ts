@@ -273,10 +273,64 @@ export function countFrom(body: unknown): number | undefined {
   return found;
 }
 
+/** Outcome of the deferred lookup updates for one table. Counts and ROWID ranges only, never cell values. */
+export interface DeferredUpdateReport {
+  table: string;
+  /** The deferred lookup columns of the table. */
+  columns: string[];
+  /** Rows whose deferred lookup columns needed an update. */
+  rows: number;
+  updated: number;
+  notUpdated: number;
+  /** ROWID ranges (first..last, in ROWID order) of the rows updated and not updated. */
+  updatedRanges: string[];
+  notUpdatedRanges: string[];
+  /** Why rows were not updated; absent when every row landed. */
+  error?: string;
+}
+
+/** Numeric ROWID order (digit strings of any length); any other id sorts after, as text. */
+function compareRowIds(a: string, b: string): number {
+  const da = /^\d+$/.test(a);
+  const db = /^\d+$/.test(b);
+  if (da !== db) return da ? -1 : 1;
+  if (da && a.length !== b.length) return a.length - b.length;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** Collapse adjacent batches that share an outcome into first..last ROWID ranges. */
+function rangesOf(batches: readonly { ids: readonly string[]; ok: boolean }[], ok: boolean): string[] {
+  const ranges: string[] = [];
+  let first: string | undefined;
+  let last: string | undefined;
+  for (const batch of [...batches, { ids: [], ok: !ok }]) {
+    if (batch.ok === ok) {
+      if (!batch.ids.length) continue;
+      first ??= batch.ids[0];
+      last = batch.ids.at(-1);
+      continue;
+    }
+    if (first !== undefined) ranges.push(first === last ? first : `${first}..${last}`);
+    first = undefined;
+  }
+  return ranges;
+}
+
+/** One report line: the counts, the ROWID ranges, and how to finish. */
+export function formatDeferredUpdate(report: DeferredUpdateReport): string {
+  const updated = report.updatedRanges.length ? ` (ROWID ${report.updatedRanges.join(', ')})` : '';
+  const missing = report.notUpdatedRanges.length ? ` (ROWID ${report.notUpdatedRanges.join(', ')})` : '';
+  return `deferred lookup update (${report.columns.join(', ')}): ${report.updated} of ${report.rows} row(s) updated${updated}; ${report.notUpdated} not updated${missing}: ${report.error ?? 'unknown error'}; re-run the load to finish them (row updates only, nothing is inserted again)`;
+}
+
 /**
  * Set the deferred (self/cyclic) lookup columns with row updates, now that
  * every side has a ROWID. Updates never insert, so source and destination
- * counts stay equal.
+ * counts stay equal, and a re-run repeats the same updates: rows a failed
+ * batch left unset are finished by the next run. Never throws for a table's
+ * own failure: each table's report names the rows updated and not updated.
+ * A table that did not load, or whose deferred lookup points at one, is
+ * skipped and reported; every other table is still updated.
  */
 export async function updateDeferredForeignKeys(
   opts: { dc: string; catalystBase: string; fetch: FetchLike; scope: CatalystScope },
@@ -284,43 +338,102 @@ export async function updateDeferredForeignKeys(
   foreignKeys: readonly SeedForeignKey[],
   deferred: ReadonlySet<string>,
   rowIds: ReadonlyMap<string, ReadonlyMap<string, string>>,
-): Promise<void> {
-  const byTable = new Map<string, Map<string, Record<string, string>>>();
+  notLoaded: ReadonlySet<string> = new Set(),
+): Promise<DeferredUpdateReport[]> {
+  const byTable = new Map<string, { columns: string[]; bodies: Map<string, Record<string, string>>; pending: Set<string>; unresolved?: string }>();
   for (const key of foreignKeys) {
     if (!deferred.has(foreignKeyId(key))) continue;
     const table = tables.find((item) => item.table === key.table);
     if (!table) continue;
+    const entry = byTable.get(key.table) ?? { columns: [], bodies: new Map<string, Record<string, string>>(), pending: new Set<string>() };
+    byTable.set(key.table, entry);
+    if (!entry.columns.includes(key.column)) entry.columns.push(key.column);
+    // The rows (or the parent rows) are not all in the store: no update can
+    // resolve, so the table is skipped and reported instead of half-updated.
+    const skipped = notLoaded.has(key.table)
+      ? `skipped: ${key.table} not loaded`
+      : notLoaded.has(key.parent)
+        ? `skipped: parent ${key.parent} not loaded (lookup ${key.column})`
+        : undefined;
     for (const row of table.rows) {
       const source = row.columns[key.column];
       if (!source) continue;
-      const mapped = sourceIds(source).map((id) => {
-        const parentId = rowIds.get(key.parent)?.get(id);
-        if (!parentId) throw new Error(`lookup ${key.column} row ${row.id} source id ${id} is not in ${key.parent}`);
-        return parentId;
-      });
-      const parentId = source.startsWith('[') ? JSON.stringify(mapped) : mapped[0]!;
+      entry.pending.add(row.id);
+      if (skipped) {
+        entry.unresolved ??= skipped;
+        const rowid = rowIds.get(key.table)?.get(row.id);
+        if (rowid) entry.bodies.set(rowid, entry.bodies.get(rowid) ?? { ROWID: rowid });
+        continue;
+      }
+      const ids = sourceIds(source);
+      const mapped = ids.map((id) => rowIds.get(key.parent)?.get(id));
+      const missing = ids.find((_, index) => !mapped[index]);
       const rowid = rowIds.get(key.table)?.get(row.id);
-      if (!rowid) throw new Error(`lookup ${key.column} row ${row.id} has no ROWID in ${key.table}`);
-      const rows = byTable.get(key.table) ?? new Map<string, Record<string, string>>();
-      const body = rows.get(rowid) ?? { ROWID: rowid };
-      body[key.column] = parentId;
-      rows.set(rowid, body);
-      byTable.set(key.table, rows);
+      if (missing !== undefined || !rowid) {
+        entry.unresolved ??= missing !== undefined
+          ? `lookup ${key.column} row ${row.id} source id ${missing} is not in ${key.parent}`
+          : `lookup ${key.column} row ${row.id} has no ROWID in ${key.table}`;
+        if (rowid) entry.bodies.set(rowid, entry.bodies.get(rowid) ?? { ROWID: rowid });
+        continue;
+      }
+      const body = entry.bodies.get(rowid) ?? { ROWID: rowid };
+      body[key.column] = source.startsWith('[') ? JSON.stringify(mapped) : mapped[0]!;
+      entry.bodies.set(rowid, body);
     }
   }
-  for (const [table, rows] of byTable) {
-    const list = [...rows.values()];
-    for (let i = 0; i < list.length; i += MAX_BATCH) {
-      const slice = list.slice(i, i + MAX_BATCH);
-      const url = catalystUpdateUrl(opts.catalystBase, table, opts.scope);
-      assertAllowedHost(url, opts.dc);
-      const response = await opts.fetch(url, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...catalystAuthHeaders(opts.scope) },
-        body: JSON.stringify(slice),
+  const reports: DeferredUpdateReport[] = [];
+  for (const [table, entry] of byTable) {
+    if (!entry.pending.size) continue;
+    const ids = [...entry.bodies.keys()].sort(compareRowIds);
+    // A row that cannot resolve leaves the whole table un-updated: a partial
+    // remap would point some rows at their parent and leave others unset.
+    if (entry.unresolved) {
+      reports.push({
+        table,
+        columns: entry.columns,
+        rows: entry.pending.size,
+        updated: 0,
+        notUpdated: entry.pending.size,
+        updatedRanges: [],
+        notUpdatedRanges: rangesOf([{ ids, ok: false }], false),
+        error: entry.unresolved,
       });
-      if (response.status >= 400) throw new Error(`catalyst row update failed: ${response.status}`);
-      await response.text();
+      continue;
     }
+    const batches: { ids: string[]; ok: boolean }[] = [];
+    let error: string | undefined;
+    const url = catalystUpdateUrl(opts.catalystBase, table, opts.scope);
+    assertAllowedHost(url, opts.dc);
+    for (let i = 0; i < ids.length; i += MAX_BATCH) {
+      const slice = ids.slice(i, i + MAX_BATCH);
+      let status: number;
+      try {
+        const response = await opts.fetch(url, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...catalystAuthHeaders(opts.scope) },
+          body: JSON.stringify(slice.map((id) => entry.bodies.get(id)!)),
+        });
+        status = response.status;
+        await response.text();
+      } catch (caught) {
+        error ??= `catalyst row update failed: ${caught instanceof Error ? caught.message : String(caught)}`;
+        batches.push({ ids: slice, ok: false });
+        continue;
+      }
+      if (status >= 400) error ??= `catalyst row update failed: ${status}`;
+      batches.push({ ids: slice, ok: status < 400 });
+    }
+    const updated = batches.filter((batch) => batch.ok).reduce((sum, batch) => sum + batch.ids.length, 0);
+    reports.push({
+      table,
+      columns: entry.columns,
+      rows: ids.length,
+      updated,
+      notUpdated: ids.length - updated,
+      updatedRanges: rangesOf(batches, true),
+      notUpdatedRanges: rangesOf(batches, false),
+      ...(error ? { error } : {}),
+    });
   }
+  return reports;
 }
