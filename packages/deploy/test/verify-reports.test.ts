@@ -248,6 +248,41 @@ test('offline kitchen-sink: an endpoint that drops a row or alters a total FAILS
   assert.ok(summarize([result]).totals.fail >= 2);
 });
 
+test('offline kitchen-sink: a late endpoint reply still renders; a reply past the settle bound FAILS as still loading', { skip: SKIP }, async () => {
+  const app = deriveIr(parse(readFileSync(KITCHEN, 'utf8')));
+  // The endpoint answers over a real round trip: a reply that lands a few
+  // event-loop turns after the mount flush (a loaded CI loop) must not read as
+  // zero rows.
+  const delayed = await runReportChecks(app, KITCHEN, {
+    n: 4,
+    wrapApi: (api) => ({
+      async post(endpoint, body) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return api.post(endpoint, body);
+      },
+    }),
+  });
+  assert.equal(delayed.error, undefined);
+  const settled = delayed.screens.find((s) => s.screen === 'All_Bookings')!.checks.find((c) => c.check === 'rows')!;
+  assert.equal(settled.status, 'pass', `a reply inside the settle bound renders its rows: ${settled.detail}`);
+  assert.equal(summarize([delayed]).totals.fail, 0, formatReportCheckMarkdown(summarize([delayed])));
+
+  // A reply past the settle bound fails the run naming the loading state —
+  // never a silent zero-row read.
+  const stalled = await runReportChecks(app, KITCHEN, {
+    n: 4,
+    wrapApi: (api) => ({
+      async post(endpoint, body) {
+        if (endpoint === '/reports/All_Rooms') await new Promise((resolve) => setTimeout(resolve, 4000));
+        return api.post(endpoint, body);
+      },
+    }),
+  });
+  const stuck = stalled.screens.find((s) => s.screen === 'All_Rooms')!.checks.find((c) => c.check === 'rows')!;
+  assert.equal(stuck.status, 'fail');
+  assert.match(stuck.detail, /never left its loading state/);
+});
+
 test('offline kitchen-sink: a seed load failure FAILS the run with the error, not a crash', { skip: SKIP }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-report-fake-'));
   try {
