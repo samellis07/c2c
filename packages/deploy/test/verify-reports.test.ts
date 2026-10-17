@@ -18,6 +18,7 @@ import { deriveIr, parse } from '../../core/src/index.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { templateRuntimeReady, TEMPLATE_MISSING, type MountedScreen } from '../../ui-react/src/index.js';
 import { zipStore } from '../src/iac-import.js';
+import { startOfflineBackend } from '../src/verify-behavior.js';
 import {
   captureDownload,
   expectedBuckets,
@@ -25,6 +26,7 @@ import {
   expectedMetric,
   findAffordances,
   formatReportCheckMarkdown,
+  loadSeed,
   pdfText,
   readChart,
   readTable,
@@ -302,6 +304,193 @@ test('offline kitchen-sink: a seed load failure FAILS the run with the error, no
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+/** A two-table lookup cycle: A.Peer -> B and B.Peer -> A, the deferred-load shape. */
+const CYCLE = `application "Widget"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Kolkata"
+	time format = "24-hr"
+	forms
+	{
+		form A
+		{
+			Name
+			(
+				type = text
+			)
+			Peer
+			(
+				type = picklist
+				values = B.Name
+			)
+		}
+		form B
+		{
+			Name
+			(
+				type = text
+			)
+			Peer
+			(
+				type = picklist
+				values = A.Name
+			)
+		}
+	}
+}
+`;
+
+test('seed load: cyclic lookups resolve in the deferred pass, store-side too', { skip: SKIP }, async () => {
+  const app = deriveIr(parse(CYCLE));
+  const backend = await startOfflineBackend(app);
+  try {
+    const seeded = await loadSeed(app, backend, 4);
+    const a = seeded.stored.get('A')!;
+    const b = seeded.stored.get('B')!;
+    assert.equal(a.length, 4);
+    assert.equal(b.length, 4);
+    const bIds = new Set(b.map((row) => String(row.ROWID)));
+    const aIds = new Set(a.map((row) => String(row.ROWID)));
+    for (const row of a) assert.ok(bIds.has(String(row.Peer)), `A.Peer ${String(row.Peer)} is a B ROWID, not a source id`);
+    for (const row of b) assert.ok(aIds.has(String(row.Peer)), `B.Peer ${String(row.Peer)} is an A ROWID, not a source id`);
+    for (const row of await backend.tableRows('A')) assert.ok(bIds.has(String(row.Peer)), 'the stored row got the deferred update');
+  } finally {
+    await backend.close();
+  }
+});
+
+test('seed load: a cyclic lookup FAILS on a backend that cannot run the deferred pass', { skip: SKIP }, async () => {
+  const app = deriveIr(parse(CYCLE));
+  let seq = 0;
+  const backend = {
+    async call(): Promise<{ status: number; body: unknown }> {
+      return { status: 200, body: {} };
+    },
+    async tableRows(): Promise<Record<string, unknown>[]> {
+      return [];
+    },
+    async insertRows(_table: string, rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]> {
+      return rows.map((row) => ({ ...row, ROWID: String(++seq) }));
+    },
+    async close(): Promise<void> {},
+  };
+  await assert.rejects(() => loadSeed(app, backend, 4), /cannot write deferred lookup rows/);
+});
+
+/** An app whose second report selects none of the seeded rows. */
+const EMPTY_REPORT = `application "EmptyReport"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Kolkata"
+	time format = "24-hr"
+	forms
+	{
+		form Item
+		{
+			Name
+			(
+				type = text
+			)
+			Amount
+			(
+				type = number
+			)
+			Status
+			(
+				type = picklist
+				values = {"Open","Shut"}
+			)
+		}
+	}
+	reports
+	{
+		list All_Items
+		{
+			displayName = "All Items"
+			show all rows from Item
+			(
+				Name as "Name"
+				Amount as "Amount"
+			)
+		}
+		list No_Items
+		{
+			displayName = "No Items"
+			show all rows from Item [Status == "Never-Seeded"]
+			(
+				Name as "Name"
+				Amount as "Amount"
+			)
+		}
+	}
+	share_settings
+	{
+		"Administrator"
+		{
+			name = "Administrator"
+			type = Users_Permissions
+			permissions = {Chat:true, Predefined:true, ApiAccess:true, PIIAccess:true, ePHIAccess:true}
+		}
+	}
+	roles
+	{
+		"Staff"
+		{
+			description = "Sees items."
+		}
+	}
+	web
+	{
+		menu
+		{
+			section Main
+			{
+				displayname = "Main"
+				form Item
+				{
+				}
+				list All_Items
+				{
+				}
+				list No_Items
+				{
+				}
+			}
+		}
+	}
+}
+`;
+
+test('empty seed selection: 0 expected and 0 rendered rows is a GAP, never a pass or a fail', { skip: SKIP }, async () => {
+  const app = deriveIr(parse(EMPTY_REPORT));
+  const result = await runReportChecks(app, 'inline', { n: 4 });
+  assert.equal(result.error, undefined);
+  const noItems = result.screens.find((s) => s.screen === 'No_Items')!;
+  for (const name of ['rows', 'totals', 'cells'] as const) {
+    const check = noItems.checks.find((c) => c.check === name)!;
+    assert.equal(check.status, 'gap', `${name}: ${check.detail}`);
+    assert.match(check.detail, /no seeded rows to compare/);
+  }
+  assert.equal(summarize([result]).totals.fail, 0, formatReportCheckMarkdown(summarize([result])));
+
+  // The same report rendering a row the seed does not select stays a FAIL.
+  const injected = await runReportChecks(app, 'inline', {
+    n: 4,
+    wrapApi: (api) => ({
+      async post(endpoint, body) {
+        const reply = await api.post(endpoint, body);
+        const rows = (reply.body as { rows?: Record<string, unknown>[] } | undefined)?.rows;
+        if (endpoint === '/reports/No_Items' && rows) return { ...reply, body: { ...(reply.body as object), rows: [{ Name: 'ghost', Amount: 1 }] } };
+        return reply;
+      },
+    }),
+  });
+  const check = injected.screens.find((s) => s.screen === 'No_Items')!.checks.find((c) => c.check === 'rows')!;
+  assert.equal(check.status, 'fail');
+  assert.equal(check.expected, 0);
+  assert.equal(check.actual, 1);
 });
 
 test('the runner command: usage errors exit 2', async () => {

@@ -52,7 +52,7 @@ export function foreignKeysForApp(app: App): SeedForeignKey[] {
  * The source ids a lookup cell holds: a single id, or a JSON array of them
  * (a multi lookup stored as a plain column, the encoding convertCell writes).
  */
-function sourceIds(value: string): string[] {
+export function sourceIds(value: string): string[] {
   if (!value.startsWith('[')) return [value];
   try {
     const parsed: unknown = JSON.parse(value);

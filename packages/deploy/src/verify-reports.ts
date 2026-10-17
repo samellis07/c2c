@@ -29,8 +29,9 @@ import { matchRow, type Criteria } from '../../shims/src/criteria.js';
 import { generateUi, type UiModel } from '../../ui/src/index.js';
 import { compileTemplateLib, mountTemplateScreen, reactAppSpec, templateRuntimeReady, TEMPLATE_MISSING, type MountedScreen, type TemplateApi, type TemplateScreen } from '../../ui-react/src/index.js';
 import type { AppSpec, ChartSpec, FilterClause, MetricSpec, PageElement, ReportSpec } from '../../ui-react/template/lib/c2c-ui/types.js';
-import { foreignKeysForApp, orderTables, resolveForeignKeys } from './remap.js';
+import { deferredColumns, foreignKeysForApp, omitColumns, orderTables, resolveForeignKeys, sourceIds } from './remap.js';
 import { parseSeed, seedStoreColumns } from './seed.js';
+import { cyclicForeignKeys, foreignKeyId } from './tables.js';
 import { startOfflineBackend, type BehaviorBackend } from './verify-behavior.js';
 import { DEFAULT_MAX_ENTRY, readZip } from './zipfile.js';
 
@@ -192,14 +193,42 @@ export async function loadSeed(app: App, backend: BehaviorBackend, n: number): P
   const keys = foreignKeysForApp(app);
   const rowIds = new Map<string, Map<string, string>>();
   const stored = new Map<string, Row[]>();
-  for (const table of orderTables(tables, keys)) {
-    const resolved = resolveForeignKeys(table, keys, rowIds);
+  const ordered = orderTables(tables, keys);
+  // Self/cyclic lookups cannot resolve in the insert pass (no side has a ROWID
+  // yet); the data loader defers them to a row update, and so does this load.
+  const deferred = cyclicForeignKeys(ordered.map((table) => table.table), keys);
+  const acyclic = keys.filter((key) => !deferred.has(foreignKeyId(key)));
+  for (const table of ordered) {
+    const resolved = omitColumns(resolveForeignKeys(table, acyclic, rowIds), deferredColumns(table.table, deferred));
     const rows = resolved.rows.map((row) => ({ ...row.columns, c2c_source_id: row.id }));
     const written = rows.length ? await backend.insertRows(table.table, rows) : [];
     const ids = new Map<string, string>();
     written.forEach((row, i) => ids.set(resolved.rows[i]!.id, String(row.ROWID)));
     rowIds.set(table.table, ids);
     stored.set(table.table, written);
+  }
+  for (const key of keys) {
+    if (!deferred.has(foreignKeyId(key))) continue;
+    const table = tables.find((item) => item.table === key.table);
+    if (!table) continue;
+    const patches: Record<string, unknown>[] = [];
+    for (const row of table.rows) {
+      const source = row.columns[key.column];
+      if (!source) continue;
+      const mapped = sourceIds(source).map((id) => {
+        const rowid = rowIds.get(key.parent)?.get(id);
+        if (!rowid) throw new Error(`lookup ${key.column} row ${row.id} source id ${id} is not in ${key.parent}`);
+        return rowid;
+      });
+      const rowid = rowIds.get(key.table)?.get(row.id);
+      if (!rowid) continue;
+      patches.push({ ROWID: rowid, [key.column]: source.startsWith('[') ? JSON.stringify(mapped) : mapped[0]! });
+    }
+    if (!patches.length) continue;
+    if (!backend.updateRows) throw new Error('the backend cannot write deferred lookup rows');
+    const updated = await backend.updateRows(key.table, patches);
+    const byRowid = new Map(updated.map((row) => [String(row.ROWID), row]));
+    stored.set(key.table, (stored.get(key.table) ?? []).map((row) => byRowid.get(String(row.ROWID)) ?? row));
   }
   return { stored };
 }
@@ -440,24 +469,29 @@ async function listChecks(model: UiModel, spec: AppSpec, report: ReportSpec, see
     else if (!expected) checks.push({ check: 'rows', status: 'fail', detail: `no seeded table for form ${report.form ?? '(none)'}` });
     else {
       const shown = Math.min(expected.length, report.pageSize || expected.length);
+      // An empty seed selection rendering an empty state compares nothing:
+      // an honest gap, never a pass and never a fail.
+      const compared = expected.length > 0 || table.rows.length > 0;
       checks.push(
-        table.rows.length === shown && shown > 0
-          ? { check: 'rows', status: 'pass', detail: `${table.rows.length} rows render (seed: ${expected.length})` }
-          : { check: 'rows', status: 'fail', detail: 'rendered row count differs from the seed', expected: shown, actual: table.rows.length },
+        !compared
+          ? gap('rows', 'no seeded rows to compare (the report criteria select 0 of the seeded rows)')
+          : table.rows.length === shown && shown > 0
+            ? { check: 'rows', status: 'pass', detail: `${table.rows.length} rows render (seed: ${expected.length})` }
+            : { check: 'rows', status: 'fail', detail: 'rendered row count differs from the seed', expected: shown, actual: table.rows.length },
       );
       const numeric = columns.map((c, i) => ({ ...c, i })).filter((c) => c.numeric && !c.key.includes('.'));
       if (!numeric.length) checks.push(gap('totals', 'the report has no numeric column to total'));
       for (const col of numeric) {
         const want = round(expected.slice(0, shown).reduce((sum, row) => sum + (numberOf(row[col.key]) ?? 0), 0));
         const got = round(table.rows.reduce((sum, row) => sum + (numberOf(row[col.i]) ?? 0), 0));
-        checks.push(want === got ? { check: 'totals', status: 'pass', detail: `${col.label} total ${got} matches the seed` } : { check: 'totals', status: 'fail', detail: `${col.label} total differs from the seed`, expected: want, actual: got });
+        checks.push(!compared ? gap('totals', 'no seeded rows to compare') : want === got ? { check: 'totals', status: 'pass', detail: `${col.label} total ${got} matches the seed` } : { check: 'totals', status: 'fail', detail: `${col.label} total differs from the seed`, expected: want, actual: got });
       }
       const form = spec.forms[report.form ?? ''];
       const textCols = columns.map((c, i) => ({ ...c, i })).filter((c) => !c.numeric && form?.fields.some((f) => f.name === c.key && (f.widget === 'text' || f.widget === 'email')));
       for (const col of textCols.slice(0, 1)) {
         const want = expected.slice(0, shown).map((row) => String(row[col.key] ?? '')).sort();
         const got = table.rows.map((row) => row[col.i]!).sort();
-        checks.push(JSON.stringify(want) === JSON.stringify(got) ? { check: 'cells', status: 'pass', detail: `${col.label} cells match the seed` } : { check: 'cells', status: 'fail', detail: `${col.label} cells differ from the seed`, expected: want, actual: got });
+        checks.push(!compared ? gap('cells', 'no seeded rows to compare') : JSON.stringify(want) === JSON.stringify(got) ? { check: 'cells', status: 'pass', detail: `${col.label} cells match the seed` } : { check: 'cells', status: 'fail', detail: `${col.label} cells differ from the seed`, expected: want, actual: got });
       }
     }
     const keyColumn = Math.max(0, columns.findIndex((c) => !c.numeric));
@@ -498,6 +532,7 @@ function chartCheck(model: UiModel, spec: AppSpec, report: ReportSpec, chart: Ch
   const want = expectedBuckets(rows, chart, lookupReader(spec, seeded, report.form));
   if (!want) return gap('chart', 'the chart filter or measure is not evaluable from the seed');
   const got = readChart(root);
+  if (!Object.keys(want).length && !Object.keys(got).length) return gap('chart', `${chart.title}: no seeded rows to compare`);
   const same = JSON.stringify(Object.entries(want).sort()) === JSON.stringify(Object.entries(got).sort());
   return same ? { check: 'chart', status: 'pass', detail: `${chart.title}: ${Object.keys(got).length} chart buckets match the seed` } : { check: 'chart', status: 'fail', detail: `${chart.title}: chart buckets differ from the seed${Object.keys(got).length ? '' : ` (the chart shows: ${(root.textContent ?? '').replace(/\s+/g, ' ').trim().slice(-80)})`}`, expected: want, actual: got };
 }
@@ -536,7 +571,13 @@ async function pageChecks(model: UiModel, spec: AppSpec, name: string, seeded: S
         const host = screen.container.querySelector(`[data-report="${el.report}"]`) ?? screen.container;
         const shown = host.querySelectorAll('tbody tr td[data-th]').length ? [...host.querySelectorAll('tbody tr')].filter((tr) => tr.querySelector('td[data-th]')).length : 0;
         const want = rows ? Math.min(rows.length, report?.pageSize || rows.length) : undefined;
-        checks.push(want !== undefined && shown === want ? { check: 'rows', status: 'pass', detail: `embedded ${el.report}: ${shown} rows render` } : { check: 'rows', status: 'fail', detail: `embedded ${el.report}: rendered row count differs from the seed`, expected: want, actual: shown });
+        checks.push(
+          want === 0 && shown === 0
+            ? gap('rows', `embedded ${el.report}: no seeded rows to compare`)
+            : want !== undefined && shown === want
+              ? { check: 'rows', status: 'pass', detail: `embedded ${el.report}: ${shown} rows render` }
+              : { check: 'rows', status: 'fail', detail: `embedded ${el.report}: rendered row count differs from the seed`, expected: want, actual: shown },
+        );
       }
       if (el.kind === 'chart') {
         const report = el.chart.report ? spec.reports[el.chart.report] : undefined;
