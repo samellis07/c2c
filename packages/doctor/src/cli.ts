@@ -256,7 +256,7 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
           `   ${ask.command}\n` +
           `${JSON.stringify(ask.observation, null, 2)}\n` +
           (ask.objectCleanup
-            ? `3. Afterwards the doctor deletes this run's nonce object and, when this run created it, the probe bucket. If it cannot, it prints a WARN naming what is left and how to remove it.\n`
+            ? `3. Afterwards the doctor deletes this run's nonce object. A probe bucket this run created is left tracked: the run prints a WARN naming it and how to remove it.\n`
             : `3. Afterwards remove the probe bucket: call ${JSON.stringify(ask.cleanup)}\n`) +
           pending.map((p) => `cleanup still pending from an earlier run: call ${JSON.stringify(probeDeleteCall(p.name, p))}\n`).join(''),
       );
@@ -328,12 +328,11 @@ async function doctorMain(parsed: DoctorArgs, io: DoctorIo, hooks?: ScopeHooks, 
             for (const pending of readPendingCleanups(workspace)) {
               if (!pending.project && (pending.org === undefined || pending.org === probeTarget.org)) clearPendingCleanup(workspace, pending.name);
             }
-            // Clean up after the check: the nonce object first, then the
-            // bucket — only one this run created. A bucket that is gone
-            // owes nothing; anything left stays tracked and warns.
+            // Clean up after the check: the nonce object, then report the
+            // bucket — one this run created stays tracked and warns; no
+            // documented REST bucket delete exists for the doctor to send.
             const cleaned = await cleanUpProbe(rest, probeTarget.project as string, probe, result.nonce, result.createdThisRun);
             probeCleanup = { ...cleaned, name: probe, nonce: result.nonce };
-            if (cleaned.bucket === 'removed') clearPendingCleanup(workspace, probe);
           }
         }
         if (projectScoped && binding.status !== 'absent' && !probeCleanup?.nonceRemoved) {

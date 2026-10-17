@@ -62,11 +62,12 @@ export interface DoctorContext {
   /** Probe bucket names the doctor still owes a Delete_Bucket instruction for (mcp-cleanup.json). */
   pendingCleanup?: readonly string[];
   /**
-   * This run's own cleanup after a verified probe: the bucket it removed,
-   * kept (not created by this run) or left (delete refused or unconfirmed),
+   * This run's own cleanup after a verified probe: the bucket it kept (not
+   * created by this run) or left (created by this run; no documented REST
+   * bucket delete exists, so it stays tracked for the caller to remove),
    * and the nonce object when that delete did not land.
    */
-  probeCleanup?: { name: string; bucket: 'removed' | 'kept' | 'left'; nonce?: string };
+  probeCleanup?: { name: string; bucket: 'kept' | 'left'; nonce?: string };
   /** CLI login-store readers; injectable for tests. */
   cliDc?: () => string | undefined;
   cliOrg?: () => string | undefined;
@@ -1422,14 +1423,16 @@ export async function runDoctorChecks(ctx: DoctorContext): Promise<DoctorRun> {
   // doctor could not prove deleted warns until a REST read-back shows it
   // gone. Only c2cprobe* names are ever tracked, so a bucket the probe did
   // not create is never targeted.
-  // This run's own cleanup never fails the doctor: what it could not remove
-  // is a WARN naming the leftover bucket (and nonce object) and the console
-  // step; a bucket it did not create is left alone and said so.
+  // This run's own cleanup never fails the doctor: a bucket this run
+  // created stays tracked (no documented REST bucket delete exists) and
+  // warns with the leftover bucket (and nonce object), the console step and
+  // the Delete_Bucket call; a bucket it did not create is left alone and
+  // said so.
   const own = ctx.probeCleanup;
   const others = (ctx.pendingCleanup ?? []).filter((name) => name !== own?.name);
   const notes: string[] = [];
   if (own?.bucket === 'left') {
-    notes.push(`the doctor could not remove the probe bucket ${own.name}${own.nonce ? ` (or its check object ${own.nonce})` : ''} it created for this check; remove it yourself — ${probeConsoleCleanup(own.name, own.nonce)}`);
+    notes.push(`the doctor could not remove the probe bucket ${own.name}${own.nonce ? ` (or its check object ${own.nonce})` : ''} it created for this check; remove it yourself — ${probeConsoleCleanup(own.name, own.nonce)}, or in this session call the CatalystbyZoho_Delete_Bucket the doctor printed under cleanup`);
   } else if (own?.bucket === 'kept') {
     notes.push(`the probe bucket ${own.name} was already in the project before this check, so the doctor left it in place${own.nonce ? ` and could not remove this check's object ${own.nonce}` : ''}; when nothing else uses it, remove it — ${probeConsoleCleanup(own.name, own.nonce)}`);
   }
@@ -1438,8 +1441,6 @@ export async function runDoctorChecks(ctx: DoctorContext): Promise<DoctorRun> {
   }
   if (notes.length) {
     checks.push(warn('D-B8', notes.join('; ')));
-  } else if (own?.bucket === 'removed') {
-    checks.push(pass('D-B8', `the probe bucket ${own.name} and this check's object were removed after the check`));
   } else if (ctx.evidence || ctx.carried) {
     checks.push(pass('D-B8', 'no probe bucket cleanup is pending'));
   }

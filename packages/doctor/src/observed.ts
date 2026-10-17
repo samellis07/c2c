@@ -537,8 +537,9 @@ export function parseObservation(
   // drift check and the cleanup track what was actually begun, even if the
   // scope flags drifted since the begin run.
   // Created by this run: the signed begin-time list did not show the bucket
-  // and the session's create did not answer already-exists. Only then may
-  // the cleanup delete the bucket; anything else leaves it alone.
+  // and the session's create did not answer already-exists. Only then does
+  // the cleanup report the bucket as left for removal; anything else
+  // leaves it alone.
   const createdThisRun = open.bucketBefore === 'absent' && !probeAlreadyExisted;
   return { evidence, observed: { request: open.request, orgs, calls }, probe: open.probe, nonce: open.nonce, scope: open.scope, createdThisRun };
 }

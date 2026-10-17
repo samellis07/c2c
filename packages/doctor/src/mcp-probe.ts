@@ -20,10 +20,12 @@
  *     route `GET .../bucket/<name>` is not used: it answered
  *     `404 INVALID_URL_PATTERN` in one DC while the list route worked
  *     (jobs-and-files.md, [UNVERIFIED]).
- *   - There is no documented token delete: cleanup is
- *     `CatalystbyZoho_Delete_Bucket` by `query_params.bucket_name`
- *     (errors.md), instructed for the session and re-printed while a pending
- *     cleanup record exists.
+ *   - The Stratus REST reference documents no bucket-delete route, so the
+ *     doctor itself removes only this run's nonce object (`PUT
+ *     .../bucket/object`). A probe bucket this run created stays tracked:
+ *     cleanup is `CatalystbyZoho_Delete_Bucket` by `query_params.bucket_name`
+ *     (errors.md) or the console step, instructed for the session and
+ *     re-printed while a pending cleanup record exists.
  *
  * The probe bucket name is deterministic per scope — one bucket per project
  * (`c2cprobe-p<project-id>`), one per org before the project exists
@@ -176,8 +178,9 @@ export function probeNonceCleanup(bucket: string, nonce: string, project: string
 /**
  * Best-effort delete of this run's nonce object. The CLI token's
  * buckets.objects.DELETE scope is not proven, so a refusal is ignored and
- * the caller still prints {@link probeNonceCleanup}. Never deletes the bucket
- * ({@link cleanUpProbe} does that, only for a bucket this run created).
+ * the caller still prints {@link probeNonceCleanup}. The probe bucket itself
+ * is never deleted over REST — no bucket-delete route is documented
+ * ({@link cleanUpProbe} leaves it tracked when this run created it).
  */
 export async function deleteProbeNonce(rest: RestFn, project: string, bucket: string, nonce: string): Promise<boolean> {
   if (!/^[0-9]+$/.test(project) || !NONCE_RE.test(nonce)) return false;
@@ -202,11 +205,6 @@ export async function probeBucketBefore(rest: RestFn, target: ProbeTarget, name:
   return read.status === 'found' ? 'present' : read.status === 'absent' ? 'absent' : undefined;
 }
 
-/** DELETE that removes the probe bucket by name. [DOC] bucket delete; CLI token scope [UNVERIFIED]. */
-export function probeBucketDeletePath(bucket: string, project: string): string {
-  return `/baas/v1/project/${project}/bucket?bucket_name=${encodeURIComponent(bucket)}`;
-}
-
 /** The console steps that remove what an automatic cleanup left behind. */
 export function probeConsoleCleanup(bucket: string, nonce?: string): string {
   return nonce
@@ -217,31 +215,27 @@ export function probeConsoleCleanup(bucket: string, nonce?: string): string {
 export interface ProbeCleanupResult {
   /** This run's nonce object was deleted (confirmed by the delete answer). */
   nonceRemoved: boolean;
-  /** 'removed': deleted and the bucket list no longer shows it. 'kept': not created by this run, so never touched. 'left': the delete was refused or not confirmed. */
-  bucket: 'removed' | 'kept' | 'left';
+  /** 'kept': not created by this run, so never touched. 'left': this run created it and it stays for the caller to remove. */
+  bucket: 'kept' | 'left';
 }
 
 /**
  * Clean up after a verified project-scoped probe: delete this run's nonce
- * object first, then the probe bucket — only when this run created it
- * (`createdThisRun`: the bucket was absent at --mcp-begin and the
- * Create_Bucket answer was not already-exists). A pre-existing bucket is
- * never deleted. The bucket counts as removed only once the bucket list no
- * longer shows it; a refusal or an unconfirmed delete leaves it for the
- * caller to report, never to fail on.
+ * object, then report the probe bucket — 'kept' when this run did not
+ * create it (`createdThisRun` false: the bucket was in the project at
+ * --mcp-begin or the Create_Bucket answer was already-exists), 'left' when
+ * it did. The Stratus REST reference documents no bucket-delete route, so
+ * the doctor never sends one: a bucket this run created is reported for
+ * the caller to remove (the console step or `CatalystbyZoho_Delete_Bucket`
+ * it prints under cleanup), never to fail on.
+ * Only the exact `c2cprobe-p<project-id>` name of THIS project is ever
+ * touched — a different project's probe, an org probe, a legacy request-id
+ * name or any other bucket gets no call at all.
  */
 export async function cleanUpProbe(rest: RestFn, project: string, bucket: string, nonce: string, createdThisRun: boolean): Promise<ProbeCleanupResult> {
+  if (bucket !== probeNameFor({ project })) return { nonceRemoved: false, bucket: 'kept' };
   const nonceRemoved = await deleteProbeNonce(rest, project, bucket, nonce);
-  if (!createdThisRun) return { nonceRemoved, bucket: 'kept' };
-  if (!nonceRemoved || !/^[0-9]+$/.test(project) || !isProbeName(bucket)) return { nonceRemoved, bucket: 'left' };
-  try {
-    const res = await rest({ method: 'DELETE', path: probeBucketDeletePath(bucket, project) });
-    if (res.status < 200 || res.status >= 300) return { nonceRemoved, bucket: 'left' };
-  } catch {
-    return { nonceRemoved, bucket: 'left' };
-  }
-  const after = await readBucketList(rest, project, bucket);
-  return { nonceRemoved, bucket: after.status === 'absent' ? 'removed' : 'left' };
+  return { nonceRemoved, bucket: createdThisRun ? 'left' : 'kept' };
 }
 
 /** The exact Delete_Bucket arguments for cleanup (by bucket name, not an id — errors.md). */
