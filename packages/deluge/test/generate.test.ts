@@ -7057,11 +7057,11 @@ test('a field a form script fills or enables on the open form is not denied for 
       }),
       // On load fills A (Creator posts it); on user input of A fills B; an
       // add-only on load selects D. E is enabled by a script.
-      workflow({ name: 'load', form: 'Item', event: 'on load', deluge: script('input.A = zoho.loginuserid;') }),
-      workflow({ name: 'input', form: 'Item', event: 'on user input of A', deluge: script('if(input.A != null)\n{\n\tinput.B = input.A;\n}') }),
-      workflow({ name: 'addLoad', form: 'Item', event: 'on load', recordEvent: 'on add', deluge: script('D.select(1);\nenable E;') }),
+      workflow({ name: 'load', container: 'form', type: 'form', form: 'Item', event: 'on load', deluge: script('input.A = zoho.loginuserid;') }),
+      workflow({ name: 'input', container: 'form', type: 'form', form: 'Item', event: 'on user input of A', deluge: script('if(input.A != null)\n{\n\tinput.B = input.A;\n}') }),
+      workflow({ name: 'addLoad', container: 'form', type: 'form', form: 'Item', event: 'on load', recordEvent: 'on add', deluge: script('D.select(1);\nenable E;') }),
       // On validate runs on the server: its write never comes from the form.
-      workflow({ name: 'validate', form: 'Item', event: 'on validate', deluge: script('input.C = "x";') }),
+      workflow({ name: 'validate', container: 'form', type: 'form', form: 'Item', event: 'on validate', deluge: script('input.C = "x";') }),
     ],
   });
   assert.deepEqual(fieldRuleDenials(ir, 'Item'), [
@@ -7069,6 +7069,27 @@ test('a field a form script fills or enables on the open form is not denied for 
     { field: 'D', action: 'disable', ops: ['update'] },
     { field: 'E', action: 'disable', ops: ['update'] },
     { field: 'F', action: 'hide' },
+  ]);
+});
+
+test('a schedule, approval or container-less workflow wrapping on load does not unlock a hidden field', () => {
+  const script = (text: string) => ({ text, span: Z });
+  const ir = app({
+    forms: [plainForm('Booking', [plainField('Status'), plainField('Note'), plainField('Owner'), plainField('Filled')])],
+    workflows: [
+      workflow({ name: 'rules', form: 'Booking', event: 'on load', fieldRules: [{ actions: [{ action: 'hide', fields: ['Status', 'Note', 'Owner', 'Filled'] }], span: Z }] }),
+      // A schedule's actions wrap `on load`: it runs on the server, never on the open form.
+      workflow({ name: 'sweep', container: 'schedule', type: 'schedule', form: 'Booking', event: 'on start / on load', deluge: script('input.Status = "Forgotten";') }),
+      workflow({ name: 'approve', container: 'approval', type: 'approval', form: 'Booking', event: 'on level 1 / on approve / on load', deluge: script('input.Note = "ok";') }),
+      // No container: not provably a form script.
+      workflow({ name: 'bare', form: 'Booking', event: 'on load', deluge: script('input.Owner = zoho.loginuserid;') }),
+      workflow({ name: 'fill', container: 'form', type: 'form', form: 'Booking', event: 'on load', deluge: script('input.Filled = zoho.loginuserid;') }),
+    ],
+  });
+  assert.deepEqual(fieldRuleDenials(ir, 'Booking'), [
+    { field: 'Note', action: 'hide' },
+    { field: 'Owner', action: 'hide' },
+    { field: 'Status', action: 'hide' },
   ]);
 });
 

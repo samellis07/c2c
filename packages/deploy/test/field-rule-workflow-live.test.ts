@@ -210,6 +210,149 @@ test('a field rule refuses the client value; the On Success script still sets th
   }
 });
 
+/**
+ * A schedule whose actions wrap `on load` runs on the server, never on the
+ * open form: its `input.Status = …` must not unlock the hidden field for
+ * client writes. A real form on-load fill still does.
+ */
+const SCHEDULE_DS = `application "Rooms"
+{
+${t(1)}time zone = "Asia/Kolkata"
+${t(1)}forms
+${t(1)}{
+${t(2)}form Booking_Form
+${t(2)}{
+${field('Title')}
+${field('Status')}
+${field('Official_Email')}
+${t(2)}}
+${t(1)}}
+${t(1)}reports
+${t(1)}{
+${t(2)}list All_Bookings
+${t(2)}{
+${t(3)}show all rows from Booking_Form
+${t(3)}(
+${t(4)}Title
+${t(4)}Status
+${t(4)}Official_Email
+${t(3)})
+${t(2)}}
+${t(1)}}
+${t(1)}workflow
+${t(1)}{
+${t(2)}form
+${t(2)}{
+${t(3)}Rules as "Rules"
+${t(3)}{
+${t(4)}type = form
+${t(4)}form = Booking_Form
+${t(4)}record event = on add or edit
+${t(4)}field rules
+${t(4)}{
+${t(5)}actions
+${t(5)}{
+${t(6)}hide Official_Email,Status;
+${t(5)}}
+${t(4)}}
+${t(3)}}
+${t(3)}Fill as "Fill"
+${t(3)}{
+${t(4)}type = form
+${t(4)}form = Booking_Form
+${t(4)}record event = on add
+${t(4)}on load
+${t(4)}{
+${t(5)}actions
+${t(5)}{
+${t(6)}custom deluge script
+${t(6)}(
+${t(7)}input.Official_Email = zoho.loginuserid;
+${t(6)})
+${t(5)}}
+${t(4)}}
+${t(3)}}
+${t(2)}}
+${t(2)}schedule
+${t(2)}{
+${t(3)}Forgotten_Booking as "Forgotten_Booking"
+${t(3)}{
+${t(4)}type = schedule
+${t(4)}form = Booking_Form
+${t(4)}start = Added_Time
+${t(4)}on start
+${t(4)}{
+${t(5)}actions
+${t(5)}{
+${t(5)}on load
+${t(5)}(
+${t(6)}if(input.Status == "Reserved")
+${t(6)}{
+${t(7)}input.Status = "Forgotten";
+${t(6)}}
+${t(5)})
+${t(5)}}
+${t(4)}}
+${t(3)}}
+${t(2)}}
+${t(1)}}
+${t(1)}share_settings
+${t(1)}{
+${profile('Lead', false).replaceAll('All_Work_Orders', 'All_Bookings').replaceAll('Work_Orders', 'Booking_Form').replace(`${t(6)}}\n${t(5)}}`, `${t(7)}Official_Email\n${t(7)}{\n${t(8)}visibility:true,readonly:false\n${t(7)}}\n${t(6)}}\n${t(5)}}`)}
+${t(1)}}
+}
+`;
+
+test('a schedule wrapping on load does not unlock a hidden field: a forged client value is refused', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-field-rule-schedule-'));
+  const moduleAny = Module as unknown as { _resolveFilename: (request: string, ...rest: unknown[]) => string };
+  const original = moduleAny._resolveFilename;
+  moduleAny._resolveFilename = function resolveFake(this: unknown, request: string, ...rest: unknown[]) {
+    if (request === 'zcatalyst-sdk-node') return fake;
+    return original.call(this, request, ...rest);
+  };
+  let server: Server | undefined;
+  try {
+    const app = deriveIr(parse(SCHEDULE_DS));
+    assert.ok(app.workflows.some((w) => w.container === 'schedule' && /on load/.test(w.event)), 'fixture parses a schedule-wrapped on load');
+    writeDeployTree(dir, deployFiles(app, guardFor(app), false, { mode: 'live' }).files);
+    const require = createRequire(import.meta.url);
+    const sdk = require(fake) as FakeSdk;
+    sdk.setSession('lead', USERS.lead);
+    const entry = require(join(dir, 'functions/c2c_api/index.js')) as (rq: IncomingMessage, rs: ServerResponse) => Promise<void>;
+    server = createServer((rq, rs) => void entry(rq, rs));
+    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    const submit = async (record: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> => {
+      const res = await fetch(`http://127.0.0.1:${port}/server/c2c_api/forms/Booking_Form/submit`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: 'c2c-harness-session=lead' },
+        body: JSON.stringify({ record }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      return { status: res.status, body: JSON.parse(await res.text()) as Record<string, unknown> };
+    };
+    const row = (title: string) => (sdk.state().tables.Booking_Form ?? []).find((r) => r.Title === title);
+
+    const forged = await submit({ Title: 'forged', Status: 'Checked In' });
+    assert.equal(forged.status, 403, JSON.stringify(forged.body));
+    assert.match(String(forged.body.message), /Booking_Form\.Status is hidden by a field rule/);
+    assert.equal(row('forged'), undefined, 'a refused submit must not write');
+
+    // The form's own on-load fill is posted with the record on add.
+    const filled = await submit({ Title: 'filled', Official_Email: 'lead@example.test' });
+    assert.equal(filled.status, 200, JSON.stringify(filled.body));
+    assert.equal(row('filled')?.Official_Email, 'lead@example.test');
+  } finally {
+    if (server) {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
+    }
+    moduleAny._resolveFilename = original;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the On Success write-back is generated only for a script that assigns input fields', () => {
   const app = deriveIr(parse(DS));
   const files = generate(app).files;
