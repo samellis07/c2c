@@ -1015,6 +1015,43 @@ const SYSTEM_FIELD_KEYS: { name: string; keys: readonly string[] }[] = [
   { name: 'Modified_Time', keys: ['Modified_Time', 'MODIFIEDTIME', 'modifiedtime'] },
 ];
 
+/** Keys of the columns the store stamps on every update (Modified_User, Modified_Time). */
+const UPDATE_STAMPED_KEYS: readonly string[] = SYSTEM_FIELD_KEYS.filter((col) => col.name.startsWith('Modified_')).flatMap((col) => col.keys);
+
+/** Field names a criteria tree tests, or undefined when a part of it is not understood. */
+function criteriaFieldNames(criteria: Criteria, out = new Set<string>()): Set<string> | undefined {
+  switch (criteria.op) {
+    case 'true':
+      return out;
+    case 'and':
+    case 'or':
+      for (const arg of criteria.args) if (!criteriaFieldNames(arg, out)) return undefined;
+      return out;
+    case 'not':
+      return criteriaFieldNames(criteria.arg, out);
+    case 'todo':
+      return undefined;
+    default:
+      out.add(criteria.field.toLowerCase());
+      return out;
+  }
+}
+
+/**
+ * True only when none of `columns` can decide which rows a set holds: not a
+ * field of its criteria (script criteria plus record access scope), not a
+ * word of its WHERE, not in its sort.
+ */
+function unrelatedToScope(columns: readonly string[], criteria: Criteria, where: string, sort: unknown): boolean {
+  const fields = criteriaFieldNames(criteria);
+  if (!fields) return false;
+  const words = new Set(`${where} ${JSON.stringify(sort ?? null)}`.toLowerCase().split(/\W+/));
+  return columns.every((name) => {
+    const lower = name.toLowerCase();
+    return /^\w+$/.test(lower) && !fields.has(lower) && !words.has(lower);
+  });
+}
+
 /**
  * Dry-run stand-in when the runtime has no real Zoho identity.
  * Angle brackets and the `c2c-dry-run:` label are not a Creator username
@@ -1451,6 +1488,10 @@ async function runStagedRead(
     const values = sourceColumn === 'ROWID' ? merged.map((row) => rowIdentity(row)) : merged.map((row) => row[sourceColumn]);
     const column = /^(\w+) IN \(/.exec(stage.where)?.[1] ?? 'ROWID';
     const onBase = stage.table === baseName;
+    // An adapter that reads the whole projection (wide lists in several
+    // statements of its own) already returned these columns for these rows.
+    // Re-reading them would copy the same values back: skip the stage.
+    if (onBase && sourceColumn === 'ROWID' && merged.every((row) => stage.columns.every((name) => Object.hasOwn(row, name)))) continue;
     const got = await fetchBound(query, stage.table, column, values, onBase ? where : '', stage.orderBy || 'ORDER BY ROWID');
     if (column === EXTENSION_KEY) {
       const byParent = new Map<string, Record<string, unknown>>();
@@ -1511,7 +1552,29 @@ function hasCounters(counters: RuntimeOptions['counters']): boolean {
   return named(counters?.columns) || named(counters?.autonumber);
 }
 
+/** The adapter with every insert, update and delete counted by `bump`, before and after it runs. */
+function countWrites(datastore: NonNullable<RuntimeOptions['datastore']>, bump: () => void): NonNullable<RuntimeOptions['datastore']> {
+  return new Proxy(datastore, {
+    get(target, key) {
+      const value: unknown = Reflect.get(target, key, target);
+      if ((key !== 'insert' && key !== 'update' && key !== 'delete') || typeof value !== 'function') return value;
+      return async (...args: unknown[]) => {
+        bump();
+        try {
+          return await (value as (...a: unknown[]) => Promise<unknown>).apply(target, args);
+        } finally {
+          bump();
+        }
+      };
+    },
+  });
+}
+
 export function createRuntime(options: RuntimeOptions = {}): Runtime {
+  // Store writes made through this runtime, so a record set's rows can be
+  // reused only while nothing has written since they were read.
+  let storeWrites = 0;
+  if (options.datastore) options = { ...options, datastore: countWrites(options.datastore, () => (storeWrites += 1)) };
   const dryRun = options.dryRun !== false;
   const adminUserIdValue = () => labelledIdentity(options.adminUserId, DRY_RUN_ADMIN_USER_ID).value;
   const configuredZone = nonemptyZone(options.appTimeZone) ?? nonemptyZone(process.env.C2C_APP_TIMEZONE);
@@ -2587,6 +2650,23 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
    * the difference; a write with no read is a set.
    */
   const counterReads = new WeakMap<object, Map<string, { value: unknown; rowId?: string }>>();
+  /**
+   * Rows a live setField read for a record set (`rec = Form[...]`), kept while
+   * no store write follows its own update. A later setField or field read on
+   * the same set and WHERE reuses them instead of reading again; a field this
+   * set has written, and the columns the store stamps on update, are read
+   * again, so a stored value is never guessed. The rows are dropped when the
+   * update writes a column of the set's criteria, record access scope or sort
+   * (the next call reads and scopes again), and when any write lands between
+   * the read and the update. Writes that do not go through this runtime's
+   * adapter (another runtime, such as an invokeUrl to the app's own endpoint)
+   * are not counted.
+   */
+  const setFieldRows = new WeakMap<Query, { rows: Record<string, unknown>[]; where: string; writes: number; written: Set<string> }>();
+  const keptRows = (query: Query, where: string) => {
+    const kept = setFieldRows.get(query);
+    return kept && !query.zcql?.length && kept.where === where && kept.writes === storeWrites ? kept : undefined;
+  };
 
   function rememberCounterRead(target: object, form: string, field: string, value: unknown, keepFirst: boolean, rowId?: string): void {
     if (!counterColumnsOf(form).includes(field)) return;
@@ -3024,7 +3104,10 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         // decimal criteria or sort needs the exact pass, which pages until it has one.
         // A staged read still applies the criteria to every stage, then keeps the first row.
         const decimals = decimalsOf(query.form);
-        const got = query.zcql?.length
+        const kept = keptRows(query, where);
+        const got = kept && !kept.written.has(field)
+          ? kept.rows
+          : query.zcql?.length
           ? await readLive(query, scoped.criteria, where, query.range ?? { from: 0, to: 0 }, query.sort)
           : query.range || needsExactRead(scoped.criteria, query.sort, decimals)
             ? await liveRows(query.form, scoped.criteria, where, query.range ?? { from: 0, to: 0 }, query.sort)
@@ -3369,7 +3452,10 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
             );
           }
         }
-        const got = await readLive(query, scoped.criteria, where, query.range, query.sort);
+        const kept = keptRows(query, where);
+        const readAt = storeWrites;
+        const got = kept ? kept.rows : await readLive(query, scoped.criteria, where, query.range, query.sort);
+        const quietRead = storeWrites === readAt;
         const updates: Record<string, unknown>[] = [];
         const current = new Map<string, unknown>();
         for (const row of got) {
@@ -3396,6 +3482,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
           batchSize: LIMITS.updateRowsPerCall,
         });
         if (counterColumnsOf(query.form).includes(field)) {
+          setFieldRows.delete(query);
           // The value is computed once and every match gets it (Deluge
           // `<collection>.<field> = value`). After a read, each row is moved by
           // its own difference: the row the script read by value - that read,
@@ -3419,6 +3506,12 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
           for (const batch of chunk(updates, LIMITS.updateRowsPerCall)) {
             await updateRows(query.form, batch);
           }
+        }
+        const changed = [...Object.keys(withShadows(query.form, { [field]: storedValue })), ...UPDATE_STAMPED_KEYS];
+        if (!query.zcql?.length && quietRead && unrelatedToScope(changed, scoped.criteria, where, query.sort)) {
+          setFieldRows.set(query, { rows: got, where, writes: storeWrites, written: new Set([...(kept?.written ?? []), ...changed]) });
+        } else {
+          setFieldRows.delete(query);
         }
         return value;
       },
