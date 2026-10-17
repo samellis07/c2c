@@ -758,8 +758,10 @@ test('a live aggregate groups a lookup column by its stored parent id, not the d
 });
 
 // A report whose criteria holds a relative clause (Due == today): the record
-// endpoint cannot compile the filter but must still serve the record read —
-// the report is registered under the form's own scope, profiles gating it.
+// endpoint binds the marker against the request clock and applies it — a row
+// outside the bound scope is not served through the report. Staff also views
+// the unfiltered All_Invoices, so the profile record filter carries no Due
+// clause and the report scope is the only guard on a Today_Invoices read.
 const RELATIVE_SRC = `application "Demo"
 {
 \tform Invoice
@@ -770,6 +772,14 @@ ${field('Due', 'date')}
 \tlist Today_Invoices
 \t{
 \t\tshow all rows from Invoice [Due == today]
+\t\t(
+\t\t\tNote
+\t\t\tDue
+\t\t)
+\t}
+\tlist All_Invoices
+\t{
+\t\tshow all rows from Invoice
 \t\t(
 \t\t\tNote
 \t\t\tDue
@@ -789,6 +799,7 @@ ${field('Due', 'date')}
 \t\t\t\t\tReportPermissions
 \t\t\t\t\t{
 \t\t\t\t\t\tToday_Invoices = {"View"}
+\t\t\t\t\t\tAll_Invoices = {"View"}
 \t\t\t\t\t}
 \t\t\t\t}
 \t\t\t}
@@ -797,9 +808,12 @@ ${field('Due', 'date')}
 }
 `;
 
-test('the record read serves a report whose criteria cannot compile into its scope', async () => {
-  const files = buildUi(deriveIr(parse(RELATIVE_SRC))).files;
-  const dir = mkdtempSync(join(tmpdir(), 'c2c-agg-record-rel-'));
+async function loadRecordEndpoint(
+  source: string,
+  formName: string,
+): Promise<{ dir: string; record: { default: (req: unknown, res: unknown) => unknown } }> {
+  const files = buildUi(deriveIr(parse(source))).files;
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-agg-record-'));
   writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
   mkdirSync(join(dir, 'node_modules'), { recursive: true });
   symlinkSync(process.cwd(), join(dir, 'node_modules/creator-to-catalyst'));
@@ -809,9 +823,52 @@ test('the record read serves a report whose criteria cannot compile into its sco
   }
   const path = files
     .filter((f) => /functions\/aio\/.*\/record\.mjs$/.test(f.path))
-    .find((f) => String(f.data).includes('export const formName = "Invoice";'))?.path;
+    .find((f) => String(f.data).includes(`export const formName = ${JSON.stringify(formName)};`))?.path;
   assert.ok(path);
   const record = (await import(pathToFileURL(join(dir, path)).href)) as { default: (req: unknown, res: unknown) => unknown };
+  return { dir, record };
+}
+
+test('the record read serves a row inside a relative-date report scope', async () => {
+  const { dir, record } = await loadRecordEndpoint(RELATIVE_SRC, 'Invoice');
+  const store = mockDatastore({ Invoice: [] });
+  const prior = (globalThis as Record<string, unknown>).__c2cDatastore;
+  const priorNow = process.env.C2C_NOW;
+  try {
+    writeFileSync(join(dir, 'functions/c2c-deploy.json'), JSON.stringify({ mode: 'live', appTimeZone: 'UTC' }));
+    process.env.C2C_NOW = '2026-10-17T12:00:00.000Z';
+    const inserted = await store.datastore.insert('Invoice', [
+      { Note: 'in', Due: '2026-10-17' },
+      { Note: 'out', Due: '2026-10-16' },
+    ]);
+    (globalThis as Record<string, unknown>).__c2cDatastore = store.datastore;
+    // Inside the bound scope: the row is served.
+    const res = await invoke(record.default, { user: STAFF, body: { ROWID: inserted[0]!.ROWID, REPORT: 'Today_Invoices' } });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.record && (res.body.record as Record<string, unknown>).Note, 'in');
+    // Outside the bound scope: the report read must not widen to the form.
+    const denied = await invoke(record.default, { user: STAFF, body: { ROWID: inserted[1]!.ROWID, REPORT: 'Today_Invoices' } });
+    assert.equal(denied.status, 404, JSON.stringify(denied.body));
+    assert.equal(denied.body.record, undefined);
+    assert.doesNotMatch(JSON.stringify(denied.body), /"out"/);
+    // The unfiltered sibling report still serves the same row.
+    const wide = await invoke(record.default, { user: STAFF, body: { ROWID: inserted[1]!.ROWID, REPORT: 'All_Invoices' } });
+    assert.equal(wide.status, 200, JSON.stringify(wide.body));
+    assert.equal(wide.body.record && (wide.body.record as Record<string, unknown>).Note, 'out');
+  } finally {
+    if (priorNow === undefined) delete process.env.C2C_NOW;
+    else process.env.C2C_NOW = priorNow;
+    (globalThis as Record<string, unknown>).__c2cDatastore = prior;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A report whose criteria never translates (a zoho.* reference) registers a
+// todo scope: the record read fails closed for every row, never unfiltered.
+const TODO_SRC = RELATIVE_SRC.replace('[Due == today]', '[zoho.loginuserid == input.x]');
+
+test('the record read refuses a report whose criteria cannot translate', async () => {
+  const { dir, record } = await loadRecordEndpoint(TODO_SRC, 'Invoice');
   const store = mockDatastore({ Invoice: [] });
   const prior = (globalThis as Record<string, unknown>).__c2cDatastore;
   try {
@@ -819,8 +876,14 @@ test('the record read serves a report whose criteria cannot compile into its sco
     const inserted = await store.datastore.insert('Invoice', [{ Note: 'n', Due: '2026-10-17' }]);
     (globalThis as Record<string, unknown>).__c2cDatastore = store.datastore;
     const res = await invoke(record.default, { user: STAFF, body: { ROWID: inserted[0]!.ROWID, REPORT: 'Today_Invoices' } });
-    assert.equal(res.status, 200, JSON.stringify(res.body));
-    assert.equal(res.body.record && (res.body.record as Record<string, unknown>).Note, 'n');
+    assert.ok(res.status === 403 || res.status === 404, `refused, not served: ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.record, undefined);
+    assert.equal(store.calls.length, 0, 'the refuse happens before any row query: ' + JSON.stringify(store.calls));
+    // Dry run refuses the same way: the todo scope is not skipped.
+    rmSync(join(dir, 'functions/c2c-deploy.json'));
+    const dry = await invoke(record.default, { user: STAFF, body: { ROWID: '9', REPORT: 'Today_Invoices' } });
+    assert.ok(dry.status === 403 || dry.status === 404, `refused, not served: ${JSON.stringify(dry.body)}`);
+    assert.equal(dry.body.record, undefined);
   } finally {
     (globalThis as Record<string, unknown>).__c2cDatastore = prior;
     rmSync(dir, { recursive: true, force: true });

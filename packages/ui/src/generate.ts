@@ -2735,7 +2735,7 @@ function stageFieldModules(app: App, formName: string): { modules: string[]; col
  */
 function recordStub(app: App, form: UiModel['forms'][number], path: string): string {
   const subformLinks = subformLinksFor(app, form.name);
-  const shimNames = ['bindRelativeCriteria', 'criteriaHasRelative', 'matchRow', ...(subformLinks.length ? ['attachSubforms'] : [])];
+  const shimNames = ['bindRelativeCriteria', 'criteriaHasRelative', 'criteriaHasTodo', 'matchRow', ...(subformLinks.length ? ['attachSubforms'] : [])];
   const shimImport = `import { ${shimNames.join(', ')} } from "creator-to-catalyst/shims";\n`;
   // A profile record filter or a report scope can hold a relative criteria
   // marker ({__rel}); the same binding the report query applies resolves it
@@ -2770,11 +2770,11 @@ function boundCriteria(criteria) {
   const childFields = JSON.stringify(Object.fromEntries(subformLinks.map((link) => [link.field, app.forms.find((item) => item.name === form.name)?.fields.find((item) => item.name === link.field)?.subfields.map((field) => field.name) ?? []])));
   const reportScopes = Object.fromEntries(app.reports.filter((report) => report.form === form.name).flatMap((report) => {
     const criteria = reportCriteria(report.criteria?.trim() || 'true');
-    // A criteria the record query cannot compile (untranslated or relative
-    // clauses) does not hide the report: the scope falls back to the form's
-    // own access, the same read a record opened without a report makes. The
-    // profiles check still gates who may open it.
-    const scopeCriteria = criteriaHasTodo(criteria) || criteriaHasRelative(criteria) ? ({ op: 'true' } as const) : criteria;
+    // The scope keeps the criteria exactly as the standalone report holds it.
+    // A relative clause binds against the request clock below and post-filters
+    // the row; a criteria that cannot translate at all fails closed as no such
+    // row, never as the whole form.
+    const scopeCriteria = criteria;
     const profiles = app.profiles.filter((profile) =>
       administratorProfiles(app).includes(profile.name) || profile.modules.some((module) =>
         module.component === form.name && module.reports.some((permission) => permission.key === report.name && /(?:^|[^A-Za-z])view(?:[^A-Za-z]|$)/i.test(permission.value)),
@@ -2853,6 +2853,13 @@ ${requirePrincipal()}
     const criteria = reportScope ? { op: "and", args: [rowCriteria, reportScope.criteria] } : rowCriteria;
     const scoped = authorizeRead(access, principal, formName, criteria);
     const selectedFields = reportScope ? (scoped.fields ? reportScope.fields.filter((field) => scoped.fields.includes(field)) : reportScope.fields) : scoped.fields;
+    // A criteria the record query cannot evaluate (an unmigrated clause in the
+    // report scope or the record filter) fails closed, like the report stub
+    // answering with no rows: no row comes back, never the unscoped read.
+    if (criteriaHasTodo(scoped.criteria)) {
+      send(res, 404, { dryRun: !live, error: "no such row" });
+      return;
+    }
     // A relative marker in the scope or the record filter binds against the
     // request clock, like the report list read; a marker that cannot bind
     // fails closed as no such row.
