@@ -1,0 +1,141 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Personal Finance Tracker",
+  "source": {
+    "file": "Personal_Finance_Tracker.ds",
+    "origin": "Creator gallery app personal-finance-tracker, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-groups",
+      "steps": [
+        {
+          "op": "report",
+          "report": "Groups",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "add-a-group-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_a_Group",
+          "record": {
+            "Group_Name": "Group_Name lumen 868"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Your New Group Added Successfully"
+          },
+          "bind": {
+            "r_add_a_group_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_a_Group": [
+            {
+              "Group_Name": "Group_Name lumen 868"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-a-group-invalid-duplicate-group-name",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_a_Group",
+          "record": {
+            "Group_Name": "Group_Name lumen 868"
+          },
+          "bind": {
+            "r_add_a_group_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_a_Group",
+          "record": {
+            "Group_Name": "Group_Name lumen 868"
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Group_Name": "This value already exists. Enter a unique value."
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_a_Group": [
+            {
+              "Group_Name": "Group_Name lumen 868"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-groups",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_a_Group",
+          "record": {
+            "Group_Name": "Group_Name lumen 868"
+          },
+          "bind": {
+            "r_add_a_group_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Groups",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_a_Group": [
+            {
+              "Group_Name": "Group_Name lumen 868"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,176 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Employee Onboarding",
+  "source": {
+    "file": "Employee_Onboarding.ds",
+    "origin": "Creator gallery app employee-onboarding, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-asset-types",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Asset_Type",
+          "record": {
+            "Asset_Type": "Asset_Type sable 951"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Asset_Types",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Asset_Type": [
+            {
+              "Asset_Type": "Asset_Type sable 951"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "Creator's baseline read held one record left by the earlier session's race ('Asset_Type sable 951'); replayed as a setup write so the stored state matches the capture."
+      ]
+    },
+    {
+      "id": "add-asset-type-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Asset_Type",
+          "record": {
+            "Asset_Type": "Asset_Type sable 514"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Data Added Successfully!"
+          },
+          "bind": {
+            "r_add_asset_type_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Asset_Type": [
+            {
+              "Asset_Type": "Asset_Type sable 514"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-asset-type-invalid-duplicate-asset-type",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Asset_Type",
+          "record": {
+            "Asset_Type": "Asset_Type sable 514"
+          },
+          "bind": {
+            "r_add_asset_type_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Asset_Type",
+          "record": {
+            "Asset_Type": "Asset_Type sable 514"
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Asset_Type": "This value already exists. Enter a unique value."
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Asset_Type": [
+            {
+              "Asset_Type": "Asset_Type sable 514"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-asset-types",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Asset_Type",
+          "record": {
+            "Asset_Type": "Asset_Type sable 951"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Asset_Type",
+          "record": {
+            "Asset_Type": "Asset_Type sable 514"
+          },
+          "bind": {
+            "r_add_asset_type_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Asset_Types",
+          "expect": {
+            "outcome": "rows",
+            "count": 2
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 2
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_Asset_Type": [
+            {
+              "Asset_Type": "Asset_Type sable 951"
+            },
+            {
+              "Asset_Type": "Asset_Type sable 514"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "Creator's post-mutation read listed the pre-existing record and the new r4 record; the duplicate refusal added no third record."
+      ]
+    }
+  ]
+}
