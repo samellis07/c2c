@@ -115,10 +115,17 @@ test('PDF export: a stream that inflates to 1 GiB FAILS within bounded memory', 
   try {
     const file = join(dir, 'bomb.pdf');
     writeFileSync(file, bomb);
-    const script = `const { verifyPdfExport } = await import(${JSON.stringify(new URL('../src/verify-reports.js', import.meta.url).href)});
-const check = verifyPdfExport(require('node:fs').readFileSync(${JSON.stringify(file)}), ['Alpha']);
-console.log(JSON.stringify({ check, maxRss: process.resourceUsage().maxRSS * 1024 }));`;
-    const run = spawnSync(process.execPath, ['--max-old-space-size=512', '--input-type=commonjs', '-e', `(async () => { ${script} })().catch((err) => { console.error(err); process.exit(1); })`], { encoding: 'utf8' });
+    const child = join(dir, 'pdf-cap-child.mjs');
+    writeFileSync(
+      child,
+      `import { readFileSync } from 'node:fs';
+const { verifyPdfExport } = await import(process.argv[2]);
+const check = verifyPdfExport(readFileSync(process.argv[3]), ['Alpha']);
+console.log(JSON.stringify({ check, maxRss: process.resourceUsage().maxRSS * 1024 }));
+`,
+    );
+    const moduleUrl = new URL('../src/verify-reports.js', import.meta.url).href;
+    const run = spawnSync(process.execPath, ['--max-old-space-size=512', child, moduleUrl, file], { encoding: 'utf8' });
     assert.equal(run.status, 0, run.stderr);
     const { check, maxRss } = JSON.parse(run.stdout.trim().split('\n').pop()!) as { check: { status: string; detail: string }; maxRss: number };
     assert.equal(check.status, 'fail');
