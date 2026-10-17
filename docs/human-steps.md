@@ -20,7 +20,7 @@ The items, in order:
 4. **Fill connection secrets in `~/.c2c/<app>-function-env.json`** — for
    declared connections with third-party credentials (e.g. client secrets, API
    keys, auth tokens). `c2c plan` and `c2c provision` autofill all derivable
-   keys (`C2C_ZOHO_DC`, `APP_URL`, `CATALYST_APP_URL`, bucket names
+   keys (`C2C_ZOHO_DC`, bucket names
    `C2C_STRATUS_BUCKET`, `STRATUS_BUCKET`, and table IDs `TABLE_ID`,
    `TABLE_<NAME>_ID`) into `<out>/function-env.json`; copy that file to
    `~/.c2c/<app>-function-env.json` — outside the generated tree and the

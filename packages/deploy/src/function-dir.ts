@@ -121,11 +121,14 @@ const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
  * environment_variables must not contain reserved keywords"). [UNVERIFIED] No
  * documented list exists in the facts: these are only the names with evidence —
  * a deploy carrying the first six was refused and passed once they were removed,
- * and X_ZOHO_CATALYST_ORG_ID per facts/functions.md. Other names are not assumed
+ * and X_ZOHO_CATALYST_ORG_ID per facts/functions.md. APP_URL and CATALYST_APP_URL:
+ * a live redeploy (2026-10-17) whose env differed from the last accepted one only
+ * by these two names was refused with that 400; which of the two is reserved is
+ * not yet split by a probe, so both are refused. Other names are not assumed
  * reserved. The generated function reads none of them; values it needs come from
  * the Catalyst runtime or c2c's own C2C_* names.
  */
-export const RESERVED_ENV_KEYS: readonly string[] = ['CATALYST_DC', 'CATALYST_ENV', 'CATALYST_PROJECT_ID', 'DC', 'ENV', 'PROJECT_ID', 'X_ZOHO_CATALYST_ORG_ID'];
+export const RESERVED_ENV_KEYS: readonly string[] = ['APP_URL', 'CATALYST_APP_URL', 'CATALYST_DC', 'CATALYST_ENV', 'CATALYST_PROJECT_ID', 'DC', 'ENV', 'PROJECT_ID', 'X_ZOHO_CATALYST_ORG_ID'];
 
 export function isReservedEnvKey(name: string): boolean {
   return RESERVED_ENV_KEYS.includes(name);

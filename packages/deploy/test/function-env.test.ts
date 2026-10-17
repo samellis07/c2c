@@ -502,7 +502,9 @@ test('buildFunctionEnv never emits a reserved name, even from an older file', ()
   });
   for (const reserved of RESERVED_ENV_KEYS) assert.equal(env[reserved], undefined, reserved);
   assert.equal(env.C2C_ZOHO_DC, 'in');
-  assert.equal(env.APP_URL, 'https://app.onslate.in');
+  // Live 2026-10-17: Catalyst refused an env carrying APP_URL/CATALYST_APP_URL.
+  assert.equal(env.APP_URL, undefined);
+  assert.equal(env.CATALYST_APP_URL, undefined);
   assert.equal(env.MY_CLIENT_SECRET, 'kept');
   // The DC still carries over from an older file that only had the reserved name.
   assert.equal(buildFunctionEnv({ existingEnv: { DC: 'eu' } }).C2C_ZOHO_DC, 'eu');
@@ -512,7 +514,7 @@ test('envVariables refuses a reserved name and keeps a non-reserved CATALYST_ na
   for (const reserved of RESERVED_ENV_KEYS) {
     assert.throws(() => envVariables('live', { [reserved]: 'x' }), new RegExp(`function env: ${reserved} is a name Catalyst reserves`));
   }
-  assert.equal(envVariables('live', { CATALYST_APP_URL: 'https://a.onslate.in' }).CATALYST_APP_URL, 'https://a.onslate.in');
+  assert.equal(envVariables('live', { CATALYST_SOMETHING: 'x' }).CATALYST_SOMETHING, 'x');
 });
 
 // Live failure F-CM-ENV: the provisioned env had no C2C_STRATUS_BUCKET and
