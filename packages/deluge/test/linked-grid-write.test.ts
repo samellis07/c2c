@@ -77,14 +77,18 @@ ${tab(1)}}
 const app = deriveIr(parse(SOURCE));
 
 test('a linked grid is a subform link onto the linked table, with no order column', () => {
-  assert.deepEqual(subformLinksFor(app, 'Quote'), [{ field: 'Lines', table: 'Line', parentColumn: 'Quote_id' }]);
+  assert.deepEqual(subformLinksFor(app, 'Quote'), [{ field: 'Lines', table: 'Line', parentColumn: 'Quote_id', linkedForm: 'Line' }]);
   assert.deepEqual(subformLinksFor(app, 'Line'), []);
 });
 
 test('the on-success route screens linked-grid rows against the linked form and saves them', () => {
   const file = generate(app).files.find((item) => item.path === 'functions/aio/quote/on-success.mjs');
   assert.ok(file, 'on-success module generated');
-  assert.match(file.source, /export const subformTables = \{"Quote":\[\{"field":"Lines","table":"Line","parentColumn":"Quote_id"\}\]\};/);
+  assert.match(file.source, /export const subformTables = \{"Quote":\[\{"field":"Lines","table":"Line","parentColumn":"Quote_id","linkedForm":"Line"\}\]\};/);
+  // Linked rows are written under the linked form's grant, checked before any store write.
+  assert.match(file.source, /authorizeSubformWrites\(datastore, rowId, split\.children, \{ replace: true, authorize: linkedSubformGate\(ctx\) \}\)/);
+  assert.match(file.source, /authorizeSubformWrites\(datastore, "", split\.children, \{ authorize: linkedSubformGate\(ctx\) \}\)/);
+  assert.match(file.source, /authorizeDelete\(access, ctx\.principal, link\.linkedForm\)/);
   const fields = JSON.parse(/^export const fields = (.*);$/m.exec(file.source)![1]!) as WriteField[];
   const lines = fields.find((field) => field.name === 'Lines');
   assert.deepEqual(lines, { name: 'Lines', kind: 'subform', fields: [{ name: 'Item', kind: 'lookup' }, { name: 'Qty', scalar: 'number' }] });
