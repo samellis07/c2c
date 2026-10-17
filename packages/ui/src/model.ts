@@ -1174,7 +1174,7 @@ function hrefFor(app: App, kind: string, name: string): string {
   return `#/report/${encodeURIComponent(name)}`;
 }
 
-interface HandlerMeta {
+export interface HandlerMeta {
   form: string | null;
   event: string | null;
   when: string | null;
@@ -1195,12 +1195,12 @@ function handlersFrom(files: readonly GeneratedFile[]): UiHandler[] {
     if (!meta?.form || !meta.when || meta.when === 'function') continue;
     const browser = `slate/assets/handlers/${file.path.slice('client/handlers/'.length).replace(/\.mjs$/, '.js')}`;
     const endpoint = `/forms/${encodeURIComponent(meta.form)}/${meta.when}`;
-    const input = /(?:user input|update) of\s+(.+)$/i.exec(meta.event ?? '');
+    const input = eventField(meta.event ?? '');
     handlers.push({
       form: meta.form,
       event: meta.event ?? meta.when,
       when: meta.when,
-      ...(input?.[1] ? { field: input[1].trim() } : {}),
+      ...(input ? { field: input } : {}),
       ...(meta.recordEvent ? { recordEvent: meta.recordEvent } : {}),
       module: `@@asset:${browser}@@`,
       ...(endpoints.has(endpoint) ? { endpoint } : {}),
@@ -1210,22 +1210,62 @@ function handlersFrom(files: readonly GeneratedFile[]): UiHandler[] {
   return handlers;
 }
 
-function readMeta(source: string): HandlerMeta | undefined {
-  const match = /export const c2cHandler = (\{[\s\S]*?\});/.exec(source);
-  if (!match) return undefined;
+const LINE_TERMINATORS = '\n\r\u2028\u2029';
+
+/**
+ * The field a `user input of <field>` / `update of <field>` event names: the
+ * text after the earliest such phrase that is followed by whitespace and then
+ * runs to the end on one line (whitespace between the phrase and that last
+ * line may span lines), trimmed. Every candidate phrase is checked in constant
+ * time against precomputed bounds, so the scan is linear in the event text.
+ */
+export function eventField(event: string): string | undefined {
+  let tailStart = 0;
+  for (let at = event.length - 1; at >= 0; at--) {
+    if (LINE_TERMINATORS.includes(event[at])) {
+      tailStart = at + 1;
+      break;
+    }
+  }
+  let blankFrom = tailStart;
+  while (blankFrom > 0 && /\s/.test(event[blankFrom - 1])) blankFrom--;
+  for (let at = 0; at < event.length; at++) {
+    const phrase = ['user input of', 'update of'].find((item) => event.slice(at, at + item.length).toLowerCase() === item);
+    if (!phrase) continue;
+    const end = at + phrase.length;
+    if (end >= event.length || !/\s/.test(event[end]) || (end < tailStart && end < blankFrom)) continue;
+    return event.slice(end).trim() || undefined;
+  }
+  return undefined;
+}
+
+const HANDLER_META_PREFIX = 'export const c2cHandler = {';
+
+/**
+ * The `c2cHandler` metadata object of a generated handler module: from the
+ * first `export const c2cHandler = {` to the first `};` after it, located
+ * with indexOf so the scan stays linear in the module source.
+ */
+export function readMeta(source: string): HandlerMeta | undefined {
+  const start = source.indexOf(HANDLER_META_PREFIX);
+  if (start < 0) return undefined;
+  const open = start + HANDLER_META_PREFIX.length - 1;
+  const end = source.indexOf('};', open + 1);
+  if (end < 0) return undefined;
   try {
-    return JSON.parse(match[1]) as HandlerMeta;
+    return JSON.parse(source.slice(open, end + 1)) as HandlerMeta;
   } catch {
     return undefined;
   }
 }
 
 export function slug(value: string): string {
-  const cleaned = value
-    .replace(/[^A-Za-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase();
-  return cleaned || 'item';
+  const dashed = value.replace(/[^A-Za-z0-9]+/g, '-');
+  let start = 0;
+  let end = dashed.length;
+  while (start < end && dashed[start] === '-') start++;
+  while (end > start && dashed[end - 1] === '-') end--;
+  return dashed.slice(start, end).toLowerCase() || 'item';
 }
 
 export function formStatus(form: UiForm): 'generated' | 'todo' {
