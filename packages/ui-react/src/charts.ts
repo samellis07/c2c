@@ -412,7 +412,7 @@ function convert(ctx: Ctx, node: ZmlElement): PageElement[] {
       out.push({ kind: 'todo', tag: node.tag, reason: `The <${tag}> element is removed from this page snippet by the sanitizer` });
     }
     if (carried.droppedRules > 0) {
-      const lost = droppedStyleRulesTodo('page', carried.droppedRules);
+      const lost = droppedStyleRulesTodo('page', carried.droppedRules, carried.dropped);
       out.push({ kind: 'todo', tag: node.tag, reason: lost.reason });
     }
     for (const child of ui.children ?? []) {

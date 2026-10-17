@@ -1073,6 +1073,7 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
   const todoLeaves = pageLeaves.filter((el) => el.kind === 'todo');
   // Dropped `<style>` CSS is one counted manual step per page; the count stays off the generated element.
   let styleRules = 0;
+  const styleDrops: string[] = [];
   let hadStaticStyle = false;
   const styles: string[] = [];
   const cssEscape = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, (ch) => `\\${ch.codePointAt(0)!.toString(16)} `);
@@ -1082,6 +1083,7 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
       const carried = carriedStyleRules(el.staticCss, `[data-page="${cssEscape(page.name)}"]`);
       if (carried.css) styles.push(carried.css);
       styleRules += carried.droppedRules;
+      styleDrops.push(...carried.dropped);
     } else styleRules += el.droppedStyleRules ?? 0;
     delete el.droppedStyleRules;
     delete el.staticCss;
@@ -1111,7 +1113,7 @@ function buildPage(page: App['pages'][number], todos: UiTodo[], env?: ZmlEnv): U
     if (dropped.length) todos.push({ area: 'zml', name: `${page.name}.${el.tag}`, reason: droppedStyleReason(dropped) });
   }
   if (styleRules) {
-    const lost = droppedStyleRulesTodo(page.name, styleRules);
+    const lost = droppedStyleRulesTodo(page.name, styleRules, styleDrops);
     todos.push({ area: 'zml', name: `${page.name}.style`, reason: lost.reason, manualReasons: ['sanitizer-loss'], manualStep: lost.step });
   }
   const status = pageLeaves.length > 0 && todoLeaves.length === pageLeaves.length ? 'todo' : todoLeaves.length > 0 ? 'partial' : 'generated';
