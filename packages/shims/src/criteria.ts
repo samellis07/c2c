@@ -274,21 +274,32 @@ function compileIdLeaf(c: Criteria): string {
   const row = ID_ROWID;
   switch (c.op) {
     case '==':
+      // `ID == null` is the null test: no stored row has a null id.
+      if (c.value == null) return `(${src} IS NULL AND ${row} IS NULL)`;
       return `((${src} IS NOT NULL AND ${src} = ${idLit(c.value)}) OR ${row} = ${idLit(c.value)})`;
     case '!=':
+      if (c.value == null) return `(${src} IS NOT NULL OR ${row} IS NOT NULL)`;
       return `((${src} IS NULL OR ${src} != ${idLit(c.value)}) AND ${row} != ${idLit(c.value)})`;
     case 'in': {
-      const items = (Array.isArray(c.value) ? c.value : [c.value]).map((v) => idLit(v)).join(', ');
-      return `((${src} IS NOT NULL AND ${src} IN (${items})) OR ${row} IN (${items}))`;
+      // A null item can never match an id (`sameIdCell` returns false for null),
+      // so it is dropped; an all-null list matches nothing.
+      const items = (Array.isArray(c.value) ? c.value : [c.value]).filter((v) => idCriteriaValue(v) != null);
+      if (!items.length) return NEVER;
+      const list = items.map((v) => idLit(v)).join(', ');
+      return `((${src} IS NOT NULL AND ${src} IN (${list})) OR ${row} IN (${list}))`;
     }
     case '<':
     case '>':
     case '<=':
     case '>=':
+      // ZCQL is SQL three-valued: a comparison against NULL is UNKNOWN.
+      if (c.value == null) return NEVER;
       return `((${src} IS NOT NULL AND ${idOrderZcql(src, c.op, c.value)}) OR (${src} IS NULL AND ${row} ${c.op} ${idLit(c.value)}))`;
     case 'contains':
     case 'startsWith':
     case 'endsWith': {
+      // A null needle is the empty pattern: it matches every stored row.
+      if (c.value == null) return ALWAYS;
       const pattern = like(idCriteriaValue(c.value), c.op);
       return `((${src} IS NOT NULL AND ${src} LIKE ${pattern}) OR (${src} IS NULL AND ${row} LIKE ${pattern}))`;
     }
@@ -347,7 +358,7 @@ function matchIdLeaf(row: Record<string, unknown>, c: Criteria): boolean {
     case '<=':
     case '>=': {
       const cell = src != null ? src : rid;
-      if (cell == null) return false;
+      if (cell == null || c.value == null) return false;
       const diff = compareIdCells(cell, c.value);
       if (c.op === '<') return diff < 0;
       if (c.op === '>') return diff > 0;
@@ -391,11 +402,9 @@ export function compileCriteria(c: Criteria, encrypted: ReadonlySet<string> = ne
 }
 
 function compileMode(c: Criteria, encrypted: ReadonlySet<string>, decimals: DecimalColumns, mode: Mode): string {
-  // Deluge `Field == input.X` with X empty matches the rows where Field is
-  // empty; ZCQL has no `= null`, only IS NULL / IS NOT NULL.
-  if ((c.op === '==' || c.op === '!=') && c.field !== ID_FIELD && (c.value === null || c.value === undefined)) {
-    return compileMode({ op: c.op === '==' ? 'isNull' : 'notNull', field: c.field }, encrypted, decimals, mode);
-  }
+  // ZCQL is SQL three-valued: `col = null` is never TRUE. The documented null
+  // tests are `IS NULL` / `IS NOT NULL` (Catalyst ZCQL WHERE operators).
+  if ((c.op === '==' || c.op === '!=') && c.value == null) c = { op: c.op === '==' ? 'isNull' : 'notNull', field: c.field };
   if (mode !== 'exact' && !touchesDecimal(c, decimals) && !hasLooseLike(c)) mode = 'exact';
   if (mode !== 'exact' && isDecimalLeaf(c, decimals)) return decimalLeaf(c, decimals[c.field]!, mode);
   switch (c.op) {
@@ -441,12 +450,18 @@ function compileMode(c: Criteria, encrypted: ReadonlySet<string>, decimals: Deci
       // A subset of a literal wildcard cannot be expressed as a LIKE: emit the
       // empty match and let the in-memory pass decide (used under NOT).
       if (mode === 'sub' && looseLike(c)) return NEVER;
+      // A null needle is the empty pattern: it matches every row.
+      if (c.value == null) return ALWAYS;
       return `${c.field} LIKE ${like(c.value, c.op)}`;
     case 'in': {
       if (c.field === ID_FIELD) return compileIdLeaf(c);
       if (encrypted.has(c.field)) throw new EncryptedCriteriaError(c.field, 'IN');
-      const items = Array.isArray(c.value) ? c.value.map((v) => lit(v)).join(', ') : lit(c.value);
-      return `${c.field} IN (${items})`;
+      // `IN (…, null, …)` never matches a NULL row; a null item is an IS NULL disjunct.
+      const items = Array.isArray(c.value) ? c.value : [c.value];
+      const values = items.filter((v) => v != null);
+      if (!values.length) return `${c.field} IS NULL`;
+      const list = `${c.field} IN (${values.map((v) => lit(v)).join(', ')})`;
+      return values.length === items.length ? list : `(${list} OR ${c.field} IS NULL)`;
     }
     case '==':
       if (c.field === ID_FIELD) return compileIdLeaf(c);
@@ -458,6 +473,8 @@ function compileMode(c: Criteria, encrypted: ReadonlySet<string>, decimals: Deci
     case '>=':
       if (c.field === ID_FIELD) return compileIdLeaf(c);
       if (encrypted.has(c.field)) throw new EncryptedCriteriaError(c.field, c.op);
+      // A relational comparison to null is never TRUE (same three-valued rule).
+      if (c.value == null) return NEVER;
       return `${c.field} ${c.op} ${lit(c.value)}`;
     default: {
       const never: never = c;
@@ -738,6 +755,9 @@ function tryDate(value: unknown): DelugeDate | null {
 }
 
 function compareRel(left: unknown, right: unknown, op: '<' | '>' | '<=' | '>='): boolean {
+  // ZCQL three-valued logic, as decimal.cmp already applies: a relational
+  // comparison against a null operand is never TRUE.
+  if (left == null || right == null) return false;
   const ld = tryDate(left);
   const rd = tryDate(right);
   // A date orders against a date. A blank or a non-date does not match a date bound.
