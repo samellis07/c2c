@@ -184,6 +184,40 @@ function spec(fields: FieldSpec[]): FormSpec {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * How long a lazy widget or an async load may take before the wait counts as
+ * failed. React holds a Suspense fallback for ~300 ms before it reveals a
+ * resolved lazy widget, and a loaded CI runner can chain several of those.
+ */
+const WAIT_MS = 15000;
+
+/**
+ * Polls `cond` (running `step` before each check) until it holds. The wait is
+ * bounded twice: by elapsed time on the monotonic clock (never Date.now, which
+ * a faked or frozen wall clock would stop) and by a hard turn count, so even a
+ * clock that never advances ends it. A miss fails naming `what`.
+ */
+async function waitFor(cond: () => boolean, what: string, ms = WAIT_MS, step?: () => void): Promise<void> {
+  const deadline = performance.now() + ms;
+  for (let turn = 0; turn < Math.ceil(ms / 5); turn++) {
+    step?.();
+    if (cond()) return;
+    if (performance.now() >= deadline) break;
+    await delay(5);
+  }
+  assert.ok(cond(), `timed out waiting for ${what}`);
+}
+
+test('a wait that never succeeds fails fast under a frozen clock instead of looping', { timeout: 5000 }, async (t) => {
+  t.mock.method(Date, 'now', () => 0);
+  t.mock.method(performance, 'now', () => 0);
+  const started = process.hrtime.bigint();
+  let checks = 0;
+  await assert.rejects(waitFor(() => (checks++, false), 'a widget that never mounts', 200), /timed out waiting for a widget that never mounts/);
+  assert.ok(Number(process.hrtime.bigint() - started) / 1e6 < 1000, 'the turn cap ends the wait within a second');
+  assert.ok(checks <= 41, `the wait checked ${checks} times for a 40-turn cap`);
+});
+
 /** Mounts every field of `form` through <Field> into a jsdom form and waits out the lazy widgets. */
 async function render(record: Record<string, unknown>, fields: FieldSpec[], mode: 'add' | 'edit' = 'add'): Promise<Rendered> {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://127.0.0.1/', pretendToBeVisual: true });
@@ -229,10 +263,7 @@ async function render(record: Record<string, unknown>, fields: FieldSpec[], mode
   );
   const formEl = container.querySelector('form') as unknown as HTMLFormElement;
   const flush = async () => {
-    for (let i = 0; i < 100 && container.querySelector('[aria-busy="true"]'); i++) {
-      flushSync(() => {});
-      await delay(5);
-    }
+    await waitFor(() => !container.querySelector('[aria-busy="true"]'), 'a lazy widget to mount', WAIT_MS, () => flushSync(() => {}));
     flushSync(() => {});
     assert.equal(container.querySelector('[aria-busy="true"]'), null, 'a lazy widget never mounted');
   };
@@ -614,10 +645,7 @@ async function renderFormView(mode: 'add' | 'edit', fields: FieldSpec[], api: an
   );
   const formEl = container.querySelector('form') as unknown as HTMLFormElement;
   const flush = async () => {
-    for (let i = 0; i < 100 && container.querySelector('[aria-busy="true"]'); i++) {
-      flushSync(() => {});
-      await delay(5);
-    }
+    await waitFor(() => !container.querySelector('[aria-busy="true"]'), 'a lazy widget to mount', WAIT_MS, () => flushSync(() => {}));
     flushSync(() => {});
   };
   await flush();
@@ -647,9 +675,7 @@ test('edit mode submit before load posts NOTHING; failed fetch posts nothing; af
 
   // Fail fetch: the error card replaces the form, so there is nothing to submit
   resolveLoad({ ok: false });
-  while (!rendered.box.querySelector('[data-state="error"]')) {
-    await delay(5);
-  }
+  await waitFor(() => rendered.box.querySelector('[data-state="error"]') !== null, 'the load error card');
   await rendered.flush();
   assert.equal(rendered.box.querySelector('form'), null, 'a failed edit read does not leave an empty form open');
   assert.match(rendered.box.querySelector('[data-state="error"]')?.textContent || '', /could not be loaded/);
@@ -669,11 +695,7 @@ test('edit mode successful load re-enables submit and clear behaviour works', as
   const rendered = await renderFormView('edit', fields, api);
   
   // Wait for load
-  while (true) {
-    const input = rendered.box.querySelector('[data-field="Qty"] input[role="spinbutton"]') as HTMLInputElement;
-    if (input && input.value === '7') break;
-    await delay(5);
-  }
+  await waitFor(() => (rendered.box.querySelector('[data-field="Qty"] input[role="spinbutton"]') as HTMLInputElement | null)?.value === '7', 'the loaded record');
   await rendered.flush();
   
   // Clear behavior
@@ -683,9 +705,7 @@ test('edit mode successful load re-enables submit and clear behaviour works', as
   click(rendered, 'button[type="submit"]');
   
   // Wait for post
-  while (!posted) {
-    await delay(5);
-  }
+  await waitFor(() => Boolean(posted), 'the submit post');
   await rendered.flush();
   
   assert.ok(posted);
@@ -789,15 +809,6 @@ test('a subform link name that contains punctuation still posts its rows on edit
   const rendered = await render(stored, fields, 'edit');
   assert.deepEqual(readRecord(rendered.formEl, spec(fields)), stored);
 });
-
-/** Polls a condition with a deadline so a missing UI update fails instead of hanging the suite. */
-async function waitFor(cond: () => boolean, what: string, ms = 5000): Promise<void> {
-  for (let waited = 0; waited < ms; waited += 5) {
-    if (cond()) return;
-    await delay(5);
-  }
-  assert.ok(cond(), `timed out waiting for ${what}`);
-}
 
 function stubOpenedWindow(rendered: Rendered): { opened: () => string | undefined } {
   let openedUrl: string | undefined;
