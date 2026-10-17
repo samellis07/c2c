@@ -161,3 +161,11 @@ Rule: [DOC] `alert(message)` is allowed in form workflows for Subform on add row
 ### Same-event form workflow ordering and cancellation
 
 Rule: [UNVERIFIED] Creator's export order is assumed to be the execution order when multiple workflows share one form event. Whether a `cancel submit` in one workflow suppresses later workflows is not established by the cited On Success documentation; the generated merged handler stops after cancellation as the safe behavior. Source pointer: [On Success action](https://help.zoho.com/portal/en/kb/creator/developer-guide/workflows/create-and-manage-on-success-action/articles/understand-on-success-action) describes when the event runs but does not specify order among workflows or cancellation propagation.
+
+### Form properties actions (`type = presuccess`, `on start`)
+
+Rule: [DOC] The form builder's Properties panel offers "Direct to" (where the user goes after submitting; by default the same form reloads) and an email notification sent to users after they submit. Both are documented as on-submission behaviour, not pre-validate steps: [Redirection - On Successful Submission](https://help.zoho.com/portal/en/kb/creator/faqs/forms/properties-of-forms/articles/redirection-on-successful-submission), [Enable redirection on form submission](https://help.zoho.com/portal/en/kb/creator/developer-guide/forms/manage-forms/articles/redirect-on-form-submission), [Sending an Email on Form Submission](https://help.zoho.com/portal/en/kb/creator/developer-guide/forms/manage-forms/articles/understand-email-notification).
+
+- [UNVERIFIED] A `.ds` export writes these settings as a `type = presuccess` workflow with an `on start` → `actions` body (an `openURL(...)` for Direct to, a `sendmail` for the email), named `<Action> - Form Properties`. No Creator page documents the `presuccess` keyword or where `on start` runs relative to On Validate.
+- [UNVERIFIED] Neither page says whether that mail is sent or that redirect is taken when On Validate cancels the submit or the save fails. The documented wording ("after submitting", "on successful submission") points to after the save.
+- The Properties panel offers no field assignment, `cancel submit` or record insert, so an `on start` body that contains them is not something these pages describe.
