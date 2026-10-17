@@ -104,7 +104,7 @@ export const CATALYST_LIMITS: readonly CatalystLimit[] = [
     verified: false,
     action: 'report',
     whenExceeded:
-      'Reported only. Rewriting extra lookups to plain bigint is a separate mapping change. Generation does not downgrade them and does not drop them.',
+      'Generation keeps 15 foreign keys per table (ON-DELETE-CASCADE ones first, then column order) and stores the rest as plain bigint ROWID ids with no store check or ON DELETE. The loader still remaps them. The migration report names every such lookup; none is dropped.',
   },
   {
     id: 'datastore.tables_per_org',
@@ -775,7 +775,7 @@ export function measureApp(plan: SchemaPlan, reports: readonly { form?: string; 
     const columns = logicalColumns(plan, table);
     const text = columns.filter(isText).length;
     const unique = columns.filter((column) => column.unique && isText(column)).length;
-    const fk = columns.filter((column) => column.dataType === 'Foreign Key').length;
+    const fk = columns.filter((column) => column.dataType === 'Foreign Key' || column.plainLookup).length;
     if (columns.length > columnCap) {
       counts.formsOverColumnCap += 1;
       wideForms.push(table.form);

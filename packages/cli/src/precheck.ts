@@ -36,7 +36,7 @@ import { AGGREGATE_METHODS, recognisedBuiltinNames } from '../../deluge/src/disp
 import { normType } from '../../deluge/src/types.js';
 import { UNIQUE_VARCHAR_MAX_PER_TABLE, fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
 import { generateSchema, isStoreVarchar } from '../../schema/src/generator.js';
-import { TABLE_NAME_LENGTH_UNVERIFIED } from '../../schema/src/limits.js';
+import { TABLE_NAME_LENGTH_UNVERIFIED, limitValue } from '../../schema/src/limits.js';
 import { cyclicForeignKeyComponents, foreignKeyId, tableCreatePlan } from '../../deploy/src/tables.js';
 
 /** Null: no local doc states a Creator link-name maximum. Do not invent one. */
@@ -268,6 +268,7 @@ export function precheck(app: App, source: string): PrecheckReport {
   approvers(app, source, formByName, walker.assignments, findings);
   converterGaps(app, source, findings);
   uniqueVarcharBudget(app, source, findings);
+  foreignKeyBudget(app, source, findings);
 
   // States Creator's editor accepts but that break a later import, export, Duplicate or backup.
   reservedNames(app, source, findings);
@@ -1917,6 +1918,30 @@ function uniqueVarcharBudget(app: App, source: string, findings: PrecheckFinding
       location: loc(source, first?.span.start ?? form?.span.start, table.form, appLevel[0]!.name),
       message: `${table.name} has ${kept.length + appLevel.length} unique text fields; Data Store allows ${UNIQUE_VARCHAR_MAX_PER_TABLE} unique varchar columns per table (403 "Reached max number of columns of Unique varchar type"). Store-level unique: ${kept.join(', ') || 'none'}. Checked by the c2c handler instead: ${appLevel.map((column) => column.name).join(', ')}.`,
       fix: `Keep at most ${UNIQUE_VARCHAR_MAX_PER_TABLE} no-duplicate text fields on this form, or accept handler-level checks: they run before each insert and update but are not atomic, and a CSV or seed import does not re-check them.`,
+    });
+  }
+}
+
+/**
+ * Data Store foreign-key budget per table (datastore.fk_columns, unverified). The schema
+ * stores the lookups past it as plain bigint ROWID ids, so deploy does not fail;
+ * precheck names each one, since the store neither checks it nor applies ON DELETE.
+ */
+function foreignKeyBudget(app: App, source: string, findings: PrecheckFinding[]): void {
+  const max = limitValue('datastore.fk_columns');
+  for (const table of generateSchema(app).tables) {
+    const plain = table.columns.filter((column) => column.plainLookup);
+    if (!plain.length) continue;
+    const form = app.forms.find((item) => item.name === table.form);
+    const first = form ? findField(form.fields, plain[0]!.name) : undefined;
+    push(findings, {
+      check: 'datastore.fk_columns',
+      severity: 'warning',
+      location: loc(source, first?.span.start ?? form?.span.start, table.form, plain[0]!.name),
+      message: `${table.name} has ${max + plain.length} lookups; Data Store allows ${max} foreign keys per table (unverified). Stored as plain bigint ROWID ids with no store check or ON DELETE: ${plain
+        .map((column) => `${column.name} -> ${column.relation!.table}`)
+        .join(', ')}.`,
+      fix: `Keep at most ${max} lookups on this form (move the rest to a child table), or accept plain ids: deleting a parent row leaves them behind, so clear or re-point them when you delete one.`,
     });
   }
 }

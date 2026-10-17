@@ -1116,7 +1116,7 @@ export function f5TableBudgets(tables: readonly SchemaTable[]): CheckResult {
       overDefault.push(`table ${table.name}: ${table.columns.length}/${maxColumns} columns (over the unverified default ${columnsDefault}; relies on the raised cap — confirm with P-COLS)`);
     const uniques = table.columns.filter((c) => c.unique && c.dataType === 'VarChar').map((c) => c.name);
     if (uniques.length > 2) breaches.push(`table ${table.name} needs ${uniques.length} unique varchar columns (${uniques.join(', ')}); Catalyst allows 2`);
-    const fks = table.columns.filter((c) => c.relation).length;
+    const fks = table.columns.filter((c) => c.relation && !c.plainLookup).length;
     if (fks > 15) breaches.push(`table ${table.name} needs ${fks} foreign keys (max 15)`);
   }
   if (breaches.length) {

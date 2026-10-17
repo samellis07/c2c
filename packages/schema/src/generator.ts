@@ -60,6 +60,12 @@ export interface SchemaColumn {
   appMandatory?: boolean;
   defaultValue?: string;
   relation?: { table: string; column: 'ROWID'; onDelete: OnDelete };
+  /**
+   * A Creator lookup past the per-table foreign-key budget: stored as a plain BigInt
+   * holding the parent ROWID. `relation` names the parent so the loader still remaps
+   * ids, but the store enforces neither the reference nor `onDelete`.
+   */
+  plainLookup?: boolean;
   /** This Double is the ZCQL criteria/sort shadow of the named exact-decimal column. */
   shadowFor?: string;
   note?: string;
@@ -1144,6 +1150,7 @@ export function generateSchema(app: App, opts?: { source?: readonly SourceTableD
   }
   for (const table of tables) demoteUniqueDates(table, issues);
   for (const table of tables) budgetUniqueVarchar(table, issues);
+  for (const table of tables) budgetForeignKeys(table, issues);
 
   const renames: ColumnRename[] = [];
   for (const table of tables) {
@@ -1269,6 +1276,45 @@ function budgetUniqueVarchar(table: SchemaTable, issues: MigrationIssue[]): void
   });
 }
 
+/**
+ * Keep the datastore.fk_columns limit's worth of lookups as store foreign keys: the ON-DELETE-CASCADE
+ * ones first (parent ids and mandatory lookups), then column order. The rest become
+ * plain BigInt ROWID columns that keep `relation` (the loader remaps them) but have
+ * no store constraint. Every demoted lookup is named in the migration report.
+ */
+function budgetForeignKeys(table: SchemaTable, issues: MigrationIssue[]): void {
+  if (table.nosql) return;
+  const max = limitValue('datastore.fk_columns');
+  const keys = table.columns.filter((column) => column.dataType === 'Foreign Key' && column.relation);
+  if (keys.length <= max) return;
+  const ranked = [
+    ...keys.filter((column) => column.relation!.onDelete === 'ON-DELETE-CASCADE'),
+    ...keys.filter((column) => column.relation!.onDelete !== 'ON-DELETE-CASCADE'),
+  ];
+  const excess = new Set(ranked.slice(max));
+  const demoted = keys.filter((column) => excess.has(column));
+  for (const column of demoted) {
+    column.dataType = 'BigInt';
+    column.plainLookup = true;
+    column.note = [
+      column.note,
+      `Plain bigint ROWID of ${column.relation!.table}, not a foreign key: Data Store allows ${max} foreign keys per table. The store does not check the id or apply ${column.relation!.onDelete}.`,
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+  issues.push({
+    severity: 'warning',
+    form: table.form,
+    message: `${table.name} has ${keys.length} lookups; Data Store allows ${max} foreign keys per table (unverified). Foreign keys: ${keys
+      .filter((column) => !excess.has(column))
+      .map((column) => column.name)
+      .join(', ')}. Stored as plain bigint ROWID ids (${demoted.length}): ${demoted
+      .map((column) => `${column.name} -> ${column.relation!.table}`)
+      .join(', ')}. Manual step: the store does not check these ids or apply ON DELETE, so a deleted parent row leaves its id behind; clear or re-point those ids when you delete a parent row, or move these lookups to a child table.`,
+  });
+}
+
 export function schemaAsJson(plan: SchemaPlan): string {
   return JSON.stringify(plan, null, 2);
 }
@@ -1284,7 +1330,8 @@ function columnLine(column: SchemaColumn): string {
   if (column.mandatory) bits.push('mandatory');
   if (column.unique) bits.push('unique');
   if (column.defaultValue !== undefined) bits.push(`default=${JSON.stringify(column.defaultValue)}`);
-  if (column.relation) bits.push(`references=${column.relation.table}.${column.relation.column} on_delete=${column.relation.onDelete}`);
+  if (column.plainLookup) bits.push(`plain-id-of=${column.relation!.table}.${column.relation!.column}`);
+  else if (column.relation) bits.push(`references=${column.relation.table}.${column.relation.column} on_delete=${column.relation.onDelete}`);
   return bits.join(' ');
 }
 

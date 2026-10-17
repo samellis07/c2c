@@ -128,9 +128,9 @@ is rejected: always send the hyphenated enum.
 Rule: [UNVERIFIED] assume a table holds at most 15 foreign-key columns
 ([L-FOREIGN-KEYS](references/limits.md#l-foreign-keys-foreign-keys-per-table)).
 Map the
-first 15 lookups as real foreign keys with the parent table id and
-`ON-DELETE-CASCADE`; store any further lookups as plain bigint ROWID
-values without a constraint. `c2c plan` warns past the count. Declare
+first 15 lookups as real foreign keys (the `ON-DELETE-CASCADE` ones
+first, then column order) with the parent table id; store any further
+lookups as plain bigint ROWID values without a constraint. `c2c plan` warns past the count. Declare
 every foreign key at generation time: ZCQL joins only run across a
 declared key.
 
