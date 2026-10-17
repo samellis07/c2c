@@ -2519,15 +2519,17 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
       const where = compileCriteria(scoped.criteria);
       const storedRows = await datastore.query(formName, where === "true" ? "" : where, 1, 0, "ORDER BY ROWID");
       const stored = Array.isArray(storedRows) && storedRows[0] && typeof storedRows[0] === "object" ? projectFields(storedRows[0], scoped.fields) : null;
-      if (stored) {
-        loaded = {};
-        for (const name of fieldNames) {
-          if (Object.prototype.hasOwnProperty.call(ctx.record, name) || !Object.prototype.hasOwnProperty.call(stored, name)) continue;
-          loaded[name] = stored[name];
-          ctx.record[name] = stored[name];
-        }
-        ctx.old = { ...stored };
+      if (!stored) {
+        send(res, 403, { dryRun: false, error: "record access: " + formName + " row is not visible" });
+        return;
       }
+      loaded = {};
+      for (const name of fieldNames) {
+        if (Object.prototype.hasOwnProperty.call(ctx.record, name) || !Object.prototype.hasOwnProperty.call(stored, name)) continue;
+        loaded[name] = stored[name];
+        ctx.record[name] = stored[name];
+      }
+      ctx.old = { ...stored };
     }
 `
     : '';
