@@ -120,6 +120,8 @@ interface Column {
   maxLength?: number;
   min?: number;
   max?: number;
+  /** `decimalplace` from the .ds: digits after the point for a decimal column. */
+  scale?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +248,11 @@ function columnsOf(field: Field, warnings: CreatorImportWarning[], form: Form): 
       return v !== undefined && Number.isFinite(Number(v)) ? Number(v) : undefined;
     })(),
     ...numberRange(field),
+    ...(() => {
+      const raw = prop(field, 'decimalplace')?.trim();
+      const v = raw ? Number(raw) : NaN;
+      return Number.isInteger(v) && v >= 0 && v < 2 ? { scale: v } : {};
+    })(),
   };
   if (isSubformField(field)) return out; // form-level skip decided by caller
   if (isFormulaField(field)) {
@@ -398,7 +405,7 @@ function numberValue(col: Column, i: number, rng: () => number): string {
   const hi = col.max !== undefined && col.max > lo ? col.max : 500;
   if (col.kind === 'decimal') {
     const cents = Math.floor(rng() * Math.min(hi, 5000) * 100) + 50;
-    return (cents / 100).toFixed(2);
+    return (cents / 100).toFixed(col.scale ?? 2);
   }
   return String(lo + ((i * 37 + Math.floor(rng() * 13)) % Math.max(1, Math.floor(hi - lo + 1))));
 }
@@ -835,12 +842,11 @@ function buildManual(
   return { form: form.name, fileName: worksheetFileName(form.name), body: `${lines.join('\n')}\n`, summary };
 }
 
-export function generateCreatorImport(app: App, opts?: { rows?: number; seed?: string }): CreatorImportResult {
-  const rows = opts?.rows ?? 20;
-  if (!Number.isInteger(rows) || rows < 0) throw new Error('c2c seed: --rows must be a non-negative integer');
-  const seed = opts?.seed || app.name || 'app';
-  const warnings: CreatorImportWarning[] = [];
-
+/**
+ * Columns and scalar values for every form, importable or not. Lookup cells
+ * are left empty here; the callers fill them.
+ */
+function seedGrid(app: App, rows: number, seed: string, warnings: CreatorImportWarning[]) {
   // Columns for every form — skipped forms still generate values in memory so
   // children can reference the display values the user must create by hand.
   const columns = new Map<string, Column[]>();
@@ -884,13 +890,11 @@ export function generateCreatorImport(app: App, opts?: { rows?: number; seed?: s
 
   // Generate every form's grid (including skipped parents).
   const grid = new Map<string, Map<string, string>[]>();
-  const caps = new Map<string, number>();
   for (const name of order) {
     const form = app.forms.find((f) => f.name === name)!;
     const cols = columns.get(name) ?? [];
     const cap = allowedEntries(form);
     const count = cap !== undefined ? Math.min(rows, cap) : rows;
-    caps.set(name, count);
     if (cap !== undefined && cap < rows) {
       warnings.push({ form: name, message: `${name} allows ${cap} total entr${cap === 1 ? 'y' : 'ies'}; generated ${count} row(s) instead of ${rows}.` });
     }
@@ -912,6 +916,17 @@ export function generateCreatorImport(app: App, opts?: { rows?: number; seed?: s
     }
     grid.set(name, table);
   }
+
+  return { columns, skipped, order, cycles, grid };
+}
+
+export function generateCreatorImport(app: App, opts?: { rows?: number; seed?: string }): CreatorImportResult {
+  const rows = opts?.rows ?? 20;
+  if (!Number.isInteger(rows) || rows < 0) throw new Error('c2c seed: --rows must be a non-negative integer');
+  const seed = opts?.seed || app.name || 'app';
+  const warnings: CreatorImportWarning[] = [];
+
+  const { columns, skipped, order, grid } = seedGrid(app, rows, seed, warnings);
 
   // Fill lookup cells from the parent's display column / expression.
   for (const name of order) {
@@ -1171,4 +1186,84 @@ function readmeFor(
     lines.push('');
   }
   return `${lines.join('\n')}\n`;
+}
+
+/** One column of a generated record grid. */
+export interface SeedRecordColumn {
+  /** CSV header: the field link name, or `Field.sub` for a composite part. */
+  name: string;
+  required: boolean;
+  /** A lookup column: the parent form. Its cells are empty; the caller links parent records. */
+  lookupForm?: string;
+  multi?: boolean;
+  /** A Users field: the cells hold example addresses, not app users. */
+  users?: boolean;
+}
+
+/** Generated rows of one form, or of one inline subform of a form. */
+export interface SeedRecordGrid {
+  form: string;
+  /** Set on an inline subform's rows: the subform field link name. */
+  subform?: string;
+  columns: SeedRecordColumn[];
+  rows: string[][];
+  /** Subform rows only: the index of each row's parent row in the form's grid. */
+  parents?: number[];
+}
+
+function recordColumn(col: Column): SeedRecordColumn {
+  return {
+    name: col.name,
+    required: col.required,
+    ...(col.lookupForm ? { lookupForm: col.lookupForm, ...(col.kind === 'lookup-multi' ? { multi: true } : {}) } : {}),
+    ...(col.note?.startsWith('Users field') ? { users: true } : {}),
+  };
+}
+
+/**
+ * Generated values for every form in dependency order (cyclic forms last) and
+ * the rows of each inline subform: what a Creator record export holds before
+ * record ids exist. Unlike generateCreatorImport nothing is skipped, because
+ * Import Data limits do not apply to an export. Parent row p of a form gets
+ * 1 + (p % 2) rows in each subform. Lookup cells and an address's latitude
+ * and longitude are empty. The same app and seed give the same grids.
+ */
+export function generateSeedRecords(app: App, opts?: { rows?: number; seed?: string }): { grids: SeedRecordGrid[]; cycles: string[] } {
+  const rows = opts?.rows ?? 20;
+  if (!Number.isInteger(rows) || rows < 0) throw new Error('c2c seed: --rows must be a non-negative integer');
+  const seed = opts?.seed || app.name || 'app';
+  const { columns, order, cycles, grid } = seedGrid(app, rows, seed, []);
+  const grids: SeedRecordGrid[] = [];
+  // An address's latitude and longitude are decimals the text pools cannot supply: left empty.
+  const isLookup = (col: Column) => col.kind === 'lookup' || col.kind === 'lookup-multi' || /\.(latitude|longitude)$/i.test(col.name);
+  for (const name of order) {
+    const form = app.forms.find((f) => f.name === name)!;
+    const cols = columns.get(name) ?? [];
+    const table = grid.get(name) ?? [];
+    grids.push({ form: name, columns: cols.map(recordColumn), rows: table.map((cells) => cols.map((col) => (isLookup(col) ? '' : cells.get(col.name) ?? ''))) });
+    for (const field of form.fields) {
+      if (!isSubformField(field) || !field.subfields.length) continue;
+      const subCols = field.subfields.flatMap((sub) => columnsOf(sub, [], form));
+      const rng = mulberry32(fnv(`${seed}:${name}:${field.name}`));
+      const seen = subCols.map(() => new Set<string>());
+      const out: string[][] = [];
+      const parents: number[] = [];
+      table.forEach((_, parent) => {
+        for (let k = 0; k <= parent % 2; k++) {
+          const i = out.length;
+          out.push(
+            subCols.map((col, ci) => {
+              if (isLookup(col)) return '';
+              const value = scalarValue(col, i, rng, seen[ci]);
+              seen[ci].add(value);
+              return value;
+            }),
+          );
+          parents.push(parent);
+        }
+      });
+      grids.push({ form: name, subform: field.name, columns: subCols.map(recordColumn), rows: out, parents });
+    }
+  }
+  return { grids, cycles };
 }

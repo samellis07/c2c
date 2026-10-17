@@ -17,7 +17,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { App } from '../../core/src/index.js';
-import { generateCreatorImport } from '../../data/src/seed-import.js';
+import { generateSeedRecords, type SeedRecordGrid } from '../../data/src/seed-import.js';
 import type { FetchLike, MigrateResponse } from '../../data/src/migrate.js';
 import {
   applyDelta,
@@ -33,6 +33,7 @@ import {
 import type { DeltaPlan } from '../../deploy/src/row-delta.js';
 import { SOURCE_ID_COLUMN } from '../../schema/src/mapping.js';
 import { generateSchema } from '../../schema/src/index.js';
+import type { SchemaColumn, SchemaTable } from '../../schema/src/generator.js';
 import { cutoverChecklist, proofReport, verifyRollbackEvidence, type CutoverInput } from './cutover.js';
 
 export type D10Status = 'PASS' | 'FAIL' | 'GAP';
@@ -55,6 +56,8 @@ export interface D10Report {
   /** Forms with rows in the synthetic export; the rest were not exercised. */
   exercised: string[];
   notExercised: { form: string; reason: string }[];
+  /** Mandatory fields the synthetic export could not fill; a refusal they cause is the harness's, not c2c's. */
+  harnessLimits: HarnessLimit[];
   criteria: D10Criterion[];
   totals: Record<D10Status, number>;
   /** PASS only when every criterion passes. */
@@ -63,7 +66,10 @@ export interface D10Report {
 
 /** One form of a synthetic Creator report export. */
 export interface ExportForm {
+  /** Form link name, or `<Form>__<Subform>` for an inline subform's rows. */
   form: string;
+  /** Set on an inline subform's rows. */
+  subform?: { form: string; field: string };
   header: string[];
   rows: string[][];
 }
@@ -182,52 +188,149 @@ function csvText(form: ExportForm): string {
   return [form.header, ...form.rows].map((row) => row.map(csvCell).join(',')).join('\n') + '\n';
 }
 
+/** A mandatory field the synthetic export leaves empty: the rehearsal cannot exercise it. */
+export interface HarnessLimit {
+  form: string;
+  /** Subform link name when the field sits in an inline subform. */
+  subform?: string;
+  field: string;
+  /** Empty cells of this field in the export. */
+  cells: number;
+  reason: string;
+}
+
+/** A placeholder a mandatory file field points at, relative to the export folder's parent. */
+export interface PlaceholderFile {
+  path: string;
+  bytes: Uint8Array;
+}
+
+export interface SyntheticExport {
+  exported: CreatorExport;
+  skipped: { form: string; reason: string }[];
+  limits: HarnessLimit[];
+  files: PlaceholderFile[];
+}
+
+const FILE_MATRIX = new Set(['file-upload', 'image', 'audio', 'video', 'signature']);
+/** A 1x1 transparent PNG, for image and signature fields. */
+const PLACEHOLDER_PNG = Uint8Array.from(
+  Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ff1f0003030200eff3bf380000000049454e44ae426082', 'hex'),
+);
+const PLACEHOLDER_TEXT = new TextEncoder().encode('c2c rehearsal placeholder\n');
+
+function headerFor(column: SchemaColumn, header: string[]): number {
+  const source = column.field ?? column.name;
+  return header.findIndex((name) => name === source || name.replace('.', '_') === column.name);
+}
+
 /**
- * A Creator report export for the app: the seed import rows, an ID column of
- * synthetic record ids, single lookups as the parent's record id and user
- * fields left empty (an export carries a user's record id, which a synthetic
- * export does not have).
+ * A Creator record export for the app, built from the `c2c seed` values of
+ * every form (subform and cyclic forms included) with an ID column of
+ * synthetic record ids. Ids are given to every row first, then each lookup is
+ * written as a parent record's id, the way a Creator CSV export carries it; a
+ * cyclic or self lookup is the loader's deferred second pass, from the same
+ * export. Inline subform rows are `<Form>__<Subform>.csv` files linked by
+ * Parent_ID. A mandatory file field points at a small placeholder file. User
+ * fields stay empty (an export carries a user's record id, which a synthetic
+ * export does not have); every mandatory field left empty is a named harness
+ * limit, never a silent blank. Forms the loader does not take (NoSQL, no
+ * Data Store table) are skipped with the reason. The same app and row count
+ * give the same bytes.
  */
-export function syntheticExport(app: App, rows: number): { exported: CreatorExport; skipped: { form: string; reason: string }[] } {
-  const seed = generateCreatorImport(app, { rows });
-  const forms = new Map(app.forms.map((form) => [form.name, form]));
+export function syntheticExport(app: App, rows: number): SyntheticExport {
+  const schema = generateSchema(app);
+  const { grids } = generateSeedRecords(app, { rows });
+  const tableFor = (grid: SeedRecordGrid) =>
+    grid.subform === undefined
+      ? schema.tables.find((table) => table.role === 'form' && table.form === grid.form)
+      : schema.tables.find((table) => table.role === 'child' && table.subform?.form === grid.form && table.subform.field === grid.subform);
+  const skipped: { form: string; reason: string }[] = [];
+  const kept: { grid: SeedRecordGrid; table: SchemaTable; ids: string[] }[] = [];
+  const ids = new Map<string, string[]>();
   let next = FIRST_RECORD_ID;
-  const exported: CreatorExport = [];
-  const byForm = new Map<string, ExportForm>();
-  for (const file of seed.files) {
-    const [header, ...body] = parseCsv(file.csv).filter((row) => row.length > 1 || row[0] !== '');
-    if (!header) continue;
-    const item: ExportForm = { form: file.form, header: [...header, 'ID'], rows: body.map((row) => [...row, String(next++)]) };
-    const fields = forms.get(file.form)?.fields ?? [];
-    header.forEach((column, index) => {
-      const field = fields.find((entry) => entry.name === column);
-      if (field?.type === 'users') for (const row of item.rows) row[index] = '';
-      if (!field?.lookup) return;
-      const parent = byForm.get(field.lookup.form);
-      const display = parent?.header.indexOf(field.lookup.field ?? '') ?? -1;
-      for (const row of item.rows) {
-        const hit = parent?.rows.find((candidate) => (display >= 0 ? candidate[display] === row[index] : candidate.includes(row[index]!)));
-        row[index] = hit ? hit[hit.length - 1]! : '';
-      }
-    });
-    exported.push(item);
-    byForm.set(file.form, item);
+  // Pass 1: every exported row gets its record id, so any lookup (cyclic ones too) can name its parent.
+  for (const grid of grids) {
+    const table = tableFor(grid);
+    if (grid.subform !== undefined && (!table || !ids.has(grid.form))) continue;
+    if (!table || table.nosql) {
+      skipped.push({ form: grid.form, reason: table ? `NoSQL collection (${table.nosqlReason ?? 'kept out of the Data Store'}); the CSV loader does not load it` : 'no Data Store table for this form' });
+      continue;
+    }
+    const rowIds = grid.rows.map(() => String(next++));
+    if (grid.subform === undefined) ids.set(grid.form, rowIds);
+    kept.push({ grid, table, ids: rowIds });
   }
-  return { exported, skipped: seed.skipped.map((entry) => ({ form: entry.form, reason: entry.reason })) };
+  // Pass 2: lookups, placeholder files, Parent_ID.
+  const exported: CreatorExport = [];
+  const limits: HarnessLimit[] = [];
+  const files = new Map<string, PlaceholderFile>();
+  for (const { grid, table, ids: rowIds } of kept) {
+    const fileColumns = table.columns.filter((column) => FILE_MATRIX.has(column.matrixId) && (column.mandatory || column.appMandatory) && !grid.columns.some((col) => col.name === (column.field ?? column.name)));
+    const header = [...grid.columns.map((col) => col.name), ...fileColumns.map((column) => column.field ?? column.name), ...(grid.subform !== undefined ? ['Parent_ID'] : []), 'ID'];
+    const parentIds = grid.subform !== undefined ? ids.get(grid.form)! : undefined;
+    const body = grid.rows.map((values, i) => {
+      const cells = grid.columns.map((col, c) => {
+        if (col.users) return '';
+        if (!col.lookupForm) return values[c]!;
+        const parent = ids.get(col.lookupForm);
+        if (!parent?.length) return '';
+        const one = parent[i % parent.length]!;
+        const two = parent[(i + 1) % parent.length]!;
+        return col.multi && two !== one ? `${one},${two}` : one;
+      });
+      for (const column of fileColumns) {
+        const image = column.matrixId === 'image' || column.matrixId === 'signature';
+        const path = `files/${table.name}/${column.name}.${image ? 'png' : 'txt'}`;
+        files.set(path, { path, bytes: image ? PLACEHOLDER_PNG : PLACEHOLDER_TEXT });
+        cells.push(path);
+      }
+      if (parentIds) cells.push(parentIds[grid.parents![i]!]!);
+      cells.push(rowIds[i]!);
+      return cells;
+    });
+    const item: ExportForm = { form: grid.subform !== undefined ? `${grid.form}__${grid.subform}` : grid.form, ...(grid.subform !== undefined ? { subform: { form: grid.form, field: grid.subform } } : {}), header, rows: body };
+    exported.push(item);
+    for (const column of table.columns) {
+      if (!(column.mandatory || column.appMandatory) || column.shadowFor) continue;
+      if (table.subform && (column.name === table.subform.parentColumn || column.name === table.subform.orderColumn)) continue;
+      const index = headerFor(column, header);
+      const empty = index < 0 ? body.length : body.filter((cells) => cells[index] === '').length;
+      if (!empty) continue;
+      const col = grid.columns.find((entry) => entry.name === header[index]);
+      const reason =
+        index < 0
+          ? `c2c seed generates no value for a ${column.creatorType} field`
+          : col?.users
+            ? 'a Users field needs an app user\'s record id, which a synthetic export does not have'
+            : col?.lookupForm
+              ? `parent form ${col.lookupForm} has no exported rows`
+              : 'c2c seed left the value empty';
+      limits.push({ form: grid.form, ...(grid.subform !== undefined ? { subform: grid.subform } : {}), field: column.field ?? column.name, cells: empty, reason });
+    }
+  }
+  return { exported, skipped, limits, files: [...files.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)) };
 }
 
 function writeExport(app: App, dir: string, exported: CreatorExport): string {
   mkdirSync(dir, { recursive: true });
   for (const form of exported) writeFileSync(join(dir, `${form.form}.csv`), csvText(form));
   // A full export: counts.json pins each form's total, which a delta delete requires.
-  const forms = generateSchema(app).tables.filter((table) => table.role === 'form' && !table.nosql);
-  const counts = Object.fromEntries(forms.map((table) => [table.form, exported.find((form) => form.form === table.form)?.rows.length ?? 0]));
+  const schema = generateSchema(app);
+  const forms = schema.tables.filter((table) => table.role === 'form' && !table.nosql);
+  const counts: Record<string, number> = Object.fromEntries(forms.map((table) => [table.form, exported.find((form) => form.form === table.form && !form.subform)?.rows.length ?? 0]));
+  // A subform child table pins its own total under its table name, so a deleted record's subform rows may be deleted too.
+  for (const table of schema.tables) {
+    if (table.role !== 'child' || table.nosql || !table.subform) continue;
+    const rows = exported.find((form) => form.subform?.form === table.subform!.form && form.subform.field === table.subform!.field)?.rows.length;
+    if (rows !== undefined) counts[table.name] = rows;
+  }
   writeFileSync(join(dir, 'counts.json'), `${JSON.stringify(counts)}\n`);
   return dir;
 }
 
 function cloneExport(exported: CreatorExport): CreatorExport {
-  return exported.map((form) => ({ form: form.form, header: [...form.header], rows: form.rows.map((row) => [...row]) }));
+  return exported.map((form) => ({ ...form, header: [...form.header], rows: form.rows.map((row) => [...row]) }));
 }
 
 interface Targets {
@@ -239,7 +342,8 @@ interface Targets {
 
 function pickTargets(app: App, exported: CreatorExport): Targets {
   const referenced = new Set(app.forms.flatMap((form) => form.fields.flatMap((field) => (field.lookup ? [field.lookup.form] : []))));
-  const withRows = exported.filter((form) => form.rows.length >= 2);
+  const withRows = exported.filter((form) => !form.subform && form.rows.length >= 2);
+  const parents = new Set(exported.flatMap((form) => (form.subform ? [form.subform.form] : [])));
   let change: Targets['change'];
   for (const form of withRows) {
     const field = app.forms.find((entry) => entry.name === form.form)?.fields.find((entry) => entry.type === 'text' && !entry.unique && form.header.includes(entry.name));
@@ -248,7 +352,9 @@ function pickTargets(app: App, exported: CreatorExport): Targets {
       break;
     }
   }
-  const leaf = [...withRows].reverse().find((form) => !referenced.has(form.form))?.form;
+  // Prefer a leaf without subform rows, so the delete is one record.
+  const leaves = [...withRows].reverse().filter((form) => !referenced.has(form.form));
+  const leaf = (leaves.find((form) => !parents.has(form.form)) ?? leaves[0])?.form;
   return { ...(change ? { change } : {}), ...(leaf ? { leaf } : {}) };
 }
 
@@ -339,8 +445,12 @@ function rowCount(body: string | undefined): number {
 export async function rehearseCutover(app: App, options: RehearsalOptions): Promise<D10Report> {
   const hooks = options.hooks ?? {};
   const work = options.workDir;
-  const { exported: initial, skipped } = syntheticExport(app, options.rows ?? 30);
-  const exercised = initial.filter((form) => form.rows.length).map((form) => form.form);
+  const { exported: initial, skipped, limits, files: placeholders } = syntheticExport(app, options.rows ?? 30);
+  for (const file of placeholders) {
+    mkdirSync(dirname(join(work, file.path)), { recursive: true });
+    writeFileSync(join(work, file.path), file.bytes);
+  }
+  const exercised = initial.filter((form) => !form.subform && form.rows.length).map((form) => form.form);
   const notExercised = [
     ...skipped,
     ...app.forms.filter((form) => !exercised.includes(form.name) && !skipped.some((entry) => entry.form === form.name)).map((form) => ({ form: form.name, reason: 'no rows in the synthetic export' })),
@@ -360,9 +470,16 @@ export async function rehearseCutover(app: App, options: RehearsalOptions): Prom
     const copy = [...leaf.rows[0]!];
     copy[copy.length - 1] = String(FIRST_RECORD_ID - 1n);
     leaf.rows.push(copy);
-    leaf.rows.splice(1, 1);
+    const [gone] = leaf.rows.splice(1, 1);
     expectParallel.added = 1;
     expectParallel.deleted = 1;
+    // Deleting a record deletes its subform rows with it.
+    for (const child of parallel.filter((form) => form.subform?.form === leaf.form)) {
+      const link = child.header.indexOf('Parent_ID');
+      const before = child.rows.length;
+      child.rows = child.rows.filter((row) => row[link] !== gone!.at(-1));
+      expectParallel.deleted += before - child.rows.length;
+    }
   }
   const changeForm = targets.change && parallel.find((form) => form.form === targets.change!.form);
   if (changeForm) {
@@ -617,6 +734,7 @@ export async function rehearseCutover(app: App, options: RehearsalOptions): Prom
     app: app.name ?? '(none)',
     exercised,
     notExercised,
+    harnessLimits: limits,
     criteria,
     totals: { PASS: count('PASS'), FAIL: count('FAIL'), GAP: count('GAP') },
     status: count('PASS') === criteria.length ? 'PASS' : 'FAIL',
@@ -635,6 +753,8 @@ export function rehearsalMarkdown(report: D10Report): string {
     '',
     `Exercised forms: ${report.exercised.join(', ') || 'none'}.`,
     ...report.notExercised.map((item) => `Not exercised: ${mdCell(item.form)} (${mdCell(item.reason)}).`),
+    `Harness limits: ${report.harnessLimits.length}.`,
+    ...report.harnessLimits.map((item) => `Harness limit: ${mdCell(`${item.form}${item.subform ? `.${item.subform}` : ''}.${item.field}`)}, ${item.cells} empty cell(s) (${mdCell(item.reason)}).`),
     '',
     '| Criterion | Status | Evidence | Reason |',
     '| --- | --- | --- | --- |',
