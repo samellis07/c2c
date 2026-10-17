@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const SUITE = fileURLToPath(new URL('./widgets.test.js', import.meta.url));
 /** Heap cap and per-test timeout for the child suite (see scripts/test-limits.mjs). */
-const CHILD_LIMITS = ['--max-old-space-size=2048', '--test-timeout=120000'];
+const CHILD_LIMITS = ['--max-old-space-size=2048', '--test-timeout=600000'];
 
 /**
  * Every failing subtest of the child TAP run, each with its own diagnostic

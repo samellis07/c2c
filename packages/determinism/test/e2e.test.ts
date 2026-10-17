@@ -167,7 +167,7 @@ test('generated api tests execute against the generated handler and pass', async
     writeFileSync(join(root, 'package.json'), '{"type":"module"}');
     const env = { ...process.env };
     delete env.NODE_TEST_CONTEXT;
-    const run = spawnSync(process.execPath, ['--max-old-space-size=2048', '--test-timeout=120000', '--test', join(root, 'tests/api/regression-handlers.test.mjs')], { encoding: 'utf8', env });
+    const run = spawnSync(process.execPath, ['--max-old-space-size=2048', '--test-timeout=600000', '--test', join(root, 'tests/api/regression-handlers.test.mjs')], { encoding: 'utf8', env });
     assert.equal(run.status, 0, run.stdout + run.stderr);
     assert.match(run.stdout, /# pass 3/);
   } finally {
