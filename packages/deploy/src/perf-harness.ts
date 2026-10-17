@@ -19,7 +19,7 @@ import { catalystLimit } from '../../schema/src/limits.js';
 import { LIMITS } from '../../shims/src/runtime.js';
 import { deployFiles, writeDeployTree } from './plan.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from './guards.js';
-import { childIndex, perfSeed, recordPlan, seedRecord, type PerfSize } from './perf-seed.js';
+import { childIndex, deferredPatch, perfSeed, recordPlan, seedRecord, type PerfSize } from './perf-seed.js';
 
 export const OFFLINE_NOTE =
   'Offline in-process numbers (fake in-memory Data Store, no network). They are NOT Catalyst numbers; only the Data Store call counts per request carry over.';
@@ -27,7 +27,14 @@ export const OFFLINE_NOTE =
 interface FakeSdk {
   setSession(token: string, user: unknown): void;
   state(): { tables: Record<string, Record<string, unknown>[]>; calls: unknown[][] };
-  initialize(req: unknown): { datastore(): { table(name: string): { insertRows(rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]> } } };
+  initialize(req: unknown): {
+    datastore(): {
+      table(name: string): {
+        insertRows(rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]>;
+        updateRows(rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]>;
+      };
+    };
+  };
 }
 
 export interface Timing {
@@ -73,6 +80,10 @@ export interface PerfRun {
   note: string;
   pageSize: number;
   imports: ImportRow[];
+  /** Second pass: rows whose self or cyclic lookups were set by row update after every insert. */
+  deferred: { form: string; columns: string[]; rows: number; ms: number }[];
+  /** Counted seed warnings (a mandatory lookup a cycle forced to post empty, a subform lookup left empty). */
+  warnings: string[];
   reports: ReportRow[];
   timeoutRisk: { report: string; probe: string; storeCalls: number; budgetMsPerCall: number | null; status: string }[];
 }
@@ -170,6 +181,7 @@ export async function runPerf(app: App, opts: PerfOptions): Promise<PerfRun> {
     const children = childIndex(seed.result, plan);
     const rowIds = new Map<string, string>();
     const imports: ImportRow[] = [];
+    for (const warning of plan.warnings) log(`seed warning: ${warning}`);
     const store = sdk.initialize({}).datastore();
     const limit = opts.apiRowsPerTable ?? Number.POSITIVE_INFINITY;
     for (const form of plan.forms) {
@@ -226,6 +238,24 @@ export async function runPerf(app: App, opts: PerfOptions): Promise<PerfRun> {
       imports.push(row);
       log(`import ${form}: ${row.viaApi} via ${route ?? 'no route'}, ${row.viaStore} via insertRows, ${row.refused} refused`);
     }
+    // Second pass: the lookups posted empty, now that every row has a ROWID.
+    const deferred: PerfRun['deferred'] = [];
+    for (const form of plan.forms) {
+      const columns = plan.deferred.get(form);
+      if (!columns?.size) continue;
+      const table = seed.result.tables.find((t) => t.form === form)!;
+      const start = performance.now();
+      const updates: Record<string, unknown>[] = [];
+      for (const seedRow of table.rows) {
+        const patch = deferredPatch(form, seedRow, plan, rowIds, children);
+        const rowid = rowIds.get(seedRow.id);
+        if (!patch || !rowid) continue;
+        updates.push({ ROWID: rowid, ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, Array.isArray(v) ? JSON.stringify(v) : v])) });
+      }
+      for (let i = 0; i < updates.length; i += LIMITS.insertRowsPerCall) await store.table(form).updateRows(updates.slice(i, i + LIMITS.insertRowsPerCall));
+      deferred.push({ form, columns: [...columns].sort(), rows: updates.length, ms: round(performance.now() - start) });
+      log(`deferred ${form}: ${updates.length} rows updated (${[...columns].sort().join(', ')})`);
+    }
 
     // ---- reports ----
     const reports: ReportRow[] = [];
@@ -278,7 +308,7 @@ export async function runPerf(app: App, opts: PerfOptions): Promise<PerfRun> {
       }
       log(`report ${report.name}: ${rows} rows, paged p95 ${result.pagedLoad.p95Ms} ms`);
     }
-    return { app: seed.app, size: opts.size, seed: seed.seed, seedSha256: seed.sha256, note: OFFLINE_NOTE, pageSize, imports, reports, timeoutRisk };
+    return { app: seed.app, size: opts.size, seed: seed.seed, seedSha256: seed.sha256, note: OFFLINE_NOTE, pageSize, imports, deferred, warnings: plan.warnings, reports, timeoutRisk };
   } finally {
     if (server) {
       server.closeAllConnections();
