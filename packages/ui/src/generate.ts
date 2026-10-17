@@ -18,7 +18,7 @@ import { reportCriteria } from '../../deluge/src/translate.js';
 import { writeRuleDeniedAt, type FieldRuleDenial, type WriteField } from '../../shims/src/access.js';
 import { LIMITS } from '../../shims/src/index.js';
 import { criteriaHasRelative, criteriaHasTodo, type Criteria } from '../../shims/src/criteria.js';
-import { generateSchema, type SchemaPlan } from '../../schema/src/generator.js';
+import { columnRenamesOf, generateSchema, type SchemaPlan } from '../../schema/src/generator.js';
 import { EXTENSION_KEY, limitValue, planReportQuery, planZcql, ZcqlLimitError } from '../../schema/src/limits.js';
 import { fieldTypeRow } from '../../schema/src/mapping.js';
 import { buildSlate, type OutFile } from './build.js';
@@ -1436,7 +1436,9 @@ function aggregateSpec(body, readable, principal) {
     if (fn !== "count" && fn !== "sum" && fn !== "value") continue;
     const field = typeof item.field === "string" ? item.field.trim() : "";
     if (field) {
-      const ref = aggregateFieldRef(field, readable, principal);
+      // A record count names ID: it folds as the row count and echoes back so
+      // the caller matches its request, like the client-side fold does.
+      const ref = field === "ID" && fn === "count" ? { name: "ID", path: null } : aggregateFieldRef(field, readable, principal);
       if (!ref) continue;
       if (ref.path) paths.push(ref.path);
       measures.push({ fn, field: ref.name });
@@ -1484,8 +1486,14 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
   const wantsRelative = criteriaHasRelative(base) || named.some((item) => criteriaHasRelative(item.criteria));
   const criteriaRef = wantsRelative ? 'applied' : 'scoped.criteria';
   const columns = report.columns.map((column) => column.field);
+  // Charts and metrics send Creator field names; the projection names store
+  // columns, so a renamed column (Priority -> Priority_col) is allowed under
+  // both names.
+  const renames = columnRenamesOf(schemaOf(app))[formName] ?? {};
+  const storeToField: Record<string, string> = {};
+  for (const [field, column] of Object.entries(renames).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) storeToField[column] = field;
   // determinism-allow: report column order then stored-column order; dedup keeps first use, and sorting would reorder the emitted aggregateFields
-  const aggFields = [...new Set([...columns, ...projection])].filter((field) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(field));
+  const aggFields = [...new Set([...columns, ...projection, ...projection.map((column) => storeToField[column] ?? column)])].filter((field) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(field));
   const decimals = Object.hasOwn(decimalColumnsOf(app), formName) ? decimalColumnsOf(app)[formName]! : {};
   const exact = Object.keys(decimals).length > 0;
   const exactNote = exact
@@ -2071,7 +2079,10 @@ ${stageLoad('        ')}        ${wantsRelative ? 'let' : 'const'} aggRows = [];
           }
         }
 ${wantsRelative ? '        if (relative) aggRows = aggRows.filter((row) => matchRow(row, aggResolved, decimalColumns));\n' : ''}        await resolveLookupPaths(datastore, aggRows, spec.paths, principal);
-        await resolveLookupDisplays(datastore, aggRows, lookupColumns, principal);
+        // The fold groups a lookup field by its stored parent ROWID: resolving
+        // the display first would merge distinct parents that share a display
+        // value into one bucket.
+        await resolveLookupDisplays(datastore, aggRows, lookupColumns.filter((column) => column.column !== spec.group), principal);
         const agg = aggregateRows(aggRows, spec);
         send(res, 200, {
           dryRun: false,
@@ -2724,20 +2735,52 @@ function stageFieldModules(app: App, formName: string): { modules: string[]; col
  */
 function recordStub(app: App, form: UiModel['forms'][number], path: string): string {
   const subformLinks = subformLinksFor(app, form.name);
-  const shimImport = subformLinks.length ? 'import { attachSubforms } from "creator-to-catalyst/shims";\n' : '';
+  const shimNames = ['bindRelativeCriteria', 'criteriaHasRelative', 'matchRow', ...(subformLinks.length ? ['attachSubforms'] : [])];
+  const shimImport = `import { ${shimNames.join(', ')} } from "creator-to-catalyst/shims";\n`;
+  // A profile record filter or a report scope can hold a relative criteria
+  // marker ({__rel}); the same binding the report query applies resolves it
+  // against the request clock before ZCQL sees it.
+  const relativePrelude = `const dateFieldKinds = ${JSON.stringify(dateFieldKinds(app, form.name))};
+function recordInstant() {
+  const raw = typeof process !== "undefined" && process.env ? process.env.C2C_NOW : undefined;
+  if (typeof raw === "string" && raw.trim()) {
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return new Date();
+}
+function recordZone() {
+  const envZone = typeof process !== "undefined" && process.env ? process.env.C2C_APP_TIMEZONE : undefined;
+  if (typeof envZone === "string" && envZone.trim()) return envZone.trim();
+  const configured = deployConfig();
+  return configured && typeof configured.appTimeZone === "string" ? configured.appTimeZone.trim() : "";
+}
+function boundCriteria(criteria) {
+  if (!criteriaHasRelative(criteria)) return criteria;
+  try {
+    return bindRelativeCriteria(criteria, recordInstant(), recordZone(), dateFieldKinds);
+  } catch (err) {
+    return null;
+  }
+}
+`;
   const subformConst = subformLinks.length
     ? `/** Inline subforms of this form, each a child table. The edit record carries them as lists in row order. */\nexport const subformTables = ${JSON.stringify({ [form.name]: subformLinks })};\n`
     : '';
   const childFields = JSON.stringify(Object.fromEntries(subformLinks.map((link) => [link.field, app.forms.find((item) => item.name === form.name)?.fields.find((item) => item.name === link.field)?.subfields.map((field) => field.name) ?? []])));
   const reportScopes = Object.fromEntries(app.reports.filter((report) => report.form === form.name).flatMap((report) => {
     const criteria = reportCriteria(report.criteria?.trim() || 'true');
-    if (criteriaHasTodo(criteria) || criteriaHasRelative(criteria)) return [];
+    // A criteria the record query cannot compile (untranslated or relative
+    // clauses) does not hide the report: the scope falls back to the form's
+    // own access, the same read a record opened without a report makes. The
+    // profiles check still gates who may open it.
+    const scopeCriteria = criteriaHasTodo(criteria) || criteriaHasRelative(criteria) ? ({ op: 'true' } as const) : criteria;
     const profiles = app.profiles.filter((profile) =>
       administratorProfiles(app).includes(profile.name) || profile.modules.some((module) =>
         module.component === form.name && module.reports.some((permission) => permission.key === report.name && /(?:^|[^A-Za-z])view(?:[^A-Za-z]|$)/i.test(permission.value)),
       ),
     ).map((profile) => profile.name);
-    return [[report.name, { criteria, fields: report.columns.map((column) => column.field), profiles }]];
+    return [[report.name, { criteria: scopeCriteria, fields: report.columns.map((column) => column.field), profiles }]];
   }));
   const queryName = subformLinks.length ? 'queried' : 'rows';
   const attachRows = subformLinks.length ? `if (Array.isArray(queried)) await attachSubforms(datastore, subformTables, formName, queried, {
@@ -2778,7 +2821,7 @@ export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.strin
 export const formName = ${JSON.stringify(form.name)};
 const reportScopes = ${JSON.stringify(reportScopes)};
 
-${subformConst}${stageConst}${deployHelpers('../../c2c-deploy.json', '../../c2c-store.mjs')}
+${subformConst}${stageConst}${relativePrelude}${deployHelpers('../../c2c-deploy.json', '../../c2c-store.mjs')}
 
 export default async function handler(req, res) {
   const deploy = deployConfig();
@@ -2810,6 +2853,15 @@ ${requirePrincipal()}
     const criteria = reportScope ? { op: "and", args: [rowCriteria, reportScope.criteria] } : rowCriteria;
     const scoped = authorizeRead(access, principal, formName, criteria);
     const selectedFields = reportScope ? (scoped.fields ? reportScope.fields.filter((field) => scoped.fields.includes(field)) : reportScope.fields) : scoped.fields;
+    // A relative marker in the scope or the record filter binds against the
+    // request clock, like the report list read; a marker that cannot bind
+    // fails closed as no such row.
+    const relative = criteriaHasRelative(scoped.criteria);
+    const applied = relative ? boundCriteria(scoped.criteria) : scoped.criteria;
+    if (relative && !applied) {
+      send(res, 404, { dryRun: !live, error: "no such row" });
+      return;
+    }
     if (!live) {
       send(res, 200, { dryRun: true, record: { ROWID: rowId } });
       return;
@@ -2819,9 +2871,10 @@ ${requirePrincipal()}
       send(res, 500, { dryRun: false, error: "live datastore is not configured" });
       return;
     }
-    const where = compileCriteria(scoped.criteria);
-    const ${queryName} = await datastore.query(formName, where === "true" ? "" : where, 1, 0, "ORDER BY ROWID");
-    ${attachRows}const row = Array.isArray(${queryName}) && ${queryName}[0] && typeof ${queryName}[0] === "object" ? projectFields(${queryName}[0], selectedFields) : null;
+    const where = compileCriteria(applied);
+    const ${queryName}Raw = await datastore.query(formName, where === "true" ? "" : where, 1, 0, "ORDER BY ROWID");
+    const ${queryName} = (Array.isArray(${queryName}Raw) ? ${queryName}Raw : []).filter((candidate) => !relative || matchRow(candidate, applied));
+    ${attachRows}const row = ${queryName}[0] && typeof ${queryName}[0] === "object" ? projectFields(${queryName}[0], selectedFields) : null;
     if (!row) {
       send(res, 404, { dryRun: false, error: "no such row" });
       return;

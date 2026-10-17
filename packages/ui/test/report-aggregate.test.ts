@@ -660,3 +660,169 @@ test('the record view of an all-rows report sends no boolean literal in the WHER
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('the aggregate op keeps a record count named ID', async () => {
+  const { dir, report } = await loadReport();
+  try {
+    const res = await invoke(report.default, {
+      user: STAFF,
+      body: { op: 'aggregate', group: 'Status', measures: [{ fn: 'count', field: 'ID' }], rows: ROWS },
+    });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    // The reply echoes the requested field so the caller matches its measure.
+    assert.deepEqual(res.body.measures, [{ fn: 'count', field: 'ID' }]);
+    assert.deepEqual(
+      buckets(res.body).map((b) => [b.key, b.values[0]]),
+      [
+        ['Closed', 1],
+        ['Held', 2],
+      ],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The same app with a reserved-name field (Priority stores as Priority_col)
+// the chart may still group by, under its Creator field name.
+const RENAMED_SRC = SRC.replace(
+  field('Session_Date', 'date'),
+  `${field('Session_Date', 'date')}\n${field('Priority', 'picklist', '\t\t\tvalues = {"High","Low"}')}`,
+).replace(
+  '\t\t\t\t\t\tSecret\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tvisibility:false,readonly:false\n\t\t\t\t\t\t}',
+  '\t\t\t\t\t\tPriority\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tvisibility:true,readonly:false\n\t\t\t\t\t\t}\n\t\t\t\t\t\tSecret\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tvisibility:false,readonly:false\n\t\t\t\t\t\t}',
+);
+
+test('the aggregate op groups on a field stored under a reserved column name', async () => {
+  assert.ok(RENAMED_SRC.includes('Priority'), 'the Priority field was added for this source');
+  const { dir, report } = await loadReport(RENAMED_SRC);
+  try {
+    const res = await invoke(report.default, {
+      user: STAFF,
+      body: {
+        op: 'aggregate',
+        group: 'Priority',
+        measures: [{ fn: 'count', field: '' }],
+        rows: [
+          { ROWID: '1', Title: 'a', Status: 'Held', Headcount: '1', Session_Date: '2026-10-01', Priority: 'High' },
+          { ROWID: '2', Title: 'b', Status: 'Held', Headcount: '1', Session_Date: '2026-10-01', Priority: 'Low' },
+          { ROWID: '3', Title: 'c', Status: 'Held', Headcount: '1', Session_Date: '2026-10-01', Priority: 'High' },
+        ],
+      },
+    });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.deepEqual(
+      buckets(res.body).map((b) => [b.key, b.values[0]]),
+      [
+        ['High', 2],
+        ['Low', 1],
+      ],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a live aggregate groups a lookup column by its stored parent id, not the display text', async () => {
+  const { dir, report } = await loadReport(LOOKUP_SRC, 'Loans_By_Genre');
+  const store = mockDatastore({ Book: [], Loan: [] });
+  const prior = (globalThis as Record<string, unknown>).__c2cDatastore;
+  try {
+    writeFileSync(join(dir, 'functions/c2c-deploy.json'), JSON.stringify({ mode: 'live', appTimeZone: 'UTC' }));
+    // Two parents share one display value: they are still two categories.
+    const books = await store.datastore.insert('Book', [
+      { Title: 'Same', Genre: 'Fiction', Available_Copies: '4', Secret: 's1' },
+      { Title: 'Same', Genre: 'Sci-Fi', Available_Copies: '2', Secret: 's2' },
+      { Title: 'Other', Genre: 'Fiction', Available_Copies: '6', Secret: 's3' },
+    ]);
+    await store.datastore.insert('Loan', [
+      { Member: 'm1', Book: books[0]!.ROWID, Fine: '0' },
+      { Member: 'm2', Book: books[1]!.ROWID, Fine: '1' },
+      { Member: 'm3', Book: books[2]!.ROWID, Fine: '0' },
+    ]);
+    (globalThis as Record<string, unknown>).__c2cDatastore = store.datastore;
+    const res = await invoke(report.default, {
+      user: STAFF,
+      body: { op: 'aggregate', group: 'Book', measures: [{ fn: 'count', field: '' }] },
+    });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const ids = books.map((b) => String(b.ROWID)).sort();
+    assert.deepEqual(
+      buckets(res.body).map((b) => [b.key, b.values[0]]),
+      ids.map((id) => [id, 1]),
+    );
+  } finally {
+    (globalThis as Record<string, unknown>).__c2cDatastore = prior;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A report whose criteria holds a relative clause (Due == today): the record
+// endpoint cannot compile the filter but must still serve the record read —
+// the report is registered under the form's own scope, profiles gating it.
+const RELATIVE_SRC = `application "Demo"
+{
+\tform Invoice
+\t{
+${field('Note', 'text')}
+${field('Due', 'date')}
+\t}
+\tlist Today_Invoices
+\t{
+\t\tshow all rows from Invoice [Due == today]
+\t\t(
+\t\t\tNote
+\t\t\tDue
+\t\t)
+\t}
+\tshare_settings
+\t{
+\t\t"Staff"
+\t\t{
+\t\t\tname = "Staff"
+\t\t\ttype = Users_Permissions
+\t\t\tModulePermissions
+\t\t\t{
+\t\t\t\tInvoice
+\t\t\t\t{
+\t\t\t\t\tenabled = true
+\t\t\t\t\tReportPermissions
+\t\t\t\t\t{
+\t\t\t\t\t\tToday_Invoices = {"View"}
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}
+}
+`;
+
+test('the record read serves a report whose criteria cannot compile into its scope', async () => {
+  const files = buildUi(deriveIr(parse(RELATIVE_SRC))).files;
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-agg-record-rel-'));
+  writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
+  mkdirSync(join(dir, 'node_modules'), { recursive: true });
+  symlinkSync(process.cwd(), join(dir, 'node_modules/creator-to-catalyst'));
+  for (const file of files) {
+    mkdirSync(dirname(join(dir, file.path)), { recursive: true });
+    writeFileSync(join(dir, file.path), file.data);
+  }
+  const path = files
+    .filter((f) => /functions\/aio\/.*\/record\.mjs$/.test(f.path))
+    .find((f) => String(f.data).includes('export const formName = "Invoice";'))?.path;
+  assert.ok(path);
+  const record = (await import(pathToFileURL(join(dir, path)).href)) as { default: (req: unknown, res: unknown) => unknown };
+  const store = mockDatastore({ Invoice: [] });
+  const prior = (globalThis as Record<string, unknown>).__c2cDatastore;
+  try {
+    writeFileSync(join(dir, 'functions/c2c-deploy.json'), JSON.stringify({ mode: 'live', appTimeZone: 'UTC' }));
+    const inserted = await store.datastore.insert('Invoice', [{ Note: 'n', Due: '2026-10-17' }]);
+    (globalThis as Record<string, unknown>).__c2cDatastore = store.datastore;
+    const res = await invoke(record.default, { user: STAFF, body: { ROWID: inserted[0]!.ROWID, REPORT: 'Today_Invoices' } });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.record && (res.body.record as Record<string, unknown>).Note, 'n');
+  } finally {
+    (globalThis as Record<string, unknown>).__c2cDatastore = prior;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

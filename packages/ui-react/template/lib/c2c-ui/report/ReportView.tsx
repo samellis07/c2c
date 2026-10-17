@@ -144,7 +144,7 @@ function rowStyles(report: ReportSpec, row: Row): Map<number, CSSProperties> {
   return styles;
 }
 
-export function ReportView({ report, row }: { report: ReportSpec; row?: string }) {
+export function ReportView({ report, row, asList }: { report: ReportSpec; row?: string; asList?: boolean }) {
   const { spec } = useEnv();
   // A page can embed a report its caller may not open (a hidden-section
   // target): the router only gates the report's own route, so the embed
@@ -154,7 +154,9 @@ export function ReportView({ report, row }: { report: ReportSpec; row?: string }
     return <p data-access-status="403">This page is not available.</p>;
   }
   if (row && report.detail) return <RecordDetail report={report} rowId={row} />;
-  if (report.view !== 'list') return <ViewStub report={report} />;
+  // Embedded on a page a non-list report still draws its records, as the list
+  // table; the standalone route keeps the pending-view stub.
+  if (report.view !== 'list' && !asList) return <ViewStub report={report} />;
   return <ReportList report={report} />;
 }
 

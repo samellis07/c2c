@@ -235,6 +235,40 @@ export async function loadSeed(app: App, backend: BehaviorBackend, n: number): P
 
 // ---------- expectations from the seed ----------
 
+/**
+ * Seed rows re-keyed from store columns back to Creator field names, so the
+ * seed-side readers see the names the served rows carry. A reserved-name
+ * column (`Priority` stores as `Priority_col`) otherwise reads as blank.
+ */
+function fieldKeyedStored(stored: Map<string, Row[]>, renames: Record<string, Record<string, string>>): Map<string, Row[]> {
+  const out = new Map<string, Row[]>();
+  for (const [table, rows] of stored) {
+    const inverse = renames[table] ? new Map(Object.entries(renames[table]!).map(([field, column]) => [column, field])) : undefined;
+    out.set(table, inverse?.size ? rows.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [inverse.get(key) ?? key, value]))) : rows);
+  }
+  return out;
+}
+
+const SEED_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+/** The calendar-day key the chart fold groups a date or date-time value under (`2020-01-26T00:00:00` or `26-Jan-2020` -> `2020-01-26`). */
+function seedDayKey(value: unknown): string | undefined {
+  const text = String(value ?? '').trim();
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:$|[T ])/.exec(text);
+  if (m) {
+    const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    return undefined;
+  }
+  m = /^(\d{1,2})[-/ ]([A-Za-z]{3})[A-Za-z]*[-/ ](\d{4})(?:$|\s)/.exec(text);
+  if (m) {
+    const month = SEED_MONTHS.indexOf(m[2]!.toLowerCase()) + 1;
+    const [y, d] = [Number(m[3]), Number(m[1])];
+    if (month && d >= 1 && d <= 31) return `${y}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+  return undefined;
+}
+
 function numberOf(value: unknown): number | undefined {
   if (value == null || value === '') return undefined;
   const n = Number(String(value).replace(/[^0-9.eE+-]/g, ''));
@@ -309,7 +343,8 @@ export function expectedBuckets(rows: readonly Row[], chart: Pick<ChartSpec, 'x'
     if (hits.some((hit) => hit === undefined)) return undefined;
     if (!hits.every(Boolean)) continue;
     const x = get(row, chart.x);
-    const key = x == null || x === '' ? '(blank)' : String(x);
+    // The chart fold buckets date and date-time values by calendar day.
+    const key = x == null || x === '' ? '(blank)' : (seedDayKey(x) ?? String(x).trim());
     out[key] = round((out[key] ?? 0) + (measure.fn === 'count' ? 1 : numberOf(get(row, measure.field)) ?? 0));
   }
   return out;
@@ -617,7 +652,8 @@ export async function runReportChecks(app: App, source: string, opts: RunReportO
     let seeded: SeededApp;
     try {
       await backend.reset?.();
-      seeded = await loadSeed(app, backend, opts.n ?? 6);
+      const raw = await loadSeed(app, backend, opts.n ?? 6);
+      seeded = { stored: fieldKeyedStored(raw.stored, columnRenamesOf(generateSchema(app))) };
     } catch (err) {
       result.error = `seed load failed: ${err instanceof Error ? err.message : String(err)}`;
       return result;
