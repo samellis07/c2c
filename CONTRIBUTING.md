@@ -17,7 +17,7 @@ hygiene check. To run the hygiene check alone: `npm run check:hygiene`.
 
 To limit parallel test processes on a busy machine, set `C2C_TEST_CONCURRENCY` to a positive integer (e.g. `C2C_TEST_CONCURRENCY=4`).
 
-Every test run carries a 4096 MB heap cap and a 120 s per-test timeout (`scripts/test-limits.mjs`); a test that spawns its own `node --test` child passes `--max-old-space-size=2048 --test-timeout=120000`, and `tests/plugin/test-limits.test.mjs` fails if a test script or spawn drops them.
+Every test run carries a 4096 MB heap cap and a 10 min per-test timeout (`scripts/test-limits.mjs`); a test that spawns its own `node --test` child passes `--max-old-space-size=2048 --test-timeout=600000`, and `tests/plugin/test-limits.test.mjs` fails if a test script or spawn drops them.
 
 Some tests do more when they can see real `.ds` exports. Point
 `C2C_FIXTURES_DIR` at a local directory (docs write it as `<fixtures-dir>`) to

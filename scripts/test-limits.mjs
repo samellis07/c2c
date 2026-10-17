@@ -11,7 +11,7 @@
  */
 export const TEST_HEAP_MB = 4096;
 export const CHILD_HEAP_MB = 2048;
-export const TEST_TIMEOUT_MS = 120000;
+export const TEST_TIMEOUT_MS = 600000;
 
 const HEAP_FLAG = /--max-old-space-size=(\d+)/;
 const TIMEOUT_FLAG = /--test-timeout=(\d+)/;

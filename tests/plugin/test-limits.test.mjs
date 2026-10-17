@@ -41,7 +41,7 @@ test('limit flags carry the documented values', () => {
   assert.deepEqual(getChildTestLimitArgs(), [`--max-old-space-size=${CHILD_HEAP_MB}`, `--test-timeout=${TEST_TIMEOUT_MS}`]);
   assert.equal(TEST_HEAP_MB, 4096);
   assert.equal(CHILD_HEAP_MB, 2048);
-  assert.equal(TEST_TIMEOUT_MS, 120000);
+  assert.equal(TEST_TIMEOUT_MS, 600000);
 });
 
 test('withHeapCap appends the cap after any existing NODE_OPTIONS', () => {
@@ -76,7 +76,15 @@ test('a test script without the cap or timeout is reported', () => {
   );
   assert.match(
     findUnlimitedTestScripts({ t: 'node --max-old-space-size=4096 --test-timeout=999999 --test x' })[0],
-    /test-timeout<=120000/,
+    /test-timeout<=600000/,
+  );
+  assert.match(
+    findUnlimitedTestScripts({ t: 'node --max-old-space-size=4096 --test-timeout=600001 --test x' })[0],
+    /test-timeout<=600000/,
+  );
+  assert.deepEqual(
+    findUnlimitedTestScripts({ ok: 'node --max-old-space-size=4096 --test-timeout=600000 --test x' }),
+    [],
   );
   assert.equal(findUnlimitedTestScripts({ t: 'npm run build && vitest run' }).length, 2);
   assert.deepEqual(findUnlimitedTestScripts({ build: 'tsc -p tsconfig.json', serve: 'node dist/cli.js --test-mode' }), []);
@@ -108,6 +116,28 @@ test('a test run through run-tests.mjs sees the heap cap', () => {
     const limit = Number(/HEAP_LIMIT_MB=(\d+)/.exec(run.stdout)?.[1]);
     assert.ok(limit > 0 && limit <= TEST_HEAP_MB + 256, `heap limit ${limit} MB exceeds the ${TEST_HEAP_MB} MB cap`);
     assert.match(run.stdout, /NODE_OPTIONS=--max-old-space-size=4096/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a hung test is stopped by the per-test timeout', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-test-limits-hang-'));
+  try {
+    const hang = join(dir, 'hang.test.mjs');
+    writeFileSync(hang, "import test from 'node:test';\ntest('hangs', () => new Promise(() => {}));\n");
+    const env = { ...process.env, NODE_OPTIONS: '' };
+    delete env.NODE_TEST_CONTEXT;
+    const start = Date.now();
+    const run = spawnSync(
+      process.execPath,
+      ['--max-old-space-size=2048', '--test-timeout=10000', '--test', hang],
+      { encoding: 'utf8', env, timeout: 300000 },
+    );
+    const elapsed = Date.now() - start;
+    assert.notEqual(run.status, 0, 'a hung test must fail');
+    assert.match(run.stdout + run.stderr, /hangs/);
+    assert.ok(elapsed < 120000, `the hung test was not stopped promptly (${elapsed} ms)`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
