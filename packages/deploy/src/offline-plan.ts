@@ -30,6 +30,8 @@ import { ZCQL_IN_LIMIT } from '../../data/src/migrate.js';
 import { cyclicForeignKeys, foreignKeyId, tableCreatePlan } from './tables.js';
 import { readSourceCsv, readSourceJson } from './csv.js';
 import { readSourceBackup } from './backup.js';
+import { destructiveRefusal, formatDelta, renameFlags, reviewSchemaChange, writeDeltaTree } from './delta.js';
+import { rollbackBackupProblem } from './rollback.js';
 import { API_FUNCTION, FUNCTION_DIR, columnTypes, functionDir } from './function-dir.js';
 import { importTableGrants, importTemplateJson } from './iac.js';
 import { zipStore } from './iac-import.js';
@@ -1802,6 +1804,8 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
   if (!target || !out || unknown.length > 0) {
     io.stderr(
       'usage: c2c plan <file|dir> --out <dir> [--dc <dc>] [--mail] [--project <id>] [--production] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--allow-budget-fail]\n' +
+        '                [--previous <deployed .ds> [--rename Form.Old=New]... [--allow-destructive --backup <rollback-export dir>]]\n' +
+        '       --previous compares the re-export with the deployed model; a drop, rename or alter is refused without a verified backup\n' +
         '       --source-* measures the Creator data so is_mandatory/is_unique are provisioned only where the records allow it\n',
     );
     return 2;
@@ -1828,6 +1832,29 @@ export async function planCli(args: readonly string[], io: Io): Promise<number> 
         : srcJson !== undefined
           ? readSourceJson(srcJson, app, allowEmpty).sourceData
           : undefined;
+    const previous = flag(args, '--previous');
+    if (previous !== undefined) {
+      const review = reviewSchemaChange(loadApp(previous), app, dc.dc, renameFlags(args));
+      writeDeltaTree(join(out, 'schema-change'), [
+        { path: 'delta.json', data: `${JSON.stringify(review.delta, null, 2)}\n` },
+        { path: 'delta.md', data: formatDelta(review.delta) },
+      ]);
+      for (const line of review.removedChoices) io.stdout(`note: ${line}\n`);
+      if (review.destructive.length > 0) {
+        const backup = flag(args, '--backup');
+        const reason = !args.includes('--allow-destructive')
+          ? 'needs --allow-destructive with a verified --backup'
+          : backup === undefined
+            ? '--allow-destructive needs --backup <rollback-export dir>'
+            : rollbackBackupProblem(backup, loadApp(previous));
+        if (reason) {
+          io.stderr(`c2c plan: ${destructiveRefusal(review, { target, previous, reason })}`);
+          return 1;
+        }
+        io.stdout(`schema change: ${review.destructive.length} destructive change(s) allowed; backup ${backup} verified\n`);
+      }
+      io.stdout(`schema change: ${out}/schema-change/delta.md\n`);
+    }
     const appKey = app.name ?? 'app';
     let configuredProject = flag(args, '--project');
     if (configuredProject !== undefined && !/^[0-9]+$/.test(configuredProject)) {

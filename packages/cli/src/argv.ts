@@ -88,6 +88,8 @@ export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
       '--confirm': 'bool',
       '--edits': 'value',
       '--function-env': 'value',
+      '--previous': 'value',
+      '--rename': 'value',
       '--mail': 'bool',
       '--mail-from': 'value',
       '--mail-sender-verified': 'bool',

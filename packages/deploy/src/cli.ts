@@ -39,7 +39,7 @@ import { importingAgeState, isStuckImporting, projectDataRecord, stuckImportGuid
 import { spawnWithRetry, restWithRetry, type RetryOptions } from './retry.js';
 import { slateAppName, slateConfigToml, slateNameProblem, waitForSlateApp, waitForSlateDomain } from './slate.js';
 import { applyEdits, editsPathFor, readEdits, withEdits } from './edit.js';
-import { unsupportedSchemaOps } from './delta.js';
+import { renameFlags, unsupportedSchemaOps } from './delta.js';
 import { assertProjectDetails, assertReportedScope, catalystScopeArgs, scrubCatalystEnv } from './scope.js';
 import { assertSeedReferences, assertSeedTables, foreignKeysForApp } from './remap.js';
 import { formatMigratePlan, formatSkipped, migrateSeed, parseSeed, parseSeedBlocked, seedBucketName, seedFileColumns, seedStoreColumns, type SeedTable } from './seed.js';
@@ -796,7 +796,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
   const { target, rest } = targetOf(args);
   if (!target) {
     io.stderr(
-      'usage: c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address>]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--slate-name <name>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--subset-shims] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>]\n' +
+      'usage: c2c deploy <file|dir> [--project <id-or-name>] [--org <id>] [--env Development] [--out <dir>] [--ui vanilla|react] [--mail [--mail-from <address>]] [--confirm] [--resume] [--api-base <url>] [--function-env <file>|new] [--slate-domain <host>] [--slate-name <name>] [--admin-email <mail> --admin-name <name> --admin-role <name> --admin-role-id <id>] [--async-on-success [--triggers-wired]] [--subset-shims] [--source-backup <zip|dir>|--source-csv <dir>|--source-json <dir>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>] [--edits <file>] [--previous <deployed .ds> [--rename Form.Old=New]...]\n' +
         '       c2c deploy <file|dir> --backfill-shadows [--confirm] [--catalyst-base <url>] [--projects <file>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
         '       --source-* measures the Creator data so is_mandatory/is_unique are provisioned only where the records allow it\n' +
         '       org: --org, else c2c-deploy.json, else the project registry (--projects), else the Catalyst CLI login (active_org)\n' +
@@ -818,6 +818,16 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
       const blocked = unsupportedSchemaOps(generateSchema(source), generateSchema(app), edited.renames);
       if (blocked.length > 0) {
         io.stderr(`c2c deploy: the edits log changes Data Store in a way the live deploy cannot apply; nothing was changed\n${blocked.map((b) => `- ${b}`).join('\n')}`);
+        return 1;
+      }
+    }
+    // A re-export compared with the deployed model (--previous): the same
+    // refusal, since the live table step adds tables and columns only.
+    const deployedSource = flag(rest, '--previous');
+    if (deployedSource !== undefined) {
+      const blocked = unsupportedSchemaOps(generateSchema(loadSource(deployedSource)), generateSchema(app), renameFlags(rest));
+      if (blocked.length > 0) {
+        io.stderr(`c2c deploy: the re-export changes Data Store in a way the live deploy cannot apply; nothing was changed\n${blocked.map((b) => `- ${b}`).join('\n')}\n`);
         return 1;
       }
     }

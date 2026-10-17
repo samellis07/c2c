@@ -31,6 +31,7 @@ import {
   type CsvLoad,
   type DeltaCheckpoint,
   type Io,
+  verifyRollbackManifest,
 } from '../../deploy/src/index.js';
 import { doubleColumns } from '../../deploy/src/row-delta.js';
 import { generateSchema } from '../../schema/src/index.js';
@@ -436,83 +437,6 @@ function isPathOutsideWorkspace(target: string, dir: string): boolean {
   return true;
 }
 
-/** `relPath` must stay inside `realDir`, after symlink resolution of the file itself. */
-function containedPath(realDir: string, relPath: unknown): { path?: string; reason?: string } {
-  if (typeof relPath !== 'string' || relPath === '' || isAbsolute(relPath)) {
-    return { reason: `manifest path ${String(relPath)} is not relative` };
-  }
-  const full = resolve(realDir, relPath);
-  const rel = relative(realDir, full);
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
-    return { reason: `manifest path ${relPath} escapes the export dir` };
-  }
-  const real = realPath(full);
-  const relReal = relative(realDir, real);
-  if (relReal === '' || relReal.startsWith('..') || isAbsolute(relReal)) {
-    return { reason: `manifest path ${relPath} resolves outside the export dir` };
-  }
-  return { path: real };
-}
-
-/**
- * A valid manifest is the file `c2c rollback-export` writes: schema
- * c2c-rollback-export/1, the app name, every exported table mapped to its
- * file, and a sha256 for every listed file that matches the bytes on disk.
- */
-function verifyManifest(dir: string, manifest: Record<string, unknown>, app: App): { ok: boolean; reason?: string } {
-  if (manifest.version !== ROLLBACK_MANIFEST_VERSION) {
-    return { ok: false, reason: `manifest version is not ${ROLLBACK_MANIFEST_VERSION}` };
-  }
-  if (manifest.app !== (app.name ?? '')) {
-    return { ok: false, reason: 'manifest app does not match this application' };
-  }
-  const files = manifest.files;
-  if (!files || typeof files !== 'object' || Array.isArray(files)) {
-    return { ok: false, reason: 'manifest carries no file checksums' };
-  }
-  const entries = Object.entries(files as Record<string, unknown>);
-  if (entries.length === 0) {
-    return { ok: false, reason: 'manifest lists no files' };
-  }
-  const tables = manifest.tables;
-  if (!tables || typeof tables !== 'object' || Array.isArray(tables)) {
-    return { ok: false, reason: 'manifest lists no tables' };
-  }
-  const expected = generateSchema(app)
-    .tables.filter((table) => !table.nosql && table.role !== 'system')
-    .map((table) => table.name)
-    .sort();
-  const listed = Object.keys(tables as Record<string, unknown>).sort();
-  if (listed.length !== expected.length || listed.some((name, index) => name !== expected[index])) {
-    return { ok: false, reason: 'manifest table inventory does not match the application' };
-  }
-  for (const [table, path] of Object.entries(tables as Record<string, unknown>)) {
-    if (typeof path !== 'string' || !(path in (files as Record<string, unknown>))) {
-      return { ok: false, reason: `manifest table ${table} names no exported file` };
-    }
-  }
-  const realDir = realPath(dir);
-  for (const [relPath, expectedSum] of entries) {
-    const contained = containedPath(realDir, relPath);
-    if (!contained.path) return { ok: false, reason: contained.reason };
-    let content: Buffer;
-    try {
-      content = readFileSync(contained.path);
-    } catch (err) {
-      const code = (err as { code?: unknown } | null)?.code;
-      if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') {
-        return { ok: false, reason: `missing file ${relPath}` };
-      }
-      throw err;
-    }
-    const actual = createHash('sha256').update(content).digest('hex');
-    if (actual.toLowerCase() !== String(expectedSum).toLowerCase()) {
-      return { ok: false, reason: `checksum mismatch on ${relPath}` };
-    }
-  }
-  return { ok: true };
-}
-
 export function verifyRollbackEvidence(target: string, rollbackPath: string | undefined, app: App): RollbackEvidence | undefined {
   if (!rollbackPath) return undefined;
   const resolved = resolve(rollbackPath);
@@ -569,7 +493,7 @@ export function verifyRollbackEvidence(target: string, rollbackPath: string | un
     };
   }
 
-  const manifestResult = verifyManifest(dir, parsed, app);
+  const manifestResult = verifyRollbackManifest(dir, parsed, app);
   if (!manifestResult.ok) {
     return {
       status: 'invalid',
