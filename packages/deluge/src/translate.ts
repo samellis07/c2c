@@ -3947,7 +3947,7 @@ function loopListUpdate(
   if (col.todo || col.appFunction || col.sideEffect || col.unboundReads.length || col.reads.includes(name) || NON_READ_EFFECT.test(col.code) || staleFx(col, scope)) return null;
   if (!updates.every((u) => listUpdateReadOnly(u.value, s.name))) return null;
   if (!tests.every((t) => listUpdateReadOnly(t, s.name) && !staleFx(t, scope))) return null;
-  if (tempNames.has(name) || tempNames.has(s.name) || [...tempNames].some((t) => before.has(t))) return null;
+  if (tempNames.has(name) || tempNames.has(s.name) || Array.from(tempNames).sort().some((t) => before.has(t))) return null;
   if (!temps.every((t) => listUpdateReadOnly(t.value, s.name) && !staleFx(t.value, scope) && !t.value.reads.includes(t.name) && !t.value.reads.includes(name))) return null;
   const body = serverBody
     .split('\n')
