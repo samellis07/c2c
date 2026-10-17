@@ -160,22 +160,138 @@ test('analyze prints the same scope labels and does not fold them into the score
   assert.equal(golden.score.readiness, report.score.readiness);
 });
 
-test('markdown report spells out an empty TODO list, no manual steps, and a nameless app', () => {
+test('markdown report spells out an empty TODO list, no manual steps, and a nameless app with all sections saying none', () => {
   const report: FixtureMigrationReport = {
     schema: 'c2c-fixture-migration-report/1',
     fixture: 'empty/app',
     app: null,
     scope: [],
+    converted: { forms: 0, reports: 0, pages: 0, functions: 0 },
     todoCount: 0,
     todoKinds: [],
+    fieldGaps: [],
     manualSteps: [],
     hiddenParts: [],
+    humanSteps: [],
   };
   const md = fixtureMigrationReportAsMarkdown(report);
   assert.match(md, /^# Migration report: empty\/app\n\nApp: \(none\)\n/);
+  assert.match(md, /## Scope\n\n- none\n/);
+  assert.match(md, /## Converted inventory\n\n- none\n/);
   assert.match(md, /## TODO counts\n\n0\n\n- none\n/);
+  assert.match(md, /## Field gaps\n\n- none\n/);
   assert.match(md, /## Manual steps\n\n- none\n\n/);
-  assert.match(md, /## Hidden from end users\n\n0\n\n- none\n$/);
+  assert.match(md, /## Hidden from end users\n\n0\n\n- none\n\n/);
+  assert.match(md, /## Human steps\n\n- none\n$/);
+});
+
+test('converted inventory section lists counts from IR and renders singular/plural correctly', () => {
+  const report: FixtureMigrationReport = {
+    schema: 'c2c-fixture-migration-report/1',
+    fixture: 'test/converted',
+    app: 'TestApp',
+    scope: [],
+    converted: { forms: 4, reports: 1, pages: 1, functions: 2 },
+    todoCount: 0,
+    todoKinds: [],
+    fieldGaps: [],
+    manualSteps: [],
+    hiddenParts: [],
+    humanSteps: [],
+  };
+  const md = fixtureMigrationReportAsMarkdown(report);
+  assert.match(md, /## Converted inventory\n\n- 4 forms\n- 1 report\n- 1 page\n- 2 functions\n/);
+});
+
+test('field gaps section lists unsupported field properties with matrixId, count, fields, and reason', () => {
+  const report: FixtureMigrationReport = {
+    schema: 'c2c-fixture-migration-report/1',
+    fixture: 'test/gaps',
+    app: 'TestApp',
+    scope: [],
+    converted: { forms: 0, reports: 0, pages: 0, functions: 0 },
+    todoCount: 0,
+    todoKinds: [],
+    fieldGaps: [
+      {
+        matrixId: 'auto-number',
+        count: 2,
+        reason: 'Auto-number reason text',
+        fields: [{ form: 'Book', field: 'ID' }, { form: 'Member', field: 'ID' }],
+      },
+    ],
+    manualSteps: [],
+    hiddenParts: [],
+    humanSteps: [],
+  };
+  const md = fixtureMigrationReportAsMarkdown(report);
+  assert.match(md, /## Field gaps\n\n- auto-number: 2 \(Book\.ID, Member\.ID\) — Auto-number reason text\n/);
+});
+
+test('manual steps carry workaround text from the precheck fix or widget detail', () => {
+  const report: FixtureMigrationReport = {
+    schema: 'c2c-fixture-migration-report/1',
+    fixture: 'test/manual',
+    app: 'TestApp',
+    scope: [],
+    converted: { forms: 0, reports: 0, pages: 0, functions: 0 },
+    todoCount: 0,
+    todoKinds: [],
+    fieldGaps: [],
+    manualSteps: [
+      {
+        severity: 'warning',
+        check: 'converter-gap',
+        count: 1,
+        workaround: 'Fix converter gap by rewriting query',
+      },
+      {
+        severity: 'blocker',
+        check: 'widget-package:chart',
+        count: 1,
+        workaround: 'chart: widget package (html + json) is not generated; rebuild it by hand',
+      },
+    ],
+    hiddenParts: [],
+    humanSteps: [],
+  };
+  const md = fixtureMigrationReportAsMarkdown(report);
+  assert.match(md, /## Manual steps\n\n- 1 warning converter-gap — Fix converter gap by rewriting query\n- 1 blocker widget-package:chart — chart: widget package \(html \+ json\) is not generated; rebuild it by hand\n/);
+});
+
+test('human steps section lists customer checklist steps', () => {
+  const report: FixtureMigrationReport = {
+    schema: 'c2c-fixture-migration-report/1',
+    fixture: 'test/human',
+    app: 'TestApp',
+    scope: [],
+    converted: { forms: 0, reports: 0, pages: 0, functions: 0 },
+    todoCount: 0,
+    todoKinds: [],
+    fieldGaps: [],
+    manualSteps: [],
+    hiddenParts: [],
+    humanSteps: [
+      'Accept invite: accept the app invite mail',
+      'Sign in once: sign in to the deployed app once',
+    ],
+  };
+  const md = fixtureMigrationReportAsMarkdown(report);
+  assert.match(md, /## Human steps\n\n- Accept invite: accept the app invite mail\n- Sign in once: sign in to the deployed app once\n/);
+});
+
+test('buildFixtureMigrationReport populates converted inventory, field gaps, workaround, and human steps for real fixtures', () => {
+  const fixture = listInRepoFixtures(root).find((f) => f.id.endsWith('library_application'));
+  assert.ok(fixture);
+  const report = buildFixtureMigrationReport(fixture);
+  assert.deepEqual(report.converted, { forms: 4, reports: 5, pages: 1, functions: 7 });
+  assert.equal(report.fieldGaps.length, 7);
+  assert.equal(report.fieldGaps.reduce((sum, g) => sum + g.count, 0), 13);
+  assert.equal(report.humanSteps.length, 4);
+  const md = fixtureMigrationReportAsMarkdown(report);
+  assert.match(md, /## Converted inventory\n\n- 4 forms\n- 5 reports\n- 1 page\n- 7 functions\n/);
+  assert.match(md, /## Field gaps\n\n- auto-number: 4 /);
+  assert.match(md, /## Human steps\n\n- Accept invite: accept the app invite mail\n/);
 });
 
 test('writing the goldens replaces stale reports, keeps dotfiles, and is byte-stable', (t) => {
