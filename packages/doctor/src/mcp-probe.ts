@@ -176,7 +176,8 @@ export function probeNonceCleanup(bucket: string, nonce: string, project: string
 /**
  * Best-effort delete of this run's nonce object. The CLI token's
  * buckets.objects.DELETE scope is not proven, so a refusal is ignored and
- * the caller still prints {@link probeNonceCleanup}. Never deletes the bucket.
+ * the caller still prints {@link probeNonceCleanup}. Never deletes the bucket
+ * ({@link cleanUpProbe} does that, only for a bucket this run created).
  */
 export async function deleteProbeNonce(rest: RestFn, project: string, bucket: string, nonce: string): Promise<boolean> {
   if (!/^[0-9]+$/.test(project) || !NONCE_RE.test(nonce)) return false;
@@ -187,6 +188,60 @@ export async function deleteProbeNonce(rest: RestFn, project: string, bucket: st
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether the probe bucket already existed when --mcp-begin ran, from the
+ * same REST bucket list the read-back uses. Only a project-scoped begin
+ * reads it; any read that cannot answer yields undefined, which never
+ * counts as "created by this run".
+ */
+export async function probeBucketBefore(rest: RestFn, target: ProbeTarget, name: string): Promise<'present' | 'absent' | undefined> {
+  if (target.project === undefined || !/^[0-9]+$/.test(target.project) || name !== probeNameFor(target)) return undefined;
+  const read = await readBucketList(rest, target.project, name);
+  return read.status === 'found' ? 'present' : read.status === 'absent' ? 'absent' : undefined;
+}
+
+/** DELETE that removes the probe bucket by name. [DOC] bucket delete; CLI token scope [UNVERIFIED]. */
+export function probeBucketDeletePath(bucket: string, project: string): string {
+  return `/baas/v1/project/${project}/bucket?bucket_name=${encodeURIComponent(bucket)}`;
+}
+
+/** The console steps that remove what an automatic cleanup left behind. */
+export function probeConsoleCleanup(bucket: string, nonce?: string): string {
+  return nonce
+    ? `in the Catalyst console open the project → Cloud Scale → Stratus → bucket ${bucket}, delete the object ${nonce}, then delete the bucket ${bucket}`
+    : `in the Catalyst console open the project → Cloud Scale → Stratus, select the bucket ${bucket} and delete it`;
+}
+
+export interface ProbeCleanupResult {
+  /** This run's nonce object was deleted (confirmed by the delete answer). */
+  nonceRemoved: boolean;
+  /** 'removed': deleted and the bucket list no longer shows it. 'kept': not created by this run, so never touched. 'left': the delete was refused or not confirmed. */
+  bucket: 'removed' | 'kept' | 'left';
+}
+
+/**
+ * Clean up after a verified project-scoped probe: delete this run's nonce
+ * object first, then the probe bucket — only when this run created it
+ * (`createdThisRun`: the bucket was absent at --mcp-begin and the
+ * Create_Bucket answer was not already-exists). A pre-existing bucket is
+ * never deleted. The bucket counts as removed only once the bucket list no
+ * longer shows it; a refusal or an unconfirmed delete leaves it for the
+ * caller to report, never to fail on.
+ */
+export async function cleanUpProbe(rest: RestFn, project: string, bucket: string, nonce: string, createdThisRun: boolean): Promise<ProbeCleanupResult> {
+  const nonceRemoved = await deleteProbeNonce(rest, project, bucket, nonce);
+  if (!createdThisRun) return { nonceRemoved, bucket: 'kept' };
+  if (!nonceRemoved || !/^[0-9]+$/.test(project) || !isProbeName(bucket)) return { nonceRemoved, bucket: 'left' };
+  try {
+    const res = await rest({ method: 'DELETE', path: probeBucketDeletePath(bucket, project) });
+    if (res.status < 200 || res.status >= 300) return { nonceRemoved, bucket: 'left' };
+  } catch {
+    return { nonceRemoved, bucket: 'left' };
+  }
+  const after = await readBucketList(rest, project, bucket);
+  return { nonceRemoved, bucket: after.status === 'absent' ? 'removed' : 'left' };
 }
 
 /** The exact Delete_Bucket arguments for cleanup (by bucket name, not an id — errors.md). */
