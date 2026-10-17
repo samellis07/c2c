@@ -594,7 +594,7 @@ export function generateSeed(app: App, opts?: { n?: number; seed?: string }): Se
 
       const queue: string[] = [];
       const rank = new Map<string, number>();
-      for (const [node, deg] of inDegree.entries()) {
+      for (const [node, deg] of [...inDegree.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
         if (deg === 0) {
           queue.push(node);
           rank.set(node, 0);
