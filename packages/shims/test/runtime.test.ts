@@ -2694,3 +2694,93 @@ test('app.users and app.userEmailIds require admin or developer profile and refu
   const dryEmployeeCtx = dry.context({ principal: { profile: 'Employee' } });
   await assert.rejects(() => dry.shim.app.users(dryEmployeeCtx), (err: unknown) => (err as { code?: string }).code === 'RECORD_ACCESS_DENIED');
 });
+
+test('deferred effects queue until flush, keep their order, and are dropped by discard', async () => {
+  const calls: string[] = [];
+  const runtime = createRuntime({
+    dryRun: false,
+    appTimeZone: 'UTC',
+    mailGuarded: true,
+    datastore: {
+      query: async () => [],
+      insert: async (form: string) => {
+        calls.push(`insert:${form}`);
+        return { ID: '1' };
+      },
+      delete: async (form: string) => {
+        calls.push(`delete:${form}`);
+      },
+    },
+    mail: async (message) => {
+      calls.push(`mail:${(message as { to?: string }).to}`);
+      return { status: 'sent' };
+    },
+    http: async (request) => {
+      calls.push(`http:${(request as { url?: string }).url}`);
+      return {};
+    },
+  });
+  const ctx = runtime.context({});
+
+  runtime.beginDeferredEffects('Orders');
+  await runtime.shim.mail.send(ctx, { to: 'a@b.c', message: 'hi' });
+  await runtime.shim.datastore.insert(ctx, 'Log', { Title: 'x' });
+  // A write to the submitted form itself is never deferred: it keeps its
+  // pre-validate place so a field write still reaches the stored row.
+  await runtime.shim.datastore.insert(ctx, 'Orders', { Name: 'mine' });
+  runtime.endDeferredEffects();
+  assert.deepEqual(calls, ['insert:Orders']);
+  const queued = runtime.transcript.filter((e) => e.deferred === true && e.performed === false);
+  assert.deepEqual(queued.map((e) => e.op), ['sendmail', 'insert']);
+
+  await runtime.flushDeferredEffects();
+  assert.deepEqual(calls, ['insert:Orders', 'mail:a@b.c', 'insert:Log']);
+
+  runtime.beginDeferredEffects('Orders');
+  await runtime.shim.mail.send(ctx, { to: 'b@c.d', message: 'hi' });
+  await runtime.shim.datastore.delete(ctx, 'Log', { op: 'true' });
+  await runtime.shim.http.invokeurl(ctx, { url: 'https://example.test/x' });
+  runtime.endDeferredEffects();
+  runtime.discardDeferredEffects();
+  assert.deepEqual(calls, ['insert:Orders', 'mail:a@b.c', 'insert:Log']);
+  await runtime.flushDeferredEffects();
+  assert.deepEqual(calls, ['insert:Orders', 'mail:a@b.c', 'insert:Log']);
+});
+
+test('a deferred effect failure propagates on flush, never silently', async () => {
+  const runtime = createRuntime({
+    dryRun: false,
+    appTimeZone: 'UTC',
+    datastore: {
+      query: async () => [],
+      insert: async () => {
+        throw new Error('store down');
+      },
+    },
+  });
+  const ctx = runtime.context({});
+  runtime.beginDeferredEffects('Orders');
+  await runtime.shim.datastore.insert(ctx, 'Log', { Title: 'x' });
+  runtime.endDeferredEffects();
+  await assert.rejects(() => runtime.flushDeferredEffects(), /store down/);
+});
+
+test('a dry run records deferred effects as not performed and never replays them', async () => {
+  let sent = 0;
+  const runtime = createRuntime({
+    dryRun: true,
+    mail: async () => {
+      sent++;
+      return { status: 'sent' };
+    },
+  });
+  const ctx = runtime.context({});
+  runtime.beginDeferredEffects('Orders');
+  await runtime.shim.mail.send(ctx, { to: 'a@b.c', message: 'hi' });
+  runtime.endDeferredEffects();
+  await runtime.flushDeferredEffects();
+  assert.equal(sent, 0);
+  const entry = runtime.transcript.find((e) => e.op === 'sendmail');
+  assert.equal(entry?.deferred, true);
+  assert.equal(entry?.performed, false);
+});

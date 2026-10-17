@@ -20,6 +20,7 @@ Catalyst platform limits and their evidence labels are indexed in `plugin/refere
 | Creator | Catalyst | Status |
 |---|---|---|
 | Form workflows (submit / edit / delete, on validate, on success) | Routes in one Advanced I/O function `c2c_api` (Node 20, `zcatalyst-sdk-node 3.4.0`, shims vendored) [TESTED] | Deploys [TESTED]; `thisapp.*` calls dispatch in-process |
+| Form properties actions (`type = presuccess`, `on start`: Direct to, Send Email) | Run in the submit pipeline before on validate; mail, invokeurl and other-form writes held until the row is stored, dropped on any refusal [DOC] | Generated; bodies the buffer cannot represent keep the earlier order and are counted (`presuccess-effect-unbuffered`) |
 | On user input / add row | Client-side handlers in the Slate PWA | Runs in the browser; server re-validates |
 | Custom functions (`thisapp.<fn>`) | Exported functions in the same bundle, dispatched by name | Generated |
 | Schedules (form/date/custom) | **Job functions** + Job Scheduling **crons** in one **job pool** | Definitions generated; automatic bootstrap planned |

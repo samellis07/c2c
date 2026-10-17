@@ -125,6 +125,10 @@ A workflow definition produces one `Workflow` entry per handler:
 - Approvals: `on level 1 { approvers ( … ) on approve { … } }` → event
   `on level 1 / on approve`, with `approvers`.
 - Schedules: `on start { actions { on load ( … ) } }` → `on start / on load`.
+- Form properties actions: `type = presuccess` with `on start { actions { … } }`
+  → event `on start` on the form's `/handler` route, run by the submit pipeline
+  before on validate. Field sets reach validate and the stored row; mail,
+  invokeurl and other-form writes are held until the row is stored.
 - Blueprints: `start { start stage = … }`, `stages`, `transitions` with
   `before` / `during` / `after` phases, each with properties, settings blocks
   and Deluge.

@@ -122,7 +122,7 @@ const admin = { user: { profile: 'Administrator', loginUser: 'ada@example.test' 
 
 async function withLiveApp(
   source: string,
-  run: (ctx: { dir: string; load: (path: string) => Promise<Record<string, unknown>>; rows: (table: string) => Record<string, unknown>[]; files: { path: string; data: string | Uint8Array }[] }) => Promise<void>,
+  run: (ctx: { dir: string; load: (path: string) => Promise<Record<string, unknown>>; rows: (table: string) => Record<string, unknown>[]; calls: () => unknown[][]; files: { path: string; data: string | Uint8Array }[] }) => Promise<void>,
 ): Promise<void> {
   const built = buildUi(deriveIr(parse(source)));
   const dir = mkdtempSync(join(tmpdir(), 'c2c-presuccess-live-'));
@@ -150,6 +150,7 @@ async function withLiveApp(
       dir,
       load: (path) => import(pathToFileURL(join(dir, path)).href) as Promise<Record<string, unknown>>,
       rows: (table) => fakeSdk.state().tables[table] ?? [],
+      calls: () => fakeSdk.state().calls,
       files: built.files as { path: string; data: string | Uint8Array }[],
     });
   } finally {
@@ -224,4 +225,284 @@ test('only a form with a presuccess body gets the presuccess run in its submit s
   const unmarkedStub = String(unmarked.files.find((file) => file.path === 'functions/aio/item/submit.mjs')?.data ?? '');
   assert.ok(unmarkedStub);
   assert.doesNotMatch(unmarkedStub, /presuccess/);
+});
+
+// A presuccess body that mails and writes another form: the mail and the Log
+// insert are on-submission effects, held until the row is stored and dropped
+// on any refusal. `must have` on Item.Name makes the second submit a store
+// refusal; `must have` on Log.Title makes the deferred insert fail at flush.
+const EFFECTS_SOURCE = `application "Demo"
+{
+${tab(1)}time zone = "Asia/Kolkata"
+${tab(1)}form Item
+${tab(1)}{
+${tab(2)}must have unique Name
+${tab(2)}(
+${tab(3)}type = text
+${tab(2)})
+${field('Stage')}
+${tab(1)}}
+${tab(1)}form Log
+${tab(1)}{
+${tab(2)}must have Title
+${tab(2)}(
+${tab(3)}type = text
+${tab(2)})
+${field('Note')}
+${tab(1)}}
+${tab(1)}workflow
+${tab(1)}{
+${tab(1)}form
+${tab(1)}{
+${presuccess('Item_Start', 'Item', [
+  'if (input.Name == "stop")',
+  '{',
+  '\tcancel submit;',
+  '}',
+  'input.Stage = "started";',
+  'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "Booked" message: "Your booking has been successfully completed"];',
+  'insert into Log',
+  '[',
+  '\tTitle: input.Name',
+  '];',
+])}
+${recordEvent('Item_Check', 'Item', 'on validate', ['if (input.Name == "veto")', '{', '\tcancel submit;', '}'])}
+${tab(1)}}
+${tab(1)}}
+${tab(1)}share_settings
+${tab(1)}{
+${tab(2)}"Administrator"
+${tab(2)}{
+${tab(3)}name = "Administrator"
+${tab(3)}type = Users_Permissions
+${tab(2)}}
+${tab(1)}}
+}
+`;
+
+test('a presuccess cancel submit discards the buffered mail and insert (T1)', async () => {
+  await withLiveApp(EFFECTS_SOURCE, async ({ load, rows }) => {
+    const presuccessModule = await load('functions/aio/item/on-start.mjs');
+    assert.equal(presuccessModule.deferEffects, true);
+    const submit = (await load('functions/aio/item/submit.mjs')).default as Handler;
+    const item0 = rows('Item').length;
+    const log0 = rows('Log').length;
+    const refused = await invoke(submit, { ...admin, body: { record: { Name: 'stop' } } });
+    assert.equal(refused.status, 422, JSON.stringify(refused.body));
+    assert.equal(refused.body.refused, true);
+    assert.equal(rows('Item').length, item0);
+    assert.equal(rows('Log').length, log0);
+  });
+});
+
+test('an on-validate refusal discards the effects the presuccess body queued (T2)', async () => {
+  await withLiveApp(EFFECTS_SOURCE, async ({ load, rows }) => {
+    const submit = (await load('functions/aio/item/submit.mjs')).default as Handler;
+    const item0 = rows('Item').length;
+    const log0 = rows('Log').length;
+    const refused = await invoke(submit, { ...admin, body: { record: { Name: 'veto' } } });
+    assert.equal(refused.status, 422, JSON.stringify(refused.body));
+    assert.equal(rows('Item').length, item0);
+    assert.equal(rows('Log').length, log0);
+  });
+});
+
+test('a stored submit flushes the buffered effects after the row write, before on success (T3)', async () => {
+  await withLiveApp(EFFECTS_SOURCE, async ({ load, rows, calls }) => {
+    const submit = (await load('functions/aio/item/submit.mjs')).default as Handler;
+    const item0 = rows('Item').length;
+    const log0 = rows('Log').length;
+    const calls0 = calls().length;
+    const ok = await invoke(submit, { ...admin, body: { record: { Name: 'kept-t3' } } });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.equal(ok.body.wrote, true);
+    const item = rows('Item');
+    assert.equal(item.length, item0 + 1);
+    assert.deepEqual([item[item.length - 1]!.Name, item[item.length - 1]!.Stage], ['kept-t3', 'started']);
+    const log = rows('Log');
+    assert.equal(log.length, log0 + 1);
+    assert.equal(log[log.length - 1]!.Title, 'kept-t3');
+    // The Log write is a post-commit effect: the Item row is stored first.
+    const writes = calls().slice(calls0).filter((c) => c[0] === 'insertRows');
+    assert.deepEqual(
+      writes.map((c) => c[1]),
+      ['Item', 'Log'],
+    );
+  });
+});
+
+test('an edit-path refusal after presuccess drops the buffered effects (T4)', async () => {
+  await withLiveApp(EFFECTS_SOURCE, async ({ load, rows }) => {
+    const submit = (await load('functions/aio/item/submit.mjs')).default as Handler;
+    const item0 = rows('Item').length;
+    const log0 = rows('Log').length;
+    // An edit of a row that does not exist is refused after the presuccess
+    // body queued its mail and Log insert: both are discarded.
+    const refused = await invoke(submit, { ...admin, body: { record: { Name: 'ghost' }, ROWID: '999999999' } });
+    assert.notEqual(refused.status, 200, JSON.stringify(refused.body));
+    assert.notEqual(refused.body.wrote, true);
+    assert.equal(rows('Item').length, item0);
+    assert.equal(rows('Log').length, log0);
+  });
+});
+
+// Deferred effects replay through the live adapters on flush; the runtime
+// unit tests pin the flush-failure path (POST_COMMIT_FAILED on a 200). This
+// fixture keeps a second submit writing a second deferred Log row.
+const FLUSH_FAIL_SOURCE = `application "Demo"
+{
+${tab(1)}time zone = "Asia/Kolkata"
+${tab(1)}form Item
+${tab(1)}{
+${field('Name')}
+${field('Stage')}
+${tab(1)}}
+${tab(1)}form Log
+${tab(1)}{
+${tab(2)}must have unique Title
+${tab(2)}(
+${tab(3)}type = text
+${tab(2)})
+${tab(1)}}
+${tab(1)}workflow
+${tab(1)}{
+${tab(1)}form
+${tab(1)}{
+${presuccess('Item_Start', 'Item', ['input.Stage = "started";', 'insert into Log', '[', '\tTitle: "fixed"', '];'])}
+${tab(1)}}
+${tab(1)}}
+${tab(1)}share_settings
+${tab(1)}{
+${tab(2)}"Administrator"
+${tab(2)}{
+${tab(3)}name = "Administrator"
+${tab(3)}type = Users_Permissions
+${tab(2)}}
+${tab(1)}}
+}
+`;
+
+test('a deferred effect replays once per committed submit (T5)', async () => {
+  await withLiveApp(FLUSH_FAIL_SOURCE, async ({ load, rows, calls }) => {
+    const submit = (await load('functions/aio/item/submit.mjs')).default as Handler;
+    const item0 = rows('Item').length;
+    const log0 = rows('Log').length;
+    const calls0 = calls().length;
+    const res = await invoke(submit, { ...admin, body: { record: { Name: 'first-t5' } } });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.wrote, true);
+    const res2 = await invoke(submit, { ...admin, body: { record: { Name: 'again-t5' } } });
+    assert.equal(res2.status, 200, JSON.stringify(res2.body));
+    assert.equal(res2.body.wrote, true);
+    assert.equal(rows('Item').length, item0 + 2);
+    assert.equal(rows('Log').length, log0 + 2);
+    const writes = calls().slice(calls0).filter((c) => c[0] === 'insertRows').map((c) => c[1]);
+    assert.deepEqual(writes, ['Item', 'Log', 'Item', 'Log']);
+  });
+});
+
+// An unsafe body (a write to the submitted form) is not deferred: today's
+// pre-commit order is kept and the module carries no deferEffects mark.
+const UNSAFE_SOURCE = `application "Demo"
+{
+${tab(1)}time zone = "Asia/Kolkata"
+${tab(1)}form Item
+${tab(1)}{
+${field('Name')}
+${field('Stage')}
+${tab(1)}}
+${tab(1)}workflow
+${tab(1)}{
+${tab(1)}form
+${tab(1)}{
+${presuccess('Item_Start', 'Item', ['insert into Item', '[', '\tName: "early",', '\tStage: "x"', '];', 'cancel submit;'])}
+${tab(1)}}
+${tab(1)}}
+${tab(1)}share_settings
+${tab(1)}{
+${tab(2)}"Administrator"
+${tab(2)}{
+${tab(3)}name = "Administrator"
+${tab(3)}type = Users_Permissions
+${tab(2)}}
+${tab(1)}}
+}
+`;
+
+test('an unbuffered presuccess body keeps pre-commit effects and is counted (T6)', async () => {
+  const built = buildUi(deriveIr(parse(UNSAFE_SOURCE)));
+  const start = String(built.files.find((file) => file.path === 'functions/aio/item/on-start.mjs')?.data ?? '');
+  assert.ok(start);
+  assert.match(start, /^export const presuccess = true;$/m);
+  assert.doesNotMatch(start, /^export const deferEffects$/m);
+  const report = JSON.parse(String(built.files.find((file) => file.path === 'migration-report.json')?.data ?? '{}')) as {
+    untranslated?: { construct: string; count: number }[];
+  };
+  assert.ok(
+    (report.untranslated ?? []).some((t) => t.construct === 'presuccess-effect-unbuffered'),
+    'the unbuffered body is counted',
+  );
+  await withLiveApp(UNSAFE_SOURCE, async ({ load, rows }) => {
+    const submit = (await load('functions/aio/item/submit.mjs')).default as Handler;
+    const item0 = rows('Item').length;
+    const refused = await invoke(submit, { ...admin, body: { record: { Name: 'any' } } });
+    assert.equal(refused.status, 422, JSON.stringify(refused.body));
+    // Unchanged behaviour: the own-form insert ran before the refusal.
+    assert.equal(rows('Item').length, item0 + 1);
+    assert.equal(rows('Item')[rows('Item').length - 1]!.Name, 'early');
+  });
+});
+
+// The on-success module owns Memo's submit URL; T1–T3 through that path.
+const AIO_SOURCE = `application "Demo"
+{
+${tab(1)}time zone = "Asia/Kolkata"
+${tab(1)}form Memo
+${tab(1)}{
+${field('Title')}
+${field('Stage')}
+${tab(1)}}
+${tab(1)}form Log
+${tab(1)}{
+${field('Title')}
+${tab(1)}}
+${tab(1)}workflow
+${tab(1)}{
+${tab(1)}form
+${tab(1)}{
+${presuccess('Memo_Start', 'Memo', ['if (input.Title == "stop")', '{', '\tcancel submit;', '}', 'input.Stage = "started";', 'insert into Log', '[', '\tTitle: input.Title', '];'])}
+${recordEvent('Memo_Done', 'Memo', 'on success', ['input.Stage = "done";', 'openUrl("#Report:Memo_All","same window");'])}
+${tab(1)}}
+${tab(1)}}
+${tab(1)}share_settings
+${tab(1)}{
+${tab(2)}"Administrator"
+${tab(2)}{
+${tab(3)}name = "Administrator"
+${tab(3)}type = Users_Permissions
+${tab(2)}}
+${tab(1)}}
+}
+`;
+
+test('the submit-owning on-success module defers presuccess effects the same way (T7)', async () => {
+  await withLiveApp(AIO_SOURCE, async ({ load, rows, files, calls }) => {
+    const success = files.find((file) => file.path.startsWith('functions/aio/memo/') && /path: "\/forms\/Memo\/success"/.test(String(file.data)));
+    assert.ok(success, 'the on-success module was not generated');
+    const handler = (await load(success.path)).default as Handler;
+    const memo0 = rows('Memo').length;
+    const log0 = rows('Log').length;
+    const calls0 = calls().length;
+    const refused = await invoke(handler, { ...admin, body: { record: { Title: 'stop' } } });
+    assert.equal(refused.status, 422, JSON.stringify(refused.body));
+    assert.equal(rows('Memo').length, memo0);
+    assert.equal(rows('Log').length, log0);
+    const ok = await invoke(handler, { ...admin, body: { record: { Title: 'memo' } } });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    assert.equal(ok.body.wrote, true);
+    assert.equal(rows('Memo')[rows('Memo').length - 1]!.Stage, 'done');
+    assert.equal(rows('Log').length, log0 + 1);
+    const writes = calls().slice(calls0).filter((c) => c[0] === 'insertRows').map((c) => c[1]);
+    assert.deepEqual(writes, ['Memo', 'Log']);
+  });
 });

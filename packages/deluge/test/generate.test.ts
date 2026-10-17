@@ -4026,6 +4026,69 @@ test('the submit-owning modules run the on start presuccess module; a field-chan
   assert.equal(generated.coverage?.find((entry) => entry.name === 'Start')?.serverInvoked, true);
 });
 
+test('a buffer-safe presuccess body marks its module deferEffects; unsafe bodies keep pre-commit effects and are counted', () => {
+  const appOf = (body: string) => snippet(`\tform Item
+\t{
+\t\tName
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tform Log
+\t{
+\t\tTitle
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tStart as "Start"
+\t\t\t{
+\t\t\t\ttype = presuccess
+\t\t\t\tform = Item
+\t\t\t\ton start
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+${body}
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  const startModule = (ir: App) =>
+    generate(ir).files.find((item) => new RegExp('path: "/forms/Item/handler"').test(item.source));
+
+  // Field sets plus mail and an other-form insert are all buffer-safe.
+  const safe = appOf('\t\t\t\t\t\tinput.Name = "ok";\n\t\t\t\t\t\tsendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "m"];\n\t\t\t\t\t\tinsert into Log\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tTitle: "done"\n\t\t\t\t\t\t];');
+  const safeMod = startModule(safe);
+  assert.ok(safeMod);
+  assert.match(safeMod.source, /^export const deferEffects = true;$/m);
+  const safeTodos = generate(safe).todos.filter((t) => t.construct === 'presuccess-effect-unbuffered');
+  assert.equal(safeTodos.length, 0);
+
+  for (const [label, body] of [
+    // A write to the submitted form is never deferred.
+    ['own-form insert', 'insert into Item\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tName: "x"\n\t\t\t\t\t\t];'],
+    // The script reads the deferred insert's id — the buffer cannot answer it.
+    ['insert id read', 'row = insert into Log\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tTitle: "x"\n\t\t\t\t\t\t];\n\t\t\t\t\t\tinfo row.ID;'],
+    // The body reads a form it also writes; the read could not see the buffered write.
+    ['read-own-write', 'existing = Log[Title == "x"];\n\t\t\t\t\t\tinsert into Log\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tTitle: existing.ID\n\t\t\t\t\t\t];'],
+  ] as const) {
+    const generated = generate(appOf(body));
+    const mod = generated.files.find((item) => new RegExp('path: "/forms/Item/handler"').test(item.source));
+    assert.ok(mod, label);
+    assert.doesNotMatch(mod.source, /deferEffects/, label);
+    assert.ok(
+      generated.todos.some((t) => t.construct === 'presuccess-effect-unbuffered'),
+      `${label}: expected a counted presuccess-effect-unbuffered row, got ${JSON.stringify(generated.todos.map((t) => t.construct))}`,
+    );
+  }
+});
+
 test('field and reporting-level approvers deny explicitly and transitions use the placeholder stage', async () => {
   const view = {
     component: 'Item',

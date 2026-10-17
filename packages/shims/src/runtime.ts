@@ -1350,6 +1350,22 @@ export interface Runtime {
   mail: MailOutcome[];
   shim: Shim;
   context(partial?: ContextInput): ShimContext;
+  /**
+   * `on start` presuccess effect buffer. While active, a body's non-record
+   * effects — sendmail, invokeurl, and insert/update/delete of a form other
+   * than `form` — are queued instead of performed, so a refused submit never
+   * sends the "successfully submitted" mail. The generated submit pipeline
+   * begins the buffer around each presuccess module, ends it once the body
+   * has run, then flushes after the row write commits or discards on any
+   * refusal (cancel submit, on-validate 422, write-rule or store failure).
+   */
+  beginDeferredEffects(form: string): void;
+  /** Stop queueing; the buffered calls stay until flush or discard. */
+  endDeferredEffects(): void;
+  /** Replay the buffered calls in order. A live failure propagates to the caller. */
+  flushDeferredEffects(): Promise<void>;
+  /** Drop the buffered calls; each transcript entry stays `performed:false, deferred:true`. */
+  discardDeferredEffects(): void;
 }
 
 /** A paged ZCQL read kept filling 300-row pages past {@link LIMITS.zcqlMaxRows}. */
@@ -1592,6 +1608,20 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
   const note = (entry: TranscriptEntry) => {
     transcript.push(entry);
   };
+
+  /**
+   * The presuccess effect buffer: `active` while a presuccess body runs.
+   * A queued call replays through the same shim method on flush, so the
+   * guards and transcript notes of the live path still apply.
+   */
+  let deferredEffects: { form: string; active: boolean; pending: { op: string; run: () => Promise<unknown> }[] } | null = null;
+
+  /** Queue `run` under `op` and record the call as not performed. */
+  function deferEffect<T>(op: string, entry: TranscriptEntry, marker: T, run: () => Promise<unknown>): T {
+    note({ ...entry, performed: false, deferred: true, dryRun });
+    deferredEffects?.pending.push({ op, run });
+    return marker;
+  }
 
   /**
    * A request for the transcript (returned to the caller): Authorization and any
@@ -3236,6 +3266,12 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         return out;
       },
       async insert(ctx, form, values) {
+        // A write to a form other than the submitted one is a post-commit
+        // effect while a presuccess body runs; a write to the submitted form
+        // itself keeps its place before validate (the field-set contract).
+        if (deferredEffects?.active && form !== deferredEffects.form) {
+          return deferEffect('insert', { op: 'insert', form, rows: { ...values } }, { deferred: true, form }, () => shim.datastore.insert(ctx, form, values));
+        }
         const fields = { ...values };
         stripColumnKeys(fields, 'both');
         warnLongStrings(form, fields);
@@ -3275,6 +3311,9 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         return options.datastore.insert(form, batches[0]!);
       },
       async update(ctx, form, criteria, values) {
+        if (deferredEffects?.active && form !== deferredEffects.form) {
+          return deferEffect('update', { op: 'update', form, where: whereOf(form, criteria) }, { deferred: true, form }, () => shim.datastore.update(ctx, form, criteria, values));
+        }
         // The platform columns are maintained here, never taken as update
         // input. record.prepare merges the stored Added_* / Modified_* into
         // ctx.record so scripts and the reply can read them; this payload
@@ -3356,6 +3395,9 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         return { updated: rows.length };
       },
       async delete(ctx, form, criteria) {
+        if (deferredEffects?.active && form !== deferredEffects.form) {
+          return deferEffect('delete', { op: 'delete', form, where: whereOf(form, criteria) }, { deferred: true, form }, () => shim.datastore.delete(ctx, form, criteria));
+        }
         const queryRows = options.datastore?.query;
         const deleteRows = options.datastore?.delete;
         const live = !dryRun && !!queryRows && !!deleteRows;
@@ -3587,9 +3629,12 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
     },
     mail: {
-      async send(_ctx, message) {
+      async send(ctx, message) {
         const from = message.from === adminUserIdValue() ? (options.mailFrom ?? (dryRun ? CREATOR_DEFAULT_MAIL_FROM : message.from)) : message.from;
         const sent = { ...message, from };
+        if (deferredEffects?.active) {
+          return deferEffect('sendmail', { op: 'sendmail', message: sent }, { deferred: true, performed: false }, () => shim.mail.send(ctx, message));
+        }
         note({ op: 'sendmail', message: sent, performed: false, dryRun });
         if (!dryRun && options.mail) {
           if (!options.mailGuarded) guardMessage('sendmail', zohoAdapters.mailDestinations(sent));
@@ -3615,8 +3660,11 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
     },
     http: {
-      async invokeurl(_ctx, request) {
+      async invokeurl(ctx, request) {
         const link = typeof request.connection === 'string' && request.connection ? request.connection : null;
+        if (deferredEffects?.active) {
+          return deferEffect('invokeurl', { op: 'invokeurl', connection: link, request: redact(request) }, { deferred: true, performed: false }, () => shim.http.invokeurl(ctx, request));
+        }
         if (link && options.zohoConnections) {
           const rest = zohoAdapters.invokeurlRequest(request);
           const dc = options.zohoConnections.dc ?? null;
@@ -4109,6 +4157,23 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     transcript,
     mail: mailOutcomes,
     shim,
+    beginDeferredEffects(form) {
+      deferredEffects = { form, active: true, pending: [] };
+    },
+    endDeferredEffects() {
+      if (deferredEffects) deferredEffects.active = false;
+    },
+    async flushDeferredEffects() {
+      const pending = deferredEffects?.pending ?? [];
+      deferredEffects = null;
+      // A dry run keeps the deferred transcript entries (performed:false);
+      // only a live submit replays the buffered calls.
+      if (dryRun) return;
+      for (const item of pending) await item.run();
+    },
+    discardDeferredEffects() {
+      deferredEffects = null;
+    },
     context(partial = {}) {
       const override = nonemptyZone(partial.appTimeZone) ?? configuredZone;
       const resolved = dates.resolveAppTimeZoneDetail(override, options.settingsTimeZone, dryRun);
