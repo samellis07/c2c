@@ -14,6 +14,7 @@ import { catalystBaseFor } from './dc.js';
 import {
   applyDelta,
   computeDelta,
+  deltaCheckpointId,
   deltaTotals,
   formatConflict,
   formatDeltaPlan,
@@ -238,7 +239,8 @@ export async function syncDeltaCli(args: readonly string[], io: Io): Promise<num
 const ROLLBACK_USAGE =
   'usage: c2c rollback-export --ds <file|dir> --out <dir> --rows <dir>\n' +
   '       c2c rollback-export --ds <file|dir> --out <dir> [--project <id>] [--org <id>] [--app <link>] [--confirm] [--catalyst-base <url>] [--dc <dc>] [--config <c2c-deploy.json>] [--projects <file>]\n' +
-  '       --rows reads <table>.json row files offline. Without --rows the rows are read from the project, only with --confirm.\n';
+  '       --rows reads <table>.json row files offline. Without --rows the rows are read from the project, only with --confirm.\n' +
+  '       --changed-since <state-file|dir> writes only rows changed or added since that sync-delta checkpoint and lists deleted ones in deleted.csv; lookups still resolve against every stored row. A full export is the default.\n';
 
 export async function rollbackExportCli(args: readonly string[], io: Io): Promise<number> {
   try {
@@ -255,6 +257,12 @@ export async function rollbackExportCli(args: readonly string[], io: Io): Promis
       .map((table) => table.name);
     const rowsDir = flag(args, '--rows');
     const confirm = args.includes('--confirm');
+    const changedSince = flag(args, '--changed-since');
+    let checkpoint: DeltaCheckpoint | undefined;
+    if (changedSince) {
+      checkpoint = readDeltaCheckpoint(stateFilePath(changedSince));
+      if (!checkpoint) throw new GuardError('configuration', `--changed-since ${changedSince} holds no sync-delta checkpoint; run c2c sync-delta --confirm first, or drop --changed-since for a full export`);
+    }
     let rows: Map<string, Record<string, unknown>[]>;
     if (rowsDir) {
       rows = new Map();
@@ -265,7 +273,7 @@ export async function rollbackExportCli(args: readonly string[], io: Io): Promis
     } else {
       const guard = confirm ? await prepareGuard(ds, args, appLink, io) : planGuard(ds, args, appLink);
       if (!confirm) {
-        const lines = ['c2c rollback-export plan v1', ...planScopeLines(guard), '', 'tables to read:', ...tables.map((table) => `- ${table}`), '', `out: ${out}`, 'reads: no', ''];
+        const lines = ['c2c rollback-export plan v1', ...planScopeLines(guard), '', `mode: ${checkpoint ? `delta since checkpoint ${deltaCheckpointId(checkpoint)}` : 'full'}`, 'tables to read:', ...tables.map((table) => `- ${table}`), '', `out: ${out}`, 'reads: no', ''];
         io.stdout(`${lines.join('\n')}\n`);
         return 0;
       }
@@ -273,13 +281,17 @@ export async function rollbackExportCli(args: readonly string[], io: Io): Promis
       const scope = await resolveScope(io, guard.org, guard.projectId);
       rows = await readStoreRows({ dc: guard.dc, catalystBase: flag(args, '--catalyst-base') ?? catalystBaseFor(guard.dc), fetch: io.fetch, scope }, tables);
     }
-    const result = rollbackExport(app, rows);
+    const result = rollbackExport(app, rows, checkpoint ? { changedSince: checkpoint } : {});
     for (const file of [...result.files, result.manifest]) {
       const path = join(out, file.path);
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, file.body);
     }
     for (const count of result.counts) io.stdout(`${count.form}: rows ${count.rows}\n`);
+    if (result.delta) {
+      const totals = result.delta.totals;
+      io.stdout(`delta since checkpoint ${result.delta.checkpoint}: changed ${totals.changed}, added ${totals.added}, deleted ${totals.deleted}, unchanged ${totals.unchanged} (left out)\n`);
+    }
     io.stdout(`import order: ${result.order.join(', ')}\n`);
     for (const line of result.warnings) io.stdout(`note: ${line}\n`);
     io.stdout(`wrote ${result.files.length + 1} files to ${out} (${result.files.length} export files and ${result.manifest.path})\n`);

@@ -22,6 +22,7 @@ import {
   loadApp,
   parseDeltaCheckpoint,
   planGuard,
+  ROLLBACK_DELETED_FILE,
   ROLLBACK_MANIFEST_FILE,
   ROLLBACK_MANIFEST_VERSION,
   readStateFile,
@@ -34,7 +35,7 @@ import {
   verifyRollbackManifest,
 } from '../../deploy/src/index.js';
 import { readConflictRecord, type ConflictRecord } from '../../deploy/src/delta-cli.js';
-import { doubleColumns, formatConflict, type DeltaConflict } from '../../deploy/src/row-delta.js';
+import { deltaCheckpointId, doubleColumns, formatConflict, type DeltaConflict } from '../../deploy/src/row-delta.js';
 import { generateSchema } from '../../schema/src/index.js';
 import { analyze } from './analyze.js';
 import { CLI_EXIT } from './exit-codes.js';
@@ -467,7 +468,7 @@ function isPathOutsideWorkspace(target: string, dir: string): boolean {
   return true;
 }
 
-export function verifyRollbackEvidence(target: string, rollbackPath: string | undefined, app: App): RollbackEvidence | undefined {
+export function verifyRollbackEvidence(target: string, rollbackPath: string | undefined, app: App, checkpoint?: DeltaCheckpoint): RollbackEvidence | undefined {
   if (!rollbackPath) return undefined;
   const resolved = resolve(rollbackPath);
   let dir = dirname(resolved);
@@ -523,7 +524,7 @@ export function verifyRollbackEvidence(target: string, rollbackPath: string | un
     };
   }
 
-  const manifestResult = verifyRollbackManifest(dir, parsed, app);
+  const manifestResult = verifyRollbackManifest(dir, parsed, app, checkpoint);
   if (!manifestResult.ok) {
     return {
       status: 'invalid',
@@ -558,7 +559,7 @@ export function cutoverInput(target: string, args: readonly string[]): CutoverIn
   const slateUrl = typeof state.slateUrl === 'string' ? state.slateUrl : undefined;
   const smoke = readSmoke(flag(args, '--smoke'));
   const rollbackArg = flag(args, '--rollback-export') ?? flag(args, '--rollback') ?? flag(args, '--rollback-manifest');
-  const rollback = verifyRollbackEvidence(target, rollbackArg, app);
+  const rollback = verifyRollbackEvidence(target, rollbackArg, app, checkpoint);
   return {
     app,
     ...(loaded ? { loaded, sourceKind: source!.kind } : {}),

@@ -13,9 +13,9 @@ import type { FetchLike } from '../../data/src/migrate.js';
 import { catalystFailure, textResponse } from '../../data/test/catalyst-row-fake.js';
 import { LOADER_REPORT, STATE_FILE, writeState, type Io } from '../src/cli.js';
 import { readSourceCsv, readSourceJson } from '../src/csv.js';
-import { computeDelta, deletionRefusals, MODIFIED_TIME, type DeltaCheckpoint } from '../src/row-delta.js';
+import { computeDelta, deletionRefusals, deltaCheckpointId, MODIFIED_TIME, type DeltaCheckpoint } from '../src/row-delta.js';
 import { rollbackExportCli, syncDeltaCli } from '../src/delta-cli.js';
-import { readStoreRows, rollbackExport } from '../src/rollback.js';
+import { readStoreRows, rollbackExport, ROLLBACK_DELETED_FILE } from '../src/rollback.js';
 
 const ORG = '10000000000';
 const SCOPE = { org: ORG, projectId: '1001', token: 'test-cli-token' };
@@ -1209,6 +1209,120 @@ test('rollback export writes Creator import CSVs that re-plan with no changes', 
   for (const table of replan.tables) {
     assert.deepEqual([table.table, table.added.length, table.changed.length, table.deleted.length], [table.table, 0, 0, 0]);
   }
+});
+
+/** After the baseline: Restock edited in the new app, Bolts deleted there, Hinges created there (no Creator id). */
+function editInApp(store: FakeStore): void {
+  const orders = store.tables.get('Purchase_Order')!;
+  const vendors = store.tables.get('Vendor')!;
+  orders.find((row) => String(row.c2c_source_id) === ORDERS[0]!.id)!.Amount = '1300.00';
+  orders.splice(
+    orders.findIndex((row) => String(row.c2c_source_id) === ORDERS[1]!.id),
+    1,
+  );
+  const northwind = vendors.find((row) => String(row.c2c_source_id) === VENDORS[1]!.id)!;
+  orders.push({ ROWID: '91001', PO_Title: 'Hinges', Vendor: northwind.ROWID, Amount: '12.00' });
+}
+
+test('rollback export --changed-since writes only the edited and new rows, lists the deleted one and resolves lookups against every row', async () => {
+  const ws = workspace();
+  const store = fakeStore();
+  await baseline(ws, store);
+  editInApp(store);
+  const app = deriveIr(parse(APP));
+  const checkpoint = checkpointOf(ws);
+  const rows = await readStoreRows({ dc: 'in', catalystBase: 'https://api.catalyst.zoho.in', fetch: store.fetch, scope: SCOPE }, ['Vendor', 'Purchase_Order']);
+  const result = rollbackExport(app, rows, { changedSince: checkpoint });
+  const files = new Map(result.files.map((file) => [file.path, file.body]));
+  const orders = files.get('import/Purchase_Order.csv')!.trimEnd().split('\n');
+  // Exactly the edited row and the new row; the parents did not change, yet both lookups show the display value.
+  assert.deepEqual(orders, ['PO_Title,Vendor,Order_Date,Amount,ID', `Restock,Acme,05-Oct-2026,1300.00,${ORDERS[0]!.id}`, 'Hinges,Northwind,,12.00,']);
+  assert.equal(files.get('import/Vendor.csv')!.trimEnd().split('\n').length, 1, 'unchanged vendors are left out');
+  assert.equal(files.get('ids/Purchase_Order.ids.csv')!.trimEnd().split('\n').length, 3);
+  assert.equal(files.get(ROLLBACK_DELETED_FILE), `Table,Form,ID\nPurchase_Order,Purchase_Order,${ORDERS[1]!.id}\n`);
+  assert.deepEqual(result.delta!.totals, { changed: 1, added: 1, unchanged: 2, deleted: 1 });
+  assert.deepEqual(result.delta!.tables.Purchase_Order, { changed: 1, added: 1, unchanged: 0, deleted: 1 });
+  assert.deepEqual(result.counts.map((count) => [count.form, count.rows]), [['Vendor', 0], ['Purchase_Order', 2]]);
+  const manifest = JSON.parse(result.manifest.body) as { mode: string; checkpoint: string; counts: Record<string, unknown>; files: Record<string, string> };
+  assert.equal(manifest.mode, 'delta');
+  assert.equal(manifest.checkpoint, deltaCheckpointId(checkpoint));
+  assert.deepEqual({ ...manifest.counts, tables: undefined }, { changed: 1, added: 1, unchanged: 2, deleted: 1, tables: undefined });
+  assert.ok(ROLLBACK_DELETED_FILE in manifest.files);
+  assert.match(files.get('README.md')!, /Delta export against checkpoint `sha256:[0-9a-f]{64}`/);
+  // Byte-identical on a second run.
+  const again = rollbackExport(app, rows, { changedSince: checkpoint });
+  assert.equal(again.manifest.body, result.manifest.body);
+
+  // A full export stays the default: every stored row, no deleted list, mode full.
+  const full = rollbackExport(app, rows);
+  assert.equal(full.files.find((file) => file.path === 'import/Purchase_Order.csv')!.body.trimEnd().split('\n').length, 3);
+  assert.equal(full.files.find((file) => file.path === 'import/Vendor.csv')!.body.trimEnd().split('\n').length, 3);
+  assert.equal(full.files.some((file) => file.path === ROLLBACK_DELETED_FILE), false);
+  assert.equal(full.delta, undefined);
+  assert.deepEqual(Object.keys(JSON.parse(full.manifest.body) as object), ['version', 'app', 'mode', 'tables', 'files']);
+  assert.equal((JSON.parse(full.manifest.body) as { mode: string }).mode, 'full');
+});
+
+test('rollback export --changed-since keeps a row Creator deleted whose deletion was never applied', async () => {
+  const ws = workspace();
+  const store = fakeStore();
+  await baseline(ws, store);
+  // Bolts leaves the Creator export; the deletion is reported only, so the store still holds the row.
+  const dir = exportDir(VENDORS, ORDERS.slice(0, 1));
+  writeFileSync(join(dir, 'counts.json'), JSON.stringify({ Vendor: 2, Purchase_Order: 1 }));
+  const run = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, dir, '--confirm'), run.io), 0, run.err());
+  const checkpoint = checkpointOf(ws);
+  assert.deepEqual(checkpoint.tables.Purchase_Order!.deleted, [ORDERS[1]!.id]);
+  assert.equal(store.tables.get('Purchase_Order')!.length, 2);
+
+  const app = deriveIr(parse(APP));
+  const rows = await readStoreRows({ dc: 'in', catalystBase: 'https://api.catalyst.zoho.in', fetch: store.fetch, scope: SCOPE }, ['Vendor', 'Purchase_Order']);
+  const result = rollbackExport(app, rows, { changedSince: checkpoint });
+  const orders = result.files.find((file) => file.path === 'import/Purchase_Order.csv')!.body.trimEnd().split('\n');
+  // The untouched stored row must be in the delta: the full export includes it, so leaving it out would lose the record.
+  assert.deepEqual(orders, ['PO_Title,Vendor,Order_Date,Amount,ID', `Bolts,Northwind,06-Oct-2026,487.50,${ORDERS[1]!.id}`]);
+  assert.deepEqual(result.delta!.totals, { changed: 1, added: 0, unchanged: 3, deleted: 0 });
+  assert.equal(result.files.find((file) => file.path === ROLLBACK_DELETED_FILE)!.body, 'Table,Form,ID\n');
+});
+
+test('rollback export --changed-since with no edits in the app writes no rows; a row without a store fingerprint counts as changed', async () => {
+  const ws = workspace();
+  const store = fakeStore();
+  await baseline(ws, store);
+  const app = deriveIr(parse(APP));
+  const checkpoint = checkpointOf(ws);
+  const rows = await readStoreRows({ dc: 'in', catalystBase: 'https://api.catalyst.zoho.in', fetch: store.fetch, scope: SCOPE }, ['Vendor', 'Purchase_Order']);
+  const quiet = rollbackExport(app, rows, { changedSince: checkpoint });
+  assert.deepEqual(quiet.delta!.totals, { changed: 0, added: 0, unchanged: 4, deleted: 0 });
+  assert.equal(quiet.files.find((file) => file.path === ROLLBACK_DELETED_FILE)!.body, 'Table,Form,ID\n');
+  // A checkpoint written before conflict checks holds no store fingerprints: nothing is assumed unchanged.
+  const bare: DeltaCheckpoint = { ...checkpoint, tables: Object.fromEntries(Object.entries(checkpoint.tables).map(([name, entry]) => [name, { rows: entry.rows }])) };
+  assert.deepEqual(rollbackExport(app, rows, { changedSince: bare }).delta!.totals, { changed: 4, added: 0, unchanged: 0, deleted: 0 });
+  // A table the rows do not include is not read: its records are never listed as deleted.
+  const partial = rollbackExport(app, new Map([['Vendor', rows.get('Vendor')!]]), { changedSince: checkpoint });
+  assert.equal(partial.delta!.totals.deleted, 0);
+  assert.ok(partial.warnings.some((line) => line.startsWith('Purchase_Order: no stored rows were read')));
+});
+
+test('rollback-export --changed-since writes the delta offline and refuses a state file with no checkpoint', async () => {
+  const ws = workspace();
+  const store = fakeStore();
+  await baseline(ws, store);
+  editInApp(store);
+  const rowsDir = mkdtempSync(join(tmpdir(), 'c2c-rows-'));
+  for (const [table, rows] of store.tables) writeFileSync(join(rowsDir, `${table}.json`), JSON.stringify(rows));
+  const out = mkdtempSync(join(tmpdir(), 'c2c-rollback-delta-'));
+  const run = cli(fakeStore());
+  assert.equal(await rollbackExportCli(['--ds', ws.ds, '--out', out, '--rows', rowsDir, '--changed-since', ws.state], run.io), 0, run.err());
+  assert.match(run.out(), /^delta since checkpoint sha256:[0-9a-f]{64}: changed 1, added 1, deleted 1, unchanged 2 \(left out\)$/m);
+  assert.equal(readFileSync(join(out, ROLLBACK_DELETED_FILE), 'utf8'), `Table,Form,ID\nPurchase_Order,Purchase_Order,${ORDERS[1]!.id}\n`);
+  assert.equal(run.fetched(), 0);
+
+  const empty = mkdtempSync(join(tmpdir(), 'c2c-no-state-'));
+  const refused = cli(fakeStore());
+  assert.notEqual(await rollbackExportCli(['--ds', ws.ds, '--out', out, '--rows', rowsDir, '--changed-since', empty], refused.io), 0);
+  assert.match(refused.err(), /holds no sync-delta checkpoint/);
 });
 
 test('rollback-export reads offline row files and plans a live read only with --confirm', async () => {

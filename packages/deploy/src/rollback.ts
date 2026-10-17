@@ -27,6 +27,16 @@
  *
  * The import/ folder reads back with `--source-csv`, so a re-plan against the
  * last checkpoint shows no changes when the store and checkpoint agree.
+ *
+ * A full export is the default. With a sync-delta checkpoint (`changedSince`)
+ * the export writes only rows whose store fingerprint differs from the one the
+ * checkpoint read back, rows the checkpoint does not hold (new in the app, or
+ * never fingerprinted), and lists in deleted.csv the checkpoint records the
+ * store no longer holds. Lookups still resolve against every stored row, so a
+ * changed row shows its parent's display value even when the parent did not
+ * change. Extension rows carry no fingerprint, so a form row that has one is
+ * always in the delta. The manifest records the mode, the checkpoint id and the
+ * counts; a delta export verifies only against that checkpoint.
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
@@ -37,7 +47,7 @@ import { SOURCE_ID_COLUMN } from '../../schema/src/mapping.js';
 import { EXTENSION_KEY } from '../../schema/src/limits.js';
 import { canonDecimal } from '../../data/src/integrity.js';
 import { cellKind } from './csv.js';
-import { compareIds, STORE_SYSTEM_COLUMNS, zcql } from './row-delta.js';
+import { compareIds, deltaCheckpointId, STORE_SYSTEM_COLUMNS, storeFingerprint, zcql, type DeltaCheckpoint } from './row-delta.js';
 import { exactId, parseJsonExact } from './json-exact.js';
 import type { CatalystScope, FetchLike } from '../../data/src/migrate.js';
 
@@ -62,10 +72,29 @@ export interface RollbackExport {
   counts: { form: string; table: string; rows: number }[];
   order: string[];
   warnings: string[];
+  /** Delta mode only: the checkpoint id, per-table counts and the records deleted in the app. */
+  delta?: RollbackDelta;
 }
+
+export interface RollbackDeltaCounts {
+  changed: number;
+  added: number;
+  unchanged: number;
+  deleted: number;
+}
+
+export interface RollbackDelta {
+  checkpoint: string;
+  tables: Record<string, RollbackDeltaCounts>;
+  totals: RollbackDeltaCounts;
+  deleted: { table: string; form: string; sourceId: string }[];
+}
+
+export type RollbackMode = 'full' | 'delta';
 
 export const ROLLBACK_MANIFEST_FILE = 'c2c-rollback-manifest.json';
 export const ROLLBACK_MANIFEST_VERSION = 'c2c-rollback-export/1';
+export const ROLLBACK_DELETED_FILE = 'deleted.csv';
 
 interface Header {
   header: string;
@@ -151,6 +180,20 @@ interface Formatted {
   sourceId: string;
   /** Header → cell, before lookups. */
   cells: Map<string, string>;
+  /** Delta mode: the row against the checkpoint. */
+  status?: 'changed' | 'added' | 'unchanged';
+}
+
+/** A stored row against the checkpoint: no Creator id or an id the checkpoint lacks is added; no store fingerprint counts as changed. */
+function deltaStatus(checkpoint: DeltaCheckpoint, table: string, sourceId: string, row: Readonly<Record<string, unknown>>): 'changed' | 'added' | 'unchanged' {
+  const entry = checkpoint.tables[table];
+  if (!sourceId || !entry) return 'added';
+  const known = Object.hasOwn(entry.rows, sourceId) || Object.hasOwn(entry.store ?? {}, sourceId) || (entry.deleted ?? []).includes(sourceId);
+  if (!known) return 'added';
+  // A checkpoint-deleted id was removed in Creator but the deletion was never applied: the row must stay in the delta so the re-import keeps it.
+  if ((entry.deleted ?? []).includes(sourceId)) return 'changed';
+  const before = entry.store && Object.hasOwn(entry.store, sourceId) ? entry.store[sourceId] : undefined;
+  return before !== undefined && storeFingerprint(row) === before ? 'unchanged' : 'changed';
 }
 
 /** Parents before children by relation; ties by name. */
@@ -172,7 +215,9 @@ function importOrder(tables: readonly SchemaTable[]): string[] {
   return placed;
 }
 
-export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
+export function rollbackExport(app: App, rows: StoreRows, opts: { changedSince?: DeltaCheckpoint } = {}): RollbackExport {
+  const checkpoint = opts.changedSince;
+  const kept = (record: Formatted) => !checkpoint || record.status !== 'unchanged';
   const schema = generateSchema(app);
   const forms = new Map(app.forms.map((form) => [form.name, form]));
   const warnings: string[] = [];
@@ -215,7 +260,7 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
         else if (kind === 'decimal' && !item.column.exactDecimal) cells.set(item.header, canonDecimal(raw) ?? raw);
         else cells.set(item.header, raw);
       }
-      out.push({ rowid, sourceId, cells });
+      out.push({ rowid, sourceId, cells, ...(checkpoint ? { status: table.role === 'extension' ? 'changed' : deltaStatus(checkpoint, table.name, sourceId, row) } : {}) });
     }
     out.sort((a, b) => (a.sourceId && b.sourceId ? compareIds(a.sourceId, b.sourceId) : a.sourceId ? -1 : b.sourceId ? 1 : compareIds(a.rowid, b.rowid)));
     formatted.set(table.name, out);
@@ -242,9 +287,14 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
     }
     const records = formatted.get(table.name) ?? [];
     const consumed = new Set<Formatted>();
+    let joinedUnchanged = 0;
     for (const record of records) {
       for (const ext of extByParent.get(record.rowid) ?? []) {
         consumed.add(ext);
+        if (record.status === 'unchanged') {
+          record.status = 'changed';
+          joinedUnchanged += 1;
+        }
         for (const [header, value] of ext.cells) {
           if (header !== EXTENSION_KEY) record.cells.set(header, value);
         }
@@ -257,8 +307,10 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
         orphans.set(ext.name, orphan);
       }
     }
+    if (joinedUnchanged) warn(`${table.form}: ${joinedUnchanged} row(s) with an extension row are in the delta because extension rows carry no checkpoint fingerprint`);
     const lookups = list.filter((item) => item.column.relation);
-    const missingIds = records.filter((row) => !row.sourceId).length;
+    const written = records.filter(kept);
+    const missingIds = written.filter((row) => !row.sourceId).length;
     if (missingIds) warn(`${table.form}: ${missingIds} row(s) were created after migration and have no Creator record id; they import as new records`);
     const displayIds = new Map<string, Map<string, string>>();
     for (const item of lookups) {
@@ -285,7 +337,7 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
     const header = [...list.map((item) => item.header), 'ID'];
     const data: string[][] = [];
     const ids: string[][] = [];
-    for (const record of records) {
+    for (const record of written) {
       const cells: string[] = [];
       const idRow = [record.sourceId, record.rowid];
       for (const item of list) {
@@ -305,11 +357,11 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
     }
     files.push({ path: `import/${table.form}.csv`, body: csvDocument(header, data) });
     files.push({ path: `ids/${table.form}.ids.csv`, body: csvDocument(['ID', 'ROWID', ...lookups.map((item) => item.header)], ids) });
-    counts.push({ form: table.form, table: table.name, rows: records.length });
+    counts.push({ form: table.form, table: table.name, rows: written.length });
   }
   for (const table of schema.tables.filter((item) => (item.role === 'child' || item.role === 'junction') && !item.nosql)) {
     const list = headers.get(table.name) ?? [];
-    const records = formatted.get(table.name) ?? [];
+    const records = (formatted.get(table.name) ?? []).filter(kept);
     const data = records.map((record) => [
       record.sourceId,
       record.rowid,
@@ -337,6 +389,10 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
     ]);
     files.push({ path: `manual/${name}.csv`, body: csvDocument(['ID', 'ROWID', ...list.map((item) => item.header)], data) });
   }
+  const keptRow = (table: string, rowid: string) => {
+    const record = rowid ? byRowId.get(table)?.get(rowid) : undefined;
+    return !record || kept(record);
+  };
   // Form row Creator id for an extension file. parent_rowid names the form row, or
   // another extension row in this export whose parent_rowid continues the chain.
   const creatorIdFromExport = (formTable: string, rowid: string, seen: Set<string>): string => {
@@ -356,7 +412,7 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
   for (const table of formTables) {
     const label = table.form;
     const entries: { sourceId: string; rowid: string; field: string; key: string }[] = [];
-    const ownEntries = fileCells.get(table.name) ?? [];
+    const ownEntries = (fileCells.get(table.name) ?? []).filter((entry) => keptRow(table.name, entry.rowid));
     const missingIds = ownEntries.filter((entry) => !entry.sourceId).length;
     entries.push(...ownEntries.filter((entry) => entry.sourceId));
     if (missingIds) warn(`${table.form}: ${missingIds} file value(s) were refused because the Creator record ID could not be resolved; no blank ID was emitted`);
@@ -386,17 +442,22 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
   for (const [name, tableEntries] of fileCells) {
     const table = schema.tables.find((item) => item.name === name)!;
     if (table.role === 'form' || table.role === 'extension') continue;
-    const entries = tableEntries.filter((entry) => entry.sourceId);
-    const refused = tableEntries.length - entries.length;
+    const keptEntries = tableEntries.filter((entry) => keptRow(name, entry.rowid));
+    const entries = keptEntries.filter((entry) => entry.sourceId);
+    const refused = keptEntries.length - entries.length;
     if (refused) warn(`${table.form}: ${refused} file value(s) in ${name} were refused because the Creator record ID could not be resolved; no blank ID was emitted`);
     if (!entries.length) continue;
     const data = entries.map((entry) => [entry.sourceId, entry.rowid, entry.field, entry.key, entry.key.split('/').pop() ?? '']);
     files.push({ path: `files/${name}.files.csv`, body: csvDocument(['ID', 'ROWID', 'Field', 'Object_Key', 'File_Name'], data) });
     warn(`${table.form}: ${entries.length} file value(s) in ${name} are Stratus object keys the report importer cannot load; fetch each object and re-attach it from files/${name}.files.csv`);
   }
+  const delta = checkpoint ? deltaOf(schema.tables, formatted, rows, checkpoint, warn) : undefined;
+  if (delta) {
+    files.push({ path: ROLLBACK_DELETED_FILE, body: csvDocument(['Table', 'Form', 'ID'], delta.deleted.map((item) => [item.table, item.form, item.sourceId])) });
+  }
   const order = importOrder(formTables).map((name) => formTables.find((table) => table.name === name)!.form);
   files.push({ path: 'IMPORT_ORDER.txt', body: `${order.map((form, index) => `${index + 1}. import/${form}.csv`).join('\n')}\n` });
-  files.push({ path: 'README.md', body: rollbackReadme(app, order, counts, warnings) });
+  files.push({ path: 'README.md', body: rollbackReadme(app, order, counts, warnings, delta) });
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 
   const tableFiles: Record<string, string> = {};
@@ -408,17 +469,75 @@ export function rollbackExport(app: App, rows: StoreRows): RollbackExport {
   for (const file of files) fileChecksums[file.path] = createHash('sha256').update(file.body).digest('hex');
   const manifest: RollbackFile = {
     path: ROLLBACK_MANIFEST_FILE,
-    body: `${JSON.stringify({ version: ROLLBACK_MANIFEST_VERSION, app: app.name ?? '', tables: tableFiles, files: fileChecksums }, null, 2)}\n`,
+    body: `${JSON.stringify(
+      {
+        version: ROLLBACK_MANIFEST_VERSION,
+        app: app.name ?? '',
+        mode: (delta ? 'delta' : 'full') satisfies RollbackMode,
+        ...(delta ? { checkpoint: delta.checkpoint, counts: { ...delta.totals, tables: delta.tables } } : {}),
+        tables: tableFiles,
+        files: fileChecksums,
+      },
+      null,
+      2,
+    )}\n`,
   };
-  return { files, manifest, counts, order, warnings };
+  return { files, manifest, counts, order, warnings, ...(delta ? { delta } : {}) };
 }
 
-function rollbackReadme(app: App, order: readonly string[], counts: RollbackExport['counts'], warnings: readonly string[]): string {
+/**
+ * Per-table delta counts, and the checkpoint records the store no longer holds.
+ * A table the rows do not include is not read, so none of its records is
+ * listed as deleted.
+ */
+function deltaOf(
+  tables: readonly SchemaTable[],
+  formatted: ReadonlyMap<string, readonly Formatted[]>,
+  rows: StoreRows,
+  checkpoint: DeltaCheckpoint,
+  warn: (line: string) => void,
+): RollbackDelta {
+  const counts: Record<string, RollbackDeltaCounts> = {};
+  const totals: RollbackDeltaCounts = { changed: 0, added: 0, unchanged: 0, deleted: 0 };
+  const deleted: RollbackDelta['deleted'] = [];
+  for (const table of [...tables].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    if (table.nosql || table.role === 'system' || table.role === 'extension') continue;
+    const item: RollbackDeltaCounts = { changed: 0, added: 0, unchanged: 0, deleted: 0 };
+    const present = new Set<string>();
+    for (const record of formatted.get(table.name) ?? []) {
+      item[record.status ?? 'added'] += 1;
+      if (record.sourceId) present.add(record.sourceId);
+    }
+    const entry = checkpoint.tables[table.name];
+    if (entry && !rows.has(table.name)) {
+      warn(`${table.name}: no stored rows were read, so deletions are not listed for it`);
+    } else if (entry) {
+      const known = new Set([...Object.keys(entry.rows), ...Object.keys(entry.store ?? {})]);
+      for (const id of [...known].sort(compareIds)) {
+        if (present.has(id)) continue;
+        deleted.push({ table: table.name, form: table.form, sourceId: id });
+        item.deleted += 1;
+      }
+    }
+    counts[table.name] = item;
+    for (const key of Object.keys(totals) as (keyof RollbackDeltaCounts)[]) totals[key] += item[key];
+  }
+  if (deleted.length) warn(`${deleted.length} record(s) were deleted in the new app since the checkpoint; delete them in Creator by hand from ${ROLLBACK_DELETED_FILE}`);
+  return { checkpoint: deltaCheckpointId(checkpoint), tables: counts, totals, deleted };
+}
+
+function rollbackReadme(app: App, order: readonly string[], counts: RollbackExport['counts'], warnings: readonly string[], delta?: RollbackDelta): string {
   const lines = [
     `# Rollback export: ${app.name ?? 'application'}`,
     '',
     'Data Store rows as CSV files for the Creator report "Import Data" screen.',
     '',
+    ...(delta
+      ? [
+          `Delta export against checkpoint \`${delta.checkpoint}\`: only rows changed (${delta.totals.changed}) or added (${delta.totals.added}) since it; ${delta.totals.unchanged} unchanged row(s) are left out. \`${ROLLBACK_DELETED_FILE}\` lists the ${delta.totals.deleted} record(s) deleted in the new app; delete them in Creator by hand. Import over the Creator data the checkpoint matches.`,
+          '',
+        ]
+      : []),
     '## Import',
     '',
     ...order.map((form, index) => `${index + 1}. \`import/${form}.csv\` into a report of ${form} (${counts.find((item) => item.form === form)?.rows ?? 0} rows).`),
@@ -516,13 +635,42 @@ function containedPath(realDir: string, relPath: unknown): { path?: string; reas
  * A valid manifest is the file `c2c rollback-export` writes: schema
  * c2c-rollback-export/1, the app name, every exported table mapped to its
  * file, and a sha256 for every listed file that matches the bytes on disk.
+ * A delta export (mode delta) also names the checkpoint it was taken against:
+ * it verifies only against that checkpoint, its counts must be whole numbers,
+ * and deleted.csv must list exactly the deleted count.
  */
-export function verifyRollbackManifest(dir: string, manifest: Record<string, unknown>, app: App): { ok: boolean; reason?: string } {
+export function verifyRollbackManifest(dir: string, manifest: Record<string, unknown>, app: App, checkpoint?: DeltaCheckpoint): { ok: boolean; reason?: string } {
   if (manifest.version !== ROLLBACK_MANIFEST_VERSION) {
     return { ok: false, reason: `manifest version is not ${ROLLBACK_MANIFEST_VERSION}` };
   }
   if (manifest.app !== (app.name ?? '')) {
     return { ok: false, reason: 'manifest app does not match this application' };
+  }
+  const mode = manifest.mode ?? 'full';
+  if (mode !== 'full' && mode !== 'delta') {
+    return { ok: false, reason: 'manifest mode is not full or delta' };
+  }
+  if (mode === 'full' && (manifest.checkpoint !== undefined || manifest.counts !== undefined)) {
+    return { ok: false, reason: 'a full export manifest carries delta fields' };
+  }
+  let deletedCount: number | undefined;
+  if (mode === 'delta') {
+    if (typeof manifest.checkpoint !== 'string' || !manifest.checkpoint) {
+      return { ok: false, reason: 'delta export manifest names no checkpoint' };
+    }
+    if (!checkpoint) {
+      return { ok: false, reason: `delta export against checkpoint ${manifest.checkpoint} needs --since <state> to verify against that checkpoint` };
+    }
+    const current = deltaCheckpointId(checkpoint);
+    if (manifest.checkpoint !== current) {
+      return { ok: false, reason: `delta export was taken against checkpoint ${manifest.checkpoint}, not the --since checkpoint ${current}` };
+    }
+    const counts = manifest.counts as Record<string, unknown> | undefined;
+    const whole = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0;
+    if (!counts || typeof counts !== 'object' || Array.isArray(counts) || !['changed', 'added', 'unchanged', 'deleted'].every((key) => whole(counts[key]))) {
+      return { ok: false, reason: 'delta export manifest carries no whole-number counts' };
+    }
+    deletedCount = counts.deleted as number;
   }
   const files = manifest.files;
   if (!files || typeof files !== 'object' || Array.isArray(files)) {
@@ -567,6 +715,13 @@ export function verifyRollbackManifest(dir: string, manifest: Record<string, unk
     if (actual.toLowerCase() !== String(expectedSum).toLowerCase()) {
       return { ok: false, reason: `checksum mismatch on ${relPath}` };
     }
+    if (relPath === ROLLBACK_DELETED_FILE && deletedCount !== undefined) {
+      const listed = content.toString('utf8').split('\n').filter((line) => line !== '').length - 1;
+      if (listed !== deletedCount) return { ok: false, reason: `${ROLLBACK_DELETED_FILE} lists ${listed} record(s), the manifest counts ${deletedCount}` };
+    }
+  }
+  if (deletedCount !== undefined && !(ROLLBACK_DELETED_FILE in (files as Record<string, unknown>))) {
+    return { ok: false, reason: `delta export manifest lists no ${ROLLBACK_DELETED_FILE}` };
   }
   return { ok: true };
 }

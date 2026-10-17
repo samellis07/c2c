@@ -138,13 +138,13 @@ export type { EditOp, EditOpName, EditResult, EditsFile, FieldRename, FieldUsage
 export { DeltaRefused, applySchemaDelta, deltaFiles, formatDelta, modelPlan, planDelta, writeDeltaTree } from './delta.js';
 export type { ColumnChange, FileChange, ModelPlan, PlanDelta, StoreDriver, TableChange } from './delta.js';
 export { editCli, opFromArgs } from './edit-cli.js';
-export { applyDelta, computeDelta, deletionRefusals, deltaTotals, formatDeltaPlan, MAX_DELETE_PERCENT, parseDeltaCheckpoint, rowFingerprint, tableChecksum, withDeletionsApplied } from './row-delta.js';
+export { applyDelta, computeDelta, deletionRefusals, deltaCheckpointId, deltaTotals, formatDeltaPlan, MAX_DELETE_PERCENT, parseDeltaCheckpoint, rowFingerprint, tableChecksum, withDeletionsApplied } from './row-delta.js';
 export type { DeltaApplyResult, DeltaCheckpoint, DeltaPlan, DeltaTable, DeletionRefusal } from './row-delta.js';
 export { dataParity, formatParity, storeRowsFromDir, verifyCli } from './parity.js';
 export type { DataParityReport, ParityTableReport } from './parity.js';
 export { DELTA_SOURCES, deltaSource, readDeltaCheckpoint, readStateFile, rollbackExportCli, stateFilePath, syncDeltaCli } from './delta-cli.js';
-export { parseStoreRows, readStoreRows, rollbackExport, ROLLBACK_MANIFEST_FILE, ROLLBACK_MANIFEST_VERSION, verifyRollbackManifest } from './rollback.js';
-export type { RollbackExport, RollbackFile } from './rollback.js';
+export { parseStoreRows, readStoreRows, rollbackExport, ROLLBACK_DELETED_FILE, ROLLBACK_MANIFEST_FILE, ROLLBACK_MANIFEST_VERSION, verifyRollbackManifest } from './rollback.js';
+export type { RollbackDelta, RollbackDeltaCounts, RollbackExport, RollbackFile, RollbackMode } from './rollback.js';
 export {
   ALL_REGISTRY_TOOLS,
   CAPABILITY_MAPPINGS,

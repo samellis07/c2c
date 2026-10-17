@@ -149,6 +149,25 @@ export function parseDeltaCheckpoint(value: unknown): DeltaCheckpoint | undefine
   return record as DeltaCheckpoint;
 }
 
+/** Canonical JSON: object keys sorted at every depth. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .filter((key) => record[key] !== undefined)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/** Id of one checkpoint: sha256 of its canonical JSON. Any later sync gives a new id. */
+export function deltaCheckpointId(checkpoint: DeltaCheckpoint): string {
+  return `sha256:${createHash('sha256').update(canonicalJson(checkpoint)).digest('hex')}`;
+}
+
 /** Double columns per table: their text form is not stable across a store round trip. */
 export function doubleColumns(app: App): Map<string, Set<string>> {
   return new Map(
