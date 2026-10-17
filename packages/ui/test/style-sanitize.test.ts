@@ -216,9 +216,10 @@ test('CSS tokenizer scopes selectors and refuses fetches, unsafe selectors, malf
   const result = carryStaticStyle('.x, .y:hover { color: red; width: 80% } @import "x"; .z{background:url(https://x)} </style><script>{', '[data-page="Home"]');
   assert.equal(result.css, '[data-page="Home"] .x,[data-page="Home"] .y:hover{color: red;width: 80%}');
   assert.equal(result.droppedRules, 3);
-  assert.deepEqual(carryStaticStyle('.x{color:red}', '[data-page="a"]'), { css: '[data-page="a"] .x{color:red}', droppedRules: 0 });
+  assert.deepEqual(result.dropped, ['@import', 'background declaration', 'unparsed CSS']);
+  assert.deepEqual(carryStaticStyle('.x{color:red}', '[data-page="a"]'), { css: '[data-page="a"] .x{color:red}', droppedRules: 0, dropped: [] });
   const responsive = carryStaticStyle('@media (min-width: 768px) { .x > .y { width: 20% } }', '[data-page="a"]');
-  assert.deepEqual(responsive, { css: '@media (min-width: 768px){[data-page="a"] .x > .y{width: 20%}}', droppedRules: 0 });
+  assert.deepEqual(responsive, { css: '@media (min-width: 768px){[data-page="a"] .x > .y{width: 20%}}', droppedRules: 0, dropped: [] });
   assert.equal(carryStaticStyle('@media (url(x)) {.x{color:red}}', '[data-page="a"]').droppedRules, 1);
 });
 
@@ -256,12 +257,12 @@ test('the rendered <style> keeps child combinators', async () => {
   assert.match(html, /<style>\[data-page="Home"\] \.b>\.c\{color:red\}<\/style>/);
 });
 
-test('dangerous <style> CSS is dropped whole and counted', () => {
+test('dangerous <style> CSS is dropped and counted by name', () => {
   const { html, styleTodos } = pageModel([
     '<style>@import url(//example.test/x.css); .a { background: url(javascript:alert(1)) } .b { behavior: url(x.htc); width: expression(alert(1)) }</style><p>Hi</p>',
   ]);
   assert.equal(styleTodos.length, 1, JSON.stringify(styleTodos));
-  assert.match(styleTodos[0].reason, /drops 3 static style rules/);
+  assert.match(styleTodos[0].reason, /drops 4 static style rules or declarations \(@import, background declaration, behavior declaration, width declaration\)$/);
   assert.doesNotMatch(html[0]?.html ?? '', /import|url|expression|behavior|style/i);
   assert.equal(html[0]?.html, '<p>Hi</p>');
 });
@@ -491,4 +492,83 @@ test('pathological style values finish fast instead of backtracking', async () =
     const ms = performance.now() - start;
     assert.ok(ms < 50, `${label}: ${ms.toFixed(1)}ms`);
   }
+});
+
+test('a rule keeps its safe declarations and names each refused one', () => {
+  const result = carryStaticStyle('.a { color: red; background: url(https://cdn.example.test/x.png); width: 10px }', '[data-page="a"]');
+  assert.equal(result.css, '[data-page="a"] .a{color: red;width: 10px}');
+  assert.deepEqual(result.dropped, ['background declaration']);
+  const all = carryStaticStyle('.a { background-image: url(/x.png) } .b { color: blue }', '[data-page="a"]');
+  assert.equal(all.css, '[data-page="a"] .b{color: blue}', 'a rule whose every declaration is refused is left out');
+  assert.deepEqual(all.dropped, ['background-image declaration']);
+});
+
+test('page sheets carry gradients, 3D transforms, filters, easing curves and content strings', () => {
+  const sheet = [
+    '.g { background-image: linear-gradient(to top, rgba(0, 0, 0, 0.1) 2%, #fff 100%) }',
+    '.w { background-image: -webkit-gradient(linear,left top,left bottom,from(#f8f8f8),to(#f1f1f1)) }',
+    '.t { transition: transform 0.35s cubic-bezier(0.56, -0.45, 0.71, 0.85), opacity 0.3s ease-in-out; transform: translate3d(10px,10px,0) scale(1) }',
+    '.f { filter: brightness(70%); clip: rect(0px, 75px, 150px, 0px); font: 13px/1.3 \'Lucida Grande\',sans-serif }',
+    '.c:before { content: "" } .d:after { content: \'\\f0d7\' } .e:after { content: attr(title) }',
+  ].join('\n');
+  const result = carryStaticStyle(sheet, '[data-page="a"]');
+  assert.deepEqual(result.dropped, []);
+  assert.equal(result.css.split('\n').length, 7);
+  assert.match(result.css, /\[data-page="a"\] \.g\{background-image: linear-gradient\(to top, rgba\(0, 0, 0, 0\.1\) 2%, #fff 100%\)\}/);
+  assert.match(result.css, /\[data-page="a"\] \.d:after\{content: '\\f0d7'\}/);
+});
+
+test('sheet-only values still refuse fetches, script, escapes and unknown functions', () => {
+  const refused = [
+    '.a { background-image: linear-gradient(red, blue), url(https://x.test/a.png) }',
+    '.a { background-image: image-set(url(a.png) 1x) }',
+    '.a { background-image: linear-gradient(expression(alert(1)), red) }',
+    '.a { content: url(https://x.test/a.png) }',
+    '.a { content: "<script>" }',
+    '.a { content: "\\" }',
+    '.a { content: attr(title) url(x) }',
+    '.a { transform: rotate(var(--x)) }',
+    '.a { filter: progid:DXImageTransform.Microsoft.gradient(enabled=false) }',
+    '.a { font: 13px \'Bad\\Name\' }',
+    '.a { behavior: linear-gradient(red, blue) }',
+  ];
+  for (const css of refused) {
+    const result = carryStaticStyle(css, '[data-page="a"]');
+    assert.equal(result.css, '', css);
+    assert.equal(result.droppedRules, 1, css);
+  }
+});
+
+test('@keyframes are carried with a page-prefixed name and the page animations follow it', () => {
+  const result = carryStaticStyle(
+    '.spin { animation: turn 2s linear infinite; -webkit-animation-name: turn } @keyframes turn { from { transform: rotate(0deg) } 50%, 75% { opacity: 0.5 } to { transform: rotate(360deg) } } @-webkit-keyframes turn { to { opacity: 1 } }',
+    '[data-page="Home"]',
+  );
+  assert.deepEqual(result.dropped, []);
+  assert.equal(
+    result.css,
+    [
+      '[data-page="Home"] .spin{animation: c2c-data-page-Home-turn 2s linear infinite;-webkit-animation-name: c2c-data-page-Home-turn}',
+      '@keyframes c2c-data-page-Home-turn{from{transform: rotate(0deg)}50%, 75%{opacity: 0.5}to{transform: rotate(360deg)}}',
+      '@-webkit-keyframes c2c-data-page-Home-turn{to{opacity: 1}}',
+    ].join('\n'),
+  );
+  const bad = carryStaticStyle('@keyframes x { .a { color: red } } @keyframes y { to { background: url(https://x.test/a) } } @media print { @keyframes z { to { opacity: 1 } } }', '[data-page="a"]');
+  assert.equal(bad.css, '@keyframes c2c-data-page-a-y{}');
+  assert.deepEqual(bad.dropped, ['@keyframes', 'background declaration', '@keyframes']);
+});
+
+test('@media written without a space before its condition is carried', () => {
+  const result = carryStaticStyle('@media(min-width: 992px){ .a { width: 50% } }', '[data-page="a"]');
+  assert.equal(result.css, '@media (min-width: 992px){[data-page="a"] .a{width: 50%}}');
+  assert.deepEqual(result.dropped, []);
+});
+
+test('a page with a scoped rule and an @import carries the rule and counts the @import by name', () => {
+  const { styleTodos, scopedCss } = pageModel([
+    '<style>@import "https://cdn.example.test/theme.css"; .banner { background-image: linear-gradient(to right, #fff, #eee) }</style><p class="banner">Hi</p>',
+  ]);
+  assert.equal(scopedCss, '[data-page="Home"] .banner{background-image: linear-gradient(to right, #fff, #eee)}');
+  assert.equal(styleTodos.length, 1, JSON.stringify(styleTodos));
+  assert.equal(styleTodos[0]!.reason, 'Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (@import)');
 });

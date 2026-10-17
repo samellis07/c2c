@@ -82,7 +82,12 @@ export interface UiElement {
   children: UiElement[];
 }
 
-export interface ScopedStyle { css: string; droppedRules: number }
+/**
+ * Static CSS carried into a page, scoped to the page root. `dropped` names
+ * each refused construct (an at-rule, a declaration's property, a selector or
+ * unparsed text) once per occurrence; `droppedRules` is its length.
+ */
+export interface ScopedStyle { css: string; droppedRules: number; dropped: string[] }
 
 /** A Creator `openUrl("#Form:X","popup window")` action lifted from a snippet. */
 export interface UiPopup {
@@ -403,9 +408,10 @@ export function cleanStyle(value: string): { style: string; dropped: string[] } 
 }
 
 /** Scan static CSS without regex parsing/backtracking. Unsupported constructs fail closed. */
-export function carryStaticStyle(css: string, scope: string, inMedia = false): ScopedStyle {
+export function carryStaticStyle(css: string, scope: string, inMedia = false, keyframes?: Set<string>): ScopedStyle {
   const rules: string[] = [];
-  let droppedRules = 0;
+  const dropped: string[] = [];
+  const drop = (what: string) => { dropped.push(what); };
   let uncommented = '';
   let quote = '', comment = '', lineWhitespace = true;
   for (let n = 0; n < css.length; n++) {
@@ -421,9 +427,12 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false): S
     else if (!/\s/.test(ch)) lineWhitespace = false;
   }
   css = uncommented;
+  const names = keyframes ?? keyframeNames(css);
+  const prefix = keyframePrefix(scope);
   let i = 0;
   const skip = () => { while (i < css.length && (css[i]!.trim() === '' || css[i] === ';')) i++; };
-  const declarations = (body: string): string[] | null => {
+  // Safe declarations are kept; each refused one is named by its property.
+  const declarations = (body: string): string[] => {
     const out: string[] = []; let start = 0, depth = 0, quote = '', comment = false;
     for (let n = 0; n <= body.length; n++) {
       const ch = body[n] ?? ';';
@@ -435,13 +444,14 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false): S
       else if (ch === ';' && depth === 0) {
         const part = body.slice(start, n).trim(); start = n + 1;
         if (!part) continue;
-        const colon = part.indexOf(':'); if (colon <= 0) return null;
-        const cleaned = cleanStyle(part);
-        if (cleaned.dropped.length || !cleaned.style) return null;
-        out.push(cleaned.style);
+        const colon = part.indexOf(':');
+        if (colon <= 0) { drop('unparsed declaration'); continue; }
+        const cleaned = cleanSheetDeclaration(part, colon);
+        if (!cleaned) { drop(declarationLabel(part.slice(0, colon))); continue; }
+        out.push(names.size && /^\s*(?:-[a-z]+-)?animation(?:-name)?\s*:/i.test(cleaned) ? renameAnimations(cleaned, names, prefix) : cleaned);
       }
     }
-    return out.length ? out : body.trim() ? null : [];
+    return out;
   };
   while (i < css.length) {
     skip(); if (i >= css.length) break;
@@ -457,12 +467,12 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false): S
       else if (ch === ';' && parens === 0 && css.slice(start, i).trim().startsWith('@')) break;
       else if (ch === '}' && parens === 0) break;
     }
-    if (i >= css.length) { droppedRules++; break; }
+    if (i >= css.length) { drop(atRuleLabel(css.slice(start)) ?? 'unparsed CSS'); break; }
     if (css[i] !== '{') {
-      if (css[i] === '}') { droppedRules++; i++; continue; }
+      if (css[i] === '}') { drop('unparsed CSS'); i++; continue; }
       const statementEnd = css.indexOf(';', i);
-      if (css.slice(start, i).trim().startsWith('@') && statementEnd >= 0) { droppedRules++; i = statementEnd + 1; continue; }
-      droppedRules++; break;
+      if (css.slice(start, i).trim().startsWith('@') && statementEnd >= 0) { drop(atRuleLabel(css.slice(start, i))!); i = statementEnd + 1; continue; }
+      drop('unparsed CSS'); break;
     }
     const head = css.slice(start, i).trim();
     let depth = 1, end = i + 1; quote = ''; comment = false;
@@ -474,9 +484,9 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false): S
       if (ch === '"' || ch === "'") { quote = ch; continue; }
       if (ch === '{') depth++; else if (ch === '}') depth--;
     }
-    if (depth) { droppedRules++; break; }
+    if (depth) { drop('unparsed CSS'); break; }
     const body = css.slice(i + 1, end - 1); i = end;
-    if (head.startsWith('@media') && (head.length === 6 || /\s/.test(head[6]!))) {
+    if (head.startsWith('@media') && (head.length === 6 || head[6] === '(' || /\s/.test(head[6]!))) {
       const condition = head.slice(6).trim();
       const lower = condition.toLowerCase();
       let conditionSafe = !!condition && !lower.includes('url') && !lower.includes('expression');
@@ -488,14 +498,15 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false): S
         } else conditionSafe = false;
       }
       if (conditionDepth !== 0) conditionSafe = false;
-      if (!conditionSafe || inMedia) { droppedRules++; continue; }
-      const nested = carryStaticStyle(body, scope, true);
-      droppedRules += nested.droppedRules;
+      if (!conditionSafe || inMedia) { drop(inMedia ? 'nested @media' : '@media condition'); continue; }
+      const nested = carryStaticStyle(body, scope, true, names);
+      dropped.push(...nested.dropped);
       if (nested.css) rules.push(`@media ${condition}{${nested.css}}`);
       continue;
     }
-    if (head.startsWith('@')) { droppedRules++; continue; }
-    const decl = declarations(body);
+    const frames = !inMedia && /^@(?:-webkit-|-moz-|-o-)?keyframes\s+[A-Za-z_][-\w]{0,60}$/i.test(head) ? keyframesRule(head, body, prefix, declarations) : undefined;
+    if (frames) { rules.push(frames); continue; }
+    if (head.startsWith('@')) { drop(atRuleLabel(head)!); continue; }
     const sels: string[] = [];
     let selectorStart = 0, selectorDepth = 0, selectorQuote = '', selectorSyntaxOkay = true;
     for (let n = 0; n <= head.length; n++) {
@@ -507,10 +518,123 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false): S
       else if (ch === ',' && selectorDepth === 0) { sels.push(head.slice(selectorStart, n).trim()); selectorStart = n + 1; }
     }
     const safeSelector = (s: string) => !!s && !/[{};@\\<]/.test(s) && !/url\s*\(|expression\s*\(/i.test(s);
-    if (!decl || !selectorSyntaxOkay || selectorDepth !== 0 || selectorQuote || !sels.every(safeSelector)) { droppedRules++; continue; }
-    rules.push(`${sels.map((s) => `${scope} ${s}`).join(',')}{${decl.join(';')}}`);
+    if (!selectorSyntaxOkay || selectorDepth !== 0 || selectorQuote || !sels.every(safeSelector)) { drop('selector'); continue; }
+    const before = dropped.length;
+    const decl = declarations(body);
+    // A rule keeps its safe declarations; one whose declarations were all refused is left out.
+    if (decl.length || dropped.length === before) rules.push(`${sels.map((s) => `${scope} ${s}`).join(',')}{${decl.join(';')}}`);
   }
-  return { css: rules.join('\n'), droppedRules };
+  return { css: rules.join('\n'), droppedRules: dropped.length, dropped };
+}
+
+/** Numeric-argument functions a page stylesheet may also call: 3D transforms, filters, `rect()` clips and easing curves. None can fetch. */
+const SHEET_NUMERIC_FUNCTIONS = new Set([
+  'translate3d', 'scale3d', 'rotate3d', 'matrix', 'matrix3d', 'perspective', 'brightness', 'contrast', 'grayscale',
+  'invert', 'opacity', 'saturate', 'sepia', 'blur', 'rect', 'cubic-bezier',
+]);
+
+/** Gradient and easing functions whose arguments are keywords, numbers and `#hex` colours (nested colour calls resolve first). */
+const SHEET_KEYWORD_FUNCTIONS = new Set([
+  'linear-gradient', 'radial-gradient', 'repeating-linear-gradient', 'repeating-radial-gradient', 'conic-gradient',
+  '-webkit-linear-gradient', '-moz-linear-gradient', '-o-linear-gradient', '-webkit-radial-gradient',
+  '-moz-radial-gradient', '-webkit-gradient', 'from', 'to', 'color-stop', 'steps', 'drop-shadow',
+]);
+
+/** A quoted CSS string with no raw markup, braces, semicolons or line breaks; a backslash only starts a hex escape. */
+const SHEET_STRING = /"(?:[^"\\<>;{}\r\n]|\\[0-9a-fA-F])*"|'(?:[^'\\<>;{}\r\n]|\\[0-9a-fA-F])*'/g;
+
+/**
+ * One declaration of a page `<style>` sheet: kept when the inline-style
+ * sanitizer keeps it, or when its value passes the sheet-only checks
+ * (gradients, 3D transforms, filters, easing curves, quoted `font` names, and
+ * `content` strings or `attr()`). Remote and relative `url()`, `@` rules,
+ * `expression`, `behavior` and `-moz-binding` stay refused.
+ */
+function cleanSheetDeclaration(part: string, colon: number): string | undefined {
+  const cleaned = cleanStyle(part);
+  if (!cleaned.dropped.length && cleaned.style) return cleaned.style;
+  const prop = flatCss(part.slice(0, colon));
+  if (!/^-?[-a-z]+$/.test(prop) || prop === 'behavior' || prop === '-moz-binding') return undefined;
+  return safeSheetValue(part.slice(colon + 1).replace(/!\s*important\s*$/i, ''), prop) ? part.trim() : undefined;
+}
+
+function safeSheetValue(raw: string, prop: string): boolean {
+  let text = String(raw ?? '').trim();
+  if (!text || text.length > STYLE_TEXT_MAX) return false;
+  if (prop === 'content') text = text.replace(SHEET_STRING, ' ').replace(/\battr\(\s*[a-zA-Z][-a-zA-Z0-9]{0,40}\s*\)/g, ' ');
+  if (prop === 'font' || prop === 'font-family') text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
+  if (/[;\\@<>'"{}]/.test(text) || text.includes('/*')) return false;
+  const flat = flatCss(text);
+  if (flat.includes('url(') || flat.includes('expression') || flat.includes('javascript:') || flat.includes('vbscript:')) return false;
+  // Nested calls (a colour inside a gradient) resolve innermost first, one level per pass.
+  for (let pass = 0; pass < 4 && text.includes('('); pass++) {
+    const next = replaceStyleCalls(text, (name: string, args: string) => {
+      const fn = name.toLowerCase();
+      if ((STYLE_FUNCTIONS.has(fn) || SHEET_NUMERIC_FUNCTIONS.has(fn)) && STYLE_ARGS.test(args)) return ' ';
+      if (fn === 'calc' && calcArgsSafe(args)) return ' ';
+      if (SHEET_KEYWORD_FUNCTIONS.has(fn) && /^[\s,a-zA-Z0-9#.%+-]*$/.test(args)) return ' ';
+      return '\u0000';
+    });
+    if (next === text || next.includes('\u0000')) return false;
+    text = next;
+  }
+  return !/[()]/.test(text);
+}
+
+/** Names declared by `@keyframes` rules (any vendor prefix) in comment-free CSS. */
+function keyframeNames(css: string): Set<string> {
+  const names = new Set<string>();
+  for (const match of css.matchAll(/@(?:-webkit-|-moz-|-o-)?keyframes\s+([A-Za-z_][-\w]{0,60})/gi)) names.add(match[1]);
+  return names;
+}
+
+/** A per-page prefix for carried keyframe names, so a page never overrides app or other-page animations. */
+function keyframePrefix(scope: string): string {
+  return `c2c-${scope.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')}-`;
+}
+
+/** Point `animation` / `animation-name` at the renamed keyframes declared on this page. */
+function renameAnimations(declaration: string, names: Set<string>, prefix: string): string {
+  const colon = declaration.indexOf(':');
+  const value = declaration.slice(colon + 1).replace(/[A-Za-z_][-\w]*/g, (word) => (names.has(word) ? prefix + word : word));
+  return declaration.slice(0, colon + 1) + value;
+}
+
+/**
+ * A `@keyframes` rule with its name page-prefixed. Every frame selector must
+ * be `from`, `to` or a percentage list, and frames may not nest; otherwise the
+ * whole rule is refused (undefined). Refused declarations inside a frame are
+ * reported by `declarations`.
+ */
+function keyframesRule(head: string, body: string, prefix: string, declarations: (body: string) => string[]): string | undefined {
+  const [, at, name] = /^@((?:-webkit-|-moz-|-o-)?keyframes)\s+(\S+)$/i.exec(head)!;
+  const frames: string[] = [];
+  let i = 0;
+  for (;;) {
+    const open = body.indexOf('{', i);
+    if (open < 0) { if (body.slice(i).trim()) return undefined; break; }
+    const close = body.indexOf('}', open + 1);
+    if (close < 0 || body.slice(open + 1, close).includes('{')) return undefined;
+    const selector = body.slice(i, open).trim();
+    if (!/^(?:from|to|\d{1,3}(?:\.\d{1,4})?%)(?:\s*,\s*(?:from|to|\d{1,3}(?:\.\d{1,4})?%)){0,20}$/i.test(selector)) return undefined;
+    const decl = declarations(body.slice(open + 1, close));
+    if (decl.length) frames.push(`${selector.toLowerCase()}{${decl.join(';')}}`);
+    i = close + 1;
+  }
+  return `@${at.toLowerCase()} ${prefix}${name}{${frames.join('')}}`;
+}
+
+/** `@name` of an at-rule head, lower-cased; undefined when `text` is not an at-rule. */
+function atRuleLabel(text: string): string | undefined {
+  const match = /^\s*@(-?[a-zA-Z][-a-zA-Z]{0,40})/.exec(text);
+  if (!match) return text.trim().startsWith('@') ? '@ rule' : undefined;
+  return `@${match[1].toLowerCase()}`;
+}
+
+/** The property a refused declaration names, or a generic label for a malformed one. */
+function declarationLabel(prop: string): string {
+  const name = prop.trim().toLowerCase();
+  return /^-?[-a-z]{1,60}$/.test(name) ? `${name} declaration` : 'unparsed declaration';
 }
 
 /**
@@ -687,30 +811,39 @@ export function droppedStyleRules(raw: string): number {
 }
 
 export function carriedStyleRules(raw: string, scope: string): ScopedStyle {
-  if (!/<\s*style/i.test(String(raw ?? ''))) return { css: '', droppedRules: 0 };
+  if (!/<\s*style/i.test(String(raw ?? ''))) return { css: '', droppedRules: 0, dropped: [] };
   const win = domWindow();
   const parsed = new win.DOMParser().parseFromString(String(raw ?? ''), 'text/html');
-  const carried: string[] = []; let droppedRules = 0;
+  const sheets: string[] = [];
   const walk = (node: DomNode) => {
     if (node.nodeType !== 1) return;
     if ((node.tagName || '').toLowerCase() === 'style') {
-      const result = carryStaticStyle(maskTemplateIslands(node.textContent ?? '', ' '), scope);
-      if (result.css) carried.push(result.css);
-      droppedRules += result.droppedRules;
+      sheets.push(maskTemplateIslands(node.textContent ?? '', ' '));
       return;
     }
     for (const child of listOf(node.childNodes)) walk(child);
   };
   walk(parsed.documentElement);
-  return { css: carried.join('\n'), droppedRules };
+  // Keyframes declared in any of the page's <style> elements are renamed in all of them.
+  const names = keyframeNames(sheets.join('\n'));
+  const carried: string[] = []; const dropped: string[] = [];
+  for (const sheet of sheets) {
+    const result = carryStaticStyle(sheet, scope, false, names);
+    if (result.css) carried.push(result.css);
+    dropped.push(...result.dropped);
+  }
+  return { css: carried.join('\n'), droppedRules: dropped.length, dropped };
 }
 
 /** The TODO reason and manual step for a page's dropped `<style>` CSS. */
-export function droppedStyleRulesTodo(page: string, rules: number): { reason: string; step: string } {
-  const what = `${rules} static style rule${rules === 1 ? '' : 's'}`;
+export function droppedStyleRulesTodo(page: string, rules: number, dropped: string[] = []): { reason: string; step: string } {
+  const counts = new Map<string, number>();
+  for (const name of dropped) counts.set(name, (counts.get(name) ?? 0) + 1);
+  const named = [...counts].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([name, n]) => (n > 1 ? `${name} x${n}` : name));
+  const what = `${rules} static style rule${rules === 1 ? '' : 's'} or declaration${rules === 1 ? '' : 's'}${named.length ? ` (${named.join(', ')})` : ''}`;
   return {
     reason: `Static <style> CSS not carried over: the page sanitizer drops ${what}`,
-    step: `page ${page}: The sanitizer drops ${what} in <style> elements. Move them into the app stylesheet, scoped to this page, or restyle the page with supported components. Keep this TODO open until the restyled page is verified.`,
+    step: `page ${page}: The sanitizer carries the safe <style> rules, scoped to this page, and drops ${what}. Restyle what was dropped in the app stylesheet, scoped to this page, or with supported components. Keep this TODO open until the restyled page is verified.`,
   };
 }
 
