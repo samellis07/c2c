@@ -90,9 +90,9 @@ export interface DelugeLocation {
    * `ui` — the hole is one generated UI stub. The location names the field, report, or page.
    */
   scope: 'app' | 'unit' | 'ui';
-  /** UI stubs from a server-side snippet: why it stays counted. */
+  /** Why the hole stays counted: snippet reasons for UI stubs. */
   manualReasons?: SnippetReason[];
-  /** UI stubs from a server-side snippet: the guided manual step. */
+  /** The guided manual step a counted hole names (UI stubs, guided deluge holes). */
   manualStep?: string;
 }
 
@@ -337,7 +337,7 @@ function locateTodos(app: App, units: readonly DelugeUnit[], todos: readonly Tod
     workflows: new IntervalIndex(app.workflows, (workflow) => workflow.span),
     functions: new IntervalIndex(app.functions, (fn) => fn.span),
   };
-  const located = dedupeTodos(todos).map((todo) => ({ ...placeTodo(app, indexes, todo), construct: todo.construct, start: todo.start, end: todo.end }));
+  const located = dedupeTodos(todos).map((todo) => ({ ...placeTodo(app, indexes, todo), construct: todo.construct, start: todo.start, end: todo.end, manualStep: todo.manualStep }));
   located.sort((a, b) => a.start - b.start || a.end - b.end || byText(a.construct, b.construct));
   const out = disambiguateLocations(located);
   out.sort((a, b) => byText(a.location, b.location) || byText(a.construct, b.construct) || byText(a.scope, b.scope));

@@ -552,6 +552,62 @@ test(
   },
 );
 
+test('a pushnotification hole is a counted deluge blocker with a guided step', () => {
+  const app = deriveIr(
+    parse(`application "Notify_App"
+{
+	forms
+	{
+		form Incident
+		{
+			Subject
+			(
+				type = text
+				displayname = "Subject"
+			)
+		}
+	}
+	workflow
+	{
+		form
+		{
+			On_Add as "On add"
+			{
+				type = form
+				form = Incident
+				on add
+				{
+					actions
+					{
+						on success
+						(
+							pushnotification
+							(
+								to : "admin@example.test"
+								title : "New Incident"
+								message : "a new record"
+								view : "Recent_Incidents"
+							)
+						)
+					}
+				}
+			}
+		}
+	}
+}
+`),
+  );
+  const r = analyze(app);
+  const hole = r.blockers.find((b) => b.detail === 'pushnotification');
+  assert.ok(hole, 'the pushnotification residual is a named blocker');
+  assert.equal(hole?.scope, 'unit');
+  assert.match(hole?.manualStep ?? '', /Enable Push Notifications in the Catalyst console/);
+  assert.match(hole?.manualStep ?? '', /ZohoCatalyst\.notifications\.web/);
+  const location = r.deluge.todoLocations.find((item) => item.construct === 'pushnotification');
+  assert.equal(location?.manualStep, hole?.manualStep);
+  assert.match(analyzeAsText(r), /\n {2}deluge: .* \(pushnotification\)\n {4}step: Enable Push Notifications in the Catalyst console/);
+});
+
 test('a write-bearing server snippet stays one counted UI blocker with a guided step', () => {
   const app = deriveIr(
     parse(`application "Demo"
