@@ -141,6 +141,37 @@ test('a setField on a criteria field: the next setField and field read see the s
   assert.deepEqual(mock.tables.get('Doc')!.map((one) => one.Amount), ['5', '7']);
 });
 
+test('a write that lands during setField\'s own update await is not absorbed: the next read sees the store', async () => {
+  const mock = mockDatastore(docSchema);
+  mock.tables.set('Doc', [
+    { ROWID: '1', ID: '1', Region: 'north', Amount: '5', Name: 'A-row' },
+    { ROWID: '2', ID: '2', Region: 'north', Amount: '7', Name: 'B-row' },
+  ]);
+  let gate: (() => void) | undefined;
+  let gated = false;
+  const datastore = {
+    ...mock.datastore,
+    async update(form: string, rows: Record<string, unknown>[]) {
+      if (!gated && rows.some((row) => 'Name' in row)) {
+        gated = true;
+        await new Promise<void>((resolve) => (gate = resolve));
+      }
+      return mock.datastore.update(form, rows);
+    },
+  };
+  const runtime = createRuntime({ dryRun: false, appTimeZone: 'UTC', datastore });
+  const ctx = runtime.context({});
+  const id1 = { op: '==', field: 'ID', value: '1' } as const;
+  const rec = runtime.shim.datastore.query(ctx, 'Doc', id1);
+  const pending = runtime.shim.datastore.setField(ctx, rec, 'Name', 'x');
+  while (!gate) await new Promise((resolve) => setTimeout(resolve, 2));
+  const other = runtime.shim.datastore.query(ctx, 'Doc', id1);
+  await runtime.shim.datastore.setField(ctx, other, 'Amount', '9');
+  gate();
+  await pending;
+  assert.equal(await runtime.shim.datastore.field(ctx, rec, 'Amount'), '9');
+});
+
 test('a column the store stamps on update is read again after setField', async () => {
   const { runtime } = docs({ stamp: true });
   const ctx = runtime.context({});
