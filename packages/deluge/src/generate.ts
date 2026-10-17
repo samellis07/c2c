@@ -187,6 +187,11 @@ export interface CoverageEntry {
   bucket: 'translated' | 'shimmed' | 'todo' | 'skipped';
 }
 
+/** A Creator form-properties action: `type = presuccess` with an `on start` body. */
+function isPresuccessWorkflow(w: Workflow): boolean {
+  return (w.type ?? '').trim().toLowerCase() === 'presuccess';
+}
+
 /**
  * A generated construct that fell back to a safe default because the .ds did
  * not declare enough to reproduce the Creator permission — or an explicit
@@ -765,6 +770,12 @@ function emitFormHandler(
   const serverBody = group.length > 1 && serverParts.length > 1
     ? serverParts.map((part, i) => `if (ctx.onlyScript == null || ctx.onlyScript === ${i}) await shim.__c2cScript(${i}, async () => {\n${indent(part)}\n});`).join('\n')
     : serverParts.join('\n');
+  // An `on start` presuccess module is run by the submit pipeline (the submit
+  // stub and every live submit-owning module) before the on-validate
+  // siblings. Only a route whose every server script is presuccess is marked:
+  // the pipeline runs the whole module, never one script of a merged route.
+  const presuccessModule =
+    kind === 'handler' && contributed.some((item) => item.server) && contributed.every((item) => !item.server || isPresuccessWorkflow(item.w));
   let serverFile: string | undefined;
   if (serverBody.trim()) {
     const systemWrite =
@@ -796,6 +807,7 @@ function emitFormHandler(
     serverFile = put(
       `functions/aio/${base}.mjs`,
       aioModule({
+        presuccess: presuccessModule,
         app,
         form,
         title: `Form handler ${first.event || first.name}`,
@@ -807,6 +819,9 @@ function emitFormHandler(
         ...extraRecordEvents,
         systemWrite,
         validateSpecs: systemWrite ? validateSiblingSpecs(app, form) : undefined,
+        // Only the modules that can own the submit URL run the presuccess
+        // actions; a field-change route that writes is not a form submit.
+        presuccessSpecs: systemWrite && (kind === 'success' || kind === 'submit') ? presuccessSiblingSpecs(app, form) : undefined,
         body: serverBody,
         schema,
         scriptEvents,
@@ -860,7 +875,7 @@ function emitFormHandler(
       let serverInvoked: boolean | undefined;
       if (item.server && serverFile) {
         if (kind === 'submit' && !clientPosted) serverInvoked = !submitBodyUnposted(successServerForms?.get(form), item.w.event || '');
-        else serverInvoked = clientPosted || runtimeReachesFormEvent(kind);
+        else serverInvoked = clientPosted || runtimeReachesFormEvent(kind) || presuccessModule;
         if (!serverInvoked) todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: item.w.span.start, end: item.w.span.end });
       }
       const paths: string[] = [];
@@ -3342,6 +3357,37 @@ export function validateSiblingSpecs(app: App, form: string): { add: string[]; e
 }
 
 /**
+ * The form's `on start` presuccess module (`./<leaf>.mjs`, path
+ * `/forms/<form>/handler`), split by the record event its presuccess scripts
+ * run under. Empty unless every server script on that route is presuccess —
+ * the same rule that marks the module `presuccess` in emitFormHandler.
+ */
+export function presuccessSiblingSpecs(app: App, form: string): { add: string[]; edit: string[] } {
+  const group = handlerGroup(app, form, 'handler');
+  const add: string[] = [];
+  const edit: string[] = [];
+  let hasServer = false;
+  let coversAdd = false;
+  let coversEdit = false;
+  for (const other of group) {
+    const translated = other.deluge ? translateInApp(app, other.deluge.text) : emptyTranslate();
+    const guarded = gateAction(app, other, translated, []);
+    if (!guarded.server.trim()) continue;
+    if (!isPresuccessWorkflow(other)) return { add, edit };
+    hasServer = true;
+    const scope = recordScope(other);
+    if (scope === 'add' || scope === 'both') coversAdd = true;
+    if (scope === 'edit' || scope === 'both') coversEdit = true;
+  }
+  if (hasServer) {
+    const spec = `./${handlerLeaf(group)}.mjs`;
+    if (coversAdd) add.push(spec);
+    if (coversEdit) edit.push(spec);
+  }
+  return { add, edit };
+}
+
+/**
  * The deploy-mode helpers shared by every live-capable generated module:
  * `C2C_DEPLOY_MODE` overrides `c2c-deploy.json`; a live run uses the injected
  * datastore (request-scoped `c2c-store.mjs`, else the `__c2cDatastore` global
@@ -3394,11 +3440,25 @@ async function liveDatastore() {
  * `on add`: a ROWID makes the write an update, and Creator never runs an
  * `on add` validate when a stored record is edited.
  */
-function aioLiveHelpers(validateSpecs: { add: string[]; edit: string[] }, writeLive: string): string {
-  return `const validateAdd = ${JSON.stringify(validateSpecs.add)};
+function aioLiveHelpers(validateSpecs: { add: string[]; edit: string[] }, pick: 'add' | 'edit' | 'either', writeLive: string, presuccessSpecs?: { add: string[]; edit: string[] }): string {
+  const pickBody =
+    pick === 'add' ? 'return validateAdd;' : pick === 'edit' ? 'return validateEdit;' : 'return rowId ? validateEdit : validateAdd;';
+  const presuccessPick =
+    pick === 'add' ? 'return presuccessAdd;' : pick === 'edit' ? 'return presuccessEdit;' : 'return rowId ? presuccessEdit : presuccessAdd;';
+  // Emitted only for a form with an `on start` presuccess module, so every
+  // other module stays byte-identical.
+  const presuccessBlock = presuccessSpecs && presuccessSpecs.add.length + presuccessSpecs.edit.length
+    ? `const presuccessAdd = ${JSON.stringify(presuccessSpecs.add)};
+const presuccessEdit = ${JSON.stringify(presuccessSpecs.edit)};
+function presuccessSpecsFor(rowId) {
+  ${presuccessPick}
+}
+`
+    : '';
+  return `${presuccessBlock}const validateAdd = ${JSON.stringify(validateSpecs.add)};
 const validateEdit = ${JSON.stringify(validateSpecs.edit)};
 function validateSpecsFor(rowId) {
-  return rowId ? validateEdit : validateAdd;
+  ${pickBody}
 }
 
 ${liveHelpers('../../')}
@@ -4325,6 +4385,10 @@ function aioModule(opts: {
   systemWrite?: 'insert' | 'update' | 'add-or-edit' | null;
   /** `./on-validate.mjs` siblings by record event scope. Imported only after deploy mode is live. */
   validateSpecs?: { add: string[]; edit: string[] };
+  /** The form's `on start` presuccess module by record event scope, run before the validate siblings. */
+  presuccessSpecs?: { add: string[]; edit: string[] };
+  /** This module is the form's `on start` presuccess route; the submit pipeline imports it. */
+  presuccess?: boolean;
   body: string;
   /** Sourced schema plan; the embedded write rules match the provisioned store. */
   schema?: SchemaPlan;
@@ -4382,6 +4446,11 @@ function aioModule(opts: {
     }
   }
   lines.push('The previous row is loaded on the server. Dry run uses dryRunOld and does not read a client previous row.');
+  if (opts.presuccess) {
+    lines.push(
+      'Creator `on start` presuccess (form properties) actions. Nothing posts this route: the submit pipeline runs this module after the access gate and before the on-validate siblings, in the submit stub and in every live module that owns the submit URL. A cancel submit here refuses the write with 422. [UNVERIFIED] Creator\'s exact placement relative to On Validate, and whether an unscoped presuccess runs on edit; this port follows the record event scope.',
+    );
+  }
   lines.push('Client tasks for this handler, if any, are in the matching client/handlers module.');
   const schemaExports = schema
     ? `export const fieldNames = ${JSON.stringify(schema.names)};
@@ -4423,7 +4492,9 @@ import { fileURLToPath } from "node:url";
   // fields are written back after the script (successSetsHelper).
   const savesSuccessSets = !!opts.systemWrite && !opts.deferSuccess && /shim\.input\.(?:set|insert)\(/.test(opts.body);
   const successSetsBlock = savesSuccessSets ? `\n${successSetsHelper(storeShape)}` : '';
-  const liveHelpersBlock = opts.systemWrite ? `\n${aioLiveHelpers(opts.validateSpecs ?? { add: [], edit: [] }, writeLiveSource(opts.form, storeShape))}${successSetsBlock}${usesConnections ? `\n${connectionsLiveHelpers()}` : ''}${usesOutbound || usesGetUrl ? `\n${outboundLiveHelpers()}` : ''}${usesApp ? `\n${appUsersHelper(administratorProfiles(opts.app))}` : ''}\n` : '\n';
+  const validatePick = opts.systemWrite === 'update' ? 'edit' : opts.systemWrite === 'insert' ? 'add' : 'either';
+  const hasPresuccess = !!opts.presuccessSpecs && opts.presuccessSpecs.add.length + opts.presuccessSpecs.edit.length > 0;
+  const liveHelpersBlock = opts.systemWrite ? `\n${aioLiveHelpers(opts.validateSpecs ?? { add: [], edit: [] }, validatePick, writeLiveSource(opts.form, storeShape), opts.presuccessSpecs)}${successSetsBlock}${usesConnections ? `\n${connectionsLiveHelpers()}` : ''}${usesOutbound || usesGetUrl ? `\n${outboundLiveHelpers()}` : ''}${usesApp ? `\n${appUsersHelper(administratorProfiles(opts.app))}` : ''}\n` : '\n';
   const zoneFields = `${timeZoneFields(opts.app)}${schemaRuntimeOptions(opts.app, opts.schema)}`;
   const runtimeSetup = opts.systemWrite
     ? `  const datastore = loadedStore || (live ? await liveDatastore() : null);
@@ -4465,7 +4536,13 @@ ${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' :
     : '';
   const successBody = opts.systemWrite
     ? `    if (live) {
-${storedFill}      for (const spec of validateSpecsFor(ctx.rowId)) {
+${storedFill}${hasPresuccess ? `      // The form's \`on start\` presuccess actions run first, on the same
+      // record, before the on-validate siblings and the row write.
+      for (const spec of presuccessSpecsFor(ctx.rowId)) {
+        const mod = await import(spec);
+        if (mod && mod.presuccess === true && typeof mod.handle === "function") await mod.handle(ctx);
+      }
+` : ''}      for (const spec of validateSpecsFor(ctx.rowId)) {
         const mod = await import(spec);
         if (mod && typeof mod.handle === "function") await mod.handle(ctx);
       }
@@ -4511,6 +4588,7 @@ ${storedUnfill}      await writeLive(runtime, ctx, formName${fieldStoreWriteArg(
   // cancel submit in this body or in a validate sibling run before the live write: nothing was written.
   const submitRefusal =
     opts.body.includes('shim.validate.cancelSubmit') ||
+    hasPresuccess ||
     (opts.validateSpecs ? opts.validateSpecs.add.length + opts.validateSpecs.edit.length > 0 : false)
       ? `    if (err && err.code === "SUBMIT_REFUSED") {
       send(res, 422, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, wrote: false, refused: true, error: err.message, ${opts.systemWrite ? '...debugTranscript' : 'transcript: runtime.transcript'} });
@@ -4538,6 +4616,7 @@ export const formName = ${JSON.stringify(opts.form)};
 export const recordEvent = ${JSON.stringify(opts.recordEvent ?? null)};
 ${opts.recordEvents ? `export const recordEvents = ${JSON.stringify(opts.recordEvents)};
 ` : ''}${opts.scriptEvents ? `export const scriptEvents = ${JSON.stringify(opts.scriptEvents)};
+` : ''}${opts.presuccess ? `export const presuccess = true;
 ` : ''}${schemaExports}
 ${subformRowHelper}${liveHelpersBlock}export async function handle(ctx) {
   const shim = ctx.shim;
