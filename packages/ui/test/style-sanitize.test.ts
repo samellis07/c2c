@@ -572,3 +572,49 @@ test('a page with a scoped rule and an @import carries the rule and counts the @
   assert.equal(styleTodos.length, 1, JSON.stringify(styleTodos));
   assert.equal(styleTodos[0]!.reason, 'Static <style> CSS not carried over: the page sanitizer drops 1 static style rule or declaration (@import)');
 });
+
+test('a selector opening with a combinator is refused and counted, so a page cannot style its siblings', () => {
+  const escapes = ['~ *', '+ div', '> *', ' ~ nav', '/**/~ *', '/* x */+ div', '\n~ *', '\t> p', '\f+ a'];
+  for (const sel of escapes) {
+    const result = carryStaticStyle(`${sel} { display: none } .ok { color: red }`, '[data-page="a"]');
+    assert.equal(result.css, '[data-page="a"] .ok{color: red}', JSON.stringify(sel));
+    assert.deepEqual(result.dropped, ['leading combinator selector'], JSON.stringify(sel));
+  }
+  for (const list of ['a, ~ *', '.x,+ div', 'p , > *', 'a,/**/~ *', 'a,\n~ *']) {
+    const result = carryStaticStyle(`${list} { display: none }`, '[data-page="a"]');
+    assert.equal(result.css, '', JSON.stringify(list));
+    assert.deepEqual(result.dropped, ['leading combinator selector'], JSON.stringify(list));
+  }
+  for (const css of ['@media print { ~ * { display: none } }', '@media screen { a, + div { color: red } }']) {
+    const result = carryStaticStyle(css, '[data-page="a"]');
+    assert.ok(!/\[data-page="a"\]\s*[~+>]/.test(result.css), result.css);
+    assert.deepEqual(result.dropped, ['leading combinator selector'], css);
+  }
+  // Combinators between compound selectors stay inside the scope.
+  const inner = carryStaticStyle('.a > .b, .c ~ .d, .e + .f { color: red }', '[data-page="a"]');
+  assert.equal(inner.css, '[data-page="a"] .a > .b,[data-page="a"] .c ~ .d,[data-page="a"] .e + .f{color: red}');
+  assert.deepEqual(inner.dropped, []);
+});
+
+test('an unterminated comment is counted, not dropped silently', () => {
+  const result = carryStaticStyle('.a { color: red } /* .b { color: blue }', '[data-page="a"]');
+  assert.equal(result.css, '[data-page="a"] .a{color: red}');
+  assert.deepEqual(result.dropped, ['unterminated comment']);
+  assert.deepEqual(carryStaticStyle('.a { color: red } /* closed */', '[data-page="a"]').dropped, []);
+});
+
+test('a form feed inside a content string is refused', () => {
+  const result = carryStaticStyle('.a::after { content: "a\fb" } .b::after { content: "ab" }', '[data-page="a"]');
+  assert.equal(result.css, '[data-page="a"] .b::after{content: "ab"}');
+  assert.deepEqual(result.dropped, ['content declaration']);
+});
+
+test('a page name with a long dash run builds its keyframe prefix in linear time', () => {
+  const scope = `[data-page="a${'-'.repeat(100_000)}a"]`;
+  const started = performance.now();
+  const result = carryStaticStyle('@keyframes k { to { opacity: 1 } }', scope);
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed < 50, `${elapsed.toFixed(1)} ms`);
+  assert.ok(result.css.startsWith(`@keyframes c2c-data-page-a${'-'.repeat(100_000)}a-k{`), result.css.slice(0, 40));
+  assert.ok(carryStaticStyle('@keyframes k { to { opacity: 1 } }', '[data-page="P"]').css.startsWith('@keyframes c2c-data-page-P-k{'));
+});
