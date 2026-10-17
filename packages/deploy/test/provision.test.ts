@@ -296,6 +296,51 @@ function writeResult(out: string, id: string, value: unknown): string {
   return path;
 }
 
+interface SecurityEvidenceFiles {
+  roles?: unknown;
+  tables?: unknown;
+  functions?: unknown;
+  permissions?: Record<string, unknown>;
+  scopes?: Record<string, unknown>;
+}
+
+/** Write the evidence files the host agent saves after calling the read tools. */
+function writeSecurityEvidence(out: string, evidence: SecurityEvidenceFiles): void {
+  const dir = join(out, 'provision', 'evidence', 'import-existing');
+  mkdirSync(dir, { recursive: true });
+  const put = (name: string, value: unknown) => writeFileSync(join(dir, name), `${JSON.stringify(value)}\n`);
+  if (evidence.roles !== undefined) put('roles.json', evidence.roles);
+  if (evidence.tables !== undefined) put('tables.json', evidence.tables);
+  if (evidence.functions !== undefined) put('functions.json', evidence.functions);
+  for (const sub of ['permissions', 'scopes'] as const) {
+    const entries = evidence[sub] ?? {};
+    if (!Object.keys(entries).length) continue;
+    mkdirSync(join(dir, sub), { recursive: true });
+    for (const [id, body] of Object.entries(entries)) writeFileSync(join(dir, sub, `${id}.json`), `${JSON.stringify(body)}\n`);
+  }
+}
+
+/**
+ * Record MCP evidence for an existing project from the sandbox state,
+ * matching what a host agent records under provision/evidence/import-existing/.
+ */
+function recordSecurityEvidence(out: string, sandbox: Sandbox): void {
+  const permissions: Record<string, unknown> = {};
+  const scopes: Record<string, unknown> = {};
+  for (const [tableName] of sandbox.tables) {
+    permissions[tableName] = mcpRows(roleRows('table_permissions'));
+    scopes[tableName] = mcpRows(roleRows('table_scope'));
+  }
+  writeSecurityEvidence(out, {
+    roles: mcpResult(sandbox, 'CatalystbyZoho_List_All_Roles'),
+    tables: mcpResult(sandbox, 'CatalystbyZoho_List_All_Tables'),
+    functions: mcpResult(sandbox, 'CatalystbyZoho_List_All_Functions'),
+    permissions,
+    scopes,
+  });
+}
+
+
 function readState(out: string): ProvisionState {
   try {
     return JSON.parse(readFileSync(join(out, 'provision', 'state.json'), 'utf8')) as ProvisionState;
@@ -649,6 +694,8 @@ test('L1 provisions end to end in the fake project, every step read back', { ski
   assert.equal(await planCli([l1, '--out', out, '--dc', 'in', '--project', PROJECT], planner.io), 0);
   const plan = JSON.parse(readFileSync(join(out, 'provision', 'plan.json'), 'utf8')) as PlanFile;
   const sandbox = emptySandbox();
+  const customRoles = plan.steps.find((step) => step.id === 'custom-roles');
+  if (customRoles) applyWrite(sandbox, customRoles);
   const c = cap(sandbox);
   mkdirSync(join(out, 'provision'), { recursive: true });
   writeFileSync(join(out, 'provision', 'inputs.json'), JSON.stringify({ slateDomain: 'app-123.onslate.in' }));
@@ -659,12 +706,16 @@ test('L1 provisions end to end in the fake project, every step read back', { ski
     const next = lastJson(nextCap.out()) as { done: boolean; step?: PlanStep };
     if (next.done === true) break;
     const step = next.step!;
+    if (step.id === 'import-existing') {
+      recordSecurityEvidence(out, sandbox);
+    }
     if (step.via === 'cli') {
       assert.equal(await provisionCli(['--out', out, '--confirm', '--run', step.id, ...SCOPE], c.io), 0, `run ${step.id}: ${c.err()}`);
     } else {
       // The host performs the write (console clicks / the MCP tool) here — faked by mutating the sandbox.
       applyWrite(sandbox, step);
     }
+    if (step.id === 'import-existing') continue;
     const recorded = await (async () => {
       if (step.id === 'project') {
         // The project read-back is c2c's own Catalyst CLI list (fake here): name and id only.
@@ -4824,30 +4875,6 @@ function mcpFixture(name: string): unknown {
 function fixtureRows(name: string): Record<string, unknown>[] {
   const body = mcpFixture(name) as { data: { data: Record<string, unknown>[] } };
   return body.data.data;
-}
-
-interface SecurityEvidenceFiles {
-  roles?: unknown;
-  tables?: unknown;
-  functions?: unknown;
-  permissions?: Record<string, unknown>;
-  scopes?: Record<string, unknown>;
-}
-
-/** Write the evidence files the host agent saves after calling the read tools. */
-function writeSecurityEvidence(out: string, evidence: SecurityEvidenceFiles): void {
-  const dir = join(out, 'provision', 'evidence', 'import-existing');
-  mkdirSync(dir, { recursive: true });
-  const put = (name: string, value: unknown) => writeFileSync(join(dir, name), `${JSON.stringify(value)}\n`);
-  if (evidence.roles !== undefined) put('roles.json', evidence.roles);
-  if (evidence.tables !== undefined) put('tables.json', evidence.tables);
-  if (evidence.functions !== undefined) put('functions.json', evidence.functions);
-  for (const sub of ['permissions', 'scopes'] as const) {
-    const entries = evidence[sub] ?? {};
-    if (!Object.keys(entries).length) continue;
-    mkdirSync(join(dir, sub), { recursive: true });
-    for (const [id, body] of Object.entries(entries)) writeFileSync(join(dir, sub, `${id}.json`), `${JSON.stringify(body)}\n`);
-  }
 }
 
 /** The captured Book project, with an optional mutation hook. */
