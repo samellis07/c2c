@@ -86,6 +86,7 @@ import { multiValueDefault } from '../../shims/src/multi-value.js';
 import { generateSchema, schemaIdent, type SchemaColumn, type SchemaPlan } from '../../schema/src/generator.js';
 import { buildModel, type UiField, type UiModel, type UiReport } from '../../ui/src/model.js';
 import type { UiElement } from '../../ui/src/pages.js';
+import { defaultEquivalent } from './default-equivalence.js';
 
 export type DropKind =
   | 'form'
@@ -399,6 +400,7 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   const key = p.key.trim().toLowerCase().replace(/\s+/g, ' ');
   const raw = p.value;
   const text = unquote(raw).trim();
+  if (defaultEquivalent(key, text, ui)) return true;
   if (key === 'type') return ui !== undefined || columns.length > 0;
   if (key === 'displayname') {
     const plain = unquote(raw);

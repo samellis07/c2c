@@ -1392,36 +1392,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Account.Image property aspect ratio",
-      "detail": "Field New_Account.Image property aspect ratio is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Account.Image property camera",
-      "detail": "Field New_Account.Image property camera is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Account.Image property show gallery",
-      "detail": "Field New_Account.Image property show gallery is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Account.Image property source",
-      "detail": "Field New_Account.Image property source is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Account.Image property switch camera",
-      "detail": "Field New_Account.Image property switch camera is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_Account.Lead_ID property displayformat",
       "detail": "Field New_Account.Lead_ID property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
@@ -1466,36 +1436,6 @@
       "kind": "deluge",
       "label": "silent drop field-property: New_Contact.Assistant_Phone property personal data",
       "detail": "Field New_Contact.Assistant_Phone property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Contact.Contact_Image property aspect ratio",
-      "detail": "Field New_Contact.Contact_Image property aspect ratio is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Contact.Contact_Image property camera",
-      "detail": "Field New_Contact.Contact_Image property camera is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Contact.Contact_Image property show gallery",
-      "detail": "Field New_Contact.Contact_Image property show gallery is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Contact.Contact_Image property source",
-      "detail": "Field New_Contact.Contact_Image property source is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Contact.Contact_Image property switch camera",
-      "detail": "Field New_Contact.Contact_Image property switch camera is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
     },
     {
@@ -1578,36 +1518,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.Deal_Image property aspect ratio",
-      "detail": "Field New_Deal.Deal_Image property aspect ratio is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.Deal_Image property camera",
-      "detail": "Field New_Deal.Deal_Image property camera is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.Deal_Image property show gallery",
-      "detail": "Field New_Deal.Deal_Image property show gallery is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.Deal_Image property source",
-      "detail": "Field New_Deal.Deal_Image property source is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.Deal_Image property switch camera",
-      "detail": "Field New_Deal.Deal_Image property switch camera is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_Deal.Deal_Owner property displayformat",
       "detail": "Field New_Deal.Deal_Owner property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
@@ -1664,36 +1574,6 @@
       "kind": "deluge",
       "label": "silent drop field-property: New_Deal.Mode_of_Shipment property sortorder",
       "detail": "Field New_Deal.Mode_of_Shipment property sortorder is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.Photograph property aspect ratio",
-      "detail": "Field New_Deal.Photograph property aspect ratio is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.Photograph property camera",
-      "detail": "Field New_Deal.Photograph property camera is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.Photograph property show gallery",
-      "detail": "Field New_Deal.Photograph property show gallery is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.Photograph property source",
-      "detail": "Field New_Deal.Photograph property source is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.Photograph property switch camera",
-      "detail": "Field New_Deal.Photograph property switch camera is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
     },
     {
@@ -1998,36 +1878,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Lead.Photograph property aspect ratio",
-      "detail": "Field New_Lead.Photograph property aspect ratio is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Lead.Photograph property camera",
-      "detail": "Field New_Lead.Photograph property camera is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Lead.Photograph property show gallery",
-      "detail": "Field New_Lead.Photograph property show gallery is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Lead.Photograph property source",
-      "detail": "Field New_Lead.Photograph property source is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Lead.Photograph property switch camera",
-      "detail": "Field New_Lead.Photograph property switch camera is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_Lead.Port_of_Discharge property displayformat",
       "detail": "Field New_Lead.Port_of_Discharge property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
@@ -2072,36 +1922,6 @@
       "kind": "deluge",
       "label": "silent drop field-property: New_Port.Country property others option",
       "detail": "Field New_Port.Country property others option is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Product.Product_Image property aspect ratio",
-      "detail": "Field New_Product.Product_Image property aspect ratio is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Product.Product_Image property camera",
-      "detail": "Field New_Product.Product_Image property camera is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Product.Product_Image property show gallery",
-      "detail": "Field New_Product.Product_Image property show gallery is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Product.Product_Image property source",
-      "detail": "Field New_Product.Product_Image property source is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Product.Product_Image property switch camera",
-      "detail": "Field New_Product.Product_Image property switch camera is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
     },
     {
@@ -2402,36 +2222,6 @@
       "kind": "deluge",
       "label": "silent drop field-property: New_Vendor.Phone_Number property personal data",
       "detail": "Field New_Vendor.Phone_Number property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Vendor.Vendor_Image property aspect ratio",
-      "detail": "Field New_Vendor.Vendor_Image property aspect ratio is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Vendor.Vendor_Image property camera",
-      "detail": "Field New_Vendor.Vendor_Image property camera is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Vendor.Vendor_Image property show gallery",
-      "detail": "Field New_Vendor.Vendor_Image property show gallery is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Vendor.Vendor_Image property source",
-      "detail": "Field New_Vendor.Vendor_Image property source is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Vendor.Vendor_Image property switch camera",
-      "detail": "Field New_Vendor.Vendor_Image property switch camera is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
     },
     {
@@ -2942,11 +2732,11 @@
       }
     ],
     "uiTodoCount": 1,
-    "silentDrops": 249,
+    "silentDrops": 214,
     "silentDropKinds": [
       {
         "construct": "field-property",
-        "count": 181
+        "count": 146
       },
       {
         "construct": "report-feature",
