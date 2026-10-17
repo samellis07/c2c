@@ -1,0 +1,46 @@
+{
+  "schema": "c2c-fixture-migration-report/1",
+  "fixture": "synthetic/shared-routes/shared_routes",
+  "app": "Shared_Routes",
+  "scope": [
+    {
+      "feature": "Payments",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Offline",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Form Email",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "C8 dialect",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Cliq bots",
+      "label": "not supported in this version (counted)"
+    },
+    {
+      "feature": "Native mobile / MDM",
+      "label": "not supported in this version (counted; on the roadmap)"
+    },
+    {
+      "feature": "Marketplace publishing",
+      "label": "not applicable (out of scope)"
+    },
+    {
+      "feature": "Zia AI builder",
+      "label": "not applicable (out of scope)"
+    },
+    {
+      "feature": "On-prem Data Bridge",
+      "label": "not applicable (out of scope)"
+    }
+  ],
+  "todoCount": 0,
+  "todoKinds": [],
+  "manualSteps": []
+}

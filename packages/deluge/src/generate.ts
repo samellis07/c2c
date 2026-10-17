@@ -699,15 +699,20 @@ function emitFormHandler(
       else if (scope === 'del') conds.push('ctx.deleting');
       else if (hasDelScope) conds.push('!ctx.deleting');
     }
-    if (multiSubform && subform) conds.push(`ctx.subformRow && ctx.subformRow.field === ${JSON.stringify(subform)}`);
+    const subformConds = multiSubform && subform ? [`ctx.subformRow && ctx.subformRow.field === ${JSON.stringify(subform)}`] : [];
+    conds.push(...subformConds);
     const wrap = (part: string): string => (part.trim() && conds.length ? `if (${conds.join(' && ')}) {\n${indent(part)}\n}` : part);
+    // The prefetch request carries no ROWID and never runs for a delete, so a
+    // record-scope guard there would skip every edit-scoped read. Prefetch is
+    // read-only: it loads every script's slots and keeps only the subform guard.
+    const wrapPrefetch = (part: string): string => (part.trim() && subformConds.length ? `if (${subformConds.join(' && ')}) {\n${indent(part)}\n}` : part);
     if (server.trim()) {
       serverScriptIndex.set(group.indexOf(w), serverParts.length);
       serverParts.push(wrap(server));
     }
     if (prefetch.trim()) {
       hasPrefetch = true;
-      prefetchParts.push(wrap(prefetch));
+      prefetchParts.push(wrapPrefetch(prefetch));
       if (translated.usesElement) prefetchElement = true;
     }
     const prefetchPath = prefetch.trim() ? `/forms/${encodeURIComponent(form)}/${kind}/prefetch` : '';
@@ -814,7 +819,9 @@ function emitFormHandler(
         title: `Prefetch for ${first.event || first.name}`,
         path: `/forms/${encodeURIComponent(form)}/${kind}/prefetch`,
         dir: '../../',
-        body: prefetchParts.join('\n'),
+        // Each script's prefetch keeps its own block: two scripts on one route
+        // can bind the same name (`const d_row` for one subform).
+        body: prefetchParts.length > 1 ? prefetchParts.map((part) => `{\n${indent(part)}\n}`).join('\n') : prefetchParts.join('\n'),
         form,
         formGrant: 'write',
         schema,
