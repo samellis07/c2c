@@ -2658,6 +2658,10 @@ function stmts(list: Stmt[], scope: Scope, stats: TranslateStats, todos: TodoIte
  * later client condition on them is prefetched, or is its own counted todo.
  * A dropped simple statement with no client effect beyond those local
  * values (no action, no field write, no round trip) is therefore not a gap.
+ * In a server-only unit (`scope.noClient`) the client half is discarded by
+ * the caller and no client entry point can reach it, so a dropped client
+ * statement is dead code rather than a gap: nothing is pushed. A statement
+ * whose server half did not translate still counts through its own todo.
  */
 const COMPOUND_KINDS = new Set<Stmt['kind']>(['if', 'forEach', 'while', 'try']);
 /** Client code with an effect outside its own locals: a queued action, a field or row write, a server round trip, an early return. */
@@ -2674,6 +2678,7 @@ function gateClientShims(s: Stmt, o: Out, scope: Scope, stats: TranslateStats, b
   if (root) written.add(root);
   for (const name of [...written].sort()) if (scope.local.has(name)) scope.serverOnly.add(name);
   if (!COMPOUND_KINDS.has(s.kind) && !CLIENT_EFFECT.test(dropped)) return;
+  if (scope.noClient) return;
   const bucket = stats.todo > before.todo ? 'todo' : stats.shimmed > before.shimmed ? 'shimmed' : stats.translated > before.translated ? 'translated' : 'todo';
   scope.clientGaps.push({ todo: { construct: 'client-shim-unsupported', start: s.span.start, end: s.span.end }, bucket });
 }

@@ -115,3 +115,62 @@ test('a server-only unit loop over a same-app call is server code, not a client-
   assert.deepEqual(constructs(only.todos), []);
   assert.equal(only.client, '');
 });
+
+// A server-only unit ships no client half, so a statement whose dropped
+// client part names a shim the browser lacks is dead code, not a gap. The
+// same statement in a form workflow keeps its counted client-shim-unsupported
+// todo because the browser runs that handler.
+const FETCH_LOOP = 'rows = Orders[Status == "Open"];\ntotal = 0;\nfor each r in rows\n{\n  total = total + r.Amount;\n}\nreturn total;';
+
+test('a dropped client statement in a server-only unit is not a counted gap', async () => {
+  const only = translate(FETCH_LOOP, { serverOnly: true });
+  assert.match(only.server, /shim\.datastore\.(rows|query)/);
+  assert.equal(only.client, '');
+  assert.deepEqual(only.clientGaps, []);
+  assert.deepEqual(constructs(only.todos), []);
+
+  // The server half is real code: the offline shim runtime executes it.
+  const runtime = createRuntime({ dryRun: true });
+  const run = new Function('shim', 'ctx', `return (async () => {\n${only.server}\n})();`) as (...a: unknown[]) => Promise<unknown>;
+  await run(runtime.shim, runtime.context({ record: {} }));
+
+  const app: App = {
+    ...emptyApp('empty'),
+    name: 'Demo_App',
+    forms: [{ name: 'Orders', properties: [], fields: [], actions: [], blocks: [], span: Z }],
+    functions: [fnDef('openOrders', FETCH_LOOP)],
+  };
+  const g = generate(app);
+  assert.ok(!g.todos.some((t) => t.construct === 'client-shim-unsupported'));
+  assert.equal(g.files.find((f) => f.path.startsWith('client/handlers/functions/')), undefined);
+
+  // A unit with a real client half keeps the counted gap for a statement the
+  // browser cannot run.
+  const wf: Workflow = {
+    name: 'Scan',
+    event: 'on load',
+    form: 'Orders',
+    deluge: { text: 'input.Name = input.Name.toUpperCase();\ninfo "done";', span: Z },
+    properties: [],
+    span: Z,
+  } as Workflow;
+  const mixed = generate({ ...app, workflows: [wf] });
+  assert.ok(mixed.todos.some((t) => t.construct === 'client-shim-unsupported'));
+});
+
+test('a server-only unit statement whose server half is a todo stays counted', () => {
+  const src = 'for each r in Orders[Status == "Open"]\n{\n  info frob.zap(r.Name);\n}';
+  const only = translate(src, { serverOnly: true });
+  assert.equal(only.stats.todo, 1);
+  assert.deepEqual(constructs(only.todos), ['method:zap']);
+  assert.deepEqual(only.clientGaps, []);
+
+  const app: App = {
+    ...emptyApp('empty'),
+    name: 'Demo_App',
+    forms: [{ name: 'Orders', properties: [], fields: [], actions: [], blocks: [], span: Z }],
+    functions: [fnDef('openOrders', src)],
+  };
+  const g = generate(app);
+  assert.deepEqual(constructs(g.todos), ['method:zap']);
+});
