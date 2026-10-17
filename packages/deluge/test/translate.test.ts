@@ -4154,6 +4154,13 @@ test('toFile on an ordinary value stays a counted manual item', () => {
   assert.deepEqual(t.todos.map((item) => item.construct), ['method:toFile']);
 });
 
+test('pushnotification with an untranslatable message argument is counted once each', () => {
+  const t = translate('pushnotification( to:"admin@example.test" title:"T" message:"x".toFile("f.txt") )');
+  assert.deepEqual(t.todos.map((item) => item.construct), ['method:toFile', 'pushnotification']);
+  assert.equal(t.todos.filter((item) => item.construct === 'pushnotification').length, 1);
+  assert.match(t.server, /await shim\.todo\(ctx, "pushnotification", \{ "to": "admin@example\.test", "title": "T", "message": await shim\.todo\(ctx, "method:toFile"\) \}\)/);
+});
+
 function assigned(src: string): Expr {
   const stmt = parse(src).body[0];
   assert.ok(stmt && stmt.kind === 'assign');
