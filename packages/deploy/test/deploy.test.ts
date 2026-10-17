@@ -211,9 +211,12 @@ function memoryRest(detailsOrg: string = SCOPE.org): {
   calls: { method: string; path: string; body?: unknown }[];
   /** Functions a `catalyst deploy --only functions:<name>` spawn landed, in the project function list. */
   deployed: Map<string, string>;
+  /** Live function env variables, keyed by function id. */
+  functionEnv: Map<string, Record<string, string>>;
 } {
   const tables = new Map<string, { id: string; columns: Set<string> }>();
   const deployed = new Map<string, string>();
+  const functionEnv = new Map<string, Record<string, string>>();
   const users: Record<string, unknown>[] = [];
   let seq = 1;
   const calls: { method: string; path: string; body?: unknown }[] = [];
@@ -224,6 +227,15 @@ function memoryRest(detailsOrg: string = SCOPE.org): {
     }
     if (call.method === 'GET' && /^\/baas\/v1\/project\/[0-9]+\/function$/.test(call.path)) {
       return { status: 200, body: { status: 'success', data: [...deployed].map(([name, id]) => ({ id, name })) } };
+    }
+    const functionId = /^\/baas\/v1\/project\/[0-9]+\/function\/([^/?]+)$/.exec(call.path)?.[1];
+    if (call.method === 'GET' && functionId) {
+      return { status: 200, body: { data: { configuration: { environment: { variables: functionEnv.get(functionId) ?? { C2C_ADMIN_USER_ID: '' } } } } } };
+    }
+    const functionConfig = /^\/baas\/v1\/project\/[0-9]+\/function\/([^/?]+)\/configuration$/.exec(call.path)?.[1];
+    if (call.method === 'POST' && functionConfig) {
+      functionEnv.set(functionConfig, { ...((call.body as { variables?: Record<string, string> }).variables ?? {}) });
+      return { status: 200, body: { status: 'success' } };
     }
     if (call.method === 'GET' && call.path.endsWith('/table')) {
       return {
@@ -294,7 +306,7 @@ function memoryRest(detailsOrg: string = SCOPE.org): {
     }
     return { status: 404, body: {} };
   };
-  return { rest, calls, deployed };
+  return { rest, calls, deployed, functionEnv };
 }
 
 function capture(env: NodeJS.ProcessEnv = { X_ZC_CREDENTIAL_PATH: SECRET }, detailsOrg: string = SCOPE.org, landsNothing: ReadonlySet<string> = new Set()): {
@@ -304,6 +316,7 @@ function capture(env: NodeJS.ProcessEnv = { X_ZC_CREDENTIAL_PATH: SECRET }, deta
   spawned: { command: string; args: string[]; env: NodeJS.ProcessEnv }[];
   fetched: string[];
   restCalls: { method: string; path: string; body?: unknown }[];
+  functionEnv: Map<string, Record<string, string>>;
 } {
   let out = '';
   let err = '';
@@ -341,7 +354,7 @@ function capture(env: NodeJS.ProcessEnv = { X_ZC_CREDENTIAL_PATH: SECRET }, deta
     rest: store.rest,
     accessToken: async () => CLI_TOKEN,
   };
-  return { io, stdout: () => out, stderr: () => err, spawned, fetched, restCalls: store.calls };
+  return { io, stdout: () => out, stderr: () => err, spawned, fetched, restCalls: store.calls, functionEnv: store.functionEnv };
 }
 
 /** Persist a green doctor.json for one scope so a confirmed bin run passes the doctor gate. */
@@ -1154,6 +1167,25 @@ test('deploy --confirm provisions auth with the recorded calls and reports them'
   const stateText = readFileSync(join(out, '.c2c-deploy-state.json'), 'utf8');
   assert.equal(stateText.includes('owner@example.test'), false);
   assert.equal(cap.stdout().includes(SECRET), false);
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('deploy writes C2C_ADMIN_USER_ID from the verified admin for an owner-gated page', async () => {
+  const zml = `<zml><layout><row><column width='100%'><dsp id='hp1'><![CDATA[htmlpage hp1()\ncontent\n<p><%\nadminRec = Accounts[Email == zoho.adminuserid];\nif (adminRec.count() <= 0) {\n  insert into Accounts [ Email = zoho.loginuserid Role = "Admin" ];\n}\n%>Ready</p>]]></dsp></column></row></layout></zml>`;
+  const ds = writeDs(mkdtempSync(join(tmpdir(), 'c2c-owner-ds-')), `application "Widget"\n{\n\ttime zone = "Asia/Kolkata"\n\tform Accounts\n\t{\n\t\tEmail\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t\tRole\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t}\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tContent=${JSON.stringify(zml)}\n\t\t}\n\t}\n}\n`);
+  const out = mkdtempSync(join(tmpdir(), 'c2c-owner-out-'));
+  const cap = capture();
+  const code = await deployCli(
+    [...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out, '--admin-email', 'owner@example.test', '--admin-role-id', '10000000000000003'],
+    cap.io,
+  );
+  assert.equal(code, 0, cap.stderr() + cap.stdout());
+  const config = JSON.parse(readFileSync(join(out, 'functions/c2c_api/catalyst-config.json'), 'utf8')) as { deployment: { env_variables: Record<string, string> } };
+  assert.equal(config.deployment.env_variables.C2C_ADMIN_USER_ID, '');
+  const functionId = [...cap.functionEnv.keys()][0];
+  assert.equal(cap.functionEnv.get(functionId ?? '')?.C2C_ADMIN_USER_ID, '10000000000000004');
+  const post = cap.restCalls.find((call) => call.method === 'POST' && call.path.endsWith(`/function/${functionId}/configuration`));
+  assert.equal((post?.body as { variables?: Record<string, string> }).variables?.C2C_ADMIN_USER_ID, '10000000000000004');
   rmSync(out, { recursive: true, force: true });
 });
 

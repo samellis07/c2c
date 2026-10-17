@@ -5,11 +5,21 @@
  *
  * Rules:
  * 1. Writes must not be inside loops (forEach or while).
- * 2. Every write must be guarded by an enclosing if test that is exactly
- *    `zoho.loginuserid == zoho.adminuserid` — the only comparison that proves
- *    the authenticated app admin is the caller. An existence check over an
- *    identity-scoped read (a count or null test on `Form[... == zoho.*userid]`)
- *    says nothing about who is calling and is not a guard.
+ * 2. Every write must be guarded by an enclosing if test that is either
+ *    (a) exactly `zoho.loginuserid == zoho.adminuserid`, or
+ *    (b) a provisioning existence check: `read.count() == 0` or `<= 0`, where
+ *        the read is `Form[Field == zoho.loginuserid]` or
+ *        `Form[Field == zoho.adminuserid]` — a plain equality on one identity
+ *        slot with no other operand — bound once to a variable directly, or
+ *        spelled inline, and never reassigned. Under (b) the only write is an
+ *        `insert into` the same form that binds the checked field exactly once
+ *        to `zoho.loginuserid` (the server resolves it to the authenticated
+ *        caller, never a client value). No other identity-like field in that
+ *        insert may read a client value. A `zoho.adminuserid`-scoped check (b)
+ *        additionally requires the caller to be the application owner at
+ *        runtime (the endpoint compares the principal to C2C_ADMIN_USER_ID).
+ *    A null test, a looser comparison, or any extra operand (`||`, `&&`)
+ *    is not a guard.
  * 3. Statements and expressions outside read-only constructs are limited to
  *    insert, update, and criteria/record field assignments.
  * 4. Runtime shims allow datastore.insert, datastore.update, and
@@ -190,6 +200,188 @@ function isAuthenticatedAdminGuard(e: Expr): boolean {
     (isIdentity(e.right, 'loginuserid') && isIdentity(e.left, 'adminuserid'));
 }
 
+/** `zoho.loginuserid` or `zoho.adminuserid` member. */
+function identityProp(e: Expr): 'loginuserid' | 'adminuserid' | null {
+  e = unwrap(e);
+  if (e.kind !== 'member') return null;
+  const object = unwrap(e.object);
+  if (object.kind !== 'name' || object.name.toLowerCase() !== 'zoho') return null;
+  const prop = e.property.toLowerCase();
+  return prop === 'loginuserid' || prop === 'adminuserid' ? prop : null;
+}
+
+interface IdentityRead {
+  form: string;
+  field: string;
+  prop: 'loginuserid' | 'adminuserid';
+}
+
+/**
+ * `Form[Field == zoho.loginuserid]` / `Form[Field == zoho.adminuserid]` — a
+ * plain equality between one field and one identity slot and nothing else:
+ * no second criteria term, no sort, no range.
+ */
+function identityRead(e: Expr): IdentityRead | null {
+  e = unwrap(e);
+  if (e.kind !== 'criteria' || e.sort || e.range) return null;
+  const object = unwrap(e.object);
+  if (object.kind !== 'name') return null;
+  const crit = unwrap(e.criteria);
+  if (crit.kind !== 'binary' || crit.op !== '==') return null;
+  const left = unwrap(crit.left);
+  const right = unwrap(crit.right);
+  if (left.kind === 'name') {
+    const prop = identityProp(right);
+    return prop ? { form: object.name, field: left.name, prop } : null;
+  }
+  if (right.kind === 'name') {
+    const prop = identityProp(left);
+    return prop ? { form: object.name, field: right.name, prop } : null;
+  }
+  return null;
+}
+
+interface StmtMeta {
+  seq: number;
+  chain: Stmt[];
+}
+
+/** Preorder sequence and the enclosing statement chain of every statement. */
+function indexStmts(ast: Script): Map<Stmt, StmtMeta> {
+  const meta = new Map<Stmt, StmtMeta>();
+  let seq = 0;
+  const visit = (s: Stmt, chain: Stmt[]) => {
+    meta.set(s, { seq: seq++, chain });
+    const inner = [...chain, s];
+    switch (s.kind) {
+      case 'block':
+        for (const child of s.body) visit(child, inner);
+        break;
+      case 'if':
+        visit(s.then, inner);
+        for (const elif of s.elifs) visit(elif.body, inner);
+        if (s.else) visit(s.else, inner);
+        break;
+      case 'forEach':
+      case 'while':
+      case 'fn':
+        visit(s.body, inner);
+        break;
+      case 'try':
+        visit(s.body, inner);
+        if (s.catchBody) visit(s.catchBody, inner);
+        break;
+      default:
+        break;
+    }
+  };
+  for (const s of ast.body) visit(s, []);
+  return meta;
+}
+
+interface AssignInfo {
+  op: string;
+  value: Expr;
+  meta: StmtMeta;
+}
+
+/** All `name <op> value` assignments, by lowercased variable name. */
+function collectAssigns(ast: Script, meta: Map<Stmt, StmtMeta>): Map<string, AssignInfo[]> {
+  const assigns = new Map<string, AssignInfo[]>();
+  for (const [stmt, info] of meta) {
+    if (stmt.kind === 'assign' && stmt.target.kind === 'name') {
+      const key = stmt.target.name.toLowerCase();
+      const list = assigns.get(key) ?? [];
+      list.push({ op: stmt.op, value: stmt.value, meta: info });
+      assigns.set(key, list);
+    }
+  }
+  return assigns;
+}
+
+/**
+ * The provisioning existence check: `read.count() == 0` / `read.count() <= 0`
+ * and nothing else. The receiver is an inline `Form[Field == zoho.*userid]`
+ * read or a variable bound exactly once to that read by an assignment that
+ * precedes and dominates the if (its enclosing chain is a prefix of the
+ * if's chain, so no branch can skip it and no reassignment is possible).
+ */
+function provisioningRead(
+  test: Expr,
+  ifMeta: StmtMeta,
+  assigns: Map<string, AssignInfo[]>,
+): IdentityRead | null {
+  test = unwrap(test);
+  if (test.kind !== 'binary' || (test.op !== '==' && test.op !== '<=')) return null;
+  const right = unwrap(test.right);
+  if (right.kind !== 'number' || Number(right.text) !== 0) return null;
+  const left = unwrap(test.left);
+  if (left.kind !== 'call' || left.args.length !== 0) return null;
+  const callee = unwrap(left.callee);
+  if (callee.kind !== 'member' || callee.property.toLowerCase() !== 'count') return null;
+  const recv = unwrap(callee.object);
+  if (recv.kind === 'criteria') return identityRead(recv);
+  if (recv.kind !== 'name') return null;
+  const binds = assigns.get(recv.name.toLowerCase());
+  if (!binds || binds.length !== 1 || binds[0]!.op !== '=') return null;
+  const bind = binds[0];
+  if (bind.meta.seq >= ifMeta.seq || bind.meta.chain.length > ifMeta.chain.length) return null;
+  for (let i = 0; i < bind.meta.chain.length; i++) {
+    if (bind.meta.chain[i] !== ifMeta.chain[i]) return null;
+  }
+  return identityRead(bind.value);
+}
+
+type WriteGuard =
+  | { kind: 'none' }
+  | { kind: 'admin' }
+  | { kind: 'provision'; read: IdentityRead };
+
+const NO_GUARD: WriteGuard = { kind: 'none' };
+
+const IDENTITY_FIELD = /email|user|owner|login|creatorid/i;
+
+/** A value that reads the page's client input, directly or through an assigned name. */
+function readsClientInput(e: Expr, assigns: Map<string, AssignInfo[]>, seen = new Set<string>()): boolean {
+  let found = false;
+  walkExpr(e, (node) => {
+    if (found) return;
+    if (node.kind !== 'name') return;
+    const name = node.name.toLowerCase();
+    if (name === 'input') {
+      found = true;
+      return;
+    }
+    if (seen.has(name)) return;
+    seen.add(name);
+    for (const bind of assigns.get(name) ?? []) {
+      if (readsClientInput(bind.value, assigns, seen)) {
+        found = true;
+        return;
+      }
+    }
+  });
+  return found;
+}
+
+/**
+ * Under a provisioning existence check the only write is `insert into` the
+ * same form, binding the checked field exactly once to `zoho.loginuserid`; the
+ * runtime resolves that slot to the authenticated caller, never a client value.
+ * Any identity-like field reading `input` makes the insert unsafe, because a
+ * duplicate or sibling binding can overwrite the identity the guard checked.
+ * A write sitting under several guards is allowed by any one of them.
+ */
+function writeExprOk(e: Expr, guard: WriteGuard, assigns: Map<string, AssignInfo[]>): boolean {
+  if (guard.kind === 'admin') return true;
+  if (guard.kind !== 'provision' || e.kind !== 'insert') return false;
+  const form = unwrap(e.form);
+  if (form.kind !== 'name' || form.name.toLowerCase() !== guard.read.form.toLowerCase()) return false;
+  const checked = e.entries.filter((en) => en.key.toLowerCase() === guard.read.field.toLowerCase());
+  if (checked.length !== 1 || identityProp(checked[0]!.value) !== 'loginuserid') return false;
+  return !e.entries.some((en) => IDENTITY_FIELD.test(en.key) && readsClientInput(en.value, assigns));
+}
+
 function isWriteStmt(s: Stmt, criteriaVars: Set<string>): boolean {
   if (s.kind === 'update') return true;
   if (s.kind === 'assign') {
@@ -227,139 +419,172 @@ export function hasShapeCWrites(ast: Script): boolean {
   return found;
 }
 
+export interface ShapeCGuard {
+  /** Writes exist and every write sits under a valid guard. */
+  ok: boolean;
+  /**
+   * A `zoho.adminuserid`-scoped existence check guards a write: the endpoint
+   * must additionally verify the caller is the application owner
+   * (`C2C_ADMIN_USER_ID`) before any write runs.
+   */
+  requireOwner: boolean;
+}
+
 /**
  * Verifies writes are not inside loops and every write sits under an if test
- * that is exactly `zoho.loginuserid == zoho.adminuserid`.
+ * that is exactly `zoho.loginuserid == zoho.adminuserid`, or under the tight
+ * provisioning existence check (see the file header).
  */
-export function isShapeCGuarded(ast: Script): boolean {
+export function isShapeCGuarded(ast: Script): ShapeCGuard {
   const criteriaVars = collectCriteriaVars(ast);
+  const meta = indexStmts(ast);
+  const assigns = collectAssigns(ast, meta);
 
   let allWritesValid = true;
   let writeCount = 0;
+  let requireOwner = false;
+  const provisionWrites = new Map<WriteGuard, number>();
 
-  function checkExpr(e: Expr, inLoop: boolean, isGuarded: boolean): void {
+  function testGuard(test: Expr, ifMeta: StmtMeta | undefined): WriteGuard {
+    if (isAuthenticatedAdminGuard(test)) return { kind: 'admin' };
+    if (!ifMeta) return NO_GUARD;
+    const read = provisioningRead(test, ifMeta, assigns);
+    if (!read) return NO_GUARD;
+    if (read.prop === 'adminuserid') requireOwner = true;
+    return { kind: 'provision', read };
+  }
+
+  function checkExpr(e: Expr, inLoop: boolean, guards: WriteGuard[], ifMeta?: StmtMeta): void {
     if (isWriteExpr(e)) {
       writeCount++;
-      if (inLoop || !isGuarded) {
-        allWritesValid = false;
+      const allowedBy = guards.filter((guard) => writeExprOk(e, guard, assigns));
+      if (inLoop || allowedBy.length === 0) allWritesValid = false;
+      for (const guard of allowedBy) {
+        if (guard.kind !== 'provision') continue;
+        const count = (provisionWrites.get(guard) ?? 0) + 1;
+        provisionWrites.set(guard, count);
+        if (count > 1) allWritesValid = false;
       }
     }
     switch (e.kind) {
       case 'list':
-        for (const el of e.elements) checkExpr(el, inLoop, isGuarded);
+        for (const el of e.elements) checkExpr(el, inLoop, guards);
         break;
       case 'map':
         for (const en of e.entries) {
-          checkExpr(en.key, inLoop, isGuarded);
-          checkExpr(en.value, inLoop, isGuarded);
+          checkExpr(en.key, inLoop, guards);
+          checkExpr(en.value, inLoop, guards);
         }
         break;
       case 'unary':
       case 'paren':
-        checkExpr(e.expr, inLoop, isGuarded);
+        checkExpr(e.expr, inLoop, guards);
         break;
       case 'binary':
-        checkExpr(e.left, inLoop, isGuarded);
-        checkExpr(e.right, inLoop, isGuarded);
+        checkExpr(e.left, inLoop, guards);
+        checkExpr(e.right, inLoop, guards);
         break;
       case 'member':
-        checkExpr(e.object, inLoop, isGuarded);
+        checkExpr(e.object, inLoop, guards);
         break;
       case 'call':
-        checkExpr(e.callee, inLoop, isGuarded);
-        for (const arg of e.args) checkExpr(arg, inLoop, isGuarded);
+        checkExpr(e.callee, inLoop, guards);
+        for (const arg of e.args) checkExpr(arg, inLoop, guards);
         break;
       case 'index':
-        checkExpr(e.object, inLoop, isGuarded);
-        checkExpr(e.index, inLoop, isGuarded);
+        checkExpr(e.object, inLoop, guards);
+        checkExpr(e.index, inLoop, guards);
         break;
       case 'criteria':
-        checkExpr(e.object, inLoop, isGuarded);
-        checkExpr(e.criteria, inLoop, isGuarded);
+        checkExpr(e.object, inLoop, guards);
+        checkExpr(e.criteria, inLoop, guards);
         if (e.range) {
-          checkExpr(e.range.from, inLoop, isGuarded);
-          checkExpr(e.range.to, inLoop, isGuarded);
+          checkExpr(e.range.from, inLoop, guards);
+          checkExpr(e.range.to, inLoop, guards);
         }
         break;
       case 'ifExpr': {
-        const testGuarded = isAuthenticatedAdminGuard(e.test);
-        checkExpr(e.test, inLoop, isGuarded);
-        checkExpr(e.then, inLoop, isGuarded || testGuarded);
-        if (e.else) checkExpr(e.else, inLoop, isGuarded);
+        const testGuarded = testGuard(e.test, ifMeta);
+        checkExpr(e.test, inLoop, guards);
+        checkExpr(e.then, inLoop, testGuarded.kind === 'none' ? guards : [...guards, testGuarded]);
+        if (e.else) checkExpr(e.else, inLoop, guards);
         break;
       }
       case 'insert':
-        checkExpr(e.form, inLoop, isGuarded);
-        for (const en of e.entries) checkExpr(en.value, inLoop, isGuarded);
+        checkExpr(e.form, inLoop, guards);
+        for (const en of e.entries) checkExpr(en.value, inLoop, guards);
         break;
       case 'invokeurl':
       case 'sendmail':
       case 'pushnotification':
-        for (const en of e.entries) checkExpr(en.value, inLoop, isGuarded);
+        for (const en of e.entries) checkExpr(en.value, inLoop, guards);
         break;
       case 'colonCall':
-        checkExpr(e.object, inLoop, isGuarded);
-        for (const arg of e.args) checkExpr(arg, inLoop, isGuarded);
+        checkExpr(e.object, inLoop, guards);
+        for (const arg of e.args) checkExpr(arg, inLoop, guards);
         break;
       default:
         break;
     }
   }
 
-  function checkStmt(s: Stmt, inLoop: boolean, isGuarded: boolean): void {
+  function checkStmt(s: Stmt, inLoop: boolean, guards: WriteGuard[]): void {
     if (isWriteStmt(s, criteriaVars)) {
       writeCount++;
-      if (inLoop || !isGuarded) {
+      // Statement writes (update, field assignment) need the admin guard;
+      // a provisioning existence check covers only its bound insert.
+      if (inLoop || !guards.some((guard) => guard.kind === 'admin')) {
         allWritesValid = false;
       }
     }
     switch (s.kind) {
       case 'block':
-        for (const child of s.body) checkStmt(child, inLoop, isGuarded);
+        for (const child of s.body) checkStmt(child, inLoop, guards);
         break;
       case 'if': {
-        const testGuarded = isAuthenticatedAdminGuard(s.test);
-        checkExpr(s.test, inLoop, isGuarded);
-        checkStmt(s.then, inLoop, isGuarded || testGuarded);
+        const stmtMeta = meta.get(s);
+        const testGuarded = testGuard(s.test, stmtMeta);
+        checkExpr(s.test, inLoop, guards, stmtMeta);
+        checkStmt(s.then, inLoop, testGuarded.kind === 'none' ? guards : [...guards, testGuarded]);
         for (const elif of s.elifs) {
-          const elifGuarded = isAuthenticatedAdminGuard(elif.test);
-          checkExpr(elif.test, inLoop, isGuarded);
-          checkStmt(elif.body, inLoop, isGuarded || elifGuarded);
+          const elifGuarded = testGuard(elif.test, meta.get(s));
+          checkExpr(elif.test, inLoop, guards);
+          checkStmt(elif.body, inLoop, elifGuarded.kind === 'none' ? guards : [...guards, elifGuarded]);
         }
-        if (s.else) checkStmt(s.else, inLoop, isGuarded);
+        if (s.else) checkStmt(s.else, inLoop, guards);
         break;
       }
       case 'forEach':
-        checkExpr(s.collection, inLoop, isGuarded);
-        checkStmt(s.body, true, isGuarded);
+        checkExpr(s.collection, inLoop, guards);
+        checkStmt(s.body, true, guards);
         break;
       case 'while':
-        checkExpr(s.test, inLoop, isGuarded);
-        checkStmt(s.body, true, isGuarded);
+        checkExpr(s.test, inLoop, guards);
+        checkStmt(s.body, true, guards);
         break;
       case 'try':
-        checkStmt(s.body, inLoop, isGuarded);
-        if (s.catchBody) checkStmt(s.catchBody, inLoop, isGuarded);
+        checkStmt(s.body, inLoop, guards);
+        if (s.catchBody) checkStmt(s.catchBody, inLoop, guards);
         break;
       case 'assign':
-        checkExpr(s.target, inLoop, isGuarded);
-        checkExpr(s.value, inLoop, isGuarded);
+        checkExpr(s.target, inLoop, guards);
+        checkExpr(s.value, inLoop, guards);
         break;
       case 'expr':
-        checkExpr(s.expr, inLoop, isGuarded);
+        checkExpr(s.expr, inLoop, guards);
         break;
       case 'update':
-        checkExpr(s.target, inLoop, isGuarded);
-        for (const en of s.entries) checkExpr(en.value, inLoop, isGuarded);
+        checkExpr(s.target, inLoop, guards);
+        for (const en of s.entries) checkExpr(en.value, inLoop, guards);
         break;
       case 'return':
       case 'info':
       case 'alert':
       case 'successMessage':
-        if (s.value) checkExpr(s.value, inLoop, isGuarded);
+        if (s.value) checkExpr(s.value, inLoop, guards);
         break;
       case 'openUrl':
-        for (const arg of s.args) checkExpr(arg, inLoop, isGuarded);
+        for (const arg of s.args) checkExpr(arg, inLoop, guards);
         break;
       default:
         break;
@@ -367,10 +592,11 @@ export function isShapeCGuarded(ast: Script): boolean {
   }
 
   for (const s of ast.body) {
-    checkStmt(s, false, false);
+    checkStmt(s, false, []);
   }
 
-  return writeCount > 0 && allWritesValid;
+  const ok = writeCount > 0 && allWritesValid;
+  return { ok, requireOwner: ok && requireOwner };
 }
 
 export function shapeCExprOk(e: Expr): boolean {

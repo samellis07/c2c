@@ -30,7 +30,7 @@ import { criteriaHasRelative, criteriaHasTodo } from '../../shims/src/criteria.j
 import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, sanitizeSnippet } from './pages.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { c2cUrlFunctionSource, flatUrl } from './url-policy.js';
-import { hasShapeCWrites, isShapeCGuarded, shapeCStmtOk, shapeCServerOk } from './htmlpage-shape-c.js';
+import { hasShapeCWrites, isShapeCGuarded, shapeCStmtOk, shapeCServerOk, type ShapeCGuard } from './htmlpage-shape-c.js';
 
 export interface HtmlpageFile {
   path: string;
@@ -930,6 +930,7 @@ function endpointModule(opts: {
   server: string;
   statics: string[];
   hasWrites?: boolean;
+  requireOwner?: boolean;
 }): string {
   const banner = `/**\n${[
     `htmlpage ${opts.name || opts.id} on page ${opts.page}: a server-side snippet compiled to ${opts.hasWrites ? 'an endpoint with setup writes' : 'a read-only endpoint'}.`,
@@ -1189,6 +1190,14 @@ ${opts.hasWrites ? `  const headers = req && req.headers && typeof req.headers =
   }
 ${opts.hasWrites ? `  if (!adminProfiles.includes(principal.profile)) {
     send(res, 403, { dryRun: true, error: "administrator profile required" });
+    return;
+  }
+` : ''}${opts.requireOwner ? `  // The snippet's existence check is scoped to zoho.adminuserid, the
+  // application owner: only the owner principal may run the write path. The
+  // owner id is deploy configuration (C2C_ADMIN_USER_ID), never a client value.
+  const ownerId = String(process.env.C2C_ADMIN_USER_ID || "");
+  if (!ownerId || String(principal.userId || "") !== ownerId) {
+    send(res, 403, { dryRun: true, error: "application owner required" });
     return;
   }
 ` : ''}  for (const form of htmlpage.forms) {
@@ -2368,8 +2377,10 @@ export function compileHtmlpage(
   if (!isShapeC && (hasEffectNode(ast.body) || boundFieldWrite(ast.body, new Set()))) {
     return fail('island is not a read-only render');
   }
+  let shapeCGuard: ShapeCGuard | undefined;
   if (isShapeC) {
-    if (!isShapeCGuarded(ast)) return fail('island writes are unguarded');
+    shapeCGuard = isShapeCGuarded(ast);
+    if (!shapeCGuard.ok) return fail('island writes are unguarded');
     if (!ast.body.every(shapeCStmtOk)) return fail('island outside the handled classes');
   } else {
     if (!ast.body.every(stmtOk)) return fail('island outside the handled classes');
@@ -2421,6 +2432,7 @@ export function compileHtmlpage(
       server,
       statics: cleanStatics,
       hasWrites: isShapeC,
+      requireOwner: shapeCGuard?.requireOwner,
     }),
   };
   return withIncludes({ ok: true, html: cleanStatics.join(''), ...(droppedTags.length ? { droppedTags } : {}), src: path, file, ...(fnFiles.length ? { files: fnFiles } : {}) });

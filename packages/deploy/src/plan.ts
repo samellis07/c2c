@@ -93,6 +93,8 @@ export interface DeployOptions {
   asyncOnSuccess?: boolean;
   /** Spike: copy only the subset of shim modules imported by generated code. Off by default. */
   subsetShims?: boolean;
+  /** Verified owner/admin user id learned by an earlier deploy's auth read-back. Never client input. */
+  adminUserId?: string;
 }
 
 export interface DeployBundle {
@@ -319,6 +321,9 @@ export function deployFiles(
       origins: appOrigins({ apiBase: opts.apiBase, slateDomain: opts.slateDomain }),
       ...(verifiedFrom ? { mailFrom: verifiedFrom } : {}),
       ...(opts.subsetShims !== undefined ? { subsetShims: opts.subsetShims } : {}),
+      ...(generated.some((file) => typeof file.data === 'string' && file.data.includes('process.env.C2C_ADMIN_USER_ID'))
+        ? { adminUserIdRequired: true, ...(opts.adminUserId ? { adminUserId: opts.adminUserId } : {}) }
+        : {}),
   });
   files.push(...apiTree);
   if (scheduling !== undefined) files.push(...jobFunctionDir(apiTree, scheduling, { mode: opts.mode ?? 'dry-run', env: opts.functionEnv, ...(verifiedFrom ? { mailFrom: verifiedFrom } : {}) }));
@@ -347,7 +352,7 @@ export function buildDeploy(
   apiBase?: string,
   functionEnv?: Readonly<Record<string, string>>,
   sender: MailSender = {},
-  auth?: { slateDomain?: string; admin?: { email: string; name?: string; roleId?: string } },
+  auth?: { slateDomain?: string; admin?: { email: string; name?: string; roleId?: string }; adminUserId?: string },
   mailTestRecipients: readonly string[] = [],
   source?: readonly SourceTableData[],
   ui: DeployUi = 'react',
@@ -369,6 +374,7 @@ export function buildDeploy(
       ...(asyncOnSuccess ? { asyncOnSuccess } : {}),
       ...(subsetShims !== undefined ? { subsetShims } : {}),
       ...(auth?.slateDomain ? { slateDomain: auth.slateDomain } : {}),
+      ...(auth?.adminUserId ? { adminUserId: auth.adminUserId } : {}),
     },
     sender,
   );

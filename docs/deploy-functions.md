@@ -94,13 +94,19 @@ are written there, and the deploy sets some itself: `--mail-from` becomes
 (`packages/deploy/src/function-dir.ts:493`).
 
 `zoho.adminuser` and `zoho.adminuserid` in report criteria are currently unsupported.
-Setting `C2C_ADMIN_USER` or `C2C_ADMIN_USERID` does not make those criteria
-compile. They remain counted as `report-criteria`, with a separate UI notice,
-and the report returns no rows. `zoho.adminuserid` denotes the Creator
-application owner's email, not a Catalyst user id; see the report notice in
-[`packages/ui/src/model.ts`](../packages/ui/src/model.ts) (lines 811-814). Follow
-[the report filter repair procedure](report-filters.md) before deploying a
-report that depends on that identity.
+They remain counted as `report-criteria`, with a separate UI notice, and the
+report returns no rows. Follow [the report filter repair procedure](report-filters.md)
+before deploying a report that depends on that identity.
+
+An owner-scoped htmlpage setup write is different: its generated endpoint checks
+the signed-in caller's Catalyst user id against `C2C_ADMIN_USER_ID`. A confirmed
+deploy reserves the variable in `env_variables` and then sets it from the admin
+user id the deploy reads back through Catalyst Authentication (the
+`--admin-email` invite or an already-listed admin user). It is never taken from
+page input. If the admin id is not verified, the variable stays empty and the
+endpoint fails closed with `403 application owner required`. The spelling is
+`C2C_ADMIN_USER_ID`; `C2C_ADMIN_USERID` is not read. The key and value count in
+Catalyst's aggregate `env_variables` size budget like any other variable.
 
 ## Outbound invokeurl (`outboundHosts`)
 

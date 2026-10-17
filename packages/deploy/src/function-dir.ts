@@ -71,6 +71,10 @@ export interface FunctionDirOptions {
    * environment with catalyst-config.json env_variables, so every key here is carried.
    */
   env?: Readonly<Record<string, string>>;
+  /** Verified Catalyst user id of the app's owner/admin, set as C2C_ADMIN_USER_ID. */
+  adminUserId?: string;
+  /** Generated code reads C2C_ADMIN_USER_ID; emit the key even before the id is known so it fails closed. */
+  adminUserIdRequired?: boolean;
   /** Verified Catalyst Mail sender, set as C2C_MAIL_FROM. Absent when the owner named none. */
   mailFrom?: string;
   /** Custom Catalyst role -> Creator profile entries from the auth apply plan. Built-ins stay authoritative. */
@@ -577,7 +581,11 @@ export function functionDir(generated: readonly FunctionFile[], opts: FunctionDi
         stack: FUNCTION_STACK,
         type: 'advancedio',
         // The verified sender (--mail-from) is set by this deploy, like C2C_DEPLOY_MODE; without it a kept console C2C_MAIL_FROM stays.
-        env_variables: envVariables(opts.mode, { ...opts.env, ...(opts.mailFrom ? { C2C_MAIL_FROM: opts.mailFrom } : {}) }),
+        env_variables: envVariables(opts.mode, {
+          ...opts.env,
+          ...(opts.adminUserIdRequired ? { C2C_ADMIN_USER_ID: opts.adminUserId ?? '' } : {}),
+          ...(opts.mailFrom ? { C2C_MAIL_FROM: opts.mailFrom } : {}),
+        }),
       },
       execution: { main: 'index.js' },
     }),
