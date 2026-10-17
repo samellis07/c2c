@@ -471,9 +471,9 @@ test('a server-only on-input script is wired through a guarded client run', () =
 });
 
 test('a server body on an event nothing posts stays counted', () => {
-  // `on start` (a presuccess form-properties action) emits the
-  // /forms/<form>/handler route; the guarded client run cannot express it and
-  // the submit pipeline does not call it, so it stays counted.
+  // A plain form workflow on `on start` emits the /forms/<form>/handler route;
+  // the guarded client run cannot express it and, not being a presuccess
+  // action, the submit pipeline does not call it, so it stays counted.
   const lead = app({
     forms: [formOf('New_Lead', ['Mode_of_Shipment'])],
     workflows: [
@@ -507,6 +507,60 @@ test('a server body on an event nothing posts stays counted', () => {
   assert.equal(auditApp(lead, forced).filter((d) => d.kind === 'workflow').length, 0);
   assert.equal(entry.serverInvoked, false);
   assert.ok(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED));
+});
+
+test('an on start presuccess body is credited: the submit pipeline runs it', () => {
+  const lead = app({
+    forms: [formOf('New_Lead', ['Mode_of_Shipment'])],
+    workflows: [
+      workflow({
+        name: 'presuccess_mail',
+        type: 'presuccess',
+        container: 'form',
+        form: 'New_Lead',
+        event: 'on start',
+        span: { start: 10, end: 40, file: 'app.ds' },
+        deluge: {
+          text: 'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];',
+          span: { start: 12, end: 38, file: 'app.ds' },
+        },
+      }),
+    ],
+  });
+  const out = collectOutputs(lead);
+  const server = out.files.find((f) => /path: "\/forms\/New_Lead\/handler"/.test(f.source));
+  assert.ok(server);
+  assert.match(server.source, /^export const presuccess = true;$/m);
+  const entry = out.coverage?.find((c) => c.name === 'presuccess_mail');
+  assert.ok(entry);
+  assert.equal(entry.serverInvoked, true);
+  assert.ok(entry.paths.includes(server.path));
+  assert.equal(out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED), false);
+  assert.equal(auditApp(lead, out).filter((d) => d.kind === 'workflow').length, 0);
+});
+
+test('a handler route merging a presuccess body with another server script stays counted', () => {
+  // The pipeline runs a whole module, never one script of a merged route, so
+  // a route that also carries a non-presuccess `on start` script is not
+  // marked and neither script is credited.
+  const mail = { text: 'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];', span: { start: 12, end: 38, file: 'app.ds' } };
+  const lead = app({
+    forms: [formOf('New_Lead', ['Mode_of_Shipment'])],
+    workflows: [
+      workflow({ name: 'presuccess_mail', type: 'presuccess', container: 'form', form: 'New_Lead', event: 'on start', span: { start: 10, end: 40, file: 'app.ds' }, deluge: mail }),
+      workflow({ name: 'plain_start', container: 'form', form: 'New_Lead', event: 'on start', span: { start: 50, end: 80, file: 'app.ds' }, deluge: { ...mail, span: { start: 52, end: 78, file: 'app.ds' } } }),
+    ],
+  });
+  const out = collectOutputs(lead);
+  const server = out.files.find((f) => /path: "\/forms\/New_Lead\/handler"/.test(f.source));
+  assert.ok(server);
+  assert.doesNotMatch(server.source, /export const presuccess/);
+  for (const name of ['presuccess_mail', 'plain_start']) {
+    const entry = out.coverage?.find((c) => c.name === name);
+    assert.ok(entry, name);
+    assert.equal(entry.serverInvoked, false, name);
+  }
+  assert.equal(out.todos.filter((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED).length, 2);
 });
 
 test('submit still credits an on-success server half the browser posts', () => {

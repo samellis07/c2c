@@ -3948,6 +3948,84 @@ test('a pre-success openUrl is a client handler, and an empty workflow is named 
   assert.equal(report.warnings?.some((item) => item.name === 'Direct'), false);
 });
 
+test('the submit-owning modules run the on start presuccess module; a field-change route does not', () => {
+  const ir = snippet(`\tform Item
+\t{
+\t\tName
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t\tStatus
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tStart as "Start"
+\t\t\t{
+\t\t\t\ttype = presuccess
+\t\t\t\tform = Item
+\t\t\t\ton start
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\t\tinput.Status = "new";
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t\tDone as "Done"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Item
+\t\t\t\ton add
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\ton success
+\t\t\t\t\t(
+\t\t\t\t\t\tinput.Name = input.Name + "!";
+\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t\tChange as "Change"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Item
+\t\t\t\ton edit
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\ton update of Status
+\t\t\t\t\t(
+\t\t\t\t\t\tinput.Name = "changed";
+\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}`);
+  const generated = generate(ir);
+  const byPath = (path: string) => generated.files.find((item) => new RegExp(`path: "${path}"`).test(item.source));
+  const start = byPath('/forms/Item/handler');
+  assert.ok(start);
+  assert.match(start.source, /^export const presuccess = true;$/m);
+  const success = byPath('/forms/Item/success');
+  assert.ok(success);
+  assert.match(success.source, /const presuccessAdd = \["\.\/on-start\.mjs"\];/);
+  const run = success.source.indexOf('presuccessSpecsFor(ctx.rowId)');
+  assert.ok(run > 0 && run < success.source.indexOf('validateSpecsFor(ctx.rowId)', run), 'presuccess runs before validate');
+  assert.match(success.source, /err\.code === "SUBMIT_REFUSED"/);
+  const change = byPath('/forms/Item/input');
+  assert.ok(change);
+  assert.match(change.source, /validateSpecsFor/, 'the field-change route is a live writer');
+  assert.doesNotMatch(change.source, /presuccess/);
+  assert.equal(generated.coverage?.find((entry) => entry.name === 'Start')?.serverInvoked, true);
+});
+
 test('field and reporting-level approvers deny explicitly and transitions use the placeholder stage', async () => {
   const view = {
     component: 'Item',

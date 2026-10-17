@@ -2446,6 +2446,7 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
   const siblingPrefix = `functions/aio/${slug(form.name)}/`;
   const siblingSpecsUsed = new Set([...validate.add, ...validate.edit, ...success.add, ...success.edit].map((spec) => `${siblingPrefix}${spec.slice(2)}`));
   const usesThisapp = delugeFiles.some((file) => siblingSpecsUsed.has(file.path) && file.source.includes('from "../../thisapp.mjs"'));
+  const presuccess = siblingSpecs(delugeFiles, form.name, 'handler');
   // State machines (approvals, blueprints) that govern this form: begin() stamps
   // the start stage before the row write, commit() logs the history row after.
   // Emitted only for governed forms, so a machine-free form's stub is unchanged.
@@ -2550,6 +2551,28 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
     }
 `
     : '';
+  // The form's \`on start\` presuccess actions run on the same record after
+  // the access gate and before on validate; a cancel submit there is a 422
+  // with nothing written. Emitted only when the form has that module.
+  const hasPresuccess = presuccess.add.length + presuccess.edit.length > 0;
+  const presuccessLine = hasPresuccess
+    ? `\nconst presuccessAdd = ${JSON.stringify(presuccess.add)};\nconst presuccessEdit = ${JSON.stringify(presuccess.edit)};`
+    : '';
+  const presuccessRun = hasPresuccess
+    ? `    try {
+      for (const spec of eventSpecs(presuccessAdd, presuccessEdit, ctx.rowId)) {
+        const mod = await import(spec);
+        if (mod && mod.presuccess === true && typeof mod.handle === "function") await mod.handle(ctx);
+      }
+    } catch (err) {
+      if (err && err.code === "SUBMIT_REFUSED") {
+        send(res, 422, { dryRun: false, wrote: false, refused: true, error: err.message });
+        return;
+      }
+      throw err;
+    }
+`
+    : '';
   return `${banner([
     `Submit ${form.name}. Dry run: the record is not inserted.`,
     'authorizeWrite checks that the form is viewable and editable.',
@@ -2561,6 +2584,9 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
     'When functions/c2c-deploy.json mode is "live" and a datastore is injected, accepted values are written after validate and before on-success scripts. Dry run does not write and does not run those scripts. On success sees the inserted row, including ID (the stored ROWID) and system fields. If an on-success script, the history row or mail fails after the write, the row stays and the reply is still 200 wrote true with a warning {code POST_COMMIT_FAILED, message, requestId}; the failure is logged, its text never reaches the caller.',
     'A live edit captures Catalyst MODIFIEDTIME while preparing the row, then re-reads ROWID/MODIFIEDTIME once immediately before updateRows. A change is refused as c2c code C2C_STALE_WRITE (409). This is c2c\'s stale check and one extra bounded read; Data Store itself has no optimistic lock.',
     'Creator runs On Success after the record is submitted (https://help.zoho.com/portal/en/kb/creator/developer-guide/workflows/create-and-manage-on-success-action/articles/understand-on-success-action): "The actions that you define in the On success event will be executed when a new record is successfully submitted to the database or when an existing record is updated or deleted from the database." Whether Creator rolls that row back when On Success throws is unverified; this port leaves the row.',
+    ...(hasPresuccess
+      ? ['In live mode the form\'s `on start` presuccess (form properties) module runs on the accepted record before on validate; a cancel submit there answers 422 and nothing is written. [UNVERIFIED] Creator\'s exact placement relative to On Validate.']
+      : []),
     ...(deferSuccess
       ? ['Async on-success opt-in: in live mode this endpoint validates and stores the row, then replies without running the on-success modules. The after-commit event function (functions/events/after-commit.mjs) runs them when the record trigger fires; a failure dead-letters to C2CEventDeadLetter for the sweep Job (docs/event-deadletter.md).']
       : []),
@@ -2581,7 +2607,7 @@ const storeFields = fields.map(unhideField);
 const validateAdd = ${JSON.stringify(validate.add)};
 const validateEdit = ${JSON.stringify(validate.edit)};
 const successAdd = ${JSON.stringify(success.add)};
-const successEdit = ${JSON.stringify(success.edit)};
+const successEdit = ${JSON.stringify(success.edit)};${presuccessLine}
 function eventSpecs(addSpecs, editSpecs, rowId) {
   return rowId ? editSpecs : addSpecs;
 }${flowLine}${stageLine}
@@ -2677,7 +2703,7 @@ ${requirePrincipal()}
 ${stageCheck}${editLoad}    // API and import inserts never saw the Slate prefill. Absent
     // fields fall back to their Creator initial values on insert only.
     if (!ctx.rowId && ctx.writeOp !== "update") applyInitialValues(ctx.record, fields);
-${validateRun}${editUnload}${flowBegin}    await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
+${presuccessRun}${validateRun}${editUnload}${flowBegin}    await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
     // The row is committed from here on. A failure after it (history row,
     // on-success script, mail) is a warning on a 200, never a failed submit:
     // a failure reply would invite a retry that inserts a second row.
@@ -3121,7 +3147,7 @@ async function liveDatastore() {
  * under. `on add`/`on edit`/`on delete` scripts run only in that write's
  * context; unscoped and `on add or edit` run in every context of their kind.
  */
-export function siblingSpecs(files: GeneratedFile[], formName: string, kind: 'validate' | 'success' | 'delete'): { add: string[]; edit: string[]; del: string[] } {
+export function siblingSpecs(files: GeneratedFile[], formName: string, kind: 'validate' | 'success' | 'delete' | 'handler'): { add: string[]; edit: string[]; del: string[] } {
   const prefix = `functions/aio/${slug(formName)}/`;
   const add: string[] = [];
   const edit: string[] = [];
@@ -3134,6 +3160,9 @@ export function siblingSpecs(files: GeneratedFile[], formName: string, kind: 'va
     // on-delete script modules declare `.../delete-script`; `/delete` itself
     // is the stub's endpoint.
     if (!match?.[1].endsWith(`/${kind === 'delete' ? 'delete-script' : kind}`)) continue;
+    // Only a route the generator marked as the `on start` presuccess module
+    // joins the submit pipeline; any other `/handler` route is not run.
+    if (kind === 'handler' && !/^export const presuccess = true;$/m.test(file.source)) continue;
     const rec = /export const recordEvent = (null|"[^"]*");/.exec(file.source);
     const merged = /export const recordEvents = (\[[^\]]*\]);/.exec(file.source);
     const scopes = merged
