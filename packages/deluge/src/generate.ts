@@ -4044,6 +4044,7 @@ function clientWrittenFields(app: App, formName: string | undefined): Map<string
       if (n.kind === 'assign') add(inputFieldOf(n.target));
       if (n.kind === 'ui' && (n.action === 'show' || n.action === 'enable') && Array.isArray(n.targets)) for (const t of n.targets) add(inputFieldOf(t, true));
       if (n.kind === 'call' && isObjectNode(n.callee) && n.callee.kind === 'member' && n.callee.property === 'select') add(inputFieldOf(n.callee.object, true));
+      // determinism-allow: AST key order is the parser's construction order, so the walk follows source order
       for (const [key, value] of Object.entries(n)) if (key !== 'span') visit(value);
     };
     visit(body);
