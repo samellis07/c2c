@@ -813,6 +813,8 @@ test('tap accounting requires one plan and a summary that matches counted result
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
   const res = spawnSync(process.execPath, [
+    '--max-old-space-size=2048',
+    '--test-timeout=120000',
     '--test',
     '--test-reporter=tap',
     '--test-reporter-destination', tapFile,

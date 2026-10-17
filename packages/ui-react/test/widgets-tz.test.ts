@@ -11,6 +11,8 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const SUITE = fileURLToPath(new URL('./widgets.test.js', import.meta.url));
+/** Heap cap and per-test timeout for the child suite (see scripts/test-limits.mjs). */
+const CHILD_LIMITS = ['--max-old-space-size=2048', '--test-timeout=120000'];
 
 /**
  * Every failing subtest of the child TAP run, each with its own diagnostic
@@ -63,7 +65,7 @@ for (const zone of ['Asia/Kolkata', 'America/Los_Angeles']) {
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('NODE_TEST_')));
     // A capped heap and a hard deadline: a runaway child fails this test
     // with its output instead of exhausting the machine or hanging CI.
-    const run = spawnSync(process.execPath, ['--max-old-space-size=2048', '--test', '--test-reporter=tap', SUITE], {
+    const run = spawnSync(process.execPath, [...CHILD_LIMITS, '--test', '--test-reporter=tap', SUITE], {
       env: { ...env, TZ: zone },
       encoding: 'utf8',
       timeout: 240000,
