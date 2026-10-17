@@ -1,5 +1,5 @@
 /**
- * The argument contract of the live c2c commands (deploy, provision, smoke,
+ * The argument contract of the live c2c commands (deploy, plan, provision, smoke,
  * migrate-data, seed, doctor, rollback-export, cutover-checklist, proof,
  * iac-drift, ...): the flags each one accepts and whether a flag
  * takes a value. c2c.ts refuses an unknown flag or a value flag without its
@@ -102,6 +102,27 @@ export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
       '--source-json': 'value',
       '--triggers-wired': 'bool',
       '--ui': 'value',
+    },
+  },
+  plan: {
+    positional: 'required',
+    flags: {
+      '--allow-budget-fail': 'bool',
+      '--allow-destructive': 'bool',
+      '--allow-empty': 'bool',
+      '--backup': 'value',
+      '--config': 'value',
+      '--dc': 'value',
+      '--mail': 'bool',
+      '--out': 'value',
+      '--previous': 'value',
+      '--production': 'bool',
+      '--project': 'value',
+      '--rename': 'value',
+      '--source-backup': 'value',
+      '--source-csv': 'value',
+      '--source-json': 'value',
+      '--subset-shims': 'bool',
     },
   },
   provision: {

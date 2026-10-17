@@ -96,3 +96,28 @@ test('--help prints the command usage and exits 0 wherever it appears', () => {
     assert.equal(result.stderr, '');
   }
 });
+
+test('plan and deploy help list the schema-change flags and say deploy --previous is plan-only for a rename, drop or alter', () => {
+  const plan = spawnSync(process.execPath, [cli, 'plan', '--help'], { encoding: 'utf8' });
+  assert.equal(plan.status, 0);
+  for (const flag of ['--previous', '--rename', '--allow-destructive', '--backup']) assert.match(plan.stdout, new RegExp(`${flag} `), `plan --help lists ${flag}`);
+  const deploy = spawnSync(process.execPath, [cli, 'deploy', '--help'], { encoding: 'utf8' });
+  assert.equal(deploy.status, 0);
+  for (const flag of ['--previous', '--rename', '--allow-destructive', '--backup']) assert.match(deploy.stdout, new RegExp(`${flag} `), `deploy --help names ${flag}`);
+  assert.match(deploy.stdout, /--previous refuses a rename, drop or alter today and changes nothing: those are plan-only/);
+  const global = spawnSync(process.execPath, [cli, '--help'], { encoding: 'utf8' });
+  for (const flag of ['--previous', '--rename', '--allow-destructive', '--backup']) assert.match(global.stdout, new RegExp(`${flag} `), `c2c --help lists ${flag}`);
+});
+
+test('plan and deploy refuse a misspelled schema-change flag with exit 2 before running', () => {
+  for (const cmd of ['plan', 'deploy']) {
+    const result = spawnSync(process.execPath, [cli, cmd, fixture, '--out', 'out', '--previus', fixture], { encoding: 'utf8' });
+    assert.equal(result.status, 2, cmd);
+    assert.equal(result.stderr.trim(), `c2c ${cmd}: unknown flag --previus`);
+    assert.equal(result.stdout, '');
+  }
+  // plan writes nothing and never asks for --confirm: it is refused like any other unknown flag.
+  const confirm = spawnSync(process.execPath, [cli, 'plan', fixture, '--out', 'out', '--confirm'], { encoding: 'utf8' });
+  assert.equal(confirm.status, 2);
+  assert.equal(confirm.stderr.trim(), 'c2c plan: unknown flag --confirm');
+});
