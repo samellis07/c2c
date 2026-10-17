@@ -53,6 +53,7 @@ import {
 import { generateSchema } from '../../schema/src/index.js';
 import { catalystFailure, catalystRows, quirkRowServer, rowEndpoint, ROW_PATH } from '../../data/test/catalyst-row-fake.js';
 import { c2cVersion, GATE_REQUIRED_CHECKS } from '../../doctor/src/index.js';
+import { isReservedEnvKey, RESERVED_ENV_KEYS } from '../src/function-dir.js';
 import { generateUi } from '../../ui/src/generate.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 
@@ -4250,7 +4251,10 @@ test('a --function-env file with a reserved name is refused before any network c
   const ds = writeDs();
   const dir = mkdtempSync(join(tmpdir(), 'c2c-fenv-reserved-'));
   try {
-    for (const reserved of ['PROJECT_ID', 'CATALYST_ENV', 'DC']) {
+    // Pinned: a mutation dropping any name from RESERVED_ENV_KEYS fails here,
+    // because the loop must still try that name against the live refusal.
+    assert.deepEqual([...RESERVED_ENV_KEYS], ['APP_URL', 'CATALYST_APP_URL', 'CATALYST_DC', 'CATALYST_ENV', 'CATALYST_PROJECT_ID', 'DC', 'ENV', 'PROJECT_ID', 'X_ZOHO_CATALYST_ORG_ID']);
+    for (const reserved of RESERVED_ENV_KEYS) {
       const file = join(dir, `${reserved}.json`);
       writeFileSync(file, JSON.stringify({ [reserved]: 'x', C2C_ZOHO_DC: 'in' }));
       const cap = capture();
@@ -4261,6 +4265,54 @@ test('a --function-env file with a reserved name is refused before any network c
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('no generated functions/*/catalyst-config.json env_variables holds a Catalyst-reserved name', async () => {
+  const check = (where: string, config: { deployment?: { env_variables?: Record<string, string> } }) => {
+    for (const key of Object.keys(config.deployment?.env_variables ?? {})) {
+      assert.ok(!isReservedEnvKey(key), `${where} env_variables carries the reserved name ${key}`);
+    }
+  };
+  // The guard must fail on any hit, not just pass on a clean tree.
+  assert.throws(() => check('seeded', { deployment: { env_variables: { APP_URL: 'https://x' } } }), /reserved name APP_URL/);
+
+  // Every function the bundle emits — c2c_api, c2c_jobs and c2c_auth — as written
+  // by deployFiles (auth-bridge.ts builds the c2c_auth env outside envVariables).
+  const app = deriveIr(parse(readFileSync(join(repoRoot(), 'fixtures/synthetic/kitchen-sink/kitchen_sink.ds'), 'utf8')));
+  const guard = checkGuards({ org: SCOPE.org, projectId: '4242', appLink: app.name ?? '', credentialPath: SECRET, registry: { ...registry, projects: {} } });
+  const emitted = deployFiles(app, guard, false, { mode: 'live' }).files.filter((file) => /^functions\/[^/]+\/catalyst-config\.json$/.test(file.path));
+  assert.deepEqual(
+    emitted.map((file) => file.path).sort(),
+    ['functions/c2c_api/catalyst-config.json', 'functions/c2c_auth/catalyst-config.json', 'functions/c2c_jobs/catalyst-config.json'],
+    'the scan must cover every emitted function',
+  );
+  for (const file of emitted) check(file.path, JSON.parse(String(file.data)) as { deployment?: { env_variables?: Record<string, string> } });
+
+  // The deployed tree, scanned again after the cli.ts functions-auth step
+  // rewrites functions/c2c_auth/catalyst-config.json outside envVariables.
+  const ds = writeDs();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-out-'));
+  try {
+    const cap = capture();
+    cap.io.spawn = async (command, args, opts) => {
+      cap.spawned.push({ command, args, env: opts.env });
+      if (args.includes('project:list')) return { code: 0, stdout: FAITHFUL_PROJECT_LIST, stderr: '' };
+      if (args.includes('slate:link')) return { code: 0, stdout: 'Slate linked successfully\n', stderr: '' };
+      if (args.includes('deploy') && args.includes('slate')) return { code: 0, stdout: 'App Url: https://c2c-widget-xyz.onslate.in\n', stderr: '' };
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    assert.equal(await deployCli([...baseArgs(ds), '--confirm', '--function-env', 'new', '--out', out], cap.io), 0, cap.stderr());
+    const scanned: string[] = [];
+    for (const name of readdirSync(join(out, 'functions'))) {
+      const configPath = join(out, 'functions', name, 'catalyst-config.json');
+      if (!existsSync(configPath)) continue;
+      scanned.push(name);
+      check(configPath, JSON.parse(readFileSync(configPath, 'utf8')) as { deployment?: { env_variables?: Record<string, string> } });
+    }
+    assert.ok(scanned.includes('c2c_api') && scanned.includes('c2c_auth'), `scanned functions: ${scanned.join(', ')}`);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
   }
 });
 

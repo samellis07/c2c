@@ -498,7 +498,7 @@ test('buildFunctionEnv never emits a reserved name, even from an older file', ()
     env: 'Development',
     projectId: '1001',
     appUrl: 'https://app.onslate.in',
-    existingEnv: { CATALYST_DC: 'in', CATALYST_ENV: 'Development', CATALYST_PROJECT_ID: '1', DC: 'in', ENV: 'Development', PROJECT_ID: '1', X_ZOHO_CATALYST_ORG_ID: '2', MY_CLIENT_SECRET: 'kept' },
+    existingEnv: { APP_URL: 'https://app.onslate.in', CATALYST_APP_URL: 'https://app.onslate.in', CATALYST_DC: 'in', CATALYST_ENV: 'Development', CATALYST_PROJECT_ID: '1', DC: 'in', ENV: 'Development', PROJECT_ID: '1', X_ZOHO_CATALYST_ORG_ID: '2', MY_CLIENT_SECRET: 'kept' },
   });
   for (const reserved of RESERVED_ENV_KEYS) assert.equal(env[reserved], undefined, reserved);
   assert.equal(env.C2C_ZOHO_DC, 'in');
