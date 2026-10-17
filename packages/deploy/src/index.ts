@@ -1,4 +1,4 @@
-export { DEPLOY_REPORT, LOADER_REPORT, STATE_FILE, confirmedLoadExit, deployCli, hasReportJson, planGuard, seedMigrateArgsProblem, seedMigrateCli, sourceBackupCli, sourceCsvCli, smokeArgsProblems, smokeCli, sourceCsvArgsProblem, readFunctionEnv, usersCli, verifyBehaviorCli, flag, loadApp, loadSource, loadRegistry, catalystSpawn, defaultIo } from './cli.js';
+export { DEPLOY_REPORT, LOADER_REPORT, STATE_FILE, confirmedLoadExit, deployCli, hasReportJson, planGuard, seedMigrateArgsProblem, seedMigrateCli, sourceBackupCli, sourceCsvCli, smokeArgsProblems, smokeCli, sourceCsvArgsProblem, readFunctionEnv, usersCli, verifyBehaviorCli, warnDriftPreflight, flag, loadApp, loadSource, loadRegistry, catalystSpawn, defaultIo } from './cli.js';
 export type { Io, SpawnFn, SpawnResult } from './cli.js';
 export { ALLOWED_ENV, ORG_HOW_TO_SET, PROJECT_HOW_TO_SET, GuardError, catalystProjectName, checkGuards, planScopeLines } from './guards.js';
 export type { GuardCode, GuardInput, GuardOk } from './guards.js';
@@ -89,8 +89,8 @@ export {
 export type { BackupUser, InviteTarget, ListedUser, ManageUserAction, ManageUserResult, PlanUser, RoleMapRow, SocialPlan, SocialProvider, UsersInviteResult, UsersListResult, UsersPlan, UsersState } from './users.js';
 export { readZip } from './zipfile.js';
 export type { ZipEntry, ZipLimits } from './zipfile.js';
-export { applyTablePlan, columnBody, cyclicForeignKeyComponents, cyclicForeignKeys, foreignKeyId, formatMandatoryRelaxed, mandatoryRelaxedColumns, formatTableCreate, formatTableDiff, mandatoryRelaxedLine, nonDeferrableKeys, provisionedConstraints, tableCreatePlan } from './tables.js';
-export type { RestFn, TableCreateStep, TableDiff } from './tables.js';
+export { applyTablePlan, columnBody, columnDetailsOf, columnOf, compareColumnFlags, cyclicForeignKeyComponents, cyclicForeignKeys, foreignKeyId, formatMandatoryRelaxed, mandatoryRelaxedColumns, formatTableCreate, formatTableDiff, mandatoryRelaxedLine, nonDeferrableKeys, provisionedConstraints, provisionedConstraintsAndDrift, tableCreatePlan } from './tables.js';
+export type { ColumnDriftFix, ColumnMismatch, LiveColumnDetail, RestFn, TableColumnDrift, TableCreateStep, TableDiff } from './tables.js';
 export { API_TEMPLATE_FUNCTION, IAC_COMPONENT_ORDER, PROJECT_TEMPLATE_FILE, bucketItem, diffTemplate, formatDrift, importTemplate, importTemplateJson, normalizeTemplate, projectTemplate, projectTemplateJson } from './iac.js';
 export { bucketCreateBody, ensureSeedBucket } from './stratus-bucket.js';
 export type { SeedBucketEnsure } from './stratus-bucket.js';

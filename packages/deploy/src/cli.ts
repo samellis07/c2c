@@ -49,7 +49,7 @@ import { formatBehaviorJson, formatBehaviorMarkdown, liveBackend, loadGoldens, r
 import { SMOKE_RESULT_MAX_AGE_MINUTES, verifySmokeResult } from './smoke-result.js';
 import { formatCustomerSteps } from './customer-steps.js';
 import { cdpBrowser, openOnOrigin, pageFetch, runBrowserSmoke, type BrowserSmokeResult, type SmokeBrowser } from './browser.js';
-import { TablePlanError, applyTablePlan, formatMandatoryRelaxed, formatTableDiff, provisionedConstraints, type RestCall, type RestFn, type TableDiff } from './tables.js';
+import { TablePlanError, applyTablePlan, formatMandatoryRelaxed, formatTableDiff, provisionedConstraints, provisionedConstraintsAndDrift, type RestCall, type RestFn, type TableColumnDrift, type TableDiff } from './tables.js';
 import { appShadowColumns, backfillShadows, formatBackfill } from './shadows.js';
 import {
   activationSentence,
@@ -1501,15 +1501,45 @@ function uniqueColumnsByTableOf(schema: SchemaPlan): Record<string, string[]> {
 }
 
 /**
+ * Warn on io.stderr when loading data into a table with known column drift.
+ */
+export function warnDriftPreflight(
+  io: Io,
+  tables: readonly { table: string }[] | readonly { name: string }[] | readonly string[],
+  drift: readonly TableColumnDrift[] | undefined,
+): void {
+  if (!drift || drift.length === 0) return;
+  const tableNames = new Set(tables.map((t) => (typeof t === 'string' ? t : 'table' in t ? t.table : t.name)));
+  const relevant = drift.filter((d) => tableNames.has(d.table));
+  if (relevant.length === 0) return;
+
+  const byTable = new Map<string, string[]>();
+  for (const d of relevant) {
+    const cols = byTable.get(d.table) ?? [];
+    cols.push(d.column);
+    byTable.set(d.table, cols);
+  }
+
+  for (const [table, cols] of byTable) {
+    io.stderr(`warning: table ${table} has column drift on ${cols.join(', ')}; loading rows may fail or violate constraints\n`);
+  }
+}
+
+/**
  * The schema as the live project was provisioned: generated flags replayed
  * with the decisions the store's own column metadata reports. A confirmed load
  * is checked against this, never against what the current source would
  * measure — a kept store constraint refuses before a token is minted.
  */
-async function provisionedSchemaOf(rest: RestFn, projectId: string, app: App, opts: RetryOptions = {}): Promise<{ schema: SchemaPlan; decisions: ConstraintDecision[] }> {
+async function provisionedSchemaOf(
+  rest: RestFn,
+  projectId: string,
+  app: App,
+  opts: RetryOptions = {},
+): Promise<{ schema: SchemaPlan; decisions: ConstraintDecision[]; drift: TableColumnDrift[] }> {
   const generated = generateSchema(app);
-  const decisions = await provisionedConstraints(rest, projectId, generated, opts);
-  return { schema: applyConstraintDecisions(generated, decisions), decisions };
+  const { decisions, drift } = await provisionedConstraintsAndDrift(rest, projectId, generated, opts);
+  return { schema: applyConstraintDecisions(generated, decisions), decisions, drift };
 }
 
 function writeLoaderReport(dir: string, integrity: IntegrityReport | undefined): void {
@@ -1689,6 +1719,7 @@ export async function seedMigrateCli(args: readonly string[], io: Io): Promise<n
     const seedFiles = seedPlan ? Object.keys(seedFileColumns(seedPlan)).length > 0 : false;
     if (seedFiles && !(await verifyFirstUseGates(io, restFn, guard, [FIRST_USE_GATES.stratus], 're-run this command'))) return 1;
     const provisioned = await provisionedSchemaOf(restFn, guard.projectId, loadApp(ds), retryLog(io));
+    warnDriftPreflight(io, tables, provisioned.drift);
     const columnsByTable = columnsByTableOf(provisioned.schema);
     const missingSchema = refuseMissingSchema(io, tables, columnsByTable);
     if (missingSchema !== undefined) return missingSchema;
@@ -1838,6 +1869,7 @@ export async function sourceCsvCli(args: readonly string[], io: Io): Promise<num
     // demoted does not refuse a later load that leaves it empty.
     const restFn = await assertLiveProject(io, guard.org, guard.projectId);
     const provisioned = await provisionedSchemaOf(restFn, guard.projectId, app, retryLog(io));
+    warnDriftPreflight(io, loaded.tables, provisioned.drift);
     // Refuse before resolveScope: no token is minted and no row is written when
     // a store-mandatory column is absent from the export.
     const provisionedColumns = loaderColumns(provisioned.schema, loaded.tables, loaded.foreignKeys);
@@ -2009,6 +2041,7 @@ export async function sourceBackupCli(args: readonly string[], io: Io): Promise<
     // demoted does not refuse a later load that leaves it empty.
     const restFn = await assertLiveProject(io, guard.org, guard.projectId);
     const provisioned = await provisionedSchemaOf(restFn, guard.projectId, app, retryLog(io));
+    warnDriftPreflight(io, loaded.tables, provisioned.drift);
     // Refuse before resolveScope: no token is minted and no row is written when
     // a store-mandatory column has empty cells.
     const provisionedColumns = loaderColumns(provisioned.schema, loaded.tables, loaded.foreignKeys);

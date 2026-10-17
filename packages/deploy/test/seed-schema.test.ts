@@ -652,3 +652,83 @@ test('a c2c_blocked entry carrying c2c_source_id is a table row, not a blocker r
   assert.equal(code, 0);
   assert.match(planned.stdout(), /- Author source 1/);
 });
+
+test('migrate-data preflight warns on table with column drift before loading rows, clean when no drift', async (t) => {
+  const { dir, ds, seedPath, projects } = writeCliFiles(CANONICAL_SEED);
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const calls: string[] = [];
+  const { fetch } = storeFetch(calls);
+  const base = ['--seed', seedPath, '--app', 'Widget', '--project', '1001', '--org', '10000000000', '--projects', projects, '--ds', ds, '--confirm'];
+
+  // 1. Live project reports drift on Book.Title (e.g. is_unique: true in store when plan is false)
+  const drifting = cliCapture(fetch);
+  const origRest = drifting.io.rest;
+  drifting.io.rest = async (call) => {
+    if (call.method === 'GET' && call.path === '/baas/v1/project/1001/table') {
+      return {
+        status: 200,
+        body: {
+          data: [
+            {
+              table_name: 'Book',
+              table_id: '9001',
+              column_details: [
+                { column_name: 'Title', column_id: '8001', data_type: 'varchar', is_unique: true, is_mandatory: true, max_length: 255 },
+                { column_name: 'Author', column_id: '8002', data_type: 'foreign key', is_unique: false, is_mandatory: false },
+              ],
+            },
+            {
+              table_name: 'Author',
+              table_id: '9002',
+              column_details: [
+                { column_name: 'Name', column_id: '8003', data_type: 'varchar', is_unique: false, is_mandatory: false, max_length: 255 },
+              ],
+            },
+          ],
+        },
+      };
+    }
+    return origRest!(call);
+  };
+
+  const driftCode = await seedMigrateCli(base, drifting.io);
+  assert.equal(driftCode, 0);
+  assert.match(drifting.stderr(), /warning: table Book has column drift on Title/);
+  assert.doesNotMatch(drifting.stderr(), /warning: table Author/);
+
+  // 2. When live metadata has no drift (is_unique: false matches plan)
+  const clean = cliCapture(fetch);
+  const cleanRest = clean.io.rest;
+  clean.io.rest = async (call) => {
+    if (call.method === 'GET' && call.path === '/baas/v1/project/1001/table') {
+      return {
+        status: 200,
+        body: {
+          data: [
+            {
+              table_name: 'Book',
+              table_id: '9001',
+              column_details: [
+                { column_name: 'Title', column_id: '8001', data_type: 'varchar', is_unique: false, is_mandatory: true, max_length: 255 },
+                { column_name: 'Author', column_id: '8002', data_type: 'foreign key', is_unique: false, is_mandatory: false },
+              ],
+            },
+            {
+              table_name: 'Author',
+              table_id: '9002',
+              column_details: [
+                { column_name: 'Name', column_id: '8003', data_type: 'varchar', is_unique: false, is_mandatory: false, max_length: 255 },
+              ],
+            },
+          ],
+        },
+      };
+    }
+    return cleanRest!(call);
+  };
+
+  const cleanCode = await seedMigrateCli(base, clean.io);
+  assert.equal(cleanCode, 0);
+  assert.doesNotMatch(clean.stderr(), /drift/i);
+});

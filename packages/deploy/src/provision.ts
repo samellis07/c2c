@@ -35,7 +35,7 @@ import { catalystScopeArgs, scrubCatalystEnv } from './scope.js';
 import { isExactGrantList, isPerRowGrantMatch, PLAN_CLI_PATH, PLAN_EMITTED_CLI_PATHS, PLAN_STEP_TOOL, PLAN_STEP_TOOLS, STEP_KINDS, sha256, type ProvisionStep, type StepEndpoint } from './offline-plan.js';
 import { functionIdFromList, readConnectionSecretKeys, writeOrUpdateFunctionEnv } from './function-env.js';
 import { JOB_FUNCTION } from './function-dir.js';
-import { applyTablePlan, type RestCall, type RestFn, type RestResult, type TableCreateStep } from './tables.js';
+import { applyTablePlan, columnDetailsOf, compareColumnFlags, type RestCall, type RestFn, type RestResult, type TableCreateStep, type TableDiff, type TableColumnDrift } from './tables.js';
 import { applyImportExistingSecurity, ImportExistingPendingError, type ImportExistingEvidence, type ImportExistingSecuritySpec } from './security.js';
 import { restWithRetry, spawnWithRetry, type ReRead, type RestRetry, type RetryOptions } from './retry.js';
 import { assertProtectedProject } from './guards.js';
@@ -62,10 +62,10 @@ export interface ProvisionPlanFile {
   connectionSecretKeys?: string[];
 }
 
-export type StepStatus = 'pending' | 'applied' | 'done' | 'existing';
+export type StepStatus = 'pending' | 'applied' | 'done' | 'existing' | 'drift';
 
 export interface StepRecord {
-  status: 'applied' | 'done' | 'existing';
+  status: 'applied' | 'done' | 'existing' | 'drift';
   at: string;
   /** true when this run actually wrote (created/enabled/invited); false when the run found nothing missing. */
   applied: boolean;
@@ -1922,8 +1922,10 @@ async function emitNext(ctx: Ctx): Promise<number> {
     const command = typeof step.command === 'string' ? (resolveTokens(step.command, ctx, missing, print) as string) : undefined;
     const status = statusOf(ctx.state, step);
     const instructions =
-      status === 'applied'
-        ? awaitingReadBack(step, step.id)
+      status === 'drift'
+        ? `column drift detected on ${step.id}: update live columns to match planned flags using CatalystbyZoho_Update_Column or the Catalyst console, then re-run: c2c provision --confirm --run ${step.id}`
+        : status === 'applied'
+          ? awaitingReadBack(step, step.id)
         : step.via === 'cli'
           ? `first read back (${endpointRef(step.readBack, step.id)}); if it already matches record it, else run: c2c provision --confirm --run ${step.id}`
           : step.via === 'mcp'
@@ -2178,6 +2180,40 @@ async function runStep(ctx: Ctx, id: string, confirm: boolean): Promise<number> 
     // computes) so a moved inputs.json is what reopens the step — not the
     // absence of a read-back file.
     const matchSha256 = matchMissing.length ? `unresolved:${[...new Set(matchMissing)].join(',')}` : sha256(JSON.stringify(match));
+    const hasDrift =
+      id === 'tables' &&
+      isRecord(outcome.result) &&
+      Array.isArray((outcome.result as unknown as TableDiff).drift) &&
+      (outcome.result as unknown as TableDiff).drift!.length > 0;
+    if (hasDrift) {
+      const driftList = (outcome.result as unknown as TableDiff).drift!;
+      ctx.state.steps[id] = { status: 'drift', at: ctx.now(), applied, result: rel, matchSha256 };
+      writeProvisionState(ctx.out, ctx.state);
+      const lines = ['column drift detected:'];
+      for (const d of driftList) {
+        const mismatches = d.mismatches.map((m) => `${m.flag} (plan: ${String(m.plan)}, live: ${String(m.live)})`).join(', ');
+        lines.push(`- ${d.table}.${d.column}: ${mismatches}`);
+        lines.push(`  fix: ${d.fix.fixLine}`);
+      }
+      ctx.io.stdout(`${lines.join('\n')}\n`);
+      ctx.io.stdout(
+        `${JSON.stringify(
+          {
+            step: id,
+            ran: true,
+            applied,
+            status: 'drift',
+            verified: false,
+            result: rel,
+            drift: driftList,
+            next: null,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      return 0;
+    }
     if (!outcome.proven && !verified) {
       // Not a successful run and not a verified claim: an already-there 4xx
       // or a read that does not satisfy the match only claims the state.
@@ -2361,10 +2397,50 @@ async function recordStep(ctx: Ctx, id: string, resultPath: string | undefined, 
     }
   }
   const applied = appliedFlag || prior?.applied === true;
+  let status: StepStatus = applied ? 'done' : 'existing';
+  if (id === 'tables') {
+    try {
+      const spec = typeof step.args.plan === 'string' ? step.args.plan : 'provision/tables.json';
+      const steps = readJsonFile<TableCreateStep[]>(join(ctx.out, spec), 'table spec');
+      const detailsMap = new Map<string, Map<string, import('./tables.js').LiveColumnDetail>>();
+      const records = Array.isArray(result) ? result : isRecord(result) && Array.isArray((result as { data?: unknown }).data) ? (result as { data: unknown[] }).data : isRecord(result) && Array.isArray((result as { tables?: unknown }).tables) ? (result as { tables: unknown[] }).tables : [];
+      for (const item of records) {
+        if (!isRecord(item)) continue;
+        const name = typeof item.table_name === 'string' ? item.table_name : typeof item.name === 'string' ? item.name : undefined;
+        if (!name) continue;
+        if (Object.prototype.hasOwnProperty.call(item, 'column_details') || Object.prototype.hasOwnProperty.call(item, 'columns')) {
+          detailsMap.set(name, columnDetailsOf(item));
+        }
+      }
+      const driftList: TableColumnDrift[] = [];
+      for (const tStep of steps) {
+        const liveCols = detailsMap.get(tStep.table);
+        if (!liveCols) continue;
+        for (const col of tStep.columns) {
+          const liveCol = liveCols.get(col.column_name);
+          if (!liveCol) continue;
+          const driftItem = compareColumnFlags(tStep.table, undefined, col, liveCol);
+          if (driftItem) driftList.push(driftItem);
+        }
+      }
+      if (driftList.length > 0) {
+        status = 'drift';
+        const lines = ['column drift detected:'];
+        for (const d of driftList) {
+          const mismatches = d.mismatches.map((m) => `${m.flag} (plan: ${String(m.plan)}, live: ${String(m.live)})`).join(', ');
+          lines.push(`- ${d.table}.${d.column}: ${mismatches}`);
+          lines.push(`  fix: ${d.fix.fixLine}`);
+        }
+        ctx.io.stdout(`${lines.join('\n')}\n`);
+      }
+    } catch {
+      // best-effort drift check on record
+    }
+  }
   const rel = storeResult(ctx.out, id, evidence);
   // Pin the resolved match, not inputs.json: when the customer edits inputs
   // later, only steps whose resolved match actually moved get re-proven.
-  ctx.state.steps[id] = { status: applied ? 'done' : 'existing', at: ctx.now(), applied, result: rel, matchSha256: sha256(JSON.stringify(match)) };
+  ctx.state.steps[id] = { status, at: ctx.now(), applied, result: rel, matchSha256: sha256(JSON.stringify(match)) };
   writeProvisionState(ctx.out, ctx.state);
   const next = ctx.plan.steps.find((item) => !['done', 'existing'].includes(stepStatus(ctx.state, item.id)));
   ctx.io.stdout(
