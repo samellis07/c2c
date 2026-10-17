@@ -318,7 +318,7 @@ function uniqueVarchar(table: SchemaTable): { names: string[]; store: string[]; 
 }
 
 function fkCount(table: SchemaTable): number {
-  return table.columns.filter((column) => column.relation).length;
+  return table.columns.filter((column) => column.relation && !column.plainLookup).length;
 }
 
 // Generation splits at the raised cap; the stated default is report-only, so
@@ -326,7 +326,7 @@ function fkCount(table: SchemaTable): number {
 const MAX_COLUMNS = limitValue('datastore.columns_per_table');
 const COLUMNS_DEFAULT = limitValue('datastore.columns_per_table_default');
 const MAX_UNIQUE_VARCHAR = UNIQUE_VARCHAR_MAX_PER_TABLE;
-const MAX_FK = 15;
+const MAX_FK = limitValue('datastore.fk_columns');
 const MAX_JOINS = 4;
 const SELECT_WIDTH_DOC = 20;
 const SELECT_WIDTH_UNVERIFIED = limitValue('zcql.select_columns');
@@ -577,7 +577,7 @@ function varcharLengthBudget(tables: SchemaTable[], source?: readonly SourceTabl
   };
 }
 
-function buildBudgets(tables: SchemaTable[], source?: readonly SourceTableData[]): { budgets: PlanBudget[]; ok: boolean } {
+export function buildBudgets(tables: SchemaTable[], source?: readonly SourceTableData[]): { budgets: PlanBudget[]; ok: boolean } {
   const budgets: PlanBudget[] = [];
   for (const table of tables) {
     const unique = uniqueVarchar(table);
@@ -614,12 +614,23 @@ function buildBudgets(tables: SchemaTable[], source?: readonly SourceTableData[]
           : {}),
     });
     const fks = fkCount(table);
+    const plain = table.columns.filter((column) => column.plainLookup).map((column) => column.name);
     budgets.push({
       id: PLAN_BUDGET_IDS[2],
       table: table.name,
-      status: fks > MAX_FK ? 'fail' : 'pass',
-      detail: `table ${table.name}: ${fks}/${MAX_FK} foreign keys`,
-      ...(fks > MAX_FK ? { fix: `replace ${table.name} lookups with plain fields plus app-layer checks; re-run c2c plan` } : {}),
+      status: fks > MAX_FK ? 'fail' : plain.length > 0 ? 'warn' : 'pass',
+      detail:
+        `table ${table.name}: ${fks}/${MAX_FK} foreign keys` +
+        (plain.length > 0
+          ? `; ${plain.length} more lookup(s) stored as plain bigint ROWID ids with no store check or ON DELETE: ${plain.join(', ')} (the ${MAX_FK}-foreign-key limit is unverified)`
+          : ''),
+      ...(fks > MAX_FK
+        ? { fix: `replace ${table.name} lookups with plain fields plus app-layer checks; re-run c2c plan` }
+        : plain.length > 0
+          ? {
+              fix: `deleting a parent row leaves these ids behind: clear or re-point them when you delete a parent row, or move the lookups to a child table (the migration report lists them)`,
+            }
+          : {}),
     });
   }
   let widest: SchemaTable | undefined;

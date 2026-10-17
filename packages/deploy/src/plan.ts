@@ -432,7 +432,8 @@ function columnLine(column: SchemaColumn): string {
   if (column.unique) bits.push('unique');
   if (column.appMandatory) bits.push('app-mandatory (checked by the handler)');
   if (column.appUnique) bits.push('app-unique (checked by the handler)');
-  if (column.relation) bits.push(`references=${column.relation.table}.${column.relation.column} on_delete=${column.relation.onDelete}`);
+  if (column.plainLookup) bits.push(`plain-id-of=${column.relation!.table}.${column.relation!.column}`);
+  else if (column.relation) bits.push(`references=${column.relation.table}.${column.relation.column} on_delete=${column.relation.onDelete}`);
   return `  - ${column.name} ${bits.join(' ')}`;
 }
 
