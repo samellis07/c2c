@@ -520,33 +520,27 @@ export async function migrateSeed(opts: {
   // Tables that did not load. A lookup child of one is skipped, not resolved:
   // its parent has no ROWIDs, so a write would carry broken foreign keys.
   const notLoaded = new Set<string>();
+  // ROWIDs are read back only where they are used: a lookup parent, or a table
+  // whose deferred lookups are set by row update after the load.
+  const needsRowIds = new Set(keys.flatMap((key) => (deferred.has(foreignKeyId(key)) ? [key.parent, key.table] : [key.parent])));
   for (const table of staged) {
     const missingParent = opts.dryRun
       ? undefined
       : acyclic.find((key) => key.table === table.table && notLoaded.has(key.parent));
     if (missingParent) {
       notLoaded.add(table.table);
-      singles.push({
-        ok: false,
-        dryRun: opts.dryRun,
-        integrity: emptyIntegrity(),
-        tables: [{
-          table: table.table,
-          sourceCount: table.rows.length,
-          writtenCount: 0,
-          sourceChecksum: '',
-          writtenChecksum: '',
-          batches: [],
-          mismatch: true,
-          missingIds: [],
-          duplicateIds: [],
-          error: `skipped: parent ${missingParent.parent} not loaded (lookup ${missingParent.column})`,
-        }],
-      });
+      singles.push(unwrittenTable(table, `skipped: parent ${missingParent.parent} not loaded (lookup ${missingParent.column})`));
       continue;
     }
     // A dry run writes nothing, so there are no ROWIDs to remap to yet.
-    const resolved = opts.dryRun ? table : omitColumns(resolveForeignKeys(table, acyclic, rowIds), deferredColumns(table.table, deferred));
+    let resolved: SeedTable;
+    try {
+      resolved = opts.dryRun ? table : omitColumns(resolveForeignKeys(table, acyclic, rowIds), deferredColumns(table.table, deferred));
+    } catch (error) {
+      notLoaded.add(table.table);
+      singles.push(unwrittenTable(table, `skipped: ${error instanceof Error ? error.message : String(error)}`));
+      continue;
+    }
     byReport.set(table.table, resolved);
     const single = await migrateData({
       dc: opts.dc,
@@ -573,11 +567,18 @@ export async function migrateSeed(opts: {
     // A refused or failed table is recorded and the load continues: one bad
     // table must not leave the rest of the app empty. ok stays false and the
     // per-table report names the table that did not load.
-    if (single.ok && !opts.dryRun && opts.scope) {
-      rowIds.set(
-        table.table,
-        await loadRowIds(opts.fetch, opts.catalystBase, opts.dc, table.table, table.rows.map((row) => row.id), opts.scope),
-      );
+    if (single.ok && !opts.dryRun && opts.scope && needsRowIds.has(table.table)) {
+      // A read-back that cannot map every written row leaves the table's
+      // children without parents: the table is reported and treated as not loaded.
+      const problem = await readBackRowIds(opts.fetch, opts.catalystBase, opts.dc, table, opts.scope, rowIds);
+      if (problem) {
+        single.ok = false;
+        for (const report of single.tables) {
+          report.mismatch = true;
+          report.error = problem;
+        }
+        notLoaded.add(table.table);
+      }
     }
   }
   const merged: MigrateResult = {
@@ -600,6 +601,51 @@ export async function migrateSeed(opts: {
     );
   }
   return fixCounts(merged, byReport);
+}
+
+/** Report row for a table that was never written. */
+function unwrittenTable(table: SeedTable, error: string): MigrateResult {
+  return {
+    ok: false,
+    dryRun: false,
+    integrity: emptyIntegrity(),
+    tables: [{
+      table: table.table,
+      sourceCount: table.rows.length,
+      writtenCount: 0,
+      sourceChecksum: '',
+      writtenChecksum: '',
+      batches: [],
+      mismatch: true,
+      missingIds: [],
+      duplicateIds: [],
+      error,
+    }],
+  };
+}
+
+/** Read the written ROWIDs into rowIds; returns the reason when not every row maps. */
+async function readBackRowIds(
+  fetch: FetchLike,
+  base: string,
+  dc: string,
+  table: SeedTable,
+  scope: CatalystScope,
+  rowIds: Map<string, Map<string, string>>,
+): Promise<string | undefined> {
+  const ids = table.rows.map((row) => row.id);
+  let found: Map<string, string>;
+  try {
+    found = await loadRowIds(fetch, base, dc, table.table, ids, scope);
+  } catch (error) {
+    return `ROWID read-back failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  const unmapped = ids.filter((id) => !found.has(id));
+  if (unmapped.length) {
+    return `ROWID read-back mapped ${ids.length - unmapped.length} of ${ids.length} written row(s); unmapped source id(s): ${unmapped.slice(0, 5).join(', ')}${unmapped.length > 5 ? ', ...' : ''}`;
+  }
+  rowIds.set(table.table, found);
+  return undefined;
 }
 
 function firstPassColumns(

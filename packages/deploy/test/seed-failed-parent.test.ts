@@ -16,7 +16,7 @@ const SOURCE: Record<string, Array<Record<string, string>>> = {
   Third: [{ ID: 't1', Name: 'T' }],
 };
 
-function storeRefusing(refused: string) {
+function storeRefusing(refused: string, readBack: { lossy?: string; failing?: string } = {}) {
   const stored = new Map<string, Map<string, { rowid: string; columns: Record<string, string> }>>();
   const writes: string[] = [];
   let seq = 1;
@@ -29,7 +29,9 @@ function storeRefusing(refused: string) {
     if (path.endsWith('/query')) {
       const sql = String(JSON.parse(String(init?.body ?? '{}')).query);
       const table = /FROM\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(sql)?.[1] ?? '';
-      const rows = stored.get(table) ?? new Map();
+      const rowIdReadBack = /^SELECT ROWID, c2c_source_id /.test(sql);
+      if (rowIdReadBack && table === readBack.failing) return response({ status: 'failure', data: { message: 'query failed' } }, 500);
+      const rows = rowIdReadBack && table === readBack.lossy ? new Map() : (stored.get(table) ?? new Map());
       return response({
         data: [...rows].map(([source, row]) => ({ ...row.columns, c2c_source_id: source, ROWID: row.rowid })),
       });
@@ -114,5 +116,61 @@ test('a loaded parent still resolves its children (no false skip)', async () => 
   assert.equal(result.ok, false);
   const child = result.tables.find((table) => table.table === 'Child');
   assert.equal(child?.mismatch, false);
+  assert.equal(store.stored.get('Child')?.get('c1')?.columns.Author, 'rowid-Parent-1');
+});
+
+for (const mode of ['lossy', 'failing'] as const) {
+  test(`a ${mode} ROWID read-back after a loaded parent returns the report, skips its children and loads independent tables`, async () => {
+    const store = storeRefusing('', { [mode]: 'Parent' });
+    const result = await migrateSeed({
+      tables: [
+        { table: 'Parent', rows: [{ id: 'p1', columns: { Name: 'P' } }] },
+        { table: 'Child', rows: [{ id: 'c1', columns: { Title: 'C', Author: 'p1' } }] },
+        { table: 'Grandchild', rows: [{ id: 'g1', columns: { Note: 'G', Owner: 'c1' } }] },
+        { table: 'Third', rows: [{ id: 't1', columns: { Name: 'T' } }] },
+      ],
+      foreignKeys: [
+        { table: 'Child', column: 'Author', parent: 'Parent' },
+        { table: 'Grandchild', column: 'Owner', parent: 'Child' },
+      ],
+      dc: 'in',
+      catalystBase: 'https://api.catalyst.zoho.in',
+      dryRun: false,
+      fetch: store.fetch,
+      checkpoint: emptyCheckpoint(),
+      scope: SCOPE,
+    });
+    assert.equal(result.ok, false);
+    const byTable = new Map(result.tables.map((table) => [table.table, table]));
+    assert.deepEqual([...byTable.keys()].sort(), ['Child', 'Grandchild', 'Parent', 'Third']);
+    assert.equal(byTable.get('Parent')?.mismatch, true);
+    assert.match(byTable.get('Parent')?.error ?? '', mode === 'lossy' ? /ROWID read-back mapped 0 of 1 .*p1/ : /ROWID read-back failed/);
+    assert.match(byTable.get('Child')?.error ?? '', /parent Parent not loaded/);
+    assert.equal(byTable.get('Child')?.writtenCount, 0);
+    assert.match(byTable.get('Grandchild')?.error ?? '', /parent Child not loaded/);
+    assert.equal(byTable.get('Third')?.mismatch, false);
+    assert.equal(store.stored.get('Third')?.size, 1, 'the independent table loads');
+    assert.ok(!store.writes.includes('Child'), 'a child of an unmapped parent is never written');
+    assert.ok(!store.writes.includes('Grandchild'));
+  });
+}
+
+test('a table no lookup points at is not read back, so its ROWIDs cannot fail the run', async () => {
+  const store = storeRefusing('', { failing: 'Third' });
+  const result = await migrateSeed({
+    tables: [
+      { table: 'Parent', rows: [{ id: 'p1', columns: { Name: 'P' } }] },
+      { table: 'Child', rows: [{ id: 'c1', columns: { Title: 'C', Author: 'p1' } }] },
+      { table: 'Third', rows: [{ id: 't1', columns: { Name: 'T' } }] },
+    ],
+    foreignKeys: [{ table: 'Child', column: 'Author', parent: 'Parent' }],
+    dc: 'in',
+    catalystBase: 'https://api.catalyst.zoho.in',
+    dryRun: false,
+    fetch: store.fetch,
+    checkpoint: emptyCheckpoint(),
+    scope: SCOPE,
+  });
+  assert.equal(result.ok, true);
   assert.equal(store.stored.get('Child')?.get('c1')?.columns.Author, 'rowid-Parent-1');
 });
