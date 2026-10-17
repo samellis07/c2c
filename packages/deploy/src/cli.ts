@@ -2749,7 +2749,8 @@ export async function verifyBehaviorCli(args: readonly string[], io: Io): Promis
       if (reportMdPath) writeFileSync(reportMdPath, formatBehaviorMarkdown(report, goldens));
       io.stdout(formatBehaviorMarkdown(report, goldens));
       if (reportPath) io.stdout(`report: ${reportPath}\n`);
-      return report.ok ? 0 : 1;
+      // 3: nothing was replayed (every case skipped) — distinct from a finding.
+      return report.status === 'equivalent' ? 0 : report.status === 'not-run' ? 3 : 1;
     } finally {
       await backend.close();
     }
