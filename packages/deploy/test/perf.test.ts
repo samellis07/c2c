@@ -4,10 +4,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { deriveIr, parse } from '../../core/src/index.js';
 import { repoRoot } from '../../core/src/toolchain.js';
-import { childIndex, perfSeed, recordPlan, seedRecord } from '../src/perf-seed.js';
+import { childIndex, deferredPatch, perfSeed, recordPlan, seedRecord } from '../src/perf-seed.js';
 import { estimateQuota, PRICED_ITEMS } from '../src/perf-estimate.js';
 import { moverApiCalls } from '../src/offline-plan.js';
 import { OFFLINE_NOTE, runPerf } from '../src/perf-harness.js';
@@ -113,4 +114,64 @@ test('the offline run imports through the generated routes and times paged repor
   assert.deepEqual(report.pagedLoad.statuses, { 200: 2 });
   assert.ok(report.pagedLoad.maxStoreCalls >= 1);
   assert.ok(run.timeoutRisk.some((t) => t.report === 'Book_Report' && /\[UNVERIFIED latency\]/.test(t.status)));
+});
+
+/** Two forms that look each other up; `mandatory` makes both lookups `must have`. */
+function cycleApp(mandatory: boolean) {
+  const lookup = (name: string, target: string) => `\t\t${mandatory ? 'must have ' : ''}${name}\n\t\t(\n\t\t\ttype = picklist\n\t\t\tvalues = ${target}.ID\n\t\t\tdisplayformat = [Label]\n\t\t)`;
+  const form = (name: string, ref: string, target: string) => `\tform ${name}\n\t{\n\t\tLabel\n\t\t(\n\t\t\ttype = text\n\t\t)\n${lookup(ref, target)}\n\t}`;
+  return deriveIr(parse(`application "Cycle"\n{\n\ttime zone = "Asia/Kolkata"\n${form('Alpha', 'Beta_Ref', 'Beta')}\n${form('Beta', 'Alpha_Ref', 'Alpha')}\n}\n`));
+}
+
+test('a two-form lookup cycle with optional lookups posts them empty, then links both sides by row update', async () => {
+  const app = cycleApp(false);
+  const seed = perfSeed(app, '10k').result;
+  const plan = recordPlan(app, seed);
+  assert.deepEqual(plan.warnings, []);
+  assert.deepEqual([...plan.deferred].map(([form, cols]) => [form, [...cols]]), [['Alpha', ['Beta_Ref']], ['Beta', ['Alpha_Ref']]]);
+  const children = childIndex(seed, plan);
+  const alphaRow = seed.tables.find((t) => t.form === 'Alpha')!.rows[0]!;
+  // First pass: no created row is needed, the lookup is left out.
+  const first = seedRecord('Alpha', alphaRow, plan, new Map(), children);
+  assert.equal(Object.hasOwn(first, 'Beta_Ref'), false);
+  assert.equal(first.Label, alphaRow.columns.Label);
+  // Second pass: the cell maps to the created ROWID; a missing row is still an error.
+  const rowIds = new Map([[alphaRow.columns.Beta_Ref!, '900']]);
+  assert.deepEqual(deferredPatch('Alpha', alphaRow, plan, rowIds, children), { Beta_Ref: '900' });
+  assert.throws(() => deferredPatch('Alpha', alphaRow, plan, new Map(), children), /has no created row/);
+
+  const run = await runPerf(app, { size: '10k', apiRowsPerTable: 5, pageSamples: 1, searchRepeats: 1 });
+  assert.deepEqual(run.warnings, []);
+  for (const i of run.imports) assert.equal(i.viaApi + i.viaStore, 10_000, i.form);
+  assert.deepEqual(run.deferred.map((d) => [d.form, d.columns, d.rows]), [['Alpha', ['Beta_Ref'], 10_000], ['Beta', ['Alpha_Ref'], 10_000]]);
+  const fake = createRequire(import.meta.url)(join(root, 'tools/catalyst-harness/fake-zcatalyst-sdk-node.cjs')) as { state(): { tables: Record<string, Record<string, unknown>[]> } };
+  const tables = fake.state().tables;
+  for (const [form, column, target] of [['Alpha', 'Beta_Ref', 'Beta'], ['Beta', 'Alpha_Ref', 'Alpha']] as const) {
+    const targets = new Set(tables[target]!.map((r) => String(r.ROWID)));
+    assert.equal(tables[form]!.length, 10_000, form);
+    for (const row of tables[form]!) assert.ok(targets.has(String(row[column])), `${form}.${column}=${String(row[column])}`);
+  }
+  // The seed itself is unchanged by the plan: same app and seed, same bytes.
+  assert.equal(perfSeed(app, '10k').sha256, run.seedSha256);
+});
+
+test('a cycle of mandatory lookups is a counted warning naming the cycle, not a silent skip', () => {
+  const app = cycleApp(true);
+  const seed = perfSeed(app, '10k').result;
+  const plan = recordPlan(app, seed);
+  assert.equal(plan.warnings.length, 2);
+  assert.match(plan.warnings[0]!, /^mandatory lookup Alpha\.Beta_Ref is on a lookup cycle \(Alpha\.Beta_Ref -> Beta\.Alpha_Ref -> Alpha\)/);
+  assert.match(plan.warnings[1]!, /^mandatory lookup Beta\.Alpha_Ref is on a lookup cycle \(Beta\.Alpha_Ref -> Alpha\.Beta_Ref -> Beta\)/);
+  // Still loadable: both sides post empty and the second pass sets them.
+  assert.deepEqual([...plan.deferred.keys()], ['Alpha', 'Beta']);
+});
+
+test('a mandatory lookup stays in the insert order when the other side of its cycle can move', () => {
+  const app = cycleApp(false);
+  app.forms.find((f) => f.name === 'Beta')!.fields.find((f) => f.name === 'Alpha_Ref')!.required = true;
+  const seed = perfSeed(app, '10k').result;
+  const plan = recordPlan(app, seed);
+  assert.deepEqual(plan.warnings, []);
+  assert.deepEqual(plan.forms, ['Alpha', 'Beta']);
+  assert.deepEqual([...plan.deferred].map(([form, cols]) => [form, [...cols]]), [['Alpha', ['Beta_Ref']]]);
 });

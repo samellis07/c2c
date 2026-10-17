@@ -72,6 +72,12 @@ for (const { name, run, estimate, calls } of runs) {
   md.push(`## ${name} (${run.app})`, '', `Rows per table posted through c2c_api: ${apiRows || 'all'}; the rest are stored with insertRows. Seed \`${run.seed}\`, seed.json sha256 \`${run.seedSha256}\`. Page size ${run.pageSize}.`, '');
   md.push('### Import through the generated c2c_api', '', '| Form | Route | Rows | Via API | Refused | API rows/s (offline) | Store calls per API row | Via insertRows | First refusal |', '|---|---|---|---|---|---|---|---|---|');
   for (const i of run.imports) md.push(`| ${i.form} | ${i.route ?? 'none'} | ${i.rows} | ${i.viaApi} | ${i.refused} | ${fmt(i.apiRowsPerSec)} | ${fmt(i.storeCallsPerApiRow)} | ${i.viaStore} | ${(i.firstRefusal ?? '').replace(/\|/g, '/').slice(0, 120)} |`);
+  if (run.deferred.length) {
+    md.push('', '### Second pass: self and cyclic lookups set by row update', '', '| Form | Columns | Rows updated |', '|---|---|---|');
+    for (const d of run.deferred) md.push(`| ${d.form} | ${d.columns.join(', ')} | ${d.rows} |`);
+  }
+  md.push('', `### Seed warnings (${run.warnings.length})`, '');
+  for (const w of run.warnings) md.push(`- ${w}`);
   md.push('', '### Reports (offline ms)', '', '| Report | Rows | First page p95 | Paged load p50 / p95 | Search broad p95 | Search selective p95 | Search none p95 | Max store calls |', '|---|---|---|---|---|---|---|---|');
   for (const r of run.reports) {
     const callsMax = Math.max(r.pagedLoad.maxStoreCalls, r.searchBroad.maxStoreCalls, r.searchSelective.maxStoreCalls, r.searchNone.maxStoreCalls);
