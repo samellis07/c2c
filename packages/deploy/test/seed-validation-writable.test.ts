@@ -661,3 +661,156 @@ test('unsupported date rule expression emits a counted warning and does not skip
   const warn = seed.warnings.find((w) => w.form === 'Event' && /date order rule.*cannot be satisfied/i.test(w.message));
   assert.ok(warn, 'must emit counted warning naming table and rule');
 });
+
+test('a negated call guard yields its sibling constraint instead of dropping the workflow', () => {
+  const NEGATED_CALL_DS = `application "NegatedCallApp"
+{
+\tforms
+\t{
+\t\tform Event
+\t\t{
+\t\t\tStarts
+\t\t\t(
+\t\t\t\ttype = date
+\t\t\t)
+\t\t\tEnds
+\t\t\t(
+\t\t\t\ttype = date
+\t\t\t)
+\t\t}
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tRule1 as "Rule1"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Event
+\t\t\t\trecord event = on add
+\t\t\t\ton validate
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\t\tcustom deluge script
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tif (!isNull(input.Ends) && input.Ends <= input.Starts) { cancel submit; }
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}
+}
+`;
+  const app = deriveIr(parse(NEGATED_CALL_DS));
+  const seed = generateSeed(app, { n: 3, seed: 'negated-call' });
+  const table = seed.tables.find((t) => t.form === 'Event')!;
+  assert.equal(table.rows.length, 3);
+  for (const row of table.rows) {
+    assert.ok(row.columns.Ends! > row.columns.Starts!, `Ends (${row.columns.Ends}) must be after Starts (${row.columns.Starts})`);
+  }
+  const warn = seed.warnings.find((w) => w.form === 'Event' && /cannot be satisfied generically/i.test(w.message));
+  assert.ok(warn, 'the negated call leaf must be counted as a warning, not drop the workflow');
+});
+
+test('a negated call guard on a non-date field emits no warning', () => {
+  const NON_DATE_DS = `application "NonDateApp"
+{
+\tforms
+\t{
+\t\tform Event
+\t\t{
+\t\t\tStarts
+\t\t\t(
+\t\t\t\ttype = date
+\t\t\t)
+\t\t\tEnds
+\t\t\t(
+\t\t\t\ttype = date
+\t\t\t)
+\t\t\tEmail
+\t\t\t(
+\t\t\t\ttype = email
+\t\t\t)
+\t\t}
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tRule1 as "Rule1"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Event
+\t\t\t\trecord event = on add
+\t\t\t\ton validate
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\t\tcustom deluge script
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tif (!input.Email.contains("@")) { cancel submit; }
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}
+}
+`;
+  const app = deriveIr(parse(NON_DATE_DS));
+  const seed = generateSeed(app, { n: 3, seed: 'non-date-guard' });
+  assert.equal(seed.tables.find((t) => t.form === 'Event')?.rows.length, 3);
+  const warned = seed.warnings.filter((w) => w.form === 'Event');
+  assert.equal(warned.length, 0, `a non-date negated guard must emit no warning, got ${JSON.stringify(warned)}`);
+});
+
+test('a deeply nested negated guard finishes and is counted', () => {
+  const NOTS = '!'.repeat(700);
+  const DEEP_DS = `application "DeepApp"
+{
+\tforms
+\t{
+\t\tform Event
+\t\t{
+\t\t\tStarts
+\t\t\t(
+\t\t\t\ttype = date
+\t\t\t)
+\t\t\tEnds
+\t\t\t(
+\t\t\t\ttype = date
+\t\t\t)
+\t\t}
+\t}
+\tworkflow
+\t{
+\t\tform
+\t\t{
+\t\t\tRule1 as "Rule1"
+\t\t\t{
+\t\t\t\ttype = form
+\t\t\t\tform = Event
+\t\t\t\trecord event = on add
+\t\t\t\ton validate
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t\t{
+\t\t\t\t\t\tcustom deluge script
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\tif (${NOTS}(input.Ends > input.Starts)) { cancel submit; }
+\t\t\t\t\t\t)
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}
+}
+`;
+  const app = deriveIr(parse(DEEP_DS));
+  const seed = generateSeed(app, { n: 3, seed: 'deep-nest' });
+  assert.equal(seed.tables.find((t) => t.form === 'Event')?.rows.length, 3);
+  const warn = seed.warnings.find((w) => w.form === 'Event' && /cannot be satisfied generically|unparseable/i.test(w.message));
+  assert.ok(warn, 'a guard deeper than the analysis backstop must still be counted');
+});
