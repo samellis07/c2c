@@ -14,13 +14,15 @@
  * The expanded list is passed to `node --test` as explicit files, which
  * every supported runtime handles the same way. Exits non-zero when a
  * target is missing, a listed path is duplicated, or any test fails.
- * `--dry-run` prints the expanded list and does not run it.
+ * `--dry-run` prints the expanded list and does not run it. The run carries
+ * the heap cap and per-test timeout from `test-limits.mjs`.
  */
 import { spawnSync } from 'node:child_process';
 import { readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getTestConcurrencyArgs } from './test-concurrency.mjs';
+import { getTestLimitArgs, withHeapCap } from './test-limits.mjs';
 import { loadTestList } from './test-list.mjs';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -135,6 +137,7 @@ if (dryRun) {
 
 const reporter = resolve(root, 'scripts/failure-summary-reporter.mjs');
 const args = [
+  ...getTestLimitArgs(),
   '--test',
   ...getTestConcurrencyArgs(),
   '--test-reporter=spec',
@@ -143,7 +146,8 @@ const args = [
   '--test-reporter-destination=stdout',
   ...files,
 ];
-const result = spawnSync(process.execPath, args, { stdio: 'inherit' });
+const env = { ...process.env, NODE_OPTIONS: withHeapCap(process.env.NODE_OPTIONS) };
+const result = spawnSync(process.execPath, args, { stdio: 'inherit', env });
 if (result.error) {
   process.stderr.write(`run-tests: ${result.error.message}\n`);
   process.exit(2);

@@ -19,6 +19,7 @@ tests/matrix/feature-mapping.test.mjs
 tests/matrix/matrix-check.test.mjs
 tests/plugin/hygiene.test.mjs
 tests/plugin/test-concurrency.test.mjs
+tests/plugin/test-limits.test.mjs
 tests/plugin/links.test.mjs
 tests/plugin/packaging.test.mjs
 tests/plugin/packaged-hygiene.test.mjs
