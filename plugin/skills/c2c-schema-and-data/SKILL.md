@@ -11,7 +11,7 @@ Use `plugin/references/facts/limits.md` as the limits ledger. Platform numbers m
 
 Load `catalyst-datastore` for ZCQL and SDK syntax and `catalyst-stratus` for buckets/objects. This skill adds the migration decisions.
 
-ZCQL schema, planning, and data-load rules are indexed in `plugin/references/facts/zcql.md`: [ZC-05], [ZC-06], [ZC-08], [ZC-10], [ZC-12] (with write rules [ZC-09], [ZC-11]).
+ZCQL schema, planning, and data-load rules are indexed in `plugin/references/facts/zcql.md`: [ZC-05], [ZC-06], [ZC-08], [ZC-10], [ZC-12], [ZC-13] (with write rules [ZC-09], [ZC-11]).
 
 ## Part A — Schema (offline, in `c2c plan`)
 
@@ -47,7 +47,7 @@ Reserved column names (`FROM`, `TO`, `PRIORITY`, `TABLE`, `TIME`, the `ROWID`/`C
 - [L-VARCHAR-LENGTH](../../references/limits.md#l-varchar-length-varchar-length): single line ≤ 255, else `text` [TESTED] → split (REST truncates silently: an over-length value is refused before any write, never clamped);
 - [L-TEXT-LENGTH](../../references/limits.md#l-text-length-text-length): `text` ≤ 10,000 and not searchable [UNVERIFIED] → warn; larger values go to Stratus with a key column;
 - [L-DATE-WRITE](../../references/limits.md#l-date-write-date-strictness) / [L-DOUBLE-ROUNDING](../../references/limits.md#l-double-rounding-double-rounding): dates normalised to `yyyy-MM-dd`, doubles rounded HALF_UP client-side [TESTED] → normalize before write;
-- [L-ZCQL-JOINS](../../references/limits.md#l-zcql-joins-zcql-joins): JOINs per report ≤ 4 [DOC], each with one condition across declared foreign keys [ZC-06] → refuse, staged reads; [L-ZCQL-WIDTH](../../references/limits.md#l-zcql-width-zcql-select-columns): projection ≤ 20 columns until P-WIDTH is measured [ZC-05] → refuse; never `SELECT *`; assume no user-tunable indexes and a capped execution budget [ZC-12];
+- [L-ZCQL-JOINS](../../references/limits.md#l-zcql-joins-zcql-joins): JOINs per report ≤ 4 [DOC], each with one condition across declared foreign keys [ZC-06] → refuse, staged reads; [L-ZCQL-WIDTH](../../references/limits.md#l-zcql-width-zcql-select-columns): projection ≤ 20 columns until P-WIDTH is measured [ZC-05] → refuse; never `SELECT *`; assume no user-tunable indexes and a capped execution budget [ZC-12]; a `contains`/`startsWith`/`endsWith` criterion with a null operand compiles to a never-matching predicate, so a record filter holding one narrows to zero rows instead of silently reading every row [UNVERIFIED] [ZC-13];
 - [L-ROW-BATCH](../../references/limits.md#l-row-batch-row-insert-batch): `/row` batches ≤ 200 [TESTED] → batch; [L-WRITE-RATE](../../references/limits.md#l-write-rate-data-store-write-rate): mover rate cap with `Retry-After` [UNVERIFIED] → cap;
 - [L-BULK-WRITE](../../references/limits.md#l-bulk-write-bulk-write): bulk job only after P-BULK passes [DOC] → refuse until probed;
 - [L-DEV-API-CALLS](../../references/limits.md#l-dev-api-calls-dev-api-calls): 200k Dev calls per app [DOC] → warn with the mover's call estimate;

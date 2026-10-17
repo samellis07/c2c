@@ -149,6 +149,8 @@ null value compiles to a predicate that matches no row (`(ROWID IS NULL)`),
 and the in-memory matcher returns false for it. No captured Creator or ZCQL
 golden documents the operand; the nearest signal is Creator's criteria-null
 refusal ("Function specified in criteria has returned null value and it
-cannot be evaluated"), so never-matching is the conservative reading. A
+cannot be evaluated"), captured when an `if()`/`isNull` expression was
+passed as criteria rather than a fetch-criteria `contains(null)`, so
+never-matching is the conservative reading. A
 record filter holding such a leaf narrows that profile to zero rows instead
 of silently reading every row.
