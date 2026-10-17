@@ -164,6 +164,16 @@ const FREE_CALLEES = new Set(recognisedBuiltinNames().map((name) => name.toLower
 /** Param keys whose value is a task keyword written bare (`type :GET`), not a variable read. */
 const TASK_ENUM_KEYS = new Set(['type', 'response-format', 'responseformat', 'method']);
 
+/**
+ * Workaround text for a construct the converter does not migrate. Precheck
+ * prints it as the finding's fix; the migration report's guided residual
+ * steps read the same text.
+ */
+export const CONVERTER_GAP_FIX = {
+  field: 'Replace the field, or accept that this converter does not migrate it. analyze and migration-report count the same gap.',
+  deluge: 'Rewrite the construct into something the converter already translates, or leave it as a fill-todo. Precheck only lists it.',
+} as const;
+
 export type Severity = 'blocker' | 'warning';
 
 export interface PrecheckLocation {
@@ -1895,7 +1905,7 @@ function converterGaps(app: App, source: string, findings: PrecheckFinding[]): v
       severity: 'warning',
       location: loc(source, found?.span.start, field.form, field.field),
       message: `Schema marks ${field.field} (${field.matrixId}) unsupported. ${SCHEMA_DOC}`,
-      fix: 'Replace the field, or accept that this converter does not migrate it. analyze and migration-report count the same gap.',
+      fix: CONVERTER_GAP_FIX.field,
     });
   }
   let generated: { construct: string; start: number }[];
@@ -1916,7 +1926,7 @@ function converterGaps(app: App, source: string, findings: PrecheckFinding[]): v
       severity: 'warning',
       location: loc(source, todo.start, form, null),
       message: `Deluge construct ${todo.construct} is still a migration TODO. analyze and migration-report count it.`,
-      fix: 'Rewrite the construct into something the converter already translates, or leave it as a fill-todo. Precheck only lists it.',
+      fix: CONVERTER_GAP_FIX.deluge,
     });
   }
 }

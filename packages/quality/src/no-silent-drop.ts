@@ -112,6 +112,12 @@ export interface SilentDrop {
   name: string;
   /** What is missing and what the user must do instead. */
   note: string;
+  /** The declaring form, when the construct belongs to one. */
+  form?: string;
+  /** The field, for a field or field-property drop. */
+  field?: string;
+  /** The field setting, for a field-property drop. */
+  property?: string;
 }
 
 /**
@@ -129,6 +135,9 @@ export interface CoverageRow {
   via: string;
   /** Dropped rows only: what is missing and what to do instead. */
   note?: string;
+  form?: string;
+  field?: string;
+  property?: string;
 }
 
 /** The generator outputs one audit run reads. Tests may fabricate these to prove a direction. */
@@ -204,6 +213,7 @@ function auditForm(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
       name: form.name,
       status: 'dropped',
       via: 'none',
+      form: form.name,
       note: `Form ${form.name} has no generated table and no fidelity note. Add one: either migrate the form or record why it cannot be migrated.`,
     });
   }
@@ -243,6 +253,8 @@ function auditField(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
         name: `${form.name}.${field.name}`,
         status: 'dropped',
         via: 'none',
+        form: form.name,
+        field: field.name,
         note: `Field ${form.name}.${field.name} has no generated column and no fidelity note. Add one: either migrate the field or record what the user must re-enter.`,
       });
     }
@@ -284,6 +296,9 @@ function auditFieldProperties(app: App, out: AuditOutputs, rows: CoverageRow[]):
         name,
         status: 'dropped',
         via: 'none',
+        form: formName,
+        field: field.name,
+        property: item.label.trim(),
         note: `Field ${formName}.${field.name} ${item.label} is not in the generated field. Add one: either emit the setting or record the manual step.`,
       });
     }
@@ -1534,7 +1549,14 @@ function auditStatements(app: App, out: AuditOutputs, rows: CoverageRow[]): void
 export function auditApp(app: App, outputs?: AuditOutputs): SilentDrop[] {
   return coverageLedger(app, outputs)
     .filter((r) => r.status === 'dropped')
-    .map((r) => ({ kind: r.kind, name: r.name, note: r.note ?? `${r.kind} ${r.name} is neither generated nor listed.` }));
+    .map((r) => ({
+      kind: r.kind,
+      name: r.name,
+      note: r.note ?? `${r.kind} ${r.name} is neither generated nor listed.`,
+      ...(r.form === undefined ? {} : { form: r.form }),
+      ...(r.field === undefined ? {} : { field: r.field }),
+      ...(r.property === undefined ? {} : { property: r.property }),
+    }));
 }
 
 /**

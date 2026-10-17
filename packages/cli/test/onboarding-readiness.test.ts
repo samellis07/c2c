@@ -153,3 +153,23 @@ test('the guide checks fail on an unknown command, a broken link and an unnamed 
   const unnamed = { ...real, pages: real.pages.map((page) => ({ ...page, text: page.text.replace(/^(#+ .*)invite/gim, '$1') })) };
   assert.equal(status(checkGuide(unnamed), 'guide-names-checklist').status, 'FAIL');
 });
+
+test('every silent drop is a guided residual item, and a dropped or empty item fails', async () => {
+  const inputs = await fresh();
+  const drops = inputs.analysis.determinism.silentDrops;
+  assert.ok(drops > 0, 'kitchen-sink has silent drops to guide');
+  assert.equal(inputs.report.residuals?.length, drops);
+  assert.equal(inputs.analysis.determinism.deterministic, false, 'guided drops are still drops');
+  assert.equal(status(checkApp(inputs).criteria, 'report-no-silent-item').status, 'PASS');
+  const [first, ...rest] = inputs.report.residuals ?? [];
+  const missing = { ...inputs, report: { ...inputs.report, residuals: rest } };
+  assert.equal(status(checkApp(missing).criteria, 'report-no-silent-item').status, 'FAIL');
+  const empty = { ...inputs, report: { ...inputs.report, residuals: [{ ...first!, step: ' ' }, ...rest] } };
+  const result = status(checkApp(empty).criteria, 'report-no-silent-item');
+  assert.equal(result.status, 'FAIL');
+  assert.match(result.detail, /empty step/);
+  const hidden = { ...inputs, report: { ...inputs.report, silentDrops: 0 } };
+  assert.equal(status(checkApp(hidden).criteria, 'report-no-silent-item').status, 'FAIL');
+  const unlisted = { ...inputs, reportMd: inputs.reportMd.split(first!.step).join('') };
+  assert.equal(status(checkApp(unlisted).criteria, 'report-no-silent-item').status, 'FAIL');
+});

@@ -260,6 +260,30 @@ export function checkApp(inputs: AppInputs): AppReadiness {
     );
   }
 
+  // 6b. No silent item: every silent drop is a guided residual item in the report.
+  {
+    const id = 'report-no-silent-item';
+    const title = 'Every silent drop is a guided residual item in the report';
+    const drops = analysis.determinism.silentDrops;
+    const problems: string[] = [];
+    if (report.silentDrops !== drops) problems.push(`report counts ${report.silentDrops} silent drops, analyze ${drops}`);
+    if ((report.residuals?.length ?? 0) !== drops) problems.push(`${report.residuals?.length ?? 0} residual item(s) for ${drops} silent drop(s)`);
+    const ids = new Set<string>();
+    for (const item of report.residuals ?? []) {
+      if (ids.has(item.id)) problems.push(`duplicate id ${item.id}`);
+      ids.add(item.id);
+      const empty = (['id', 'construct', 'reason', 'step'] as const).filter((key) => !item[key].trim());
+      if (empty.length) problems.push(`${item.id || item.construct}: empty ${empty.join(', ')}`);
+      else if (!inputs.reportMd.includes(item.step)) problems.push(`${item.id}: step missing from the markdown report`);
+    }
+    const generic = (report.residuals ?? []).filter((item) => item.stepSource === 'generic').length;
+    criteria.push(
+      problems.length === 0
+        ? pass(id, title, `${drops} silent drop(s), each guided (${drops - generic} workaround, ${generic} generic manual step); still counted as drops`)
+        : fail(id, title, problems.slice(0, 10).join('; ')),
+    );
+  }
+
   // 7. Owner scope (not supported in this version / out of scope) is printed.
   {
     const id = 'report-lists-scope';
