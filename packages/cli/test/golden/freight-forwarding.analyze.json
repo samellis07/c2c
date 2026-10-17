@@ -1578,12 +1578,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.Closing_Date property alloweddays",
-      "detail": "Field New_Deal.Closing_Date property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_Deal.Deal_Image property aspect ratio",
       "detail": "Field New_Deal.Deal_Image property aspect ratio is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
@@ -1638,24 +1632,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.DO_Valid_Till_Date property alloweddays",
-      "detail": "Field New_Deal.DO_Valid_Till_Date property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.ETA property alloweddays",
-      "detail": "Field New_Deal.ETA property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.ETD property alloweddays",
-      "detail": "Field New_Deal.ETD property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_Deal.Expected_Revenue property format",
       "detail": "Field New_Deal.Expected_Revenue property format is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
@@ -1670,12 +1646,6 @@
       "kind": "deluge",
       "label": "silent drop field-property: New_Deal.Gate_Way_Airport property sortorder",
       "detail": "Field New_Deal.Gate_Way_Airport property sortorder is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.Lead_Expiration_Date property alloweddays",
-      "detail": "Field New_Deal.Lead_Expiration_Date property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
     },
     {
@@ -1812,24 +1782,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Delivery_Order.Due_Date property alloweddays",
-      "detail": "Field New_Delivery_Order.Due_Date property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Delivery_Order.ETA property alloweddays",
-      "detail": "Field New_Delivery_Order.ETA property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Delivery_Order.ETD property alloweddays",
-      "detail": "Field New_Delivery_Order.ETD property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_Delivery_Order.Excise_Duty property format",
       "detail": "Field New_Delivery_Order.Excise_Duty property format is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
@@ -1920,12 +1872,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Invoice.Due_Date property alloweddays",
-      "detail": "Field New_Invoice.Due_Date property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_Invoice.Excise_Duty property format",
       "detail": "Field New_Invoice.Excise_Duty property format is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
@@ -1934,12 +1880,6 @@
       "kind": "deluge",
       "label": "silent drop field-property: New_Invoice.Grand_Total property format",
       "detail": "Field New_Invoice.Grand_Total property format is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Invoice.Invoice_Date property alloweddays",
-      "detail": "Field New_Invoice.Invoice_Date property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
     },
     {
@@ -2010,18 +1950,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Lead.ETA property alloweddays",
-      "detail": "Field New_Lead.ETA property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Lead.ETD property alloweddays",
-      "detail": "Field New_Lead.ETD property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_Lead.Gate_Way_Airport property displayformat",
       "detail": "Field New_Lead.Gate_Way_Airport property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
@@ -2030,12 +1958,6 @@
       "kind": "deluge",
       "label": "silent drop field-property: New_Lead.Gate_Way_Airport property sortorder",
       "detail": "Field New_Lead.Gate_Way_Airport property sortorder is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Lead.Lead_Expiration_Date property alloweddays",
-      "detail": "Field New_Lead.Lead_Expiration_Date property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
     },
     {
@@ -2256,18 +2178,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Quotation.ETA property alloweddays",
-      "detail": "Field New_Quotation.ETA property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Quotation.ETD property alloweddays",
-      "detail": "Field New_Quotation.ETD property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_Quotation.Gate_Way_Airport property displayformat",
       "detail": "Field New_Quotation.Gate_Way_Airport property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
@@ -2334,12 +2244,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Quotation.Start_Date property alloweddays",
-      "detail": "Field New_Quotation.Start_Date property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_Quotation.Sub_Total property format",
       "detail": "Field New_Quotation.Sub_Total property format is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
@@ -2352,12 +2256,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Quotation.Valid_Untill property alloweddays",
-      "detail": "Field New_Quotation.Valid_Untill property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_SOF.Appointment property displayformat",
       "detail": "Field New_SOF.Appointment property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
@@ -2366,12 +2264,6 @@
       "kind": "deluge",
       "label": "silent drop field-property: New_SOF.Appointment property sortorder",
       "detail": "Field New_SOF.Appointment property sortorder is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_SOF.Date_sof property alloweddays",
-      "detail": "Field New_SOF.Date_sof property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
     },
     {
@@ -2396,12 +2288,6 @@
       "kind": "deluge",
       "label": "silent drop field-property: New_SOF.Vessel_Name property sortorder",
       "detail": "Field New_SOF.Vessel_Name property sortorder is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Table_of_Container.Arrived_On property alloweddays",
-      "detail": "Field New_Table_of_Container.Arrived_On property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
     },
     {
@@ -2462,12 +2348,6 @@
       "kind": "deluge",
       "label": "silent drop field-property: New_Table_of_Container.Destination_Airport property sortorder",
       "detail": "Field New_Table_of_Container.Destination_Airport property sortorder is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Table_of_Container.ETA property alloweddays",
-      "detail": "Field New_Table_of_Container.ETA property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
     },
     {
@@ -3062,11 +2942,11 @@
       }
     ],
     "uiTodoCount": 1,
-    "silentDrops": 269,
+    "silentDrops": 249,
     "silentDropKinds": [
       {
         "construct": "field-property",
-        "count": 201
+        "count": 181
       },
       {
         "construct": "report-feature",
