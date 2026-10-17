@@ -1133,6 +1133,8 @@ test('the read-only island check refuses an await that is not a shim read', () =
 interface FieldGrant {
   fields?: string[];
   read?: boolean;
+  write?: boolean;
+  ownerScope?: 'view' | 'modify';
 }
 
 function rewritePolicy(files: { path: string; data: string | Buffer }[], profiles: Record<string, Record<string, FieldGrant>>): void {
@@ -1990,6 +1992,61 @@ test('an ExecuteFunction write call rejects tampered argument envelopes', async 
       assert.equal(out.status, 400, JSON.stringify({ args, body: out.body }));
       assert.equal((live.tables.get('Orders') ?? [])[0]?.Status, 'open');
     }
+  } finally {
+    live.restore();
+  }
+});
+
+test('an ExecuteFunction write call refuses an unauthenticated caller and injected arguments', async () => {
+  const writeFn = `update Orders[ID == id] [ Status : "closed" ];`;
+  const app = appWithFns([{ name: 'helpers.close', signature: 'void helpers.close(int id)', deluge: writeFn }], `${ORDERS}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n<% x = 1; %>\n${execButton('helpers.close', '7')}`)}`);
+  const { files, model } = generateUi(app);
+  const callPath = 'functions/custom/helpers-close-call.mjs';
+  assert.ok(uiSnippetFiles(model).some((f) => f.path === callPath));
+  const callMod = await loadTree(files, callPath);
+  const live = await liveStore({ Orders: [{ Status: 'open', Amount: 1 }] });
+  try {
+    const anon = await invoke(callMod.default as never, { body: { args: [1000] } });
+    assert.equal(anon.status, 401, JSON.stringify(anon.body));
+    for (const args of [[JSON.parse('{"__proto__":{"polluted":"yes"}}')], [JSON.parse('{"safe":{"__proto__":{"polluted":"yes"}}}')], [{ __row: true, form: 'Orders', values: { ID: 1000 } }]]) {
+      const out = await invoke(callMod.default as never, { ...USER, body: { args } });
+      assert.equal(out.status, 400, JSON.stringify({ args, body: out.body }));
+    }
+    assert.equal(({} as Record<string, unknown>).polluted, undefined, 'no prototype pollution');
+    assert.equal((live.tables.get('Orders') ?? [])[0]?.Status, 'open');
+  } finally {
+    live.restore();
+  }
+});
+
+test('an ExecuteFunction write call cannot reach a row outside the caller\'s owner scope', async () => {
+  const writeFn = `update Orders[ID == id] [ Status : "closed" ];`;
+  const app = appWithFns([{ name: 'helpers.close', signature: 'void helpers.close(int id)', deluge: writeFn }], `${ORDERS}\n${pageWithSnippet(`htmlpage hp1()\ncontent\n<% x = 1; %>\n${execButton('helpers.close', '7')}`)}`);
+  const { files, model } = generateUi(app);
+  const callPath = 'functions/custom/helpers-close-call.mjs';
+  assert.ok(uiSnippetFiles(model).some((f) => f.path === callPath));
+  // Clerk may update Orders but only rows it owns (Added_User == login user).
+  const callFile = files.find((f) => f.path === callPath);
+  assert.ok(callFile);
+  const callSrc = String(callFile.data);
+  const accessDecl = callSrc.match(/export const access = (\{.*\});/);
+  assert.ok(accessDecl, 'call module embeds its access policy');
+  const callAccess = JSON.parse(accessDecl[1]!) as { profiles: Record<string, Record<string, FieldGrant>> };
+  Object.assign(callAccess.profiles, { Clerk: { Orders: { write: true, ownerScope: 'view' } } });
+  callFile.data = callSrc.replace(accessDecl[0], `export const access = ${JSON.stringify(callAccess)};`);
+  const callMod = await loadTree(files, callPath);
+  const clerk = { user: { profile: 'Clerk', loginUser: 'cy@example.com', userId: 'u3' } };
+  const live = await liveStore({ Orders: [{ Status: 'open', Amount: 1, Added_User: 'bea@example.com' }, { Status: 'open', Amount: 2, Added_User: 'cy@example.com' }] });
+  try {
+    // Another user's ROWID is invisible to the caller-scoped read: no write persists.
+    const foreign = await invoke(callMod.default as never, { ...clerk, body: { args: [1000] } });
+    assert.notEqual(foreign.status, 500, JSON.stringify(foreign.body));
+    assert.equal((live.tables.get('Orders') ?? [])[0]?.Status, 'open');
+    // The same call on the caller's own row works, proving the write path itself.
+    const own = await invoke(callMod.default as never, { ...clerk, body: { args: [1001] } });
+    assert.equal(own.status, 200, JSON.stringify(own.body));
+    assert.equal((live.tables.get('Orders') ?? [])[1]?.Status, 'closed');
+    assert.equal((live.tables.get('Orders') ?? [])[0]?.Status, 'open');
   } finally {
     live.restore();
   }
