@@ -3,8 +3,8 @@ export type { Token, TokKind } from './lexer.js';
 export { parse, parseExpression } from './parser.js';
 export { reportCriteria, translate } from './translate.js';
 export type { AlertEventClass, StatementCover, TodoItem, TranslateOptions, TranslateResult, TranslateStats } from './translate.js';
-export { accessPolicyFor, conditionalFieldRules, dedupeTodos, fieldRuleDenials, flowSpecs, generate, residualDeterminism, slug, workflowKind, blueprintFieldSpecs } from './generate.js';
-export type { AlertDiagnostic, CoverageEntry, FlowSpec, GenerateOptions, GenerateResult, GeneratedFile, GenerateWarning, ResidualDeterminism, UiStubTodo } from './generate.js';
+export { accessPolicyFor, conditionalFieldRules, dedupeTodos, fieldRuleDenials, flowSpecs, formDateOrderRules, generate, residualDeterminism, slug, workflowKind, blueprintFieldSpecs } from './generate.js';
+export type { AlertDiagnostic, CoverageEntry, DateOrderConstraint, FlowSpec, FormDateOrderResult, GenerateOptions, GenerateResult, GeneratedFile, GenerateWarning, ResidualDeterminism, UiStubTodo } from './generate.js';
 export {
   SHIM_API,
   TRANSLATOR_VERSION,

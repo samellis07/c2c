@@ -15,7 +15,7 @@ import { accessPolicyFor, administratorProfiles, appUniqueColumnsOf, decimalColu
 import { analyzeConnections } from '../../deluge/src/connections.js';
 import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, fileFieldsByForm, subformLinksFor, writeLiveSource } from '../../deluge/src/field-store.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
-import type { WriteField } from '../../shims/src/access.js';
+import { writeRuleDeniedAt, type FieldRuleDenial, type WriteField } from '../../shims/src/access.js';
 import { LIMITS } from '../../shims/src/index.js';
 import { criteriaHasRelative, criteriaHasTodo, type Criteria } from '../../shims/src/criteria.js';
 import { generateSchema, type SchemaPlan } from '../../schema/src/generator.js';
@@ -3212,4 +3212,72 @@ function escapeText(value: string): string {
 
 function css(): string {
   return BASE_CSS;
+}
+
+/**
+ * Writable composite parts for each form and inline subform table, keyed by table name and field name.
+ * Derived from the UiModel and field rules, matching submitStub and authorizeWrite.
+ */
+export function writableCompositeParts(app: App): Map<string, Map<string, Set<string>>> {
+  const model = buildModel(app);
+  const out = new Map<string, Map<string, Set<string>>>();
+  const schema = schemaOf(app);
+
+  /**
+   * The parts of one composite node the submit handler would accept on
+   * insert. A posted part goes through the same checks the handler runs on
+   * every key: the composite's own hidden / read-only flags and a field-rule
+   * denial at `Comp`, then each part's flags and a denial at `Comp.Part`
+   * (or `Sub.Comp.Part` at subform depth). writeRuleDeniedAt is the
+   * handler's own matcher, so the seed never re-implements it.
+   */
+  const collect = (
+    node: WriteField,
+    dottedPrefix: string,
+    denied: readonly FieldRuleDenial[],
+    map: Map<string, Set<string>>,
+  ) => {
+    if (node.kind !== 'composite') return;
+    const dotted = `${dottedPrefix}${node.name}`;
+    const parts = new Set<string>();
+    if (!node.hidden && !node.readOnly && !writeRuleDeniedAt(dotted, denied, 'insert')) {
+      for (const child of node.fields ?? []) {
+        const childDotted = `${dotted}.${child.name}`;
+        if (!child.hidden && !child.readOnly && !writeRuleDeniedAt(childDotted, denied, 'insert')) {
+          parts.add(child.name);
+        }
+      }
+    }
+    map.set(node.name, parts);
+  };
+
+  for (const form of model.forms) {
+    const denied = fieldRuleDenials(app, form.name);
+    const { fields } = fieldNamesOf(form.fields, closedChoicesOf(app, form.name));
+    const formMap = new Map<string, Set<string>>();
+    for (const node of fields) collect(node, '', denied, formMap);
+    out.set(form.name, formMap);
+  }
+
+  for (const table of schema.tables) {
+    if (table.role !== 'child' || !table.subform) continue;
+    const parentForm = model.forms.find((f) => f.name === table.subform!.form);
+    const subformField = parentForm?.fields.find((f) => f.name === table.subform!.field);
+    if (!subformField) continue;
+    const denied = fieldRuleDenials(app, table.subform.form);
+    const subformNode = writeFieldOf(subformField, closedChoicesOf(app, table.subform.form));
+    const childMap = new Map<string, Set<string>>();
+    if (!subformNode.hidden && !subformNode.readOnly && !writeRuleDeniedAt(subformNode.name, denied, 'insert')) {
+      for (const child of subformNode.fields ?? []) {
+        collect(child, `${subformNode.name}.`, denied, childMap);
+      }
+    } else {
+      for (const child of subformNode.fields ?? []) {
+        if (child.kind === 'composite') childMap.set(child.name, new Set());
+      }
+    }
+    out.set(table.name, childMap);
+  }
+
+  return out;
 }

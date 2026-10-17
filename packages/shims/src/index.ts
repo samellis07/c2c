@@ -11,6 +11,7 @@ export {
   principalFromRequest,
   projectFields,
   projectReadable,
+  writeRuleDeniedAt,
   OWNER_FIELD,
   type AccessPolicy,
   type FieldRuleDenial,
