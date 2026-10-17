@@ -11,16 +11,16 @@
  * locally and fail under CI, where the install step is part of the run.
  */
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import ts from 'typescript';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { compareCells, compareDecimalCells } from '../../shims/src/criteria.js';
-import { TEMPLATE_DIR, hiddenParts, reactAppSpec } from '../src/index.js';
+import { TEMPLATE_DIR, compileTemplateLib, hiddenParts, reactAppSpec } from '../src/index.js';
 import type { FormSpec, ReportSpec } from '../template/lib/c2c-ui/types.js';
 
 function source(): string {
@@ -139,43 +139,10 @@ const MISSING = 'template runtime dependencies are not installed: run `npm ci --
 // Missing template dependencies skip the render tests locally; under CI the
 // install step is part of the run, so a missing runtime fails instead.
 const SKIP = runtimeReady ? false : process.env.CI === 'true' ? false : MISSING;
-const LIB = join(TEMPLATE_DIR, 'lib');
 
-/** Transpile lib/c2c-ui to ESM .js under <out>/lib; css imports get a stub module, bare specifiers get a node_modules link. */
 function compileLib(out: string): void {
   assert.ok(runtimeReady, MISSING);
-  const files: string[] = [];
-  const walk = (dir: string) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) walk(path);
-      else if (/\.tsx?$/.test(entry.name)) files.push(path);
-    }
-  };
-  walk(LIB);
-  mkdirSync(out, { recursive: true });
-  const stub = join(out, 'css-stub.mjs');
-  writeFileSync(stub, 'export default new Proxy({}, { get: (_, key) => String(key) });\n');
-  for (const file of files) {
-    const target = join(out, 'lib', relative(LIB, file).replace(/\.tsx?$/, '.js'));
-    mkdirSync(dirname(target), { recursive: true });
-    const { outputText } = ts.transpileModule(readFileSync(file, 'utf8'), {
-      fileName: file,
-      compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
-    });
-    const specifier = (pre: string, spec: string): string => {
-      if (spec.endsWith('.css')) {
-        const to = relative(dirname(target), stub).replace(/\\/g, '/');
-        return `${pre}'${to.startsWith('.') ? to : `./${to}`}'`;
-      }
-      return /\.[a-z]+$/.test(spec) ? `${pre}'${spec}'` : `${pre}'${spec}.js'`;
-    };
-    const rewritten = outputText
-      .replace(/^(\s*(?:import|export)\s[^'"]*?\bfrom\s*)['"](\.{1,2}\/[^'"]+)['"]/gm, (_all, pre: string, spec: string) => specifier(pre, spec))
-      .replace(/^(\s*import\s*)['"](\.{1,2}\/[^'"]+)['"]/gm, (_all, pre: string, spec: string) => specifier(pre, spec));
-    writeFileSync(target, rewritten);
-  }
-  symlinkSync(MODULES, join(out, 'node_modules'), 'dir');
+  compileTemplateLib(out);
 }
 
 type Row = Record<string, unknown>;
@@ -318,7 +285,7 @@ const ROWS: Row[] = [
 ];
 
 async function compileOnly(t: { after(fn: () => void): void }, tag: string): Promise<string> {
-  const out = join(tmpdir(), `c2c-report-render-${tag}-${process.pid}`);
+  const out = mkdtempSync(join(tmpdir(), `c2c-report-render-${tag}-`));
   t.after(() => rmSync(out, { recursive: true, force: true }));
   compileLib(out);
   return out;
