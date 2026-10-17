@@ -436,6 +436,8 @@ function runSuiteOnce(ctx, sha, suiteFile) {
   let res = { status: 1 };
   try {
     const args = [
+      '--max-old-space-size=2048',
+      '--test-timeout=120000',
       '--test',
       '--test-reporter=tap',
       '--test-reporter-destination',

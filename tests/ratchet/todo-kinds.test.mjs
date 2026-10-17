@@ -195,6 +195,8 @@ test('UPDATE_TODO_RATCHET=1 still fails when a fixture count rises', () => {
   const child = spawnSync(
     process.execPath,
     [
+      '--max-old-space-size=2048',
+      '--test-timeout=120000',
       '--test',
       '--test-name-pattern',
       '^TODO kinds ratchet on committed fixtures$',
