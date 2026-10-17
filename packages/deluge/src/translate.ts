@@ -5787,7 +5787,7 @@ function namedCall(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fal
   if (name === 'leftPad') return mergeFx(`shim.string.leftPad(${args.map((a) => a.code).join(', ')})`, args, { shim: true });
   if (name === 'rightPad') return mergeFx(`shim.string.rightPad(${args.map((a) => a.code).join(', ')})`, args, { shim: true });
   if (name === 'removeAllAlpha') return mergeFx(`shim.string.removeAllAlpha(${args[0]?.code ?? 'null'})`, args, { shim: true });
-  if (name === 'toDecimal') return mergeFx(`shim.convert.toDecimal(${args[0]?.code ?? 'null'})`, args, { shim: true, decimal: true });
+  if (name === 'toDecimal') return mergeFx(`shim.convert.toDecimal(${args[0]?.code ?? 'null'}, ctx)`, args, { shim: true, decimal: true });
   if (name === 'sin' || name === 'cos' || name === 'tan' || name === 'asin') {
     return mergeFx(`shim.number.${name}(${args[0]?.code ?? 'null'})`, args, { shim: true, decimal: true });
   }
