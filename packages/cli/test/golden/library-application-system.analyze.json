@@ -509,12 +509,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: Book_Transaction.Issue_date property alloweddays",
-      "detail": "Field Book_Transaction.Issue_date property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: Book_Transaction.Member property displayformat",
       "detail": "Field Book_Transaction.Member property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
@@ -527,20 +521,8 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: Book_Transaction.Return_date property alloweddays",
-      "detail": "Field Book_Transaction.Return_date property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: Book.Genre property others option",
       "detail": "Field Book.Genre property others option is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app"
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: Member_Info.Membership_Start_Date property alloweddays",
-      "detail": "Field Member_Info.Membership_Start_Date property alloweddays is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app"
     },
     {
@@ -628,11 +610,11 @@
     "fillLockEntries": 0,
     "todoKinds": [],
     "uiTodoCount": 0,
-    "silentDrops": 21,
+    "silentDrops": 18,
     "silentDropKinds": [
       {
         "construct": "field-property",
-        "count": 12
+        "count": 9
       },
       {
         "construct": "report-feature",

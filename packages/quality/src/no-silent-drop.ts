@@ -258,7 +258,7 @@ function auditFieldProperties(app: App, out: AuditOutputs, rows: CoverageRow[]):
   eachField(app, (formName, field) => {
     const status = fieldRow.get(`${formName}.${field.name}`);
     if (status !== 'emitted' && status !== 'counted') return;
-    const items = fieldSettingItems(field, app);
+    const items = fieldSettingItems(field, app, formName, out.schema);
     if (status === 'counted' || fieldListed(out, formName, field)) {
       for (const item of items) {
         rows.push({ kind: 'field-property', name: `${formName}.${field.name} ${item.label}`, status: 'counted', via: 'field manual item' });
@@ -295,15 +295,16 @@ interface FieldSetting {
   proved: (ui: UiField | undefined, columns: SchemaColumn[]) => boolean;
 }
 
-function fieldSettingItems(field: Field, app: App): FieldSetting[] {
+function fieldSettingItems(field: Field, app: App, formName: string, schema: SchemaPlan): FieldSetting[] {
   const span = field.span;
   const items: FieldSetting[] = [];
   for (const p of field.properties) {
+    const bidirectional = p.key.trim().toLowerCase() === 'bidirectional';
     items.push({
       label: `property ${p.key}`,
       start: p.span.start,
       end: p.span.end,
-      proved: (ui, columns) => propertyProved(p, field, ui, columns, app),
+      proved: (ui, columns) => (bidirectional ? bidirectionalProved(p, field, formName, app, schema) : propertyProved(p, field, ui, columns, app)),
     });
   }
   for (const modifier of field.modifiers) {
@@ -414,6 +415,7 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   if (key === 'width') return ui?.width === text;
   if (key === 'height') return ui?.height === text;
   if (key === 'visibility') return visibilityProved(text, ui);
+  if (key === 'alloweddays') return allowedDaysProved(text, ui);
   if (key === 'start index') {
     const rawTrim = raw.trim();
     return columns.some((column) => {
@@ -449,6 +451,56 @@ function visibilityProved(text: string, ui: UiField | undefined): boolean {
   const shown = text.toLowerCase() !== 'false';
   if (!shown) return ui?.visibility === false;
   return ui?.visibility !== false;
+}
+
+/**
+ * `alloweddays = 0,1,2,3,4,5,6` (every weekday) is the Creator default. The
+ * generated date and datetime widgets are native inputs with no weekday
+ * restriction, so every day stays selectable. A restricted set is not emitted.
+ */
+function allowedDaysProved(text: string, ui: UiField | undefined): boolean {
+  if (ui?.widget !== 'date' && ui?.widget !== 'datetime') return false;
+  const days = new Set(text.split(',').map((day) => day.trim()));
+  return days.size === 7 && ['0', '1', '2', '3', '4', '5', '6'].every((day) => days.has(day));
+}
+
+/**
+ * A `bidirectional = Back` lookup pair is stored as one foreign key, which the
+ * schema generator places from the linked grid side (packages/schema
+ * generator.ts pendingRefs): a grid on form A pointing at T names its reverse
+ * column `Back` on T, related to A's table, or reuses that column when T
+ * already declares it. The pair is proved only when that named column exists
+ * with the right relation and the generator did not fall back to an unnamed
+ * back column. A pair without a linked grid side gets no reverse column from
+ * the schema generator and is not proved here.
+ */
+function bidirectionalProved(p: Property, field: Field, formName: string, app: App, schema: SchemaPlan): boolean {
+  const target = field.lookup?.form;
+  const back = unquote(p.value).trim();
+  if (!target || !back) return false;
+  const table = (form: string): string | undefined => schema.tables.find((t) => t.form === form && t.role === 'form')?.name;
+  const own = table(formName);
+  const other = table(target);
+  if (!own || !other) return false;
+  const linkedGrid = (item: Field | undefined, to: string): boolean =>
+    item !== undefined && ['grid', 'subform', 'form'].includes((item.type ?? '').trim().toLowerCase()) && item.lookup?.form === to;
+  // The FK column `name` on the holder form's own table relates to table
+  // `to`, and no fallback back column (created without the bidirectional name)
+  // relates the same two tables. A same-named column on one of the form's
+  // child or junction tables is unrelated storage and never proves the pair.
+  const stored = (holder: string, name: string, to: string): boolean => {
+    const holderTable = schema.tables.find((t) => t.form === holder && t.role === 'form');
+    if (!holderTable) return false;
+    const ident = schemaIdent(name, 'col');
+    const named = holderTable.columns.filter((column) => column.field === name || column.name === name || column.name === ident);
+    if (!named.some((column) => column.relation?.table === to)) return false;
+    return !holderTable.columns.some((column) => column.creatorType === 'subform' && column.relation?.table === to && !named.includes(column));
+  };
+  if (linkedGrid(field, target)) return stored(target, back, own);
+  const partner = app.forms.find((form) => form.name === target)?.fields.find((item) => item.name === back);
+  const partnerBack = partner?.properties.find((item) => item.key.trim().toLowerCase() === 'bidirectional');
+  if (!linkedGrid(partner, formName) || unquote(partnerBack?.value ?? '').trim() !== field.name) return false;
+  return stored(formName, field.name, other);
 }
 
 function choicesProved(field: Field, ui: UiField | undefined): boolean {

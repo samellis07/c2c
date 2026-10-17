@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { emptyApp, parseProject, type App, type Field, type Workflow } from '../../core/src/index.js';
+import { deriveIr, emptyApp, parse, parseProject, type App, type Field, type Workflow } from '../../core/src/index.js';
 import { FORM_EVENT_SERVER_UNINVOKED, assertNoSkippedStatements, clientPostsServerPath, generate } from '../../deluge/src/generate.js';
 import { assertCovered, auditApp, collectOutputs, coverageLedger, groupDrops, renderNoSilentDrop, SilentDropError } from '../src/no-silent-drop.js';
 
@@ -1183,3 +1183,181 @@ for (const [label, successes, expected] of [
     assert.equal(auditApp(orders, out).filter((d) => d.kind === 'workflow').length, 0);
   });
 }
+
+function dsApp(body: string): App {
+  return deriveIr(parse(`application "Demo"\n{\n${body}\n}\n`));
+}
+
+function rowStatus(source: App, out: ReturnType<typeof collectOutputs>, name: string): string | undefined {
+  return coverageLedger(source, out).find((row) => row.name === name)?.status;
+}
+
+const LINKED_PAIR = `
+	form Company
+	{
+		Branches
+		(
+			type = grid
+			values = Site.ID
+			bidirectional = Owner
+		)
+	}
+	form Site
+	{
+		Name
+		(
+			type = text
+		)
+		Owner
+		(
+			type = picklist
+			values = Company.ID
+			bidirectional = Branches
+		)
+	}
+`;
+
+test('a bidirectional lookup pair is emitted only when the schema stores its named reverse column', () => {
+  const source = dsApp(LINKED_PAIR);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Company.Branches property bidirectional'), 'emitted');
+  assert.equal(rowStatus(source, out, 'Site.Owner property bidirectional'), 'emitted');
+
+  // The reverse relation gone from the generated schema: both sides drop.
+  const unrelated = cloneOutputs(out);
+  for (const table of unrelated.schema.tables) {
+    for (const column of table.columns) if (column.name === 'Owner') delete column.relation;
+  }
+  assert.equal(rowStatus(source, unrelated, 'Company.Branches property bidirectional'), 'dropped');
+  assert.equal(rowStatus(source, unrelated, 'Site.Owner property bidirectional'), 'dropped');
+
+  // A generator that ignored the name and added its fallback back column.
+  const fallback = cloneOutputs(out);
+  const site = fallback.schema.tables.find((table) => table.form === 'Site')!;
+  const owner = site.columns.find((column) => column.name === 'Owner')!;
+  site.columns.push({ ...owner, name: 'Company_id', creatorType: 'subform', field: undefined });
+  assert.equal(rowStatus(source, fallback, 'Company.Branches property bidirectional'), 'dropped');
+  assert.equal(rowStatus(source, fallback, 'Site.Owner property bidirectional'), 'dropped');
+});
+
+test('a grid whose reverse field is not declared is proved by the back column the schema generator creates', () => {
+  const source = dsApp(`
+	form Company
+	{
+		Branches
+		(
+			type = grid
+			values = Site.ID
+			bidirectional = Head_Office
+		)
+	}
+	form Site
+	{
+		Name
+		(
+			type = text
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const back = out.schema.tables.find((table) => table.form === 'Site')!.columns.find((column) => column.name === 'Head_Office');
+  assert.equal(back?.relation?.table, out.schema.tables.find((table) => table.form === 'Company')!.name);
+  assert.equal(rowStatus(source, out, 'Company.Branches property bidirectional'), 'emitted');
+
+  const missing = cloneOutputs(out);
+  const site = missing.schema.tables.find((table) => table.form === 'Site')!;
+  site.columns = site.columns.filter((column) => column.name !== 'Head_Office');
+  assert.equal(rowStatus(source, missing, 'Company.Branches property bidirectional'), 'dropped');
+});
+
+test('a same-named lookup on a child table never proves the reverse column of the form table', () => {
+  const source = dsApp(`
+	form Parent
+	{
+		Kids
+		(
+			type = grid
+			values = Child.ID
+			bidirectional = Back
+		)
+	}
+	form Child
+	{
+		Back
+		(
+			type = text
+		)
+		Inner
+		(
+			type = grid
+			Back
+			(
+				type = picklist
+				values = Parent.ID
+			)
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const parent = out.schema.tables.find((table) => table.form === 'Parent' && table.role === 'form')!;
+  const inner = out.schema.tables.find((table) => table.form === 'Child' && table.role !== 'form' && table.columns.some((column) => column.name === 'Back'));
+  assert.equal(inner?.columns.find((column) => column.name === 'Back')?.relation?.table, parent.name);
+  const own = out.schema.tables.find((table) => table.form === 'Child' && table.role === 'form')!;
+  assert.equal(own.columns.find((column) => column.name === 'Back')?.relation, undefined);
+  assert.equal(rowStatus(source, out, 'Parent.Kids property bidirectional'), 'dropped');
+});
+
+test('a bidirectional pair without a linked grid side gets no reverse relation and stays a drop', () => {
+  const source = dsApp(`
+	form Company
+	{
+		Main_Site
+		(
+			type = picklist
+			values = Site.ID
+			bidirectional = Owner
+		)
+	}
+	form Site
+	{
+		Owner
+		(
+			type = picklist
+			values = Company.ID
+			bidirectional = Main_Site
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Company.Main_Site property bidirectional'), 'dropped');
+  assert.equal(rowStatus(source, out, 'Site.Owner property bidirectional'), 'dropped');
+});
+
+test('alloweddays is emitted only for every weekday on a generated date widget', () => {
+  const days = (value: string, type = 'date'): string => `
+	form Visit
+	{
+		Day
+		(
+			type = ${type}
+			alloweddays = ${value}
+		)
+	}
+`;
+  const all = dsApp(days('0,1,2,3,4,5,6'));
+  const out = collectOutputs(all);
+  assert.equal(rowStatus(all, out, 'Visit.Day property alloweddays'), 'emitted');
+  const datetime = dsApp(days('0,1,2,3,4,5,6', 'datetime'));
+  assert.equal(rowStatus(datetime, collectOutputs(datetime), 'Visit.Day property alloweddays'), 'emitted');
+
+  // A restricted set is not enforced by the generated input.
+  for (const value of ['1,2,3,4,5', '0', '0,1,2,3,4,5,5']) {
+    const restricted = dsApp(days(value));
+    assert.equal(rowStatus(restricted, collectOutputs(restricted), 'Visit.Day property alloweddays'), 'dropped', value);
+  }
+
+  // Not a native date input any more: the default is no longer shown to hold.
+  const notDate = cloneOutputs(out);
+  notDate.model.forms[0]!.fields.find((item) => item.name === 'Day')!.widget = 'text';
+  assert.equal(rowStatus(all, notDate, 'Visit.Day property alloweddays'), 'dropped');
+});
