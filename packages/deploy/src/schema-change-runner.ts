@@ -3,7 +3,10 @@
  *
  * Deploys an app to the in-process Catalyst harness (the generated c2c_api
  * function over the offline SDK stand-in), seeds rows through the API, then
- * applies a sequence of Creator-side changes to a copy of the .ds. Each change
+ * applies a sequence of Creator-side changes to a copy of the .ds. The target
+ * form, its fields and the seed rows are derived from the parsed model
+ * (`deriveScenarios`); a scenario the app has no form or field for is a
+ * counted gap with the reason. Each change
  * goes through `c2c plan --previous`, the schema delta is applied to the
  * harness store, and the new tree is redeployed and read back. Additive
  * changes must keep every row and value; a drop or rename must be refused
@@ -15,7 +18,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import Module, { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import type { App } from '../../core/src/ir.js';
+import { parseCst } from '../../core/src/cst.js';
+import { closedChoices, deriveIr, unquote, type App, type Field, type Form } from '../../core/src/ir.js';
+import { generateSeed, type SeedResult } from '../../data/src/seed.js';
 import { generateSchema, type SchemaColumn, type SchemaTable } from '../../schema/src/generator.js';
 import { deployCli, loadApp, type Io } from './cli.js';
 import { applySchemaDelta, modelPlan, planDelta, type StoreDriver } from './delta.js';
@@ -23,6 +28,7 @@ import type { FieldRename } from './edit.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from './guards.js';
 import { parseCsv } from './csv.js';
 import { planCli } from './offline-plan.js';
+import { childIndex, recordPlan, seedRecord } from './perf-seed.js';
 import { deployFiles, writeDeployTree } from './plan.js';
 import { rollbackBackupProblem, rollbackExport, STORE_SYSTEM_COLUMNS } from './rollback.js';
 
@@ -59,6 +65,12 @@ export interface SchemaChangeGap {
 export interface SchemaChangeReport {
   schema: 'c2c-scorecard-d12/1';
   app: string;
+  /** The form and fields the scenarios were derived for; absent when no form qualifies. */
+  target?: ScenarioTarget;
+  /** Seed cells left out because the app's admin profile may not write them (`Form.Field[.part]`). */
+  seedSkipped: string[];
+  /** Forms left out because the deployed API refused their seed row, with the refusal. */
+  seedRefused: string[];
   scenarios: ScenarioResult[];
   gaps: SchemaChangeGap[];
   summary: { pass: number; fail: number; gaps: number };
@@ -71,66 +83,296 @@ interface FakeSdk {
   state(): { tables: Record<string, Row[]> };
 }
 
-function replaceOnce(text: string, pattern: RegExp, by: string, what: string): string {
-  if (!pattern.test(text)) throw new Error(`schema change anchor not found: ${what}`);
-  return text.replace(pattern, by);
+/** The scenario ids, in run order. */
+export const SCENARIO_IDS = ['add-field', 'add-form', 'picklist-add', 'picklist-remove', 'rename-field', 'delete-field'] as const;
+
+/** Seed rows per form: one row holds the choice the picklist-remove step drops. */
+const SEED_ROWS = 3;
+const SEED_TAG = 'c2c-schema-change';
+
+/** Field types whose seeded cell is one scalar the store keeps as written. */
+const SCALAR_TYPES = new Set(['text', 'textarea', 'email', 'number', 'decimal', 'currency', 'percent', 'url', 'phonenumber', 'date']);
+
+/** Field types the offline seed posts no cell for: no Stratus objects and no user list offline. */
+const UNSEEDED_TYPES = new Set(['upload file', 'image', 'audio', 'video', 'signature', 'users']);
+
+/** The form the scenarios run against and the fields each scenario changes. */
+export interface ScenarioTarget {
+  form: string;
+  /** Text field the rename-field step renames. */
+  text?: string;
+  /** Closed-choice picklist the picklist steps change. */
+  picklist?: string;
+  /** The choice a seeded row holds, removed by picklist-remove. */
+  removedChoice?: string;
+  addedChoice?: string;
+  /** Optional scalar field the delete-field step drops. */
+  deletable?: string;
+  addedField: string;
+  addedForm: string;
+  renamedTo?: string;
 }
 
-/** The library sequence: add field, add form, picklist add and remove, rename field, delete field. */
-export const LIBRARY_CHANGES: readonly SchemaChange[] = [
-  {
-    id: 'add-field',
-    title: 'add field Book.Shelf_Code',
-    kind: 'additive',
-    apply: (ds) =>
-      replaceOnce(ds, /^(\t+)Mark_as_Featured$/m, '$1Shelf_Code\n$1(\n$1\ttype = text\n$1\tdisplayname = "Shelf Code"\n$1)\n$1Mark_as_Featured', 'Book.Mark_as_Featured'),
-  },
-  {
-    id: 'add-form',
-    title: 'add form Branch',
-    kind: 'additive',
-    apply: (ds) =>
-      replaceOnce(ds, /^(\t+)form Member_Info$/m, '$1form Branch\n$1{\n$1\tBranch_Name\n$1\t(\n$1\t\ttype = text\n$1\t\tdisplayname = "Branch Name"\n$1\t)\n$1}\n$1form Member_Info', 'form Member_Info'),
-  },
-  {
-    id: 'picklist-add',
-    title: 'add choice "Poetry" to Book.Genre',
-    kind: 'additive',
-    apply: (ds) => replaceOnce(ds, /values = \{"Sci-Fi","Biography","Non-Fiction","Fiction"\}/, 'values = {"Sci-Fi","Biography","Non-Fiction","Fiction","Poetry"}', 'Book.Genre values'),
-  },
-  {
-    id: 'picklist-remove',
-    title: 'remove choice "Biography" from Book.Genre (a seeded row holds it)',
-    kind: 'additive',
-    apply: (ds) => replaceOnce(ds, /values = \{"Sci-Fi","Biography","Non-Fiction","Fiction","Poetry"\}/, 'values = {"Sci-Fi","Non-Fiction","Fiction","Poetry"}', 'Book.Genre values'),
-  },
-  {
-    id: 'rename-field',
-    title: 'rename field Book.Author -> Writer',
-    kind: 'destructive',
-    apply: (ds) => replaceOnce(ds, /^(\s+)Author(\s*)$/gm, '$1Writer$2', 'Book.Author'),
-    renames: [{ form: 'Book', from: 'Author', to: 'Writer' }],
-  },
-  {
-    id: 'delete-field',
-    title: 'delete field Book.Rating',
-    kind: 'destructive',
-    apply: (ds) =>
-      replaceOnce(
-        replaceOnce(ds, /^\t+Rating\n\t+\(\n(?:[^\n]*\n)*?\t+\)\n/m, '', 'Book.Rating field'),
-        /^\s+Rating as "Rating \(1-5\)"\n/gm,
-        '',
-        'Book.Rating report columns',
-      ),
-  },
-];
+export interface DerivedScenarios {
+  target?: ScenarioTarget;
+  changes: SchemaChange[];
+  /** One gap per scenario the app has no form or field for. */
+  gaps: SchemaChangeGap[];
+  seed: SeedResult;
+}
 
-/** Library seed rows: one holds the choice the picklist-remove step drops. */
-export const LIBRARY_SEED: readonly { form: string; record: Row }[] = [
-  { form: 'Book', record: { Title: 'Dune', Author: 'Frank Herbert', Genre: 'Sci-Fi', Publication_Year: 1965, Rating: 5 } },
-  { form: 'Book', record: { Title: 'Long Walk', Author: 'Nelson Mandela', Genre: 'Biography', Publication_Year: 1994, Rating: 4 } },
-  { form: 'Book', record: { Title: 'Emma', Author: 'Jane Austen', Genre: 'Fiction', Publication_Year: 1815, Rating: 3 } },
-];
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** A line that names the field and nothing else: its declaration (after any modifiers) or a report or layout column. */
+function bareLine(name: string, flags = 'm'): RegExp {
+  return new RegExp(`^(\\s*(?:[a-z]+\\s+)*)${escapeRegExp(name)}((?:\\s+as\\s+"(?:[^"\\\\\\n]|\\\\.)*")?[ \\t]*)$`, flags);
+}
+
+const LABEL_LINE = /^\s*(?:displayname|description|tooltip|placeholder)\s*=\s*"/i;
+/** The export header and script comments: `/* ... *\/` lines and `//` lines name no field. */
+const COMMENT_LINE = /^\s*(?:\/\*|\*|\/\/)/;
+
+/**
+ * True when the field is referenced only by bare lines (its declaration and
+ * report or layout columns) and display labels, so a text edit of those lines
+ * renames or removes every reference. A criteria, lookup, formula, script or
+ * page that names the field makes it unsuitable. With `noColumnOptions`, a
+ * column line may not open an options block either (a delete would orphan it).
+ */
+function onlyBareReferences(ds: string, name: string, noColumnOptions: boolean): boolean {
+  const word = new RegExp(`\\b${escapeRegExp(name)}\\b`);
+  const bare = bareLine(name, '');
+  const lines = ds.split('\n');
+  let blocks = 0;
+  for (const [i, line] of lines.entries()) {
+    if (!word.test(line)) continue;
+    if (LABEL_LINE.test(line) || COMMENT_LINE.test(line)) continue;
+    if (!bare.test(line)) return false;
+    const next = lines.slice(i + 1).find((l) => l.trim() !== '');
+    if (next?.trim().startsWith('(')) blocks += 1;
+  }
+  return noColumnOptions ? blocks === 1 : blocks >= 1;
+}
+
+function freshName(ds: string, base: string): string {
+  for (let i = 1; ; i++) {
+    const name = i === 1 ? base : `${base}_${i}`;
+    if (!new RegExp(`\\b${escapeRegExp(name)}\\b`).test(ds)) return name;
+  }
+}
+
+function freshChoice(choices: readonly string[], base: string): string {
+  for (let i = 1; ; i++) {
+    const name = i === 1 ? base : `${base} ${i}`;
+    if (!choices.includes(name)) return name;
+  }
+}
+
+function modelOf(ds: string): App {
+  return deriveIr(parseCst(ds));
+}
+
+function fieldIn(ds: string, form: string, field: string): Field {
+  const found = modelOf(ds).forms.find((f) => f.name === form)?.fields.find((f) => f.name === field);
+  if (!found) throw new Error(`schema change anchor not found: ${form}.${field}`);
+  return found;
+}
+
+function lineStart(text: string, at: number): number {
+  return text.lastIndexOf('\n', at - 1) + 1;
+}
+
+function indentAt(text: string, at: number): string {
+  const start = lineStart(text, at);
+  return /^[ \t]*/.exec(text.slice(start))![0];
+}
+
+/** Rewrites the `values = {...}` list inside one field's declaration. */
+function editChoices(ds: string, form: string, field: string, edit: (tokens: string[]) => string[]): string {
+  const span = fieldIn(ds, form, field).span;
+  const body = ds.slice(span.start, span.end);
+  const match = /values\s*=\s*\{([^}]*)\}/.exec(body);
+  if (!match) throw new Error(`schema change anchor not found: ${form}.${field} values`);
+  const tokens = match[1]!.match(/"(?:[^"\\]|\\.)*"/g) ?? [];
+  const at = span.start + match.index + match[0].indexOf('{');
+  return `${ds.slice(0, at)}{${edit(tokens).join(',')}}${ds.slice(at + match[0].length - match[0].indexOf('{'))}`;
+}
+
+function quoteChoice(choice: string): string {
+  return `"${choice.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+function gap(id: string, detail: string): SchemaChangeGap {
+  return { id: `no-${id}`, scenario: id, detail };
+}
+
+/**
+ * The six scenarios for one app, from its parsed model. The target is the
+ * first form (declaration order) with the most of: a renameable text field,
+ * a closed-choice picklist with two or more choices, and a deletable optional
+ * scalar field; only forms the seed can fill count (`refusedForms`: forms whose
+ * seed rows the deployed API refused, with the refusal). A scenario the target
+ * cannot carry is a gap with the reason, never a pass.
+ */
+export function deriveScenarios(app: App, ds: string, refusedForms: ReadonlyMap<string, string> = new Map()): DerivedScenarios {
+  const seed = generateSeed(app, { n: SEED_ROWS, seed: SEED_TAG });
+  const blocked = new Set(seed.blockers.map((b) => b.form));
+  const seeded = new Map(seed.tables.map((t) => [t.form, t]));
+  const names = new Map<string, number>();
+  for (const form of app.forms) for (const field of form.fields) names.set(field.name, (names.get(field.name) ?? 0) + 1);
+  const unique = (field: Field) => names.get(field.name) === 1 && !/[^A-Za-z0-9_]/.test(field.name);
+  const type = (field: Field) => (field.type ?? '').trim().toLowerCase();
+  const held = (form: string, field: string) => seeded.get(form)?.rows.map((r) => r.columns[field]).find((v) => v !== undefined && v !== '');
+
+  const byName = new Map(app.forms.map((f) => [f.name, f]));
+  const fieldsOf = (form: Form) => form.fields.flatMap((f) => [f, ...f.subfields]);
+  // Why the API seed cannot fill a form (undefined when it can): the form or a
+  // form its seed rows look up is blocked, has no seeded rows, has a required
+  // cell the offline seed leaves out (file, image, users ...), or refused a seed
+  // row; or the rows look each other up in a cycle (no posting order exists).
+  const unfillable = (name: string): string | undefined => {
+    const deps = seedDependencies(seed, name);
+    if (!seedOrder(seed, [...deps])) return `${name}: its seed rows and the rows they look up (${[...deps].sort(compareText).join(', ')}) look each other up in a cycle`;
+    for (const dep of deps) {
+      const form = byName.get(dep);
+      if (!form) continue;
+      const via = dep === name ? '' : ` (looked up by ${name})`;
+      if (refusedForms.has(dep)) return `${dep}${via}: the deployed API refused a seed row: ${refusedForms.get(dep)}`;
+      if (blocked.has(dep)) return `${dep}${via}: ${seed.blockers.find((b) => b.form === dep)!.message}`;
+      if (!seeded.get(dep)?.rows.length) return `${dep}${via}: the seed generates no rows`;
+      const unseeded = fieldsOf(form).find((f) => f.required && UNSEEDED_TYPES.has(type(f)));
+      if (unseeded) return `${dep}${via}: required ${type(unseeded)} field ${unseeded.name} has no offline seed value`;
+    }
+    return undefined;
+  };
+  const refused: string[] = [];
+  let best: { form: Form; text?: Field; picklist?: Field; deletable?: Field; score: number } | undefined;
+  for (const form of app.forms) {
+    const why = form.fields.length ? unfillable(form.name) : `${form.name}: no fields`;
+    if (why) {
+      refused.push(why);
+      continue;
+    }
+    const text = form.fields.find((f) => type(f) === 'text' && unique(f) && held(form.name, f.name) !== undefined && onlyBareReferences(ds, f.name, false));
+    const picklist = form.fields.find((f) => (closedChoices(f)?.length ?? 0) >= 2 && held(form.name, f.name) !== undefined);
+    const deletable = [...form.fields]
+      .reverse()
+      .find((f) => f !== text && f !== picklist && SCALAR_TYPES.has(type(f)) && !f.required && !f.unique && unique(f) && held(form.name, f.name) !== undefined && onlyBareReferences(ds, f.name, true));
+    const score = Number(!!text) + Number(!!picklist) + Number(!!deletable);
+    if (!best || score > best.score) best = { form, text, picklist, deletable, score };
+  }
+
+  const gaps: SchemaChangeGap[] = [];
+  if (!best) {
+    const detail = `no form the seed can fill${refused.length ? `: ${refused.join('; ')}` : ' (the app declares no form)'}`;
+    for (const id of SCENARIO_IDS) gaps.push(gap(id, detail));
+    return { changes: [], gaps, seed };
+  }
+  const form = best.form.name;
+  const choices = best.picklist ? closedChoices(best.picklist)! : [];
+  const target: ScenarioTarget = {
+    form,
+    addedField: freshName(ds, 'Added_Field'),
+    addedForm: freshName(ds, 'Added_Form'),
+    ...(best.text ? { text: best.text.name, renamedTo: freshName(ds, `${best.text.name}_Renamed`) } : {}),
+    ...(best.picklist ? { picklist: best.picklist.name, removedChoice: held(form, best.picklist.name)!, addedChoice: freshChoice(choices, 'Added Choice') } : {}),
+    ...(best.deletable ? { deletable: best.deletable.name } : {}),
+  };
+  const changes: SchemaChange[] = [
+    {
+      id: 'add-field',
+      title: `add field ${form}.${target.addedField}`,
+      kind: 'additive',
+      apply: (text) => {
+        const fields = modelOf(text).forms.find((f) => f.name === form)?.fields ?? [];
+        const last = fields[fields.length - 1];
+        if (!last) throw new Error(`schema change anchor not found: ${form} fields`);
+        const ind = indentAt(text, last.span.start);
+        const block = `\n${ind}${target.addedField}\n${ind}(\n${ind}\ttype = text\n${ind}\tdisplayname = "${target.addedField.replace(/_/g, ' ')}"\n${ind})`;
+        return text.slice(0, last.span.end) + block + text.slice(last.span.end);
+      },
+    },
+    {
+      id: 'add-form',
+      title: `add form ${target.addedForm}`,
+      kind: 'additive',
+      apply: (text) => {
+        const at = modelOf(text).forms.find((f) => f.name === form)?.span.start;
+        if (at === undefined) throw new Error(`schema change anchor not found: form ${form}`);
+        const ind = indentAt(text, at);
+        const start = lineStart(text, at);
+        const block = `${ind}form ${target.addedForm}\n${ind}{\n${ind}\tName_Text\n${ind}\t(\n${ind}\t\ttype = text\n${ind}\t\tdisplayname = "Name Text"\n${ind}\t)\n${ind}}\n`;
+        return text.slice(0, start) + block + text.slice(start);
+      },
+    },
+  ];
+  if (target.picklist) {
+    const field = target.picklist;
+    changes.push(
+      {
+        id: 'picklist-add',
+        title: `add choice "${target.addedChoice}" to ${form}.${field}`,
+        kind: 'additive',
+        apply: (text) => editChoices(text, form, field, (tokens) => [...tokens, quoteChoice(target.addedChoice!)]),
+      },
+      {
+        id: 'picklist-remove',
+        title: `remove choice "${target.removedChoice}" from ${form}.${field} (a seeded row holds it)`,
+        kind: 'additive',
+        apply: (text) =>
+          editChoices(text, form, field, (tokens) => {
+            const kept = tokens.filter((t) => unquote(t) !== target.removedChoice);
+            if (kept.length === tokens.length) throw new Error(`schema change anchor not found: ${form}.${field} choice ${target.removedChoice}`);
+            return kept;
+          }),
+      },
+    );
+  } else {
+    const reason = `form ${form} has no closed-choice picklist with two or more choices that the seed fills`;
+    gaps.push(gap('picklist-add', reason), gap('picklist-remove', reason));
+  }
+  if (target.text) {
+    const from = target.text;
+    const to = target.renamedTo!;
+    changes.push({
+      id: 'rename-field',
+      title: `rename field ${form}.${from} -> ${to}`,
+      kind: 'destructive',
+      apply: (text) => {
+        const bare = bareLine(from, 'gm');
+        if (!bare.test(text)) throw new Error(`schema change anchor not found: ${form}.${from}`);
+        return text.replace(bare, `$1${to}$2`);
+      },
+      renames: [{ form, from, to }],
+    });
+  } else {
+    gaps.push(gap('rename-field', `form ${form} has no text field with seeded values whose only references are its declaration and report columns`));
+  }
+  if (target.deletable) {
+    const name = target.deletable;
+    changes.push({
+      id: 'delete-field',
+      title: `delete field ${form}.${name}`,
+      kind: 'destructive',
+      apply: (text) => {
+        const span = fieldIn(text, form, name).span;
+        const end = text[span.end] === '\n' ? span.end + 1 : span.end;
+        const cut = text.slice(0, lineStart(text, span.start)) + text.slice(end);
+        return cut.replace(new RegExp(`${bareLine(name).source}\\n`, 'gm'), '');
+      },
+    });
+  } else {
+    gaps.push(gap('delete-field', `form ${form} has no optional, non-unique scalar field with seeded values whose only references are its declaration and report columns`));
+  }
+  changes.sort((a, b) => SCENARIO_IDS.indexOf(a.id as (typeof SCENARIO_IDS)[number]) - SCENARIO_IDS.indexOf(b.id as (typeof SCENARIO_IDS)[number]));
+  return { target, changes, gaps, seed };
+}
 
 function guardFor(app: App): GuardOk {
   return {
@@ -183,13 +425,26 @@ class Harness {
     this.sdk.setSession(SESSION, { user_id: '1', email_id: 'admin@example.test', role_details: { role_name: 'App Administrator' } });
   }
 
+  /** Empties every table (the column lists stay). */
+  clear(): void {
+    for (const rows of Object.values(this.sdk.state().tables)) rows.splice(0);
+  }
+
   tables(): Record<string, Row[]> {
     return this.sdk.state().tables;
+  }
+
+  private routes: Record<string, string> = {};
+
+  /** The path when the deployed c2c_api serves `POST path`. */
+  route(path: string): string | undefined {
+    return this.routes[`POST ${path}`] ? path : undefined;
   }
 
   async deploy(app: App, dir: string): Promise<void> {
     await this.stop();
     writeDeployTree(dir, deployFiles(app, guardFor(app), false, { mode: 'live' }).files);
+    this.routes = JSON.parse(readFileSync(join(dir, 'functions/c2c_api/routes.json'), 'utf8')) as Record<string, string>;
     const entry = createRequire(import.meta.url)(join(dir, 'functions/c2c_api/index.js')) as (rq: IncomingMessage, rs: ServerResponse) => Promise<void>;
     this.server = createServer((rq, rs) => void entry(rq, rs));
     await new Promise<void>((resolve) => this.server!.listen(0, '127.0.0.1', resolve));
@@ -325,6 +580,107 @@ function lostValues(before: Map<string, Map<string, Row>>, after: Map<string, Ma
   return lost;
 }
 
+/**
+ * The other forms one form's seed rows (and their subform and multi-lookup
+ * rows, `<Form>__<Field>` tables) look up: a seed id cell names the looked-up
+ * row as `<Form>#<tag>#<n>`.
+ */
+function seedLookups(seed: SeedResult, form: string): Set<string> {
+  const owner = new Map<string, string>();
+  for (const table of seed.tables) for (const row of table.rows) owner.set(row.id, table.form);
+  const out = new Set<string>();
+  for (const table of seed.tables) {
+    if (table.form !== form && table.form.split('__')[0] !== form) continue;
+    for (const row of table.rows) {
+      for (const value of Object.values(row.columns)) {
+        const dep = owner.get(value);
+        if (dep && dep !== form) out.add(dep);
+      }
+    }
+  }
+  return out;
+}
+
+/** The forms in posting order, each after every form its rows look up; undefined on a lookup cycle. */
+function seedOrder(seed: SeedResult, forms: readonly string[]): string[] | undefined {
+  const pending = [...forms];
+  const order: string[] = [];
+  while (pending.length) {
+    const next = pending.findIndex((name) => [...seedLookups(seed, name)].every((dep) => order.includes(dep)));
+    if (next < 0) return undefined;
+    order.push(pending.splice(next, 1)[0]!);
+  }
+  return order;
+}
+
+/** The form and every form its seed rows look up, transitively. */
+export function seedDependencies(seed: SeedResult, form: string): Set<string> {
+  const out = new Set<string>();
+  const visit = (name: string) => {
+    if (out.has(name)) return;
+    out.add(name);
+    for (const dep of seedLookups(seed, name)) visit(dep);
+  };
+  visit(form);
+  return out;
+}
+
+/** The `Field[.part]` a 403 record-access refusal (field permission or field rule) names for this form, if any. */
+function unwritable(form: string, res: { status: number; body: Record<string, unknown> }): string | undefined {
+  if (res.status !== 403) return undefined;
+  const match = /^record access: (?:profile .* cannot write (\S+)|(\S+) is (?:hidden|disabled) by a field rule)$/.exec(String(res.body.message ?? ''));
+  const cell = match?.[1] ?? match?.[2];
+  return cell?.startsWith(`${form}.`) ? cell.slice(form.length + 1) : undefined;
+}
+
+/** Removes `Field` or `Field.part` from a seed record; false when it is not there. */
+function dropCell(record: Row, cell: string): boolean {
+  const [field, part] = cell.split('.', 2) as [string, string | undefined];
+  if (!(field in record)) return false;
+  const group = record[field];
+  if (part === undefined || typeof group !== 'object' || group === null) {
+    delete record[field];
+    return true;
+  }
+  if (!(part in group)) return false;
+  delete (group as Row)[part];
+  if (!Object.keys(group).length) delete record[field];
+  return true;
+}
+
+/**
+ * Posts the target form's seed rows and the rows they look up, parents first.
+ * Returns the first refusal (form and response) or undefined when every row landed.
+ */
+async function seedTarget(harness: Harness, app: App, derived: DerivedScenarios, skipped: string[]): Promise<{ form: string; detail: string } | undefined> {
+  if (!derived.target) return undefined;
+  const plan = recordPlan(app, derived.seed);
+  const children = childIndex(derived.seed, plan);
+  const rowIds = new Map<string, string>();
+  const needed = seedDependencies(derived.seed, derived.target.form);
+  const order = seedOrder(derived.seed, plan.forms.filter((name) => needed.has(name)));
+  if (!order) return { form: derived.target.form, detail: 'its seed rows look each other up in a cycle' };
+  for (const form of order) {
+    for (const row of derived.seed.tables.find((t) => t.form === form)?.rows ?? []) {
+      const record = seedRecord(form, row, plan, rowIds, children);
+      // A form with an on-success workflow takes its writes on /success.
+      const route = harness.route(`/forms/${form}/success`) ?? `/forms/${form}/submit`;
+      let res = await harness.post(route, { record });
+      // The app's own field permissions bind the seed too: leave out a cell the admin profile cannot write.
+      for (let cell = unwritable(form, res); cell && dropCell(record, cell); cell = unwritable(form, res)) {
+        if (!skipped.includes(`${form}.${cell}`)) skipped.push(`${form}.${cell}`);
+        res = await harness.post(route, { record });
+      }
+      // No principal is the harness session, not the app refusing a row.
+      if (res.status === 401) throw new Error(`seed ${form}: the harness session is not signed in (${String(res.body.message ?? res.status)})`);
+      if (res.status !== 200) return { form, detail: `${res.status} ${String(res.body.message ?? JSON.stringify(res.body))}` };
+      const rowid = (res.body.values as { ROWID?: unknown } | undefined)?.ROWID;
+      if (rowid !== undefined) rowIds.set(row.id, String(rowid));
+    }
+  }
+  return undefined;
+}
+
 export interface RunOptions {
   /** The deployed .ds. */
   ds: string;
@@ -332,8 +688,8 @@ export interface RunOptions {
   workDir: string;
   /** Path to the offline SDK stand-in (tools/catalyst-harness/fake-zcatalyst-sdk-node.cjs). */
   sdkPath: string;
+  /** Run these changes instead of the ones derived from the model (the runner's own tests). */
   changes?: readonly SchemaChange[];
-  seed?: readonly { form: string; record: Row }[];
   /** Fault injection for the runner's own tests: wrap the store driver. */
   wrapDriver?: (driver: StoreDriver) => StoreDriver;
   /** Fault injection: apply destructive changes without taking the backup first. */
@@ -341,8 +697,6 @@ export interface RunOptions {
 }
 
 export async function runSchemaChangeScenarios(opts: RunOptions): Promise<SchemaChangeReport> {
-  const changes = opts.changes ?? LIBRARY_CHANGES;
-  const seed = opts.seed ?? LIBRARY_SEED;
   mkdirSync(opts.workDir, { recursive: true });
   let prevPath = join(opts.workDir, '0-deployed', 'app.ds');
   mkdirSync(dirname(prevPath), { recursive: true });
@@ -351,15 +705,24 @@ export async function runSchemaChangeScenarios(opts: RunOptions): Promise<Schema
   let prev = loadApp(prevPath);
   const harness = new Harness(opts.sdkPath);
   const scenarios: ScenarioResult[] = [];
+  const seedSkipped: string[] = [];
+  const refusedForms = new Map<string, string>();
+  let derived = deriveScenarios(prev, prevText, refusedForms);
   const gaps: SchemaChangeGap[] = [];
   try {
     await harness.deploy(prev, join(opts.workDir, '0-deployed', 'tree'));
     for (const table of generateSchema(prev).tables) harness.columns.set(table.name, table.columns.map((c) => c.name));
-    for (const { form, record } of seed) {
-      const res = await harness.post(`/forms/${form}/submit`, { record });
-      if (res.status !== 200) throw new Error(`seed ${form} failed: ${res.status} ${JSON.stringify(res.body)}`);
+    // A form whose seed row the app refuses (a validate script, say) is left
+    // out and the target chosen again from the rest, on an empty store.
+    for (let refusal = await seedTarget(harness, prev, derived, seedSkipped); refusal; refusal = await seedTarget(harness, prev, derived, seedSkipped)) {
+      refusedForms.set(refusal.form, refusal.detail);
+      harness.clear();
+      seedSkipped.splice(0);
+      derived = deriveScenarios(prev, prevText, refusedForms);
     }
+    if (!opts.changes) gaps.push(...derived.gaps);
     const driver = opts.wrapDriver ? opts.wrapDriver(harness.driver()) : harness.driver();
+    const changes = opts.changes ?? derived.changes;
 
     for (const [index, change] of changes.entries()) {
       const dir = join(opts.workDir, `${index + 1}-${change.id}`);
@@ -431,10 +794,12 @@ export async function runSchemaChangeScenarios(opts: RunOptions): Promise<Schema
           check(false, `store delta: ${err instanceof Error ? err.message : String(err)}`);
         }
         await harness.deploy(next, join(dir, 'tree'));
-        const sample = [...(before.get('Book')?.keys() ?? [])][0];
-        if (sample) {
-          const read = await harness.post('/forms/Book/record', { ROWID: sample });
-          check(read.status === 200, `redeployed c2c_api reads Book row ${sample} back (HTTP ${read.status})`);
+        const form = derived.target?.form;
+        const table = generateSchema(next).tables.find((t) => t.role === 'form' && t.form === form)?.name;
+        const sample = table ? [...(before.get(table)?.keys() ?? [])][0] : undefined;
+        if (form && sample) {
+          const read = await harness.post(`/forms/${form}/record`, { ROWID: sample });
+          check(read.status === 200, `redeployed c2c_api reads ${form} row ${sample} back (HTTP ${read.status})`);
         }
       }
       const after = snapshot(harness.tables());
@@ -458,11 +823,20 @@ export async function runSchemaChangeScenarios(opts: RunOptions): Promise<Schema
   gaps.push({ id: 'deployed-model-not-recorded', scenario: '*', detail: 'the deploy state keeps a bundle digest, not the deployed model: the operator must pass the deployed .ds as --previous' });
   gaps.push({ id: 'creator-rename-undetectable', scenario: 'rename-field', detail: 'a .ds re-export carries no rename record: without --rename Form.Old=New a renamed field reads as a drop plus an add' });
   const pass = scenarios.filter((s) => s.status === 'PASS').length;
-  return { schema: 'c2c-scorecard-d12/1', app: prev.name || 'app', scenarios, gaps, summary: { pass, fail: scenarios.length - pass, gaps: gaps.length } };
+  return { schema: 'c2c-scorecard-d12/1', app: prev.name || 'app', ...(derived.target ? { target: derived.target } : {}), seedSkipped, seedRefused: [...refusedForms].map(([form, detail]) => `${form}: ${detail}`), scenarios, gaps, summary: { pass, fail: scenarios.length - pass, gaps: gaps.length } };
 }
 
 export function formatSchemaChangeReport(report: SchemaChangeReport): string {
   const lines = [`# D12 schema change + redeploy (offline): ${report.app}`, '', `PASS ${report.summary.pass}, FAIL ${report.summary.fail}, gaps ${report.summary.gaps}`, ''];
+  const t = report.target;
+  lines.push(
+    t
+      ? `Target form ${t.form}: text ${t.text ?? '(none)'}, picklist ${t.picklist ?? '(none)'}${t.removedChoice ? ` (removes "${t.removedChoice}")` : ''}, deletable ${t.deletable ?? '(none)'}`
+      : 'Target form: none (no form the seed can fill)',
+    '',
+  );
+  if (report.seedRefused.length) lines.push(`Forms left out (the deployed API refused a seed row): ${report.seedRefused.join('; ')}`, '');
+  if (report.seedSkipped.length) lines.push(`Seed cells the app's admin profile may not write (left out): ${report.seedSkipped.join(', ')}`, '');
   lines.push('| # | Scenario | Kind | Result | Rows before -> after | Lost values |', '|---|---|---|---|---|---|');
   for (const [i, s] of report.scenarios.entries()) {
     lines.push(`| ${i + 1} | ${s.title} | ${s.kind} | ${s.status} | ${JSON.stringify(s.rows.before)} -> ${JSON.stringify(s.rows.after)} | ${s.lost.length} |`);

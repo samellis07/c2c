@@ -3,7 +3,9 @@
  * Offline schema-change runner: deploy an app to the in-process Catalyst
  * harness, seed rows, apply a sequence of Creator-side changes to a copy of
  * the .ds, re-plan and redeploy each one, and report rows kept, refusals and
- * gaps. Needs `npm run build` first. No network, no Catalyst CLI.
+ * gaps. The target form, fields and seed rows come from the parsed --ds; a
+ * scenario the app has no form or field for is a counted gap. Needs
+ * `npm run build` first. No network, no Catalyst CLI.
  *
  *   node tools/schema-change-runner.mjs --out <dir> [--ds <file.ds>]
  *

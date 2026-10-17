@@ -9,9 +9,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { deployCli, type Io } from '../src/cli.js';
+import { deployCli, loadApp, type Io } from '../src/cli.js';
 import { planCli } from '../src/offline-plan.js';
-import { LIBRARY_CHANGES, formatSchemaChangeReport, runSchemaChangeScenarios, type SchemaChange } from '../src/schema-change-runner.js';
+import { deriveScenarios, formatSchemaChangeReport, runSchemaChangeScenarios, SCENARIO_IDS, type SchemaChange } from '../src/schema-change-runner.js';
 import type { StoreDriver } from '../src/delta.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -24,8 +24,20 @@ function scratch(t: { after(fn: () => void): void }): string {
   return dir;
 }
 
+function deriveAppFrom(ds: string) {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-schema-change-'));
+  try {
+    writeFileSync(join(dir, 'app.ds'), ds);
+    return loadApp(join(dir, 'app.ds'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const LIBRARY_SCENARIOS = deriveScenarios(loadApp(LIBRARY), readFileSync(LIBRARY, 'utf8'));
+
 function change(id: string): SchemaChange {
-  return LIBRARY_CHANGES.find((c) => c.id === id)!;
+  return LIBRARY_SCENARIOS.changes.find((c) => c.id === id)!;
 }
 
 function io(): Io & { out: string[]; err: string[] } {
@@ -48,7 +60,7 @@ test('the library sequence keeps every row and value, and each destructive step 
   const report = await runSchemaChangeScenarios({ ds: LIBRARY, workDir: scratch(t), sdkPath: SDK });
   assert.deepEqual(
     report.scenarios.map((s) => [s.id, s.status]),
-    LIBRARY_CHANGES.map((c) => [c.id, 'PASS']),
+    SCENARIO_IDS.map((id) => [id, 'PASS']),
     formatSchemaChangeReport(report),
   );
   for (const s of report.scenarios) {
@@ -63,7 +75,7 @@ test('the library sequence keeps every row and value, and each destructive step 
     assert.ok(backupAt >= 0 && appliedAt > backupAt, `${id}: the backup is verified before the store changes`);
     assert.ok(evidence.some((e) => e.startsWith('ok: c2c plan --previous refuses without --allow-destructive')), id);
   }
-  assert.ok(report.scenarios.find((s) => s.id === 'picklist-remove')!.evidence.some((e) => /note: Book\.Genre: "Biography" removed/.test(e)));
+  assert.ok(report.scenarios.find((s) => s.id === 'picklist-remove')!.evidence.some((e) => /note: Book\.Genre: "Sci-Fi" removed/.test(e)));
   assert.deepEqual(
     report.gaps.map((g) => g.id),
     ['picklist-stored-values', 'live-rename-field', 'live-delete-field', 'deployed-model-not-recorded', 'creator-rename-undetectable'],
@@ -84,7 +96,7 @@ test('a redeploy whose store rename loses the values fails the runner', async (t
   const [s] = report.scenarios;
   assert.equal(s!.status, 'FAIL');
   assert.equal(s!.lost.length, 3, s!.lost.join('\n'));
-  assert.match(s!.lost[0]!, /^Book\.Author row \d+: "Frank Herbert"$/);
+  assert.match(s!.lost[0]!, /^Book\.Author row \d+: "[^"]+"$/);
   assert.equal(report.summary.fail, 1);
 });
 
@@ -151,8 +163,8 @@ test('c2c plan --previous: a Creator rename without --rename reads as drop plus 
   assert.match(err, /c2c rollback-export --ds /);
   assert.ok(readFileSync(join(dir, 'plan/schema-change/delta.md'), 'utf8').includes('drop column Book.Author'));
   const paired = io();
-  assert.equal(await planCli([next, '--out', join(dir, 'plan'), '--dc', 'in', '--previous', LIBRARY, '--rename', 'Book.Author=Writer', '--allow-budget-fail'], paired), 1);
-  assert.match(paired.err.join(''), /- rename column Book\.Author -> Writer/);
+  assert.equal(await planCli([next, '--out', join(dir, 'plan'), '--dc', 'in', '--previous', LIBRARY, '--rename', 'Book.Author=Author_Renamed', '--allow-budget-fail'], paired), 1);
+  assert.match(paired.err.join(''), /- rename column Book\.Author -> Author_Renamed/);
   const bad = io();
   assert.equal(await planCli([next, '--out', join(dir, 'plan'), '--dc', 'in', '--previous', LIBRARY, '--rename', 'Book.Author'], bad), 1);
   assert.match(bad.err.join(''), /--rename needs Form\.Old=New/);
@@ -170,4 +182,114 @@ test('c2c plan --previous passes an additive change with no flags; deploy --prev
   const deploy = io();
   assert.equal(await deployCli([dropped, '--previous', LIBRARY, '--dc', 'in'], deploy), 1);
   assert.match(deploy.err.join(''), /drop column Book\.Rating: column drop is not yet supported on the live store/);
+});
+
+test('the library scenarios are derived from the model: form Book, text Author, picklist Genre, deletable Rating', () => {
+  assert.deepEqual(LIBRARY_SCENARIOS.target, {
+    form: 'Book',
+    text: 'Author',
+    renamedTo: 'Author_Renamed',
+    picklist: 'Genre',
+    removedChoice: 'Sci-Fi',
+    addedChoice: 'Added Choice',
+    deletable: 'Rating',
+    addedField: 'Added_Field',
+    addedForm: 'Added_Form',
+  });
+  assert.deepEqual(LIBRARY_SCENARIOS.changes.map((c) => c.id), [...SCENARIO_IDS]);
+  assert.deepEqual(LIBRARY_SCENARIOS.gaps, []);
+  // Title is named by a page criteria and lookups, Isbn_Number comes after Author: neither is the rename target.
+  const again = deriveScenarios(loadApp(LIBRARY), readFileSync(LIBRARY, 'utf8'));
+  assert.equal(JSON.stringify(again.seed), JSON.stringify(LIBRARY_SCENARIOS.seed), 'the same app gives byte-identical seed rows');
+  const cells = LIBRARY_SCENARIOS.seed.tables.flatMap((t) => t.rows.flatMap((r) => Object.values(r.columns)));
+  assert.ok(cells.some((v) => v.includes('@')));
+  for (const v of cells.filter((c) => c.includes('@'))) assert.match(v, /@example\.com$/);
+});
+
+const NO_SUITABLE = `application "Synthetic_Counter"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Kolkata"
+	section Main_Section
+	{
+		displayname = "Main"
+		form Item
+		{
+			must have Count
+			(
+				type = number
+				displayname = "Count"
+			)
+			Label
+			(
+				type = text
+				displayname = "Label"
+			)
+		}
+		list All_Items
+		{
+			displayName = "All Items"
+			show all rows from Item [Label != ""]
+			(
+				Count as "Count"
+				Label as "Label"
+			)
+		}
+	}
+	share_settings
+	{
+		Administrator
+		{
+			type = Users_Permissions
+		}
+	}
+}
+`;
+
+test('an app with no picklist, no renameable text field and no deletable field: those scenarios are gaps with the reason, never a pass', async (t) => {
+  const dir = scratch(t);
+  const ds = join(dir, 'counter.ds');
+  writeFileSync(ds, NO_SUITABLE);
+  const report = await runSchemaChangeScenarios({ ds, workDir: join(dir, 'work'), sdkPath: SDK });
+  assert.equal(report.target?.form, 'Item');
+  assert.deepEqual(
+    report.scenarios.map((s) => [s.id, s.status]),
+    [
+      ['add-field', 'PASS'],
+      ['add-form', 'PASS'],
+    ],
+    formatSchemaChangeReport(report),
+  );
+  const gaps = new Map(report.gaps.map((g) => [g.id, g.detail]));
+  for (const id of ['picklist-add', 'picklist-remove', 'rename-field', 'delete-field']) assert.match(gaps.get(`no-${id}`) ?? '', /^form Item has no /, id);
+  // Label is named by the report criteria, Count is required.
+  assert.equal(report.target?.text, undefined);
+  assert.equal(report.target?.deletable, undefined);
+  assert.equal(report.summary.fail, 0);
+  assert.equal(report.summary.gaps, report.gaps.length);
+  assert.deepEqual(report.scenarios[0]!.rows.before, { Item: 3 });
+});
+
+test('the same app without the criteria: Label becomes the rename target', () => {
+  const ds = NO_SUITABLE.replace(' [Label != ""]', '');
+  const derived = deriveScenarios(deriveAppFrom(ds), ds);
+  assert.equal(derived.target?.text, 'Label');
+  assert.equal(derived.target?.deletable, undefined, 'Count is required');
+  assert.ok(derived.changes.some((c) => c.id === 'rename-field'));
+});
+
+test('an app with no form the seed can fill: every scenario is a gap', async (t) => {
+  const dir = scratch(t);
+  const ds = join(dir, 'pictures.ds');
+  writeFileSync(ds, NO_SUITABLE.replace('must have Count\n\t\t\t(\n\t\t\t\ttype = number', 'must have Count\n\t\t\t(\n\t\t\t\ttype = image'));
+  const report = await runSchemaChangeScenarios({ ds, workDir: join(dir, 'work'), sdkPath: SDK });
+  assert.equal(report.target, undefined);
+  assert.deepEqual(report.scenarios, []);
+  assert.deepEqual(
+    report.gaps.filter((g) => g.id.startsWith('no-')).map((g) => g.scenario),
+    [...SCENARIO_IDS],
+  );
+  assert.match(report.gaps[0]!.detail, /Item: required image field Count has no offline seed value/);
+  assert.equal(report.summary.pass, 0);
+  assert.equal(report.summary.fail, 0);
 });
