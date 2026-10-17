@@ -4,6 +4,8 @@ import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
 import { generateSchema, linkedTableName, schemaIdent, type SchemaPlan, type SchemaTable } from '../../schema/src/generator.js';
 import { tableNameLengthBlocker, type LimitBlocker } from '../../schema/src/limits.js';
 import { encodeMultiValue } from '../../shims/src/multi-value.js';
+import { writableCompositeParts } from '../../ui/src/index.js';
+import { formDateOrderRules } from '../../deluge/src/index.js';
 
 export interface SeedWarning {
   form: string;
@@ -126,6 +128,7 @@ interface SeedColumn {
   /** Set on a composite part column. */
   part?: string;
   isMulti?: boolean;
+  dateOffset?: number;
 }
 
 const NAME_PARTS = ['prefix', 'first_name', 'last_name', 'suffix'] as const;
@@ -222,7 +225,7 @@ function claimComposite(table: SchemaTable | undefined, raw: string, claimed: Se
   return base;
 }
 
-function columnsFor(field: Field, table: SchemaTable | undefined, claimed: Set<string>): SeedColumn[] | undefined {
+function columnsFor(field: Field, table: SchemaTable | undefined, claimed: Set<string>, allowedParts?: Set<string>): SeedColumn[] | undefined {
   if (isSubform(field)) return undefined;
   const token = normalizeType(field.type);
   if (field.lookup) {
@@ -244,8 +247,11 @@ function columnsFor(field: Field, table: SchemaTable | undefined, claimed: Set<s
   }
   const row = fieldTypeRow(field.type);
   if (!row || SKIP.has(row.id) || row.kind === 'none') return undefined;
-  const parts = compositePartNames(field);
+  let parts = compositePartNames(field);
   if (parts) {
+    if (allowedParts) {
+      parts = parts.filter((part) => allowedParts.has(part));
+    }
     return parts.map((part) => {
       const sub = field.subfields.find((item) => item.name === part);
       const choices = partChoices(sub);
@@ -360,9 +366,9 @@ function scalar(col: SeedColumn, row: number, tag: { text: string; n: number }):
     case 'decimal':
       return (100 + row + (shift % 50)).toFixed(2);
     case 'date':
-      return addDays('2020-01-01', row + (shift % 28));
+      return addDays('2020-01-01', row + (shift % 28) + (col.dateOffset ?? 0));
     case 'datetime':
-      return `${addDays('2020-01-01', row + (shift % 28))}T00:00:00`;
+      return `${addDays('2020-01-01', row + (shift % 28) + (col.dateOffset ?? 0))}T00:00:00`;
     case 'time':
       return `${String(row % 24).padStart(2, '0')}:00:00`;
     case 'bool':
@@ -485,6 +491,7 @@ function formNameForTable(plan: SchemaPlan, tableName: string): string | undefin
 function planTables(app: App, plan: SchemaPlan): { tables: PlannedTable[]; composites: SeedCompositeMap } {
   const composites: SeedCompositeMap = {};
   const planned: PlannedTable[] = [];
+  const writableParts = writableCompositeParts(app);
   const remember = (tableName: string, field: Field, cols: SeedColumn[]) => {
     const parts = cols.filter((col) => col.part);
     if (!parts.length) return;
@@ -495,8 +502,10 @@ function planTables(app: App, plan: SchemaPlan): { tables: PlannedTable[]; compo
     const cols: SeedColumn[] = [];
     const needs = new Set<string>();
     const claimed = new Set<string>();
+    const formWritable = writableParts.get(form.name);
     for (const field of form.fields) {
-      const fieldCols = columnsFor(field, schemaTable, claimed);
+      const allowedParts = formWritable?.get(field.name);
+      const fieldCols = columnsFor(field, schemaTable, claimed, allowedParts);
       if (!fieldCols) continue;
       remember(form.name, field, fieldCols);
       for (const col of fieldCols) {
@@ -532,8 +541,10 @@ function planTables(app: App, plan: SchemaPlan): { tables: PlannedTable[]; compo
     claimed.add(parentColumn);
     cols.push({ name: orderColumn, kind: 'number', unique: false, isRowOrder: true });
     claimed.add(orderColumn);
+    const childWritable = writableParts.get(table.name);
     for (const sub of field.subfields) {
-      const fieldCols = columnsFor(sub, table, claimed);
+      const allowedParts = childWritable?.get(sub.name);
+      const fieldCols = columnsFor(sub, table, claimed, allowedParts);
       if (!fieldCols) continue;
       remember(table.name, sub, fieldCols);
       for (const col of fieldCols) {
@@ -560,6 +571,70 @@ export function generateSeed(app: App, opts?: { n?: number; seed?: string }): Se
   const blockers: SeedWarning[] = [];
   const schemaPlan = generateSchema(app);
   const planned = planTables(app, schemaPlan);
+
+  for (const table of planned.tables) {
+    const { constraints, unsupportedRules } = formDateOrderRules(app, table.name);
+    for (const rule of unsupportedRules) {
+      warnings.push({
+        form: table.name,
+        message: `date order rule on ${table.name} cannot be satisfied generically: ${rule}`,
+      });
+    }
+    if (constraints.length > 0) {
+      const inDegree = new Map<string, number>();
+      const adj = new Map<string, Set<string>>();
+      for (const c of constraints) {
+        if (!adj.has(c.earlierField)) adj.set(c.earlierField, new Set());
+        if (!adj.get(c.earlierField)!.has(c.laterField)) {
+          adj.get(c.earlierField)!.add(c.laterField);
+          inDegree.set(c.laterField, (inDegree.get(c.laterField) ?? 0) + 1);
+        }
+        if (!inDegree.has(c.earlierField)) inDegree.set(c.earlierField, 0);
+      }
+
+      const queue: string[] = [];
+      const rank = new Map<string, number>();
+      for (const [node, deg] of inDegree.entries()) {
+        if (deg === 0) {
+          queue.push(node);
+          rank.set(node, 0);
+        }
+      }
+
+      let visitedCount = 0;
+      while (queue.length > 0) {
+        const u = queue.shift()!;
+        visitedCount++;
+        const uRank = rank.get(u) ?? 0;
+        const neighbors = adj.get(u) ?? new Set();
+        for (const v of neighbors) {
+          rank.set(v, Math.max(rank.get(v) ?? 0, uRank + 1));
+          const newDeg = (inDegree.get(v) ?? 1) - 1;
+          inDegree.set(v, newDeg);
+          if (newDeg === 0) {
+            queue.push(v);
+          }
+        }
+      }
+
+      if (visitedCount < inDegree.size) {
+        warnings.push({
+          form: table.name,
+          message: `date-order rules on ${table.name} contain a cycle; date ordering cannot be satisfied generically`,
+        });
+      } else {
+        for (const col of table.cols) {
+          if (col.kind === 'date' || col.kind === 'datetime') {
+            const r = rank.get(col.name);
+            if (r !== undefined) {
+              col.dateOffset = r * 7;
+            }
+          }
+        }
+      }
+    }
+  }
+
   const columns = new Map<string, SeedColumn[]>();
   const deps = new Map<string, Set<string>>();
   const parentOf = new Map<string, string>();

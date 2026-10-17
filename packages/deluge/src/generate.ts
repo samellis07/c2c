@@ -17,7 +17,9 @@
 import { flowStatusColumn, formLink, isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleBranchWorkflow, isScheduleWorkflow, isUsersField, closedChoices, staticDefault, unquote, type App, type Field, type Form, type FunctionDef, type ModulePermission, type Profile, type Property, type PropertyBlock, type RawDeluge, type Report, type Translation, type Workflow } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
-import { fieldTypeRow } from '../../schema/src/mapping.js';
+import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
+import { parse } from './parser.js';
+import type { Expr, Script, Stmt } from './ast.js';
 import type { AccessPolicy, FieldRuleDenial, FormGrant, WriteField, WriteOp, WriteScalar } from '../../shims/src/access.js';
 import { criteriaHasRelative, criteriaHasTodo, type Criteria, type DecimalColumn, type DecimalColumns } from '../../shims/src/criteria.js';
 import { integrityColumns, type IntegrityColumn } from '../../data/src/integrity.js';
@@ -5728,4 +5730,327 @@ export default function unsupported() {
 function safeFn(name: string): string {
   const s = name.replace(/[^A-Za-z0-9_]/g, '_').replace(/^(\d)/, '_$1');
   return /^[$A-Za-z_]/.test(s) ? s : `fn_${s}`;
+}
+
+export interface DateOrderConstraint {
+  earlierField: string;
+  laterField: string;
+  strict: boolean;
+}
+
+export interface FormDateOrderResult {
+  constraints: DateOrderConstraint[];
+  unsupportedRules: string[];
+}
+
+function hasCancelSubmit(stmt: Stmt): boolean {
+  if (stmt.kind === 'cancelSubmit') return true;
+  if (stmt.kind === 'block') return stmt.body.some(hasCancelSubmit);
+  if (stmt.kind === 'if') {
+    if (hasCancelSubmit(stmt.then)) return true;
+    if (stmt.elifs?.some((e) => hasCancelSubmit(e.body))) return true;
+    if (stmt.else && hasCancelSubmit(stmt.else)) return true;
+  }
+  if (stmt.kind === 'try') {
+    return hasCancelSubmit(stmt.body) || (stmt.catchBody ? hasCancelSubmit(stmt.catchBody) : false);
+  }
+  return false;
+}
+
+function unwrapParens(expr: Expr): Expr {
+  let cur = expr;
+  while (cur.kind === 'paren') cur = cur.expr;
+  return cur;
+}
+
+function fieldRefOf(expr: Expr): string | undefined {
+  const u = unwrapParens(expr);
+  if (u.kind === 'member' && u.object.kind === 'name' && u.object.name === 'input') {
+    return u.property;
+  }
+  if (u.kind === 'name') {
+    return u.name;
+  }
+  return undefined;
+}
+
+const NEGATED_COMPARE: Record<string, string> = {
+  '<': '>=',
+  '<=': '>',
+  '>': '<=',
+  '>=': '<',
+  '==': '!=',
+  '=': '!=',
+  '!=': '==',
+};
+
+/**
+ * The logical negation of a guard expression as an Expr. Comparisons flip
+ * (`!(A > B)` is `A <= B`), `&&`/`||` de Morgan, and `!!` cancels; anything
+ * else stays wrapped in `!` so the caller can still count it.
+ */
+function negateTest(test: Expr): Expr {
+  const u = unwrapParens(test);
+  if (u.kind === 'unary' && u.op === '!') return u.expr;
+  if (u.kind === 'binary') {
+    const op = u.op.toLowerCase();
+    if (op === '&&' || op === 'and') {
+      return { kind: 'binary', op: '||', left: negateTest(u.left), right: negateTest(u.right), span: u.span };
+    }
+    if (op === '||' || op === 'or') {
+      return { kind: 'binary', op: '&&', left: negateTest(u.left), right: negateTest(u.right), span: u.span };
+    }
+    const flipped = NEGATED_COMPARE[u.op];
+    if (flipped) return { kind: 'binary', op: flipped, left: u.left, right: u.right, span: u.span };
+  }
+  return { kind: 'unary', op: '!', expr: u, span: u.span };
+}
+
+/** Every date field this expression references at any depth (call args, members, operands). */
+function exprDateRefs(expr: Expr, dateFields: Set<string>, into: Set<string>): void {
+  const u = unwrapParens(expr);
+  const ref = fieldRefOf(u);
+  if (ref && dateFields.has(ref)) into.add(ref);
+  switch (u.kind) {
+    case 'binary':
+      exprDateRefs(u.left, dateFields, into);
+      exprDateRefs(u.right, dateFields, into);
+      return;
+    case 'unary':
+      exprDateRefs(u.expr, dateFields, into);
+      return;
+    case 'call':
+      exprDateRefs(u.callee, dateFields, into);
+      for (const arg of u.args) exprDateRefs(arg, dateFields, into);
+      return;
+    case 'member':
+      exprDateRefs(u.object, dateFields, into);
+      return;
+    case 'index':
+      exprDateRefs(u.object, dateFields, into);
+      exprDateRefs(u.index, dateFields, into);
+      return;
+    case 'list':
+      for (const el of u.elements) exprDateRefs(el, dateFields, into);
+      return;
+    case 'map':
+      for (const entry of u.entries) {
+        exprDateRefs(entry.key, dateFields, into);
+        exprDateRefs(entry.value, dateFields, into);
+      }
+      return;
+    case 'ifExpr':
+      exprDateRefs(u.test, dateFields, into);
+      exprDateRefs(u.then, dateFields, into);
+      if (u.else) exprDateRefs(u.else, dateFields, into);
+      return;
+    case 'criteria':
+      exprDateRefs(u.object, dateFields, into);
+      exprDateRefs(u.criteria, dateFields, into);
+      return;
+    case 'insert':
+      for (const param of u.entries) exprDateRefs(param.value, dateFields, into);
+      return;
+    case 'colonCall':
+      exprDateRefs(u.object, dateFields, into);
+      for (const arg of u.args) exprDateRefs(arg, dateFields, into);
+      return;
+    case 'invokeurl':
+    case 'sendmail':
+    case 'pushnotification':
+      for (const param of u.entries) exprDateRefs(param.value, dateFields, into);
+      return;
+    default:
+      return;
+  }
+}
+
+function isNullLiteral(expr: Expr): boolean {
+  const u = unwrapParens(expr);
+  return u.kind === 'name' && u.name === 'null';
+}
+
+function extractConstraintsFromTest(
+  test: Expr,
+  dateFields: Set<string>,
+  constraints: DateOrderConstraint[],
+  unsupported: string[],
+): void {
+  const produced = constraints.length + unsupported.length;
+  const unwrapped = unwrapParens(test);
+  if (unwrapped.kind === 'unary' && unwrapped.op === '!') {
+    extractConstraintsFromTest(negateTest(unwrapped.expr), dateFields, constraints, unsupported);
+    return;
+  }
+  if (unwrapped.kind === 'binary' && (unwrapped.op === '||' || unwrapped.op === 'or')) {
+    extractConstraintsFromTest(unwrapped.left, dateFields, constraints, unsupported);
+    extractConstraintsFromTest(unwrapped.right, dateFields, constraints, unsupported);
+    return;
+  }
+  if (unwrapped.kind === 'binary' && (unwrapped.op === '&&' || unwrapped.op === 'and')) {
+    // Both sides of a refusing guard must hold: keep every constraint and
+    // every counted unsupported part, whichever side produced it.
+    extractConstraintsFromTest(unwrapped.left, dateFields, constraints, unsupported);
+    extractConstraintsFromTest(unwrapped.right, dateFields, constraints, unsupported);
+    return;
+  }
+  if (unwrapped.kind === 'binary') {
+    const leftField = fieldRefOf(unwrapped.left);
+    const rightField = fieldRefOf(unwrapped.right);
+    const leftIsDate = leftField ? dateFields.has(leftField) : false;
+    const rightIsDate = rightField ? dateFields.has(rightField) : false;
+
+    if (leftIsDate && rightIsDate && leftField && rightField) {
+      if (leftField === rightField) {
+        unsupported.push(`${leftField} ${unwrapped.op} ${rightField}`);
+        return;
+      }
+      switch (unwrapped.op) {
+        case '<=':
+          constraints.push({ earlierField: rightField, laterField: leftField, strict: true });
+          return;
+        case '<':
+          constraints.push({ earlierField: rightField, laterField: leftField, strict: false });
+          return;
+        case '>=':
+          constraints.push({ earlierField: leftField, laterField: rightField, strict: true });
+          return;
+        case '>':
+          constraints.push({ earlierField: leftField, laterField: rightField, strict: false });
+          return;
+        case '==':
+        case '=':
+          constraints.push({ earlierField: leftField, laterField: rightField, strict: true });
+          return;
+        case '!=':
+          unsupported.push(`${leftField} != ${rightField}`);
+          return;
+        default:
+          unsupported.push(`${leftField} ${unwrapped.op} ${rightField}`);
+          return;
+      }
+    } else if (leftIsDate || rightIsDate) {
+      // A null check on a date field narrows presence, not order: it is
+      // neither a constraint nor an unsupported rule.
+      if (
+        (unwrapped.op === '==' || unwrapped.op === '=' || unwrapped.op === '!=') &&
+        (isNullLiteral(unwrapped.left) || isNullLiteral(unwrapped.right))
+      ) {
+        return;
+      }
+      unsupported.push(`date comparison involving ${leftIsDate ? leftField : rightField}`);
+      return;
+    }
+  }
+  // Any guard that references a date field anywhere but produced neither a
+  // constraint nor a reason — a method call, a unary shape, an arithmetic
+  // expression — is counted as a rule the seed could not analyse, never
+  // silently dropped.
+  if (constraints.length + unsupported.length === produced) {
+    const refs = new Set<string>();
+    exprDateRefs(unwrapped, dateFields, refs);
+    if (refs.size) {
+      unsupported.push(`date comparison involving ${[...refs].sort().join(', ')}`);
+    }
+  }
+}
+
+function tableDateFields(app: App, tableName: string): Set<string> {
+  const set = new Set<string>();
+  const form = app.forms.find((f) => f.name === tableName);
+  if (form) {
+    for (const f of form.fields) {
+      const t = normalizeType(f.type);
+      const row = fieldTypeRow(f.type);
+      if (row?.id === 'date' || row?.id === 'date-time' || t === 'date' || t === 'datetime' || t === 'date-time') {
+        set.add(f.name);
+      }
+    }
+    return set;
+  }
+  const plan = schemaOf(app);
+  const childTable = plan.tables.find((t) => t.name === tableName && t.role === 'child');
+  if (childTable?.subform) {
+    const parentForm = app.forms.find((f) => f.name === childTable.subform!.form);
+    const subField = parentForm?.fields.find((f) => f.name === childTable.subform!.field);
+    if (subField) {
+      for (const f of subField.subfields) {
+        const t = normalizeType(f.type);
+        const row = fieldTypeRow(f.type);
+        if (row?.id === 'date' || row?.id === 'date-time' || t === 'date' || t === 'datetime' || t === 'date-time') {
+          set.add(f.name);
+        }
+      }
+    }
+  }
+  return set;
+}
+
+/**
+ * Extract date-ordering constraints and unsupported validation rules from
+ * `on validate` form handlers that run on record add.
+ */
+export function formDateOrderRules(app: App, formName: string): FormDateOrderResult {
+  const dateFields = tableDateFields(app, formName);
+  if (dateFields.size < 2) {
+    return { constraints: [], unsupportedRules: [] };
+  }
+
+  const workflows = handlerGroup(app, formName, 'validate').filter((w) => {
+    const scope = recordScope(w);
+    return scope === 'add' || scope === 'both';
+  });
+
+  const constraints: DateOrderConstraint[] = [];
+  const unsupportedRules: string[] = [];
+
+  const visitStmt = (stmt: Stmt) => {
+    if (stmt.kind === 'if') {
+      if (hasCancelSubmit(stmt.then)) {
+        extractConstraintsFromTest(stmt.test, dateFields, constraints, unsupportedRules);
+      }
+      for (const elif of stmt.elifs ?? []) {
+        if (hasCancelSubmit(elif.body)) {
+          extractConstraintsFromTest(elif.test, dateFields, constraints, unsupportedRules);
+        }
+      }
+      visitStmt(stmt.then);
+      for (const elif of stmt.elifs ?? []) visitStmt(elif.body);
+      if (stmt.else) visitStmt(stmt.else);
+    } else if (stmt.kind === 'block') {
+      for (const inner of stmt.body) visitStmt(inner);
+    } else if (stmt.kind === 'try') {
+      visitStmt(stmt.body);
+      if (stmt.catchBody) visitStmt(stmt.catchBody);
+    }
+  };
+
+  for (const w of workflows) {
+    if (!w.deluge?.text?.trim()) continue;
+    try {
+      const script = parse(w.deluge.text);
+      for (const stmt of script.body) {
+        visitStmt(stmt);
+      }
+    } catch {
+      if (w.deluge.text.includes('cancel submit')) {
+        unsupportedRules.push(`unparseable validation workflow ${w.name || formName}`);
+      }
+    }
+  }
+
+  const deduped: DateOrderConstraint[] = [];
+  const seen = new Map<string, DateOrderConstraint>();
+  for (const c of constraints) {
+    const key = `${c.earlierField}->${c.laterField}`;
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, c);
+      deduped.push(c);
+    } else if (c.strict && !existing.strict) {
+      existing.strict = true;
+    }
+  }
+
+  return { constraints: deduped, unsupportedRules };
 }

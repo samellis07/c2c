@@ -592,6 +592,20 @@ function screenObject(
 }
 
 /**
+ * The unconditional field-rule denial in force at `dotted` for `op`, or
+ * undefined. This is the same match a write goes through in screenObject:
+ * the op filter of ruleDeniedFor and the path match of ruleDenialAt, so
+ * generators filtering seed data keep the handler's rule as the one source.
+ */
+export function writeRuleDeniedAt(
+  dotted: string,
+  denied: readonly FieldRuleDenial[] | undefined,
+  op?: WriteOp,
+): FieldRuleDenial | undefined {
+  return ruleDenialAt(dotted, ruleDeniedFor(denied, op));
+}
+
+/**
  * The denial for this key path, or undefined. `Sub[0].Field` normalises to
  * the field-rule target `Sub.Field`, so a rule naming a subform column
  * refuses writes to that column in every row.

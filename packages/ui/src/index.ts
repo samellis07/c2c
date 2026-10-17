@@ -2,7 +2,7 @@ export { buildSlate, shortHashId, solidPng } from './build.js';
 export type { OutFile } from './build.js';
 export { formatUiReport, uiCorpus } from './corpus.js';
 export type { AppNumbers, UiCorpusNumbers } from './corpus.js';
-export { buildUi, clientRuntimeSource, generateUi, serviceWorker } from './generate.js';
+export { buildUi, clientRuntimeSource, generateUi, serviceWorker, writableCompositeParts } from './generate.js';
 export type { UiBundle } from './generate.js';
 export { buildModel, formStatus, slug, summarize } from './model.js';
 export type {
