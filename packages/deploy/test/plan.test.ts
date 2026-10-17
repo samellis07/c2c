@@ -11,11 +11,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { openZip } from '../src/zipfile.js';
+import { iacImportBundle } from '../src/iac-import.js';
 import { buildOfflinePlan, planCli, PLAN_STEP_TOOLS, resolveDc, type ProvisionStep } from '../src/offline-plan.js';
 import { isVerifiedMcpTool, VERIFIED_MCP_TOOL_REGISTRY } from '../src/mcp-registry.js';
 import { ALL_REQUIRED_MCP_TOOLS, REQUIRED_MCP_TOOLS } from '../../doctor/src/required-tools.js';
@@ -1300,6 +1301,65 @@ const SENDS_MAIL = `application "MailApp" {
     }
   }
 }`;
+
+/** Write a built plan's provision/iac files under dir, as c2c plan does. */
+function writeIac(dir: string, files: { path: string; data: string; bytes?: Buffer }[]): string {
+  for (const file of files.filter((item) => item.path.startsWith('provision/iac/'))) {
+    mkdirSync(dirname(join(dir, file.path)), { recursive: true });
+    writeFileSync(join(dir, file.path), file.bytes ?? file.data);
+  }
+  return join(dir, 'provision', 'iac');
+}
+
+test('a new project plan for an app with schedules imports c2c_jobs beside c2c_api; an app without keeps c2c_api only', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-plan-jobs-iac-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'sched.ds'), SENDS_MAIL);
+  writeFileSync(join(dir, 'plain.ds'), DS);
+  const functionsOf = (data: string): { name: string; properties: { type: string; code: { path: string } } }[] =>
+    (JSON.parse(data) as { components: { Functions: { name: string; properties: { type: string; code: { path: string } } }[] } }).components.Functions;
+
+  const sched = buildOfflinePlan(loadApp(join(dir, 'sched.ds')), { dc: 'in', dcSource: '--dc', mail: false, newProject: true });
+  const template = sched.files.find((file) => file.path === 'provision/iac/project-template-1.0.0.json')?.data ?? '';
+  assert.deepEqual(
+    functionsOf(template).map((fn) => [fn.name, fn.properties.type, fn.properties.code.path]),
+    [
+      ['c2c_api', 'applogic', 'functions/c2c_api.zip'],
+      ['c2c_jobs', 'job', 'functions/c2c_jobs.zip'],
+    ],
+  );
+  const jobsZip = sched.files.find((file) => file.path === 'provision/iac/functions/c2c_jobs.zip');
+  assert.ok(jobsZip?.bytes, 'the plan packs the c2c_jobs code zip');
+  const jobs = openZip(jobsZip.bytes);
+  for (const member of ['index.js', 'catalyst-config.json', 'job-scheduling.json', 'package.json', 'c2c-manifest.json']) assert.ok(jobs.has(member), member);
+  assert.equal((JSON.parse(jobs.read('catalyst-config.json').toString('utf8')) as { deployment: { type: string } }).deployment.type, 'job');
+  // The plan is byte-identical on regeneration, the jobs zip included.
+  const again = buildOfflinePlan(loadApp(join(dir, 'sched.ds')), { dc: 'in', dcSource: '--dc', mail: false, newProject: true });
+  assert.ok(again.files.find((file) => file.path === 'provision/iac/functions/c2c_jobs.zip')?.bytes?.equals(jobsZip.bytes));
+  // The import bundle carries both function zips the template names.
+  const schedIac = writeIac(join(dir, 'sched'), sched.files);
+  assert.deepEqual([...openZip(iacImportBundle(schedIac)).names].sort(), ['functions/c2c_api.zip', 'functions/c2c_jobs.zip', 'project-template-1.0.0.json']);
+  // A template that names c2c_jobs without its zip is refused, not imported without it.
+  rmSync(join(schedIac, 'functions', 'c2c_jobs.zip'));
+  assert.throws(() => iacImportBundle(schedIac), /c2c_jobs\.zip/);
+
+  const plain = buildOfflinePlan(loadApp(join(dir, 'plain.ds')), { dc: 'in', dcSource: '--dc', mail: false, newProject: true });
+  const plainTemplate = plain.files.find((file) => file.path === 'provision/iac/project-template-1.0.0.json')?.data ?? '';
+  assert.deepEqual(functionsOf(plainTemplate).map((fn) => fn.name), ['c2c_api']);
+  assert.equal(plain.files.some((file) => file.path.endsWith('c2c_jobs.zip')), false);
+  const plainIac = writeIac(join(dir, 'plain'), plain.files);
+  assert.deepEqual([...openZip(iacImportBundle(plainIac)).names].sort(), ['functions/c2c_api.zip', 'project-template-1.0.0.json']);
+});
+
+test('a scheduled cron body names c2c_jobs by its deployed id, which provision reads back', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-plan-cron-target-'));
+  writeFileSync(join(dir, 'sched.ds'), SENDS_MAIL);
+  const built = buildOfflinePlan(loadApp(join(dir, 'sched.ds')), { dc: 'in', dcSource: '--dc', mail: false });
+  const crons = JSON.parse(built.files.find((file) => file.path === 'provision/crons.json')?.data ?? '[]') as { body: { job_details: Record<string, unknown> } }[];
+  assert.equal(crons.length, 1);
+  assert.deepEqual(crons[0]!.body.job_details, { job_name: 'job/daily', target_type: 'Function', target_id: '<function-id:c2c_jobs>' });
+  rmSync(dir, { recursive: true, force: true });
+});
 
 function planMailLines(md: string): { summary: string; probe: string } {
   const summary = md.split('\n').find((line) => line.startsWith('mail: '));

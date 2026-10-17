@@ -162,6 +162,16 @@ function functionsSendMail(files: readonly { path: string; data: string | Buffer
  * expands the runtime assets: mail module, mail/projections/schema json, and
  * every functions/* file buildUi generated (mail import patched in).
  */
+/**
+ * The app's job-scheduling.json when it deploys c2c_jobs, else undefined.
+ * job-scheduling.json and functions/job/* come together; both mean the app
+ * deploys the Job function its crons target.
+ */
+export function jobScheduling(files: readonly { path: string; data: string | Buffer }[]): string | undefined {
+  const scheduling = files.find((file) => file.path === 'job-scheduling.json')?.data;
+  return typeof scheduling === 'string' && files.some((file) => file.path.startsWith('functions/job/')) ? scheduling : undefined;
+}
+
 export function functionSources(
   schema: ReturnType<typeof generateSchema>,
   ui: { files: { path: string; data: string | Buffer }[] },
@@ -244,9 +254,8 @@ export function deployFiles(
   const schema = generateSchema(app, opts.source ? { source: opts.source } : undefined);
   const ui = buildUi(app, { dc: guard.dc, schema, ...(opts.asyncOnSuccess ? { asyncOnSuccess: true } : {}) });
   const files: DeployFile[] = [];
-  // job-scheduling.json and functions/job/* come together; both mean the app deploys c2c_jobs.
-  const scheduling = ui.files.find((file) => file.path === 'job-scheduling.json')?.data;
-  const usesJobs = typeof scheduling === 'string' && ui.files.some((file) => file.path.startsWith('functions/job/'));
+  const scheduling = jobScheduling(ui.files);
+  const usesJobs = scheduling !== undefined;
   files.push({ path: 'catalyst.json', data: `${JSON.stringify(catalystJson(guard, mail, usesJobs), null, 2)}\n` });
   files.push({
     path: '.catalystrc',
@@ -312,7 +321,7 @@ export function deployFiles(
       ...(opts.subsetShims !== undefined ? { subsetShims: opts.subsetShims } : {}),
   });
   files.push(...apiTree);
-  if (usesJobs) files.push(...jobFunctionDir(apiTree, scheduling as string, { mode: opts.mode ?? 'dry-run', env: opts.functionEnv, ...(verifiedFrom ? { mailFrom: verifiedFrom } : {}) }));
+  if (scheduling !== undefined) files.push(...jobFunctionDir(apiTree, scheduling, { mode: opts.mode ?? 'dry-run', env: opts.functionEnv, ...(verifiedFrom ? { mailFrom: verifiedFrom } : {}) }));
   const widgetItems = widgetManualItems(app.widgets);
   if (widgetItems.length) {
     files.push({ path: 'manual/widgets.json', data: `${JSON.stringify({ widgets: widgetItems }, null, 2)}\n` });

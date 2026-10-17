@@ -205,8 +205,14 @@ function assertScopedCall(url: string, init: { headers?: Record<string, string> 
   assert.equal(init?.headers?.['X-CATALYST-Environment'], 'Development');
 }
 
-function memoryRest(detailsOrg: string = SCOPE.org): { rest: RestFn; calls: { method: string; path: string; body?: unknown }[] } {
+function memoryRest(detailsOrg: string = SCOPE.org): {
+  rest: RestFn;
+  calls: { method: string; path: string; body?: unknown }[];
+  /** Functions a `catalyst deploy --only functions:<name>` spawn landed, in the project function list. */
+  deployed: Map<string, string>;
+} {
   const tables = new Map<string, { id: string; columns: Set<string> }>();
+  const deployed = new Map<string, string>();
   const users: Record<string, unknown>[] = [];
   let seq = 1;
   const calls: { method: string; path: string; body?: unknown }[] = [];
@@ -214,6 +220,9 @@ function memoryRest(detailsOrg: string = SCOPE.org): { rest: RestFn; calls: { me
     calls.push({ method: call.method, path: call.path, body: call.body });
     if (call.method === 'GET' && /^\/baas\/v1\/project\/[0-9]+$/.test(call.path)) {
       return { status: 200, body: projectDetails(call.path.split('/').at(-1) ?? '', detailsOrg) };
+    }
+    if (call.method === 'GET' && /^\/baas\/v1\/project\/[0-9]+\/function$/.test(call.path)) {
+      return { status: 200, body: { status: 'success', data: [...deployed].map(([name, id]) => ({ id, name })) } };
     }
     if (call.method === 'GET' && call.path.endsWith('/table')) {
       return {
@@ -284,10 +293,10 @@ function memoryRest(detailsOrg: string = SCOPE.org): { rest: RestFn; calls: { me
     }
     return { status: 404, body: {} };
   };
-  return { rest, calls };
+  return { rest, calls, deployed };
 }
 
-function capture(env: NodeJS.ProcessEnv = { X_ZC_CREDENTIAL_PATH: SECRET }, detailsOrg: string = SCOPE.org): {
+function capture(env: NodeJS.ProcessEnv = { X_ZC_CREDENTIAL_PATH: SECRET }, detailsOrg: string = SCOPE.org, landsNothing: ReadonlySet<string> = new Set()): {
   io: Io;
   stdout: () => string;
   stderr: () => string;
@@ -320,6 +329,10 @@ function capture(env: NodeJS.ProcessEnv = { X_ZC_CREDENTIAL_PATH: SECRET }, deta
       }
       if (args.includes('slate:link')) {
         return { code: 0, stdout: `App Url: https://${SLATE_DOMAIN}\n`, stderr: '' };
+      }
+      const only = args[args.indexOf('--only') + 1];
+      if (args.includes('deploy') && only?.startsWith('functions:') && !landsNothing.has(only.slice('functions:'.length))) {
+        store.deployed.set(only.slice('functions:'.length), `1000000000000${String(store.deployed.size + 1).padStart(4, '0')}`);
       }
       return { code: 0, stdout: '', stderr: '' } satisfies SpawnResult;
     },
@@ -556,6 +569,38 @@ test('blocker 3: --async-on-success warns in plan mode and refuses --confirm wit
   );
   assert.equal(wired, 0);
   assert.equal(wiredCap.stderr().includes('blocker event-async-triggers'), false);
+});
+
+test('a deploy with schedules reads c2c_jobs back after its deploy and records its id as the cron target', async () => {
+  // The async on-success lane adds the dead-letter sweep cron, so the app deploys c2c_jobs.
+  const ds = writeDs();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-out-'));
+  const cap = capture();
+  const code = await deployCli([...baseArgs(ds), '--async-on-success', '--triggers-wired', '--confirm', '--function-env', 'new', '--out', out], cap.io);
+  assert.equal(code, 0, cap.stderr());
+  const listed = cap.restCalls.filter((call) => call.method === 'GET' && /\/function$/.test(call.path));
+  assert.equal(listed.length, 1, 'one function-list read-back, after functions-jobs');
+  const state = JSON.parse(readFileSync(join(out, '.c2c-deploy-state.json'), 'utf8')) as { done: string[]; jobsFunctionId?: string };
+  assert.ok(state.done.includes('functions-jobs'));
+  assert.match(state.jobsFunctionId ?? '', /^[0-9]+$/);
+  assert.match(cap.stdout(), new RegExp(`c2c_jobs: function id ${state.jobsFunctionId} \\(the cron target\\)`));
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('a deploy whose c2c_jobs does not land in the function list stops with the next step', async () => {
+  const ds = writeDs();
+  const out = mkdtempSync(join(tmpdir(), 'c2c-out-'));
+  const cap = capture(undefined, undefined, new Set(['c2c_jobs']));
+  const code = await deployCli([...baseArgs(ds), '--async-on-success', '--triggers-wired', '--confirm', '--function-env', 'new', '--out', out], cap.io);
+  assert.equal(code, 1);
+  assert.match(cap.stderr(), /c2c_jobs is not in the project function list after its deploy/);
+  assert.match(cap.stderr(), /next step: .*re-run deploy --confirm --resume --out .*crons are provisioned only once c2c_jobs is deployed/);
+  const state = JSON.parse(readFileSync(join(out, '.c2c-deploy-state.json'), 'utf8')) as { done: string[]; jobsFunctionId?: string };
+  assert.equal(state.done.includes('functions-jobs'), false, 'the step stays open for the resume');
+  assert.equal(state.jobsFunctionId, undefined);
+  // Nothing after functions-jobs ran: no Slate step was spawned.
+  assert.equal(cap.spawned.some((spawn) => spawn.args.some((arg) => arg.startsWith('slate'))), false);
+  rmSync(out, { recursive: true, force: true });
 });
 
 test('deploy --confirm spawns the Development CLI and still hides the credential path', async () => {

@@ -28,7 +28,7 @@
  */
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
 import { join, sep } from 'node:path';
-import { API_FUNCTION } from './function-dir.js';
+import { API_FUNCTION, JOB_FUNCTION } from './function-dir.js';
 import { PROJECT_TEMPLATE_FILE } from './iac.js';
 import { parseJsonExact } from './json-exact.js';
 import { invalidTokenAnswer, readWithNewerToken } from './retry.js';
@@ -155,17 +155,32 @@ function readMember(root: string, rel: string): Buffer {
   }
 }
 
+/** True when the template's Functions component lists a function of this name. */
+function templateListsFunction(template: Buffer, name: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(template.toString('utf8'));
+  } catch {
+    return false;
+  }
+  const functions = (parsed as { components?: { Functions?: unknown } } | null)?.components?.Functions;
+  return Array.isArray(functions) && functions.some((item) => (item as { name?: unknown } | null)?.name === name);
+}
+
 /**
  * The import `code` part: the template plus functions/<fn>.zip, like an export
- * unpacks. Both members are checked before either is read: no link, no hard
+ * unpacks — c2c_api always, c2c_jobs when the template lists it (an app with
+ * schedules). Every member is checked before it is read: no link, no hard
  * link, nothing that resolves outside the directory.
  */
 export function iacImportBundle(dir: string): Buffer {
   const root = realpathSync(dir);
-  const members = [PROJECT_TEMPLATE_FILE, `functions/${API_FUNCTION}.zip`];
-  for (const rel of members) checkMember(root, rel);
-  const data = members.map((rel) => readMember(root, rel));
-  return zipStore(members.map((name, i) => ({ name, data: data[i]! })));
+  checkMember(root, PROJECT_TEMPLATE_FILE);
+  const template = readMember(root, PROJECT_TEMPLATE_FILE);
+  const zips = [`functions/${API_FUNCTION}.zip`, ...(templateListsFunction(template, JOB_FUNCTION) ? [`functions/${JOB_FUNCTION}.zip`] : [])];
+  for (const rel of zips) checkMember(root, rel);
+  const data = zips.map((rel) => readMember(root, rel));
+  return zipStore([{ name: PROJECT_TEMPLATE_FILE, data: template }, ...zips.map((name, i) => ({ name, data: data[i]! }))]);
 }
 
 // ---------------------------------------------------------------------------

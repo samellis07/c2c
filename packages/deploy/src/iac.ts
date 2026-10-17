@@ -19,7 +19,7 @@
  */
 import { BASELINE_GRANT } from '../../auth/src/plan.js';
 import type { SchemaPlan } from '../../schema/src/generator.js';
-import { API_FUNCTION, FUNCTION_STACK } from './function-dir.js';
+import { API_FUNCTION, FUNCTION_STACK, JOB_FUNCTION } from './function-dir.js';
 import { columnBody, tableCreatePlan, type ColumnCreate } from './tables.js';
 
 export const PROJECT_TEMPLATE_FILE = 'project-template-1.0.0.json';
@@ -54,6 +54,16 @@ export const API_TEMPLATE_FUNCTION: TemplateFunction = {
   type: 'applogic',
   stack: FUNCTION_STACK,
   // [assumed] Catalyst's default function memory; catalyst-config.json does not set one.
+  memory: 256,
+  env: ['C2C_DEPLOY_MODE'],
+};
+
+/** The c2c_jobs Job function an app with schedules deploys; its crons target it (function-dir.ts). */
+export const JOB_TEMPLATE_FUNCTION: TemplateFunction = {
+  name: JOB_FUNCTION,
+  type: 'job',
+  stack: FUNCTION_STACK,
+  // [assumed] the same default memory as c2c_api; catalyst-config.json does not set one.
   memory: 256,
   env: ['C2C_DEPLOY_MODE'],
 };
