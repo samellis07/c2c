@@ -3292,16 +3292,16 @@ async function liveDatastore() {
 /**
  * Live helpers plus the record-event-scoped validate sibling lists. Creator
  * runs only the validates whose record event matches the write: `on add` and
- * unscoped when inserting, `on edit` and unscoped when updating, and for an
- * `add or edit` write the request's ROWID picks the context.
+ * unscoped when inserting, `on edit` and unscoped when updating. The request's
+ * ROWID picks the context for every module, including one whose own script is
+ * `on add`: a ROWID makes the write an update, and Creator never runs an
+ * `on add` validate when a stored record is edited.
  */
-function aioLiveHelpers(validateSpecs: { add: string[]; edit: string[] }, pick: 'add' | 'edit' | 'either', writeLive: string): string {
-  const pickBody =
-    pick === 'add' ? 'return validateAdd;' : pick === 'edit' ? 'return validateEdit;' : 'return rowId ? validateEdit : validateAdd;';
+function aioLiveHelpers(validateSpecs: { add: string[]; edit: string[] }, writeLive: string): string {
   return `const validateAdd = ${JSON.stringify(validateSpecs.add)};
 const validateEdit = ${JSON.stringify(validateSpecs.edit)};
 function validateSpecsFor(rowId) {
-  ${pickBody}
+  return rowId ? validateEdit : validateAdd;
 }
 
 ${liveHelpers('../../')}
@@ -4244,13 +4244,12 @@ import { fileURLToPath } from "node:url";
   const usesOutbound = !!opts.systemWrite && usesOutboundInvokeurl(opts.body);
   const usesGetUrl = !!opts.systemWrite && usesOutboundGetUrl(opts.body);
   const storeShape = opts.systemWrite ? fieldStoreShape(opts.app, opts.form) : { links: [], files: [] };
-  const validatePick = opts.systemWrite === 'update' ? 'edit' : opts.systemWrite === 'insert' ? 'add' : 'either';
   // On Success may assign input fields (input.Status = "..."). Creator saves
   // them with the record; here the row is already committed, so the changed
   // fields are written back after the script (successSetsHelper).
   const savesSuccessSets = !!opts.systemWrite && !opts.deferSuccess && /shim\.input\.(?:set|insert)\(/.test(opts.body);
   const successSetsBlock = savesSuccessSets ? `\n${successSetsHelper(storeShape)}` : '';
-  const liveHelpersBlock = opts.systemWrite ? `\n${aioLiveHelpers(opts.validateSpecs ?? { add: [], edit: [] }, validatePick, writeLiveSource(opts.form, storeShape))}${successSetsBlock}${usesConnections ? `\n${connectionsLiveHelpers()}` : ''}${usesOutbound || usesGetUrl ? `\n${outboundLiveHelpers()}` : ''}${usesApp ? `\n${appUsersHelper(administratorProfiles(opts.app))}` : ''}\n` : '\n';
+  const liveHelpersBlock = opts.systemWrite ? `\n${aioLiveHelpers(opts.validateSpecs ?? { add: [], edit: [] }, writeLiveSource(opts.form, storeShape))}${successSetsBlock}${usesConnections ? `\n${connectionsLiveHelpers()}` : ''}${usesOutbound || usesGetUrl ? `\n${outboundLiveHelpers()}` : ''}${usesApp ? `\n${appUsersHelper(administratorProfiles(opts.app))}` : ''}\n` : '\n';
   const zoneFields = `${timeZoneFields(opts.app)}${schemaRuntimeOptions(opts.app, opts.schema)}`;
   const runtimeSetup = opts.systemWrite
     ? `  const datastore = loadedStore || (live ? await liveDatastore() : null);
