@@ -48,10 +48,10 @@ export interface FixtureMigrationReport {
   hiddenParts: { location: string; reason: string }[];
   humanSteps: string[];
   /** Residual TODO holes that carry a guided step: where the Creator code is and the manual step. Still counted in `todoCount`. */
-  todoSteps: GuidedTodoStep[];
+  todoSteps?: GuidedTodoStep[];
   /** Constructs the converter drops (still counted as silent drops), each with its reason and guided step. */
-  silentDrops: number;
-  residuals: GuidedResidual[];
+  silentDrops?: number;
+  residuals?: GuidedResidual[];
 }
 
 export interface InRepoFixture {
@@ -169,9 +169,7 @@ export function fixtureMigrationReportAsMarkdown(report: FixtureMigrationReport)
   const residuals = report.residuals?.length
     ? report.residuals.flatMap((item) => [`- \`${item.id}\` — not converted. ${item.reason}`, `  - Step: ${item.step}`])
     : ['- none'];
-  const manual = report.manualSteps.length ? report.manualSteps.map((step) => `- ${step.count} ${step.severity} ${step.check}`) : ['- none'];
-  const hidden = report.hiddenParts.length ? report.hiddenParts.map((part) => `- ${part.location}: ${part.reason}`) : ['- none'];
-  const todoSteps = report.todoSteps.length
+  const todoSteps = report.todoSteps?.length
     ? report.todoSteps.flatMap((item) => [`- \`${item.location}\` — ${item.construct}`, `  - Step: ${item.step}`])
     : ['- none'];
   return [
