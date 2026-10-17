@@ -28,19 +28,23 @@ function status(report: D10Report, id: string): string | undefined {
   return report.criteria.find((item) => item.id === id)?.status;
 }
 
-const GAPS = { 'D10.reverse-sync': 'GAP', 'D10.custom-domain': 'GAP', 'D10.link-map': 'GAP', 'D10.downtime': 'GAP' };
-const CHECKED = { 'D10.parallel-run': 'PASS', 'D10.final-delta': 'PASS', 'D10.freeze': 'PASS', 'D10.verify': 'PASS', 'D10.sequence': 'PASS', 'D10.rollback': 'PASS' };
+const GAPS = { 'D10.custom-domain': 'GAP', 'D10.link-map': 'GAP', 'D10.downtime': 'GAP' };
+const CHECKED = { 'D10.reverse-sync': 'PASS', 'D10.parallel-run': 'PASS', 'D10.final-delta': 'PASS', 'D10.freeze': 'PASS', 'D10.verify': 'PASS', 'D10.sequence': 'PASS', 'D10.rollback': 'PASS' };
 
 test('library: every checked criterion passes, the gaps are named and the app is not ready', async () => {
   const report = await run(LIBRARY);
   assert.deepEqual(statuses(report), { ...CHECKED, 'D10.rollback-complete': 'PASS', ...GAPS });
   assert.equal(report.status, 'FAIL');
-  assert.deepEqual(report.totals, { PASS: 7, FAIL: 0, GAP: 4 });
+  assert.deepEqual(report.totals, { PASS: 8, FAIL: 0, GAP: 3 });
   for (const item of report.criteria.filter((entry) => entry.status === 'GAP')) {
     assert.ok(item.reason && item.fix, `${item.id} names why and how`);
   }
-  // The both-sides edit is observed, not assumed: the Creator value wins silently.
-  assert.match(report.criteria.find((item) => item.id === 'D10.reverse-sync')!.evidence.join('\n'), /no conflict reported; store now holds "c2c rehearsal Creator side"/);
+  // The both-sides edit is observed, not assumed: refused with a hashed report, then applied by an explicit choice.
+  const evidence = report.criteria.find((item) => item.id === 'D10.reverse-sync')!.evidence.join('\n');
+  assert.match(evidence, /both-sides edit refused: Book ROWID \d+ source id \d+: edited in Creator and in the new app: Title \(Creator sha256:[0-9a-f]{12}, new app sha256:[0-9a-f]{12}\) -> unresolved/);
+  assert.match(evidence, /--prefer creator: Book\/\d+ holds the Creator value, resolution recorded/);
+  assert.match(evidence, /new-app-only edit Book\/ROWID \d+ unchanged by both syncs/);
+  assert.doesNotMatch(evidence, /c2c rehearsal/);
 });
 
 test('kitchen-sink: subform rows and files are a rollback gap; the skipped form is listed', async () => {
@@ -71,6 +75,12 @@ test('a Creator write after the freeze fails the freeze check', async () => {
   });
   assert.equal(status(report, 'D10.freeze'), 'FAIL');
   assert.match(report.criteria.find((item) => item.id === 'D10.freeze')!.reason!, /1 Creator change\(s\) after the freeze: 0 new, 1 changed/);
+});
+
+test('a both-sides edit applied without a choice fails reverse-sync', async () => {
+  const report = await run(LIBRARY, { conflictResolver: () => 'creator' });
+  assert.equal(status(report, 'D10.reverse-sync'), 'FAIL');
+  assert.match(report.criteria.find((item) => item.id === 'D10.reverse-sync')!.reason!, /edited on both sides: sync-delta applied without refusing/);
 });
 
 test('a record lost from the store after the final delta fails verify', async () => {

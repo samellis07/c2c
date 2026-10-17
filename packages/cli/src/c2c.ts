@@ -86,6 +86,7 @@
  *                                   writes need --confirm and pass the doctor gate.
  *   c2c sync-delta --source-json|--source-csv <dir>|--source-backup <zip|dir> --ds <file|dir> --since <state-file|dir>
  *                                   [--project <id>] [--org <org>] [--confirm] [--apply-deletes] [--allow-mass-delete] [--max-delete-percent <pct>]
+ *                                   [--prefer creator|catalyst|<Table>=creator|catalyst] [--conflicts <file>]
  *                                   new, changed and deleted records against the checkpoint in the project's state file.
  *                                   Plans unless --confirm. --confirm upserts by source id and records the checkpoint.
  *                                   Deletions are reported; they are applied only with --apply-deletes, and only
@@ -207,7 +208,7 @@ const USAGE =
       '       c2c users plan --source-backup <zip|dir> --ds <file|dir> [--out <dir>] [--state <file>] [--salt <s>] [--social <a,b>] [--json]\n' +
       '       c2c users invite --source-backup <zip|dir> --ds <file|dir> --project <id> --org <org> --confirm [--slate-domain <host>] [--role-ids <name=id,...>] [--state <file>]\n' +
       '       c2c users list|add|disable|enable|set-role --ds <file|dir> --project <id> --org <org> [--email <e>] [--role <name>] [--user-id <id>] [--confirm]\n' +
-      '       c2c sync-delta --source-json <dir> --ds <file|dir> --since <state-file|dir> [--project <id>] [--org <org>] [--confirm] [--apply-deletes] [--allow-mass-delete] [--max-delete-percent <pct>]\n' +
+      '       c2c sync-delta --source-json <dir> --ds <file|dir> --since <state-file|dir> [--project <id>] [--org <org>] [--confirm] [--apply-deletes] [--allow-mass-delete] [--max-delete-percent <pct>] [--prefer creator|catalyst|<Table>=creator|catalyst] [--conflicts <file>]\n' +
       '              (--source-csv <dir> and --source-backup <zip|dir> read the same reports)\n' +
       '       c2c cutover-checklist <file|dir> [--source-json|--source-csv <dir>|--source-backup <zip|dir>] [--since <state-file|dir>] [--smoke <file>] [--rollback-export <dir|file>] [--project <id>] [--dc <dc>] [--config <c2c-deploy.json>] [--out <dir>]\n' +
       '       c2c proof <file|dir> [same options as cutover-checklist]\n' +

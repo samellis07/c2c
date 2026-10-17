@@ -622,3 +622,36 @@ test('proof and checklist escape every untrusted field', () => {
   assertFieldEscaped(blockedList, 'proof.blocker');
   assert.equal(blockedList.includes('<script>'), false);
 });
+
+test('proof lists the last sync-delta conflicts with hashes and makes an unresolved one a manual item', () => {
+  const ws = workspace();
+  const fields = [{ column: 'PO_Title', creator: 'sha256:aaaaaaaaaaaa', catalyst: 'sha256:bbbbbbbbbbbb' }];
+  writeFileSync(
+    join(ws.state, STATE_FILE),
+    JSON.stringify({
+      deltaConflicts: {
+        since: '2026-10-06 10:00:00',
+        conflicts: [
+          { table: 'Purchase_Order', sourceId: '21', rowid: '9001', kind: 'changed', fields },
+          { table: 'Vendor', sourceId: '11', rowid: '9002', kind: 'changed', fields: [], resolution: 'creator' },
+        ],
+      },
+    }),
+  );
+  const input = cutoverInput(ws.ds, ['--since', ws.state]);
+  const proof = proofReport(input);
+  assert.equal(proof.conflicts?.items.length, 2);
+  const manual = proof.readiness.manual.filter((item) => item.startsWith('resolve conflict:'));
+  assert.deepEqual(manual, [
+    'resolve conflict: Purchase_Order ROWID 9001 source id 21: edited in Creator and in the new app: PO_Title (Creator sha256:aaaaaaaaaaaa, new app sha256:bbbbbbbbbbbb) -> unresolved; re-run sync-delta with --prefer creator|catalyst or --conflicts <file>',
+  ]);
+  const md = proofMarkdown(proof);
+  assert.match(md, /^## Conflicts$/m);
+  assert.match(md, /^\| Purchase_Order \| 9001 \| 21 \| changed \| PO_Title sha256:aaaaaaaaaaaa \/ sha256:bbbbbbbbbbbb \| unresolved \|$/m);
+  assert.match(md, /^\| Vendor \| 9002 \| 11 \| changed \| - \| keep Creator value \|$/m);
+  // No conflict record: the proof keeps its earlier shape.
+  writeFileSync(join(ws.state, STATE_FILE), JSON.stringify({ deltaConflicts: { conflicts: [] } }));
+  const clean = proofReport(cutoverInput(ws.ds, ['--since', ws.state]));
+  assert.equal('conflicts' in clean, false);
+  assert.doesNotMatch(proofMarkdown(clean), /## Conflicts/);
+});
