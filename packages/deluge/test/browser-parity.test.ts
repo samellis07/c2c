@@ -567,3 +567,51 @@ test('convert.toMap agrees on both runtimes, malformed inputs included', async (
   };
   assert.deepEqual(extra(browser.convert), extra(server.convert));
 });
+
+test('convert.toMap refuses adversarial input on both runtimes', async () => {
+  const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const server = runtime.shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const ctx = { appTimeZone: 'America/New_York' };
+  const run = (api: Record<string, (...args: unknown[]) => unknown>, value: unknown) => {
+    try {
+      return { ok: api.toMap!(value, ctx) as Record<string, unknown> };
+    } catch (err) {
+      return { error: `${(err as Error).name}:${(err as Error).message}` };
+    }
+  };
+  // A 10,000-level map must fail fast with the same conversion error, never a RangeError.
+  const deep = '{a:'.repeat(10_000) + '1' + '}'.repeat(10_000);
+  const started = Date.now();
+  const serverDeep = run(server.convert, deep);
+  const browserDeep = run(browser.convert, deep);
+  assert.ok(Date.now() - started < 10_000, 'deep input must fail fast');
+  assert.deepEqual(browserDeep, serverDeep);
+  assert.deepEqual(serverDeep, { error: 'DelugeConversionError:toMap: text exceeds the depth limit' });
+  // 64 levels is the cap on both runtimes; 65 is refused.
+  const atCap = '{a:'.repeat(64) + '1' + '}'.repeat(64);
+  assert.deepEqual(run(browser.convert, atCap), run(server.convert, atCap));
+  assert.deepEqual(
+    run(server.convert, '{a:'.repeat(65) + '1' + '}'.repeat(65)),
+    { error: 'DelugeConversionError:toMap: text exceeds the depth limit' },
+  );
+  // Prototype-mutating keys are data on both runtimes, at every depth.
+  for (const input of [
+    '{__proto__:{polluted:1}}',
+    '{"__proto__":{"polluted":1}}',
+    '{a:{__proto__:{polluted:1}}}',
+    '{__proto__:1}',
+    '{constructor:{prototype:{polluted:1}}}',
+    '{prototype:{polluted:1}}',
+  ]) {
+    for (const api of [server.convert, browser.convert]) {
+      const result = run(api, input);
+      assert.ok('ok' in result, `toMap(${input}) should parse`);
+      assert.equal(Object.getPrototypeOf(result.ok!), Object.prototype, `toMap(${input}) prototype`);
+    }
+    assert.deepEqual(plain(run(browser.convert, input).ok), plain(run(server.convert, input).ok), `toMap(${input})`);
+    const parsed = run(server.convert, input).ok!;
+    const top = input.includes('a:{') ? (parsed.a as Record<string, unknown>) : parsed;
+    assert.equal(Object.hasOwn(top, Object.keys(top)[0]!), true, `toMap(${input}) own key`);
+  }
+  assert.equal((Object.prototype as Record<string, unknown>).polluted, undefined);
+});

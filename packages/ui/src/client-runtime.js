@@ -2814,6 +2814,7 @@ function clientConversionError(message) {
 
 const CLIENT_MAP_BAD = 'Invalid JSON Format String';
 const CLIENT_MAX_MAP_TEXT = 5 * 1024 * 1024;
+const CLIENT_MAX_MAP_DEPTH = 64;
 
 /** Integer square root by Newton's method, like number.ts bigintSqrt. */
 function clientBigintSqrt(value) {
@@ -2878,7 +2879,8 @@ function clientRealArg(name, value) {
 }
 
 /** Deluge's {key:value} text form, like convert.ts looseMap. */
-function clientLooseMap(text) {
+function clientLooseMap(text, depth = 0) {
+  if (depth >= CLIENT_MAX_MAP_DEPTH) throw clientConversionError('toMap: text exceeds the depth limit');
   const inner = text.slice(1, -1).trim();
   const out = {};
   if (!inner) return out;
@@ -2889,15 +2891,16 @@ function clientLooseMap(text) {
     if (colon < 0) throw clientConversionError('toMap: text is not a key-value map');
     const key = clientUnquote(trimmed.slice(0, colon).trim());
     if (!key) throw clientConversionError('toMap: empty key');
-    out[key] = clientLooseValue(trimmed.slice(colon + 1).trim());
+    // defineProperty so '__proto__' is data, not a prototype write.
+    Object.defineProperty(out, key, { value: clientLooseValue(trimmed.slice(colon + 1).trim(), depth), enumerable: true, writable: true, configurable: true });
   }
   return out;
 }
 
-function clientLooseValue(raw) {
+function clientLooseValue(raw, depth) {
   if (!raw) throw clientConversionError('toMap: empty value');
   if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) return clientUnquote(raw);
-  if (raw.startsWith('{') && raw.endsWith('}')) return clientLooseMap(raw);
+  if (raw.startsWith('{') && raw.endsWith('}')) return clientLooseMap(raw, depth + 1);
   if (raw === 'true') return true;
   if (raw === 'false') return false;
   if (raw === 'null') return null;

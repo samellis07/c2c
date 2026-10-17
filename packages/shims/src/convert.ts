@@ -31,6 +31,7 @@ import { DelugeRuntimeError } from './errors.js';
 import { parseJsonLossless } from './ids.js';
 
 const MAX_MAP_TEXT = 5 * 1024 * 1024;
+const MAX_MAP_DEPTH = 64;
 const NUMERIC = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 
 export class DelugeConversionError extends DelugeRuntimeError {
@@ -197,7 +198,8 @@ function isPlain(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
-function looseMap(text: string): Record<string, unknown> {
+function looseMap(text: string, depth = 0): Record<string, unknown> {
+  if (depth >= MAX_MAP_DEPTH) throw new DelugeConversionError('toMap: text exceeds the depth limit');
   const inner = text.slice(1, -1).trim();
   const out: Record<string, unknown> = {};
   if (!inner) return out;
@@ -208,15 +210,16 @@ function looseMap(text: string): Record<string, unknown> {
     if (colon < 0) throw new DelugeConversionError('toMap: text is not a key-value map');
     const key = unquote(trimmed.slice(0, colon).trim());
     if (!key) throw new DelugeConversionError('toMap: empty key');
-    out[key] = looseValue(trimmed.slice(colon + 1).trim());
+    // defineProperty so '__proto__' is data, not a prototype write.
+    Object.defineProperty(out, key, { value: looseValue(trimmed.slice(colon + 1).trim(), depth), enumerable: true, writable: true, configurable: true });
   }
   return out;
 }
 
-function looseValue(raw: string): unknown {
+function looseValue(raw: string, depth: number): unknown {
   if (!raw) throw new DelugeConversionError('toMap: empty value');
   if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) return unquote(raw);
-  if (raw.startsWith('{') && raw.endsWith('}')) return looseMap(raw);
+  if (raw.startsWith('{') && raw.endsWith('}')) return looseMap(raw, depth + 1);
   if (raw === 'true') return true;
   if (raw === 'false') return false;
   if (raw === 'null') return null;

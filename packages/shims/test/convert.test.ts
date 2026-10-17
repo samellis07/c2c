@@ -107,6 +107,38 @@ test('toMap rejects invalid JSON and text over 5 MB', () => {
   assert.throws(() => toMap('{' + 'x'.repeat(5 * 1024 * 1024) + '}'), DelugeConversionError);
 });
 
+test('toMap refuses nesting past the depth limit instead of overflowing the stack', () => {
+  // 64 nested maps is the cap; a 10,000-level input fails fast with a
+  // conversion error, never a RangeError.
+  const atCap = '{a:'.repeat(64) + '1' + '}'.repeat(64);
+  assert.doesNotThrow(() => toMap(atCap));
+  const pastCap = '{a:'.repeat(65) + '1' + '}'.repeat(65);
+  assert.throws(() => toMap(pastCap), /toMap: text exceeds the depth limit/);
+  const deep = '{a:'.repeat(10_000) + '1' + '}'.repeat(10_000);
+  const started = Date.now();
+  assert.throws(() => toMap(deep), DelugeConversionError);
+  assert.throws(() => toMap(deep), /toMap: text exceeds the depth limit/);
+  assert.ok(Date.now() - started < 5_000, 'deep input must fail fast');
+});
+
+test('toMap keeps __proto__, constructor and prototype keys as data', () => {
+  const loose = toMap('{__proto__:{polluted:1}}');
+  assert.equal(Object.getPrototypeOf(loose), Object.prototype);
+  assert.equal(Object.hasOwn(loose, '__proto__'), true);
+  assert.deepEqual(loose['__proto__'], { polluted: 1 });
+  const strict = toMap('{"__proto__":{"polluted":1}}');
+  assert.equal(Object.hasOwn(strict, '__proto__'), true);
+  assert.deepEqual(strict['__proto__'], { polluted: 1 });
+  const nested = toMap('{a:{__proto__:{polluted:1}}}') as { a: Record<string, unknown> };
+  assert.equal(Object.getPrototypeOf(nested.a), Object.prototype);
+  assert.deepEqual(nested.a['__proto__'], { polluted: 1 });
+  assert.equal((Object.prototype as Record<string, unknown>).polluted, undefined);
+  const ctor = toMap('{constructor:{prototype:{x:1}},prototype:{y:2}}');
+  assert.deepEqual(ctor['constructor'], { prototype: { x: 1 } });
+  assert.deepEqual(ctor['prototype'], { y: 2 });
+  assert.equal((Object.prototype as Record<string, unknown>).x, undefined);
+});
+
 test('toJSONList parses JSON array text into a list; anything else throws', () => {
   // https://www.zoho.com/deluge/help/functions/common/tojsonlist.html —
   // non-JSON text is a runtime error, not an empty list.
