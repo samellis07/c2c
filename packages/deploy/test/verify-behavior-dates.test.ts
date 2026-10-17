@@ -40,8 +40,10 @@ test('date-times: wall-clock text compares as given; an instant is shown in the 
   assert.equal(temporalEqual('18-Oct-2026 18:39:00', '2026-10-18 18:39:01'), false);
   assert.equal(temporalEqual('2026-10-18 18:39:00.500', '2026-10-18 18:39:00'), false);
   assert.equal(temporalEqual('2026-10-18T13:09:00Z', '18-Oct-2026 18:39:00', 'America/Los_Angeles'), false);
-  assert.equal(temporalEqual('2026-10-18T13:09:00Z', '18-Oct-2026 18:39:00'), false);
-  assert.equal(temporalEqual('2026-10-18T13:09:00Z', '18-Oct-2026 18:39:00', 'Not/AZone'), false);
+  // 13:09 UTC is 13:09 in UTC: these would match under a zone fallback, so a
+  // missing or invalid zone MUST fail rather than fall back to UTC.
+  assert.equal(temporalEqual('2026-10-18T13:09:00Z', '2026-10-18 13:09:00'), false);
+  assert.equal(temporalEqual('2026-10-18T13:09:00Z', '2026-10-18 13:09:00', 'Not/AZone'), false);
   assert.equal(normalizeTemporal('18-Oct-2026 24:00:00'), undefined);
 });
 
