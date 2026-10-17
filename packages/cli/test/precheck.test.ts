@@ -150,6 +150,7 @@ const cases: { file: string; check: string; severity: 'blocker' | 'warning'; phr
   { file: 'signature.ds', check: 'signature', severity: 'blocker', phrase: "Data type of argument at index '1' of the function 'add'" },
   { file: 'void-assign.ds', check: 'void-assign', severity: 'blocker', phrase: "Void function 'ping' cannot be used in expression" },
   { file: 'converter-gap.ds', check: 'converter-gap', severity: 'warning', phrase: 'geolocation' },
+  { file: 'store-calls-lookup-path.ds', check: 'store-calls-lookup-path-filter', severity: 'warning', phrase: 'lookup path Owner.Status' },
 ];
 
 for (const item of cases) {
@@ -1201,4 +1202,16 @@ test('two connections with the same display name stay unresolved and still block
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('precheck counts the Data Store calls of an on success script, with the functions it calls, against the per-request target', () => {
+  const reads = (n: number) => Array.from({ length: n }, (_, i) => `\t\t\t\t\t\t\tc${i} = Item[Qty > ${i}].count();`).join('\n');
+  const over = fromSource(app('Precheck_Calls_Over', `${itemForm()}${fns(`\t\t\tvoid Sum.recount()\n\t\t\t{\n${reads(3)}\n\t\t\t}`)}${handlers([{ event: 'on success', script: `${reads(1)}\n\t\t\t\t\t\t\tinsert into Item [ Title = "x" ];\n\t\t\t\t\t\t\tthisapp.Sum.recount();` }])}`));
+  const found = over.findings.filter((finding) => finding.check === 'store-calls-on-success');
+  assert.equal(found.length, 1, messages(over));
+  assert.equal(found[0]!.severity, 'warning');
+  assert.match(found[0]!.message, /at least 5 Data Store calls per submit \(with Sum\.recount\)/);
+  // Four calls is within the target; reads inside strings and comments are not calls.
+  const within = fromSource(app('Precheck_Calls_Within', `${itemForm()}${handlers([{ event: 'on success', script: `${reads(4)}\n\t\t\t\t\t\t\t// Item[Qty > 9]\n\t\t\t\t\t\t\tinfo "Item[Qty > 9]";` }])}`));
+  assert.deepEqual(within.findings.filter((finding) => finding.check === 'store-calls-on-success'), [], messages(within));
 });
