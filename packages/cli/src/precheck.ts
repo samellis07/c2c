@@ -274,6 +274,7 @@ export function precheck(app: App, source: string): PrecheckReport {
   customActions(app, source, sigs, findings);
   reportViewColumns(app, source, formByName, findings);
   scriptShapes(scripts, source, findings);
+  successStoreCalls(app, scripts, source, findings);
   nonBmpText(app, source, findings);
   pivotReports(app, source, findings);
 
@@ -832,12 +833,16 @@ function reportFilters(app: App, source: string, formByName: Map<string, Form>, 
       if (!text) return;
       const expr = parseExpression(text);
       if (expr.kind === 'unknown') return;
+      const rejected = new Set<string>();
       for (const hit of multiselectLeft(expr, form, formByName)) {
         push(findings, criteriaFinding(source, offset, form.name, hit, `Report ${report.name} ${where}`));
+        rejected.add(`${hit.lookup}.${hit.value}`);
       }
       const own = new Set<string>();
+      const paths = new Set<string>();
       for (const left of leftOperands(expr)) {
         const chain = chainOf(left);
+        if (chain?.length === 2 && fieldOf(form, chain[0]!)?.lookup) paths.add(chain.join('.'));
         if (chain?.length !== 1) continue;
         const field = fieldOf(form, chain[0]!);
         if (field && isMulti(field) && !field.lookup) own.add(field.name);
@@ -851,6 +856,17 @@ function reportFilters(app: App, source: string, formByName: Map<string, Form>, 
           fix: 'Check the migrated report filter returns the same rows, or filter on a single-value field.',
         });
       }
+      // A criteria Creator rejects is already a blocker; its call cost is moot.
+      for (const path of [...paths].filter((item) => !rejected.has(item)).sort(compareEnUs)) {
+        const parent = fieldOf(form, path.split('.')[0]!)?.lookup?.form ?? 'the parent form';
+        push(findings, {
+          check: 'store-calls-lookup-path-filter',
+          severity: 'warning',
+          location: loc(source, offset, form.name, path.split('.')[0]!),
+          message: `Report ${report.name} ${where} filters on lookup path ${path}. Each request first reads ${parent} ${LOOKUP_PATH_PAGE_ROWS} rows per Data Store call for this leaf, then the report rows, so one report request costs ceil(${parent} rows / ${LOOKUP_PATH_PAGE_ROWS}) calls for this leaf plus the report read (over the ${STORE_CALLS_PER_REQUEST_TARGET}-call target once ${parent} passes ${LOOKUP_PATH_PAGE_ROWS * (STORE_CALLS_PER_REQUEST_TARGET - 1)} rows). Above ${LOOKUP_PATH_PARENT_CAP} matching ${parent} records the leaf fails closed and the report shows no rows for it.`,
+          fix: `Keep ${parent} small, or store the filtered value on ${form.name} itself and filter on that field.`,
+        });
+      }
     };
     check(report.criteria, report.span.start, 'criteria');
     for (const filter of report.filters) {
@@ -858,6 +874,12 @@ function reportFilters(app: App, source: string, formByName: Map<string, Form>, 
     }
   }
 }
+
+/** Rows per parent read of a lookup-path leaf, and the parent ids it accepts (packages/ui/src/generate.ts LOOKUP_PARENT_PAGE_CAP). */
+const LOOKUP_PATH_PAGE_ROWS = 300;
+const LOOKUP_PATH_PARENT_CAP = 1000;
+/** Data Store calls one request should stay within; a design target of this check, not a Catalyst limit. */
+export const STORE_CALLS_PER_REQUEST_TARGET = 4;
 
 function criteriaFinding(source: string, offset: number | undefined, form: string, hit: { lookup: string; value: string }, where: string): PrecheckFinding {
   return {
@@ -2144,6 +2166,56 @@ function hiddenSpans(text: string): Hidden[] {
  * subform traversal `(input.X.Y).input.X.Y.getall()`. `List((input.X.Y).getall())`
  * is Creator's own serialization and is not flagged.
  */
+/**
+ * Lower bound of the Data Store calls an on success script makes: one per
+ * `insert into` and one per `Form[criteria]` read, in the script and in every
+ * function it calls (by name or thisapp.name, each function counted once).
+ * A record-set update adds its own write, so the real count is higher.
+ */
+function successStoreCalls(app: App, scripts: ScriptSrc[], source: string, findings: PrecheckFinding[]): void {
+  const formNames = new Set(app.forms.map((form) => form.name));
+  const bodies = new Map<string, ScriptSrc[]>();
+  for (const script of scripts) if (script.owner) bodies.set(script.owner, [...(bodies.get(script.owner) ?? []), script]);
+  const own = (script: ScriptSrc) => {
+    const hidden = hiddenSpans(script.text);
+    const code = (at: number) => !hidden.some((span) => at >= span.start && at < span.end);
+    let calls = 0;
+    const callees = new Set<string>();
+    for (const match of script.text.matchAll(/\binsert\s+into\b/gi)) if (code(match.index!)) calls++;
+    for (const match of script.text.matchAll(/(?<![\w.])(?<!\binsert\s+into\s+)([A-Za-z_]\w*)\s*\[/gi)) if (code(match.index!) && formNames.has(match[1]!)) calls++;
+    for (const match of script.text.matchAll(/(?<![\w.])(?:thisapp\.)?([A-Za-z_][\w.]*)\s*\(/g)) {
+      if (!code(match.index!)) continue;
+      // `thisapp.Account.Balance_Calculation(...)`: the function may be keyed with or without its namespace.
+      const name = [match[1]!, match[1]!.slice(match[1]!.lastIndexOf('.') + 1)].find((key) => bodies.has(key));
+      if (name) callees.add(name);
+    }
+    return { calls, callees };
+  };
+  for (const script of scripts) {
+    if (script.context !== 'success' || !script.form) continue;
+    let total = 0;
+    const seen = new Set<string>();
+    const queue = [script];
+    while (queue.length) {
+      const next = own(queue.shift()!);
+      total += next.calls;
+      for (const name of next.callees) {
+        if (seen.has(name)) continue;
+        seen.add(name);
+        queue.push(...bodies.get(name)!);
+      }
+    }
+    if (total <= STORE_CALLS_PER_REQUEST_TARGET) continue;
+    push(findings, {
+      check: 'store-calls-on-success',
+      severity: 'warning',
+      location: loc(source, script.base, script.form, null),
+      message: `${script.form} ${script.where} makes at least ${total} Data Store calls per submit${seen.size ? ` (with ${[...seen].sort(compareEnUs).join(', ')})` : ''}, over the ${STORE_CALLS_PER_REQUEST_TARGET}-call target; every call adds latency to the submit request.`,
+      fix: 'Keep running totals updated on write instead of re-reading other forms, or move the recalculation to a scheduled function.',
+    });
+  }
+}
+
 function scriptShapes(scripts: ScriptSrc[], source: string, findings: PrecheckFinding[]): void {
   const seen = new Set<string>();
   const note = (script: ScriptSrc, at: number, check: string, message: string, fix: string) => {
