@@ -25,7 +25,7 @@ import { pathToFileURL } from 'node:url';
 import { deriveIr, parse, parseFile, type App } from '../../core/src/index.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from '../src/guards.js';
-import { deployFiles, writeDeployTree } from '../src/plan.js';
+import { deployFiles, writeDeployTree, type DeployUi } from '../src/plan.js';
 
 /**
  * The matrix serves the generated admin smoke endpoint in-process: it drives
@@ -47,7 +47,7 @@ const COMPANION_DS = `application "c2c-route-matrix-companion"
 	time zone = "Asia/Kolkata"
 	forms
 	{
-		form Ticket
+		form Job
 		{
 			Title
 			(
@@ -65,10 +65,10 @@ const COMPANION_DS = `application "c2c-route-matrix-companion"
 	}
 	reports
 	{
-		list All_Tickets
+		list All_Jobs
 		{
-			displayName = "All Tickets"
-			show all rows from Ticket
+			displayName = "All Jobs"
+			show all rows from Job
 			(
 				Title as "Title"
 				Status as "Status"
@@ -77,7 +77,11 @@ const COMPANION_DS = `application "c2c-route-matrix-companion"
 			(
 				"Close"
 				(
-				workflow = Close_Ticket
+				workflow = Close_Job
+				)
+				"Resolve"
+				(
+				workflow = Resolve_Job
 				)
 			)
 		}
@@ -90,7 +94,7 @@ const COMPANION_DS = `application "c2c-route-matrix-companion"
 			{
 				return n * 2;
 			}
-			void Close_Ticket(int id)
+			void Close_Job(int id)
 			{
 				info id;
 			}
@@ -109,10 +113,10 @@ const COMPANION_DS = `application "c2c-route-matrix-companion"
 	{
 		form
 		{
-			Ticket_Open as "Ticket open"
+			Job_Open as "Job open"
 			{
 				type = form
-				form = Ticket
+				form = Job
 				record event = on add
 				on load
 				{
@@ -120,18 +124,34 @@ const COMPANION_DS = `application "c2c-route-matrix-companion"
 					{
 						custom deluge script
 						(
-							if (Ticket[Status == "Open"].count() > 0) { alert "open"; }
+							if (Job[Status == "Open"].count() > 0) { alert "open"; }
 						)
+					}
+				}
+			}
+		}
+		functions
+		{
+			Resolve_Job as "Resolve Job"
+			{
+				type = functions
+				form = Job
+				execution type = for each record
+				on start
+				{
+					actions
+					{
+						rec.Status = "Open";
 					}
 				}
 			}
 		}
 		approval
 		{
-			Ticket_Approval as "Ticket Approval"
+			Job_Approval as "Job Approval"
 			{
 				type = approval
-				form = Ticket
+				form = Job
 				on level 1
 				{
 					approvers
@@ -176,12 +196,12 @@ const COMPANION_DS = `application "c2c-route-matrix-companion"
 			type = Users_Permissions
 			ModulePermissions
 			{
-				Ticket
+				Job
 				{
 					enabled = true
 					ReportPermissions
 					{
-						All_Tickets = {"View"}
+						All_Jobs = {"View"}
 					}
 				}
 			}
@@ -199,6 +219,8 @@ interface Call {
    * runs only after authorization passed (its message is not an access error).
    */
   granted?: { status: number; error: RegExp };
+  /** The granted 2xx reply must report a live write (`wrote: true`), not a no-op. */
+  wrote?: true;
 }
 
 /** Seeded rows: `keep` is read, signed, and transitioned; `victim` is the row the granted delete removes. */
@@ -215,6 +237,14 @@ interface Family {
   /** Restore the seeded rows before the granted call (the call itself changes them). */
   reset?: boolean;
 }
+
+/**
+ * Report custom actions that are stubs by design: the companion's "Close" names
+ * a standalone Deluge function, not a Creator `type = functions` workflow with
+ * a record execution type, so its endpoint refuses a live call (422) once the
+ * caller is authenticated and granted. "Resolve" names such a workflow and runs.
+ */
+const STUB_ACTIONS = new Set(['POST /reports/All_Jobs/actions/close']);
 
 const form = (m: RegExpExecArray) => decodeURIComponent(m[1] as string);
 
@@ -258,7 +288,12 @@ const FAMILIES: Family[] = [
   {
     name: 'report-custom-action',
     pattern: /^POST \/reports\/([^/]+)\/actions\/[^/]+$/,
-    calls: (m) => [{ method: 'POST', path: m.input.slice(5), body: { rows: [] } }],
+    // A stub action (its workflow generated no function) is refused with 422
+    // after the gate; a dispatchable one runs live on the posted row.
+    calls: (m) =>
+      STUB_ACTIONS.has(m.input)
+        ? [{ method: 'POST', path: m.input.slice(5), body: { ROWID: '@keep' }, granted: { status: 422, error: /has no generated function to run/ } }]
+        : [{ method: 'POST', path: m.input.slice(5), body: { ROWID: '@keep' }, wrote: true }],
   },
   {
     name: 'lookup',
@@ -313,7 +348,7 @@ const SUBMIT_RECORDS: Record<string, Record<string, unknown>> = {
   Guest: { Guest_Name: 'Ada' },
   Media_Kit: { Kit_Name: 'Press kit' },
   Room: { Room_Code: 'R1' },
-  Ticket: { Title: 'Broken lamp' },
+  Job: { Title: 'Broken lamp' },
 };
 
 interface AppCase {
@@ -323,6 +358,8 @@ interface AppCase {
   params: { form: string; text: string; file: string };
   /** Seed rows per table, keyed by form. */
   seed: Record<string, Record<string, unknown>>;
+  /** The deploy UI target; both serve the same buildUi functions. Default react. */
+  ui?: DeployUi;
 }
 
 function withNobody(app: App): App {
@@ -359,7 +396,7 @@ const WRITES = new Set(['insertRows', 'updateRows', 'deleteRows']);
 
 /** Serves one app's deploy tree; returns the call helper and the side-effect probes. */
 async function serve(c: AppCase, sdk: FakeSdk, out: string) {
-  writeDeployTree(out, deployFiles(withNobody(c.app), guardFor(c.app), false, { mode: 'live' }).files);
+  writeDeployTree(out, deployFiles(withNobody(c.app), guardFor(c.app), false, { mode: 'live', ...(c.ui ? { ui: c.ui } : {}) }).files);
   const base = join(out, 'functions/c2c_api');
   const routes = JSON.parse(readFileSync(join(base, 'routes.json'), 'utf8')) as Record<string, string>;
   const signed: string[] = [];
@@ -466,6 +503,7 @@ async function matrix(c: AppCase, granted: string, seen: Set<string>, partial?: 
           const error = String(body.message ?? body.error ?? '');
           if (ok.status !== call.granted.status || !call.granted.error.test(error)) failures.push(`${label}: granted role got ${ok.status} ${ok.text}`);
         } else if (ok.status < 200 || ok.status >= 300) failures.push(`${label}: granted role got ${ok.status} ${ok.text}`);
+        else if (call.wrote && (JSON.parse(ok.text) as { wrote?: unknown }).wrote !== true) failures.push(`${label}: granted role did not write: ${ok.text}`);
       }
     }
     assert.deepEqual(failures, [], `${c.label}: authorization matrix failures`);
@@ -528,23 +566,27 @@ test('kitchen sink: every generated route refuses anonymous and grantless caller
 
 test('companion app: prefetch, flow, custom-function and report-action routes are gated the same way', async () => {
   const app = deriveIr(parse(COMPANION_DS));
+  for (const ui of ['react', 'vanilla'] as const) {
   await matrix(
-    { label: 'companion', app, params: { form: 'Ticket', text: 'Title', file: 'Attachment' }, seed: { Ticket: { Title: 't', Status: 'Open', Flow_Status: 'Pending' } } },
+    { label: `companion-${ui}`, ui, app, params: { form: 'Job', text: 'Title', file: 'Attachment' }, seed: { Job: { Title: 't', Status: 'Open', Flow_Status: 'Pending' } } },
     'App Administrator',
     seen,
     {
-      // Agent can view Ticket but cannot edit it, approve it, or run admin functions.
+      // Agent can view Job but cannot edit it, approve it, or run admin functions.
       role: 'Agent',
       denied: [
-        { method: 'POST', path: '/flows/ticket-approval/approve', body: { ROWID: '@keep', status: 'Approved' } },
+        { method: 'POST', path: '/flows/job-approval/approve', body: { ROWID: '@keep', status: 'Approved' } },
         { method: 'POST', path: '/functions/helpers-twice', body: { args: [4] } },
-        { method: 'POST', path: '/forms/Ticket/load/prefetch', body: { record: {}, nonce: 'n1' } },
+        { method: 'POST', path: '/forms/Job/load/prefetch', body: { record: {}, nonce: 'n1' } },
+        // View without Edit: the live action reads the row but may not modify it.
+        { method: 'POST', path: '/reports/All_Jobs/actions/resolve', body: { ROWID: '@keep' } },
       ],
       granted: [
-        { method: 'POST', path: '/reports/All_Tickets', body: { op: 'query' } },
+        { method: 'POST', path: '/reports/All_Jobs', body: { op: 'query' } },
       ],
     },
   );
+  }
 });
 
 test('every route family has a row and every row is exercised by a generated route', () => {
