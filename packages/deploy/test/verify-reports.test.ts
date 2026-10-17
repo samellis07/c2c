@@ -231,10 +231,35 @@ test('offline kitchen-sink: an endpoint that drops a row or alters a total FAILS
       },
     }),
   });
-  const statusOf = (screen: string, check: string) => result.screens.find((s) => s.screen === screen)!.checks.find((c) => c.check === check)!.status;
+  const statusOf = (screen: string, check: string) => {
+    const found = result.screens.find((s) => s.screen === screen)?.checks.find((c) => c.check === check);
+    if (!found) assert.fail(`no '${check}' check on screen '${screen}'${result.error ? ` — run failed: ${result.error}` : ''}`);
+    return found.status;
+  };
   assert.equal(statusOf('All_Gear', 'rows'), 'fail');
   assert.equal(statusOf('All_Rooms', 'totals'), 'fail');
   assert.ok(summarize([result]).totals.fail >= 2);
+});
+
+test('offline kitchen-sink: a seed load failure FAILS the run with the error, not a crash', { skip: SKIP }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-report-fake-'));
+  try {
+    const fakeSdk = join(dir, 'fake.cjs');
+    writeFileSync(fakeSdk, `module.exports = {
+  initialize() { return { datastore() { return { table() { return { insertRows: async () => { throw new Error('simulated store failure'); } }; } }; } }; },
+  setSession() {},
+  state() { return { tables: {} }; },
+  executeZCQLQuery: async () => [],
+};
+`);
+    const app = deriveIr(parse(readFileSync(KITCHEN, 'utf8')));
+    const result = await runReportChecks(app, KITCHEN, { n: 4, fakeSdk });
+    assert.equal(result.screens.length, 0);
+    assert.match(result.error ?? '', /seed load failed: simulated store failure/);
+    assert.equal(summarize([result]).totals.fail, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('the runner command: usage errors exit 2', async () => {
