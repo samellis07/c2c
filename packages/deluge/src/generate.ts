@@ -85,6 +85,21 @@ export const FORM_EVENT_SERVER_UNINVOKED = 'form-event-server-uninvoked';
  */
 export const PRESUCCESS_EFFECT_UNBUFFERED = 'presuccess-effect-unbuffered';
 
+/**
+ * The guided step every `form-event-server-uninvoked` todo carries: what is
+ * not run (the generated route body for this workflow event) and the manual
+ * step. A submit body the on-success routes own merges into the matching
+ * on-success module; any other kind needs a caller wired to its route.
+ */
+function formEventUninvokedStep(form: string, event: string, kind: string): string {
+  const route = formEventServerPath(form, kind);
+  const label = event || kind;
+  if (kind === 'submit') {
+    return `The generated ${route} body for '${label}' never runs — the on-success routes own its posts. Merge that body into the matching on-success module under functions/aio/${slug(form)}/, or move it into a function the app calls, then verify it once.`;
+  }
+  return `The generated ${route} body for '${label}' is never invoked — no generated caller posts that route and the submit/delete pipeline does not call it. Post ${route} from a Catalyst client or function, or move the '${label}' workflow's server logic into an invoked module, then verify it once.`;
+}
+
 const CLIENT_RUN_GUARD = 'if (!shim.client || typeof shim.client.run !== "function") throw Object.assign(new Error("client.run unavailable; server half not run"), { c2cElementBlocked: true });\nawait shim.client.run(ctx);';
 
 /** One form workflow that emitFormHandler actually wrote into a module. */
@@ -681,7 +696,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
     if (!submitBodyUnposted(successServerForms.get(fix.form), fix.event)) continue;
     fix.entry.serverInvoked = false;
     if (fix.serverFile) fix.entry.paths = fix.entry.paths.filter((p) => p !== fix.serverFile);
-    todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: fix.entry.start, end: fix.entry.end });
+    todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: fix.entry.start, end: fix.entry.end, manualStep: formEventUninvokedStep(fix.form, fix.event, 'submit') });
   }
   // Every Advanced I/O form handler imports the shared request helpers from
   // one app-local module. Emit it only when this app has at least one AIO file.
@@ -1182,7 +1197,7 @@ function emitFormHandler(
       if (item.server && serverFile) {
         if (kind === 'submit' && !clientPosted) serverInvoked = !submitBodyUnposted(successServerForms?.get(form), item.w.event || '');
         else serverInvoked = clientPosted || runtimeReachesFormEvent(kind) || presuccessModule;
-        if (!serverInvoked) todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: item.w.span.start, end: item.w.span.end });
+        if (!serverInvoked) todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: item.w.span.start, end: item.w.span.end, manualStep: formEventUninvokedStep(form, item.w.event || '', kind) });
       }
       const paths: string[] = [];
       if (item.server && serverFile && serverInvoked !== false) paths.push(serverFile);

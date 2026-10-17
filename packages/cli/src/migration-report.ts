@@ -20,7 +20,7 @@ import { basename, join } from 'node:path';
 import { entryKind, listDsFiles, parseFileOrProjectWithSidecars, type App } from '../../core/src/index.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { readLockIfPresent, type FillLock, type LockFileFs } from '../../deluge/src/index.js';
-import { analyze, type TodoKind } from './analyze.js';
+import { analyze, guidedTodoSteps, type GuidedTodoStep, type TodoKind } from './analyze.js';
 import type { FieldGap } from '../../schema/src/generator.js';
 import type { HiddenPart } from '../../ui-react/src/index.js';
 import type { GuidedResidual } from './guided-residual.js';
@@ -43,6 +43,8 @@ export interface MigrationAppEntry {
   silentDropKinds: TodoKind[];
   /** One guided item per silent drop (what, why, the customer's step, a stable id). The drops stay counted. */
   residuals: GuidedResidual[];
+  /** Residual TODO holes carrying a guided step: where the Creator code is, and the manual step. Still counted in `todoCount`. */
+  todoSteps: GuidedTodoStep[];
   readiness: number;
   band: 'ready' | 'needs-work' | 'blocked';
 }
@@ -89,6 +91,8 @@ export interface MigrationReport {
     genericResidualSteps: number;
     /** Silent drops with no guided residual item. Stays zero. */
     unguidedSilentDrops: number;
+    /** Residual TODO holes carrying a guided step across the corpus. */
+    guidedTodoSteps: number;
   };
 }
 
@@ -142,6 +146,7 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
       silentDrops: report.determinism.silentDrops,
       silentDropKinds: report.determinism.silentDropKinds,
       residuals: report.residuals,
+      todoSteps: guidedTodoSteps(report),
       readiness: report.score.readiness,
       band: report.score.band,
     };
@@ -201,6 +206,7 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
       guidedResiduals: apps.reduce((sum, app) => sum + app.residuals.length, 0),
       genericResidualSteps: apps.reduce((sum, app) => sum + app.residuals.filter((item) => item.stepSource === 'generic').length, 0),
       unguidedSilentDrops: apps.reduce((sum, app) => sum + Math.max(0, app.silentDrops - app.residuals.filter((item) => item.step.trim()).length), 0),
+      guidedTodoSteps: apps.reduce((sum, app) => sum + app.todoSteps.length, 0),
     },
   };
 }
@@ -227,6 +233,7 @@ export function migrationReportAsText(report: MigrationReport): string {
     `silent drops (total): ${a.silentDrops}`,
     ...a.silentDropKinds.slice(0, 10).map((kind) => `  ${kind.count} ${kind.construct}`),
     `guided residual items: ${a.guidedResiduals} (${a.genericResidualSteps} with a generic manual step); unguided silent drops: ${a.unguidedSilentDrops}`,
+    `residual TODO holes with a guided step: ${a.guidedTodoSteps}`,
     `residual TODO items: ${a.todoTotal} across ${a.distinctTodoKinds} kinds`,
     `field gaps: ${a.fieldGapTotal} across ${a.fieldGaps.length} kinds`,
     ...a.fieldGaps.map((gap) => `  ${gap.matrixId}: ${gap.count} (${gap.fields.map((field) => `${field.form}.${field.field}`).join(', ')}) — ${gap.reason}`),
