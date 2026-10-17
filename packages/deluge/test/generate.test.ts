@@ -4087,6 +4087,20 @@ ${body}
     ['invokeurl result in if', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tif (resp.get("ok") != true)\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tcancel submit;\n\t\t\t\t\t\t}'],
     // The marker copied into a field stores a lie.
     ['invokeurl result into field', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tinput.Name = resp.get("id");'],
+    // An alias of a bound call result carries the marker; reading it decides
+    // on the placeholder, not the response.
+    ['invokeurl result alias', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tother = resp;\n\t\t\t\t\t\tinfo other;'],
+    // Taint follows the chain: an alias of an alias still holds the marker.
+    ['invokeurl result alias chain', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tother = resp;\n\t\t\t\t\t\tthird = other;\n\t\t\t\t\t\tinfo third;'],
+    // A map built from a bound result holds the marker under its key.
+    ['invokeurl result through map', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tm = Map();\n\t\t\t\t\t\tm.put("k", resp);\n\t\t\t\t\t\tinfo m.get("k");'],
+    // A list built from a bound result holds the marker in its elements.
+    ['invokeurl result through list', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tl = List();\n\t\t\t\t\t\tl.add(resp);\n\t\t\t\t\t\tinfo l.get(0);'],
+    // A call whose argument is tainted returns a derived marker; reading the
+    // assigned result decides on it.
+    ['invokeurl result through call', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tderived = resp.get("id");\n\t\t\t\t\t\tinfo derived;'],
+    // A string built from a bound result interpolates the marker.
+    ['invokeurl result in concat', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\ttext = "got " + resp;\n\t\t\t\t\t\tinfo text;'],
     // The call sits in the condition itself — the result is used at once.
     ['invokeurl in condition', 'if (invokeurl[url: "https://example.test/check" type: GET].get("ok") != true)\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tcancel submit;\n\t\t\t\t\t\t}'],
     // A thisapp call is opaque: its own writes defer under the same buffer and

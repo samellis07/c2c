@@ -231,6 +231,12 @@ function presuccessBodyDeferrable(text: string, ownForm: string): boolean {
   let zcqlRead = false;
   const effectBound = new Set<string>();
   const readNames = new Set<string>();
+  // `x = <expr>` propagates the marker: a name whose value mentions a bound or
+  // already-tainted name holds the marker too. bindings records, per named
+  // target, every name its value reads; the fixpoint below grows the tainted
+  // set through the chain (`other = resp`, `m = {"k": resp}`, `x = f(resp)`).
+  const bindings: { target: string; names: Set<string> }[] = [];
+  let nameSink: Set<string> | null = null;
   const KNOWN_BARE_CALLS = new Set(recognisedBuiltinNames().map((n) => n.toLowerCase()));
   const unparen = (e: Expr): Expr => (e.kind === 'paren' ? unparen(e.expr) : e);
   const rootName = (e: Expr | undefined): string | null => {
@@ -316,6 +322,7 @@ function presuccessBodyDeferrable(text: string, ownForm: string): boolean {
         return;
       case 'name':
         readNames.add(e.name);
+        if (nameSink) nameSink.add(e.name);
         return;
       case 'mailAttachments':
         for (const item of e.items) {
@@ -373,10 +380,18 @@ function presuccessBodyDeferrable(text: string, ownForm: string): boolean {
         }
         if (s.else) visitStmt(s.else);
         return;
-      case 'forEach':
+      case 'forEach': {
+        // `for each x in <tainted>` taints the element variable; `for each
+        // index i` iterates positions, not values.
+        const collectionReads = new Set<string>();
+        const prevSink = nameSink;
+        nameSink = collectionReads;
         visitExpr(s.collection, true);
+        nameSink = prevSink;
+        if (!s.iteratesIndex) bindings.push({ target: s.name, names: collectionReads });
         visitStmt(s.body);
         return;
+      }
       case 'while':
         visitExpr(s.test, true);
         visitStmt(s.body);
@@ -401,11 +416,24 @@ function presuccessBodyDeferrable(text: string, ownForm: string): boolean {
         // value-position use (a condition, an argument, `input.F = invokeurl`)
         // decides on the marker, so it is unsafe by the valuePosition rule.
         const v = unparen(s.value);
+        const valueReads = new Set<string>();
+        const prevSink = nameSink;
+        nameSink = valueReads;
         if (s.op === '=' && s.target.kind === 'name' && (v.kind === 'invokeurl' || v.kind === 'sendmail' || v.kind === 'pushnotification')) {
           effectBound.add(s.target.name);
           visitExpr(s.value, false);
         } else {
           visitExpr(s.value, true);
+        }
+        nameSink = prevSink;
+        if (s.target.kind === 'name') {
+          // A compound `x op= value` also reads `x` itself.
+          if (s.op !== '=') readNames.add(s.target.name);
+          bindings.push({ target: s.target.name, names: valueReads });
+        } else {
+          // A member/index target the analysis cannot follow: visit it so a
+          // name read in the target itself (a[i] = …) is still counted.
+          visitExpr(s.target, true);
         }
         return;
       }
@@ -432,7 +460,24 @@ function presuccessBodyDeferrable(text: string, ownForm: string): boolean {
     }
   };
   for (const s of script.body) visitStmt(s);
-  for (const bound of effectBound) if (readNames.has(bound)) unsafe = true;
+  // Grow the taint transitively: a name assigned (or looped) from an expression
+  // that mentions a tainted name holds the marker too, at any chain depth.
+  const tainted = new Set(effectBound);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const b of bindings) {
+      if (tainted.has(b.target)) continue;
+      for (const n of b.names) {
+        if (tainted.has(n)) {
+          tainted.add(b.target);
+          grew = true;
+          break;
+        }
+      }
+    }
+  }
+  for (const name of readNames) if (tainted.has(name)) unsafe = true;
   if (unsafe || writes.has(ownForm)) return false;
   if (zcqlRead && writes.size > 0) return false;
   for (const read of reads) if (writes.has(read)) return false;
