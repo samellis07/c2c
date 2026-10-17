@@ -605,8 +605,8 @@ test('stored whitespace seeds an empty number field; a huge number posts its exa
   assert.equal(record.BigDec, '1000000000000000000000.50');
 });
 
-async function renderFormView(mode: 'add' | 'edit', fields: FieldSpec[], api: any) {
-  const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://127.0.0.1/', pretendToBeVisual: true });
+async function renderFormView(mode: 'add' | 'edit', fields: FieldSpec[], api: any, url = 'http://127.0.0.1/') {
+  const dom = new JSDOM('<!doctype html><body></body>', { url, pretendToBeVisual: true });
   const win = dom.window as any;
   installGlobals(win);
   const kit = await bundle();
@@ -651,6 +651,28 @@ async function renderFormView(mode: 'add' | 'edit', fields: FieldSpec[], api: an
   await flush();
   return { formEl, box: win.document as unknown as Document, win, flush };
 }
+
+test('an add screen opened by a navigation link prefills only its own fields from the route query', async () => {
+  const api = { post: async () => ({ ok: true, body: {} }) };
+  const fields = [field('Qty', 'number'), field('Name', 'text'), field('Note', 'text')];
+  const rendered = await renderFormView('add', fields, api, 'http://127.0.0.1/#/form/F?Name=Desk%20%26%20chair&Qty=3&Bogus=1');
+  await waitFor(() => (rendered.box.querySelector('[data-field="Name"] input') as HTMLInputElement | null)?.value === 'Desk & chair', 'the prefilled Name');
+  await rendered.flush();
+  assert.equal((rendered.box.querySelector('[data-field="Qty"] input[role="spinbutton"]') as HTMLInputElement | null)?.value, '3');
+  assert.equal((rendered.box.querySelector('[data-field="Note"] input') as HTMLInputElement | null)?.value, '');
+  assert.equal(rendered.box.querySelector('[name="Bogus"]'), null);
+  const record = readRecord(rendered.formEl, spec(fields));
+  assert.equal(record.Name, 'Desk & chair');
+});
+
+test('an edit screen never prefills from the route query', async () => {
+  const api = { post: async (url: string) => (url === '/r' ? { ok: true, body: { record: { Qty: '7', Name: 'x' } } } : { ok: true, body: {} }) };
+  const fields = [field('Qty', 'number'), field('Name', 'text')];
+  const rendered = await renderFormView('edit', fields, api, 'http://127.0.0.1/#/form/F/edit/123?Name=Other');
+  await waitFor(() => (rendered.box.querySelector('[data-field="Qty"] input[role="spinbutton"]') as HTMLInputElement | null)?.value === '7', 'the loaded record');
+  await rendered.flush();
+  assert.equal((rendered.box.querySelector('[data-field="Name"] input') as HTMLInputElement | null)?.value, 'x');
+});
 
 test('edit mode submit before load posts NOTHING; failed fetch posts nothing; after load clear behaviour works', async () => {
   let resolveLoad: any;

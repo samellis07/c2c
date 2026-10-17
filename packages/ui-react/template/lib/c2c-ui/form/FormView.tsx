@@ -28,6 +28,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { Alert } from '../arc/components/alert/alert';
 import { Button } from '../arc/components/button/button';
 import type { FieldSpec, FormRecord, FormSpec, RecordValue } from '../types';
+import { routePrefill } from '../runtime/router';
 import { SESSION_EXPIRED_EVENT, pageHash, watchAuthCall, type AppWindow } from '../runtime/api';
 import { useEnv } from '../runtime/env';
 import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
@@ -319,6 +320,28 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
     view.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
     return () => view.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
   }, [view, form]);
+
+  // Add screen opened by a navigation link (`#/form/X?Field=value`): its
+  // query fills this form's own fields once; other names are ignored.
+  useEffect(() => {
+    if (edit) return;
+    let hash = '';
+    try {
+      hash = view.location.hash;
+    } catch {
+      return;
+    }
+    const values = routePrefill(hash);
+    if (!values) return;
+    const start: Record<string, unknown> = {};
+    for (const field of form.fields) {
+      if (field.widget === 'subform' || !Object.prototype.hasOwnProperty.call(values, field.name)) continue;
+      start[field.name] = values[field.name];
+    }
+    if (!Object.keys(start).length) return;
+    setRecord((prev) => ({ ...prev, ...start }));
+    setLoaded((n) => n + 1);
+  }, [view, edit, form]);
 
   // Add screen: back from sign-in, the saved draft fills the controls once —
   // only for the user who saved it.

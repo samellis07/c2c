@@ -156,6 +156,12 @@ export interface CustomActionSpec {
   header?: boolean;
   /** The endpoint is a dry-run stub: the button renders turned off with a note. */
   preview?: true;
+  /**
+   * The workflow is only an openUrl to this app's own screen: the button is a
+   * link to `href`, each param prefilling the target form field `name` from
+   * the row's `field` (or a literal `value`).
+   */
+  navigate?: { kind: 'form' | 'report' | 'page'; target: string; href: string; params: Array<{ name: string; field?: string; value?: string }> };
 }
 
 export interface ReportSpec {

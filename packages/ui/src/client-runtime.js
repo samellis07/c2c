@@ -745,10 +745,55 @@ function chartPanel(report, heading) {
  * A custom action button. An action whose endpoint is a dry-run stub
  * (`preview`) renders turned off: a click would report a run that saved nothing.
  */
-function actionButtonHtml(report, endpoint, label) {
+function actionButtonHtml(report, endpoint, label, row) {
+  const nav = actionNavOf(report, endpoint);
+  if (nav) return navLinkHtml(nav, label, row);
   const preview = (report.customActions || []).some((action) => action && action.endpoint === endpoint && action.preview);
   const off = preview ? ' disabled title="Not available yet: this action is turned off."' : '';
   return `<button type="button" data-action="${escapeHtml(endpoint)}"${off}>${escapeHtml(label)}</button>`;
+}
+
+/** The client navigation of the action posting to `endpoint`, or undefined. */
+function actionNavOf(report, endpoint) {
+  const action = (report.customActions || []).find((item) => item && item.endpoint === endpoint);
+  return action && action.navigate && typeof action.navigate.href === 'string' ? action.navigate : undefined;
+}
+
+/** A navigation that prefills from the clicked row needs a row to open. */
+export function navNeedsRow(nav) {
+  return (nav.params || []).some((param) => param && typeof param.field === 'string');
+}
+
+/**
+ * The route a navigation custom action opens: the target's own route (so its
+ * access gate runs as for any visit) plus a query that prefills the target
+ * form. A row value is sent only when the row the caller read holds it as a
+ * scalar; a field the caller cannot read is not on the row and prefills
+ * nothing.
+ */
+export function actionNavHref(nav, row) {
+  const query = [];
+  for (const param of nav.params || []) {
+    if (!param || typeof param.name !== 'string') continue;
+    let value;
+    if (typeof param.field === 'string') {
+      const raw = row && typeof row === 'object' && Object.prototype.hasOwnProperty.call(row, param.field) ? row[param.field] : undefined;
+      if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') value = String(raw);
+    } else if (typeof param.value === 'string') value = param.value;
+    if (value !== undefined && value !== '') query.push(`${encodeURIComponent(param.name)}=${encodeURIComponent(value)}`);
+  }
+  return query.length ? `${nav.href}?${query.join('&')}` : nav.href;
+}
+
+function navLinkHtml(nav, label, row) {
+  return `<a href="${escapeHtml(actionNavHref(nav, row))}" data-action-nav="">${escapeHtml(label)}</a>`;
+}
+
+/** Navigation actions shown per record: every one that is not a column, unless it is a header action needing no row. */
+function recordNavActions(report) {
+  return (report.customActions || []).filter(
+    (action) => action && action.navigate && !(report.columns || []).some((column) => column && column.action === action.endpoint) && (action.header !== true || navNeedsRow(action.navigate)),
+  );
 }
 
 /** The note naming the custom actions that are turned off, or ''. */
@@ -781,7 +826,7 @@ export function renderReport(report) {
   // Only `show action in view header = true` actions sit in the toolbar.
   // Record-menu and `column header` actions are per-record, not header chrome.
   const actions = (report.customActions || [])
-    .filter((action) => action.header === true)
+    .filter((action) => action.header === true && !(action.navigate && navNeedsRow(action.navigate)))
     .map((action) => actionButtonHtml(report, action.endpoint, action.name))
     .join('');
   const filters = (report.filters || [])
@@ -793,7 +838,7 @@ export function renderReport(report) {
   // The blank option is the default. The posted value is the label; the server maps a predefined label to criteria baked into the report module.
   const filterSelect = filters ? `<select data-filter aria-label="Filter"><option value=""></option>${filters}</select>` : '';
   // Record affordances are a trailing column — Creator's per-row Edit/Delete.
-  const opsHead = report.rowActions && (report.rowActions.edit || report.rowActions.delete) ? '<th scope="col" data-row-ops></th>' : '';
+  const opsHead = (report.rowActions && (report.rowActions.edit || report.rowActions.delete)) || recordNavActions(report).length ? '<th scope="col" data-row-ops></th>' : '';
   const bulkHead = report.rowActions && report.rowActions.edit ? '<th scope="col">Select</th>' : '';
   // Kanban, calendar and timeline fill grouped lanes; every other view is a table.
   const rowsHtml = BOARD_VIEWS.has(report.view)
@@ -1711,12 +1756,15 @@ function phoneCellAttrs(cell) {
  * Delete follow when the report allows them, and only for a row that has a
  * record id. A header-only action stays in the toolbar.
  */
-export function cardActions(report, id) {
+export function cardActions(report, id, row) {
   const actions = [];
   for (const column of report.columns || []) {
     if (!column || !column.action) continue;
-    actions.push({ action: column.action, label: column.label || column.field });
+    const nav = actionNavOf(report, column.action);
+    if (nav) actions.push({ href: actionNavHref(nav, row), label: column.label || column.field });
+    else actions.push({ action: column.action, label: column.label || column.field });
   }
+  for (const action of recordNavActions(report)) actions.push({ href: actionNavHref(action.navigate, row), label: action.name });
   if (!id) return actions;
   if (report.detail) {
     actions.push({
@@ -1730,8 +1778,8 @@ export function cardActions(report, id) {
 }
 
 /** The phone card footer: those actions as buttons and links. Hidden on a wide screen. */
-function cardActionsHtml(report, id) {
-  const actions = cardActions(report, id);
+function cardActionsHtml(report, id, row) {
+  const actions = cardActions(report, id, row);
   if (!actions.length) return '';
   const items = actions
     .map((item) => {
@@ -1767,7 +1815,7 @@ export function renderReportRows(report, rows) {
           const style = css ? ` style="${escapeHtml(css)}"` : '';
           if (column.action) {
             // `column header` custom action: a per-record button, not a value.
-            return `<td${head}${primary}${numeric}${style}>${actionButtonHtml(report, column.action, column.label || column.field)}</td>`;
+            return `<td${head}${primary}${numeric}${style}>${actionButtonHtml(report, column.action, column.label || column.field, source)}</td>`;
           }
           const text = column.multiValue ? multiValueItems(source[column.field]).join(', ') : source[column.field] != null ? String(source[column.field]) : '';
           if (report.detail && id && index === 0) {
@@ -1777,18 +1825,19 @@ export function renderReportRows(report, rows) {
         })
         .join('');
       const select = report.rowActions && report.rowActions.edit && id ? `<td data-bulk-select-cell><input type="checkbox" data-bulk-select value="${escapeHtml(id)}" aria-label="Select record ${escapeHtml(id)}"></td>` : '';
-      const ops = report.rowActions
-        ? `<td data-row-ops>${report.rowActions.edit ? `<button type="button" data-row-edit>Edit</button>` : ''}${report.rowActions.delete ? `<button type="button" data-row-delete>Delete</button>` : ''}</td>`
+      const navs = recordNavActions(report).map((action) => navLinkHtml(action.navigate, action.name, source)).join('');
+      const ops = report.rowActions || navs
+        ? `<td data-row-ops>${report.rowActions && report.rowActions.edit ? `<button type="button" data-row-edit>Edit</button>` : ''}${report.rowActions && report.rowActions.delete ? `<button type="button" data-row-delete>Delete</button>` : ''}${navs}</td>`
         : '';
       // Row ops need the ROWID on the row even without the detail link.
       const rowAttr = (report.detail || report.rowActions) && id ? ` data-row="${escapeHtml(id)}"` : '';
-      return `<tr data-card=""${rowAttr}>${select}${cells}${ops}${cardActionsHtml(report, id)}</tr>`;
+      return `<tr data-card=""${rowAttr}>${select}${cells}${ops}${cardActionsHtml(report, id, source)}</tr>`;
     })
     .join('');
 }
 
 export function parseRoute(hash) {
-  const [pathPart] = String(hash || '').split('?');
+  const [pathPart, queryPart] = String(hash || '').split('?');
   const parts = pathPart
     .replace(/^#/, '')
     .split('/')
@@ -1801,13 +1850,42 @@ export function parseRoute(hash) {
       }
     });
   if (!parts.length) return { name: 'home' };
-  if (parts[0] === 'form' && parts[1]) return { name: 'form', id: parts[1], edit: parts[2] === 'edit' ? parts[3] : undefined };
+  if (parts[0] === 'form' && parts[1]) {
+    const edit = parts[2] === 'edit' ? parts[3] : undefined;
+    const prefill = !edit && queryPart ? routePrefill(queryPart) : undefined;
+    return prefill ? { name: 'form', id: parts[1], edit, prefill } : { name: 'form', id: parts[1], edit };
+  }
   if (parts[0] === 'report' && parts[1]) return { name: 'report', id: parts[1], row: parts[2] === 'row' ? parts[3] : undefined };
   if (parts[0] === 'record' && parts[1] && parts[2]) return { name: 'record', id: parts[1], row: parts[2] };
   if (parts[0] === 'page' && parts[1]) return { name: 'page', id: parts[1] };
   // Hidden admin route — never in the nav. `c2c smoke --in-browser` points a browser here.
   if (parts[0] === 'admin' && parts[1] === 'smoke') return { name: 'smoke', id: 'smoke' };
   return { name: 'missing', id: parts.join('/') };
+}
+
+/**
+ * `#/form/X?Field=value` (a navigation custom action's link): the add
+ * screen's starting values, or undefined. Only plain names are kept.
+ */
+function routePrefill(query) {
+  const out = {};
+  let any = false;
+  for (const pair of query.split('&')) {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    let name;
+    let value;
+    try {
+      name = decodeURIComponent(pair.slice(0, eq));
+      value = decodeURIComponent(pair.slice(eq + 1));
+    } catch {
+      continue;
+    }
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || Object.prototype.hasOwnProperty.call(out, name)) continue;
+    out[name] = value;
+    any = true;
+  }
+  return any ? out : undefined;
 }
 
 function hiddenTarget(appModel, name) {
@@ -6380,6 +6458,13 @@ export function boot(appModel, doc) {
    */
   async function openForm(model, form, formEl, viewRef, route) {
     if (!route || !route.edit) {
+      // A navigation link's query fills the add screen's own fields; a name
+      // that is not a field of this form is ignored.
+      const prefill = route && route.prefill ? prefillRecord(form, route.prefill) : null;
+      if (prefill) {
+        await fillLookups(form, formEl, viewRef).catch(() => {});
+        fillFormValues(formEl, form, prefill);
+      }
       wireForm(model, form, formEl, viewRef);
       return;
     }
@@ -6403,6 +6488,17 @@ export function boot(appModel, doc) {
     fillFormValues(formEl, form, record);
     applyActions(stageFieldActions(form, stages), formEl);
     wireForm(model, form, formEl, viewRef, { mode: 'edit', rowId, old: record });
+  }
+
+  function prefillRecord(form, values) {
+    const record = {};
+    let any = false;
+    for (const field of form.fields || []) {
+      if (!field || typeof field.name !== 'string' || field.widget === 'subform' || !Object.prototype.hasOwnProperty.call(values, field.name)) continue;
+      record[field.name] = values[field.name];
+      any = true;
+    }
+    return any ? record : null;
   }
 
   function wireForm(model, form, formEl, viewRef, open) {

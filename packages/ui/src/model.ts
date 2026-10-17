@@ -11,6 +11,8 @@ import type { App, Field, Form, FunctionDef, Property, Report } from '../../core
 import { unquote } from '../../core/src/ir.js';
 import type { BlueprintFieldSpec } from '../../deluge/src/blueprint-rules.js';
 import { blueprintFieldSpecs, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
+import type { Expr } from '../../deluge/src/ast.js';
+import { parse as parseDeluge } from '../../deluge/src/parser.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { requiredCompositePart } from '../../schema/src/composite-parts.js';
 import { CURRENCY_CODES, fieldTypeRow, normalizeType, type FieldTypeRow } from '../../schema/src/mapping.js';
@@ -134,6 +136,24 @@ export interface UiAction {
    * is a counted todo (see actionDispatchTarget).
    */
   preview?: true;
+  /**
+   * The workflow's whole body is one `openUrl` to this app's own form, report
+   * or page: the button navigates there in the client (see actionNavigation).
+   */
+  navigate?: UiActionNav;
+}
+
+/**
+ * A client navigation lifted from an `openUrl("#Form:X?F=" + input.ID, ...)`
+ * workflow. `href` is the generated route (`#/form/X`); each param prefills
+ * the target form field `name` from the clicked row's `field` (`ROWID` for
+ * `input.ID`) or from a literal `value`.
+ */
+export interface UiActionNav {
+  kind: 'form' | 'report' | 'page';
+  target: string;
+  href: string;
+  params: Array<{ name: string; field?: string; value?: string }>;
 }
 
 export interface UiReport {
@@ -439,6 +459,93 @@ export function actionDispatchTarget(app: App, workflow: string | undefined, del
   const module = `functions/custom/${delugeSlug(fn.name || 'function')}.mjs`;
   const registered = delugeFiles.some((file) => file.path === 'functions/thisapp.mjs') && delugeFiles.some((file) => file.path === module);
   return registered ? fn : undefined;
+}
+
+/** `"https://app.zohocreator.<tld>" + zoho.appuri` or `zoho.appuri` alone: this app's own address. */
+const OWN_APP_HOST = /^https:\/\/(?:app\.)?zohocreator\.[a-z]{2,3}(?:\.[a-z]{2})?$/;
+
+/** The operands of a `+` chain, left to right. */
+function concatParts(expr: Expr): Expr[] {
+  if (expr.kind === 'paren') return concatParts(expr.expr);
+  if (expr.kind === 'binary' && expr.op === '+') return [...concatParts(expr.left), ...concatParts(expr.right)];
+  return [expr];
+}
+
+const isAppUri = (expr: Expr | undefined) => expr?.kind === 'member' && expr.object.kind === 'name' && expr.object.name === 'zoho' && expr.property === 'appuri';
+
+/**
+ * The client navigation a custom action's workflow stands for, or none. The
+ * workflow (a Creator `type = functions` record workflow on the report's
+ * form) must hold exactly one statement, `openUrl(url[, window[, features]])`,
+ * whose url is this app's own `#Form:` / `#Report:` / `#Page:` link, written
+ * as literals and `input.<Field>` (or `input.<Lookup>.ID`) reads, optionally after the app's own
+ * address (`zoho.appuri`). The target must be a form, report or page of the
+ * app. A form link's query prefills the form: each value is a literal or one
+ * field of the clicked row, and each name a field of the target form;
+ * Creator's `zc_` display parameters are dropped. A report or page link
+ * carries no query. Anything else (an external address, a computed target, a
+ * second statement, an unknown field) is no navigation, and the action stays
+ * turned off and counted.
+ */
+export function actionNavigation(app: App, report: Report, workflow: string | undefined): UiActionNav | undefined {
+  const wanted = (workflow ?? '').trim();
+  const fn = wanted ? app.functions.find((item) => item.kind === 'creator' && item.name === wanted) : undefined;
+  if (!fn || !functionRowBinding(fn) || !fn.form || fn.form !== report.form) return undefined;
+  let body;
+  try {
+    body = parseDeluge(fn.deluge.map((part) => part.text).join('\n')).body;
+  } catch {
+    return undefined;
+  }
+  const stmt = body.length === 1 ? body[0] : undefined;
+  if (!stmt || stmt.kind !== 'openUrl' || !stmt.args.length || stmt.args.length > 3) return undefined;
+  if (stmt.args.slice(1).some((arg) => arg.kind !== 'string')) return undefined;
+  const parts = concatParts(stmt.args[0]!);
+  if (parts[0]?.kind === 'string' && OWN_APP_HOST.test(parts[0].value) && isAppUri(parts[1])) parts.splice(0, 2);
+  else if (isAppUri(parts[0])) parts.splice(0, 1);
+  const source = app.forms.find((form) => form.name === fn.form);
+  // The url as text with each row read as a numbered placeholder.
+  const reads: string[] = [];
+  let text = '';
+  for (const part of parts) {
+    if (part.kind === 'string') {
+      if (part.value.includes('\u0000')) return undefined;
+      text += part.value;
+    } else if (part.kind === 'member' && part.object.kind === 'name' && part.object.name === 'input' && /^[A-Za-z_]\w*$/.test(part.property)) {
+      text += `\u0000${reads.length}\u0000`;
+      reads.push(part.property);
+    } else if (part.kind === 'member' && part.property === 'ID' && part.object.kind === 'member' && part.object.object.kind === 'name' && part.object.object.name === 'input' && formField(source, part.object.property)?.lookup) {
+      // `input.<Lookup>.ID` is the parent ROWID the lookup column stores.
+      text += `\u0000${reads.length}\u0000`;
+      reads.push(part.object.property);
+    } else return undefined;
+  }
+  const m = /^#(Form|Report|Page):([A-Za-z_]\w*)(?:\?(.*))?$/.exec(text);
+  if (!m) return undefined;
+  const kind = m[1]!.toLowerCase() as UiActionNav['kind'];
+  const target = m[2]!;
+  const targetForm = kind === 'form' ? app.forms.find((form) => form.name === target) : undefined;
+  if (kind === 'form' ? !targetForm : kind === 'report' ? !app.reports.some((item) => item.name === target) : !app.pages.some((item) => item.name === target)) return undefined;
+  const params: UiActionNav['params'] = [];
+  for (const pair of (m[3] ?? '').split('&').filter(Boolean)) {
+    const eq = pair.indexOf('=');
+    const name = eq < 0 ? pair : pair.slice(0, eq);
+    const raw = eq < 0 ? '' : pair.slice(eq + 1);
+    if (/^zc_/i.test(name)) {
+      if (raw.includes('\u0000')) return undefined;
+      continue;
+    }
+    if (!targetForm || !formField(targetForm, name)) return undefined;
+    const read = /^\u0000(\d+)\u0000$/.exec(raw);
+    if (read) {
+      const field = reads[Number(read[1])]!;
+      if (field === 'ID') params.push({ name, field: 'ROWID' });
+      else if (source && formField(source, field)) params.push({ name, field });
+      else return undefined;
+    } else if (raw.includes('\u0000')) return undefined;
+    else params.push({ name, value: raw });
+  }
+  return { kind, target, href: `#/${kind}/${encodeURIComponent(target)}`, params };
 }
 
 export function buildModel(app: App, delugeFiles: readonly GeneratedFile[] = []): UiModel {
@@ -906,13 +1013,19 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   // An action whose workflow generated no function has an endpoint that runs
   // nothing (see actionStub in generate.ts): a button that reported success
   // would claim a workflow ran when nothing was saved, so it is turned off and
-  // counted. A dispatchable action runs through the thisapp registry.
-  const actions = report.customActions.map((action) => ({
+  // counted. A dispatchable action runs through the thisapp registry. An
+  // action whose workflow is only an openUrl to this app's own screen is a
+  // client navigation instead (actionNavigation): no endpoint runs.
+  const navigationOf = (workflow: string | undefined): { navigate: UiActionNav } | { preview: true } => {
+    const navigate = actionNavigation(app, report, workflow);
+    return navigate ? { navigate } : { preview: true as const };
+  };
+  const actions: UiAction[] = report.customActions.map((action) => ({
     name: action.name,
     ...(action.workflow ? { workflow: action.workflow } : {}),
     endpoint: `/reports/${encodeURIComponent(report.name)}/actions/${slug(action.name)}`,
     ...(reportProp(action.properties, 'show action in view header') === 'true' ? { header: true as const } : {}),
-    ...(actionDispatchTarget(app, action.workflow, delugeFiles) ? {} : { preview: true as const }),
+    ...(actionDispatchTarget(app, action.workflow, delugeFiles) ? {} : navigationOf(action.workflow)),
   }));
   for (const action of actions) {
     if (!action.preview) continue;

@@ -160,8 +160,8 @@ function groupRows(rows, field) {
 }
 
 /** A phone card footer: the record's actions (cardActions), hidden on a wide screen. */
-function cardFooter(doc, report, id) {
-  const actions = cardActions(report, id);
+function cardFooter(doc, report, id, row) {
+  const actions = cardActions(report, id, row);
   if (!actions.length) return null;
   const td = doc.createElement('td');
   td.setAttribute('data-card-actions', '');
@@ -220,7 +220,15 @@ function tableFor(doc, columns, rows, cardCells, report) {
       if (cell.phone >= 0) td.setAttribute('data-phone', String(cell.phone));
       if (cell.order != null) td.style.order = String(cell.order);
       if (cell.extra) td.setAttribute('data-phone-only', '');
-      if (column.action) {
+      const nav = column.action && report ? (report.customActions || []).find((action) => action && action.endpoint === column.action && action.navigate) : undefined;
+      if (nav) {
+        // A navigation action opens its target screen for this record.
+        const link = doc.createElement('a');
+        link.setAttribute('href', actionNavHref(nav.navigate, rows[r]));
+        link.setAttribute('data-action-nav', '');
+        link.textContent = column.label || column.field;
+        td.appendChild(link);
+      } else if (column.action) {
         // `column header` custom action: a per-record button, not a value.
         const btn = doc.createElement('button');
         btn.type = 'button';
@@ -233,7 +241,7 @@ function tableFor(doc, columns, rows, cardCells, report) {
       tr.appendChild(td);
     }
     if (cardCells && report) {
-      const footer = cardFooter(doc, report, id);
+      const footer = cardFooter(doc, report, id, rows[r]);
       if (footer) tr.appendChild(footer);
     }
     tbody.appendChild(tr);

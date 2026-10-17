@@ -30,7 +30,7 @@ import { SortableDataTable, type DataColumn, type SortState } from '../arc/compo
 import type { FormSpec, ReportSpec } from '../types';
 import { useEnv } from '../runtime/env';
 import { Slot, useCustomization } from '../runtime/extend';
-import { hrefFor } from '../runtime/router';
+import { actionNavHref, hrefFor, navNeedsRow } from '../runtime/router';
 import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
 import { matchCriteria } from './criteria';
 import { multiValueItems } from '../form/value';
@@ -326,8 +326,10 @@ function ReportList({ report }: { report: ReportSpec }) {
   const previewEndpoints = new Set(report.customActions.filter((a) => a.preview).map((a) => a.endpoint));
   const previewTitle = 'Not available yet: this action is turned off.';
   const actionNameFor = (endpoint: string, fallback: string) => report.customActions.find((a) => a.endpoint === endpoint)?.name ?? fallback;
+  const navFor = (endpoint: string) => report.customActions.find((a) => a.endpoint === endpoint)?.navigate;
+  // A header navigation that prefills from a row opens per record instead.
   const recordCustomActions = report.customActions.filter(
-    (action) => !action.header && !report.columns.some((c) => c.action === action.endpoint),
+    (action) => (!action.header || (action.navigate && navNeedsRow(action.navigate))) && !report.columns.some((c) => c.action === action.endpoint),
   );
   const columns: DataColumn<Row>[] = report.columns.map((column, index) => ({
     key: column.field,
@@ -341,6 +343,14 @@ function ReportList({ report }: { report: ReportSpec }) {
         const actionLabel = actionName.toLowerCase().includes(column.label.toLowerCase())
           ? actionName
           : `${column.label}: ${actionName}`;
+        const nav = navFor(column.action);
+        if (nav) {
+          return (
+            <a href={actionNavHref(nav, row)} data-action-nav="" aria-label={actionLabel}>
+              {column.label}
+            </a>
+          );
+        }
         return (
           <Button
             type="button"
@@ -430,7 +440,12 @@ function ReportList({ report }: { report: ReportSpec }) {
                 Delete
               </Button>
             ) : null}
-            {recordCustomActions.map((action) => (
+            {recordCustomActions.map((action) =>
+              action.navigate ? (
+                <a key={action.name} href={actionNavHref(action.navigate, row)} data-action-nav="">
+                  {action.name}
+                </a>
+              ) : (
               <Button
                 key={action.name}
                 type="button"
@@ -442,7 +457,8 @@ function ReportList({ report }: { report: ReportSpec }) {
               >
                 {action.name}
               </Button>
-            ))}
+              ),
+            )}
             {own?.rowActions?.(row)}
           </span>
         );
@@ -456,7 +472,7 @@ function ReportList({ report }: { report: ReportSpec }) {
   const groupField = report.groupBy[0]?.field;
   const groups = groupField ? groupRows(shown, groupField) : null;
   const showPages = load.state === 'ready' && (page > 0 || live.length >= report.pageSize);
-  const headerActions = report.customActions.filter((a) => a.header === true);
+  const headerActions = report.customActions.filter((a) => a.header === true && !(a.navigate && navNeedsRow(a.navigate)));
 
   const table = (rows: Row[], caption: string) =>
     Table ? (
@@ -492,11 +508,17 @@ function ReportList({ report }: { report: ReportSpec }) {
             }}
           />
         ) : null}
-        {headerActions.map((action) => (
+        {headerActions.map((action) =>
+          action.navigate ? (
+            <a key={action.name} href={actionNavHref(action.navigate)} data-action-nav="">
+              {action.name}
+            </a>
+          ) : (
           <Button key={action.name} type="button" variant="secondary" size="sm" data-action={action.endpoint} {...(action.preview ? { disabled: true, title: previewTitle } : {})} onClick={() => runAction(action.name, action.endpoint)}>
             {action.name}
           </Button>
-        ))}
+          ),
+        )}
         <Slot>{own?.slots?.toolbar}</Slot>
       </div>
       {canBulkEdit ? (
