@@ -14,11 +14,22 @@ App: c2c-conn-desk
 - Zia AI builder — not applicable (out of scope)
 - On-prem Data Bridge — not applicable (out of scope)
 
+## Converted inventory
+
+- 2 forms
+- 2 reports
+- 2 functions
+
 ## TODO counts
 
 0
 
 - none
+
+## Field gaps
+
+- email: 1 (Conn_Helpdesk_Case.Contact_Email) — There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.
+- multi-line: 2 (Conn_Helpdesk_Case.Contact_Description, Conn_Helpdesk_Case.Helpdesk_Response) — Data Store text holds 10,000 characters. A generated length check rejects the rest. Multi-line formula output (up to 65,355) does not fit.
 
 ## Manual steps
 
@@ -29,3 +40,10 @@ App: c2c-conn-desk
 0
 
 - none
+
+## Human steps
+
+- Accept invite: accept the app invite mail
+- Sign in once: sign in to the deployed app once
+- Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
+- Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)

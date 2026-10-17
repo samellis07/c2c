@@ -14,9 +14,18 @@ App: c2c-conn-creator-src
 - Zia AI builder — not applicable (out of scope)
 - On-prem Data Bridge — not applicable (out of scope)
 
+## Converted inventory
+
+- 2 forms
+- 2 reports
+
 ## TODO counts
 
 0
+
+- none
+
+## Field gaps
 
 - none
 
@@ -29,3 +38,10 @@ App: c2c-conn-creator-src
 0
 
 - none
+
+## Human steps
+
+- Accept invite: accept the app invite mail
+- Sign in once: sign in to the deployed app once
+- Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
+- Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)

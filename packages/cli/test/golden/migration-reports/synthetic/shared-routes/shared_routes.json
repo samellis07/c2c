@@ -40,8 +40,52 @@
       "label": "not applicable (out of scope)"
     }
   ],
+  "converted": {
+    "forms": 3,
+    "reports": 1,
+    "pages": 0,
+    "functions": 0
+  },
   "todoCount": 0,
   "todoKinds": [],
+  "fieldGaps": [
+    {
+      "matrixId": "decimal",
+      "count": 3,
+      "reason": "Decimal is not a Data Store column type (Text, VarChar, Date, DateTime, Int, Double, Boolean, BigInt, Foreign Key, Encrypted). Stored as a canonical decimal string in varchar 64. Scale is the field decimal places (default 2). Extra fractional digits quantize half-away-from-zero. ZCQL orders the varchar as text.",
+      "fields": [
+        {
+          "form": "Catalog",
+          "field": "Unit_Price"
+        },
+        {
+          "form": "Order_Sheet",
+          "field": "Total"
+        },
+        {
+          "form": "Order_Sheet",
+          "field": "Price"
+        }
+      ]
+    },
+    {
+      "matrixId": "subform",
+      "count": 1,
+      "reason": "The .ds token is grid. Every inline subform (nested fields, no values = Form.Field) becomes its own child table with a parent_id foreign key to the parent ROWID (ON-DELETE-CASCADE) and a row_order Int (0-based Creator row position). A form with several subforms gets one child table per subform; it is not a NoSQL collection. A nested subform inside a subform is not expanded. A grid whose values point at another form is a relation to that form’s table, not a second copy of it.",
+      "fields": [
+        {
+          "form": "Order_Sheet",
+          "field": "Lines"
+        }
+      ]
+    }
+  ],
   "manualSteps": [],
-  "hiddenParts": []
+  "hiddenParts": [],
+  "humanSteps": [
+    "Accept invite: accept the app invite mail",
+    "Sign in once: sign in to the deployed app once",
+    "Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)",
+    "Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)"
+  ]
 }
