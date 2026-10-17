@@ -662,6 +662,15 @@ function buildBudgets(tables: SchemaTable[], source?: readonly SourceTableData[]
   return { budgets, ok: budgets.every((budget) => budget.status !== 'fail') };
 }
 
+/** The mover's API calls for one Data Store table of `rows` rows (the call model on devApiCallsBudget). */
+export function moverApiCalls(rows: number, deferred = false): number {
+  const batches = Math.ceil(rows / MOVER_BATCH);
+  const slices = Math.ceil(rows / MOVER_ID_CHUNK);
+  // Empty measured tables take no loader calls; the fixed allowance is
+  // deliberately conservative for non-empty tables only.
+  return 3 * batches + 3 * slices + (rows > 0 ? MOVER_TABLE_FIXED_CALLS : 0) + (deferred ? batches : 0);
+}
+
 /**
  * Dev API-call budget: warn with the mover's call estimate.
  * Per measured Data Store table with N rows (B 200-row batches, C 300-id
@@ -698,12 +707,7 @@ function devApiCallsBudget(tables: SchemaTable[], source?: readonly SourceTableD
     const rows = rowsOf(table);
     if (rows === undefined) unmeasured.push(table.name);
     else {
-      const batches = Math.ceil(rows / MOVER_BATCH);
-      const slices = Math.ceil(rows / MOVER_ID_CHUNK);
-      // Empty measured tables take no loader calls; the fixed allowance is
-      // deliberately conservative for non-empty tables only.
-      calls += 3 * batches + 3 * slices + (rows > 0 ? MOVER_TABLE_FIXED_CALLS : 0);
-      if (deferredTables.has(table.name)) calls += batches;
+      calls += moverApiCalls(rows, deferredTables.has(table.name));
     }
   }
   const cap = `${DEV_API_CALLS}`;
