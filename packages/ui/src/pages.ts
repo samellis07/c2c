@@ -426,6 +426,8 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
     if (ch === '\n' || ch === '\r') lineWhitespace = true;
     else if (!/\s/.test(ch)) lineWhitespace = false;
   }
+  // An unterminated /* hides the rest of the sheet; count it rather than lose it silently.
+  if (comment === 'block') drop('unterminated comment');
   css = uncommented;
   const names = keyframes ?? keyframeNames(css);
   const prefix = keyframePrefix(scope);
@@ -517,6 +519,8 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
       else if (ch === ')' || ch === ']') { selectorDepth--; if (selectorDepth < 0) selectorSyntaxOkay = false; }
       else if (ch === ',' && selectorDepth === 0) { sels.push(head.slice(selectorStart, n).trim()); selectorStart = n + 1; }
     }
+    // A selector opening with a combinator would hang off the scope itself ('[data-page] ~ *') and reach the page's siblings.
+    if (sels.some((s) => s[0] === '~' || s[0] === '+' || s[0] === '>')) { drop('leading combinator selector'); continue; }
     const safeSelector = (s: string) => !!s && !/[{};@\\<]/.test(s) && !/url\s*\(|expression\s*\(/i.test(s);
     if (!selectorSyntaxOkay || selectorDepth !== 0 || selectorQuote || !sels.every(safeSelector)) { drop('selector'); continue; }
     const before = dropped.length;
@@ -541,7 +545,7 @@ const SHEET_KEYWORD_FUNCTIONS = new Set([
 ]);
 
 /** A quoted CSS string with no raw markup, braces, semicolons or line breaks; a backslash only starts a hex escape. */
-const SHEET_STRING = /"(?:[^"\\<>;{}\r\n]|\\[0-9a-fA-F])*"|'(?:[^'\\<>;{}\r\n]|\\[0-9a-fA-F])*'/g;
+const SHEET_STRING = /"(?:[^"\\<>;{}\r\n\f]|\\[0-9a-fA-F])*"|'(?:[^'\\<>;{}\r\n\f]|\\[0-9a-fA-F])*'/g;
 
 /**
  * One declaration of a page `<style>` sheet: kept when the inline-style
@@ -590,7 +594,12 @@ function keyframeNames(css: string): Set<string> {
 
 /** A per-page prefix for carried keyframe names, so a page never overrides app or other-page animations. */
 function keyframePrefix(scope: string): string {
-  return `c2c-${scope.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')}-`;
+  const name = scope.replace(/[^a-zA-Z0-9_-]+/g, '-');
+  // Trim edge dashes with an index walk: a regex /-+$/ backtracks quadratically on a long inner dash run.
+  let start = 0, end = name.length;
+  while (start < end && name[start] === '-') start++;
+  while (end > start && name[end - 1] === '-') end--;
+  return `c2c-${name.slice(start, end)}-`;
 }
 
 /** Point `animation` / `animation-name` at the renamed keyframes declared on this page. */
