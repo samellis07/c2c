@@ -346,7 +346,7 @@ Rule: `cron_url_details cannot be null` means a legacy cron body pointed at a fu
 
 Cause: POST /cron used cron_function_id. The function target must be a Job function, and the cron must be a Job Scheduling cron bound to an existing pool.
 
-Fix: Create the pool with MCP CatalystbyZoho_Create_Job_Pool (the token POST /jobpool returns `401 OAUTH_SCOPE_MISMATCH`). Then POST /job_scheduling/cron with cron_name, cron_type, cron_status, jobpool_id, and job_details for a Job function.
+Fix: Create the pool with MCP CatalystbyZoho_Create_Job_Pool (the token POST /jobpool returns `401 OAUTH_SCOPE_MISMATCH`). Then POST /job_scheduling/cron with cron_name, cron_type, cron_status, job_detail (the schedule), and job_meta (jobpool_id, job_name, source_type, target_type, target_id of a Job function). A top-level jobpool_id with no job_meta answers `400` `Mandatory parameter job_meta is missing`.
 
 Recipe: POST /job_scheduling/cron with the token headers. Success is HTTP 200 and the cron present in CatalystbyZoho_List_All_Crons.
 

@@ -157,6 +157,24 @@ plus `timezone`), and `job_meta` (`jobpool_id` of an existing pool,
 Job function) returns 200. The body uses the two singular keys only;
 never send a pluralised variant of the schedule key.
 
+- [TESTED] (live run, 17 Oct 2026, `c2c provision --out <dir> --confirm
+--run crons`) a body with
+the pluralised schedule keys and a top-level
+`jobpool_id` (no `job_meta`) answers `400` `Mandatory parameter
+job_meta is missing` and creates nothing.
+- [UNVERIFIED] the unit of `time_of_execution` (c2c sends epoch
+seconds), the values `cron_execution_type: pre-defined` and
+`source_type: Cron`, `cron_expression` as a top-level field of a
+CronExpression cron, and `job_meta.params` reaching the Job function.
+
+Rule: [UNVERIFIED] post only crons the generator planned
+(job-scheduling.json): a repeating custom schedule is `CronExpression`,
+a schedule with no frequency is `OneTime`, and `--run crons` refuses a
+`OneTime` start in the past (it would never fire) and refuses every
+cron until the project's function list shows the `c2c_jobs` Job
+function, whose id is the `target_id`. A record-relative form schedule
+is reported, never posted as a cron.
+
 Rule: [UNVERIFIED] generate Job functions as cron targets; the console picker
 lists Job functions only. Never emit the legacy shape. Map
 `cron_url_details cannot be null` to the legacy `POST /cron` with
