@@ -299,6 +299,7 @@ export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
     flags: {
       ...SCOPE,
       '--catalyst-base': 'value',
+      '--changed-since': 'value',
       '--confirm': 'bool',
       '--ds': 'value',
       '--env': 'value',

@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { deriveIr, parse } from '../../core/src/index.js';
-import { computeDelta, readSourceJson, rollbackExportCli, STATE_FILE, type Io } from '../../deploy/src/index.js';
+import { computeDelta, deltaCheckpointId, readSourceJson, rollbackExportCli, STATE_FILE, type DeltaCheckpoint, type Io } from '../../deploy/src/index.js';
+import { storeFingerprint } from '../../deploy/src/row-delta.js';
 import {
   CHECKLIST_MD,
   PROOF_JSON,
@@ -470,6 +471,90 @@ test('a valid export inside the workspace ticks nothing, even through a symlink'
   const linked = checklist(ws, link);
   assert.match(linked, /- \[ \] `c2c rollback-export .*\(open: export is inside the workspace\)/);
   assert.match(linked, /- \[ \] Keep the exported folder somewhere outside this workspace\. \(open: export is inside the workspace\)/);
+});
+
+/** Store rows at the checkpoint, and after one edit, one new record and one deletion in the new app. */
+const STORED_VENDORS = [
+  { ROWID: '1', c2c_source_id: '11', Vendor_Name: 'Acme' },
+  { ROWID: '2', c2c_source_id: '12', Vendor_Name: 'Northwind' },
+];
+const STORED_ORDERS = [
+  { ROWID: '3', c2c_source_id: '21', PO_Title: 'Restock', Vendor: '1' },
+  { ROWID: '4', c2c_source_id: '22', PO_Title: 'Bolts', Vendor: '2' },
+];
+
+function writeCheckpoint(state: string, orders: readonly Record<string, unknown>[] = STORED_ORDERS): DeltaCheckpoint {
+  const prints = (rows: readonly Record<string, unknown>[]) => Object.fromEntries(rows.map((row) => [String(row.c2c_source_id), storeFingerprint(row)]));
+  const checkpoint: DeltaCheckpoint = {
+    version: 1,
+    source: 'json',
+    tables: {
+      Vendor: { rows: { '11': 'a', '12': 'b' }, store: prints(STORED_VENDORS) },
+      Purchase_Order: { rows: Object.fromEntries(orders.map((row) => [String(row.c2c_source_id), 'c'])), store: prints(orders) },
+    },
+  };
+  writeFileSync(join(state, STATE_FILE), `${JSON.stringify({ delta: checkpoint }, null, 2)}\n`);
+  return checkpoint;
+}
+
+/** Runs `c2c rollback-export --rows --changed-since` against the edited store rows; returns the manifest path. */
+async function deltaExport(ws: { ds: string; state: string }, out: string): Promise<string> {
+  const rows = mkdtempSync(join(tmpdir(), 'c2c-rows-'));
+  writeFileSync(join(rows, 'Vendor.json'), JSON.stringify(STORED_VENDORS));
+  writeFileSync(
+    join(rows, 'Purchase_Order.json'),
+    JSON.stringify([{ ...STORED_ORDERS[0], PO_Title: 'Restock now' }, { ROWID: '5', PO_Title: 'Hinges', Vendor: '2' }]),
+  );
+  let err = '';
+  const io = {
+    stdout: () => {},
+    stderr: (t: string) => void (err += t),
+    env: {},
+    spawn: async () => assert.fail('no catalyst CLI spawn in a cutover test'),
+    fetch: async () => assert.fail('no fetch in an offline export'),
+  } as unknown as Io;
+  assert.equal(await rollbackExportCli(['--ds', ws.ds, '--out', out, '--rows', rows, '--changed-since', ws.state], io), 0, err);
+  return join(out, 'c2c-rollback-manifest.json');
+}
+
+test('a delta rollback export verifies only against its own checkpoint', async () => {
+  const ws = workspace();
+  const checkpoint = writeCheckpoint(ws.state);
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-rollback-delta-'));
+  const manifestPath = await deltaExport(ws, dir);
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { mode: string; checkpoint: string; counts: Record<string, number> };
+  assert.equal(manifest.mode, 'delta');
+  assert.equal(manifest.checkpoint, deltaCheckpointId(checkpoint));
+  assert.deepEqual([manifest.counts.changed, manifest.counts.added, manifest.counts.deleted, manifest.counts.unchanged], [1, 1, 1, 2]);
+  assert.equal(readFileSync(join(dir, 'import', 'Purchase_Order.csv'), 'utf8'), 'PO_Title,Vendor,ID\nRestock now,Acme,21\nHinges,Northwind,\n');
+  assert.equal(readFileSync(join(dir, 'deleted.csv'), 'utf8'), 'Table,Form,ID\nPurchase_Order,Purchase_Order,22\n');
+  assert.match(checklist(ws, dir), /- \[x\] `c2c rollback-export .*\(automatic\)/);
+
+  // Another checkpoint (a later sync changed it) refuses the delta.
+  const other = workspace();
+  writeCheckpoint(other.state, [STORED_ORDERS[0]!]);
+  const refused = checklist({ ...ws, state: other.state }, dir);
+  assert.match(refused, /- \[ \] `c2c rollback-export .*\(open: delta export was taken against checkpoint sha256:[0-9a-f]{64}, not the --since checkpoint sha256:[0-9a-f]{64}\)/);
+  // No --since: nothing to check the delta against.
+  const run = capture();
+  assert.equal(cutoverCli([ws.ds, '--source-json', ws.source, '--rollback-export', dir], run.io, 'checklist'), 0, run.err());
+  assert.match(run.out(), /\(open: delta export against checkpoint sha256:[0-9a-f]{64} needs --since &lt;state&gt; to verify against that checkpoint\)/);
+
+  // A forged count or mode, or delta fields on a full manifest, is refused.
+  tamperManifest(manifestPath, (edit) => void ((edit.counts as Record<string, number>).deleted = 0));
+  assert.match(checklist(ws, dir), /\(open: deleted\.csv lists 1 record\(s\), the manifest counts 0\)/);
+  tamperManifest(manifestPath, (edit) => void ((edit.counts as Record<string, number>).deleted = 1.5));
+  assert.match(checklist(ws, dir), /\(open: delta export manifest carries no whole-number counts\)/);
+  tamperManifest(manifestPath, (edit) => void (edit.mode = 'partial'));
+  assert.match(checklist(ws, dir), /\(open: manifest mode is not full or delta\)/);
+  tamperManifest(manifestPath, (edit) => void (edit.mode = 'full'));
+  assert.match(checklist(ws, dir), /\(open: a full export manifest carries delta fields\)/);
+  tamperManifest(manifestPath, (edit) => {
+    edit.mode = 'delta';
+    (edit.counts as Record<string, number>).deleted = 1;
+    delete (edit.files as Record<string, string>)['deleted.csv'];
+  });
+  assert.match(checklist(ws, dir), /\(open: delta export manifest lists no deleted\.csv\)/);
 });
 
 test('proof file and cutover checklist are byte-identical across two runs with rollback evidence', async () => {

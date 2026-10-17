@@ -95,7 +95,7 @@
  *                                   cut-over checklist filled with the app's facts; --out also writes c2c-proof.json/.md.
  *   c2c proof <file|dir> [same options]
  *                                   counts, checksums, smoke result and readiness (% automatic plus the manual items).
- *   c2c rollback-export --ds <file|dir> --out <dir> (--rows <dir> | [--project <id>] [--org <id>] [--confirm])
+ *   c2c rollback-export --ds <file|dir> --out <dir> (--rows <dir> | [--project <id>] [--org <id>] [--confirm]) [--changed-since <state>]
  *                                   Data Store rows as CSV files for Creator's report import, ids in a side file.
  *   c2c deploy <file|dir> [--project <id>] [--org <id>] [--confirm] [--out <dir>] [--mail] [--ui vanilla|react] [--async-on-success [--triggers-wired]]
  *                                   Catalyst app dir and a full plan. Development only. CLI deploy runs only with --confirm.
@@ -212,8 +212,8 @@ const USAGE =
       '              (--source-csv <dir> and --source-backup <zip|dir> read the same reports)\n' +
       '       c2c cutover-checklist <file|dir> [--source-json|--source-csv <dir>|--source-backup <zip|dir>] [--since <state-file|dir>] [--smoke <file>] [--rollback-export <dir|file>] [--project <id>] [--dc <dc>] [--config <c2c-deploy.json>] [--out <dir>]\n' +
       '       c2c proof <file|dir> [same options as cutover-checklist]\n' +
-      '       c2c rollback-export --ds <file|dir> --out <dir> --rows <dir>\n' +
-      '       c2c rollback-export --ds <file|dir> --out <dir> [--project <id-or-name>] [--org <id>] [--app <link>] [--confirm] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
+      '       c2c rollback-export --ds <file|dir> --out <dir> --rows <dir> [--changed-since <state-file|dir>]\n' +
+      '       c2c rollback-export --ds <file|dir> --out <dir> [--project <id-or-name>] [--org <id>] [--app <link>] [--confirm] [--changed-since <state-file|dir>] [--dc <dc>] [--config <c2c-deploy.json>]\n' +
       '              (without --rows: plans the tables to read; --confirm reads the rows from the project)\n' +
       '       c2c verify --data-parity --ds <file|dir> (--source-json <dir> | --source-csv <dir> | --source-backup <zip|dir>) --rows <dir> [--json]\n' +
       '       c2c verify-behavior <file|dir> --goldens <dir> [--report <file.json>] [--report-md <file.md>]\n' +
