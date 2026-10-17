@@ -411,15 +411,32 @@ function errorState(root: Element): string | undefined {
   return el ? (el.textContent ?? '').trim().slice(0, 200) || 'error state' : undefined;
 }
 
+/**
+ * A screen's data arrives over a real endpoint round trip, which can land a few
+ * event-loop turns after the mount flush — a slow loop (loaded CI, an older
+ * Node's fetch) is not a zero-row read. Flush until every `data-state="loading"`
+ * marker clears, bounded: a screen that never settles returns its marker text so
+ * the caller fails with the reason instead of counting 0 rows.
+ */
+const LOADING_FLUSH_LIMIT = 50;
+
+async function settleLoading(screen: MountedScreen): Promise<string | undefined> {
+  const pending = () => screen.container.querySelector('[data-state="loading"]')?.textContent?.trim();
+  for (let i = 0; i < LOADING_FLUSH_LIMIT && pending() !== undefined; i++) await screen.flush(1);
+  return pending();
+}
+
 async function listChecks(model: UiModel, spec: AppSpec, report: ReportSpec, seeded: SeededApp, mount: (s: TemplateScreen) => Promise<MountedScreen>): Promise<ScreenCheck[]> {
   const checks: ScreenCheck[] = [];
   const expected = seedRowsFor(model, seeded, report.name, report.form);
   const screen = await mount({ kind: 'report', report: report.name });
   try {
+    const pending = await settleLoading(screen);
     const error = errorState(screen.container);
     const columns = report.columns.filter((c) => !c.action).map((c) => ({ key: c.field, label: c.label, numeric: !!c.numeric }));
     const table = readTable(screen.container, columns);
-    if (error) checks.push({ check: 'rows', status: 'fail', detail: `the report screen shows an error: ${error}` });
+    if (pending !== undefined) checks.push({ check: 'rows', status: 'fail', detail: `the report screen never left its loading state: ${pending.slice(0, 200) || 'loading'}` });
+    else if (error) checks.push({ check: 'rows', status: 'fail', detail: `the report screen shows an error: ${error}` });
     else if (!expected) checks.push({ check: 'rows', status: 'fail', detail: `no seeded table for form ${report.form ?? '(none)'}` });
     else {
       const shown = Math.min(expected.length, report.pageSize || expected.length);
@@ -452,6 +469,7 @@ async function listChecks(model: UiModel, spec: AppSpec, report: ReportSpec, see
     const row = expected[0]!;
     const detail = await mount({ kind: 'report', report: report.name, row: String(row.ROWID) });
     try {
+      await settleLoading(detail);
       const error = errorState(detail.container);
       const text = detail.container.textContent ?? '';
       const form = spec.forms[report.form ?? ''];
@@ -496,7 +514,8 @@ async function pageChecks(model: UiModel, spec: AppSpec, name: string, seeded: S
   const screen = await mount({ kind: 'page', page: name });
   const checks: ScreenCheck[] = [];
   try {
-    await screen.flush(5);
+    const pending = await settleLoading(screen);
+    if (pending !== undefined) checks.push({ check: 'view', status: 'fail', detail: `the page never left its loading state: ${pending.slice(0, 200) || 'loading'}` });
     const els = [...walk(page.elements)];
     const metrics = els.filter((el): el is Extract<PageElement, { kind: 'metric' }> => el.kind === 'metric');
     const tiles = [...screen.container.querySelectorAll('[data-metric]')];
@@ -575,9 +594,11 @@ export async function runReportChecks(app: App, source: string, opts: RunReportO
       const ui = model.reports.find((r) => r.name === report.name);
       if (report.view === 'chart') {
         const screen = await mount({ kind: 'chart', report: report.name });
-        await screen.flush(5);
+        const pending = await settleLoading(screen);
         try {
-          const checks = [chartCheck(model, spec, report, report.chart, seeded, chartRoots(screen.container)[0])];
+          const checks = pending !== undefined
+            ? [{ check: 'chart' as const, status: 'fail' as const, detail: `the chart screen never left its loading state: ${pending.slice(0, 200) || 'loading'}` }]
+            : [chartCheck(model, spec, report, report.chart, seeded, chartRoots(screen.container)[0])];
           checks.push(...EXPORT_FORMATS.map((f) => gap(f, `the generated chart screen offers no ${f.toUpperCase()} export (${CREATOR_EXPORT})`)), gap('print', `the generated chart screen offers no print view (${CREATOR_EXPORT})`));
           result.screens.push({ screen: report.name, kind: 'chart', checks });
         } finally {
