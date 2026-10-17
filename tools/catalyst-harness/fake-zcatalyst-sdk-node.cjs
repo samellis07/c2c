@@ -26,10 +26,20 @@
  * statusCode 409 and code DUPLICATE_VALUE, that a refused batch stores no row,
  * that comparison is exact (case-sensitive) and that empty values never clash:
  * confirm with a live check.
+ *
+ * Foreign-key columns: setForeignKeys({ <table>: [<column>, ...] }) declares
+ * the columns the table plan creates as data_type "foreign key" (a bigint
+ * ROWID). insertRows/updateRows then refuse a non-empty value that is not a
+ * whole number with 400 INVALID_INPUT, "Invalid input value for <column>.
+ * bigint value expected" (the store's type-mismatch shape, store-errors.ts).
+ * Nothing is written on a refusal. [UNVERIFIED] the exact text for a foreign
+ * key column, and whether a well-formed id with no parent row is refused:
+ * this fake does not check the parent row.
  */
 
 const tables = new Map();
 let uniqueColumns = new Map();
+let foreignKeyColumns = new Map();
 const sessions = new Map();
 const calls = [];
 let nextRowId = 10000000000000001n;
@@ -62,6 +72,17 @@ function assertUnique(name, next, changed) {
   }
 }
 
+/** Refuse the first foreign-key value in `changed` that is not a whole-number id. */
+function assertForeignKeys(name, changed) {
+  for (const column of foreignKeyColumns.get(name) || []) {
+    for (const row of changed) {
+      const value = row[column];
+      if (value == null || value === '') continue;
+      if (!/^\d+$/.test(String(value))) throw sdkError(`Invalid input value for ${column}. bigint value expected`, 400, 'INVALID_INPUT');
+    }
+  }
+}
+
 function cookie(req, name) {
   const header = req && req.headers ? req.headers.cookie || '' : '';
   for (const part of String(header).split(';')) {
@@ -86,6 +107,7 @@ function table(name) {
         id += 1n;
         return stamp({ ...stringify(row), ROWID: String(id) });
       });
+      assertForeignKeys(name, out);
       assertUnique(name, [...rowsOf(name), ...out], new Set(out));
       nextRowId = id;
       rowsOf(name).push(...out);
@@ -105,6 +127,7 @@ function table(name) {
         changed.add(next[at]);
         out.push({ ...next[at] });
       }
+      assertForeignKeys(name, changed);
       assertUnique(name, next, changed);
       store.splice(0, store.length, ...next);
       return out;
@@ -348,8 +371,13 @@ function setUnique(declared) {
   uniqueColumns = new Map(Object.entries(declared || {}).map(([name, columns]) => [name, [...columns]]));
 }
 
+/** Replace the foreign-key column declaration: { <table>: [<column>, ...] }. */
+function setForeignKeys(declared) {
+  foreignKeyColumns = new Map(Object.entries(declared || {}).map(([name, columns]) => [name, [...columns]]));
+}
+
 function state() {
   return { tables: Object.fromEntries([...tables.entries()].sort()), calls: [...calls] };
 }
 
-module.exports = { initialize, setSession, setUnique, state, executeZCQLQuery, __fake: true };
+module.exports = { initialize, setSession, setUnique, setForeignKeys, state, executeZCQLQuery, __fake: true };

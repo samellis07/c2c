@@ -411,8 +411,6 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Official_Email",
-            "Status",
             "Reason_to_Cancelled"
           ]
         }
@@ -520,8 +518,6 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Official_Email",
-            "Status",
             "Reason_to_Cancelled"
           ]
         },
@@ -552,8 +548,6 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Official_Email",
-            "Status",
             "Reason_to_Cancelled"
           ]
         }
@@ -674,8 +668,6 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Official_Email",
-            "Status",
             "Reason_to_Cancelled"
           ]
         },
@@ -700,8 +692,6 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Official_Email",
-            "Status",
             "Reason_to_Cancelled"
           ]
         },
@@ -846,8 +836,6 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Official_Email",
-            "Status",
             "Reason_to_Cancelled"
           ]
         },
@@ -872,8 +860,6 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Official_Email",
-            "Status",
             "Reason_to_Cancelled"
           ]
         },
@@ -1040,8 +1026,6 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Official_Email",
-            "Status",
             "Reason_to_Cancelled"
           ]
         },
@@ -1066,8 +1050,6 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Official_Email",
-            "Status",
             "Reason_to_Cancelled"
           ]
         },
@@ -1231,8 +1213,6 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Official_Email",
-            "Status",
             "Reason_to_Cancelled"
           ]
         },
@@ -1257,8 +1237,6 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Official_Email",
-            "Status",
             "Reason_to_Cancelled"
           ]
         },
@@ -1367,7 +1345,13 @@
           "bind": {
             "r_add_room_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         },
         {
           "op": "submit",
@@ -1391,7 +1375,13 @@
           "bind": {
             "r_add_user_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "submit",
@@ -1463,7 +1453,13 @@
           "bind": {
             "r_add_room_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         },
         {
           "op": "submit",
@@ -1487,7 +1483,13 @@
           "bind": {
             "r_add_user_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "submit",
@@ -1586,7 +1588,13 @@
           "bind": {
             "r_add_room_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         },
         {
           "op": "submit",
@@ -1610,7 +1618,13 @@
           "bind": {
             "r_add_user_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "submit",
@@ -1709,7 +1723,13 @@
           "bind": {
             "r_add_room_setup_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Available"
+          ]
         },
         {
           "op": "submit",
@@ -1733,7 +1753,13 @@
           "bind": {
             "r_add_user_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status"
+          ]
         },
         {
           "op": "submit",

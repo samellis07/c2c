@@ -7,14 +7,14 @@
  * have`), where every difference lands as a finding with its pointer.
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { deriveIr, parse } from '../../core/src/index.js';
 import { repoRoot } from '../../core/src/toolchain.js';
-import { verifyBehaviorCli, type Io } from '../src/cli.js';
-import { assertGolden, formatBehaviorMarkdown, loadGoldens, runBehavior, startOfflineBackend, textBoundaryEqual, type BehaviorBackend, type BehaviorCall } from '../src/verify-behavior.js';
+import { loadApp, verifyBehaviorCli, type Io } from '../src/cli.js';
+import { apiOnlyGaps, assertGolden, formatBehaviorMarkdown, loadGoldens, runBehavior, startOfflineBackend, textBoundaryEqual, type BehaviorBackend, type BehaviorCall } from '../src/verify-behavior.js';
 
 const root = repoRoot();
 const APP_DS = join(root, 'tests/behavior/behavior-sample/app.ds');
@@ -661,4 +661,62 @@ test('the schema pairs the api-only-acceptance tag with apiOnly on a write step'
   assert.throws(bad({ op: 'submit', form: 'Item', record: {}, apiOnly: ['Shelf'] }), /tag api-only-acceptance and apiOnly go together/);
   assert.throws(bad({ op: 'submit', form: 'Item', record: {}, tags: ['api-only-acceptance'], apiOnly: [] }), /apiOnly must be non-empty/);
   assert.throws(bad({ op: 'report', report: 'R', tags: ['api-only-acceptance'], apiOnly: ['Shelf'] }), /apiOnly needs a submit or update step/);
+});
+
+test('equivalentCases counts each case once by its final status: an api-only case with a finding is not-equivalent, never subtracted twice', async () => {
+  const report = await replayRule([
+    // Equivalent by design, then a finding: not-equivalent.
+    { id: 'ebd-with-finding', steps: [{ ...CAPTURED, tags: ['api-only-acceptance'], apiOnly: ['Shelf', 'Status'] }], expect: { partial: true, tables: { Item: [{ Title: 'Bolt', Status: 'Approved' }] } } },
+    // Equivalent by design, clean.
+    { id: 'ebd-clean', steps: [{ ...CAPTURED, tags: ['api-only-acceptance'], apiOnly: ['Shelf', 'Status'] }] },
+    // Plain equivalent.
+    { id: 'plain', steps: [{ op: 'report', report: 'All_Items', expect: { outcome: 'rows', count: 0 } }] },
+  ]);
+  assert.deepEqual([...new Set(report.findings.map((f) => f.case))], ['ebd-with-finding']);
+  assert.deepEqual(report.equivalentByDesign?.map((e) => e.case), ['ebd-with-finding', 'ebd-clean']);
+  // 3 cases: 1 equivalent, 1 equivalent by design, 1 not-equivalent.
+  assert.equal(report.summary.equivalentCases, 1);
+  assert.match(formatBehaviorMarkdown(report), /equivalent on 1 of 3 cases/);
+});
+
+test('apiOnlyGaps: apiOnly must be exactly the field-rule-denied fields a write sets', () => {
+  const app = deriveIr(parse(RULE_DS));
+  const golden = assertGolden({
+    version: 'c2c-behavior-golden/2',
+    app: 'rule-sample',
+    cases: [
+      { id: 'exact', steps: [{ ...CAPTURED, tags: ['api-only-acceptance'], apiOnly: ['Shelf', 'Status'] }] },
+      // MUST-FAIL: Shelf is hidden on add but not listed; Note is listed but no rule denies it.
+      { id: 'untagged', steps: [CAPTURED] },
+      { id: 'over', steps: [{ op: 'submit', form: 'Item', record: { Title: 'Bolt', Note: 'n', Shelf: 'S' }, tags: ['api-only-acceptance'], apiOnly: ['Note', 'Shelf'] }] },
+      // A field the record does not set is not a gap; a skipped case is not checked.
+      { id: 'unset', steps: [{ op: 'submit', form: 'Item', record: { Title: 'Bolt' } }] },
+      { id: 'skipped', skip: 'not reachable', steps: [CAPTURED] },
+    ],
+  });
+  assert.deepEqual(apiOnlyGaps(app, golden), [
+    { case: 'untagged', step: 1, form: 'Item', missing: ['Shelf', 'Status'], extra: [] },
+    { case: 'over', step: 1, form: 'Item', missing: [], extra: ['Note'] },
+  ]);
+});
+
+test('every committed Creator golden lists exactly its field-rule-denied fields in apiOnly (gallery fixtures)', (t) => {
+  const fixtures = process.env.C2C_FIXTURES_DIR;
+  const gallery = fixtures ? join(fixtures, 'gallery') : '';
+  if (!fixtures || !existsSync(gallery)) {
+    t.skip('C2C_FIXTURES_DIR/gallery not present');
+    return;
+  }
+  const root = join(repoRoot(), 'tests/behavior');
+  const gaps: string[] = [];
+  for (const name of readdirSync(root).sort()) {
+    const dir = join(root, name, 'creator');
+    const appDir = join(gallery, name);
+    if (!existsSync(join(dir, 'cases.json')) || !existsSync(appDir)) continue;
+    const ds = readdirSync(appDir).find((file) => file.endsWith('.ds'));
+    if (!ds) continue;
+    const app = loadApp(join(appDir, ds));
+    for (const gap of apiOnlyGaps(app, loadGoldens(dir))) gaps.push(`${name} ${JSON.stringify(gap)}`);
+  }
+  assert.deepEqual(gaps, []);
 });

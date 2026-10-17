@@ -27,7 +27,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { App } from '../../core/src/ir.js';
 import { repoRoot } from '../../core/src/toolchain.js';
-import { slug } from '../../deluge/src/generate.js';
+import { fieldRuleDenials, slug } from '../../deluge/src/generate.js';
 import { generateUi, type UiModel } from '../../ui/src/index.js';
 import { appTimeZone } from '../../ui/src/generate.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from './guards.js';
@@ -431,6 +431,8 @@ interface FakeSdk {
   setSession(token: string, user: unknown): void;
   /** Columns the table plan creates is_unique, enforced as Data Store does. */
   setUnique?(declared: Record<string, string[]>): void;
+  /** Columns the table plan creates as data_type "foreign key": the store refuses a non-id value. */
+  setForeignKeys?(declared: Record<string, string[]>): void;
   state(): { tables: Record<string, Record<string, unknown>[]> };
   executeZCQLQuery(sql: string): Promise<unknown>;
 }
@@ -441,6 +443,17 @@ export function uniqueByTable(steps: readonly TableCreateStep[]): Record<string,
   for (const step of steps) {
     for (const column of step.columns) {
       if (column.is_unique) (out[step.table] ??= []).push(column.column_name);
+    }
+  }
+  return out;
+}
+
+/** table → the columns its create step types as "foreign key" (a ROWID). */
+export function foreignKeysByTable(steps: readonly TableCreateStep[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const step of steps) {
+    for (const column of step.columns) {
+      if (column.data_type === 'foreign key') (out[step.table] ??= []).push(column.column_name);
     }
   }
   return out;
@@ -488,7 +501,9 @@ export async function startOfflineBackend(app: App, opts: OfflineHarnessOptions 
     const req = createRequire(import.meta.url);
     const sdk = req(fake) as FakeSdk;
     const token = 'c2c-behavior';
-    sdk.setUnique?.(uniqueByTable(tableCreatePlan(generated.schema)));
+    const plan = tableCreatePlan(generated.schema);
+    sdk.setUnique?.(uniqueByTable(plan));
+    sdk.setForeignKeys?.(foreignKeysByTable(plan));
     sdk.setSession(token, { user_id: '1', email_id: 'admin@example.test', role_details: { role_name: 'App Administrator' } });
     const entry = req(join(fnDir, 'index.js')) as (rq: IncomingMessage, rs: ServerResponse) => Promise<void>;
     server = createServer((rq, rs) => void entry(rq, rs));
@@ -714,6 +729,58 @@ function withoutApiOnly(record: Record<string, unknown>, fields: readonly string
   return out;
 }
 
+/** A write step whose `apiOnly` differs from the field-rule-denied fields its record sets. */
+export interface ApiOnlyGap {
+  case: string;
+  step: number;
+  form: string;
+  /** Denied fields the record sets that `apiOnly` does not list, sorted. */
+  missing: string[];
+  /** `apiOnly` fields the app does not deny for that op (or the record does not set), sorted. */
+  extra: string[];
+}
+
+/**
+ * Write steps whose `apiOnly` is not exactly the fields the record sets that
+ * an unconditional field rule of the app hides or disables for that op
+ * (`submit` = add, `update` = edit; see `fieldRuleDenials`). SCHEMA.md ties
+ * `api-only-acceptance` to those fields: an untagged denied field makes c2c
+ * refuse the form's own write and every later bind cascades; a listed field
+ * the app accepts is stripped from a write the form really sends.
+ */
+export function apiOnlyGaps(app: App, golden: GoldenFile): ApiOnlyGap[] {
+  const reports = new Map(app.reports.map((r) => [r.name, r.form] as const));
+  const gaps: ApiOnlyGap[] = [];
+  for (const kase of golden.cases) {
+    if (kase.skip) continue;
+    for (const [i, step] of kase.steps.entries()) {
+      if (step.op !== 'submit' && step.op !== 'update') continue;
+      const form = step.op === 'submit' ? step.form : reports.get(step.report);
+      if (!form) continue;
+      const op = step.op === 'submit' ? 'insert' : 'update';
+      const denied = new Set<string>();
+      for (const denial of fieldRuleDenials(app, form)) {
+        if (denial.ops && !denial.ops.includes(op)) continue;
+        if (setsField(step.record, denial.field)) denied.add(denial.field);
+      }
+      const listed = new Set(step.apiOnly ?? []);
+      const missing = [...denied].filter((f) => !listed.has(f)).sort();
+      const extra = [...listed].filter((f) => !denied.has(f)).sort();
+      if (missing.length || extra.length) gaps.push({ case: kase.id, step: i + 1, form, missing, extra });
+    }
+  }
+  return gaps;
+}
+
+/** True when the record carries a value for `field` (`Sub.Field` in any subform row). */
+function setsField(record: Record<string, unknown>, field: string): boolean {
+  const [top, column] = field.split('.', 2) as [string, string | undefined];
+  if (!Object.prototype.hasOwnProperty.call(record, top)) return false;
+  if (column === undefined) return true;
+  const rows = record[top];
+  return Array.isArray(rows) && rows.some((row) => isObject(row) && Object.prototype.hasOwnProperty.call(row, column));
+}
+
 /** True when the reply refused the write: a 4xx submit with nothing written, or an update that changed no matched row. */
 function refusedClientInput(step: GoldenStep, res: BehaviorCall): boolean {
   const body = isObject(res.body) ? res.body : {};
@@ -863,11 +930,12 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
       matchRows(expectedRows, actualRows, `tables.${table}`, diffs, kase.expect?.unordered === true, kase.expect?.partial === true, zone);
       for (const d of diffs) at(d);
     }
-    if (findings.length === findingsBefore) equivalentCases += 1;
+    // Each case counts once, by its final status: a finding makes it
+    // not-equivalent; else an api-only replay makes it equivalent by design.
+    if (findings.length === findingsBefore && !equivalentByDesign.some((e) => e.case === kase.id)) equivalentCases += 1;
   }
   const replayed = golden.cases.length - skipped.length;
   const status: BehaviorStatus = replayed === 0 ? 'not-run' : findings.length === 0 && skipped.length === 0 ? 'equivalent' : 'not-equivalent';
-  const equivalentByDesignCases = new Set(equivalentByDesign.map((e) => e.case));
   const report: BehaviorReport = {
     version: REPORT_VERSION,
     app: app.name || 'app',
@@ -875,7 +943,7 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
     status,
     ok: status === 'equivalent',
     behaviorEquivalentApps: status === 'equivalent' ? 1 : 0,
-    summary: { cases: golden.cases.length, steps: stepCount, findings: findings.length, skipped: skipped.length, replayed, equivalentCases: equivalentCases - equivalentByDesignCases.size, equivalentByDesign: equivalentByDesign.length },
+    summary: { cases: golden.cases.length, steps: stepCount, findings: findings.length, skipped: skipped.length, replayed, equivalentCases, equivalentByDesign: equivalentByDesign.length },
     findings,
     ...(skipped.length ? { skipped } : {}),
     ...(envArtifacts.length ? { envArtifacts } : {}),

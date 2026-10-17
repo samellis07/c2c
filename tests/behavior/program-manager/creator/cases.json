@@ -332,9 +332,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         }
@@ -423,9 +421,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         },
@@ -532,9 +528,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         },
@@ -650,9 +644,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         },
@@ -780,9 +772,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         },
@@ -949,9 +939,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         },
@@ -1057,9 +1045,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         }
@@ -1156,9 +1142,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         },
@@ -1258,9 +1242,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         },
@@ -1359,9 +1341,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         },
@@ -1461,9 +1441,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         },
@@ -1543,9 +1521,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         },
@@ -1645,9 +1621,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         },
@@ -1727,9 +1701,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         },
@@ -1829,9 +1801,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Admin",
             "ManagerEmail",
-            "Status",
             "Users"
           ]
         },
@@ -1911,7 +1881,13 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Users"
+          ]
         }
       ],
       "expect": {
@@ -1993,7 +1969,13 @@
           "bind": {
             "r_r4_add_program_admin_is_caller": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Users"
+          ]
         },
         {
           "op": "report",
@@ -2085,7 +2067,13 @@
           "bind": {
             "r_add_program_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Users"
+          ]
         },
         {
           "op": "report",

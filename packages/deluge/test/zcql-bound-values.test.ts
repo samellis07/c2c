@@ -56,11 +56,12 @@ function readQuoted(sql: string): { start: number; end: number; text: string } |
   return null;
 }
 
-function skeleton(where: string, value: string | null): string {
+function skeleton(where: string, value: string | null): string | null {
   if (value === null) {
-    assert.equal(where, 'Field = null');
+    // An empty value binds no literal: ZCQL has no `= null`, only IS NULL.
+    assert.equal(where, 'Field IS NULL');
     assert.equal(where.includes("'"), false);
-    return 'Field = §';
+    return null;
   }
   const quoted = `'${value.replace(/'/g, "''")}'`;
   assert.equal(where, `Field = ${quoted}`);
@@ -97,7 +98,8 @@ test('Form[Field == x] binds each value as one ZCQL literal and keeps the query 
     const { where, server } = await dryWhere(item.value);
     const compiled = compileCriteria({ op: '==', field: 'Field', value: item.value });
     assert.equal(compiled, where, item.name);
-    shapes.push(skeleton(where, item.value));
+    const shape = skeleton(where, item.value);
+    if (shape !== null) shapes.push(shape);
     const token = item.value === null ? 'null' : JSON.stringify(item.value);
     const bound = `value: ${token}`;
     assert.equal(server.split(bound).length - 1, 1, `${item.name} is one bound value in the generated script`);

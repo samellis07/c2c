@@ -200,7 +200,11 @@ carried into findings so a report can separate them:
 - `superseded` — the capture was overwritten; used with `skip`.
 - `api-only-acceptance` on a `submit` or `update` step, with `apiOnly` —
   the captured record sets fields an unconditional Creator field rule hides
-  or disables. Hide and disable are form behaviours: the Creator REST API
+  or disables for that op, and that no form script of the same record event
+  fills on the open form (on load, on user input, a row event: Creator posts
+  the value the script set, so c2c accepts it). `apiOnly` lists exactly those
+  fields; verify-behavior's `apiOnlyGaps` reports a write that lists more or
+  fewer. Hide and disable are form behaviours: the Creator REST API
   ignores them and stores the value, while c2c refuses a client value for
   such a field on the server. When Creator stored the captured write (a
   saved outcome, an update that changed rows, or code 3000), the record is

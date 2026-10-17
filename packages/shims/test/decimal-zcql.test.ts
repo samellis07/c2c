@@ -231,3 +231,19 @@ test('NOT of a relational decimal comparison keeps blanks under three-valued ZCQ
   const nested: Criteria = { op: 'not', arg: { op: 'and', args: [{ op: '<', field: 'Rate', value: '5' }, { op: '>', field: 'Rate', value: '1' }] } };
   assert.deepEqual(await rateValues(runtime, ctx, nested), ['', '10.00']);
 });
+
+test('a comparison with an empty value compiles to IS NULL / IS NOT NULL, never `= null`', () => {
+  // Deluge `Form[Field == input.X]` with X empty matches the rows where Field
+  // is empty; ZCQL has no `= null` (the store refuses it as a syntax error).
+  assert.equal(compileCriteria({ op: '==', field: 'Email', value: null }), 'Email IS NULL');
+  assert.equal(compileCriteria({ op: '!=', field: 'Email', value: undefined }), 'Email IS NOT NULL');
+  assert.equal(
+    compileCriteria({ op: 'and', args: [{ op: '==', field: 'Email', value: null }, { op: '==', field: 'Status', value: 'Open' }] }),
+    "(Email IS NULL AND Status = 'Open')",
+  );
+  // A decimal column with an empty value is the same NULL test, not a shadow bound.
+  const decimals = { Amount: { shadow: 'Amount_c2c_num', scale: 2 } };
+  assert.equal(compileCriteria({ op: '==', field: 'Amount', value: null }, new Set(), decimals), 'Amount IS NULL');
+  // A value is still a literal comparison.
+  assert.equal(compileCriteria({ op: '==', field: 'Email', value: 'a@b.c' }), "Email = 'a@b.c'");
+});
