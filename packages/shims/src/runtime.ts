@@ -350,6 +350,8 @@ export interface RuntimeOptions {
   adminUser?: string;
   /** Application owner email (`zoho.adminuserid`). Same sentinel rule as `adminUser`. */
   adminUserId?: string;
+  /** A generated request endpoint whose script writes run under the caller's grants. */
+  authorizeScriptWrites?: boolean;
   /**
    * Catalyst Mail sender used when a mail's `from` is the application owner
    * (`zoho.adminuserid`). Creator sends that mail from its notification sender
@@ -3244,7 +3246,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         // them). Every other insert path — submit boundaries already screened,
         // workflow and blueprint scripts that run with the app's privileges —
         // is untouched.
-        if (options.access && options.adminUserId !== undefined) {
+        if (options.access && (options.adminUserId !== undefined || options.authorizeScriptWrites === true)) {
           try {
             storedValues = authorizeWrite(options.access, ctx.principal, form, fields, undefined, 'insert').values;
           } catch (err) {

@@ -16,7 +16,7 @@ export function escapeHtml(value) {
 }
 
 export const ALLOWED_TAGS = new Set([
-  'a', 'abbr', 'b', 'blockquote', 'br', 'caption', 'code', 'col', 'colgroup', 'dd', 'del', 'div', 'dl', 'dt',
+  'a', 'abbr', 'b', 'blockquote', 'br', 'button', 'caption', 'code', 'col', 'colgroup', 'dd', 'del', 'div', 'dl', 'dt',
   'em', 'figcaption', 'figure', 'font', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'ins', 'kbd',
   'li', 'mark', 'ol', 'p', 'pre', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody',
   'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul', 'var', 'wbr',
@@ -29,6 +29,7 @@ export const DROPPED_TAGS = new Set([
 
 const ALLOWED_ATTRS = {
   a: new Set(['href', 'title']),
+  button: new Set(['type', 'data-fn-call', 'data-fn-args', 'data-fn-argc', 'data-fn-msg', 'data-fn-refresh']),
   img: new Set(['src', 'alt', 'title', 'width', 'height']),
   font: new Set(['color', 'face', 'size']),
   td: new Set(['colspan', 'rowspan', 'title']),
@@ -235,6 +236,7 @@ function allowedAttr(tag, name) {
   if (name.startsWith('on') || name === 'srcdoc') return false;
   if (name === 'style') return true;
   const specific = ALLOWED_ATTRS[tag];
+  if (tag === 'button' && /^data-fn-arg-\d+$/.test(name)) return true;
   if (specific && specific.has(name)) return true;
   return ALLOWED_ATTRS['*'].has(name);
 }

@@ -10,6 +10,7 @@
 import { createRequire } from 'node:module';
 import type { App } from '../../core/src/ir.js';
 import type { ZmlElement } from '../../core/src/zml.js';
+import type { SchemaPlan } from '../../schema/src/generator.js';
 import {
   compileHtmlpage,
   decodeXmlEntities,
@@ -36,6 +37,8 @@ export interface ZmlEnv {
   seq?: { n: number };
   /** Generated views available to inline zc-component embeds. */
   components?: { forms: Set<string>; reports: Set<string> };
+  /** The deploy-time schema plan; generated endpoint modules match its store constraints. */
+  schema?: SchemaPlan;
 }
 
 export interface UiElement {
@@ -145,7 +148,7 @@ const NAMED: Record<string, UiElement['kind']> = {
 };
 
 export const ALLOWED_TAGS = new Set([
-  'a', 'abbr', 'b', 'blockquote', 'br', 'caption', 'code', 'col', 'colgroup', 'dd', 'del', 'div', 'dl', 'dt',
+  'a', 'abbr', 'b', 'blockquote', 'br', 'button', 'caption', 'code', 'col', 'colgroup', 'dd', 'del', 'div', 'dl', 'dt',
   'em', 'figcaption', 'figure', 'font', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'ins', 'kbd',
   'li', 'mark', 'ol', 'p', 'pre', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody',
   'td', 'tfoot', 'th', 'thead', 'tr', 'u', 'ul', 'var', 'wbr',
@@ -159,6 +162,9 @@ export const DROPPED_TAGS = new Set([
 
 export const ALLOWED_ATTRS: Record<string, Set<string>> = {
   a: new Set(['href', 'title']),
+  // A generated ExecuteFunction button carries its call route, encoded
+  // arguments, and success message; the runtime wires the click.
+  button: new Set(['type', 'data-fn-call', 'data-fn-args', 'data-fn-argc', 'data-fn-msg', 'data-fn-refresh']),
   img: new Set(['src', 'alt', 'title', 'width', 'height']),
   font: new Set(['color', 'face', 'size']),
   td: new Set(['colspan', 'rowspan', 'title']),
@@ -674,6 +680,7 @@ export function allowedAttr(tag: string, name: string): boolean {
   if (name.startsWith('on') || name === 'srcdoc') return false;
   if (name === 'style') return true;
   const specific = ALLOWED_ATTRS[tag];
+  if (tag === 'button' && /^data-fn-arg-\d+$/.test(name)) return true;
   if (specific?.has(name)) return true;
   return ALLOWED_ATTRS['*'].has(name);
 }
@@ -1045,10 +1052,16 @@ export function elementFromZml(
     // The attribute is XML-escaped, so `<% %>` islands show up as `&lt;%`.
     if (/^\s*htmlpage\b/i.test(decoded) || /<%/.test(decoded) || /<%/.test(source)) {
       const id = env ? `s${env.seq ? env.seq.n++ : 0}` : 's0';
-      const compiled = env ? compileHtmlpage(env.app, env.page, name ?? tag, decoded, { id }) : null;
+      const compiled = env ? compileHtmlpage(env.app, env.page, name ?? tag, decoded, { id, schema: env.schema }) : null;
+      if (compiled?.ok) for (const extra of compiled.files ?? []) env?.emit?.(extra);
       const styleRules = droppedStyleRules(decoded);
       const lostCss = styleRules ? { droppedStyleRules: styleRules, staticCss: decoded } : {};
-      const actionItems = imageActionTodos(imageActions, compiled && !compiled.ok ? compiled.reason : undefined);
+      // A compiled snippet wired every ExecuteFunction button to its generated
+      // client-call endpoint (any unwired one refuses the compile), so only
+      // the image actions remain manual steps.
+      const actionItems = compiled?.ok
+        ? imageActionTodos(dedupeImageActions(zmlImageActions(decoded)))
+        : imageActionTodos(imageActions, compiled ? compiled.reason : undefined);
       if (compiled?.ok) {
         const inline = (compiled.components ?? []).filter((item) => env?.components?.[item.kind === 'form' ? 'forms' : 'reports'].has(item.name));
         const unavailable = (compiled.components ?? []).filter((item) => !inline.includes(item)).map((item) => `${item.kind} "${item.name}"`);

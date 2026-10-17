@@ -93,8 +93,8 @@ function c2cUrlOk(url) {
   return false;
 }
 
-const C2C_AUDIT_TAGS = new Set(["a","abbr","b","blockquote","br","caption","code","col","colgroup","dd","del","div","dl","dt","em","figcaption","figure","font","h1","h2","h3","h4","h5","h6","hr","i","img","ins","kbd","li","mark","ol","p","pre","q","s","samp","small","span","strong","sub","sup","table","tbody","td","tfoot","th","thead","tr","u","ul","var","wbr"]);
-const C2C_AUDIT_ATTRS = {"*":["data-style-dropped","data-zml","title"],"a":["href","title","rel"],"font":["color","face","size"],"img":["alt","height","src","title","width"],"ol":["start","title"],"td":["colspan","rowspan","title"],"th":["colspan","rowspan","title"]};
+const C2C_AUDIT_TAGS = new Set(["a","abbr","b","blockquote","br","button","caption","code","col","colgroup","dd","del","div","dl","dt","em","figcaption","figure","font","h1","h2","h3","h4","h5","h6","hr","i","img","ins","kbd","li","mark","ol","p","pre","q","s","samp","small","span","strong","sub","sup","table","tbody","td","tfoot","th","thead","tr","u","ul","var","wbr"]);
+const C2C_AUDIT_ATTRS = {"*":["data-style-dropped","data-zml","title"],"a":["href","title","rel"],"button":["data-fn-argc","data-fn-args","data-fn-call","data-fn-msg","data-fn-refresh","type"],"font":["color","face","size"],"img":["alt","height","src","title","width"],"ol":["start","title"],"td":["colspan","rowspan","title"],"th":["colspan","rowspan","title"]};
 const C2C_AUDIT_URLS = /^(href|src|srcset|action|formaction|xlink:href|poster|cite|background|longdesc|profile|usemap|data|ping|manifest|codebase|archive|lowsrc|dynsrc|srcdoc)$/i;
 function c2cAttrAuditOk(tag, name, value) {
   const attr = String(name).toLowerCase();
@@ -104,6 +104,7 @@ function c2cAttrAuditOk(tag, name, value) {
     return flat.indexOf("javascript:") < 0 && flat.indexOf("vbscript:") < 0;
   }
   const specific = C2C_AUDIT_ATTRS[tag];
+  if (tag === "button" && /^data-fn-arg-\d+$/.test(attr)) return true;
   if (!(specific && specific.indexOf(attr) >= 0) && C2C_AUDIT_ATTRS["*"].indexOf(attr) < 0) return false;
   if (C2C_AUDIT_URLS.test(attr) && !c2cUrlOk(value)) return false;
   return true;
