@@ -1127,3 +1127,59 @@ test('a kanban view that the model does not keep, and an options icon, are drops
   });
   assert.deepEqual(dropNames(icon, collectOutputs(icon)), ['Book_by_Genre block options']);
 });
+
+// A submit-kind body on /forms/<form>/submit runs only for the posts the
+// generated UI still sends there: add posts go to submitEndpoint, edit posts
+// to editSubmitEndpoint (falling back to submitEndpoint). Each case pins which
+// body is credited and checks the credit against the UI model's endpoints.
+function submitScopeApp(successes: { name: string; recordEvent?: string; client: boolean }[]): App {
+  const mail = (tag: string) => `sendmail[from: zoho.loginuserid to: "a@b.c" subject: "${tag}" message: "hi"];`;
+  let at = 100;
+  const span = () => {
+    const start = at;
+    at += 100;
+    return { start, end: start + 50, file: 'app.ds' };
+  };
+  const body = (name: string, event: string, text: string, extra: Partial<Workflow> = {}) => {
+    const s = span();
+    return workflow({ name, container: 'form', form: 'Orders', event, span: s, deluge: { text, span: { start: s.start + 1, end: s.end - 1, file: 'app.ds' } }, ...extra });
+  };
+  return app({
+    forms: [formOf('Orders', ['Title'])],
+    workflows: [
+      ...successes.map((w) =>
+        body(w.name, 'on success', (w.client ? 'openUrl("https://example.com", "same window");\n' : '') + mail(w.name), w.recordEvent ? { recordEvent: w.recordEvent } : {}),
+      ),
+      body('AddBody', 'on add', mail('add')),
+      body('EditBody', 'on edit', mail('edit')),
+      body('BothBody', 'on add or edit', mail('both')),
+    ],
+  });
+}
+
+for (const [label, successes, expected] of [
+  ['an add-only success with a client part owns add and, by fallback, edit posts', [{ name: 'Succ', recordEvent: 'on add', client: true }], { AddBody: false, EditBody: false, BothBody: false }],
+  ['an edit-only success with a client part owns only edit posts', [{ name: 'Succ', recordEvent: 'on edit', client: true }], { AddBody: true, EditBody: false, BothBody: true }],
+  ['add- and edit-scoped successes own every submit post', [{ name: 'SuccA', recordEvent: 'on add', client: true }, { name: 'SuccE', recordEvent: 'on edit', client: true }], { AddBody: false, EditBody: false, BothBody: false }],
+  ['a server-only success registers no client handler and owns nothing', [{ name: 'Succ', client: false }], { AddBody: true, EditBody: true, BothBody: true }],
+] as const) {
+  test(`submit-scope credit: ${label}`, () => {
+    const orders = submitScopeApp([...successes]);
+    const out = collectOutputs(orders);
+    const form = out.model.forms.find((f) => f.name === 'Orders');
+    assert.ok(form);
+    const submitPath = '/forms/Orders/submit';
+    const addPostsSubmit = form.submitEndpoint === submitPath;
+    const editPostsSubmit = (form.editSubmitEndpoint ?? form.submitEndpoint) === submitPath;
+    const uiPosts = { AddBody: addPostsSubmit, EditBody: editPostsSubmit, BothBody: addPostsSubmit || editPostsSubmit };
+    for (const [name, invoked] of Object.entries(expected)) {
+      const entry = out.coverage?.find((c) => c.name === name);
+      assert.ok(entry, name);
+      assert.equal(entry.serverInvoked, invoked, name);
+      assert.equal(entry.serverInvoked, uiPosts[name as keyof typeof uiPosts], `${name} credit matches the UI post`);
+      const counted = out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === entry.start);
+      assert.equal(counted, !invoked, `${name} counted`);
+    }
+    assert.equal(auditApp(orders, out).filter((d) => d.kind === 'workflow').length, 0);
+  });
+}

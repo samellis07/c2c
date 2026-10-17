@@ -136,6 +136,38 @@ export function formEventServerPath(form: string, kind: string): string {
  * delete-script module. Other kinds run only when a generated client posts
  * the route; prefetch does not.
  */
+/** The submit scopes a form's success handlers take over from `/forms/<form>/submit`. */
+interface SubmitOwnership {
+  add: boolean;
+  edit: boolean;
+}
+
+interface SubmitFixup {
+  entry: WorkflowCoverage;
+  clientPosted: boolean;
+  serverFile?: string;
+  form: string;
+  event: string;
+}
+
+/**
+ * True when no post the generated UI makes reaches the `/submit` body of a
+ * submit-kind `event`: every scope the event covers (`on add`, `on edit`, or
+ * both) is owned by a success route. An edit post falls back to the add
+ * endpoint when no edit-scoped success exists, so an add-owned form owns edits too.
+ */
+function submitBodyUnposted(owned: SubmitOwnership | undefined, event: string): boolean {
+  if (!owned) return false;
+  const e = event.toLowerCase();
+  const add = /\badd\b|\bcreate\b/.test(e);
+  const edit = /\bedit\b|\bupdate\b/.test(e);
+  const addOwned = owned.add;
+  const editOwned = owned.edit || owned.add;
+  if (add && !edit) return addOwned;
+  if (edit && !add) return editOwned;
+  return addOwned && editOwned;
+}
+
 function runtimeReachesFormEvent(kind: string): boolean {
   return kind === 'success' || kind === 'validate' || kind === 'delete';
 }
@@ -282,14 +314,13 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
     return p;
   };
   const coverage: WorkflowCoverage[] = [];
-  // Forms whose success handler owns the submit URL: the UI model promotes
-  // `submitEndpoint` to the success route only when a success workflow with a
-  // server module also emitted a client handler whose record event covers the
-  // add scope. A `submit`-kind server module on those forms is not what the
-  // browser posts; with anything weaker (an edit-only success, or a
-  // server-only one that registers no client handler) `/submit` still is.
-  const successServerForms = new Set<string>();
-  const submitFixups: { entry: WorkflowCoverage; clientPosted: boolean; serverFile?: string }[] = [];
+  // Per form, the submit scopes a success handler owns. The UI model promotes
+  // `submitEndpoint` (add posts) and `editSubmitEndpoint` (edit posts) to the
+  // success route only when a success workflow with a server module also
+  // emitted a client handler whose record event covers that scope. A
+  // server-only success registers no client handler and owns nothing.
+  const successServerForms = new Map<string, SubmitOwnership>();
+  const submitFixups: SubmitFixup[] = [];
 
   put('runtime/limits.mjs', limitsModule());
 
@@ -347,7 +378,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
   // reachable. Once every handler exists, success owns that submit URL.
   for (const fix of submitFixups) {
     if (fix.clientPosted || fix.entry.serverInvoked === false) continue;
-    if (!successServerForms.has(fix.entry.form)) continue;
+    if (!submitBodyUnposted(successServerForms.get(fix.form), fix.event)) continue;
     fix.entry.serverInvoked = false;
     if (fix.serverFile) fix.entry.paths = fix.entry.paths.filter((p) => p !== fix.serverFile);
     todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: fix.entry.start, end: fix.entry.end });
@@ -606,8 +637,8 @@ function emitFormHandler(
   recordHandler?: (entry: { path: string; kind: string; candidate: AsyncCandidate }) => void,
   coverage?: WorkflowCoverage[],
   files: readonly GeneratedFile[] = [],
-  successServerForms?: Set<string>,
-  submitFixups?: { entry: WorkflowCoverage; clientPosted: boolean; serverFile?: string }[],
+  successServerForms?: Map<string, SubmitOwnership>,
+  submitFixups?: SubmitFixup[],
 ): void {
   const first = group[0]!;
   const form = first.form || 'form';
@@ -740,14 +771,19 @@ function emitFormHandler(
             : 'on add';
     const extraRecordEvents = recordEvents.size > 1 ? { recordEvents: [...new Set(group.map((w) => w.recordEvent ?? ''))].sort(compareEnUs) } : {};
 
-    // The UI model promotes submitEndpoint to this success route only when a
-    // client handler whose record event covers the add scope registers: an
-    // edit- or delete-scoped success handler leaves `/submit` posted, and a
-    // server-only success workflow emits no client handler at all.
-    if (kind === 'success' && clientParts.some((part) => {
-      const rec = (part.w.recordEvent ?? '').trim().toLowerCase();
-      return rec !== 'on edit' && rec !== 'on delete';
-    })) successServerForms?.add(form);
+    // Mirror the UI model's successAt: a success client handler scoped `on add`
+    // takes add posts, `on edit` edit posts, unscoped or `on add or edit` both;
+    // `on delete` never submits. A server-only success emits no client handler.
+    if (kind === 'success' && successServerForms) {
+      const owned = successServerForms.get(form) ?? { add: false, edit: false };
+      for (const part of clientParts) {
+        const rec = (part.w.recordEvent ?? '').toLowerCase();
+        if (rec === 'on delete') continue;
+        if (rec !== 'on edit') owned.add = true;
+        if (rec !== 'on add') owned.edit = true;
+      }
+      if (owned.add || owned.edit) successServerForms.set(form, owned);
+    }
     serverFile = put(
       `functions/aio/${base}.mjs`,
       aioModule({
@@ -812,7 +848,7 @@ function emitFormHandler(
     for (const item of contributed) {
       let serverInvoked: boolean | undefined;
       if (item.server && serverFile) {
-        if (kind === 'submit' && !clientPosted) serverInvoked = !successServerForms?.has(form);
+        if (kind === 'submit' && !clientPosted) serverInvoked = !submitBodyUnposted(successServerForms?.get(form), item.w.event || '');
         else serverInvoked = clientPosted || runtimeReachesFormEvent(kind);
         if (!serverInvoked) todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: item.w.span.start, end: item.w.span.end });
       }
@@ -833,7 +869,7 @@ function emitFormHandler(
         ...(serverInvoked !== undefined ? { serverInvoked } : {}),
       };
       coverage.push(entry);
-      if (item.server && serverFile && kind === 'submit') submitFixups?.push({ entry, clientPosted, serverFile });
+      if (item.server && serverFile && kind === 'submit') submitFixups?.push({ entry, clientPosted, serverFile, form, event: item.w.event || '' });
     }
   }
 }
