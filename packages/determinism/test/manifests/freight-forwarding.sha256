@@ -85,7 +85,7 @@ e3cb81ab9f1c750d26af9e755ef4aca4f70c937505dc67492a32e8a541130a41  functions/c2c_
 2aaf4ba47126b924ace69fccc52d9adf7ec282d39776a6ab5fb0d36b47b72218  functions/c2c_api/aio/new-container/record.mjs
 7a62b3b4e6049426dfb1fbe05c7a2a54c5c47aa5bc971e9ba207739dbea97663  functions/c2c_api/aio/new-container/submit.mjs
 c01f7589f904a13865e59e1c3ecfe3b7ea7ef928d6ae5c10a2fea68ce9caa978  functions/c2c_api/aio/new-deal/delete.mjs
-1ee9bc541c65693029bec7825c6c4edf8faa764b00eb56f9033142b65c4a1bbb  functions/c2c_api/aio/new-deal/input-handlers-prefetch.mjs
+45d7fd6f4ce68f61acc107cdb2a3ad42eba64efd9d4b7259ed7a9683d3eb43c2  functions/c2c_api/aio/new-deal/input-handlers-prefetch.mjs
 238fb2a87d87ad6279a95029b44cd8e76f96425017238b726b5a5830ca0ca18f  functions/c2c_api/aio/new-deal/input-handlers.mjs
 71cb53fb24f3542d10ed931592de2f50d07fac7ec518bf8b229490fc405e1464  functions/c2c_api/aio/new-deal/on-success.mjs
 c49b3402c1d3e639a05db7f1e2b9a91b943f487ea280030871a97fce64ed8faf  functions/c2c_api/aio/new-deal/on-validate.mjs
@@ -109,7 +109,7 @@ c942be2848afe9581653d5eace45d9ef073cbc89c12a0bfcb3441b7b2ca8637e  functions/c2c_
 c1acbedbe8fdffdaf8a954ad0bb0a4e7e9f543a501f25ee85db05346bd80ba55  functions/c2c_api/aio/new-invoice/on-validate.mjs
 917c47519178df0efc56718eb4a148605e5ae1effdd62106f05beea76bfe5baf  functions/c2c_api/aio/new-invoice/record.mjs
 068fee7d5c767d205e4de1e66bc71b275c35b6b1bad3a77e27f766683dcecd39  functions/c2c_api/aio/new-lead/delete.mjs
-66e8132667e95deb1dec5139a878cfc75733eb9a40df64242ee490eb34195962  functions/c2c_api/aio/new-lead/input-handlers-prefetch.mjs
+8fe2918ca02e3345cfd481b109d6f4f10794a434ed5365de299f2b123a6e03d1  functions/c2c_api/aio/new-lead/input-handlers-prefetch.mjs
 b76031a4f837d9d4aa20443539e11eb250f43a9d7ee5efa48ea24e715e0e655d  functions/c2c_api/aio/new-lead/input-handlers.mjs
 63712cced45c1e4bb919687dab2f50e65a3e7801bede3ebfb5ee4b406d0eb05d  functions/c2c_api/aio/new-lead/on-load-prefetch.mjs
 dfe660f0d2491490981a2f375d0f01de93f975d873238242af320e0e118608b1  functions/c2c_api/aio/new-lead/on-load.mjs
@@ -126,7 +126,7 @@ b805945abfeb5cd8436ba1fce9e7da24aa0309075a36dd295e62660eb13fe654  functions/c2c_
 b5dfcd6865b20a829a50df28e42beaa0e9ff0b4c0af7e7bad654ff08f27d4b2f  functions/c2c_api/aio/new-quotation/input-handlers.mjs
 ca59edaf1f2b74cb74b44982960d2361ab139d53bbc4d5cac3b83b1a1547828c  functions/c2c_api/aio/new-quotation/on-load-prefetch.mjs
 bd7d553ac246f72fa319560eb306f7a2018864cb0d0042972440bc8979569afc  functions/c2c_api/aio/new-quotation/on-load.mjs
-fa1eb36ffbd532c91ba692ed7857beb8faeff9fad77da9b4ff561d4c46be748c  functions/c2c_api/aio/new-quotation/on-success.mjs
+3e6698e2427b685c3187ff311c02e7243ca87f506850dd4655cc1b753121d367  functions/c2c_api/aio/new-quotation/on-success.mjs
 e33cad97647fbcae842efef6ea9230ff568291156c84ea29e95104ab0f5261d4  functions/c2c_api/aio/new-quotation/on-validate.mjs
 902ba044b93261469d7a03329aafbec7f43636041261d4a993c8f9fcef625859  functions/c2c_api/aio/new-quotation/record.mjs
 acb668aa797f229c414b09359d73fc1512e5262066d9b219d658be6947905c10  functions/c2c_api/aio/new-sof/delete.mjs
