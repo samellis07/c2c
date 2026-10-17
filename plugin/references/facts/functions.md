@@ -124,7 +124,7 @@ Rule: [UNVERIFIED] Circuits is unavailable in those data centres (invocation →
 
 ### Keep reserved names out of env_variables
 
-Rule: [UNVERIFIED] a deploy whose `env_variables` carried `CATALYST_DC`, `CATALYST_ENV`, `CATALYST_PROJECT_ID`, `DC`, `ENV` and `PROJECT_ID` was refused with `HTTP Error: 400, environment_variables must not contain reserved keywords`, and passed once they were removed. No documented list exists. c2c refuses these names and `X_ZOHO_CATALYST_ORG_ID`; it assumes no other name is reserved.
+Rule: [UNVERIFIED] a deploy whose `env_variables` carried `CATALYST_DC`, `CATALYST_ENV`, `CATALYST_PROJECT_ID`, `DC`, `ENV` and `PROJECT_ID` was refused with `HTTP Error: 400, environment_variables must not contain reserved keywords`, and passed once they were removed. A later redeploy whose env differed from the last accepted one only by `APP_URL` and `CATALYST_APP_URL` hit the same 400; which of the two is reserved is not yet split by a probe. No documented list exists. c2c refuses these names, `X_ZOHO_CATALYST_ORG_ID`, `APP_URL` and `CATALYST_APP_URL`; it assumes no other name is reserved.
 
 ### Slate app names are letters, digits and single hyphens
 
