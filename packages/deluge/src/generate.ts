@@ -2293,7 +2293,7 @@ export function functionScriptOptions(app: App, fn: FunctionDef, slotStart: numb
   };
 }
 
-interface ClientCallCatalog {
+export interface ClientCallCatalog {
   /** Dotted callee names proved read-only, keyed by the exact declared name. */
   names: Set<string>;
   /** Emitted server body for each read-only function, keyed by the exact declared name. */
@@ -2310,7 +2310,7 @@ interface ClientCallCatalog {
  * `client-condition-uses-server` result, and so does one that may mutate a
  * list or map reachable from its parameters (`mutatesParameters`).
  */
-function clientCallFunctions(app: App): ClientCallCatalog {
+export function clientCallFunctions(app: App): ClientCallCatalog {
   const bodies = new Map<string, string>();
   const forms = new Map<string, Set<string>>();
   // The runtime registry (functions/thisapp.mjs) dispatches exact-name-first,
@@ -2380,6 +2380,100 @@ function clientCallFunctions(app: App): ClientCallCatalog {
     if (!changed) break;
   }
   return { names, bodies, reads };
+}
+
+export interface ButtonFunctionCall {
+  /** Emitted server body for a function whose call endpoint may be generated. */
+  body: string;
+  /** Forms the emitted body reads. */
+  reads: Set<string>;
+  /** Form -> write operation the emitted body performs. */
+  writes: Map<string, 'insert' | 'update' | 'delete'>;
+}
+
+function addWrite(writes: Map<string, 'insert' | 'update' | 'delete'>, form: string | undefined, op: 'insert' | 'update' | 'delete'): void {
+  if (form) writes.set(form, op);
+}
+
+/** Literal form writes in an emitted function body, including writes through a fetched query or subform row. */
+function emittedWriteForms(body: string): Map<string, 'insert' | 'update' | 'delete'> | null {
+  const writes = new Map<string, 'insert' | 'update' | 'delete'>();
+  const queryVars = new Map<string, string>();
+  const queryRe = /\b(?:var\s+)?([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?shim\.datastore\.query\s*\(\s*ctx\s*,\s*("(?:\\.|[^"\\])*")/g;
+  for (const m of body.matchAll(queryRe)) {
+    try {
+      const form = JSON.parse(m[2]!) as unknown;
+      if (typeof form !== 'string') return null;
+      queryVars.set(m[1]!, form);
+    } catch {
+      return null;
+    }
+  }
+  const direct = (op: 'insert' | 'update' | 'delete', re: RegExp) => {
+    for (const m of body.matchAll(re)) {
+      try {
+        const form = JSON.parse(m[1]!) as unknown;
+        if (typeof form !== 'string') return false;
+        addWrite(writes, form, op);
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  };
+  if (!direct('insert', /\bshim\.datastore\.(?:insert|insertRow)\s*\(\s*ctx\s*,\s*("(?:\\.|[^"\\])*")/g)) return null;
+  if (!direct('update', /\bshim\.datastore\.(?:update|writeRow)\s*\(\s*ctx\s*,\s*("(?:\\.|[^"\\])*")/g)) return null;
+  if (!direct('delete', /\bshim\.datastore\.delete\s*\(\s*ctx\s*,\s*("(?:\\.|[^"\\])*")/g)) return null;
+  const loopRows = new Map<string, string>();
+  const loopRe = /\bfor\s*\(\s*(?:var\s+)?([A-Za-z_$][\w$]*)\s+of\s+shim\.each\s*\(\s*ctx\s*,\s*(?:await\s+)?shim\.datastore\.(?:field|column|rows)\s*\(\s*ctx\s*,\s*([A-Za-z_$][\w$]*)/g;
+  for (const m of body.matchAll(loopRe)) {
+    const form = queryVars.get(m[2]!);
+    if (form) loopRows.set(m[1]!, form);
+  }
+  const setFieldRe = /\bshim\.datastore\.setField\s*\(\s*ctx\s*,\s*([A-Za-z_$][\w$]*)/g;
+  for (const m of body.matchAll(setFieldRe)) {
+    const form = queryVars.get(m[1]!);
+    if (!form) return null;
+    addWrite(writes, form, 'update');
+  }
+  const setRe = /\bshim\.(?:record\.set|set)\s*\(\s*([A-Za-z_$][\w$]*)/g;
+  for (const m of body.matchAll(setRe)) {
+    const form = queryVars.get(m[1]!) ?? loopRows.get(m[1]!);
+    if (!form) return null;
+    addWrite(writes, form, 'update');
+  }
+  return writes;
+}
+
+/**
+ * Functions whose emitted server body a generated ExecuteFunction button may
+ * invoke. The catalog carries reads plus the exact write grants the body can
+ * exercise; bodies with mail, outbound HTTP, tasks, an untranslated hole, or
+ * a nested app-function call stay counted.
+ */
+export function buttonCallFunctions(app: App): Map<string, ButtonFunctionCall> {
+  const out = new Map<string, ButtonFunctionCall>();
+  for (const fn of app.functions) {
+    let slot = 0;
+    const parts = fn.deluge.map((d) => {
+      const tr = translateInApp(app, d.text, functionScriptOptions(app, fn, slot));
+      slot = tr.nextSlot;
+      return tr;
+    });
+    const server = parts.map((p) => p.server).filter((part) => part.trim()).join('\n');
+    const declaredEmpty = !fn.deluge.some((d) => d.text.trim());
+    if ((!server.trim() && !declaredEmpty) || parts.some((part) => part.todos.length)) continue;
+    if (mutatesParameters(fn.deluge.map((d) => d.text), fnSignatureParams(fn.signature))) continue;
+    if (/\bshim\.(?:mail\.send|http\.|zoho\.task|thisapp\.call|todo)\s*\(/.test(server)) continue;
+    const reads = emittedReadForms(server);
+    if (reads === null) continue;
+    const allReads = new Set(reads);
+    for (const form of functionReadForms(app, fn)) allReads.add(form);
+    const writes = emittedWriteForms(server);
+    if (writes === null) continue;
+    out.set(fn.name.toLowerCase(), { body: server, reads: allReads, writes });
+  }
+  return out;
 }
 
 /** Literal form names an emitted function body reads through datastore.query. */
@@ -2947,7 +3041,7 @@ function fnDecimalParams(signature: string | undefined): string[] {
 }
 
 /** Declared `(type name)` pairs of a `thisapp` signature; the last token is the name. */
-function fnSignatureParams(signature: string | undefined): { type: string; name: string }[] {
+export function fnSignatureParams(signature: string | undefined): { type: string; name: string }[] {
   if (!signature) return [];
   const m = signature.match(/\(([^)]*)\)/);
   if (!m || !m[1]?.trim()) return [];
@@ -5350,29 +5444,31 @@ export default async function handler(req, res) {
  * function arguments, the server runs the registered callee, and the response
  * carries one value rather than prefetch slots.
  */
-function functionCallModule(opts: {
+export function functionCallModule(opts: {
   app: App;
   name: string;
   signature?: string;
   params: string[];
   reads: string[];
+  writes?: { form: string; op: 'insert' | 'update' | 'delete' }[];
   schema?: SchemaPlan;
 }): string {
   const path = `/functions/${slug(opts.name)}/call`;
   const pathArgs = JSON.stringify(opts.name.split('.'));
   const readForms = [...new Set(opts.reads)].sort(compareEnUs);
-  const needsRows = readForms.length > 0;
+  const writeForms = [...(opts.writes ?? [])].sort((a, b) => compareEnUs(a.form, b.form) || a.op.localeCompare(b.op));
+  const needsRows = readForms.length > 0 || writeForms.length > 0;
   return `${banner([
     `Client call for ${opts.name}`,
     opts.signature ? `Signature (verbatim): ${opts.signature.replace(/\*\//g, '* /')}` : 'No signature on the IR node.',
     `Advanced I/O POST ${path}`,
-    'Runs one app function the generator proved read-only from its emitted server body.',
+    writeForms.length ? 'Runs one translated app function from a generated ExecuteFunction button.' : 'Runs one app function the generator proved read-only from its emitted server body.',
     'body.args are plain JSON data, one per declared parameter, at most 64 KB encoded. Branded, non-plain, or over-deep values are refused.',
     'Dry run reports value null — a placeholder must never take the true branch of a client condition.',
-    'The client form, record, old row, and field names are not read. Authorization is checked for every form the callee reads.',
+    writeForms.length ? 'The client form, record, old row, and field names are not read. Authorization is checked for every form the callee reads, and authorizeWrite/authorizeDelete checks every form the callee writes.' : 'The client form, record, old row, and field names are not read. Authorization is checked for every form the callee reads.',
     'The response nonce is the form state the condition ran for.',
     'functions/c2c-deploy.json mode (or C2C_DEPLOY_MODE) decides: "live" runs the function; anything else returns the runtime dry-run result.',
-  ])}import { authorizeRead, createRuntime, jsonReplacer, principalFromRequest } from "creator-to-catalyst/shims";
+  ])}import { authorizeDelete, authorizeRead, authorizeWrite, createRuntime, jsonReplacer, principalFromRequest } from "creator-to-catalyst/shims";
 import { functions } from "../thisapp.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -5382,6 +5478,7 @@ export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.strin
 
 export const access = ${accessLiteral(opts.app)};
 export const readForms = ${JSON.stringify(readForms)};
+export const writeForms = ${JSON.stringify(writeForms)};
 
 function send(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -5396,7 +5493,7 @@ ${REQUEST_ARGS_HELPER}
 ${liveHelpers('../')}
 
 export default async function handler(req, res) {
-  const deniedForm = readForms.find(isHidden);
+  const deniedForm = [...readForms, ...writeForms.map((w) => w.form)].find(isHidden);
   if (deniedForm) {
     send(res, 403, { ok: false, error: "hidden form" });
     return;
@@ -5408,7 +5505,7 @@ export default async function handler(req, res) {
   }
   const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
   const sentArgs = Array.isArray(body.args) ? body.args : [];
-  if (body.args !== undefined && (!Array.isArray(body.args) || sentArgs.length > ${opts.params.length} || sentArgs.some((arg) => !plainJsonArg(arg, 0)) || Buffer.byteLength(JSON.stringify(sentArgs), "utf8") > 65536)) {
+  if (body.args !== undefined && (!Array.isArray(body.args) || sentArgs.length ${writeForms.length ? "!==" : ">"} ${opts.params.length} || sentArgs.some((arg) => !plainJsonArg(arg, 0)) || Buffer.byteLength(JSON.stringify(sentArgs), "utf8") > 65536)) {
     send(res, 400, { ok: false, error: "invalid function argument" });
     return;
   }
@@ -5427,6 +5524,10 @@ export default async function handler(req, res) {
   }
   try {
     for (const form of readForms) authorizeRead(access, principal, form, { op: "true" });
+    for (const write of writeForms) {
+      if (write.op === "delete") authorizeDelete(access, principal, write.form);
+      else authorizeWrite(access, principal, write.form, {}, undefined, write.op);
+    }
     const datastore = live && ${needsRows ? 'true' : 'false'} ? await liveDatastore() : null;
     if (live && ${needsRows ? 'true' : 'false'} && !datastore) {
       send(res, 500, { ok: false, dryRun: false, error: "live datastore is not configured" });
@@ -5437,6 +5538,7 @@ export default async function handler(req, res) {
       appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined${timeZoneFields(opts.app)}${schemaRuntimeOptions(opts.app, opts.schema)},
       ...(datastore ? { datastore, ...(datastore.now ? { now: datastore.now } : {}) } : {}),
       access,
+      authorizeScriptWrites: ${writeForms.length ? 'true' : 'false'},
       functions,
     });
     const ctx = runtime.context({
@@ -5447,6 +5549,7 @@ export default async function handler(req, res) {
       appTimeZone: process.env.C2C_APP_TIMEZONE,
     });
     const value = await ctx.shim.thisapp.call(ctx, ${pathArgs}, requestArgs(req, ${opts.params.length}));
+    ${writeForms.length ? 'await ctx.shim.datastore.flush(ctx);' : ''}
     send(res, 200, { ok: true, dryRun: !live, nonce: ctx.formNonce ?? null, value: live ? (value ?? null) : null, ...(live ? {} : { transcript: runtime.transcript }) });
   } catch (err) {
     const denied = err && (err.code === "RECORD_ACCESS_DENIED" || err.name === "RecordAccessError");

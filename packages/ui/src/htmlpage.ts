@@ -23,7 +23,8 @@ import type { App } from '../../core/src/ir.js';
 import { lex } from '../../deluge/src/lexer.js';
 import { parse } from '../../deluge/src/parser.js';
 import type { Expr, Stmt } from '../../deluge/src/ast.js';
-import { administratorProfiles, translateInApp } from '../../deluge/src/generate.js';
+import { administratorProfiles, buttonCallFunctions, clientCallFunctions, fnSignatureParams, functionCallModule, rawFnParams, slug as functionSlug, translateInApp, type ButtonFunctionCall, type ClientCallCatalog } from '../../deluge/src/generate.js';
+import type { SchemaPlan } from '../../schema/src/generator.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { criteriaHasRelative, criteriaHasTodo } from '../../shims/src/criteria.js';
 import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, sanitizeSnippet } from './pages.js';
@@ -48,6 +49,8 @@ export interface HtmlpageCompiled {
   src?: string;
   /** The generated endpoint module. */
   file?: HtmlpageFile;
+  /** Extra generated modules the snippet depends on (function-call endpoints). */
+  files?: HtmlpageFile[];
   /** Why this template is not compiled (the element keeps its TODO). */
   reason?: string;
   /** Pages of this app the template embedded by `page-embed` iframe, now inline includes. */
@@ -453,8 +456,7 @@ const IFRAME_OPEN = new RegExp(`^<iframe(?:${IFRAME_ATTR})*?[${TAG_WS}]+src[${TA
 const APPURI_ISLAND = /<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>/gi;
 
 /**
- * A literal `<iframe src="<%=zoho.appuri%>page-embed/<Page>">` (or the older
- * `view-embed/<Page>` spelling) of another page
+ * A literal `<iframe src="<%=zoho.appuri%>page-embed/<Page>">` of another page
  * of this app becomes an inline include of that page's generated view. Creator
  * draws the named page inside the frame [UNVERIFIED]; `zc_*` query keys are
  * Creator display flags (header, footer) [UNVERIFIED] with no view effect
@@ -478,7 +480,7 @@ function inlinePageEmbeds(template: string, app: App, page: string): { template:
     const quote = open[1];
     const rest = template.slice(m.index + m[0].length);
     const tail = new RegExp(
-      `^(?:page-embed|view-embed)/([A-Za-z_]\\w*)(?:\\?([^"'<>%${TAG_WS}]*))?${quote}(?:${IFRAME_ATTR})*[${TAG_WS}]*>[${TAG_WS}]*</iframe[${TAG_WS}]*>`,
+      `^page-embed/([A-Za-z_]\\w*)(?:\\?([^"'<>%${TAG_WS}]*))?${quote}(?:${IFRAME_ATTR})*[${TAG_WS}]*>[${TAG_WS}]*</iframe[${TAG_WS}]*>`,
       'i',
     ).exec(rest);
     if (!tail) continue;
@@ -899,6 +901,7 @@ function c2cAttrAuditOk(tag, name, value) {
     return flat.indexOf("javascript:") < 0 && flat.indexOf("vbscript:") < 0;
   }
   const specific = C2C_AUDIT_ATTRS[tag];
+  if (tag === "button" && /^data-fn-arg-\\d+$/.test(attr)) return true;
   if (!(specific && specific.indexOf(attr) >= 0) && C2C_AUDIT_ATTRS["*"].indexOf(attr) < 0) return false;
   if (C2C_AUDIT_URLS.test(attr) && !c2cUrlOk(value)) return false;
   return true;
@@ -1517,13 +1520,13 @@ export function zmlExecuteFunctionButtons(template: string): ZmlImageAction[] {
   const chunks = splitChunks(template);
   const markup = chunks ? chunks.map((c) => (c.kind === 'static' ? c.text : '')).join('') : template.replace(/<%[\s\S]*?(?:%>|$)/g, '');
   const out: ZmlImageAction[] = [];
-  for (const m of markup.matchAll(/<button\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi)) {
-    const attrs = parseZmlAttributes(m[1] ?? '');
+  for (const tag of buttonTags(markup)) {
+    const attrs = parseZmlAttributes(tag.attrText);
     const action = (attrs.action ?? '').trim();
     if (action.replace(/\s+/g, '').toLowerCase() !== 'executefunction') continue;
     const fn = (attrs.functionname ?? attrs.function ?? '').trim();
     const label = ['elementname', 'name', 'id', 'value', 'text', 'label'].map((k) => (attrs[k] ?? '').trim()).find(Boolean);
-    out.push({ action: 'ExecuteFunction', siteId: `button-${m.index}`, ...(fn ? { fn } : {}), ...(label ? { label } : {}), element: 'button' });
+    out.push({ action: 'ExecuteFunction', siteId: `button-${tag.start}`, ...(fn ? { fn } : {}), ...(label ? { label } : {}), element: 'button' });
   }
   return out;
 }
@@ -1664,10 +1667,12 @@ export function convertZmlSnippetToHtml(template: string): string {
 const CLIENT_PROJECTION_TODOS: ReadonlySet<string> = new Set(['client-condition-uses-server', 'client-loop-uses-server']);
 
 /**
- * Compile refusal for a ZML `<button action='ExecuteFunction'>`. The button
- * runs a Deluge function with the given parameters when clicked; the generated
- * page has no endpoint for that call, and the sanitizer would keep an inert
- * button, so the snippet stays a counted manual item with this reason.
+ * Compile refusal for a ZML `<button action='ExecuteFunction'>` whose function
+ * call cannot be generated. The button runs a Deluge function with the given
+ * parameters when clicked; only a call to a read-only function of this app
+ * with constant or declared-page-parameter arguments is rewritten to a
+ * generated client-call endpoint. Anything else keeps the snippet a counted
+ * manual item with this reason.
  */
 export const EXECUTE_FUNCTION_BUTTON = 'ZML ExecuteFunction button';
 
@@ -1680,9 +1685,7 @@ export function rewriteRecordSummaryFrames(template: string, app?: App): string 
   return replaceIframeElements(String(template ?? ''), (whole, attrs, inner) => {
     const src = /\bsrc\s*=\s*(["'])([\s\S]*?)\1/i.exec(attrs);
     if (!src) return whole;
-    // Exports sometimes spell out the app host before the appuri island; the
-    // island already carries it, so a literal zohocreator prefix is redundant.
-    const match = /^(?:https?:\/\/[A-Za-z0-9.-]*\.zohocreator\.[A-Za-z.]+)?<%=\s*zoho\.appuri\s*%>record-summary\/([A-Za-z_]\w*)\/<%=([\s\S]+?)%>$/i.exec(src[2]);
+    const match = /^<%=\s*zoho\.appuri\s*%>record-summary\/([A-Za-z_]\w*)\/<%=([\s\S]+?)%>$/i.exec(src[2]);
     if (!match) return whole;
     const target = match[1];
     const report = app?.reports.find((item) => item.name === target);
@@ -1692,26 +1695,7 @@ export function rewriteRecordSummaryFrames(template: string, app?: App): string 
       const criteria = reportCriteria(report.criteria?.trim() || 'true');
       if (criteriaHasTodo(criteria) || criteriaHasRelative(criteria)) return whole;
     }
-    let idExpr = match[2].trim();
-    // An id island often names a local the same script filled with the row
-    // read (`rowid = Form[criteria].ID` or `rec = Form[criteria]` used as
-    // `rec.ID`). Substitute the bound read when the variable is assigned
-    // exactly once; any other binding or count leaves the frame counted.
-    {
-      const member = /^([A-Za-z_]\w*)\s*\.\s*ID$/.exec(idExpr);
-      const ident = member ? member[1] : /^[A-Za-z_]\w*$/.test(idExpr) ? idExpr : undefined;
-      if (ident) {
-        const assigns = [...template.matchAll(new RegExp(`\\b${ident}\\s*=(?![=>])`, 'g'))];
-        if (assigns.length === 1) {
-          const rhs = /^\s*([^\n;]+)/.exec(template.slice(assigns[0]!.index + assigns[0]![0].length))?.[1]?.trim() ?? '';
-          const formRead = /^([A-Za-z_]\w*)\s*\[[^\[\]]+\](\s*\.\s*ID)?$/i.exec(rhs);
-          if (formRead && !/<%|%>/.test(rhs)) {
-            if (member && !formRead[2]) idExpr = `${rhs.trim()}.ID`;
-            else if (!member && formRead[2]) idExpr = rhs;
-          }
-        }
-      }
-    }
+    const idExpr = match[2].trim();
     const read = new RegExp(`^${form}\\s*\\[[^\\[\\]]+\\]\\s*\\.\\s*ID$`, 'i').test(idExpr);
     const param = /^input\.[A-Za-z_]\w*$/.test(idExpr);
     if (!read && !param) return whole;
@@ -1774,13 +1758,323 @@ function replaceIframeElements(template: string, replace: (whole: string, attrs:
   return out + template.slice(copied);
 }
 
+/** A `<button …>` tag found by `buttonTags`. */
+interface ButtonTag {
+  /** Offset of the `<`. */
+  start: number;
+  /** Offset just past the closing `>`. */
+  end: number;
+  /** Attribute text between `<button` and `>`, minus a self-closing `/`. */
+  attrText: string;
+  /** The tag ended `/>`: the ZML button is a self-closing element. */
+  selfClose: boolean;
+}
+
+/**
+ * `<button …>` tags in `template`, found by a single-pass scan (a
+ * backtracking attribute-list regex is super-linear on adversarial input).
+ * `FIND` locates each `<button` word; the attribute scan then steps forward
+ * once, skipping `>` inside a closed quote. A quote with no closing partner
+ * abandons only that tag — a later `<button` can still open one. A scan that
+ * reaches the end of the template means no `>` remains, so no later
+ * `<button` can close either and the scan stops.
+ */
+function* buttonTags(template: string): Generator<ButtonTag> {
+  const FIND = /<button\b/gi;
+  for (let m = FIND.exec(template); m; m = FIND.exec(template)) {
+    const start = m.index;
+    let i = start + m[0].length;
+    let end = -1;
+    while (i < template.length) {
+      const c = template[i]!;
+      if (c === '>') {
+        end = i + 1;
+        break;
+      }
+      if (c === '"' || c === "'") {
+        const close = template.indexOf(c, i + 1);
+        if (close < 0) break;
+        i = close + 1;
+        continue;
+      }
+      i++;
+    }
+    if (end < 0) {
+      if (i >= template.length) return;
+      continue;
+    }
+    const raw = template.slice(start + m[0].length, end - 1);
+    const trimmed = raw.trimEnd();
+    const selfClose = trimmed.endsWith('/');
+    yield { start, end, attrText: selfClose ? trimmed.slice(0, -1) : raw, selfClose };
+    FIND.lastIndex = end;
+  }
+}
+
 /** True when the template holds a ZML button whose action calls a Deluge function. */
 export function hasExecuteFunctionButton(template: string): boolean {
-  for (const m of template.matchAll(/<button\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi)) {
-    const action = parseZmlAttributes(m[1] ?? '').action ?? '';
+  for (const tag of buttonTags(template)) {
+    const action = parseZmlAttributes(tag.attrText).action ?? '';
     if (action.replace(/\s+/g, '').toLowerCase() === 'executefunction') return true;
   }
   return false;
+}
+
+/** One decoded ExecuteFunction argument: a constant JSON value or a declared page parameter name. */
+type FnButtonArg = { kind: 'c'; value: unknown } | { kind: 'p'; name: string } | { kind: 'r'; expr: string; type: string };
+
+/**
+ * Split a `parameters` attribute on its top-level commas. Commas inside
+ * quoted strings or `<%= %>` islands do not split. `null` on an unterminated
+ * quote or island — the button is left in place and stays counted.
+ */
+function splitButtonArgs(text: string): string[] | null {
+  const parts: string[] = [];
+  let cur = '';
+  let quote = '';
+  let island = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (island) {
+      cur += c;
+      if (c === '%' && text[i + 1] === '>') {
+        cur += '>';
+        i++;
+        island = false;
+      }
+      continue;
+    }
+    if (quote) {
+      cur += c;
+      if (c === '\\') {
+        if (i + 1 < text.length) cur += text[++i];
+      } else if (c === quote) {
+        quote = '';
+      }
+      continue;
+    }
+    if (c === '<' && text.startsWith('<%', i)) {
+      cur += '<%';
+      i++;
+      island = true;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      cur += c;
+      continue;
+    }
+    if (c === ',') {
+      parts.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += c;
+  }
+  if (quote || island) return null;
+  parts.push(cur);
+  return parts;
+}
+
+/**
+ * Decode one ExecuteFunction argument. A `<%=name%>` island that spans the
+ * whole argument names a declared page parameter (the client reads it from
+ * the page URL like the snippet render input does); anything else inside an
+ * island — a member read, an expression, a script variable — is refused.
+ * Quoted strings, numbers, and booleans are constants; every other shape is
+ * refused so the button stays the counted manual item.
+ */
+function buttonArg(raw: string, pageParams: ReadonlySet<string>, rendered: boolean, paramType = ''): FnButtonArg | null {
+  const arg = raw.trim();
+  if (!arg) return null;
+  const island = /^<%=([\s\S]+?)%>$/.exec(arg);
+  if (island) {
+    const expr = island[1]!.trim();
+    if (/^[A-Za-z_]\w*$/.test(expr) && pageParams.has(expr)) return { kind: 'p', name: expr };
+    if (rendered && /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(expr)) return { kind: 'r', expr, type: paramType };
+    return null;
+  }
+  if (arg.includes('<%')) return null;
+  if (arg[0] === '"' && arg.endsWith('"') && arg.length >= 2) {
+    try {
+      return { kind: 'c', value: JSON.parse(arg) as unknown };
+    } catch {
+      return null;
+    }
+  }
+  if (arg[0] === "'" && arg.endsWith("'") && arg.length >= 2) {
+    const inner = arg.slice(1, -1);
+    if (/\\[^\\'nt]/.test(inner)) return null;
+    return { kind: 'c', value: inner.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\'/g, "'").replace(/\\\\/g, '\\') };
+  }
+  if (/^[+-]?\d+(?:\.\d+)?$/.test(arg)) return { kind: 'c', value: Number(arg) };
+  if (arg === 'true' || arg === 'false') return { kind: 'c', value: arg === 'true' };
+  return null;
+}
+
+/** The read-only client-call catalog is identical for every snippet of one app. */
+const CLIENT_CALL_CACHE = new WeakMap<App, ClientCallCatalog>();
+
+function clientCallsFor(app: App): ClientCallCatalog {
+  let cached = CLIENT_CALL_CACHE.get(app);
+  if (!cached) {
+    cached = clientCallFunctions(app);
+    CLIENT_CALL_CACHE.set(app, cached);
+  }
+  return cached;
+}
+
+const BUTTON_CALL_CACHE = new WeakMap<App, Map<string, ButtonFunctionCall>>();
+
+function buttonCallsFor(app: App): Map<string, ButtonFunctionCall> {
+  let cached = BUTTON_CALL_CACHE.get(app);
+  if (!cached) {
+    cached = buttonCallFunctions(app);
+    BUTTON_CALL_CACHE.set(app, cached);
+  }
+  return cached;
+}
+
+function fnArgType(type: string): string {
+  const t = type.trim().toLowerCase();
+  if (/^(int|integer|number|decimal|float|bigint|long)$/.test(t)) return 'n';
+  if (/^(bool|boolean)$/.test(t)) return 'b';
+  return 's';
+}
+
+/**
+ * `[open, end)` ranges the template's `<% %>` / `<%{ }%>` islands span, using
+ * the same delimiter rules as splitChunks. `null` when an island never
+ * closes — the template is malformed and the caller refuses it anyway.
+ */
+function islandRanges(template: string): [number, number][] | null {
+  const ranges: [number, number][] = [];
+  let at = 0;
+  for (;;) {
+    const open = template.indexOf('<%', at);
+    if (open < 0) return ranges;
+    if (template.startsWith('<%{', open)) {
+      const brace = template.indexOf('%}', open + 3);
+      const plain = template.indexOf('%>', open + 3);
+      if (brace < 0 && plain < 0) return null;
+      if (brace >= 0 && (plain < 0 || brace < plain)) {
+        const end = brace + (template.startsWith('%}>', brace) ? 3 : 2);
+        ranges.push([open, end]);
+        at = end;
+        continue;
+      }
+      ranges.push([open, plain + 2]);
+      at = plain + 2;
+      continue;
+    }
+    const close = template.indexOf('%>', open + 2);
+    if (close < 0) return null;
+    ranges.push([open, close + 2]);
+    at = close + 2;
+  }
+}
+
+/**
+ * Rewrite each ZML `<button action='ExecuteFunction'>` in the template to a
+ * wired `<button data-fn-call>` that posts to the callee's generated client
+ * endpoint — the same read-only function surface a client condition would
+ * call. A button is rewritten only when its `functionName` is a Deluge
+ * function this app defines and that function is in the proved read-only
+ * client-call set, and every `parameters` entry is a quoted/number/boolean
+ * constant or a whole-argument `<%=name%>` island naming a declared page
+ * parameter (the island is consumed into the encoded argument list, never
+ * rendered). Each accepted callee contributes its
+ * `functions/custom/<name>-call.mjs` endpoint module to `files` (deduped by
+ * function). A button that fails any check is left unchanged so the caller's
+ * `hasExecuteFunctionButton` refusal keeps the whole snippet counted. Button
+ * text inside a `<% %>` island is never touched.
+ */
+function rewriteExecuteFunctionButtons(
+  template: string,
+  app: App,
+  pageParams: ReadonlySet<string>,
+  files: HtmlpageFile[],
+  schema?: SchemaPlan,
+): string {
+  if (!hasExecuteFunctionButton(template)) return template;
+  const islands = islandRanges(template);
+  if (!islands) return template;
+  const calls = clientCallsFor(app);
+  const buttonCalls = buttonCallsFor(app);
+  const emitted = new Set<string>();
+  let out = '';
+  let at = 0;
+  for (const tag of buttonTags(template)) {
+    const start = tag.start;
+    // A `<button` inside an island is Deluge code, not markup.
+    if (islands.some(([s, e]) => start >= s && start < e)) continue;
+    const rewritten = ((): string | null => {
+      const attrs = parseZmlAttributes(tag.attrText);
+      if ((attrs.action ?? '').replace(/\s+/g, '').toLowerCase() !== 'executefunction') return null;
+      // The ZML button is a self-closing element; a paired `<button>…</button>`
+      // with body markup stays the counted snippet. So does any attribute
+      // besides `parameters` carrying an island.
+      if (!tag.selfClose) return null;
+      // determinism-allow: a yes/no test over every attribute; order cannot reach output
+      if (Object.entries(attrs).some(([name, value]) => name !== 'parameters' && value.includes('<%'))) return null;
+      const fnName = attrs['functionname'] ?? '';
+      const key = fnName.toLowerCase();
+      const fn = app.functions.find((f) => f.name.toLowerCase() === key);
+      // Unknown or untranslated app functions stay counted. Read-only calls
+      // use the client-call catalog; a writing call must have a write grant
+      // the generated endpoint can preflight.
+      const writeCall = calls.names.has(key) ? undefined : buttonCalls.get(key);
+      if (!fn || (!calls.names.has(key) && !writeCall?.writes.size)) return null;
+      const declared = rawFnParams(fn.signature);
+      const declaredTypes = fnSignatureParams(fn.signature);
+      const parts = splitButtonArgs(attrs['parameters'] ?? '');
+      if (!parts) return null;
+      const args: FnButtonArg[] = [];
+      for (const part of parts) {
+        if (!part.trim() && parts.length === 1) continue;
+        const arg = buttonArg(part, pageParams, !!writeCall, declaredTypes[args.length]?.type ?? '');
+        if (!arg) return null;
+        args.push(arg);
+      }
+      // The endpoint itself refuses more args than the signature declares; a
+      // button that would always fail is a manual step instead.
+      if (args.length > declared.length) return null;
+      const msg = (attrs['successmsg'] ?? '').trim();
+      if (!emitted.has(key)) {
+        emitted.add(key);
+        files.push({
+          path: `functions/custom/${functionSlug(fn.name)}-call.mjs`,
+          source: functionCallModule({
+            app,
+            name: fn.name,
+            signature: fn.signature,
+            params: declared,
+            reads: [...(calls.reads.get(key) ?? writeCall?.reads ?? [])],
+            writes: [...(writeCall?.writes ?? new Map<string, 'insert' | 'update' | 'delete'>())].map(([form, op]) => ({ form, op })),
+            schema,
+          }),
+        });
+      }
+      // A self-closing ZML button carries its label in `text`.
+      if (writeCall) {
+        const argAttrs = args
+          .map((arg, i) => {
+            const value = arg.kind === 'c' ? `j:${JSON.stringify(arg.value)}` : arg.kind === 'p' ? `p:${arg.name}` : `${fnArgType(arg.type)}:<%=${arg.expr}%>`;
+            return ` data-fn-arg-${i}="${arg.kind === 'r' ? value : escapeHtml(value)}"`;
+          })
+          .join('');
+        return `<button type="button" data-fn-call="/functions/${functionSlug(fn.name)}/call" data-fn-argc="${args.length}"${argAttrs}${msg ? ` data-fn-msg="${escapeHtml(msg)}"` : ''} data-fn-refresh="true">${escapeHtml(attrs['text'] ?? '')}</button>`;
+      }
+      const encoded = args
+        .map((arg) => (arg.kind === 'c' ? `c=${encodeURIComponent(JSON.stringify(arg.value))}` : arg.kind === 'p' ? `p=${encodeURIComponent(arg.name)}` : `r=${encodeURIComponent(arg.expr)}`))
+        .join('&');
+      return `<button type="button" data-fn-call="/functions/${functionSlug(fn.name)}/call"${encoded ? ` data-fn-args="${escapeHtml(encoded)}"` : ''}${msg ? ` data-fn-msg="${escapeHtml(msg)}"` : ''}>${escapeHtml(attrs['text'] ?? '')}</button>`;
+    })();
+    if (rewritten === null) continue;
+    out += template.slice(at, start) + rewritten;
+    at = tag.end;
+  }
+  return out + template.slice(at);
 }
 
 function isZcParam(param: string): boolean {
@@ -1850,14 +2144,18 @@ export function compileHtmlpage(
   page: string,
   elementName: string,
   decoded: string,
-  opts: { id?: string } = {},
+  opts: { id?: string; schema?: SchemaPlan } = {},
 ): HtmlpageCompiled {
   const fail = (reason: string): HtmlpageCompiled => ({ ok: false, reason });
   const head = splitTemplate(decoded);
   head.template = rewriteRecordSummaryFrames(head.template, app);
   head.template = convertZmlSnippetToHtml(head.template);
   head.template = rewriteEmbedIframes(head.template, app);
-  if (hasExecuteFunctionButton(head.template)) return fail(EXECUTE_FUNCTION_BUTTON);
+  const fnFiles: HtmlpageFile[] = [];
+  if (hasExecuteFunctionButton(head.template)) {
+    head.template = rewriteExecuteFunctionButtons(head.template, app, new Set(head.params), fnFiles, opts.schema);
+    if (hasExecuteFunctionButton(head.template)) return fail(EXECUTE_FUNCTION_BUTTON);
+  }
   // A template that already writes the include marker could name a page the
   // compiler never checked: it stays the counted snippet.
   if (head.template.toLowerCase().includes(PAGE_INCLUDE_PREFIX)) return fail('marker collision');
@@ -1879,12 +2177,14 @@ export function compileHtmlpage(
   if (!chunks) return fail('malformed Deluge island');
   const rawIslands = chunks.filter((c) => c.kind !== 'static');
   if (!rawIslands.length) {
-    if (!includes.length && !embedded.components.length) return fail('no Deluge islands');
+    if (!includes.length && !embedded.components.length && !fnFiles.length) return fail('no Deluge islands');
     // The embed's appuri island or a generated component marker was the only
-    // dynamic construct: the rest is static markup.
+    // dynamic construct: the rest is static markup. A snippet that is static
+    // markup plus wired function-call buttons needs no render endpoint; the
+    // runtime wires `data-fn-call` clicks on the shell.
     const staticMarkup = chunks.map((c) => c.text).join('');
     if (droppedStyles(staticMarkup, false).length) return fail('static markup contains a dropped style declaration');
-    return withIncludes({ ok: true, staticOnly: true, html: sanitizeSnippet(staticMarkup) });
+    return withIncludes({ ok: true, staticOnly: true, html: sanitizeSnippet(staticMarkup), ...(fnFiles.length ? { files: fnFiles } : {}) });
   }
   // Legacy exports sometimes wrap entirely static markup in an empty
   // statement block. Parse every statement island before accepting this path:
@@ -1912,6 +2212,7 @@ export function compileHtmlpage(
       staticOnly: true,
       html,
       ...(droppedTags.length ? { droppedTags } : {}),
+      ...(fnFiles.length ? { files: fnFiles } : {}),
     });
   }
   if (MARK_CHECK.test(head.template) || /\bc2c_(out|parts|static|str|esc|link|notes|css)\b/i.test(head.template))
@@ -2122,7 +2423,7 @@ export function compileHtmlpage(
       hasWrites: isShapeC,
     }),
   };
-  return withIncludes({ ok: true, html: cleanStatics.join(''), ...(droppedTags.length ? { droppedTags } : {}), src: path, file });
+  return withIncludes({ ok: true, html: cleanStatics.join(''), ...(droppedTags.length ? { droppedTags } : {}), src: path, file, ...(fnFiles.length ? { files: fnFiles } : {}) });
 }
 
 function islandOrdinal(chunks: Chunk[], target: Chunk): number {
