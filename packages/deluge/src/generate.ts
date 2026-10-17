@@ -41,7 +41,6 @@ import { withoutDecimalAudit } from './audit.js';
 import { resolveAppCalls } from './resolve-app-calls.js';
 import { recognisedBuiltinNames } from './dispatch.js';
 import { parse as parseDeluge } from './parser.js';
-import type { Expr, Stmt } from './ast.js';
 
 export interface GeneratedFile {
   path: string;
