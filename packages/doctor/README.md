@@ -68,15 +68,16 @@ The plugin never asks the user for an evidence file. `/c2c:doctor` runs:
    proves the MCP connector is bound to the same org/DC/project as the CLI —
    the only evidence a stdio/local connector can offer. The observation must
    include the bucket create and the org list; the upload-signature result
-   may be included and is not required. After the check the doctor cleans
-   up by itself: it deletes this run's nonce object, then deletes the probe
-   bucket — but only when this run created it (the bucket was not in the
-   project when `--mcp-begin` ran, and the create did not answer "already
-   exists"). A bucket that was already there is never deleted. If a delete
-   is refused or cannot be confirmed, D-B8 warns with the exact bucket (and
-   object) left behind and the console steps to remove it; the doctor does
-   not fail because of it. While a probe bucket may still exist, the delete
-   is re-printed on every run and D-B8 warns until a read-back shows the
+   may be included and is not required. After the check the doctor deletes
+   this run's nonce object itself. There is no documented REST bucket
+   delete, so the probe bucket stays tracked: a bucket this run created
+   (the bucket was not in the project when `--mcp-begin` ran, and the
+   create did not answer "already exists") warns on D-B8 with the exact
+   bucket (and object) left behind, the console steps to remove it and the
+   `CatalystbyZoho_Delete_Bucket` call printed under cleanup — the doctor
+   does not fail because of it. A bucket that was already there is never
+   targeted. While a probe bucket may still exist, the delete is
+   re-printed on every run and D-B8 warns until a read-back shows the
    bucket gone.
 3. The agent pipes one observation into `c2c doctor --mcp-observed -` (with
    the usual scope flags):
