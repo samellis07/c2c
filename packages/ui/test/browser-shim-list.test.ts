@@ -30,7 +30,7 @@ test('browserShim implements every shim name the translator may emit into client
   }
   assert.deepEqual(missing, []);
   // The stub itself is detected, so the check above cannot pass vacuously.
-  assert.equal(implemented((shim.string as Record<string, unknown>).trim), false);
+  assert.equal(implemented((shim.string as Record<string, unknown>).toUpperCase), false);
   assert.equal(implemented((shim.list as Record<string, unknown>).aggregate), false);
 });
 

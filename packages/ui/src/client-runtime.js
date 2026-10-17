@@ -2714,6 +2714,14 @@ function clientEpochMillis(value, zone) {
 const CLIENT_LONG_NUMERIC = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 const CLIENT_MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
 
+/** A DelugeConversionError, like packages/shims/src/convert.ts. */
+function clientConversionError(message) {
+  const err = new Error(message);
+  err.name = 'DelugeConversionError';
+  err.code = 'DELUGE_CONVERSION';
+  return err;
+}
+
 function clientLongCastError(value, name) {
   const err =
     value == null
@@ -4269,6 +4277,14 @@ export function browserShimSurface(fetchImpl) {
         const d = clientAsDate(value);
         return d ? clientDateOf(d) : null;
       },
+      // Week starts on Sunday, like dates.startOfWeek; the result is midnight
+      // of that day's wall fields (already the app zone — no zone arg needed).
+      toStartOfWeek(value) {
+        const d = clientAsDate(value);
+        if (!d) return null;
+        const back = clientAddDays(d, -new Date(Date.UTC(d.y, d.m - 1, d.d)).getUTCDay());
+        return clientDate(back.y, back.m, back.d, 0, 0, 0);
+      },
       getYear(value) {
         const d = clientAsDate(value);
         return d ? d.y : null;
@@ -4337,6 +4353,35 @@ export function browserShimSurface(fetchImpl) {
       toNumber(value, ctx) {
         return clientToLong(value, ctx, 'toNumber');
       },
+      // Same cases as convert.toList: arrays copy, text splits on the
+      // separator, empty parts read as null, anything else is refused.
+      toList(value, ctx, separator, ...extra) {
+        if (extra.length) throw clientConversionError('toList() takes at most one argument');
+        if (Array.isArray(value)) {
+          if (separator !== undefined) throw clientConversionError('toList: separator is for text');
+          return value.slice();
+        }
+        if (typeof value !== 'string') throw clientConversionError('toList: null or source is not text');
+        const token = (part) => (part === '' ? null : part);
+        if (separator === undefined || separator === null) return [token(value)];
+        const sep = String(separator);
+        if (sep === '' || !value.includes(sep)) return [token(value)];
+        return value.split(sep).map(token);
+      },
+    }),
+    math: withStubFallback({
+      // Same rules as number.ts round: a bigint is unchanged, a non-finite
+      // input is returned as is, halves round away from zero.
+      round(value, places = 0) {
+        if (typeof value === 'bigint') return value;
+        const n = typeof value === 'number' ? value : Number(value);
+        const p = Number(places);
+        if (!Number.isFinite(n)) return n;
+        const f = 10 ** (Number.isFinite(p) ? p : 0);
+        const x = n * f;
+        if (x < 0) return -Math.round(-x) / f;
+        return Math.round(x) / f;
+      },
     }),
     string: withStubFallback({
       // ASCII letters, the same set both runtimes use (text.ts).
@@ -4345,6 +4390,24 @@ export function browserShimSurface(fetchImpl) {
       },
       removeAllAlpha(value) {
         return value == null ? null : clientEmptyToNull(String(value).replace(/[A-Za-z]/g, ''));
+      },
+      // trim/getPrefix/getSuffix, the same blank-in null-out rules as text.ts.
+      trim(value) {
+        return value == null ? null : clientEmptyToNull(String(value).trim());
+      },
+      getPrefix(value, sep) {
+        const s = value == null ? '' : String(value);
+        const needle = sep == null ? '' : String(sep);
+        if (s === '' || needle === '') return null;
+        const at = s.indexOf(needle);
+        return at < 0 ? null : clientEmptyToNull(s.slice(0, at));
+      },
+      getSuffix(value, sep) {
+        const s = value == null ? '' : String(value);
+        const needle = sep == null ? '' : String(sep);
+        if (s === '' || needle === '') return null;
+        const at = s.indexOf(needle);
+        return at < 0 ? null : clientEmptyToNull(s.slice(at + needle.length));
       },
     }),
     old: {

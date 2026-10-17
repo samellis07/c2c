@@ -296,3 +296,106 @@ test('record.system reads the stored system columns the same on both runtimes', 
     }
   }
 });
+
+test('date.toStartOfWeek agrees on both runtimes in every app zone', async () => {
+  const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const dates: unknown[] = [
+    new DelugeDate(2026, 10, 17, 9, 30, 45), // Saturday
+    new DelugeDate(2026, 10, 18, 0, 0, 1), // Sunday
+    new DelugeDate(2026, 10, 19, 23, 59, 59), // Monday
+    new DelugeDate(2026, 1, 1, 12, 0, 0), // year boundary, Thursday
+    new DelugeDate(2024, 2, 29, 12, 0, 0), // leap day
+    '15-Oct-2026 07:05:03',
+    '11-Oct-2026', // a Sunday
+    '2026-10-14',
+    null,
+    '',
+  ];
+  for (const zone of ['America/Los_Angeles', 'Asia/Kolkata', 'UTC']) {
+    const server = zoneRuntime(zone).shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+    const ctx = { appTimeZone: zone };
+    for (const d of dates) {
+      const run = (api: Record<string, (...args: unknown[]) => unknown>) => {
+        try {
+          return { ok: plain(api.toStartOfWeek!(d, ctx)) };
+        } catch (err) {
+          return { error: (err as Error).message };
+        }
+      };
+      assert.deepEqual(run(browser.date), run(server.date), `toStartOfWeek(${JSON.stringify(plain(d))}) in ${zone}`);
+    }
+  }
+});
+
+test('string.trim, getPrefix and getSuffix agree on both runtimes', async () => {
+  const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const server = runtime.shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const values: unknown[] = ['  abc  ', 'a:b:c', '', '   ', null, 42, 'nosep', 'x:', ':x', '::', 'a::b'];
+  const seps: unknown[] = [':', '', null, 'b', '::', 'zzz'];
+  for (const value of values) {
+    assert.deepEqual(browser.string.trim!(value), server.string.trim!(value), `trim(${JSON.stringify(value)})`);
+    for (const sep of seps) {
+      assert.deepEqual(browser.string.getPrefix!(value, sep), server.string.getPrefix!(value, sep), `getPrefix(${JSON.stringify(value)}, ${JSON.stringify(sep)})`);
+      assert.deepEqual(browser.string.getSuffix!(value, sep), server.string.getSuffix!(value, sep), `getSuffix(${JSON.stringify(value)}, ${JSON.stringify(sep)})`);
+    }
+  }
+});
+
+test('math.round agrees on both runtimes, bigint and negative halves included', async () => {
+  const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const server = runtime.shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const values: unknown[] = [1.5, -1.5, 2.675, -2.675, 0, '3.14159', 7n, 9007199254740993n, Number.NaN, Number.POSITIVE_INFINITY, null, 'abc', 1234.5678];
+  const places: unknown[] = [0, 1, 2, -1, 'x', null];
+  for (const value of values) {
+    for (const p of places) {
+      const run = (api: Record<string, (...args: unknown[]) => unknown>) => {
+        try {
+          return { ok: plain(api.round!(value, p)) };
+        } catch (err) {
+          return { error: (err as Error).message };
+        }
+      };
+      assert.deepEqual(run(browser.math), run(server.math), `round(${String(plain(value))}, ${String(plain(p))})`);
+    }
+  }
+});
+
+test('convert.toList agrees on both runtimes, error cases included', async () => {
+  const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const server = runtime.shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const ctx = { appTimeZone: 'America/New_York' };
+  const cases: [unknown, unknown][] = [
+    ['a,b,c', ','],
+    ['x', ','],
+    ['x', undefined],
+    ['x', null],
+    ['', ','],
+    ['a::b', '::'],
+    ['a,,b', ','],
+    [['a', 'b'], undefined],
+    [[], ','],
+    [42, ','],
+    [null, ','],
+    [{ a: 1 }, ','],
+    ['a-b', ','],
+  ];
+  for (const [value, sep] of cases) {
+    const run = (api: Record<string, (...args: unknown[]) => unknown>) => {
+      try {
+        return { ok: plain(sep === undefined ? api.toList!(value, ctx) : api.toList!(value, ctx, sep)) };
+      } catch (err) {
+        return { error: (err as Error).message };
+      }
+    };
+    assert.deepEqual(run(browser.convert), run(server.convert), `toList(${JSON.stringify(plain(value))}, ${JSON.stringify(sep)})`);
+  }
+  // A third argument is the same 'at most one argument' refusal on both.
+  const extra = (api: Record<string, (...args: unknown[]) => unknown>) => {
+    try {
+      return { ok: plain(api.toList!('a,b', ctx, ',', 'extra')) };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  };
+  assert.deepEqual(extra(browser.convert), extra(server.convert));
+});
