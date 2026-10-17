@@ -119,8 +119,8 @@ export interface TodoKind {
 
 /**
  * Deterministic-migration flag. `deterministic` is true only when the app has
- * zero residual TODO items and no fill-todos lock entries are applied to it.
- * Any lock fill — even for a construct with vector coverage — is a
+ * zero residual TODO items, no fill-todos lock entries are applied to it, and
+ * no declared construct is silently dropped. Any lock fill — even for a construct with vector coverage — is a
  * host-authored overlay, so it disqualifies the app.
  */
 export interface DeterminismInfo {
@@ -139,6 +139,8 @@ export interface DeterminismInfo {
    * emitted nor counted. Any silent drop disqualifies the app.
    */
   silentDrops: number;
+  /** Silent drops by construct kind (form, field, report, ...), count desc then kind asc. */
+  silentDropKinds: TodoKind[];
 }
 
 export interface AnalyzeReport {
@@ -484,6 +486,7 @@ export function analyze(app: App, options?: { lock?: FillLock }): AnalyzeReport 
       todoKinds,
       uiTodoCount: determinism.uiTodoCount,
       silentDrops: silentDrops.length,
+      silentDropKinds: todoKindsOf(silentDrops.map((drop) => ({ construct: drop.kind }))),
     },
     score: { readiness, band, features: Math.round(featureScore), deluge: Math.round(delugeScore) },
     effort: { estimate: true, hours: Math.round(hours * 10) / 10, weights: EFFORT_WEIGHTS },

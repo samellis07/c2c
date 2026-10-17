@@ -628,7 +628,21 @@
     "fillLockEntries": 0,
     "todoKinds": [],
     "uiTodoCount": 0,
-    "silentDrops": 21
+    "silentDrops": 21,
+    "silentDropKinds": [
+      {
+        "construct": "field-property",
+        "count": 12
+      },
+      {
+        "construct": "report-feature",
+        "count": 5
+      },
+      {
+        "construct": "page-element",
+        "count": 4
+      }
+    ]
   },
   "score": {
     "readiness": 78,

@@ -3,7 +3,10 @@
  *
  * One entry per app (each sub-folder with .ds files, or each .ds file) with
  * the deterministic flag from `analyze`: true only when the app has zero
- * residual TODO items and no fill-todos lock entries applied to it.
+ * residual TODO items, no fill-todos lock entries applied to it, and no
+ * silent drops. `noTodoApps` counts the same apps without the silent-drop
+ * condition, so the gap between the two numbers is the apps held back only by
+ * silent drops.
  *
  * The aggregate counts ONLY deterministic apps toward the 95%/100% migration
  * targets. Both numbers are shown: total apps and deterministic apps.
@@ -32,6 +35,8 @@ export interface MigrationAppEntry {
   uiTodoCount: number;
   /** Coverage-ledger violations: constructs neither emitted nor counted. Any one disqualifies the app. */
   silentDrops: number;
+  /** Silent drops by construct kind (public kind names only). */
+  silentDropKinds: TodoKind[];
   readiness: number;
   band: 'ready' | 'needs-work' | 'blocked';
 }
@@ -49,6 +54,11 @@ export interface MigrationReport {
   apps: MigrationAppEntry[];
   aggregate: {
     totalApps: number;
+    /**
+     * Apps with zero residual TODO items and no fill-todos lock entries. Silent
+     * drops are not considered, so this is at least `deterministicApps`.
+     */
+    noTodoApps: number;
     deterministicApps: number;
     /** Deterministic share of total apps, 0..100, rounded to one decimal. */
     deterministicShare: number;
@@ -63,6 +73,8 @@ export interface MigrationReport {
     deterministicWithUiTodos: { apps: number; uiTodos: number };
     /** Coverage-ledger violations across the corpus (constructs neither emitted nor counted). */
     silentDrops: number;
+    /** Silent drops by construct kind across the corpus, count desc then kind asc. */
+    silentDropKinds: TodoKind[];
   };
 }
 
@@ -113,6 +125,7 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
       fieldGaps: report.fieldGaps,
       uiTodoCount: report.determinism.uiTodoCount,
       silentDrops: report.determinism.silentDrops,
+      silentDropKinds: report.determinism.silentDropKinds,
       readiness: report.score.readiness,
       band: report.score.band,
     };
@@ -121,12 +134,15 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
 
   const deterministicApps = apps.filter((app) => app.deterministic).length;
   const withUi = apps.filter((app) => app.deterministic && app.uiTodoCount > 0);
+  const noTodoApps = apps.filter((app) => app.todoCount === 0 && app.fillLockEntries === 0).length;
   const kindCounts = new Map<string, number>();
+  const dropCounts = new Map<string, number>();
   const fieldGapCounts = new Map<string, FieldGap>();
   let todoTotal = 0;
   for (const app of apps) {
     todoTotal += app.todoCount;
     for (const kind of app.todoKinds) kindCounts.set(kind.construct, (kindCounts.get(kind.construct) ?? 0) + kind.count);
+    for (const kind of app.silentDropKinds) dropCounts.set(kind.construct, (dropCounts.get(kind.construct) ?? 0) + kind.count);
     for (const gap of app.fieldGaps) {
       const existing = fieldGapCounts.get(gap.matrixId);
       if (existing) {
@@ -136,6 +152,9 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
     }
   }
   const todoKinds: TodoKind[] = [...kindCounts.entries()]
+    .map(([construct, count]) => ({ construct, count }))
+    .sort(byKind);
+  const silentDropKinds: TodoKind[] = [...dropCounts.entries()]
     .map(([construct, count]) => ({ construct, count }))
     .sort(byKind);
   const fieldGaps = [...fieldGapCounts.values()].sort((a, b) => compareEnUs(a.matrixId, b.matrixId));
@@ -150,6 +169,7 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
     apps,
     aggregate: {
       totalApps: apps.length,
+      noTodoApps,
       deterministicApps,
       deterministicShare: apps.length ? Math.round((deterministicApps / apps.length) * 1000) / 10 : 100,
       targets: { p95: target(0.95), p100: target(1) },
@@ -160,6 +180,7 @@ export function buildMigrationReport(entries: { name: string; ir: App; lock?: Fi
       fieldGapTotal: fieldGaps.reduce((total, gap) => total + gap.count, 0),
       deterministicWithUiTodos: { apps: withUi.length, uiTodos: withUi.reduce((sum, app) => sum + app.uiTodoCount, 0) },
       silentDrops: apps.reduce((sum, app) => sum + app.silentDrops, 0),
+      silentDropKinds,
     },
   };
 }
@@ -181,6 +202,10 @@ export function migrationReportAsText(report: MigrationReport): string {
   return [
     `migration report: ${report.label}  apps ${a.totalApps}  deterministic ${a.deterministicApps} (${a.deterministicShare}%)`,
     `targets (deterministic apps only): 95% needs ${a.targets.p95.required} — ${a.targets.p95.met ? 'met' : 'NOT met'}; 100% needs ${a.targets.p100.required} — ${a.targets.p100.met ? 'met' : 'NOT met'}`,
+    `apps with no residual todos: ${a.noTodoApps}/${a.totalApps}`,
+    `apps with no residual todos and no silent drops (deterministic): ${a.deterministicApps}/${a.totalApps}`,
+    `silent drops (total): ${a.silentDrops}`,
+    ...a.silentDropKinds.slice(0, 10).map((kind) => `  ${kind.count} ${kind.construct}`),
     `residual TODO items: ${a.todoTotal} across ${a.distinctTodoKinds} kinds`,
     `field gaps: ${a.fieldGapTotal} across ${a.fieldGaps.length} kinds`,
     ...a.fieldGaps.map((gap) => `  ${gap.matrixId}: ${gap.count} (${gap.fields.map((field) => `${field.form}.${field.field}`).join(', ')}) — ${gap.reason}`),

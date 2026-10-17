@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { emptyApp, type App, type Workflow } from '../../core/src/ir.js';
-import { buildMigrationReport, migrationReportForDir, type MigrationReport } from '../../cli/src/migration-report.js';
+import { buildMigrationReport, loadIr as loadIrForTest, migrationReportForDir, type MigrationReport } from '../../cli/src/migration-report.js';
 import {
   builtinTodoCount,
   canonicalStatusJson,
@@ -14,6 +14,7 @@ import {
   main,
   parseStatusDoc,
   publicConstruct,
+  statusDocLayout,
   renderStatusDoc,
   resolveSitesPath,
   resolveStatusDir,
@@ -33,17 +34,30 @@ function statusDir(): string | undefined {
 test('status doc round-trips through its machine-readable block', () => {
   const status: DeterminismStatus = {
     totalApps: 3,
+    noTodoApps: 2,
     deterministicApps: 1,
     todoTotal: 4,
     kinds: [
       { construct: 'task:if', count: 3 },
       { construct: 'method:select', count: 1 },
     ],
-    perAppConstructSets: [{ constructs: ['task:if'], items: 3 }],
+    perAppConstructSets: [
+      { constructs: [], items: 0 },
+      { constructs: ['task:if'], items: 3 },
+    ],
     deterministicWithUiTodos: { apps: 1, uiTodos: 2 },
+    silentDropTotal: 5,
+    silentDropKinds: [
+      { construct: 'field', count: 3 },
+      { construct: 'report', count: 2 },
+    ],
   };
   const doc = renderStatusDoc(status);
-  assert.match(doc, /\| deterministic apps \| 1 \(33\.3%\) \|/);
+  assert.match(doc, /^\| apps with no residual todos \| 2\/3 \|$/m);
+  assert.match(doc, /^\| apps with no residual todos and no silent drops \(deterministic\) \| 1\/3 \(33\.3%\) \|$/m);
+  assert.match(doc, /^\| silent drops \(total\) \| 5 \|$/m);
+  assert.match(doc, /## Top 2 silent-drop kinds\n\n\| construct \| count \|\n\|---\|---:\|\n\| `field` \| 3 \|\n\| `report` \| 2 \|\n/);
+  assert.equal(statusDocLayout(doc), 'current');
   assert.match(doc, /Each UI stub is included in the residual/);
   assert.match(doc, /1 of the 1 deterministic apps still have UI TODO stubs \(2 in total\)/);
   assert.equal(/\d{4}-\d{2}-\d{2}|\/Users\//.test(doc), false);
@@ -76,6 +90,7 @@ function assertNoQuotedIdentifiers(status: DeterminismStatus): void {
   for (const set of status.perAppConstructSets) {
     for (const name of set.constructs) assert.equal(QUOTED_IDENTIFIER.test(name), false, name);
   }
+  for (const kind of status.silentDropKinds) assert.equal(QUOTED_IDENTIFIER.test(kind.construct), false, kind.construct);
 }
 
 test('a quoted name in the construct prefix is absent from the doc and the JSON', () => {
@@ -127,8 +142,11 @@ test('a quoted name in the construct prefix is absent from the doc and the JSON'
         { construct: 'task:sort', count: 1 },
       ],
       deterministicWithUiTodos: { apps: 0, uiTodos: 0 },
+      noTodoApps: 0,
+      silentDrops: 0,
+      silentDropKinds: [],
     },
-  } as MigrationReport;
+  } as unknown as MigrationReport;
   const status = statusFromReport(report);
   const doc = renderStatusDoc(status);
   const json = canonicalStatusJson(status);
@@ -253,8 +271,11 @@ test('status records one sorted name-free construct set per non-deterministic ap
         { construct: 'task:zebra_widget_9f3c', count: 1 },
       ],
       deterministicWithUiTodos: { apps: 0, uiTodos: 0 },
+      noTodoApps: 1,
+      silentDrops: 0,
+      silentDropKinds: [],
     },
-  } as MigrationReport;
+  } as unknown as MigrationReport;
   const status = statusFromReport(report);
   assert.equal(status.totalApps, 5);
   assert.equal(status.deterministicApps, 1);
@@ -572,6 +593,9 @@ test('status doc renders the builtin TODO count from the catalogue, not a hard-c
       kinds: [],
       perAppConstructSets: [],
       deterministicWithUiTodos: { apps: 0, uiTodos: 0 },
+      noTodoApps: 0,
+      silentDropTotal: 0,
+      silentDropKinds: [],
     };
     const doc = renderStatusDoc(status, fixturePath);
     assert.match(doc, /The builtin catalogue lists 7 TODO entries/);
@@ -604,19 +628,108 @@ test('no doc quotes a builtin TODO count that differs from docs/deluge-builtins.
   assert.ok(quotes >= 1, 'expected docs/determinism-status.md to quote counts.todo');
 });
 
-test('committed status doc is structurally canonical without gallery fixtures', () => {
-  const doc = readFileSync(docPath, 'utf8');
-  const status = parseStatusDoc(doc);
-  assert.equal(doc, renderStatusDoc(status), 'status doc has duplicated, missing, or inconsistent generated rows');
+/** Invariants every rendered status holds, whichever layout the doc has. */
+function assertStatusInvariants(status: DeterminismStatus): void {
   assert.equal(status.totalApps, status.deterministicApps + status.perAppConstructSets.length);
   assert.equal(status.todoTotal, status.perAppConstructSets.reduce((sum, row) => sum + row.items, 0));
   assert.equal(status.todoTotal, status.kinds.reduce((sum, kind) => sum + kind.count, 0));
   assert.equal(status.deterministicApps >= status.deterministicWithUiTodos.apps, true);
+  assert.equal(status.noTodoApps >= status.deterministicApps && status.noTodoApps <= status.totalApps, true);
+  assert.equal(status.silentDropTotal, status.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0));
   assertNoQuotedIdentifiers(status);
+}
+
+test('committed status doc is structurally canonical without gallery fixtures', () => {
+  const doc = readFileSync(docPath, 'utf8');
+  const status = parseStatusDoc(doc);
+  assertStatusInvariants(status);
+  // A doc written before the silent-drop numbers existed is accepted until the
+  // next regeneration; once it carries them it must render byte-identically.
+  if (statusDocLayout(doc) === 'legacy') {
+    assert.match(doc, /^\| deterministic apps \| \d+ \([\d.]+%\) \|$/m);
+    assert.equal(doc.includes('silent drops'), false, 'a legacy status doc cannot mention silent drops');
+    return;
+  }
+  assert.equal(doc, renderStatusDoc(status), 'status doc has duplicated, missing, or inconsistent generated rows');
+  assert.equal(status.totalApps, status.deterministicApps + status.perAppConstructSets.length);
+});
+
+test('an app with no todos is deterministic only when it also has no silent drops', () => {
+  // The redistributable library fixture has zero residual todos but silent drops.
+  const library = loadIrForTest(join(root, 'fixtures/redistributable/library-application-system'));
+  const clean: App = {
+    ...emptyApp('empty'),
+    name: 'T',
+    workflows: [{ name: 'On add', form: 'Orders', event: 'on success', deluge: { text: 'info "ok";', span: { start: 0, end: 10 } }, properties: [], span: { start: 0, end: 0 } } as Workflow],
+  };
+  const report = buildMigrationReport(
+    [
+      { name: 'clean', ir: clean },
+      { name: 'drops', ir: library },
+    ],
+    'unit',
+  );
+  const byName = new Map(report.apps.map((app) => [app.app, app]));
+  const drops = byName.get('drops');
+  assert.ok(drops);
+  assert.equal(drops.todoCount, 0);
+  assert.ok(drops.silentDrops > 0, 'fixture must keep silent drops or this test checks nothing');
+  assert.equal(drops.deterministic, false);
+  assert.equal(byName.get('clean')?.deterministic, true);
+  assert.equal(byName.get('clean')?.silentDrops, 0);
+
+  const status = statusFromReport(report);
+  assert.equal(status.noTodoApps, 2, 'the drop-only app counts in the first number');
+  assert.equal(status.deterministicApps, 1, 'the drop-only app does not count as deterministic');
+  assert.equal(status.silentDropTotal, drops.silentDrops);
+  assertStatusInvariants(status);
+  const doc = renderStatusDoc(status);
+  assert.match(doc, /^\| apps with no residual todos \| 2\/2 \|$/m);
+  assert.match(doc, /^\| apps with no residual todos and no silent drops \(deterministic\) \| 1\/2 \(50%\) \|$/m);
+  assert.match(doc, new RegExp(`^\\| silent drops \\(total\\) \\| ${drops.silentDrops} \\|$`, 'm'));
+  assert.equal(statusDocLayout(doc), 'current');
+  assert.equal(doc, renderStatusDoc(parseStatusDoc(doc)));
+});
+
+test('status doc renders the top 10 silent-drop kinds by count, bucketed and name-free', () => {
+  const kinds = ['approval', 'field', 'field-property', 'form', 'function', 'integration', 'page', 'permission', 'report', 'report-feature', 'statement', 'translation'];
+  const silentDropKinds = kinds.map((construct, index) => ({ construct, count: kinds.length - index }));
+  const status: DeterminismStatus = {
+    totalApps: 2,
+    noTodoApps: 1,
+    deterministicApps: 0,
+    todoTotal: 1,
+    kinds: [{ construct: 'task:if', count: 1 }],
+    perAppConstructSets: [
+      { constructs: [], items: 0 },
+      { constructs: ['task:if'], items: 1 },
+    ],
+    deterministicWithUiTodos: { apps: 0, uiTodos: 0 },
+    silentDropTotal: silentDropKinds.reduce((sum, kind) => sum + kind.count, 0),
+    silentDropKinds,
+  };
+  const doc = renderStatusDoc(status);
+  const section = /## Top (\d+) silent-drop kinds\n\n\| construct \| count \|\n\|---\|---:\|\n((?:\|.*\|\n)*)/.exec(doc);
+  assert.ok(section?.[2]);
+  assert.equal(section[1], '10');
+  assert.deepEqual(
+    section[2].trim().split('\n'),
+    silentDropKinds.slice(0, 10).map((kind) => `| \`${kind.construct}\` | ${kind.count} |`),
+  );
+  assert.equal(doc.includes('`statement`'), false, 'the 11th kind is only in the JSON block');
+  assert.match(doc, /^\| silent drops \(total\) \| 78 \|$/m);
+  assert.deepEqual(parseStatusDoc(doc), status);
+  assertStatusInvariants(status);
+
+  // Bucketing: drop kinds go through the same public-name rules as TODO kinds.
+  const report = buildMigrationReport([{ name: 'secret_app_name', ir: loadIrForTest(join(root, 'fixtures/redistributable/library-application-system')) }], 'unit');
+  const fromReport = statusFromReport(report);
+  assert.deepEqual(fromReport.silentDropKinds.map((kind) => kind.construct), report.aggregate.silentDropKinds.map((kind) => publicConstruct(kind.construct)));
+  assert.equal(renderStatusDoc(fromReport).includes('secret_app_name'), false);
 });
 
 test('parseStatusDoc rejects a doc without a json block or with a malformed payload', () => {
-  const good = {
+  const legacy = {
     totalApps: 1,
     deterministicApps: 1,
     todoTotal: 0,
@@ -624,8 +737,17 @@ test('parseStatusDoc rejects a doc without a json block or with a malformed payl
     perAppConstructSets: [{ constructs: ['a'], items: 1 }],
     deterministicWithUiTodos: { apps: 0, uiTodos: 0 },
   };
+  const good = { ...legacy, noTodoApps: 1, silentDropTotal: 2, silentDropKinds: [{ construct: 'form', count: 2 }] };
   const doc = (payload: unknown) => `# status\n\n\`\`\`json\n${JSON.stringify(payload)}\n\`\`\`\n`;
   assert.deepEqual(parseStatusDoc(doc(good)), good);
+  assert.equal(statusDocLayout(doc(good)), 'current');
+  assert.equal(statusDocLayout(doc(legacy)), 'legacy');
+  assert.deepEqual(parseStatusDoc(doc(legacy)), { ...legacy, noTodoApps: 1, silentDropTotal: 0, silentDropKinds: [] });
+  for (const key of ['noTodoApps', 'silentDropTotal', 'silentDropKinds'] as const) {
+    const partial: Record<string, unknown> = { ...good };
+    delete partial[key];
+    assert.throws(() => parseStatusDoc(doc(partial)), /some but not all silent-drop fields/, key);
+  }
   assert.throws(() => parseStatusDoc('# status\nno block\n'), /no ```json block found/);
   const broken: unknown[] = [
     { ...good, totalApps: '1' },
@@ -636,6 +758,11 @@ test('parseStatusDoc rejects a doc without a json block or with a malformed payl
     { ...good, perAppConstructSets: [{ constructs: ['a'], items: '1' }] },
     { ...good, deterministicWithUiTodos: undefined },
     { ...good, deterministicWithUiTodos: { apps: 0 } },
+    { ...good, noTodoApps: '1' },
+    { ...good, silentDropTotal: null },
+    { ...good, silentDropKinds: {} },
+    { ...good, silentDropKinds: [{ construct: 1, count: 1 }] },
+    { ...good, silentDropKinds: [{ construct: 'form', count: '1' }] },
   ];
   for (const payload of broken) assert.throws(() => parseStatusDoc(doc(payload)), /is not a status payload/, JSON.stringify(payload));
 });

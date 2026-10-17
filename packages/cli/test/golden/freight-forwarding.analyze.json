@@ -3061,7 +3061,17 @@
       }
     ],
     "uiTodoCount": 1,
-    "silentDrops": 269
+    "silentDrops": 269,
+    "silentDropKinds": [
+      {
+        "construct": "field-property",
+        "count": 201
+      },
+      {
+        "construct": "report-feature",
+        "count": 68
+      }
+    ]
   },
   "score": {
     "readiness": 78,
