@@ -122,6 +122,8 @@ interface Column {
   max?: number;
   /** `decimalplace` from the .ds: digits after the point for a decimal column. */
   scale?: number;
+  /** Address latitude/longitude: a signed decimal in [min, max]. */
+  geo?: 'latitude' | 'longitude';
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +318,24 @@ function columnsOf(field: Field, warnings: CreatorImportWarning[], form: Form): 
         });
         continue;
       }
+      const geo = [normalizeType(sub.type ?? ''), normalizeType(sub.name)].find((t) => t === 'latitude' || t === 'longitude');
+      if (geo === 'latitude' || geo === 'longitude') {
+        // Catalyst stores these as Double and the CSV reader parses them as decimals.
+        const limit = geo === 'latitude' ? 90 : 180;
+        out.push({
+          ...base,
+          name: `${name}.${sub.name}`,
+          kind: 'decimal',
+          unique: false,
+          maxLength: undefined,
+          min: -limit,
+          max: limit,
+          geo,
+          hint: `${hint}.${sub.name}`,
+          note: `part of composite ${field.name}; decimal degrees`,
+        });
+        continue;
+      }
       out.push({
         ...base,
         name: `${name}.${sub.name}`,
@@ -420,8 +440,16 @@ function scalarValue(col: Column, i: number, rng: () => number, seen: Set<string
       // NANP reserves 555-0100…555-0199 for fictional use.
       return `+1-555-01${String(10 + (i % 90)).padStart(2, '0')}`;
     case 'number':
-    case 'decimal':
       return numberValue(col, i, rng);
+    case 'decimal': {
+      if (!col.geo) return numberValue(col, i, rng);
+      // Make the same draws the text column made before, so the shared
+      // per-form stream used by later cells does not shift.
+      const drawn = textValue({ ...col, kind: 'text', maxLength: undefined }, i, rng, new Set());
+      const lo = col.min ?? 0;
+      const hi = col.max ?? 0;
+      return (lo + ((fnv(`${col.hint}:${i}:${drawn}`) % 1000000) / 1000000) * (hi - lo)).toFixed(4);
+    }
     case 'date': {
       const d = new Date(Date.UTC(2025, Math.floor(rng() * 20), 1 + Math.floor(rng() * 28)));
       return fmtDate(d);
