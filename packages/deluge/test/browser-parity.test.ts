@@ -399,3 +399,171 @@ test('convert.toList agrees on both runtimes, error cases included', async () =>
   };
   assert.deepEqual(extra(browser.convert), extra(server.convert));
 });
+
+test('date.toStartOfMonth agrees on both runtimes in every app zone', async () => {
+  const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const dates: unknown[] = [
+    new DelugeDate(2026, 10, 17, 9, 30, 45),
+    new DelugeDate(2026, 10, 1, 0, 0, 0), // already the first
+    new DelugeDate(2026, 10, 31, 23, 59, 59), // month-end
+    new DelugeDate(2024, 2, 29, 12, 0, 0), // leap day
+    new DelugeDate(2026, 1, 31, 12, 0, 0), // year boundary
+    new DelugeDate(2026, 3, 8, 1, 30, 0), // DST spring-forward night
+    new DelugeDate(2026, 3, 8, 2, 30, 0), // DST gap wall time
+    new DelugeDate(2026, 11, 1, 1, 30, 0), // DST fall-back overlap
+    '15-Oct-2026 07:05:03',
+    '2026-10-31',
+    null,
+    '',
+  ];
+  for (const zone of ['America/Los_Angeles', 'Asia/Kolkata', 'UTC']) {
+    const server = zoneRuntime(zone).shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+    const ctx = { appTimeZone: zone };
+    for (const d of dates) {
+      const run = (api: Record<string, (...args: unknown[]) => unknown>) => {
+        try {
+          return { ok: plain(api.toStartOfMonth!(d, ctx)) };
+        } catch (err) {
+          return { error: (err as Error).message };
+        }
+      };
+      assert.deepEqual(run(browser.date), run(server.date), `toStartOfMonth(${JSON.stringify(plain(d))}) in ${zone}`);
+    }
+  }
+});
+
+test('math.sqrt agrees on both runtimes, bigint squares and negatives included', async () => {
+  const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const server = runtime.shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const values: unknown[] = [
+    4,
+    2,
+    0,
+    -4,
+    -0.0001,
+    0.25,
+    '9',
+    ' 16.5 ',
+    '',
+    'abc',
+    null,
+    undefined,
+    true,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    4n,
+    0n,
+    2n,
+    -4n,
+    1000000000000000000n, // 10^18: a perfect square past 2^53 stays a bigint
+    9007199254740993n, // past 2^53, not a square: refuses
+    9007199254740991n, // inside the safe range, not a square
+    [4],
+    { v: 4 },
+  ];
+  for (const value of values) {
+    const run = (api: Record<string, (...args: unknown[]) => unknown>) => {
+      try {
+        return { ok: plain(api.sqrt!(value)) };
+      } catch (err) {
+        return { error: `${(err as Error).name}:${(err as Error).message}` };
+      }
+    };
+    assert.deepEqual(run(browser.math), run(server.math), `sqrt(${typeof value === 'bigint' ? `${value}n` : JSON.stringify(value)})`);
+  }
+});
+
+test('string.toUpperCase agrees on both runtimes, non-ASCII included', async () => {
+  const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const server = runtime.shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const values: unknown[] = [
+    'hello',
+    'Hello World',
+    'café',
+    'ß', // expands to SS
+    'ﬁle', // ligature expands
+    'ǳungla', // titlecase digraph
+    'στρ', // Greek
+    'ıstanbul', // dotless i
+    'already UPPER',
+    '',
+    '   ',
+    null,
+    42,
+    -1.5,
+    true,
+  ];
+  for (const value of values) {
+    assert.deepEqual(browser.string.toUpperCase!(value), server.string.toUpperCase!(value), `toUpperCase(${JSON.stringify(value)})`);
+  }
+});
+
+test('convert.toMap agrees on both runtimes, malformed inputs included', async () => {
+  const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const server = runtime.shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const ctx = { appTimeZone: 'America/New_York' };
+  const values: unknown[] = [
+    '{"a":1,"b":"x"}',
+    '{a:1,b:"x"}', // Deluge's loose key:value form
+    '{a:1,b:two}', // bare identifier value
+    '{a:{b:2},c:"x,y"}', // nested map and a quoted comma
+    '{a:1.5,b:-0.25}', // decimals stay exact
+    '{a:+9007199254740993}', // past 2^53 keeps its digits as text
+    '{"a":9007199254740993}', // the same inside strict JSON
+    '{}',
+    '{ }',
+    '{a:}', // empty value
+    '{:1}', // empty key
+    '{a:1,}', // trailing comma
+    '{a:1 b:2}', // missing comma
+    '{a:"unterminated}',
+    '{a:[1,2]}', // a list value is refused
+    '{a:1', // unclosed
+    'not a map',
+    '[1,2]',
+    '42',
+    '',
+    '   ',
+    null,
+    undefined,
+    42,
+    true,
+    { a: 1, b: 'x' }, // a plain object copies
+    [['a', 1]],
+    'x'.repeat(5 * 1024 * 1024 + 1), // past the 5 MB text bound
+  ];
+  for (const value of values) {
+    const run = (api: Record<string, (...args: unknown[]) => unknown>) => {
+      try {
+        return { ok: plain(api.toMap!(value, ctx)) };
+      } catch (err) {
+        return { error: `${(err as Error).name}:${(err as Error).message}` };
+      }
+    };
+    assert.deepEqual(run(browser.convert), run(server.convert), `toMap(${typeof value === 'string' && value.length > 80 ? `string(${value.length})` : String(value)})`);
+  }
+  // A date is refused on both runtimes: DelugeDate on the server, its
+  // plain {y,m,d,hh,mm,ss} wire shape in the browser.
+  const run = (api: Record<string, (...args: unknown[]) => unknown>, value: unknown) => {
+    try {
+      return { ok: plain(api.toMap!(value, ctx)) };
+    } catch (err) {
+      return { error: `${(err as Error).name}:${(err as Error).message}` };
+    }
+  };
+  assert.deepEqual(
+    run(browser.convert, { y: 2026, m: 10, d: 17, hh: 9, mm: 30, ss: 45 }),
+    run(server.convert, new DelugeDate(2026, 10, 17, 9, 30, 45)),
+    'toMap(date)',
+  );
+  // An extra argument is the same refusal on both.
+  const extra = (api: Record<string, (...args: unknown[]) => unknown>) => {
+    try {
+      return { ok: plain(api.toMap!('{"a":1}', ctx, 'extra')) };
+    } catch (err) {
+      return { error: `${(err as Error).name}:${(err as Error).message}` };
+    }
+  };
+  assert.deepEqual(extra(browser.convert), extra(server.convert));
+});
