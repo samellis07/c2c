@@ -3,7 +3,9 @@
  *
  * One definition: the numbers come from the migration report
  * (`c2c migration-report`), so an app is deterministic here exactly when its
- * analyze report says so — zero TODO items and no fill-todos lock entries.
+ * analyze report says so — zero TODO items, no fill-todos lock entries and no
+ * silent drops. The doc also prints the count without the silent-drop
+ * condition, the silent-drop total and the top silent-drop kinds.
  *
  * Counts and public construct names only — never app names, paths, dates or
  * source text — so the rendered doc (docs/determinism-status.md) is safe to
@@ -58,6 +60,9 @@ export interface PerAppConstructSet {
 
 export interface DeterminismStatus {
   totalApps: number;
+  /** Apps with zero residual TODO items and no fill-todos lock entries, silent drops aside. */
+  noTodoApps: number;
+  /** Apps that also have no silent drops: the deterministic count. */
   deterministicApps: number;
   /** Residual TODO items across the gallery. */
   todoTotal: number;
@@ -67,6 +72,10 @@ export interface DeterminismStatus {
   perAppConstructSets: PerAppConstructSet[];
   /** Deterministic apps that still have UI TODO stubs. A stub is a residual hole, so this stays zero. */
   deterministicWithUiTodos: { apps: number; uiTodos: number };
+  /** Silent drops (constructs neither emitted nor counted) across the gallery. */
+  silentDropTotal: number;
+  /** Full silent-drop histogram by public kind name, count desc then kind asc. */
+  silentDropKinds: StatusKind[];
 }
 
 /** Gallery dir from explicit argv, C2C_FIXTURES_DIR/gallery, or C2C_GALLERY_DIR. */
@@ -143,22 +152,30 @@ function constructSetForApp(app: { todoKinds: { construct: string; count: number
   return { constructs: [...names].sort(compareEnUs), items: app.todoCount };
 }
 
-export function statusFromReport(report: MigrationReport): DeterminismStatus {
-  const kinds = new Map<string, number>();
-  for (const kind of report.aggregate.todoKinds) {
+/** Merge kinds that share a public bucket. */
+function publicKinds(kinds: readonly { construct: string; count: number }[]): StatusKind[] {
+  const merged = new Map<string, number>();
+  for (const kind of kinds) {
     const name = publicConstruct(kind.construct);
-    kinds.set(name, (kinds.get(name) ?? 0) + kind.count);
+    merged.set(name, (merged.get(name) ?? 0) + kind.count);
   }
+  return [...merged.entries()].map(([construct, count]) => ({ construct, count })).sort(byKind);
+}
+
+export function statusFromReport(report: MigrationReport): DeterminismStatus {
   return {
     totalApps: report.aggregate.totalApps,
+    noTodoApps: report.aggregate.noTodoApps,
     deterministicApps: report.aggregate.deterministicApps,
     todoTotal: report.aggregate.todoTotal,
-    kinds: [...kinds.entries()].map(([construct, count]) => ({ construct, count })).sort(byKind),
+    kinds: publicKinds(report.aggregate.todoKinds),
     perAppConstructSets: report.apps
       .filter((app) => !app.deterministic)
       .map(constructSetForApp)
       .sort(compareConstructSets),
     deterministicWithUiTodos: report.aggregate.deterministicWithUiTodos,
+    silentDropTotal: report.aggregate.silentDrops,
+    silentDropKinds: publicKinds(report.aggregate.silentDropKinds),
   };
 }
 
@@ -604,6 +621,7 @@ function writeSitesFile(anchor: SitesAnchor, contents: string): void {
 
 export function renderStatusDoc(status: DeterminismStatus, builtinCataloguePath?: string): string {
   const top = status.kinds.slice(0, 20);
+  const topDrops = status.silentDropKinds.slice(0, 10);
   const todoCount = builtinTodoCount(builtinCataloguePath);
   const share = status.totalApps ? Math.round((status.deterministicApps / status.totalApps) * 1000) / 10 : 100;
   return [
@@ -617,9 +635,12 @@ export function renderStatusDoc(status: DeterminismStatus, builtinCataloguePath?
     'Each non-deterministic app adds one construct set: the sorted public names and that',
     "app's residual item count, with no app name.",
     '',
-    'An app is deterministic when `c2c analyze` finds zero residual TODO items and no',
-    '`c2c fill-todos` lock entries apply to it. Only deterministic apps count toward the',
-    '95% / 100% migration targets.',
+    'Two app counts are shown. "Apps with no residual todos" counts apps where `c2c analyze`',
+    'finds zero residual TODO items and no `c2c fill-todos` lock entries apply. "Apps with no',
+    'residual todos and no silent drops" also requires that no declared construct is silently',
+    'dropped (neither generated nor listed as a TODO or manual step). Only that second number',
+    'is the deterministic count, and only those apps count toward the 95% / 100% migration',
+    'targets. The gap between the two numbers is the apps held back only by silent drops.',
     '',
     'A residual TODO item is an untranslated Deluge hole or one generated UI stub',
     '(a field, report, page, or ZML item). Each UI stub is included in the residual,',
@@ -634,7 +655,9 @@ export function renderStatusDoc(status: DeterminismStatus, builtinCataloguePath?
     '| | |',
     '|---|---:|',
     `| corpus apps | ${status.totalApps} |`,
-    `| deterministic apps | ${status.deterministicApps} (${share}%) |`,
+    `| apps with no residual todos | ${status.noTodoApps}/${status.totalApps} |`,
+    `| apps with no residual todos and no silent drops (deterministic) | ${status.deterministicApps}/${status.totalApps} (${share}%) |`,
+    `| silent drops (total) | ${status.silentDropTotal} |`,
     `| residual TODO items | ${status.todoTotal} |`,
     `| distinct TODO kinds | ${status.kinds.length} |`,
     `| deterministic apps with UI TODO stubs (included in the residual) | ${status.deterministicWithUiTodos.apps} (${status.deterministicWithUiTodos.uiTodos} stubs) |`,
@@ -644,6 +667,12 @@ export function renderStatusDoc(status: DeterminismStatus, builtinCataloguePath?
     '| construct | count |',
     '|---|---:|',
     ...top.map((kind) => `| \`${kind.construct}\` | ${kind.count} |`),
+    '',
+    `## Top ${topDrops.length} silent-drop kinds`,
+    '',
+    '| construct | count |',
+    '|---|---:|',
+    ...topDrops.map((kind) => `| \`${kind.construct}\` | ${kind.count} |`),
     '',
     '## Sole-kind unblocks',
     '',
@@ -670,7 +699,10 @@ export function canonicalStatusJson(status: DeterminismStatus): string {
       deterministicApps: status.deterministicApps,
       deterministicWithUiTodos: status.deterministicWithUiTodos,
       kinds: status.kinds,
+      noTodoApps: status.noTodoApps,
       perAppConstructSets: status.perAppConstructSets,
+      silentDropKinds: status.silentDropKinds,
+      silentDropTotal: status.silentDropTotal,
       todoTotal: status.todoTotal,
       totalApps: status.totalApps,
     },
@@ -679,11 +711,41 @@ export function canonicalStatusJson(status: DeterminismStatus): string {
   );
 }
 
-/** Parse the ```json block back out of a rendered doc. */
-export function parseStatusDoc(text: string): DeterminismStatus {
+function statusJsonBlock(text: string): Partial<DeterminismStatus> {
   const match = /```json\n([\s\S]*?)\n```/.exec(text);
   if (!match?.[1]) throw new Error('determinism-status: no ```json block found');
-  const parsed = JSON.parse(match[1]) as Partial<DeterminismStatus>;
+  return JSON.parse(match[1]) as Partial<DeterminismStatus>;
+}
+
+const SILENT_DROP_FIELDS = ['noTodoApps', 'silentDropKinds', 'silentDropTotal'] as const;
+
+/**
+ * `current` when the doc carries the silent-drop fields, `legacy` when it
+ * predates them (none present). A doc with only some of them is malformed.
+ */
+export function statusDocLayout(text: string): 'current' | 'legacy' {
+  const parsed = statusJsonBlock(text);
+  const present = SILENT_DROP_FIELDS.filter((key) => key in parsed).length;
+  if (present === SILENT_DROP_FIELDS.length) return 'current';
+  if (present === 0) return 'legacy';
+  throw new Error('determinism-status: ```json block has some but not all silent-drop fields');
+}
+
+const isKindList = (value: unknown): value is StatusKind[] =>
+  Array.isArray(value) &&
+  value.every((row) => !!row && typeof (row as StatusKind).construct === 'string' && typeof (row as StatusKind).count === 'number');
+
+/**
+ * Parse the ```json block back out of a rendered doc. A legacy doc (no
+ * silent-drop fields) reads as `noTodoApps = deterministicApps` with no
+ * silent drops, which is what it recorded.
+ */
+export function parseStatusDoc(text: string): DeterminismStatus {
+  const parsed = statusJsonBlock(text);
+  const legacy = statusDocLayout(text) === 'legacy';
+  const noTodoApps = legacy ? parsed.deterministicApps : parsed.noTodoApps;
+  const silentDropTotal = legacy ? 0 : parsed.silentDropTotal;
+  const silentDropKinds = legacy ? [] : parsed.silentDropKinds;
   const sets = parsed.perAppConstructSets;
   const setsOk =
     Array.isArray(sets) &&
@@ -701,17 +763,23 @@ export function parseStatusDoc(text: string): DeterminismStatus {
     !Array.isArray(parsed.kinds) ||
     !setsOk ||
     typeof parsed.deterministicWithUiTodos?.apps !== 'number' ||
-    typeof parsed.deterministicWithUiTodos.uiTodos !== 'number'
+    typeof parsed.deterministicWithUiTodos.uiTodos !== 'number' ||
+    typeof noTodoApps !== 'number' ||
+    typeof silentDropTotal !== 'number' ||
+    !isKindList(silentDropKinds)
   ) {
     throw new Error('determinism-status: ```json block is not a status payload');
   }
   return {
     totalApps: parsed.totalApps,
+    noTodoApps,
     deterministicApps: parsed.deterministicApps,
     todoTotal: parsed.todoTotal,
     kinds: parsed.kinds,
     perAppConstructSets: sets.map((row) => ({ constructs: [...row.constructs], items: row.items })),
     deterministicWithUiTodos: { apps: parsed.deterministicWithUiTodos.apps, uiTodos: parsed.deterministicWithUiTodos.uiTodos },
+    silentDropTotal,
+    silentDropKinds: silentDropKinds.map((kind) => ({ construct: kind.construct, count: kind.count })),
   };
 }
 
@@ -764,7 +832,7 @@ export function main(argv: string[]): number {
       process.stderr.write(`determinism:status sites -> ${sitesPath}\n`);
     }
     process.stdout.write(
-      `determinism:status apps=${status.totalApps} deterministic=${status.deterministicApps} todos=${status.todoTotal} kinds=${status.kinds.length} construct-sets=${status.perAppConstructSets.length} ui-todo-apps=${status.deterministicWithUiTodos.apps} ui-todos=${status.deterministicWithUiTodos.uiTodos}\n`,
+      `determinism:status apps=${status.totalApps} no-todo=${status.noTodoApps} deterministic=${status.deterministicApps} silent-drops=${status.silentDropTotal} todos=${status.todoTotal} kinds=${status.kinds.length} construct-sets=${status.perAppConstructSets.length} ui-todo-apps=${status.deterministicWithUiTodos.apps} ui-todos=${status.deterministicWithUiTodos.uiTodos}\n`,
     );
     return 0;
   } finally {
