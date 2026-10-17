@@ -1468,7 +1468,10 @@ ${gallery.map((name) => modulePerms(name)).join('\n')}
       const endpoint = `/forms/${name}/success`;
       const form = built.model.forms.find((item) => item.name === name);
       assert.equal(form?.submitEndpoint, endpoint, name);
-      assert.equal(built.files.has(`functions/aio/${name.toLowerCase().replace(/_/g, '-')}/submit.mjs`), false, name);
+      // The `on add` success owns add posts only: an edit posts to the plain
+      // submit handler, which runs the `on edit` validates under the same gate.
+      assert.equal(form?.editSubmitEndpoint, `/forms/${name}/submit`, name);
+      assert.equal(built.files.has(`functions/aio/${name.toLowerCase().replace(/_/g, '-')}/submit.mjs`), true, name);
       const mod = await import(pathToFileURL(join(built.dir, `functions/aio/${name.toLowerCase().replace(/_/g, '-')}/on-success.mjs`)).href);
       const source = readFileSync(join(built.dir, `functions/aio/${name.toLowerCase().replace(/_/g, '-')}/on-success.mjs`), 'utf8');
       assert.match(source, /authorizeWrite/);

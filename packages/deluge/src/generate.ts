@@ -4344,13 +4344,35 @@ ${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' :
   // dry-run debug view only: no live reply carries it.
   const debugTranscript = live ? {} : { transcript: runtime.transcript };`
     : `  const runtime = createRuntime({ dryRun: true, appTimeZone: process.env.C2C_APP_TIMEZONE${zoneFields}${mailFrom}, access${usesThis ? ', functions' : ''} });`;
+  // Creator's on edit validate sees the whole stored record as input: the
+  // fields the edit did not post are filled from the row loaded above (the
+  // caller's read and modify scope) while the validates run, and the filled
+  // values they leave unchanged are not written back.
+  const fillsStored = !!schema && (opts.validateSpecs?.edit.length ?? 0) > 0;
+  const storedFill = fillsStored
+    ? `      const filled = {};
+      if (ctx.rowId && loadedOld && loadedOld.loaded !== false) {
+        for (const name of fieldNames) {
+          if (Object.prototype.hasOwnProperty.call(ctx.record, name) || !Object.prototype.hasOwnProperty.call(loadedOld, name)) continue;
+          filled[name] = loadedOld[name];
+          ctx.record[name] = loadedOld[name];
+        }
+      }
+`
+    : '';
+  const storedUnfill = fillsStored
+    ? `      for (const name of Object.keys(filled)) {
+        if (ctx.record[name] === filled[name]) delete ctx.record[name];
+      }
+`
+    : '';
   const successBody = opts.systemWrite
     ? `    if (live) {
-      for (const spec of validateSpecsFor(ctx.rowId)) {
+${storedFill}      for (const spec of validateSpecsFor(ctx.rowId)) {
         const mod = await import(spec);
         if (mod && typeof mod.handle === "function") await mod.handle(ctx);
       }
-      await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
+${storedUnfill}      await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
     }
     let result = null;
     let warning = null;${savesSuccessSets ? '\n    const committed = live && ctx.persisted ? successSnapshot(ctx.record) : null;' : ''}

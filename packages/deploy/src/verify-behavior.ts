@@ -28,6 +28,7 @@ import { join } from 'node:path';
 import type { App } from '../../core/src/ir.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { fieldRuleDenials, slug } from '../../deluge/src/generate.js';
+import { columnRenamesOf, generateSchema } from '../../schema/src/generator.js';
 import { generateUi, type UiModel } from '../../ui/src/index.js';
 import { appTimeZone } from '../../ui/src/generate.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from './guards.js';
@@ -714,6 +715,22 @@ export function whereMatches(row: Record<string, unknown>, where: Record<string,
   });
 }
 
+function storeColumnOf(column: string, renames: Readonly<Record<string, string>> | undefined): string {
+  return renames && Object.hasOwn(renames, column) ? renames[column]! : column;
+}
+
+/**
+ * A golden row keyed by store columns. Goldens name columns by their Creator
+ * field; a reserved name is stored under the schema's rename (`To` → `To_col`).
+ * A column already named by its store name is kept as written.
+ */
+export function storeRowOf(row: Record<string, unknown>, renames: Readonly<Record<string, string>> | undefined): Record<string, unknown> {
+  if (!renames) return row;
+  const out: Record<string, unknown> = {};
+  for (const [column, value] of Object.entries(row)) out[storeColumnOf(column, renames)] = value;
+  return out;
+}
+
 /** The record without the `apiOnly` fields: what the form submits. `Sub.Field` drops the column from every row. */
 function withoutApiOnly(record: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {
   const out: Record<string, unknown> = { ...record };
@@ -823,6 +840,7 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
   const model = generateUi(app).model;
   // Date-times compare in the app zone the generated app runs in: `C2C_APP_TIMEZONE`, else the app setting.
   const zone = comparisonZone(process.env.C2C_APP_TIMEZONE?.trim() || appTimeZone(app));
+  const renames = columnRenamesOf(generateSchema(app));
   const findings: BehaviorFinding[] = [];
   const skipped: { case: string; reason: string }[] = [];
   const envArtifacts: { case: string; step: number; tags: string[] }[] = [];
@@ -921,10 +939,13 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
     const tables = resolveRefs(kase.expect?.tables ?? {}, refs, missing) as Record<string, Record<string, unknown>[]>;
     for (const name of [...missing].sort()) at({ pointer: `tables <ref:${name}>`, expected: 'a value bound by an earlier step', actual: '(unbound)' });
     for (const [table, listed] of Object.entries(tables)) {
-      const sentBy = apiOnlySent.get(table);
+      const tableRenames = Object.hasOwn(renames, table) ? renames[table] : undefined;
+      const sent = apiOnlySent.get(table);
+      const sentBy = sent && new Map([...sent].map(([field, values]) => [storeColumnOf(field, tableRenames), values]));
+      const storeRows = listed.map((row) => storeRowOf(row, tableRenames));
       const expectedRows = sentBy
-        ? listed.map((row) => Object.fromEntries(Object.entries(row).filter(([column, value]) => !sentBy.get(column)?.some((sent) => sent === value || textBoundaryEqual(value, sent, zone)))))
-        : listed;
+        ? storeRows.map((row) => Object.fromEntries(Object.entries(row).filter(([column, value]) => !sentBy.get(column)?.some((sent) => sent === value || textBoundaryEqual(value, sent, zone)))))
+        : storeRows;
       const actualRows = await backend.tableRows(table);
       const diffs: Omit<BehaviorFinding, 'case'>[] = [];
       matchRows(expectedRows, actualRows, `tables.${table}`, diffs, kase.expect?.unordered === true, kase.expect?.partial === true, zone);

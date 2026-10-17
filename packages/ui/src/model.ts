@@ -471,6 +471,9 @@ export function buildModel(app: App, delugeFiles: readonly GeneratedFile[] = [])
     if (addSuccess) form.submitEndpoint = addSuccess;
     const editSuccess = successAt('edit')?.endpoint;
     if (editSuccess && editSuccess !== form.submitEndpoint) form.editSubmitEndpoint = editSuccess;
+    // An `on add` success module owns add posts only: an edit post goes to the
+    // plain submit handler, which runs the `on edit` validates, not that script.
+    else if (addSuccess && !editSuccess) form.editSubmitEndpoint = plainSubmitEndpoint(form.name);
   }
   const dateFormat = app.settings.find((item) => item.key.toLowerCase() === 'date format');
   const model: UiModel = {
@@ -582,6 +585,11 @@ function flatFields(fields: UiField[]): UiField[] {
   return out;
 }
 
+/** The generated submit handler a form posts to when no success module owns the write. */
+function plainSubmitEndpoint(form: string): string {
+  return `/forms/${encodeURIComponent(form)}/submit`;
+}
+
 function buildForm(form: Form, todos: UiTodo[], app: App): UiForm {
   const raw = form.properties.find((p) => p.key.toLowerCase() === 'success message')?.value;
   const success = raw?.replace(/^"([\s\S]*)"$/, '$1');
@@ -590,7 +598,7 @@ function buildForm(form: Form, todos: UiTodo[], app: App): UiForm {
     label: form.displayName || form.name,
     ...(form.section ? { section: form.section } : {}),
     fields: form.fields.map((field) => buildField(field, todos, form.name, 0, app)),
-    submitEndpoint: `/forms/${encodeURIComponent(form.name)}/submit`,
+    submitEndpoint: plainSubmitEndpoint(form.name),
     recordEndpoint: `/forms/${encodeURIComponent(form.name)}/record`,
     deleteEndpoint: `/forms/${encodeURIComponent(form.name)}/delete`,
     ...(success ? { successMessage: success } : {}),
