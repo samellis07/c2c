@@ -1,0 +1,651 @@
+{
+  "version": 1,
+  "command": "plan",
+  "c2c": "0.2.0",
+  "app": "Shared_Routes",
+  "dc": "in",
+  "dcSource": "--dc",
+  "doctor": "not-run",
+  "counts": {
+    "tables": 4,
+    "dataStoreTables": 4,
+    "columns": 34,
+    "nosqlTables": 0,
+    "functions": 0,
+    "schedules": 0,
+    "reports": 1,
+    "pages": 0,
+    "roles": 0,
+    "customApis": 0
+  },
+  "tables": [
+    {
+      "name": "Catalog",
+      "form": "Catalog",
+      "role": "form",
+      "nosql": false,
+      "columns": 8,
+      "uniqueVarchar": 1,
+      "fks": 0
+    },
+    {
+      "name": "Activity",
+      "form": "Activity",
+      "role": "form",
+      "nosql": false,
+      "columns": 6,
+      "uniqueVarchar": 0,
+      "fks": 0
+    },
+    {
+      "name": "Order_Sheet__Lines",
+      "form": "Order_Sheet",
+      "role": "child",
+      "nosql": false,
+      "columns": 11,
+      "uniqueVarchar": 0,
+      "fks": 1
+    },
+    {
+      "name": "Order_Sheet",
+      "form": "Order_Sheet",
+      "role": "form",
+      "nosql": false,
+      "columns": 9,
+      "uniqueVarchar": 0,
+      "fks": 0
+    }
+  ],
+  "fieldGaps": [
+    {
+      "matrixId": "decimal",
+      "count": 3,
+      "reason": "Decimal is not a Data Store column type (Text, VarChar, Date, DateTime, Int, Double, Boolean, BigInt, Foreign Key, Encrypted). Stored as a canonical decimal string in varchar 64. Scale is the field decimal places (default 2). Extra fractional digits quantize half-away-from-zero. ZCQL orders the varchar as text.",
+      "fields": [
+        {
+          "form": "Catalog",
+          "field": "Unit_Price"
+        },
+        {
+          "form": "Order_Sheet",
+          "field": "Total"
+        },
+        {
+          "form": "Order_Sheet",
+          "field": "Price"
+        }
+      ]
+    },
+    {
+      "matrixId": "subform",
+      "count": 1,
+      "reason": "The .ds token is grid. Every inline subform (nested fields, no values = Form.Field) becomes its own child table with a parent_id foreign key to the parent ROWID (ON-DELETE-CASCADE) and a row_order Int (0-based Creator row position). A form with several subforms gets one child table per subform; it is not a NoSQL collection. A nested subform inside a subform is not expanded. A grid whose values point at another form is a relation to that form’s table, not a second copy of it.",
+      "fields": [
+        {
+          "form": "Order_Sheet",
+          "field": "Lines"
+        }
+      ]
+    }
+  ],
+  "budgets": [
+    {
+      "id": "columns",
+      "table": "Catalog",
+      "status": "pass",
+      "detail": "table Catalog: 8/250 columns"
+    },
+    {
+      "id": "unique-varchar",
+      "table": "Catalog",
+      "status": "pass",
+      "detail": "table Catalog: 1/2 unique varchar columns"
+    },
+    {
+      "id": "fk",
+      "table": "Catalog",
+      "status": "pass",
+      "detail": "table Catalog: 0/15 foreign keys"
+    },
+    {
+      "id": "columns",
+      "table": "Activity",
+      "status": "pass",
+      "detail": "table Activity: 6/250 columns"
+    },
+    {
+      "id": "unique-varchar",
+      "table": "Activity",
+      "status": "pass",
+      "detail": "table Activity: 0/2 unique varchar columns"
+    },
+    {
+      "id": "fk",
+      "table": "Activity",
+      "status": "pass",
+      "detail": "table Activity: 0/15 foreign keys"
+    },
+    {
+      "id": "columns",
+      "table": "Order_Sheet__Lines",
+      "status": "pass",
+      "detail": "table Order_Sheet__Lines: 11/250 columns"
+    },
+    {
+      "id": "unique-varchar",
+      "table": "Order_Sheet__Lines",
+      "status": "pass",
+      "detail": "table Order_Sheet__Lines: 0/2 unique varchar columns"
+    },
+    {
+      "id": "fk",
+      "table": "Order_Sheet__Lines",
+      "status": "pass",
+      "detail": "table Order_Sheet__Lines: 1/15 foreign keys"
+    },
+    {
+      "id": "columns",
+      "table": "Order_Sheet",
+      "status": "pass",
+      "detail": "table Order_Sheet: 9/250 columns"
+    },
+    {
+      "id": "unique-varchar",
+      "table": "Order_Sheet",
+      "status": "pass",
+      "detail": "table Order_Sheet: 0/2 unique varchar columns"
+    },
+    {
+      "id": "fk",
+      "table": "Order_Sheet",
+      "status": "pass",
+      "detail": "table Order_Sheet: 0/15 foreign keys"
+    },
+    {
+      "id": "select-width",
+      "table": "Order_Sheet__Lines",
+      "status": "pass",
+      "detail": "widest generated read of Order_Sheet__Lines selects 11 columns per statement (docs 20, unverified limit 30; confirm with P-WIDTH)"
+    },
+    {
+      "id": "joins",
+      "status": "pass",
+      "detail": "generated reads are single-table (0/4 joins); lookup display needs one fetch per lookup (confirm with P-JOIN)"
+    },
+    {
+      "id": "org-tables",
+      "status": "pass",
+      "detail": "this app creates 4 Data Store table(s); an org-wide limit on table creates refuses a create with 403 API_LIMIT_REACHED \"API Limit for table\" — on that refusal stop creates, keep created tables, and retry after 30/60/120 minutes; a project delete may not free capacity at once"
+    },
+    {
+      "id": "dev-row-cap",
+      "status": "warn",
+      "detail": "the per-table row estimate needs source row counts; Development's per-table row cap is a hidden value (datastore.rows_per_table_dev, the value is not published) — a load refused with 403 API_LIMIT_REACHED \"API Limit for row\" is the signal",
+      "fix": "re-run c2c plan with --source-backup, --source-csv or --source-json so the budget lists the largest tables; rehearse a large load on a different environment before cutover"
+    },
+    {
+      "id": "varchar-length",
+      "status": "warn",
+      "detail": "source string values are unmeasured; a REST insert silently truncates past a varchar column's length (measured ceiling 255) — validate before write; counts are JavaScript code points — whether Catalyst counts emoji, multibyte characters or CRLF line endings the same way is unverified",
+      "fix": "re-run c2c plan with --source-backup, --source-csv or --source-json so the budget measures source string values against varchar column lengths"
+    },
+    {
+      "id": "dev-api-calls",
+      "status": "warn",
+      "detail": "the mover's API-call estimate needs source row counts; Development allows 200000 API calls per application (api.calls_dev, docs figure)",
+      "fix": "re-run c2c plan with --source-backup, --source-csv or --source-json so the estimate counts the mover reads and writes"
+    },
+    {
+      "id": "dev-write-rate",
+      "status": "pass",
+      "detail": "no source row counts — the dev-api-calls budget carries the missing-source warning; the stated Development write rate is ~100 writes/min/table (datastore.write_requests_per_minute, unverified)",
+      "fix": "re-run c2c plan with --source-backup, --source-csv or --source-json so both estimates count the mover calls; run c2c probe P-RATE before a large load"
+    }
+  ],
+  "budgetsOk": true,
+  "steps": [
+    {
+      "id": "import",
+      "via": "cli",
+      "command": "c2c provision --confirm --run import",
+      "args": {
+        "name": "c2c-shared-routes",
+        "environment": "Development",
+        "app": "Shared_Routes",
+        "dir": "provision/iac",
+        "note": "the bundle ships the dry-run c2c_api without bundled dependencies — run c2c deploy --confirm after provisioning to install the live function"
+      },
+      "readBack": {
+        "via": "cli",
+        "command": "c2c provision --record import",
+        "match": {
+          "project_name": "<import-name>",
+          "id": "<project>"
+        }
+      }
+    },
+    {
+      "id": "cloudscale-enable",
+      "via": "console",
+      "command": "Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)",
+      "args": {
+        "service": "Cloud Scale"
+      },
+      "readBack": {
+        "via": "cli",
+        "command": "c2c provision --record cloudscale-enable",
+        "args": {
+          "call": {
+            "method": "GET",
+            "path": "/baas/v1/project/<project>/table"
+          }
+        },
+        "match": {
+          "gate": "open"
+        }
+      }
+    },
+    {
+      "id": "tables",
+      "via": "cli",
+      "command": "c2c provision --confirm --run tables",
+      "args": {
+        "plan": "provision/tables.json",
+        "tables": [
+          "Catalog",
+          "Activity",
+          "Order_Sheet__Lines",
+          "Order_Sheet"
+        ]
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_List_All_Tables",
+        "match": {
+          "table_name": [
+            "Catalog",
+            "Activity",
+            "Order_Sheet__Lines",
+            "Order_Sheet"
+          ]
+        }
+      }
+    },
+    {
+      "id": "import-table-permissions",
+      "via": "mcp",
+      "tool": "CatalystbyZoho_Get_Table_Permissions",
+      "args": {
+        "path_variables": {
+          "projectId": "<project>"
+        },
+        "headers": {
+          "Catalyst-org": "<org>",
+          "Environment": "Development"
+        },
+        "calls": [
+          {
+            "path_variables": {
+              "id": "<id:Catalog>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Activity>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Order_Sheet__Lines>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Order_Sheet>"
+            }
+          }
+        ],
+        "note": "the IaC import set these grants; this step only proves them — a mismatch means the import did not apply them"
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_Get_Table_Permissions",
+        "args": {
+          "path_variables": {
+            "projectId": "<project>"
+          },
+          "headers": {
+            "Catalyst-org": "<org>",
+            "Environment": "Development"
+          },
+          "calls": [
+            {
+              "path_variables": {
+                "id": "<id:Catalog>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Activity>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Order_Sheet__Lines>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Order_Sheet>"
+              }
+            }
+          ]
+        },
+        "match": {
+          "<id:Catalog>": {
+            "App Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "App User": []
+          },
+          "<id:Activity>": {
+            "App Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "App User": []
+          },
+          "<id:Order_Sheet__Lines>": {
+            "App Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "App User": []
+          },
+          "<id:Order_Sheet>": {
+            "App Administrator": [
+              "SELECT",
+              "UPDATE",
+              "INSERT",
+              "DELETE"
+            ],
+            "App User": []
+          }
+        }
+      }
+    },
+    {
+      "id": "import-table-scopes",
+      "via": "mcp",
+      "tool": "CatalystbyZoho_Get_Table_Scopes",
+      "args": {
+        "path_variables": {
+          "projectId": "<project>"
+        },
+        "headers": {
+          "Catalyst-org": "<org>",
+          "Environment": "Development"
+        },
+        "calls": [
+          {
+            "path_variables": {
+              "id": "<id:Catalog>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Activity>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Order_Sheet__Lines>"
+            }
+          },
+          {
+            "path_variables": {
+              "id": "<id:Order_Sheet>"
+            }
+          }
+        ],
+        "note": "the IaC import set these scopes; this step only proves them"
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_Get_Table_Scopes",
+        "args": {
+          "path_variables": {
+            "projectId": "<project>"
+          },
+          "headers": {
+            "Catalyst-org": "<org>",
+            "Environment": "Development"
+          },
+          "calls": [
+            {
+              "path_variables": {
+                "id": "<id:Catalog>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Activity>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Order_Sheet__Lines>"
+              }
+            },
+            {
+              "path_variables": {
+                "id": "<id:Order_Sheet>"
+              }
+            }
+          ]
+        },
+        "match": {
+          "<id:Catalog>": {
+            "App Administrator": [
+              "GLOBAL"
+            ],
+            "App User": [
+              "USER"
+            ]
+          },
+          "<id:Activity>": {
+            "App Administrator": [
+              "GLOBAL"
+            ],
+            "App User": [
+              "USER"
+            ]
+          },
+          "<id:Order_Sheet__Lines>": {
+            "App Administrator": [
+              "GLOBAL"
+            ],
+            "App User": [
+              "USER"
+            ]
+          },
+          "<id:Order_Sheet>": {
+            "App Administrator": [
+              "GLOBAL"
+            ],
+            "App User": [
+              "USER"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "authorized-domain",
+      "via": "cli",
+      "command": "c2c provision --confirm --run authorized-domain (after the Slate deploy, when the App URL host is known)",
+      "args": {
+        "call": {
+          "method": "POST",
+          "path": "/baas/v1/project/<project>/cors-domain",
+          "body": {
+            "domain": "<slate-app-url-host>",
+            "cors": true,
+            "iframe": true
+          }
+        }
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_List_All_CORS_Domains",
+        "match": {
+          "<slate-app-url-host>": {
+            "cors": true,
+            "iframe": true
+          }
+        }
+      }
+    },
+    {
+      "id": "sign-in-check",
+      "via": "console",
+      "command": "Open the Slate app URL — the sign-in box must show the Catalyst sign-in page, not the app itself or a blank box. A blank box means iFrame is off for the host: Authentication > Whitelisting > the Slate host > Edit > iFrame on, then reload.",
+      "args": {},
+      "readBack": {
+        "via": "console",
+        "command": "record the check: c2c provision --record sign-in-check --result <file> ({\"sign_in_page\": true} once the sign-in page shows)",
+        "match": {
+          "sign_in_page": true
+        }
+      }
+    },
+    {
+      "id": "import-security-rule",
+      "via": "mcp",
+      "tool": "CatalystbyZoho_List_All_Functions",
+      "args": {
+        "path_variables": {
+          "projectId": "<project>"
+        },
+        "headers": {
+          "Catalyst-org": "<org>",
+          "Environment": "Development"
+        },
+        "note": "the IaC SecurityRules item requires authentication for c2c_api; List_All_Functions exposes is_authenticated — this step only proves the import applied it"
+      },
+      "readBack": {
+        "via": "mcp",
+        "tool": "CatalystbyZoho_List_All_Functions",
+        "match": {
+          "c2c_api": {
+            "is_authenticated": true
+          }
+        }
+      }
+    }
+  ],
+  "mcpTools": {
+    "base": [
+      "CatalystbyZoho_List_All_Organizations",
+      "CatalystbyZoho_List_All_Tables",
+      "CatalystbyZoho_List_All_Columns",
+      "CatalystbyZoho_Execute_Query",
+      "CatalystbyZoho_Get_Table_Permissions",
+      "CatalystbyZoho_Update_Table_Permissions",
+      "CatalystbyZoho_Get_Table_Scopes",
+      "CatalystbyZoho_Update_Table_Scopes",
+      "CatalystbyZoho_Get_Authentication_Configurations",
+      "CatalystbyZoho_List_All_Roles",
+      "CatalystbyZoho_List_All_CORS_Domains",
+      "CatalystbyZoho_List_All_Project_Users",
+      "CatalystbyZoho_List_All_Functions",
+      "CatalystbyZoho_List_All_Env_Variables",
+      "CatalystbyZoho_List_All_Slate_Apps",
+      "CatalystbyZoho_Get_Logs"
+    ],
+    "plan": []
+  },
+  "probes": [
+    {
+      "id": "P-LIKE",
+      "measures": "LIKE '*x*' returns the row; '%x%' returns 0",
+      "needed": true,
+      "reason": "every migration verifies it"
+    },
+    {
+      "id": "P-OFFSET",
+      "measures": "LIMIT a,b offset base",
+      "needed": true,
+      "reason": "every migration verifies it"
+    },
+    {
+      "id": "P-UPD300",
+      "measures": "ZCQL UPDATE/DELETE statement cap",
+      "needed": true,
+      "reason": "every migration verifies it"
+    },
+    {
+      "id": "P-JOIN",
+      "measures": "max joins (Development and Production)",
+      "needed": true,
+      "reason": "every migration verifies it"
+    },
+    {
+      "id": "P-WIDTH",
+      "measures": "max select columns + exact error",
+      "needed": true,
+      "reason": "every migration verifies it"
+    },
+    {
+      "id": "P-COLS",
+      "measures": "columns per table by type (scratch table)",
+      "needed": true,
+      "reason": "every migration verifies it"
+    },
+    {
+      "id": "P-401",
+      "measures": "private route without auth returns 401",
+      "needed": true,
+      "reason": "every migration verifies it"
+    },
+    {
+      "id": "P-BULK",
+      "measures": "bulk write job path with a Stratus CSV",
+      "needed": true,
+      "reason": "run before the data load"
+    },
+    {
+      "id": "P-RATE",
+      "measures": "write rate before a large load",
+      "needed": true,
+      "reason": "run before the data load"
+    },
+    {
+      "id": "P-SVC",
+      "measures": "enabled services (console first-use on a fresh project)",
+      "needed": false,
+      "reason": "no Job Scheduling, Stratus or Signals use planned"
+    },
+    {
+      "id": "P-MAIL",
+      "measures": "send from the verified sender (customer confirms receipt)",
+      "needed": false,
+      "reason": "the app sends no mail"
+    }
+  ],
+  "zcqlCaps": {
+    "rowsPerQuery": 300,
+    "offsetBase": 1,
+    "likeWildcard": "*",
+    "maxJoins": 4,
+    "selectWidthDoc": 20,
+    "selectWidthUnverified": 30
+  }
+}
