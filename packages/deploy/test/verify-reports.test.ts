@@ -7,9 +7,11 @@
  * print view as gaps (never passes), and FAILS when an endpoint drops a row.
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { deflateSync } from 'node:zlib';
+import { createDeflate, deflateSync } from 'node:zlib';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { deriveIr, parse } from '../../core/src/index.js';
@@ -23,6 +25,7 @@ import {
   expectedMetric,
   findAffordances,
   formatReportCheckMarkdown,
+  pdfText,
   readChart,
   readTable,
   runReportChecks,
@@ -84,6 +87,46 @@ test('PDF export: every visible row key shown passes; a missing row, or not a PD
   assert.equal(missing.status, 'fail');
   assert.deepEqual([missing.expected, missing.actual], [2, 1]);
   assert.equal(verifyPdfExport(Buffer.from('<html>Alpha Beta</html>'), keys).status, 'fail');
+});
+
+test('PDF export: content streams that inflate past the cap FAIL with a clear message', () => {
+  const keys = ['Alpha'];
+  const big = pdf(['Alpha', 'x'.repeat(4096)]);
+  assert.match(pdfText(big, 8192), /Alpha/);
+  assert.throws(() => pdfText(big, 1024), /PDF content streams inflate past the 1024 byte cap/);
+  const twice = Buffer.concat([big, big]);
+  assert.throws(() => pdfText(twice, 6000), /past the 6000 byte cap/, 'the cap is shared across streams');
+  const check = verifyPdfExport(big, keys);
+  assert.equal(check.status, 'pass', 'a normal PDF is well under the default cap');
+});
+
+test('PDF export: a stream that inflates to 1 GiB FAILS within bounded memory', async () => {
+  const chunk = Buffer.alloc(1024 * 1024);
+  const deflate = createDeflate({ level: 9 });
+  const packed: Buffer[] = [];
+  deflate.on('data', (data: Buffer) => packed.push(data));
+  const done = new Promise((resolve) => deflate.on('end', resolve));
+  for (let i = 0; i < 1024; i++) if (!deflate.write(chunk)) await new Promise((resolve) => deflate.once('drain', resolve));
+  deflate.end();
+  await done;
+  const content = Buffer.concat(packed);
+  const bomb = Buffer.concat([Buffer.from(`%PDF-1.4\n1 0 obj\n<< /Length ${content.length} /Filter /FlateDecode >>\nstream\n`, 'latin1'), content, Buffer.from('\nendstream\nendobj\n%%EOF\n', 'latin1')]);
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-pdf-cap-'));
+  try {
+    const file = join(dir, 'bomb.pdf');
+    writeFileSync(file, bomb);
+    const script = `const { verifyPdfExport } = await import(${JSON.stringify(new URL('../src/verify-reports.js', import.meta.url).href)});
+const check = verifyPdfExport(require('node:fs').readFileSync(${JSON.stringify(file)}), ['Alpha']);
+console.log(JSON.stringify({ check, maxRss: process.resourceUsage().maxRSS * 1024 }));`;
+    const run = spawnSync(process.execPath, ['--max-old-space-size=512', '--input-type=commonjs', '-e', `(async () => { ${script} })().catch((err) => { console.error(err); process.exit(1); })`], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    const { check, maxRss } = JSON.parse(run.stdout.trim().split('\n').pop()!) as { check: { status: string; detail: string }; maxRss: number };
+    assert.equal(check.status, 'fail');
+    assert.match(check.detail, /PDF is not readable: PDF content streams inflate past the 67108864 byte cap/);
+    assert.ok(maxRss < 512 * 1024 * 1024, `peak RSS ${maxRss} bytes`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('seed folds: metric count/sum under a filter, chart buckets by category', () => {
