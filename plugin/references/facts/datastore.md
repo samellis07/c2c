@@ -246,6 +246,18 @@ inside 15 digits.
 admin-scope write stamps the admin, and a `scope:'user'` SDK init
 without a signed-in app user fails `no user credentials present`.
 
+### ZCQL boolean comparison spelling is unprobed
+
+Recipe: [UNVERIFIED] whether a `WHERE` on a `Boolean` column accepts
+`Col = true`, `Col = 'true'`, or both has not been probed live. The
+read side returns the text `true`/`false`; the offline shim treats the
+two spellings alike, so an offline run cannot separate them.
+
+Rule: [UNVERIFIED] keep the unquoted `Col = true` spelling until a live
+`Execute_Query` run of both spellings answers it; never let a bare
+`true`/`false` stand as a whole predicate (ZCQL has no boolean literal
+predicate — an always-true read sends no `WHERE`).
+
 ### Read CREATEDTIME and MODIFIEDTIME as project-zone strings
 
 Recipe: [UNVERIFIED] system columns are stored and compared in the project time

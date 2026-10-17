@@ -1235,8 +1235,8 @@ function loadChart(report, section, viewRef) {
         return { rows, truncated: rows.length >= (report.pageSize || PAGE_SIZE), scanned: rows.length };
       });
     });
-  // The aggregate op folds on the server; an endpoint without it (or a group
-  // field it refuses) falls back to the row query, which folds here.
+  // The aggregate op folds on the server; an endpoint without it falls back
+  // to the row query, which folds here. A refused or failed op is an error.
   const first = axes.label
     ? post({ op: 'aggregate', group: axes.label, measures: [{ fn: axes.measure ? 'sum' : 'count', field: axes.measure || '' }], order: 'key' }).then((res) => {
         if (res && res.ok) {
@@ -1246,8 +1246,9 @@ function loadChart(report, section, viewRef) {
           });
         }
         if (res && (res.status === 404 || res.status === 405 || res.status === 501)) return { rows: [] };
-        // A refused or failed aggregate falls back to the row query, which folds here.
-        return foldRows();
+        // A refused group field or a server error is a load failure: the panel
+        // shows its error state, never a fake "No Data Available".
+        throw new Error(`chart aggregate ${res && res.status}`);
       })
     : foldRows();
   return first
