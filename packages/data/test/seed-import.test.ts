@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
-import { generateCreatorImport } from '../src/index.js';
+import { generateCreatorImport, generateSeedRecords } from '../src/index.js';
 
 function appOf(body: string, name = 'Demo'): App {
   return deriveIr(parse(`application "${name}"\n{\n${body}\n}\n`));
@@ -858,4 +858,40 @@ test('a mutual lookup cycle is reported as a manual worksheet', () => {
     assert.ok(r.manual.some((m) => m.form === name), name);
   }
   assert.equal(procedure(r.orderText).some((s) => s.kind === 'import' && (s.name === 'Left' || s.name === 'Right')), false);
+});
+
+test('a decimal with decimalplace below 2 is generated at that scale', () => {
+  const app = appOf('\tform Offer\n\t{\n\t\tDiscount\n\t\t(\n\t\t\ttype = percent\n\t\t\tdecimalplace = 1\n\t\t)\n\t\tWhole\n\t\t(\n\t\t\ttype = decimal\n\t\t\tdecimalplace = 0\n\t\t)\n\t\tPrice\n\t\t(\n\t\t\ttype = decimal\n\t\t)\n\t}');
+  const [header, ...rows] = parseCsv(generateCreatorImport(app, { rows: 4 }).files[0]!.csv);
+  const at = (name: string) => rows.map((row) => row[header!.indexOf(name)]!);
+  for (const cell of at('Discount')) assert.match(cell, /^\d+\.\d$/);
+  for (const cell of at('Whole')) assert.match(cell, /^\d+$/);
+  for (const cell of at('Price')) assert.match(cell, /^\d+\.\d\d$/);
+});
+
+test('record grids cover subform and cyclic forms, one grid per subform, the same every time', () => {
+  const app = appOf(
+    '\tform A\n\t{\n\t\tA_Name\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t\tTo_B\n\t\t(\n\t\t\ttype = picklist\n\t\t\tvalues = B.ID\n\t\t\tdisplayformat = [B_Name]\n\t\t)\n\t}\n' +
+      '\tform B\n\t{\n\t\tB_Name\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t\tmust have To_A\n\t\t(\n\t\t\ttype = picklist\n\t\t\tvalues = A.ID\n\t\t\tdisplayformat = [A_Name]\n\t\t)\n\t\tParts\n\t\t(\n\t\t\ttype = grid\n\t\t\tPart_Label\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)\n\t\t)\n\t}',
+  );
+  // The import generator skips both (a cycle, and B has a subform) ...
+  assert.deepEqual(generateCreatorImport(app, { rows: 3 }).files, []);
+  // ... the record grids keep them.
+  const records = generateSeedRecords(app, { rows: 3 });
+  assert.deepEqual(records, generateSeedRecords(app, { rows: 3 }));
+  assert.deepEqual(records.cycles, ['A', 'B']);
+  assert.deepEqual(records.grids.map((grid) => `${grid.form}${grid.subform ? `/${grid.subform}` : ''}:${grid.rows.length}`), ['A:3', 'B:3', 'B/Parts:4']);
+  const b = records.grids[1]!;
+  assert.deepEqual(b.columns.find((col) => col.name === 'To_A'), { name: 'To_A', required: true, lookupForm: 'A' });
+  assert.deepEqual(records.grids[2]!.parents, [0, 1, 1, 2]);
+  assert.ok(records.grids[2]!.rows.every((row) => row[0] !== ''));
+});
+
+test('record grids leave an address latitude and longitude empty', () => {
+  const app = appOf('\tform Site\n\t{\n\t\tWhere\n\t\t(\n\t\t\ttype = address\n\t\t\taddress_line_1\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)\n\t\t\tlatitude\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)\n\t\t\tlongitude\n\t\t\t(\n\t\t\t\ttype = text\n\t\t\t)\n\t\t)\n\t}');
+  const [grid] = generateSeedRecords(app, { rows: 3 }).grids;
+  const at = (name: string) => grid!.rows.map((row) => row[grid!.columns.findIndex((col) => col.name === name)]);
+  assert.deepEqual(at('Where.latitude'), ['', '', '']);
+  assert.deepEqual(at('Where.longitude'), ['', '', '']);
+  assert.ok(at('Where.address_line_1').every((cell) => cell !== ''));
 });
