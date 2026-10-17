@@ -391,6 +391,11 @@ export function compileCriteria(c: Criteria, encrypted: ReadonlySet<string> = ne
 }
 
 function compileMode(c: Criteria, encrypted: ReadonlySet<string>, decimals: DecimalColumns, mode: Mode): string {
+  // Deluge `Field == input.X` with X empty matches the rows where Field is
+  // empty; ZCQL has no `= null`, only IS NULL / IS NOT NULL.
+  if ((c.op === '==' || c.op === '!=') && c.field !== ID_FIELD && (c.value === null || c.value === undefined)) {
+    return compileMode({ op: c.op === '==' ? 'isNull' : 'notNull', field: c.field }, encrypted, decimals, mode);
+  }
   if (mode !== 'exact' && !touchesDecimal(c, decimals) && !hasLooseLike(c)) mode = 'exact';
   if (mode !== 'exact' && isDecimalLeaf(c, decimals)) return decimalLeaf(c, decimals[c.field]!, mode);
   switch (c.op) {

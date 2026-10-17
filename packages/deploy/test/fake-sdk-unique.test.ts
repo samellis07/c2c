@@ -16,7 +16,7 @@ import { repoRoot } from '../../core/src/toolchain.js';
 import { generateSchema } from '../../schema/src/generator.js';
 import { generateUi } from '../../ui/src/index.js';
 import { tableCreatePlan } from '../src/tables.js';
-import { startOfflineBackend, uniqueByTable } from '../src/verify-behavior.js';
+import { foreignKeysByTable, startOfflineBackend, uniqueByTable } from '../src/verify-behavior.js';
 
 interface FakeTable {
   insertRows(rows: Record<string, unknown>[]): Promise<Record<string, string>[]>;
@@ -24,6 +24,7 @@ interface FakeTable {
 }
 interface Fake {
   setUnique(declared: Record<string, string[]>): void;
+  setForeignKeys(declared: Record<string, string[]>): void;
   state(): { tables: Record<string, Record<string, string>[]> };
   initialize(req: unknown): { datastore(): { table(name: string): FakeTable } };
 }
@@ -145,4 +146,26 @@ test('offline verify-behavior refuses a duplicate submit on a schema-unique colu
   } finally {
     await backend.close();
   }
+});
+
+test('a foreign-key column refuses a value that is not a whole-number id, on insert and update, storing nothing', async () => {
+  fake.setUnique({});
+  fake.setForeignKeys({ Link_Rows: ['Parent'] });
+  const t = tableOf('Link_Rows');
+  const before = rows('Link_Rows').length;
+  const INVALID = { statusCode: 400, code: 'INVALID_INPUT', message: 'Invalid input value for Parent. bigint value expected' };
+  await assert.rejects(t.insertRows([{ Parent: 'Title juniper 739' }]), INVALID);
+  assert.equal(rows('Link_Rows').length, before);
+  const [ok] = await t.insertRows([{ Parent: '10000000000000005' }, { Parent: null }]);
+  await assert.rejects(t.updateRows([{ ROWID: ok!.ROWID, Parent: 'x1' }]), INVALID);
+  assert.equal(rows('Link_Rows').find((row) => row.ROWID === ok!.ROWID)?.Parent, '10000000000000005');
+  fake.setForeignKeys({});
+});
+
+test('foreignKeysByTable lists the columns the table plan types as foreign key', () => {
+  const steps = [
+    { table: 'Child', columns: [{ column_name: 'Parent', data_type: 'foreign key' }, { column_name: 'Name', data_type: 'varchar' }] },
+    { table: 'Plain', columns: [{ column_name: 'Name', data_type: 'varchar' }] },
+  ] as unknown as Parameters<typeof foreignKeysByTable>[0];
+  assert.deepEqual(foreignKeysByTable(steps), { Child: ['Parent'] });
 });

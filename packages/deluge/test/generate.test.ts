@@ -7046,6 +7046,32 @@ test('an unscoped rule denies both ops; a conditional rule denies neither', () =
   assert.deepEqual(fieldRuleDenials(ir, 'Item'), [{ field: 'A', action: 'hide' }]);
 });
 
+test('a field a form script fills or enables on the open form is not denied for that op', () => {
+  const script = (text: string) => ({ text, span: Z });
+  const ir = app({
+    forms: [plainForm('Item', [plainField('A'), plainField('B'), plainField('C'), plainField('D'), plainField('E'), plainField('F')])],
+    workflows: [
+      workflow({
+        name: 'rules', form: 'Item', event: 'on load',
+        fieldRules: [{ actions: [{ action: 'hide', fields: ['A', 'B', 'C', 'F'] }, { action: 'disable', fields: ['D', 'E'] }], span: Z }],
+      }),
+      // On load fills A (Creator posts it); on user input of A fills B; an
+      // add-only on load selects D. E is enabled by a script.
+      workflow({ name: 'load', form: 'Item', event: 'on load', deluge: script('input.A = zoho.loginuserid;') }),
+      workflow({ name: 'input', form: 'Item', event: 'on user input of A', deluge: script('if(input.A != null)\n{\n\tinput.B = input.A;\n}') }),
+      workflow({ name: 'addLoad', form: 'Item', event: 'on load', recordEvent: 'on add', deluge: script('D.select(1);\nenable E;') }),
+      // On validate runs on the server: its write never comes from the form.
+      workflow({ name: 'validate', form: 'Item', event: 'on validate', deluge: script('input.C = "x";') }),
+    ],
+  });
+  assert.deepEqual(fieldRuleDenials(ir, 'Item'), [
+    { field: 'C', action: 'hide' },
+    { field: 'D', action: 'disable', ops: ['update'] },
+    { field: 'E', action: 'disable', ops: ['update'] },
+    { field: 'F', action: 'hide' },
+  ]);
+});
+
 test('a workflow aio module embeds the form field-rule denials and passes them to authorizeWrite', () => {
   const ir = app({
     forms: [plainForm('Orders', [plainField('Status'), plainField('Secret')])],

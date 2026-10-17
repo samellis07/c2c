@@ -590,7 +590,6 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Faculty",
             "Status",
             "Submissions"
           ]
@@ -719,7 +718,6 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Faculty",
             "Status",
             "Submissions"
           ]
@@ -965,7 +963,6 @@
           "apiOnly": [
             "recID",
             "Submitted_By",
-            "Student",
             "Status",
             "Reviewer",
             "Remarks",
@@ -1397,7 +1394,6 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
-            "Faculty",
             "Status",
             "Submissions"
           ]
@@ -1925,7 +1921,14 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status",
+            "Submissions"
+          ]
         }
       ],
       "expect": {
@@ -2054,7 +2057,14 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status",
+            "Submissions"
+          ]
         }
       ],
       "expect": {
@@ -2178,7 +2188,14 @@
           "bind": {
             "r_r4_create_assignment_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status",
+            "Submissions"
+          ]
         },
         {
           "op": "update",
@@ -2199,7 +2216,13 @@
           "creator": {
             "code": 3000,
             "message": "Data Updated Successfully"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Submissions"
+          ]
         }
       ],
       "expect": {
@@ -2319,7 +2342,14 @@
           "bind": {
             "r_r4_create_assignment_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status",
+            "Submissions"
+          ]
         },
         {
           "op": "submit",
@@ -2347,7 +2377,19 @@
           },
           "expect": {
             "outcome": "saved"
-          }
+          },
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "recID",
+            "Submitted_By",
+            "Status",
+            "Reviewer",
+            "Remarks",
+            "Marks",
+            "Reviewed_On"
+          ]
         }
       ],
       "expect": {
@@ -2469,7 +2511,14 @@
           "bind": {
             "r_r4_create_assignment_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status",
+            "Submissions"
+          ]
         },
         {
           "op": "submit",
@@ -2491,7 +2540,19 @@
           "bind": {
             "r_r4_submit_assignment_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "recID",
+            "Submitted_By",
+            "Status",
+            "Reviewer",
+            "Remarks",
+            "Marks",
+            "Reviewed_On"
+          ]
         },
         {
           "op": "update",
@@ -2633,7 +2694,14 @@
           "bind": {
             "r_r4_create_assignment_valid_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status",
+            "Submissions"
+          ]
         },
         {
           "op": "submit",
@@ -2656,7 +2724,14 @@
           "bind": {
             "r_r4_create_assignment_boundary_submit": "body.values.ROWID"
           },
-          "setup": true
+          "setup": true,
+          "tags": [
+            "api-only-acceptance"
+          ],
+          "apiOnly": [
+            "Status",
+            "Submissions"
+          ]
         },
         {
           "op": "report",

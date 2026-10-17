@@ -37,6 +37,7 @@ import { normType } from './types.js';
 import { mutatesParameters } from './param-mutation.js';
 import { withoutDecimalAudit } from './audit.js';
 import { resolveAppCalls } from './resolve-app-calls.js';
+import { parse as parseScript } from './parser.js';
 
 export interface GeneratedFile {
   path: string;
@@ -3993,6 +3994,60 @@ function recordEventOps(recordEvent: string | undefined): readonly WriteOp[] | n
   return null;
 }
 
+/** Form events that run on the open form, before submit: their writes are posted with the record. */
+const CLIENT_EVENT_KINDS: ReadonlySet<string> = new Set(['load', 'input', 'addrow', 'deleterow']);
+
+/**
+ * Per field, the write ops in which a client-side form script of `formName`
+ * sets it (`input.F = …`, `F.select(…)`) or shows/enables it.
+ */
+function clientWrittenFields(app: App, formName: string | undefined): Map<string, Set<WriteOp>> {
+  const out = new Map<string, Set<WriteOp>>();
+  for (const w of app.workflows) {
+    if ((w.form ?? '') !== (formName ?? '') || !w.deluge || !CLIENT_EVENT_KINDS.has(eventKind(w.event))) continue;
+    const ops = recordEventOps(w.recordEvent);
+    if (!ops) continue;
+    const add = (field: string | undefined): void => {
+      if (!field) return;
+      const set = out.get(field) ?? new Set<WriteOp>();
+      for (const op of ops) set.add(op);
+      out.set(field, set);
+    };
+    let body: unknown;
+    try {
+      body = parseScript(w.deluge.text).body;
+    } catch {
+      continue;
+    }
+    const visit = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const item of node) visit(item);
+        return;
+      }
+      if (!node || typeof node !== 'object') return;
+      const n = node as { kind?: unknown; [key: string]: unknown };
+      if (n.kind === 'assign') add(inputFieldOf(n.target));
+      if (n.kind === 'ui' && (n.action === 'show' || n.action === 'enable') && Array.isArray(n.targets)) for (const t of n.targets) add(inputFieldOf(t, true));
+      if (n.kind === 'call' && isObjectNode(n.callee) && n.callee.kind === 'member' && n.callee.property === 'select') add(inputFieldOf(n.callee.object, true));
+      for (const [key, value] of Object.entries(n)) if (key !== 'span') visit(value);
+    };
+    visit(body);
+  }
+  return out;
+}
+
+function isObjectNode(value: unknown): value is { kind?: unknown; [key: string]: unknown } {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** `input.F` names field F; with `bare`, a plain name `F` does too (ui targets, `F.select`). */
+function inputFieldOf(expr: unknown, bare = false): string | undefined {
+  if (!isObjectNode(expr)) return undefined;
+  if (expr.kind === 'member' && isObjectNode(expr.object) && expr.object.kind === 'name' && expr.object.name === 'input' && typeof expr.property === 'string') return expr.property;
+  if (bare && expr.kind === 'name' && typeof expr.name === 'string') return expr.name;
+  return undefined;
+}
+
 /**
  * Fields an unconditional field rule hides or disables on this form.
  *
@@ -4005,9 +4060,15 @@ function recordEventOps(recordEvent: string | undefined): readonly WriteOp[] | n
  * Order matters: rules run in declaration order on load, and a later
  * unconditional `show`/`enable` cancels an earlier `hide`/`disable` (and the
  * reverse). The last static action touching a field wins, per write op.
+ *
+ * A field a form script of the same record event fills on the open form
+ * (`input.F = …` or `F.select(…)` in on load / on user input / a row event)
+ * or shows/enables there is not denied for that op: Creator submits the
+ * value the script set, so a posted value for it can come from the form.
  */
 export function fieldRuleDenials(app: App, formName: string | undefined): FieldRuleDenial[] {
   const state = new Map<string, { insert?: 'hide' | 'disable' | 'show' | 'enable'; update?: 'hide' | 'disable' | 'show' | 'enable' }>();
+  const scripted = clientWrittenFields(app, formName);
   for (const w of app.workflows) {
     if ((w.form ?? '') !== (formName ?? '')) continue;
     const ops = recordEventOps(w.recordEvent);
@@ -4033,6 +4094,7 @@ export function fieldRuleDenials(app: App, formName: string | undefined): FieldR
     for (const op of ['insert', 'update'] as const) {
       const verb = entry[op];
       if (verb !== 'hide' && verb !== 'disable') continue;
+      if (scripted.get(field)?.has(op)) continue;
       const group = verbs.get(verb) ?? { insert: false, update: false };
       group[op] = true;
       verbs.set(verb, group);
