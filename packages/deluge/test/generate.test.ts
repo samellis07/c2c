@@ -4070,6 +4070,11 @@ ${body}
   const safeTodos = generate(safe).todos.filter((t) => t.construct === 'presuccess-effect-unbuffered');
   assert.equal(safeTodos.length, 0);
 
+  // A bound-but-never-read call result is still buffer-safe: the call defers
+  // and nothing decided on the marker.
+  const unread = appOf('\t\t\t\t\t\tresp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tinput.Name = "ok";');
+  assert.match(startModule(unread)!.source, /^export const deferEffects = true;$/m);
+
   for (const [label, body] of [
     // A write to the submitted form is never deferred.
     ['own-form insert', 'insert into Item\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tName: "x"\n\t\t\t\t\t\t];'],
@@ -4077,6 +4082,18 @@ ${body}
     ['insert id read', 'row = insert into Log\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tTitle: "x"\n\t\t\t\t\t\t];\n\t\t\t\t\t\tinfo row.ID;'],
     // The body reads a form it also writes; the read could not see the buffered write.
     ['read-own-write', 'existing = Log[Title == "x"];\n\t\t\t\t\t\tinsert into Log\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tTitle: existing.ID\n\t\t\t\t\t\t];'],
+    // The buffered invokeurl returns a marker; branching on it cancels on a
+    // value that is never the real response.
+    ['invokeurl result in if', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tif (resp.get("ok") != true)\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tcancel submit;\n\t\t\t\t\t\t}'],
+    // The marker copied into a field stores a lie.
+    ['invokeurl result into field', 'resp = invokeurl[url: "https://example.test/check" type: GET];\n\t\t\t\t\t\tinput.Name = resp.get("id");'],
+    // The call sits in the condition itself — the result is used at once.
+    ['invokeurl in condition', 'if (invokeurl[url: "https://example.test/check" type: GET].get("ok") != true)\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tcancel submit;\n\t\t\t\t\t\t}'],
+    // A thisapp call is opaque: its own writes defer under the same buffer and
+    // its return may be a marker.
+    ['thisapp call', 'r = thisapp.notify(input.Name);\n\t\t\t\t\t\tinfo r;'],
+    // An unrecognised bare call may be an app function — same opacity.
+    ['custom function call', 'helper(input.Name);'],
   ] as const) {
     const generated = generate(appOf(body));
     const mod = generated.files.find((item) => new RegExp('path: "/forms/Item/handler"').test(item.source));

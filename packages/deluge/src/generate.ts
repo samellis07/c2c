@@ -39,6 +39,7 @@ import { normType } from './types.js';
 import { mutatesParameters } from './param-mutation.js';
 import { withoutDecimalAudit } from './audit.js';
 import { resolveAppCalls } from './resolve-app-calls.js';
+import { recognisedBuiltinNames } from './dispatch.js';
 import { parse as parseDeluge } from './parser.js';
 import type { Expr, Stmt } from './ast.js';
 
@@ -208,7 +209,14 @@ function isPresuccessWorkflow(w: Workflow): boolean {
  * - one that reads (fetch criteria, `Form.count()`-style aggregate, or zcql)
  *   a form it also writes (the read could not see the buffered write),
  * - one that writes its own form (a same-form write is never deferred, so a
- *   body that depends on it staying early keeps today's order).
+ *   body that depends on it staying early keeps today's order),
+ * - one that uses a buffered call's result: the deferred `invokeurl`/
+ *   `sendmail` returns a `{deferred:true}` marker, so any later read of the
+ *   bound variable (a condition, a field set, a cancel, a return) decides on
+ *   the marker, not the response, and the real call's result is discarded,
+ * - one that calls a `thisapp.*` function or an unrecognised bare function:
+ *   the callee is opaque to this analysis and runs under the same buffer, so
+ *   its own writes would be deferred and its return could be a marker.
  */
 function presuccessBodyDeferrable(text: string, ownForm: string): boolean {
   let script;
@@ -221,6 +229,17 @@ function presuccessBodyDeferrable(text: string, ownForm: string): boolean {
   const reads = new Set<string>();
   let unsafe = false;
   let zcqlRead = false;
+  const effectBound = new Set<string>();
+  const readNames = new Set<string>();
+  const KNOWN_BARE_CALLS = new Set(recognisedBuiltinNames().map((n) => n.toLowerCase()));
+  const unparen = (e: Expr): Expr => (e.kind === 'paren' ? unparen(e.expr) : e);
+  const rootName = (e: Expr | undefined): string | null => {
+    let cur = e;
+    while (cur && (cur.kind === 'member' || cur.kind === 'index' || cur.kind === 'paren')) {
+      cur = cur.kind === 'paren' ? cur.expr : cur.object;
+    }
+    return cur?.kind === 'name' ? cur.name : null;
+  };
   const nameOf = (e: Expr | undefined): string | null => {
     const props: string[] = [];
     let cur = e;
@@ -271,8 +290,9 @@ function presuccessBodyDeferrable(text: string, ownForm: string): boolean {
         const object = nameOf(e.object);
         const leaf = e.path[e.path.length - 1]?.toLowerCase() ?? '';
         if (object?.toLowerCase() === 'zcql') zcqlRead = true;
+        else if (object?.toLowerCase() === 'thisapp') unsafe = true;
         else if (object && AGGREGATES.has(leaf)) reads.add(object);
-        visitExpr(e.object);
+        visitExpr(e.object, valuePosition);
         for (const a of e.args) visitExpr(a, true);
         return;
       }
@@ -281,14 +301,21 @@ function presuccessBodyDeferrable(text: string, ownForm: string): boolean {
           const object = nameOf(e.callee.object);
           if (object && AGGREGATES.has(e.callee.property.toLowerCase())) reads.add(object);
         }
-        visitExpr(e.callee);
+        const root = rootName(e.callee);
+        if (root?.toLowerCase() === 'thisapp') unsafe = true;
+        else if (e.callee.kind === 'name' && !KNOWN_BARE_CALLS.has(e.callee.name.toLowerCase())) unsafe = true;
+        visitExpr(e.callee, true);
         for (const a of e.args) visitExpr(a, true);
         return;
       }
       case 'sendmail':
       case 'invokeurl':
       case 'pushnotification':
+        if (valuePosition) unsafe = true;
         for (const p of e.entries) visitExpr(p.value, true);
+        return;
+      case 'name':
+        readNames.add(e.name);
         return;
       case 'mailAttachments':
         for (const item of e.items) {
@@ -314,10 +341,10 @@ function presuccessBodyDeferrable(text: string, ownForm: string): boolean {
         visitExpr(e.right, true);
         return;
       case 'member':
-        visitExpr(e.object);
+        visitExpr(e.object, valuePosition);
         return;
       case 'index':
-        visitExpr(e.object);
+        visitExpr(e.object, valuePosition);
         visitExpr(e.index, true);
         return;
       case 'paren':
@@ -368,9 +395,20 @@ function presuccessBodyDeferrable(text: string, ownForm: string): boolean {
         writeTarget(s.target);
         for (const p of s.entries) visitExpr(p.value, true);
         return;
-      case 'assign':
-        visitExpr(s.value, true);
+      case 'assign': {
+        // `x = invokeurl[…]` stores the marker, not the response: record the
+        // binding and stay deferrable only while nothing reads `x`. Any other
+        // value-position use (a condition, an argument, `input.F = invokeurl`)
+        // decides on the marker, so it is unsafe by the valuePosition rule.
+        const v = unparen(s.value);
+        if (s.op === '=' && s.target.kind === 'name' && (v.kind === 'invokeurl' || v.kind === 'sendmail' || v.kind === 'pushnotification')) {
+          effectBound.add(s.target.name);
+          visitExpr(s.value, false);
+        } else {
+          visitExpr(s.value, true);
+        }
         return;
+      }
       case 'expr':
         visitExpr(s.expr, false);
         return;
@@ -394,6 +432,7 @@ function presuccessBodyDeferrable(text: string, ownForm: string): boolean {
     }
   };
   for (const s of script.body) visitStmt(s);
+  for (const bound of effectBound) if (readNames.has(bound)) unsafe = true;
   if (unsafe || writes.has(ownForm)) return false;
   if (zcqlRead && writes.size > 0) return false;
   for (const read of reads) if (writes.has(read)) return false;
