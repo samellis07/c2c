@@ -14,7 +14,7 @@ application "c2c-conn-desk"
 				type = text
 			)
 		}
-		form Conn_Desk_Ticket
+		form Conn_Helpdesk_Case
 		{
 			displayname = "Conn Zoho Desk Record"
 			must have Ticket_Subject
@@ -25,7 +25,7 @@ application "c2c-conn-desk"
 				column = 1
 				width = medium
 			)
-			must have Ticket_Contact_Last_Name
+			must have Case_Contact_Last_Name
 			(
 				type = text
 				displayname = "Contact last name"
@@ -33,7 +33,7 @@ application "c2c-conn-desk"
 				column = 1
 				width = medium
 			)
-			must have Ticket_Contact_Email
+			must have Case_Contact_Email
 			(
 				type = email
 				displayname = "Contact email"
@@ -49,7 +49,7 @@ application "c2c-conn-desk"
 				column = 1
 				width = medium
 			)
-			Desk_Response
+			Helpdesk_Response
 			(
 				type = textarea
 				displayname = "Desk response"
@@ -99,16 +99,16 @@ application "c2c-conn-desk"
 				Name
 			)
 		}
-		list All_Conn_Desk_Tickets
+		list All_Conn_Helpdesk_Cases
 		{
-			displayName = "All Conn Desk Tickets"
-			show all rows from Conn_Desk_Ticket
+			displayName = "All Conn Helpdesk Cases"
+			show all rows from Conn_Helpdesk_Case
 			(
 				Ticket_Subject as "Subject"
-				Ticket_Contact_Last_Name as "Contact last name"
-				Ticket_Contact_Email as "Contact email"
+				Case_Contact_Last_Name as "Contact last name"
+				Case_Contact_Email as "Contact email"
 				Ticket_Description as "Description"
-				Desk_Response as "Desk response"
+				Helpdesk_Response as "Desk response"
 			)
 		}
 	}
@@ -117,10 +117,10 @@ application "c2c-conn-desk"
 	{
 		form
 		{
-			Conn_Desk_Ticket_Check as "Conn Desk Ticket Check"
+			Conn_Helpdesk_Case_Check as "Conn Helpdesk Case Check"
 			{
 				type = form
-				form = Conn_Desk_Ticket
+				form = Conn_Helpdesk_Case
 				record event = on add or edit
 				on validate
 				{
@@ -142,10 +142,10 @@ application "c2c-conn-desk"
 					}
 				}
 			}
-			Conn_Desk_Ticket_Create as "Conn Desk Ticket Create"
+			Conn_Helpdesk_Case_Create as "Conn Helpdesk Case Create"
 			{
 				type = form
-				form = Conn_Desk_Ticket
+				form = Conn_Helpdesk_Case
 				record event = on add or edit
 				on success
 				{
@@ -154,15 +154,15 @@ application "c2c-conn-desk"
 						custom deluge script
 						(
 							contact = Map();
-							contact.put("lastName", input.Ticket_Contact_Last_Name);
-							contact.put("email", input.Ticket_Contact_Email);
+							contact.put("lastName", input.Case_Contact_Last_Name);
+							contact.put("email", input.Case_Contact_Email);
 							ticket = Map();
 							ticket.put("subject", input.Ticket_Subject);
 							ticket.put("departmentId", thisapp.c2c_desk_department_id());
 							ticket.put("contact", contact);
 							ticket.put("description", input.Ticket_Description);
 							resp = zoho.desk.create(thisapp.c2c_desk_org_id().toLong(), "tickets", ticket, "c2c_desk");
-							input.Desk_Response = resp.toString();
+							input.Helpdesk_Response = resp.toString();
 							success message "c2c-desk-ticket-sent";
 						)
 					}
@@ -188,7 +188,7 @@ application "c2c-conn-desk"
 
 	share_settings
 	{
-		role Hierarchy = {New_Contact,Conn_Desk_Ticket}
+		role Hierarchy = {New_Contact,Conn_Helpdesk_Case}
 	}
 
 	web
@@ -199,7 +199,7 @@ application "c2c-conn-desk"
 			{
 				label placement = left
 			}
-			form Conn_Desk_Ticket
+			form Conn_Helpdesk_Case
 			{
 				label placement = left
 			}
@@ -219,14 +219,14 @@ application "c2c-conn-desk"
 					{
 					}
 				}
-				section Conn_Section_Desk_Ticket
+				section Conn_Section_Helpdesk_Case
 				{
 					displayname = "c2c-conn-desk"
 					icon = "design-todo"
-					form Conn_Desk_Ticket
+					form Conn_Helpdesk_Case
 					{
 					}
-					report All_Conn_Desk_Tickets
+					report All_Conn_Helpdesk_Cases
 					{
 					}
 				}
