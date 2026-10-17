@@ -73,6 +73,12 @@ export interface TodoItem {
    * Adjacency alone never changes the verdict; the note flags it for review.
    */
   note?: string;
+  /**
+   * The guided manual step for a hole that stays counted but names its own
+   * setup work ({@link TODO_MANUAL_STEPS}). `c2c analyze` prints it as the
+   * blocker's `step:` line.
+   */
+  manualStep?: string;
 }
 
 export interface TranslateResult {
@@ -2518,6 +2524,25 @@ function lineStart(src: string, offset: number): number {
   return src.lastIndexOf('\n', Math.max(0, offset - 1)) + 1;
 }
 
+/**
+ * Residual holes that stay counted but name their own setup work: `c2c
+ * analyze` prints the step as the blocker's `step:` line, so the hole tells
+ * the operator what to do instead of being an anonymous gap.
+ *
+ * `pushnotification`: Creator notifies named app users in the app's
+ * Notifications tab (https://www.zoho.com/deluge/help/pushnotify-using-deluge.html).
+ * Catalyst can send a web push — `pushNotification.web().sendNotification`
+ * takes user IDs or emails under admin scope `ZohoCatalyst.notifications.web`
+ * (https://docs.catalyst.zoho.com/en/cloud-scale/help/push-notifications/) —
+ * but only to authenticated app users who registered a device through the
+ * console's `catalyst.notification.enableNotification()` client snippet. The
+ * generated app has no enrollment path, so the hole is guided, not shimmed.
+ */
+export const TODO_MANUAL_STEPS: Record<string, string> = {
+  pushnotification:
+    'Enable Push Notifications in the Catalyst console and add the catalyst.notification.enableNotification() snippet to the web client so each signed-in app user registers a device (web push reaches only authenticated app users); send from a function with pushNotification.web().sendNotification(message, [emails]) under admin scope ZohoCatalyst.notifications.web. The Creator report link has no Catalyst equivalent: open the record through a deep link in the client messageHandler.',
+};
+
 function account(
   stats: TranslateStats,
   todos: TodoItem[],
@@ -2531,7 +2556,10 @@ function account(
   if (b !== 'todo') return;
   const names = flags.constructs ?? [];
   const listed = names.length ? names : ['unknown'];
-  for (const construct of listed) todos.push({ construct, start: span.start, end: span.end, note: flags.note });
+  for (const construct of listed) {
+    const manualStep = TODO_MANUAL_STEPS[construct];
+    todos.push({ construct, start: span.start, end: span.end, note: flags.note, ...(manualStep ? { manualStep } : {}) });
+  }
 }
 
 /**
@@ -4673,11 +4701,16 @@ function exprBody(e: Expr, scope: Scope): Fx {
     case 'sendmail':
       return mailOrHttp('mail', 'send', e.entries, scope);
     case 'pushnotification': {
-      // The Creator push-notification task targets the mobile app's
-      // Notifications tab (deluge-docs/pages/deluge/help/pushnotify-using-deluge.html);
-      // no Catalyst-side equivalent exists, so it stays a named manual item.
-      return fx({
-        code: `await shim.todo(ctx, "pushnotification")`,
+      // The Creator push-notification task targets named app users'
+      // Notifications tab (deluge-docs/pages/deluge/help/pushnotify-using-deluge.html).
+      // Catalyst web push needs client-side device enrollment the generated app
+      // never sets up, so it stays a named manual item — but the task's own
+      // arguments (to/title/message/view) go into the detail object so the
+      // residual names its recipients and message (see TODO_MANUAL_STEPS for
+      // the guided step analyze prints).
+      const parts = e.entries.map((en) => ({ key: en.key.toLowerCase(), v: expr(en.value, scope) }));
+      const detail = `{ ${parts.map((p) => `${JSON.stringify(p.key)}: ${p.v.code}`).join(', ')} }`;
+      return mergeFx(`await shim.todo(ctx, "pushnotification", ${detail})`, parts.map((p) => p.v), {
         todo: true,
         shim: true,
         constructs: ['pushnotification'],

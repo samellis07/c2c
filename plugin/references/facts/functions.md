@@ -93,6 +93,8 @@ Recipe: [UNVERIFIED] the console's Web push tab sends test pushes to an end-user
 
 Rule: [UNVERIFIED] generate the Web-SDK enable call on pages that need push, and never promise push to signed-out users — end users must be authenticated on the app.
 
+Recipe: [DOC] a function sends web push with `pushNotification.web().sendNotification(message, userList)` — `userList` takes up to 50 user IDs or email addresses per call, admin scope `ZohoCatalyst.notifications.web` (https://docs.catalyst.zoho.com/en/sdk/javascript/v1/cloudscale/push-notifications/send-web-notifications/, https://docs.catalyst.zoho.com/en/cloud-scale/help/push-notifications/). Delivery still needs each recipient's device enrolled through `catalyst.notification.enableNotification()` on the client, so a server-side send with no enrollment path delivers to nobody.
+
 ## Reachability and security
 
 ### Set per-function auth through Security Rules — re-check when API Gateway is on

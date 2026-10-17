@@ -4,7 +4,7 @@ import type { Expr } from '../src/ast.js';
 import { compileCriteria, matchRow, type Criteria } from '../../shims/src/criteria.js';
 import { createRuntime } from '../../shims/src/runtime.js';
 import { parse } from '../src/parser.js';
-import { reportCriteria, singleReturnText, translate } from '../src/translate.js';
+import { reportCriteria, singleReturnText, TODO_MANUAL_STEPS, translate } from '../src/translate.js';
 function stripComments(s: string) { return (s || '').replace(/^\s*\/\/ Deluge: .*\n?/gm, ''); }
 
 function kinds(src: string): string[] {
@@ -4091,7 +4091,20 @@ test('pushnotification is a named manual item, not an anonymous task stub', () =
     'pushnotification\n(\n sender type : "fields"\n to : "admin@example.test"\n title : "New Incident"\n message : "a new record"\n view: "Recent_Incidents"\n)',
   );
   assert.deepEqual(t.todos.map((item) => item.construct), ['pushnotification']);
-  assert.match(t.server, /shim\.todo\(ctx, "pushnotification"\)/);
+  assert.match(t.server, /shim\.todo\(ctx, "pushnotification", \{ "sender type": "fields", "to": "admin@example\.test", "title": "New Incident", "message": "a new record", "view": "Recent_Incidents" \}\)/);
+  // A guided residual: the counted hole names the Catalyst setup work.
+  assert.match(t.todos[0]?.manualStep ?? '', /catalyst\.notification\.enableNotification\(\)/);
+  assert.match(t.todos[0]?.manualStep ?? '', /ZohoCatalyst\.notifications\.web/);
+});
+
+test('pushnotification keeps its argument expressions in the detail object', () => {
+  const t = translate('pushnotification\n(\n to : input.Owner_Email\n title : "New Incident"\n message : input.Subject\n)', {
+    inputFields: ['Owner_Email', 'Subject'],
+  });
+  assert.deepEqual(t.todos.map((item) => item.construct), ['pushnotification']);
+  assert.match(t.server, /"to": shim\.input\.get\(ctx, "Owner_Email"\)/);
+  assert.match(t.server, /"message": shim\.input\.get\(ctx, "Subject"\)/);
+  assert.equal(t.todos[0]?.manualStep, TODO_MANUAL_STEPS.pushnotification);
 });
 
 test('toFile on an ordinary value stays a counted manual item', () => {
