@@ -5806,59 +5806,62 @@ function negateTest(test: Expr): Expr {
   return { kind: 'unary', op: '!', expr: u, span: u.span };
 }
 
+const MAX_TEST_ANALYSIS_DEPTH = 512;
+
 /** Every date field this expression references at any depth (call args, members, operands). */
-function exprDateRefs(expr: Expr, dateFields: Set<string>, into: Set<string>): void {
+function exprDateRefs(expr: Expr, dateFields: Set<string>, into: Set<string>, depth = 0): void {
+  if (depth >= MAX_TEST_ANALYSIS_DEPTH) return;
   const u = unwrapParens(expr);
   const ref = fieldRefOf(u);
   if (ref && dateFields.has(ref)) into.add(ref);
   switch (u.kind) {
     case 'binary':
-      exprDateRefs(u.left, dateFields, into);
-      exprDateRefs(u.right, dateFields, into);
+      exprDateRefs(u.left, dateFields, into, depth + 1);
+      exprDateRefs(u.right, dateFields, into, depth + 1);
       return;
     case 'unary':
-      exprDateRefs(u.expr, dateFields, into);
+      exprDateRefs(u.expr, dateFields, into, depth + 1);
       return;
     case 'call':
-      exprDateRefs(u.callee, dateFields, into);
-      for (const arg of u.args) exprDateRefs(arg, dateFields, into);
+      exprDateRefs(u.callee, dateFields, into, depth + 1);
+      for (const arg of u.args) exprDateRefs(arg, dateFields, into, depth + 1);
       return;
     case 'member':
-      exprDateRefs(u.object, dateFields, into);
+      exprDateRefs(u.object, dateFields, into, depth + 1);
       return;
     case 'index':
-      exprDateRefs(u.object, dateFields, into);
-      exprDateRefs(u.index, dateFields, into);
+      exprDateRefs(u.object, dateFields, into, depth + 1);
+      exprDateRefs(u.index, dateFields, into, depth + 1);
       return;
     case 'list':
-      for (const el of u.elements) exprDateRefs(el, dateFields, into);
+      for (const el of u.elements) exprDateRefs(el, dateFields, into, depth + 1);
       return;
     case 'map':
       for (const entry of u.entries) {
-        exprDateRefs(entry.key, dateFields, into);
-        exprDateRefs(entry.value, dateFields, into);
+        exprDateRefs(entry.key, dateFields, into, depth + 1);
+        exprDateRefs(entry.value, dateFields, into, depth + 1);
       }
       return;
     case 'ifExpr':
-      exprDateRefs(u.test, dateFields, into);
-      exprDateRefs(u.then, dateFields, into);
-      if (u.else) exprDateRefs(u.else, dateFields, into);
+      exprDateRefs(u.test, dateFields, into, depth + 1);
+      exprDateRefs(u.then, dateFields, into, depth + 1);
+      if (u.else) exprDateRefs(u.else, dateFields, into, depth + 1);
       return;
     case 'criteria':
-      exprDateRefs(u.object, dateFields, into);
-      exprDateRefs(u.criteria, dateFields, into);
+      exprDateRefs(u.object, dateFields, into, depth + 1);
+      exprDateRefs(u.criteria, dateFields, into, depth + 1);
       return;
     case 'insert':
-      for (const param of u.entries) exprDateRefs(param.value, dateFields, into);
+      for (const param of u.entries) exprDateRefs(param.value, dateFields, into, depth + 1);
       return;
     case 'colonCall':
-      exprDateRefs(u.object, dateFields, into);
-      for (const arg of u.args) exprDateRefs(arg, dateFields, into);
+      exprDateRefs(u.object, dateFields, into, depth + 1);
+      for (const arg of u.args) exprDateRefs(arg, dateFields, into, depth + 1);
       return;
     case 'invokeurl':
     case 'sendmail':
     case 'pushnotification':
-      for (const param of u.entries) exprDateRefs(param.value, dateFields, into);
+      for (const param of u.entries) exprDateRefs(param.value, dateFields, into, depth + 1);
       return;
     default:
       return;
@@ -5875,26 +5878,54 @@ function extractConstraintsFromTest(
   dateFields: Set<string>,
   constraints: DateOrderConstraint[],
   unsupported: string[],
+  depth = 0,
 ): void {
   const produced = constraints.length + unsupported.length;
   const unwrapped = unwrapParens(test);
+  if (depth >= MAX_TEST_ANALYSIS_DEPTH) {
+    const refs = new Set<string>();
+    exprDateRefs(unwrapped, dateFields, refs);
+    unsupported.push(
+      refs.size
+        ? `date comparison involving ${[...refs].sort().join(', ')}`
+        : 'unparseable validation expression',
+    );
+    return;
+  }
+  if (unwrapped.kind === 'unknown') {
+    const refs = new Set<string>();
+    for (const f of dateFields) {
+      if (new RegExp(`\\b${f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(unwrapped.text)) refs.add(f);
+    }
+    unsupported.push(
+      refs.size
+        ? `date comparison involving ${[...refs].sort().join(', ')}`
+        : 'unparseable validation expression',
+    );
+    return;
+  }
   if (unwrapped.kind === 'unary' && unwrapped.op === '!') {
-    extractConstraintsFromTest(negateTest(unwrapped.expr), dateFields, constraints, unsupported);
+    // Recurse on the negation only when it changed the node. negateTest
+    // leaves a `!` on a call, name or any opaque operand wrapped in `!`
+    // again; recursing on that would revisit the same node forever, so such
+    // a leaf is counted by its date references below.
+    const inner = unwrapParens(unwrapped.expr);
+    const negated = unwrapParens(negateTest(inner));
+    if (!(negated.kind === 'unary' && negated.expr === inner)) {
+      extractConstraintsFromTest(negated, dateFields, constraints, unsupported, depth + 1);
+      return;
+    }
+  } else if (unwrapped.kind === 'binary' && (unwrapped.op === '||' || unwrapped.op === 'or')) {
+    extractConstraintsFromTest(unwrapped.left, dateFields, constraints, unsupported, depth + 1);
+    extractConstraintsFromTest(unwrapped.right, dateFields, constraints, unsupported, depth + 1);
     return;
-  }
-  if (unwrapped.kind === 'binary' && (unwrapped.op === '||' || unwrapped.op === 'or')) {
-    extractConstraintsFromTest(unwrapped.left, dateFields, constraints, unsupported);
-    extractConstraintsFromTest(unwrapped.right, dateFields, constraints, unsupported);
-    return;
-  }
-  if (unwrapped.kind === 'binary' && (unwrapped.op === '&&' || unwrapped.op === 'and')) {
+  } else if (unwrapped.kind === 'binary' && (unwrapped.op === '&&' || unwrapped.op === 'and')) {
     // Both sides of a refusing guard must hold: keep every constraint and
     // every counted unsupported part, whichever side produced it.
-    extractConstraintsFromTest(unwrapped.left, dateFields, constraints, unsupported);
-    extractConstraintsFromTest(unwrapped.right, dateFields, constraints, unsupported);
+    extractConstraintsFromTest(unwrapped.left, dateFields, constraints, unsupported, depth + 1);
+    extractConstraintsFromTest(unwrapped.right, dateFields, constraints, unsupported, depth + 1);
     return;
-  }
-  if (unwrapped.kind === 'binary') {
+  } else if (unwrapped.kind === 'binary') {
     const leftField = fieldRefOf(unwrapped.left);
     const rightField = fieldRefOf(unwrapped.right);
     const leftIsDate = leftField ? dateFields.has(leftField) : false;
@@ -6022,20 +6053,24 @@ export function formDateOrderRules(app: App, formName: string): FormDateOrderRes
     } else if (stmt.kind === 'try') {
       visitStmt(stmt.body);
       if (stmt.catchBody) visitStmt(stmt.catchBody);
+    } else if (stmt.kind === 'unknown' && /cancel\s+submit/i.test(stmt.text)) {
+      unsupportedRules.push('unparseable validation statement');
     }
   };
 
   for (const w of workflows) {
     if (!w.deluge?.text?.trim()) continue;
+    let script: Script;
     try {
-      const script = parse(w.deluge.text);
-      for (const stmt of script.body) {
-        visitStmt(stmt);
-      }
+      script = parse(w.deluge.text);
     } catch {
       if (w.deluge.text.includes('cancel submit')) {
         unsupportedRules.push(`unparseable validation workflow ${w.name || formName}`);
       }
+      continue;
+    }
+    for (const stmt of script.body) {
+      visitStmt(stmt);
     }
   }
 
