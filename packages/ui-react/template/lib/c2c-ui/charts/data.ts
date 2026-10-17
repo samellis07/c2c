@@ -185,6 +185,16 @@ export function chartSeries(rows: Row[], chart: ChartSpec, today: Day): Series {
   };
 }
 
+/**
+ * Whether an `op: "aggregate"` reply falls back to the row query: a 2xx without
+ * buckets means an older endpoint that ignores the op, and 404/405/501 means a
+ * static host with no data function. A refused group field or a server error
+ * is a load failure — the chart shows its error state, never an empty drawing.
+ */
+export function aggregateFallback(reply: { ok: boolean; status: number }): boolean {
+  return reply.ok || reply.status === 404 || reply.status === 405 || reply.status === 501;
+}
+
 /** The `op: "aggregate"` reply body of a report endpoint. */
 export interface AggregateBody {
   buckets?: { key: string; values: number[] }[];

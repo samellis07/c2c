@@ -963,6 +963,24 @@ function compositePartsOfParents(app: App, parents: Record<string, string>, plan
   return out;
 }
 
+/**
+ * Parent form -> its stored column names, for the lookup parents of one form.
+ * The aggregate op's lookup-path tail (`Book.Genre`) may name only a stored
+ * column of the parent — an own-element check against this list, never a
+ * property lookup on a row object, so `constructor`/`__proto__`/`toString` and
+ * sibling-form fields are refused. Decimal criteria shadows are internal and
+ * excluded. Columns come from the generated schema, never a row key.
+ */
+function storedColumnsOfParents(app: App, parents: Record<string, string>, plan: SchemaPlan): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const parentForm of Object.values(parents).sort().filter((name, index, all) => index === 0 || name !== all[index - 1])) {
+    const table = plan.tables.find((item) => item.role === 'form' && item.form === parentForm && !item.nosql);
+    if (!table) continue;
+    out[parentForm] = table.columns.filter((column) => !column.shadowFor).map((column) => column.name);
+  }
+  return out;
+}
+
 /** Swap only the over-cap report. The unstaged source is returned untouched. */
 function stageReportSource(source: string, queries: readonly string[]): string {
   const bound = source.includes('function boundCriteria(');
@@ -1122,6 +1140,107 @@ function dateFieldKinds(app: App, formName: string): Record<string, 'date' | 'da
 const aggregateHelpers = `const AGGREGATE_ROW_CAP = ${LIMITS.zcqlRowsPerQuery * 10};
 const AGG_PAGE = ${LIMITS.zcqlRowsPerQuery};
 const AGG_IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const AGG_PATH = /^[A-Za-z_][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*$/;
+
+// A lookup-path field (Book.Genre): head is a lookup field of the report form,
+// rest a stored column of the parent form (a composite part maps to its stored
+// column) — an own-element check on the emitted parentColumns allowlist, never
+// a row-object property lookup, so prototype names and foreign fields refuse.
+// The parent field must also be readable under the caller's scope — the same
+// lookupDisplayScope a display column uses — or the path is refused.
+// The row key the fold reads stays the requested dotted name.
+function aggregatePath(raw, readable, principal) {
+  const dot = raw.indexOf(".");
+  const head = raw.slice(0, dot);
+  const rest = raw.slice(dot + 1);
+  if (!head || !rest || !aggregateFields.includes(head) || !readableField(head, readable)) return null;
+  const parent = Object.prototype.hasOwnProperty.call(lookupParents, head) ? lookupParents[head] : "";
+  if (!parent) return null;
+  const parts = Object.prototype.hasOwnProperty.call(parentParts, parent) ? parentParts[parent] : {};
+  const field = Object.prototype.hasOwnProperty.call(parts, rest) ? parts[rest] : rest;
+  const columns = Object.prototype.hasOwnProperty.call(parentColumns, parent) ? parentColumns[parent] : null;
+  if (!Array.isArray(columns) || !columns.includes(field)) return null;
+  if (!lookupDisplayScope(principal, parent, field, { op: "true" })) return null;
+  return { key: head + "." + rest, head, form: parent, field, rest };
+}
+
+// One group or measure field of an aggregate request: a stored/report column,
+// or a lookup path. Returns the row key the fold reads and the path spec when
+// the parent has to be read.
+function aggregateFieldRef(raw, readable, principal) {
+  if (typeof raw !== "string") return null;
+  const field = raw.trim();
+  if (!field) return null;
+  if (AGG_PATH.test(field)) {
+    const path = aggregatePath(field, readable, principal);
+    return path ? { name: path.key, path } : null;
+  }
+  if (!AGG_IDENT.test(field) || !aggregateFields.includes(field) || !readableField(field, readable)) return null;
+  return { name: field, path: null };
+}
+
+// Parent reads behind the lookup paths an aggregate groups or folds on: one
+// scoped ROWID IN read per field, values kept under the dotted row key
+// ("Book.Genre") so the fold sees them next to the projected row. A supplied
+// nested cell (row.Book.Genre or row["Book.Genre"]) is read without a query;
+// an unresolvable or unreadable path leaves the key empty, like a display
+// column the caller may not read.
+async function resolveLookupPaths(datastore, rows, paths, principal) {
+  for (const p of paths || []) {
+    for (const row of rows) {
+      if (!row || row[p.key] !== undefined) continue;
+      const cell = row[p.head];
+      if (cell && typeof cell === "object" && !Array.isArray(cell)) {
+        if (cell[p.field] !== undefined) row[p.key] = cell[p.field];
+        else if (cell[p.rest] !== undefined) row[p.key] = cell[p.rest];
+      }
+    }
+  }
+  if (!datastore) return;
+  const heads = {};
+  for (const p of paths || []) {
+    const group = heads[p.head] = heads[p.head] || { form: p.form, specs: [] };
+    group.specs.push(p);
+  }
+  for (const head of Object.keys(heads)) {
+    const { form, specs } = heads[head];
+    const seen = {};
+    const ids = [];
+    for (const row of rows) {
+      if (!row || !specs.some((p) => row[p.key] === undefined)) continue;
+      const cell = row[head];
+      const id = typeof cell === "string" && /^[0-9]+$/.test(cell)
+        ? cell
+        : cell && typeof cell === "object" && cell.id != null && /^[0-9]+$/.test(String(cell.id)) ? String(cell.id) : "";
+      if (id && !seen[id]) {
+        seen[id] = true;
+        ids.push(id);
+      }
+    }
+    if (!ids.length) continue;
+    for (const p of specs) {
+      const scoped = lookupDisplayScope(principal, form, p.field, { op: "in", field: "ROWID", value: ids });
+      if (!scoped) continue;
+      let parents;
+      try {
+        parents = await readScoped(datastore, form, scoped.criteria, 0, ids.length);
+      } catch (err) {
+        continue;
+      }
+      const values = {};
+      for (const parent of Array.isArray(parents) ? parents : []) {
+        if (!parent || typeof parent !== "object" || parent.ROWID == null || parent.ROWID === "") continue;
+        values[String(parent.ROWID)] = parent[p.field];
+      }
+      for (const row of rows) {
+        if (!row || row[p.key] !== undefined) continue;
+        const cell = row[head];
+        const id = typeof cell === "string" ? cell : cell && typeof cell === "object" && cell.id != null ? String(cell.id) : "";
+        if (Object.prototype.hasOwnProperty.call(values, id)) row[p.key] = values[id];
+      }
+    }
+  }
+}
 const AGG_MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
 // The text a value is grouped and compared by (mirrors the client fold).
@@ -1184,24 +1303,32 @@ function aggFold(rows, fn, field) {
 }
 
 // body.group and each body.measures field must be a stored or report column
-// the caller's profile reads: a hidden group would leak what it holds through
-// the bucket keys, so the whole request fails; a hidden measure just drops
-// that measure. An empty measure list folds the record count.
-function aggregateSpec(body, readable) {
-  const group = typeof body.group === "string" ? body.group.trim() : "";
-  if (!AGG_IDENT.test(group) || !aggregateFields.includes(group) || !readableField(group, readable)) return null;
+// the caller's profile reads, or a lookup path through a lookup field of the
+// form: a hidden group would leak what it holds through the bucket keys, so
+// the whole request fails; a hidden measure just drops that measure. An empty
+// measure list folds the record count.
+function aggregateSpec(body, readable, principal) {
+  const groupRef = aggregateFieldRef(body.group, readable, principal);
+  if (!groupRef) return null;
   const measures = [];
+  const paths = groupRef.path ? [groupRef.path] : [];
   for (const item of Array.isArray(body.measures) ? body.measures : []) {
     if (!item || typeof item !== "object") continue;
     const fn = typeof item.fn === "string" ? item.fn.toLowerCase() : "";
     if (fn !== "count" && fn !== "sum" && fn !== "value") continue;
     const field = typeof item.field === "string" ? item.field.trim() : "";
-    if (field && (!AGG_IDENT.test(field) || !aggregateFields.includes(field) || !readableField(field, readable))) continue;
-    if (fn !== "count" && !field) continue;
-    measures.push({ fn, field });
+    if (field) {
+      const ref = aggregateFieldRef(field, readable, principal);
+      if (!ref) continue;
+      if (ref.path) paths.push(ref.path);
+      measures.push({ fn, field: ref.name });
+    } else {
+      if (fn !== "count") continue;
+      measures.push({ fn, field: "" });
+    }
   }
   if (!measures.length) measures.push({ fn: "count", field: "" });
-  return { group, measures, order: body.order === "value" ? "value" : "key" };
+  return { group: groupRef.name, measures, paths, order: body.order === "value" ? "value" : "key" };
 }
 
 // Group the projected rows by the group field and fold every measure per
@@ -1260,6 +1387,7 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
   // column compares the varchar ('10' < '5').
   const parents = lookupParentsOf(app, formName);
   const parentParts = compositePartsOfParents(app, parents, schemaOf(app));
+  const parentColumns = storedColumnsOfParents(app, parents, schemaOf(app));
   const parentForms: string[] = [];
   const seenParents = new Set<string>();
   for (const item of lookups) {
@@ -1436,7 +1564,7 @@ ${indent}}
     'body.filter is a predefined filter label. It applies only when that label was baked in from the report. A field-only filter has no criteria and does not filter. An unknown string is ignored and is not compiled as criteria.',
     'body.q, body.filter and body.sort use only fields the caller\'s profile reads; a hidden field is ignored, so no condition or order reveals its values.',
     'body.op "aggregate" folds rows on the server: body.group is the bucket field, body.measures the count/sum/value folds, body.order "key" or "value". It reads at most AGGREGATE_ROW_CAP rows through the same criteria and profile scope as "query" (ORDER BY ROWID pages, so the fold is stable), and truncated marks the cap. Dry run folds body.rows.',
-    'The aggregate group field must be a readable stored column or report column, else the request fails 400; a hidden measure field drops that measure. Bucket keys follow the chart fold: dates group by calendar day.',
+    'The aggregate group field must be a readable stored column, report column or lookup path (Book.Genre, resolved under the caller\'s parent read scope), else the request fails 400; a hidden measure field drops that measure. Bucket keys follow the chart fold: dates group by calendar day.',
     'A criteria that did not migrate fails closed: zero rows and notice "filter not migrated", never an unfiltered read.',
     ...(wantsRelative
       ? ['A relative date is evaluated when the report is read, in the application time zone. A week starts on Sunday (https://www.zoho.com/deluge/help/functions/datetime/getweekofyear.html). today is 00:00:00 (https://www.zoho.com/deluge/help/functions/datetime/today.html). A missing time zone fails closed.']
@@ -1455,6 +1583,8 @@ export const lookupColumns = ${JSON.stringify(lookups)};
 export const lookupParents = ${JSON.stringify(parents)};
 /** Stored part column of each lookup parent's composite parts: "Name.first_name" -> "Name_first_name". */
 export const parentParts = ${JSON.stringify(parentParts)};
+/** Stored columns of each lookup parent form: the only names an aggregate lookup path may read after the dot. */
+const parentColumns = ${JSON.stringify(parentColumns)};
 export const reportSort = ${JSON.stringify(report.sort)};
 /** Fields an aggregate request may group or fold: the report's columns plus the form's stored columns. */
 const aggregateFields = ${JSON.stringify(aggFields)};
@@ -1784,7 +1914,7 @@ ${liveBind}      if (body.op === "aggregate") {
         // Server-side chart fold: the same scope, criteria, projection and
         // stage field rules as the list read, in ORDER BY ROWID pages up to
         // AGGREGATE_ROW_CAP rows.
-        const spec = aggregateSpec(body, readableFields);
+        const spec = aggregateSpec(body, readableFields, principal);
         if (!spec) {
           send(res, 400, { dryRun: false, error: "the aggregate request needs a readable group field on this report" });
           return;
@@ -1807,7 +1937,8 @@ ${stageLoad('        ')}        ${wantsRelative ? 'let' : 'const'} aggRows = [];
             break;
           }
         }
-${wantsRelative ? '        if (relative) aggRows = aggRows.filter((row) => matchRow(row, aggResolved, decimalColumns));\n' : ''}        await resolveLookupDisplays(datastore, aggRows, lookupColumns, principal);
+${wantsRelative ? '        if (relative) aggRows = aggRows.filter((row) => matchRow(row, aggResolved, decimalColumns));\n' : ''}        await resolveLookupPaths(datastore, aggRows, spec.paths, principal);
+        await resolveLookupDisplays(datastore, aggRows, lookupColumns, principal);
         const agg = aggregateRows(aggRows, spec);
         send(res, 200, {
           dryRun: false,
@@ -1865,11 +1996,12 @@ ${stageLoad('    ')}    ${rowWord} = suppliedRows(req).map((row) => {
       return projected;
     });
 ${wantsRelative ? '    if (relative) rows = rows.filter((row) => matchRow(row, applied, decimalColumns));\n' : ''}    if (body.op === "aggregate") {
-      const spec = aggregateSpec(body, scoped.fields);
+      const spec = aggregateSpec(body, scoped.fields, principal);
       if (!spec) {
         send(res, 400, { dryRun: true, error: "the aggregate request needs a readable group field on this report" });
         return;
       }
+      await resolveLookupPaths(null, rows, spec.paths, principal);
       const agg = aggregateRows(rows, spec);
       send(res, 200, {
         dryRun: true,

@@ -9,7 +9,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import type { ChartSpec, ReportSpec } from '../types';
 import type { Api } from '../runtime/api';
 import { useEnv } from '../runtime/env';
-import { bucketsToSeries, chartSeries, todayIn, type AggregateBody, type Day, type Row, type Series } from './data';
+import { aggregateFallback, bucketsToSeries, chartSeries, todayIn, type AggregateBody, type Day, type Row, type Series } from './data';
 
 /** At most this many pages per report (300 rows each by default). */
 export const MAX_PAGES = 10;
@@ -58,8 +58,10 @@ export async function readChartRows(api: Api, report: ReportSpec, chart: ChartSp
     if (reply.ok && reply.body && Array.isArray(reply.body.buckets)) {
       return { series: bucketsToSeries(reply.body, chart), truncated: !!reply.body.truncated, scanned: Number(reply.body.scanned) || 0 };
     }
-    // Any other answer — an endpoint without the op, a refused group field, a
-    // server error — falls back to the row query, which folds here.
+    // An endpoint without the op (a static host) falls back to the row query,
+    // which folds here. A refused group field or a server error is a load
+    // failure: the chart shows its error state, never a fake "no data".
+    if (!aggregateFallback(reply)) throw new Error(`aggregate ${reply.status}`);
   }
   const { rows, truncated } = await readRows(api, report);
   return { series: chartSeries(rows, chart, today), truncated, scanned: rows.length };

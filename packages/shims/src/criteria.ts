@@ -374,6 +374,11 @@ function matchIdLeaf(row: Record<string, unknown>, c: Criteria): boolean {
   }
 }
 
+/** `(NOT p)` with the always-true marker folded to the never-match clause. */
+function notMode(compiled: string): string {
+  return compiled === 'true' ? NEVER : `(NOT ${compiled})`;
+}
+
 type Mode = 'exact' | 'super' | 'sub';
 
 /**
@@ -393,10 +398,19 @@ function compileMode(c: Criteria, encrypted: ReadonlySet<string>, decimals: Deci
       return 'true';
     case 'todo':
       throw new UntranslatedConstruct(c.construct);
-    case 'and':
+    case 'and': {
+      // ZCQL has no boolean literal predicate: a `true` operand carries no
+      // clause and is dropped, so `x AND true` compiles as `x`. An empty AND
+      // is the always-true marker callers strip to no WHERE.
+      const parts = c.args.map((a) => compileMode(a, encrypted, decimals, mode)).filter((part) => part !== 'true');
+      if (!parts.length) return 'true';
+      return `(${parts.join(' AND ')})`;
+    }
     case 'or': {
-      const joiner = c.op === 'and' ? ' AND ' : ' OR ';
-      return `(${c.args.map((a) => compileMode(a, encrypted, decimals, mode)).join(joiner)})`;
+      const parts = c.args.map((a) => compileMode(a, encrypted, decimals, mode));
+      // `x OR true` is always true: keep the marker, never the bare literal.
+      if (parts.includes('true')) return 'true';
+      return `(${parts.join(' OR ')})`;
     }
     case 'not':
       if (mode === 'super' && isDecimalLeaf(c.arg, decimals)) {
@@ -405,7 +419,7 @@ function compileMode(c: Criteria, encrypted: ReadonlySet<string>, decimals: Deci
         return `(NOT (${bound}) OR ${decimals[c.arg.field]!.shadow} IS NULL)`;
       }
       // NOT of a superset is a subset, so the operand is compiled the other way.
-      return `(NOT ${compileMode(c.arg, encrypted, decimals, mode === 'super' ? 'sub' : mode === 'sub' ? 'super' : 'exact')})`;
+      return notMode(compileMode(c.arg, encrypted, decimals, mode === 'super' ? 'sub' : mode === 'sub' ? 'super' : 'exact'));
     case 'isNull':
       if (c.field === ID_FIELD) return compileIdLeaf(c);
       if (encrypted.has(c.field)) throw new EncryptedCriteriaError(c.field, 'IS NULL');
