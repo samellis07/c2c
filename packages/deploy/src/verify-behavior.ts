@@ -29,10 +29,12 @@ import type { App } from '../../core/src/ir.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { slug } from '../../deluge/src/generate.js';
 import { generateUi, type UiModel } from '../../ui/src/index.js';
+import { appTimeZone } from '../../ui/src/generate.js';
 import { ALLOWED_ENV, catalystProjectName, type GuardOk } from './guards.js';
 import { deployFiles, writeDeployTree } from './plan.js';
 import { emptyRegistry } from './registry.js';
 import { tableCreatePlan, type TableCreateStep } from './tables.js';
+import { comparisonZone, temporalEqual } from './temporal.js';
 
 // ---------- golden schema ----------
 
@@ -276,7 +278,7 @@ function isVolatile(value: unknown): boolean {
  * a literal. Returns true when actual satisfies expected; findings are
  * appended.
  */
-function matchValue(expected: unknown, actual: unknown, pointer: string, findings: Omit<BehaviorFinding, 'case'>[], unordered: boolean, partial = false): boolean {
+function matchValue(expected: unknown, actual: unknown, pointer: string, findings: Omit<BehaviorFinding, 'case'>[], unordered: boolean, partial = false, zone?: string): boolean {
   if (typeof expected === 'string' && (MARKERS as readonly string[]).includes(expected)) {
     if (markerMatches(expected, actual)) return true;
     findings.push({ pointer, expected, actual });
@@ -291,7 +293,7 @@ function matchValue(expected: unknown, actual: unknown, pointer: string, finding
     if (unordered) {
       const used = new Set<number>();
       expected.forEach((want, i) => {
-        const at = actual.findIndex((got, j) => !used.has(j) && matchSilent(want, got, unordered, partial));
+        const at = actual.findIndex((got, j) => !used.has(j) && matchSilent(want, got, unordered, partial, zone));
         if (at < 0) {
           findings.push({ pointer: `${pointer}[${i}]`, expected: want, actual: 'no matching element' });
           ok = false;
@@ -302,7 +304,7 @@ function matchValue(expected: unknown, actual: unknown, pointer: string, finding
     } else {
       const count = Math.min(expected.length, actual.length);
       for (let i = 0; i < count; i++) {
-        if (!matchValue(expected[i], actual[i], `${pointer}[${i}]`, findings, unordered, partial)) ok = false;
+        if (!matchValue(expected[i], actual[i], `${pointer}[${i}]`, findings, unordered, partial, zone)) ok = false;
       }
       for (let i = count; i < expected.length; i++) {
         findings.push({ pointer: `${pointer}[${i}]`, expected: expected[i], actual: '(absent)' });
@@ -325,7 +327,7 @@ function matchValue(expected: unknown, actual: unknown, pointer: string, finding
       if (!(key in actual)) {
         findings.push({ pointer: `${pointer}.${key}`, expected: want, actual: '(absent)' });
         ok = false;
-      } else if (!matchValue(want, actual[key], `${pointer}.${key}`, findings, unordered, partial)) {
+      } else if (!matchValue(want, actual[key], `${pointer}.${key}`, findings, unordered, partial, zone)) {
         ok = false;
       }
     }
@@ -340,7 +342,8 @@ function matchValue(expected: unknown, actual: unknown, pointer: string, finding
   if (Object.is(expected, actual)) return true;
   // Normalization: a numeric cell compares equal across the text/number
   // boundary — Creator stores and exports text; Catalyst columns are typed.
-  if (textBoundaryEqual(expected, actual)) return true;
+  // A date or date-time compares in one normal form (Creator `dd-MMM-yyyy`, Catalyst ISO).
+  if (textBoundaryEqual(expected, actual, zone)) return true;
   findings.push({ pointer, expected, actual });
   return false;
 }
@@ -350,9 +353,12 @@ const NUMERIC_TEXT = /^-?\d+(\.\d+)?$/;
 /**
  * Creator cells are text; Catalyst columns are typed. A number equals its
  * numeric text by value (`2` = `"2"`, `947` = `"947.00"`), and a boolean
- * equals `"true"`/`"false"`. Two strings or two numbers still compare strictly.
+ * equals `"true"`/`"false"`. Two date or date-time strings compare in the
+ * {@link temporalEqual} normal form, date-times in the app zone `zone`. Other
+ * strings and two numbers still compare strictly.
  */
-export function textBoundaryEqual(expected: unknown, actual: unknown): boolean {
+export function textBoundaryEqual(expected: unknown, actual: unknown, zone?: string): boolean {
+  if (temporalEqual(expected, actual, zone)) return true;
   const pair = [expected, actual];
   const text = pair.find((v) => typeof v === 'string') as string | undefined;
   if (text === undefined) return false;
@@ -363,16 +369,16 @@ export function textBoundaryEqual(expected: unknown, actual: unknown): boolean {
 }
 
 /** Diff-free probe used by multiset array matching. */
-function matchSilent(expected: unknown, actual: unknown, unordered: boolean, partial = false): boolean {
+function matchSilent(expected: unknown, actual: unknown, unordered: boolean, partial = false, zone?: string): boolean {
   const scratch: Omit<BehaviorFinding, 'case'>[] = [];
-  return matchValue(expected, actual, '', scratch, unordered, partial);
+  return matchValue(expected, actual, '', scratch, unordered, partial, zone);
 }
 
-function matchRows(expectedRows: Record<string, unknown>[], actualRows: Record<string, unknown>[], pointer: string, findings: Omit<BehaviorFinding, 'case'>[], unordered: boolean, partial = false): void {
+function matchRows(expectedRows: Record<string, unknown>[], actualRows: Record<string, unknown>[], pointer: string, findings: Omit<BehaviorFinding, 'case'>[], unordered: boolean, partial = false, zone?: string): void {
   if (unordered) {
     const used = new Set<number>();
     expectedRows.forEach((want, i) => {
-      const at = actualRows.findIndex((got, j) => !used.has(j) && matchSilent(want, got, unordered, partial));
+      const at = actualRows.findIndex((got, j) => !used.has(j) && matchSilent(want, got, unordered, partial, zone));
       if (at < 0) {
         findings.push({ pointer: `${pointer}[${i}]`, expected: want, actual: 'no matching row' });
       } else {
@@ -387,7 +393,7 @@ function matchRows(expectedRows: Record<string, unknown>[], actualRows: Record<s
   }
   const count = Math.min(expectedRows.length, actualRows.length);
   for (let i = 0; i < count; i++) {
-    matchValue(expectedRows[i], actualRows[i], `${pointer}[${i}]`, findings, unordered, partial);
+    matchValue(expectedRows[i], actualRows[i], `${pointer}[${i}]`, findings, unordered, partial, zone);
   }
   for (let i = count; i < expectedRows.length; i++) {
     findings.push({ pointer: `${pointer}[${i}]`, expected: expectedRows[i], actual: '(absent)' });
@@ -682,12 +688,13 @@ function outcomeDiff(want: Outcome, count: number | undefined, res: BehaviorCall
   return ok ? undefined : seen;
 }
 
-/** True when a report row's field equals the `where` value (text/number boundary, display objects). */
-function whereMatches(row: Record<string, unknown>, where: Record<string, unknown>): boolean {
+/** True when a report row's field equals the `where` value (text/number boundary, date normal form, display objects). */
+export function whereMatches(row: Record<string, unknown>, where: Record<string, unknown>, zone?: string): boolean {
   return Object.entries(where).every(([field, want]) => {
     const got = row[field];
     if (got === want) return true;
     if (got !== null && got !== undefined && want !== null && typeof got !== 'object' && String(got) === String(want)) return true;
+    if (temporalEqual(got, want, zone)) return true;
     return isObject(got) && (got.display_value === want || got.zc_display_value === want);
   });
 }
@@ -726,7 +733,7 @@ function creatorAccepted(step: GoldenStep): boolean {
   return codes.includes(3000);
 }
 
-async function runUpdate(step: Extract<GoldenStep, { op: 'update' }>, model: UiModel, backend: BehaviorBackend): Promise<BehaviorCall> {
+async function runUpdate(step: Extract<GoldenStep, { op: 'update' }>, model: UiModel, backend: BehaviorBackend, zone?: string): Promise<BehaviorCall> {
   const report = model.reports.find((r) => r.name === step.report);
   if (!report) throw new Error(`no report ${step.report} in the migrated app`);
   const form = model.forms.find((f) => f.name === report.form);
@@ -734,7 +741,7 @@ async function runUpdate(step: Extract<GoldenStep, { op: 'update' }>, model: UiM
   const read = await backend.call('POST', report.queryEndpoint, { op: 'query', page: 0, pageSize: 300 });
   const rows = isObject(read.body) && Array.isArray(read.body.rows) ? (read.body.rows as unknown[]).filter(isObject) : null;
   if (read.status !== 200 || !rows) return { status: read.status, body: { error: 'report read failed', reply: read.body } };
-  const matched = rows.filter((row) => whereMatches(row, step.where));
+  const matched = rows.filter((row) => whereMatches(row, step.where, zone));
   let updated = 0;
   let refused = 0;
   for (const row of matched) {
@@ -747,6 +754,8 @@ async function runUpdate(step: Extract<GoldenStep, { op: 'update' }>, model: UiM
 
 export async function runBehavior(app: App, golden: GoldenFile, backend: BehaviorBackend, mode: 'offline' | 'live'): Promise<BehaviorRunResult> {
   const model = generateUi(app).model;
+  // Date-times compare in the app zone the generated app runs in: `C2C_APP_TIMEZONE`, else the app setting.
+  const zone = comparisonZone(process.env.C2C_APP_TIMEZONE?.trim() || appTimeZone(app));
   const findings: BehaviorFinding[] = [];
   const skipped: { case: string; reason: string }[] = [];
   const envArtifacts: { case: string; step: number; tags: string[] }[] = [];
@@ -782,7 +791,7 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
       let res: BehaviorCall;
       let path: string;
       const send = async (sent: GoldenStep): Promise<BehaviorCall> => {
-        if (sent.op === 'update') return runUpdate(sent, model, backend);
+        if (sent.op === 'update') return runUpdate(sent, model, backend, zone);
         const endpoint = stepEndpoint(sent, model);
         return backend.call(endpoint.method, endpoint.path, endpoint.body);
       };
@@ -837,7 +846,7 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
       }
       if (want.body !== undefined) {
         const diffs: Omit<BehaviorFinding, 'case'>[] = [];
-        matchValue(want.body, res.body, 'body', diffs, want.unordered === true, want.partial === true);
+        matchValue(want.body, res.body, 'body', diffs, want.unordered === true, want.partial === true, zone);
         for (const d of diffs) at({ step: stepNo, ...d }, stepTags);
       }
     }
@@ -847,11 +856,11 @@ export async function runBehavior(app: App, golden: GoldenFile, backend: Behavio
     for (const [table, listed] of Object.entries(tables)) {
       const sentBy = apiOnlySent.get(table);
       const expectedRows = sentBy
-        ? listed.map((row) => Object.fromEntries(Object.entries(row).filter(([column, value]) => !sentBy.get(column)?.some((sent) => sent === value || textBoundaryEqual(value, sent)))))
+        ? listed.map((row) => Object.fromEntries(Object.entries(row).filter(([column, value]) => !sentBy.get(column)?.some((sent) => sent === value || textBoundaryEqual(value, sent, zone)))))
         : listed;
       const actualRows = await backend.tableRows(table);
       const diffs: Omit<BehaviorFinding, 'case'>[] = [];
-      matchRows(expectedRows, actualRows, `tables.${table}`, diffs, kase.expect?.unordered === true, kase.expect?.partial === true);
+      matchRows(expectedRows, actualRows, `tables.${table}`, diffs, kase.expect?.unordered === true, kase.expect?.partial === true, zone);
       for (const d of diffs) at(d);
     }
     if (findings.length === findingsBefore) equivalentCases += 1;
