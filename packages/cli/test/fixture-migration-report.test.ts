@@ -182,7 +182,7 @@ test('markdown report spells out an empty TODO list, no manual steps, and a name
   assert.match(md, /## Field gaps\n\n- none\n/);
   assert.match(md, /## Manual steps\n\n- none\n\n/);
   assert.match(md, /## Hidden from end users\n\n0\n\n- none\n\n/);
-  assert.match(md, /## Human steps\n\n- none\n$/);
+  assert.match(md, /## Human steps\n\n- none\n\n## Not converted\n\nSilent drops: 0/);
 });
 
 test('converted inventory section lists counts from IR and renders singular/plural correctly', () => {
