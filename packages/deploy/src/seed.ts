@@ -523,6 +523,9 @@ export async function migrateSeed(opts: {
   // Tables that did not load. A lookup child of one is skipped, not resolved:
   // its parent has no ROWIDs, so a write would carry broken foreign keys.
   const notLoaded = new Set<string>();
+  // The not-loaded tables whose rows never reached the store: a re-run
+  // inserts them (a ROWID read-back failure leaves its rows behind instead).
+  const uninserted = new Set<string>();
   // ROWIDs are read back only where they are used: a lookup parent, or a table
   // whose deferred lookups are set by row update after the load.
   const needsRowIds = new Set(keys.flatMap((key) => (deferred.has(foreignKeyId(key)) ? [key.parent, key.table] : [key.parent])));
@@ -532,6 +535,7 @@ export async function migrateSeed(opts: {
       : acyclic.find((key) => key.table === table.table && notLoaded.has(key.parent));
     if (missingParent) {
       notLoaded.add(table.table);
+      uninserted.add(table.table);
       singles.push(unwrittenTable(table, `skipped: parent ${missingParent.parent} not loaded (lookup ${missingParent.column})`));
       continue;
     }
@@ -541,6 +545,7 @@ export async function migrateSeed(opts: {
       resolved = opts.dryRun ? table : omitColumns(resolveForeignKeys(table, acyclic, rowIds), deferredColumns(table.table, deferred));
     } catch (error) {
       notLoaded.add(table.table);
+      uninserted.add(table.table);
       singles.push(unwrittenTable(table, `skipped: ${error instanceof Error ? error.message : String(error)}`));
       continue;
     }
@@ -566,7 +571,10 @@ export async function migrateSeed(opts: {
       ...(opts.userIds?.size ? { userIds: opts.userIds } : {}),
     });
     singles.push(single);
-    if (!single.ok) notLoaded.add(table.table);
+    if (!single.ok) {
+      notLoaded.add(table.table);
+      uninserted.add(table.table);
+    }
     // A refused or failed table is recorded and the load continues: one bad
     // table must not leave the rest of the app empty. ok stays false and the
     // per-table report names the table that did not load.
@@ -603,6 +611,7 @@ export async function migrateSeed(opts: {
       deferred,
       rowIds,
       notLoaded,
+      uninserted,
     );
     return { ...fixCounts(applyDeferredReports(merged, reports), byReport), ...(reports.length ? { deferredUpdates: reports } : {}) };
   }

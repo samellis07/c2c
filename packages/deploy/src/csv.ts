@@ -691,6 +691,9 @@ export async function migrateLoaded(opts: {
   // count passes below still run, so the report names every table that did not land.
   let failed = false;
   const notLoaded = new Set<string>();
+  // The not-loaded tables whose rows never reached the store: a re-run
+  // inserts them (a ROWID read-back failure leaves its rows behind instead).
+  const uninserted = new Set<string>();
   const acyclic = loaded.foreignKeys.filter((key) => !deferred.has(foreignKeyId(key)));
   // ROWIDs are read back only where they are used: a lookup parent, or a table
   // whose deferred lookups are set by row update after the load.
@@ -700,6 +703,7 @@ export async function migrateLoaded(opts: {
     written.push(...result.tables);
     seeded.push(result);
     notLoaded.add(table.table);
+    uninserted.add(table.table);
     failed = true;
   };
   for (const table of loaded.tables) {
@@ -743,6 +747,7 @@ export async function migrateLoaded(opts: {
     if (!result.ok) {
       failed = true;
       notLoaded.add(table.table);
+      uninserted.add(table.table);
       continue;
     }
     if (!needsRowIds.has(table.table)) continue;
@@ -761,7 +766,7 @@ export async function migrateLoaded(opts: {
   // Another table's failure does not stop the deferred updates: only a table
   // that did not load, or whose deferred parent did not, is skipped and reported.
   const deferredUpdates = deferred.size > 0
-    ? await updateDeferredForeignKeys(opts, loaded.tables, loaded.foreignKeys, deferred, rowIds, notLoaded)
+    ? await updateDeferredForeignKeys(opts, loaded.tables, loaded.foreignKeys, deferred, rowIds, notLoaded, uninserted)
     : [];
   applyDeferredReports({ ok: true, dryRun: false, tables: written }, deferredUpdates);
   if (deferredUpdates.some((report) => report.notUpdated || report.error)) failed = true;
