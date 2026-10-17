@@ -420,6 +420,8 @@ export interface BehaviorBackend {
   reset?(): Promise<void>;
   /** Write rows straight into a Data Store table, the way the data loader lands them (offline only). */
   insertRows?(table: string, rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]>;
+  /** Row updates by ROWID, the deferred-lookup second pass the data loader runs (offline only). */
+  updateRows?(table: string, rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]>;
   close(): Promise<void>;
 }
 
@@ -431,7 +433,7 @@ export interface OfflineHarnessOptions {
 }
 
 interface FakeSdk {
-  initialize(req: unknown, opts?: { scope?: string }): { datastore(): { table(name: string): { insertRows(rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]> } } };
+  initialize(req: unknown, opts?: { scope?: string }): { datastore(): { table(name: string): { insertRows(rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]>; updateRows(rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]> } } };
   setSession(token: string, user: unknown): void;
   /** Columns the table plan creates is_unique, enforced as Data Store does. */
   setUnique?(declared: Record<string, string[]>): void;
@@ -542,6 +544,9 @@ export async function startOfflineBackend(app: App, opts: OfflineHarnessOptions 
       },
       insertRows(table, rows) {
         return sdk.initialize(undefined, { scope: 'admin' }).datastore().table(table).insertRows(rows);
+      },
+      updateRows(table, rows) {
+        return sdk.initialize(undefined, { scope: 'admin' }).datastore().table(table).updateRows(rows);
       },
       async close() {
         if (server) {
