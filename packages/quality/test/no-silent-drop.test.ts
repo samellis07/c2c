@@ -651,6 +651,46 @@ test('a translation block with several languages is named as a block and listed 
   assert.deepEqual(auditApp(de, deOut).map((d) => d.name), ['translation de']);
 });
 
+/** A creator function whose body is only a client `openUrl`: the generator warns `function-untranslated` and writes no module. */
+function warningOnlyFunctionApp(): App {
+  return app({
+    functions: [
+      {
+        name: 'Navi',
+        kind: 'creator',
+        deluge: [{ text: 'openUrl("#Form:Orders", "same window");', span: { start: 0, end: 42 } }],
+        properties: [],
+        span: { start: 0, end: 500 },
+      },
+    ],
+  });
+}
+
+test('a function warned about but not emitted is a silent drop, not coverage', () => {
+  const a = warningOnlyFunctionApp();
+  const out = collectOutputs(a);
+  assert.ok(out.warnings.some((w) => w.construct === 'function-untranslated' && w.name === 'Navi'));
+  assert.ok(!out.files.some((f) => f.path === 'functions/custom/navi.mjs'));
+  const drops = auditApp(a, out);
+  assert.deepEqual(
+    drops.map((d) => `${d.kind}: ${d.name}`),
+    ['function: Navi'],
+  );
+  assert.match(drops[0]!.note, /warning/);
+});
+
+test('a todo inside a warned function counts it once — a warning alone never does', () => {
+  const a = warningOnlyFunctionApp();
+  const out = collectOutputs(a);
+  out.todos = [{ construct: 'manual', start: 0, end: 10 }];
+  const rows = coverageLedger(a, out).filter((r) => r.kind === 'function');
+  assert.deepEqual(
+    rows.map((r) => `${r.status}:${r.via}`),
+    ['counted:todo'],
+  );
+  assert.deepEqual(auditApp(a, out), []);
+});
+
 /** App with one emitted workflow whose script has two assign statements. */
 function twoStatementApp(): App {
   const base = coveredApp();
