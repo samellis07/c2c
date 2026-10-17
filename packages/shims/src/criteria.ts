@@ -298,8 +298,10 @@ function compileIdLeaf(c: Criteria): string {
     case 'contains':
     case 'startsWith':
     case 'endsWith': {
-      // A null needle is the empty pattern: it matches every stored row.
-      if (c.value == null) return ALWAYS;
+      // A null needle never matches: no captured ZCQL/Creator behaviour backs
+      // a match-all, and widening a record filter to every row is worse than
+      // refusing the match ([UNVERIFIED], plugin/references/facts/zcql.md).
+      if (c.value == null) return NEVER;
       const pattern = like(idCriteriaValue(c.value), c.op);
       return `((${src} IS NOT NULL AND ${src} LIKE ${pattern}) OR (${src} IS NULL AND ${row} LIKE ${pattern}))`;
     }
@@ -369,9 +371,9 @@ function matchIdLeaf(row: Record<string, unknown>, c: Criteria): boolean {
     case 'startsWith':
     case 'endsWith': {
       const cell = src != null ? src : rid;
-      if (cell == null) return false;
+      if (cell == null || c.value == null) return false;
       const text = String(cell);
-      const needle = c.value == null ? '' : String(idCriteriaValue(c.value));
+      const needle = String(idCriteriaValue(c.value));
       if (c.op === 'contains') return text.includes(needle);
       if (c.op === 'startsWith') return text.startsWith(needle);
       return text.endsWith(needle);
@@ -450,8 +452,8 @@ function compileMode(c: Criteria, encrypted: ReadonlySet<string>, decimals: Deci
       // A subset of a literal wildcard cannot be expressed as a LIKE: emit the
       // empty match and let the in-memory pass decide (used under NOT).
       if (mode === 'sub' && looseLike(c)) return NEVER;
-      // A null needle is the empty pattern: it matches every row.
-      if (c.value == null) return ALWAYS;
+      // A null needle never matches (same rule as the ID leaf above).
+      if (c.value == null) return NEVER;
       return `${c.field} LIKE ${like(c.value, c.op)}`;
     case 'in': {
       if (c.field === ID_FIELD) return compileIdLeaf(c);
@@ -650,8 +652,9 @@ export function matchRow(row: Record<string, unknown>, c: Criteria, decimals: De
     case 'startsWith':
     case 'endsWith': {
       if (c.field === ID_FIELD) return matchIdLeaf(row, c);
+      if (c.value == null) return false;
       const text = row[c.field] == null ? '' : String(row[c.field]);
-      const needle = c.value == null ? '' : String(c.value);
+      const needle = String(c.value);
       if (c.op === 'contains') return text.includes(needle);
       if (c.op === 'startsWith') return text.startsWith(needle);
       return text.endsWith(needle);

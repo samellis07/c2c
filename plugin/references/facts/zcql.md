@@ -141,3 +141,14 @@ Denormalise hot filter columns, load-test every report query at full
 volume, and split long-running reads into staged pages. `c2c plan`
 warns on unindexed filter columns and fails closed past the join and
 width budgets.
+
+### [ZC-13] A null text-match operand never widens to every row
+
+Rule: [UNVERIFIED] a `contains` / `startsWith` / `endsWith` criteria with a
+null value compiles to a predicate that matches no row (`(ROWID IS NULL)`),
+and the in-memory matcher returns false for it. No captured Creator or ZCQL
+golden documents the operand; the nearest signal is Creator's criteria-null
+refusal ("Function specified in criteria has returned null value and it
+cannot be evaluated"), so never-matching is the conservative reading. A
+record filter holding such a leaf narrows that profile to zero rows instead
+of silently reading every row.
