@@ -41,9 +41,37 @@ test('a relational comparison to null never matches a row', () => {
   }
 });
 
-test('a text-match against null is the empty pattern: every row', () => {
-  assert.equal(compileCriteria({ op: 'contains', field: 'Name', value: null }), '(ROWID IS NOT NULL)');
-  assert.equal(compileCriteria({ op: 'contains', field: 'ID', value: null }), '(ROWID IS NOT NULL)');
+// A null text-match needle never widens to every row: it compiles to a
+// never-matching predicate and matchRow agrees. No captured Creator or ZCQL
+// golden documents the behaviour; the closest signal is Creator's
+// criteria-null refusal, so never-matching is the safe reading (marked
+// [UNVERIFIED] in plugin/references/facts/zcql.md).
+test('a text-match against null never matches a row', () => {
+  for (const op of ['contains', 'startsWith', 'endsWith'] as const) {
+    assert.equal(compileCriteria({ op, field: 'Name', value: null }), '(ROWID IS NULL)');
+    assert.equal(compileCriteria({ op, field: 'ID', value: null }), '(ROWID IS NULL)');
+    assert.equal(matchRow({ Name: 'abc' }, { op, field: 'Name', value: null }), false);
+    assert.equal(matchRow({ Name: null }, { op, field: 'Name', value: null }), false);
+    assert.equal(matchRow({ ROWID: '7' }, { op, field: 'ID', value: null }), false);
+  }
+  // A blank '' needle keeps its meaning: the pattern that matches every text.
+  assert.equal(compileCriteria({ op: 'contains', field: 'Name', value: '' }), "Name LIKE '*'");
+});
+
+// A record filter whose leaf compares text to null must narrow to no rows,
+// never silently become "all rows" for the profiles it guards.
+test('a record filter holding a null text-match returns no rows', async () => {
+  const runtime = createRuntime({
+    dryRun: true,
+    access: {
+      roles: [],
+      profiles: { Staff: { Contact: { recordFilter: { op: 'contains', field: 'Name', value: null } } } },
+    },
+    seed: { Contact: [{ Name: 'a' }, { Name: null }] },
+  });
+  const ctx = runtime.context({ principal: { profile: 'Staff', loginUser: 'ada@example.test' } });
+  const rows = await runtime.shim.datastore.rows(ctx, runtime.shim.datastore.query(ctx, 'Contact', { op: 'true' }));
+  assert.deepEqual(rows, []);
 });
 
 test('null comparisons nest under AND/OR/NOT', () => {
