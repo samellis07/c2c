@@ -24,6 +24,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.
 /** Each command's entry functions; c2c.ts's own `if (cmd === ...)` block is added for every command. */
 const ROOTS: Record<string, string[]> = {
   deploy: ['doctorGateForArgs', 'deployCli'],
+  plan: ['planCli'],
   provision: ['doctorGateForArgs', 'provisionCreatesProject', 'provisionCli'],
   smoke: ['doctorGateForArgs', 'smokeCli'],
   users: ['doctorGateForArgs', 'usersCli', 'usersManageCli'],
@@ -188,4 +189,11 @@ test('cutover-checklist, proof, rollback-export and iac-drift refuse a flag they
 test('deploy: --backfill-shadows --confirm does not need --function-env; a plain --confirm still does', () => {
   assert.deepEqual(argvProblems('deploy', ['app.ds', '--backfill-shadows', '--confirm']), []);
   assert.match(argvProblems('deploy', ['app.ds', '--confirm']).join('\n'), /^--confirm needs --function-env <file> /);
+});
+
+test('plan: the schema-change flags pass the shape check and a misspelled one does not', () => {
+  assert.deepEqual(argvShapeProblems('plan', ['app.ds', '--out', 'out', '--dc', 'us', '--previous', 'old.ds', '--rename', 'Form.Old=New', '--rename', 'Form.A=B', '--allow-destructive', '--backup', 'backup']), []);
+  assert.deepEqual(argvShapeProblems('plan', ['app.ds', '--out', 'out', '--previus', 'old.ds']), ['unknown flag --previus', 'unexpected argument old.ds']);
+  assert.deepEqual(argvShapeProblems('plan', ['app.ds', '--out', 'out', '--backup']), ['--backup needs a value']);
+  assert.deepEqual(argvShapeProblems('plan', ['--out', 'out', 'app.ds']), ['the app source must come first']);
 });
