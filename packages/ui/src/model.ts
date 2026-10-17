@@ -524,7 +524,7 @@ export function applyDecorations(model: UiModel, app: App, dir?: string): void {
  * A pass that returns a new model copies those fields onto the model being built.
  */
 const SWAPPED_DECORATION = new Set(['applyLabels']);
-const DECORATION_HELPER = new Set(['displayRefs', 'displayChoice', 'reportFieldLabel']);
+const DECORATION_HELPER = new Set(['displayRefs', 'displayTerms', 'displayChoice', 'lookupFormats', 'reportFieldLabel']);
 
 function invokeDecoration(key: string, fn: (model: UiModel, app: App) => void, model: UiModel, app: App): void {
   if (DECORATION_HELPER.has(key)) return;

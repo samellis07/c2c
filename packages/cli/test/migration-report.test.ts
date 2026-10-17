@@ -61,23 +61,25 @@ test('committed fixtures carry the deterministic flag', () => {
     ff.todoKinds.reduce((sum, kind) => sum + kind.count, 0),
     12,
   );
-  assert.equal(lib.deterministic, true);
+  // lib's stub custom actions now dispatch, so it has no todos — but its 21
+  // silent drops keep it off the deterministic count under the drop rule.
+  assert.equal(lib.deterministic, false);
   assert.equal(lib.todoCount, 0);
   assert.equal(lib.uiTodoCount, 0);
   assert.deepEqual(lib.todoKinds, []);
-  assert.equal(lib.silentDrops, 0);
+  assert.equal(lib.silentDrops, 21);
   assert.equal(ff.silentDrops, 269);
-  assert.equal(report.aggregate.deterministicApps, 1);
-  assert.equal(report.aggregate.silentDrops, 269);
+  assert.equal(report.aggregate.deterministicApps, 0);
+  assert.equal(report.aggregate.silentDrops, 290);
   assert.equal(report.aggregate.todoTotal, 12);
-  // lib has no todos and no silent drops: it counts as a deterministic app.
+  // lib has no todos but silent drops: it counts as a no-todo app, not a deterministic one.
   assert.equal(report.aggregate.noTodoApps, 1);
   for (const app of [lib, ff]) assert.equal(app.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), app.silentDrops);
-  assert.equal(report.aggregate.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), 269);
+  assert.equal(report.aggregate.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), 290);
   const text = migrationReportAsText(report);
   assert.match(text, /^apps with no residual todos: 1\/2$/m);
-  assert.match(text, /^apps with no residual todos and no silent drops \(deterministic\): 1\/2$/m);
-  assert.match(text, /^silent drops \(total\): 269$/m);
+  assert.match(text, /^apps with no residual todos and no silent drops \(deterministic\): 0\/2$/m);
+  assert.match(text, /^silent drops \(total\): 290$/m);
 });
 
 test('aggregate counts only deterministic apps toward the 95%/100% targets', () => {
@@ -133,12 +135,12 @@ test('c2c migration-report and analyze --json print the flag from the CLI', () =
   const report = spawnSync(process.execPath, [cli, 'migration-report', fixtures, '--json'], { encoding: 'utf8' });
   assert.equal(report.status, 0, report.stderr);
   const parsed = JSON.parse(report.stdout) as { aggregate: { totalApps: number; deterministicApps: number } };
-  assert.deepEqual([parsed.aggregate.totalApps, parsed.aggregate.deterministicApps], [2, 1]);
+  assert.deepEqual([parsed.aggregate.totalApps, parsed.aggregate.deterministicApps], [2, 0]);
   const text = spawnSync(process.execPath, [cli, 'migration-report', fixtures], { encoding: 'utf8' });
-  assert.match(text.stdout, /apps 2  deterministic 1 \(50%\)/);
+  assert.match(text.stdout, /apps 2  deterministic 0 \(0%\)/);
   const analyzed = spawnSync(process.execPath, [cli, 'analyze', join(fixtures, 'library-application-system'), '--json'], { encoding: 'utf8' });
   assert.equal(analyzed.status, 0, analyzed.stderr);
-  assert.equal((JSON.parse(analyzed.stdout) as { determinism: { deterministic: boolean } }).determinism.deterministic, true);
+  assert.equal((JSON.parse(analyzed.stdout) as { determinism: { deterministic: boolean } }).determinism.deterministic, false);
   const notDir = spawnSync(process.execPath, [cli, 'migration-report', join(fixtures, 'missing')], { encoding: 'utf8' });
   assert.equal(notDir.status, 2);
 });
