@@ -11,7 +11,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { App } from '../../core/src/ir.js';
+import type { App, Field } from '../../core/src/ir.js';
 import { authPlan } from '../../auth/src/plan.js';
 import { type SchemaColumn, type SchemaPlan, type SchemaTable } from '../../schema/src/generator.js';
 import type { EditOp, FieldRename } from './edit.js';
@@ -302,6 +302,82 @@ export function unsupportedSchemaOps(before: SchemaPlan, after: SchemaPlan, rena
   return out;
 }
 
+/**
+ * A Creator-side change between the model that is deployed and a re-export of
+ * the app. A .ds diff carries no edit log, so a renamed field reads as a drop
+ * plus an add unless `renames` names it.
+ */
+export interface SchemaChangeReview {
+  delta: PlanDelta;
+  /** Changes that drop, move, or reshape stored values: they need --allow-destructive and a verified --backup. */
+  destructive: string[];
+  /** Choices removed from a choice field. Rows that hold one keep the stored value. */
+  removedChoices: string[];
+}
+
+function choiceFields(app: App): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const visit = (form: string, fields: readonly Field[]) => {
+    for (const field of fields) {
+      if (field.choices?.length) out.set(`${form}.${field.name}`, field.choices);
+      if (field.subfields?.length) visit(`${form}.${field.name}`, field.subfields);
+    }
+  };
+  for (const form of app.forms) visit(form.name, form.fields);
+  return out;
+}
+
+/** Review a re-exported model against the deployed one before a redeploy. Deterministic for the same inputs. */
+export function reviewSchemaChange(before: App, after: App, dc: string, renames: readonly FieldRename[] = []): SchemaChangeReview {
+  const delta = planDelta(modelPlan(before, dc), modelPlan(after, dc), { app: after.name || 'app', edits: [], renames });
+  const destructive: string[] = [];
+  for (const table of delta.tables) {
+    if (table.op === 'drop') destructive.push(`drop table ${table.table} (form ${table.form})`);
+  }
+  for (const column of delta.columns) {
+    if (column.op === 'drop') destructive.push(`drop column ${column.table}.${column.column}`);
+    else if (column.op === 'rename') destructive.push(`rename column ${column.table}.${column.from} -> ${column.to}`);
+    else if (column.op === 'alter') destructive.push(`alter column ${column.table}.${column.column}: ${column.changes.join(', ')}`);
+  }
+  const removedChoices: string[] = [];
+  const next = choiceFields(after);
+  for (const [field, choices] of choiceFields(before)) {
+    const kept = next.get(field);
+    if (!kept) continue;
+    const gone = choices.filter((choice) => !kept.includes(choice));
+    if (gone.length) removedChoices.push(`${field}: ${gone.map((choice) => JSON.stringify(choice)).join(', ')} removed; rows that hold a removed choice keep it`);
+  }
+  return { delta, destructive, removedChoices };
+}
+
+/** Parse repeated `--rename Form.Old=New` flags. */
+export function renameFlags(args: readonly string[]): FieldRename[] {
+  const out: FieldRename[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== '--rename') continue;
+    const value = args[i + 1] ?? '';
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z_][A-Za-z0-9_]*)$/.exec(value);
+    if (!match) throw new Error(`--rename needs Form.Old=New, got ${JSON.stringify(value)}`);
+    out.push({ form: match[1]!, from: match[2]!, to: match[3]! });
+  }
+  return out;
+}
+
+/** The text a refused destructive plan prints: what would change, and the steps that make it safe. */
+export function destructiveRefusal(review: SchemaChangeReview, opts: { target: string; previous: string; reason: string }): string {
+  const renamed = review.delta.columns.some((c) => c.op === 'rename');
+  const pairs = review.delta.columns.filter((c) => c.op === 'drop').length > 0 && review.delta.columns.some((c) => c.op === 'add');
+  const lines = [
+    `the re-export changes stored data and ${opts.reason}; nothing was planned`,
+    ...review.destructive.map((line) => `- ${line}`),
+    'next steps:',
+    `  1. export the deployed rows: c2c rollback-export --ds ${opts.previous} --out <backup-dir> --confirm`,
+    ...(pairs ? ['  2. if a field was renamed in Creator, add --rename Form.Old=New so the column keeps its rows instead of a drop plus an add'] : []),
+    `  ${pairs ? 3 : 2}. re-run: c2c plan ${opts.target} --out <dir> --previous ${opts.previous}${renamed || pairs ? ' [--rename Form.Old=New]' : ''} --allow-destructive --backup <backup-dir>`,
+  ];
+  return `${lines.join('\n')}\n`;
+}
+
 /** What a delta apply did: the store calls made, and the ops it could not locate. */
 export interface DeltaApplyResult {
   applied: string[];
@@ -316,10 +392,20 @@ export interface DeltaApplyResult {
 /**
  * Apply the schema part of a delta. Every drop is checked before anything is
  * written: without confirm, or while the table or column still holds data,
- * nothing is applied. Steps already in place are skipped, so a re-run after a
+ * nothing is applied. A column whose table is in `backedUp` may be dropped
+ * with values: the verified export holds them. Steps already in place are skipped, so a re-run after a
  * partial apply finishes the rest.
  */
-export async function applySchemaDelta(delta: PlanDelta, after: SchemaPlan, driver: StoreDriver, opts: { confirm?: boolean } = {}): Promise<DeltaApplyResult> {
+export async function applySchemaDelta(
+  delta: PlanDelta,
+  after: SchemaPlan,
+  driver: StoreDriver,
+  opts: {
+    confirm?: boolean;
+    /** Tables whose rows are in a verified rollback export: a confirmed column drop there may discard values the export holds. */
+    backedUp?: ReadonlySet<string>;
+  } = {},
+): Promise<DeltaApplyResult> {
   const drops: { table: string; column?: string }[] = [
     ...delta.tables.filter((t) => t.op === 'drop').map((t) => ({ table: t.table })),
     ...delta.columns.flatMap((c) => (c.op === 'drop' ? [{ table: c.table, column: c.column }] : [])),
@@ -334,7 +420,7 @@ export async function applySchemaDelta(delta: PlanDelta, after: SchemaPlan, driv
     if (d.column !== undefined) {
       if (!present.includes(d.column)) continue;
       const n = await driver.valueCount(d.table, d.column);
-      if (n > 0) throw new DeltaRefused(`drop of ${d.table}.${d.column} refused: ${n} row(s) hold a value; export or clear them first`);
+      if (n > 0 && !opts.backedUp?.has(d.table)) throw new DeltaRefused(`drop of ${d.table}.${d.column} refused: ${n} row(s) hold a value; export or clear them first`);
     } else {
       const n = await driver.rowCount(d.table);
       if (n > 0) throw new DeltaRefused(`drop of table ${d.table} refused: it has ${n} row(s); export or clear them first`);
