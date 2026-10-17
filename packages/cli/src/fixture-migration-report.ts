@@ -14,7 +14,7 @@ import { compareEnUs } from '../../core/src/order.js';
 import { decode } from '../../core/src/source.js';
 import { CUSTOMER_STEPS } from '../../deploy/src/customer-steps.js';
 import type { FieldGap } from '../../schema/src/index.js';
-import { analyze } from './analyze.js';
+import { analyze, guidedTodoSteps, type GuidedTodoStep } from './analyze.js';
 import type { GuidedResidual } from './guided-residual.js';
 import { precheck, type Severity } from './precheck.js';
 import { ownerScope, type ScopeEntry } from './scope-labels.js';
@@ -47,8 +47,11 @@ export interface FixtureMigrationReport {
   /** Parts the generated app does not show to end users, with the reason each is hidden. */
   hiddenParts: { location: string; reason: string }[];
   humanSteps: string[];
-  silentDrops?: number;
-  residuals?: GuidedResidual[];
+  /** Residual TODO holes that carry a guided step: where the Creator code is and the manual step. Still counted in `todoCount`. */
+  todoSteps: GuidedTodoStep[];
+  /** Constructs the converter drops (still counted as silent drops), each with its reason and guided step. */
+  silentDrops: number;
+  residuals: GuidedResidual[];
 }
 
 export interface InRepoFixture {
@@ -114,6 +117,7 @@ export function buildFixtureMigrationReport(fixture: InRepoFixture): FixtureMigr
     fieldGaps: analysis.fieldGaps,
     manualSteps: manualStepsOf(ir, source),
     hiddenParts: analysis.hiddenParts.map((part) => ({ location: part.location, reason: part.reason })),
+    todoSteps: guidedTodoSteps(analysis),
     humanSteps: isEmpty ? [] : [...CUSTOMER_STEPS],
     silentDrops: analysis.determinism.silentDrops,
     residuals: analysis.residuals,
@@ -165,7 +169,11 @@ export function fixtureMigrationReportAsMarkdown(report: FixtureMigrationReport)
   const residuals = report.residuals?.length
     ? report.residuals.flatMap((item) => [`- \`${item.id}\` — not converted. ${item.reason}`, `  - Step: ${item.step}`])
     : ['- none'];
-
+  const manual = report.manualSteps.length ? report.manualSteps.map((step) => `- ${step.count} ${step.severity} ${step.check}`) : ['- none'];
+  const hidden = report.hiddenParts.length ? report.hiddenParts.map((part) => `- ${part.location}: ${part.reason}`) : ['- none'];
+  const todoSteps = report.todoSteps.length
+    ? report.todoSteps.flatMap((item) => [`- \`${item.location}\` — ${item.construct}`, `  - Step: ${item.step}`])
+    : ['- none'];
   return [
     `# Migration report: ${report.fixture}`,
     '',
@@ -192,6 +200,10 @@ export function fixtureMigrationReportAsMarkdown(report: FixtureMigrationReport)
     '## Manual steps',
     '',
     ...manual,
+    '',
+    '## Residual TODO steps',
+    '',
+    ...todoSteps,
     '',
     '## Hidden from end users',
     '',

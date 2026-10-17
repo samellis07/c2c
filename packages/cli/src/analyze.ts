@@ -119,6 +119,16 @@ export interface TodoKind {
   count: number;
 }
 
+/** One located residual TODO hole that carries a guided manual step. */
+export interface GuidedTodoStep {
+  /** Where the hole sits (`workflow <name>:<line>`, `report <name>`, `page <name>`). */
+  location: string;
+  /** The counted todo kind, e.g. `form-event-server-uninvoked`, or a UI stub's reason. */
+  construct: string;
+  /** The guided manual step. */
+  step: string;
+}
+
 /**
  * Deterministic-migration flag. `deterministic` is true only when the app has
  * zero residual TODO items, no fill-todos lock entries are applied to it, and
@@ -192,6 +202,13 @@ export interface AnalyzeReport {
 }
 
 const byText = (a: string, b: string) => compareEnUs(a, b);
+
+/** The located residual holes of a report that carry a guided manual step, in report order. */
+export function guidedTodoSteps(report: Pick<AnalyzeReport, 'deluge'>): GuidedTodoStep[] {
+  return report.deluge.todoLocations
+    .filter((item) => item.manualStep)
+    .map((item) => ({ location: item.location, construct: item.construct, step: item.manualStep! }));
+}
 
 interface DelugeUnit {
   label: string;
@@ -312,7 +329,7 @@ function placeTodo(app: App, indexes: TodoIndexes, todo: TodoItem): { scope: 'ap
 
 /** The guided manual step of a server-snippet stub, when it has one. */
 function manualFields(item: { manualReasons?: SnippetReason[]; manualStep?: string }): { manualReasons?: SnippetReason[]; manualStep?: string } {
-  return item.manualStep ? { manualReasons: item.manualReasons ?? [], manualStep: item.manualStep } : {};
+  return item.manualStep ? { ...(item.manualReasons?.length ? { manualReasons: item.manualReasons } : {}), manualStep: item.manualStep } : {};
 }
 
 function disambiguateLocations(
@@ -343,7 +360,7 @@ function locateTodos(app: App, units: readonly DelugeUnit[], todos: readonly Tod
     workflows: new IntervalIndex(app.workflows, (workflow) => workflow.span),
     functions: new IntervalIndex(app.functions, (fn) => fn.span),
   };
-  const located = dedupeTodos(todos).map((todo) => ({ ...placeTodo(app, indexes, todo), construct: todo.construct, start: todo.start, end: todo.end, manualStep: todo.manualStep }));
+  const located = dedupeTodos(todos).map((todo) => ({ ...placeTodo(app, indexes, todo), construct: todo.construct, start: todo.start, end: todo.end, ...(todo.manualStep ? { manualStep: todo.manualStep } : {}) }));
   located.sort((a, b) => a.start - b.start || a.end - b.end || byText(a.construct, b.construct));
   const out = disambiguateLocations(located);
   out.sort((a, b) => byText(a.location, b.location) || byText(a.construct, b.construct) || byText(a.scope, b.scope));
