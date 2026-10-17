@@ -2812,6 +2812,166 @@ function clientConversionError(message) {
   return err;
 }
 
+const CLIENT_MAP_BAD = 'Invalid JSON Format String';
+const CLIENT_MAX_MAP_TEXT = 5 * 1024 * 1024;
+
+/** Integer square root by Newton's method, like number.ts bigintSqrt. */
+function clientBigintSqrt(value) {
+  if (value === 0n) return 0n;
+  let x = value;
+  let y = (x + 1n) / 2n;
+  while (y < x) {
+    x = y;
+    y = (x + value / x) / 2n;
+  }
+  return x;
+}
+
+/** JSON.parse that keeps unsafe integer literals exact, like ids.ts parseJsonLossless. */
+function clientParseJsonLossless(text) {
+  return JSON.parse(quoteUnsafeIntegers(text));
+}
+
+/** convert.ts isPlain: a client Decimal fails the proto check; a Deluge date is a plain object on the wire, so it is excluded by shape. */
+function clientIsPlainMap(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (typeof value.y === 'number' && typeof value.m === 'number' && typeof value.d === 'number') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/** The decimal as a double, only when the double's shortest text is the decimal's own. */
+function clientDecimalArg(name, value) {
+  const text = clientDecimal().from(value);
+  const n = Number(text);
+  if (!Number.isFinite(n) || !clientDecimal().cmp(text, n, '==')) {
+    throw clientConversionError(`${name}: value ${text} is not exactly representable as a double; refusing to lose precision`);
+  }
+  return n;
+}
+
+/** Blank and non-numeric inputs are null, like number.ts realArg; an exactness loss refuses. */
+function clientRealArg(name, value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'bigint') {
+    if (value > CLIENT_MAX_SAFE || value < -CLIENT_MAX_SAFE) {
+      throw clientConversionError(`${name}: magnitude exceeds 2^53; refusing to lose precision`);
+    }
+    return Number(value);
+  }
+  if (typeof value === 'object' && typeof value.digits === 'bigint' && typeof value.toString === 'function') {
+    return clientDecimalArg(name, value);
+  }
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (text === '') return null;
+    let d;
+    try {
+      d = clientDecimal().from(text);
+    } catch {
+      return null;
+    }
+    return clientDecimalArg(name, d);
+  }
+  return null;
+}
+
+/** Deluge's {key:value} text form, like convert.ts looseMap. */
+function clientLooseMap(text) {
+  const inner = text.slice(1, -1).trim();
+  const out = {};
+  if (!inner) return out;
+  for (const pair of clientSplitTop(inner, ',')) {
+    const trimmed = pair.trim();
+    if (!trimmed) continue;
+    const colon = clientTopColon(trimmed);
+    if (colon < 0) throw clientConversionError('toMap: text is not a key-value map');
+    const key = clientUnquote(trimmed.slice(0, colon).trim());
+    if (!key) throw clientConversionError('toMap: empty key');
+    out[key] = clientLooseValue(trimmed.slice(colon + 1).trim());
+  }
+  return out;
+}
+
+function clientLooseValue(raw) {
+  if (!raw) throw clientConversionError('toMap: empty value');
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) return clientUnquote(raw);
+  if (raw.startsWith('{') && raw.endsWith('}')) return clientLooseMap(raw);
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  if (raw === 'null') return null;
+  if (CLIENT_NUMERIC.test(raw)) {
+    if (/[.eE]/.test(raw)) return clientDecimal().from(raw);
+    return Number.isSafeInteger(Number(raw)) ? Number(raw) : raw.replace(/^\+/, '');
+  }
+  if (/^[A-Za-z_][\w$]*$/.test(raw)) return raw;
+  throw clientConversionError('toMap: text is not a key-value map');
+}
+
+function clientUnquote(token) {
+  if (token.length >= 2 && ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'")))) {
+    return token.slice(1, -1).replace(/\\(.)/g, '$1');
+  }
+  return token;
+}
+
+/** Split on the top-level separator, like convert.ts splitTop. */
+function clientSplitTop(input, sep) {
+  const out = [];
+  let start = 0;
+  let depth = 0;
+  let quote = null;
+  for (let i = 0; i < input.length; i++) {
+    const c = input[i];
+    if (quote) {
+      if (c === '\\') {
+        i++;
+        continue;
+      }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      continue;
+    }
+    if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') depth = Math.max(0, depth - 1);
+    else if (c === sep && depth === 0) {
+      out.push(input.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(input.slice(start));
+  return out;
+}
+
+/** The first top-level colon, like convert.ts topColon. */
+function clientTopColon(input) {
+  let depth = 0;
+  let quote = null;
+  for (let i = 0; i < input.length; i++) {
+    const c = input[i];
+    if (quote) {
+      if (c === '\\') {
+        i++;
+        continue;
+      }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      continue;
+    }
+    if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') depth = Math.max(0, depth - 1);
+    else if (c === ':' && depth === 0) return i;
+  }
+  return -1;
+}
+
 function clientLongCastError(value, name) {
   const err =
     value == null
@@ -2969,6 +3129,10 @@ export function clientDecimal() {
       const frac = body.slice(body.length - this.scale);
       const text = whole + '.' + frac;
       return this.neg ? '-' + text : text;
+    }
+
+    toJSON() {
+      return this.toString();
     }
   }
 
@@ -4375,6 +4539,11 @@ export function browserShimSurface(fetchImpl) {
         const back = clientAddDays(d, -new Date(Date.UTC(d.y, d.m - 1, d.d)).getUTCDay());
         return clientDate(back.y, back.m, back.d, 0, 0, 0);
       },
+      // First of the month at midnight on the wall fields, like dates.startOfMonth.
+      toStartOfMonth(value) {
+        const d = clientAsDate(value);
+        return d ? clientDate(d.y, d.m, 1, 0, 0, 0) : null;
+      },
       getYear(value) {
         const d = clientAsDate(value);
         return d ? d.y : null;
@@ -4458,6 +4627,27 @@ export function browserShimSurface(fetchImpl) {
         if (sep === '' || !value.includes(sep)) return [token(value)];
         return value.split(sep).map(token);
       },
+      // Same cases as convert.toMap: a plain object copies, strict JSON
+      // parses losslessly, Deluge's {key:value} text parses loosely, anything
+      // else refuses 'Invalid JSON Format String'.
+      toMap(value, ctx, ...extra) {
+        if (extra.length) throw clientConversionError('toMap() takes no arguments');
+        if (clientIsPlainMap(value)) return { ...value };
+        if (typeof value !== 'string') throw clientConversionError(CLIENT_MAP_BAD);
+        if (value.length > CLIENT_MAX_MAP_TEXT) throw clientConversionError('toMap: text exceeds 5 MB');
+        const text = value.trim();
+        if (!text) throw clientConversionError(CLIENT_MAP_BAD);
+        if (text.startsWith('{') && text.endsWith('}')) {
+          try {
+            const parsed = clientParseJsonLossless(text);
+            if (clientIsPlainMap(parsed)) return parsed;
+          } catch {
+            /* Deluge's {key:value} form is not JSON. */
+          }
+          return clientLooseMap(text);
+        }
+        throw clientConversionError(CLIENT_MAP_BAD);
+      },
     }),
     math: withStubFallback({
       // Same rules as number.ts round: a bigint is unchanged, a non-finite
@@ -4471,6 +4661,21 @@ export function browserShimSurface(fetchImpl) {
         const x = n * f;
         if (x < 0) return -Math.round(-x) / f;
         return Math.round(x) / f;
+      },
+      // Same edges as number.ts sqrt: a negative or blank is null, a bigint
+      // perfect square keeps its exact root, an exactness loss refuses.
+      sqrt(value) {
+        if (typeof value === 'bigint') {
+          if (value < 0n) return null;
+          const root = clientBigintSqrt(value);
+          if (root * root === value) return root > CLIENT_MAX_SAFE ? root : Number(root);
+          if (value > CLIENT_MAX_SAFE || value < -CLIENT_MAX_SAFE) {
+            throw clientConversionError('toLong: magnitude exceeds 2^53; refusing to lose precision');
+          }
+          return Math.sqrt(Number(value));
+        }
+        const n = clientRealArg('sqrt', value);
+        return n === null || n < 0 ? null : Math.sqrt(n);
       },
     }),
     string: withStubFallback({
@@ -4498,6 +4703,10 @@ export function browserShimSurface(fetchImpl) {
         if (s === '' || needle === '') return null;
         const at = s.indexOf(needle);
         return at < 0 ? null : clientEmptyToNull(s.slice(at + needle.length));
+      },
+      // Locale-independent default casing, like text.ts toUpperCase.
+      toUpperCase(value) {
+        return value == null ? null : clientEmptyToNull(String(value).toUpperCase());
       },
     }),
     old: {

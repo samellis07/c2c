@@ -23,7 +23,7 @@ export const CLIENT_SHIM_CALLABLE: ReadonlySet<string> = new Set(['each', 'get',
 export const CLIENT_SHIM_METHODS: ReadonlyMap<string, ReadonlySet<string>> = new Map<string, ReadonlySet<string>>([
   ['client', new Set(['call', 'element', 'prefetch', 'rows', 'run', 'touch'])],
   ['compare', new Set(['eq', 'ne'])],
-  ['convert', new Set(['toList', 'toLong', 'toNumber'])],
+  ['convert', new Set(['toList', 'toLong', 'toMap', 'toNumber'])],
   [
     'date',
     new Set([
@@ -58,6 +58,7 @@ export const CLIENT_SHIM_METHODS: ReadonlyMap<string, ReadonlySet<string>> = new
       'subYear',
       'text',
       'toDate',
+      'toStartOfMonth',
       'toStartOfWeek',
       'toTime',
       'yearsBetween',
@@ -105,10 +106,10 @@ export const CLIENT_SHIM_METHODS: ReadonlyMap<string, ReadonlySet<string>> = new
       'values',
     ]),
   ],
-  ['math', new Set(['round'])],
+  ['math', new Set(['round', 'sqrt'])],
   ['old', new Set(['get'])],
   ['record', new Set(['bind', 'get', 'set', 'system'])],
-  ['string', new Set(['getAlphaNumeric', 'getPrefix', 'getSuffix', 'removeAllAlpha', 'trim'])],
+  ['string', new Set(['getAlphaNumeric', 'getPrefix', 'getSuffix', 'removeAllAlpha', 'toUpperCase', 'trim'])],
   ['subform', new Set(['currentRow'])],
   ['zoho', new Set(['adminUser', 'adminUserId', 'appName', 'appUri', 'currentDate', 'currentTime', 'loginUser', 'loginUserId'])],
 ]);
