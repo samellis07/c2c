@@ -951,6 +951,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     }, {
       ...(slateDomain ? { slateDomain } : {}),
       ...(admin ? { admin } : {}),
+      ...(previous?.authAdminUserId ? { adminUserId: previous.authAdminUserId } : {}),
     }, deployConfig?.mail?.testRecipients ?? deployMailRecipients(uiConfigPath), deploySource?.sourceData, ui, rest.includes('--async-on-success'), subsetShims, slateName);
     const mailBlockers = bundle.mailFindings.filter((finding) => finding.severity === 'blocker');
     if (confirm && mailBlockers.length) {
@@ -1134,6 +1135,16 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
       }
       state.authDone = auth.done;
       if (auth.adminUserId) state.authAdminUserId = auth.adminUserId;
+      let ownerEnvError = false;
+      if (auth.adminUserId && deployedEnvKeys.includes('C2C_ADMIN_USER_ID') && state.done.includes('functions')) {
+        try {
+          await applyFunctionEnvSecrets(restFn, guard.projectId, { C2C_ADMIN_USER_ID: auth.adminUserId }, ['C2C_ADMIN_USER_ID'], retry);
+          io.stdout(`function env: set C2C_ADMIN_USER_ID on ${API_FUNCTION} from the verified admin user\n`);
+        } catch (err) {
+          ownerEnvError = true;
+          io.stderr(`c2c: ${redact(err instanceof Error ? err.message : String(err), secret)}\n`);
+        }
+      }
       const steps = postDeploySteps(guard.projectId, services, { resume: code !== 0, shadowsOnExistingRows: diff.shadowsOnExistingRows, org: guard.org });
       // Auth console steps sit before the trailing resume step — "then re-run" stays last.
       const authSteps: PostDeployStep[] = auth.consoleSteps.map((text) => ({ kind: 'configure', projectId: guard.projectId, services: ['Authentication'], text }));
@@ -1207,7 +1218,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         dc: guard.dc,
         ui,
         dcSource: guard.dcOrigin ?? null,
-        exitCode: code === 0 && (authThrew || (auth.results.length > 0 && auth.results.every((op) => op.status === 'failed'))) ? 1 : code,
+        exitCode: code === 0 && (authThrew || ownerEnvError || (auth.results.length > 0 && auth.results.every((op) => op.status === 'failed'))) ? 1 : code,
         tableDiff: diff,
         ...(bundle.constraints?.length ? { constraints: bundle.constraints } : {}),
         ...(tableError ? { tableError } : {}),
