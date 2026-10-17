@@ -40,7 +40,7 @@ Catalyst platform limits and their evidence labels are indexed in `plugin/refere
 4. **Schedules → Job Scheduling** (live; via `c2c-provision-and-deploy`):
    - **one job pool per project**: MCP `CatalystbyZoho_Create_Job_Pool` (CLI token → 401 `OAUTH_SCOPE_MISMATCH` [TESTED]). Pool name without `_` [TESTED]: `c2cpool` + 4 hex. Read-back `List_All_Jobpools`.
    - Job functions deploy with the code (`catalyst deploy --only functions`).
-   - **crons**: CLI token `POST /job_scheduling/cron` works once the pool exists [TESTED]; target type Function must be a **Job** function [DOC][TESTED]. Created disabled, enabled after verify. Read-back MCP `List_All_Crons`.
+   - **crons**: CLI token `POST /job_scheduling/cron` works once the pool exists [TESTED]; target type Function must be a **Job** function [DOC][TESTED]. Created disabled, enabled after verify. Read-back MCP `List_All_Crons`. The body is `job_detail` + `job_meta` (`jobpool_id`, `target_id` of the deployed `c2c_jobs` Job function) [UNVERIFIED]; a body without `job_meta` answers `400 Mandatory parameter job_meta is missing` [TESTED] (live run, 17 Oct 2026, `c2c provision --out <dir> --confirm --run crons`). A repeating schedule posts `CronExpression`, a one-shot `OneTime`; a past one-shot and a project without `c2c_jobs` are refused before any POST.
    - Generated Job code calls `closeWithSuccess()` / `closeWithFailure()` in `finally` (else it shows as a 15-min timeout or "In Progress" for hours [UNVERIFIED]).
 5. **Env values** the logic needs (API keys for invokeurl, etc.) go into `~/.c2c/<app>-function-env.json`, outside the repository, and are filled by the user; `c2c deploy <ds> --function-env <file>` merges them (deploy otherwise **replaces** the function's env vars).
 
