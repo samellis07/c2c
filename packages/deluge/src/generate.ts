@@ -3994,17 +3994,32 @@ function recordEventOps(recordEvent: string | undefined): readonly WriteOp[] | n
   return null;
 }
 
-/** Form events that run on the open form, before submit: their writes are posted with the record. */
-const CLIENT_EVENT_KINDS: ReadonlySet<string> = new Set(['load', 'input', 'addrow', 'deleterow']);
+/**
+ * Raw form events that run in the browser on the open form, before submit:
+ * their writes are posted with the record. Matched on the raw event name, not
+ * eventKind, which folds a schedule's `on start / on load` into `load`.
+ */
+const CLIENT_FORM_EVENT = /^on (?:load|user input of \S.*|update of \S.*|(?:add|delete) row of \S.*)$/;
+
+/**
+ * A form-container workflow whose event runs in the browser. Schedule,
+ * approval and other server-side containers never fill the open form, even
+ * when their actions wrap an `on load` block.
+ */
+function isClientFormScript(w: Workflow): boolean {
+  if ((w.container ?? '').trim().toLowerCase() !== 'form' || (w.type ?? '').trim().toLowerCase() !== 'form') return false;
+  return CLIENT_FORM_EVENT.test(w.event.trim().toLowerCase());
+}
 
 /**
  * Per field, the write ops in which a client-side form script of `formName`
- * sets it (`input.F = …`, `F.select(…)`) or shows/enables it.
+ * sets it (`input.F = …`, `F.select(…)`) or shows/enables it. Only form
+ * scripts count: a server-side workflow's write is never posted by the form.
  */
 function clientWrittenFields(app: App, formName: string | undefined): Map<string, Set<WriteOp>> {
   const out = new Map<string, Set<WriteOp>>();
   for (const w of app.workflows) {
-    if ((w.form ?? '') !== (formName ?? '') || !w.deluge || !CLIENT_EVENT_KINDS.has(eventKind(w.event))) continue;
+    if ((w.form ?? '') !== (formName ?? '') || !w.deluge || !isClientFormScript(w)) continue;
     const ops = recordEventOps(w.recordEvent);
     if (!ops) continue;
     const add = (field: string | undefined): void => {

@@ -333,6 +333,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         }
@@ -422,6 +423,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         },
@@ -529,6 +531,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         },
@@ -645,6 +648,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         },
@@ -773,6 +777,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         },
@@ -940,6 +945,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         },
@@ -1046,6 +1052,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         }
@@ -1143,6 +1150,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         },
@@ -1243,6 +1251,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         },
@@ -1342,6 +1351,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         },
@@ -1442,6 +1452,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         },
@@ -1522,6 +1533,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         },
@@ -1622,6 +1634,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         },
@@ -1702,6 +1715,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         },
@@ -1802,6 +1816,7 @@
           ],
           "apiOnly": [
             "ManagerEmail",
+            "Status",
             "Users"
           ]
         },
@@ -1886,6 +1901,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
+            "Status",
             "Users"
           ]
         }
@@ -1974,6 +1990,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
+            "Status",
             "Users"
           ]
         },
@@ -2072,6 +2089,7 @@
             "api-only-acceptance"
           ],
           "apiOnly": [
+            "Status",
             "Users"
           ]
         },
