@@ -25,6 +25,13 @@ export interface SubformTable {
    * are that form's records and read back in ROWID order.
    */
   orderColumn?: string;
+  /**
+   * The form a linked grid writes its rows to (`values = Form.ID`). Set only
+   * for linked grids: those rows are real records of another form and carry
+   * that form's grant, unlike an inline subform's child table which is written
+   * under the parent form's grant.
+   */
+  linkedForm?: string;
 }
 
 /** Parent form → its inline subforms. */
@@ -215,6 +222,45 @@ export async function saveSubforms(
     }
   }
   return { inserted, deleted };
+}
+
+/** A linked-grid row write: rows posted are inserts; `replace` deletes the rows it finds. */
+export type SubformLinkOp = 'insert' | 'delete';
+
+export interface AuthorizeSubformWritesOptions {
+  /** Update: the carried subforms replace the parent's existing rows. */
+  replace?: boolean;
+  /**
+   * Grant check for a linked grid (`SubformTable.linkedForm`), run per row
+   * and once for the delete a replace performs. Throw to refuse the write.
+   */
+  authorize?: (link: SubformTable, op: SubformLinkOp, row?: Record<string, unknown>) => void;
+}
+
+/**
+ * Authorizes the linked-grid writes of one submit BEFORE any row is stored,
+ * so a refusal leaves the parent and the linked table untouched. Inline
+ * subforms (no `linkedForm`) are written under the parent form's grant and
+ * skip the check. A replace that would delete existing linked rows runs the
+ * `delete` check first; every posted linked row runs `insert`.
+ */
+export async function authorizeSubformWrites(
+  store: SubformStore | undefined,
+  parentRowId: unknown,
+  children: readonly { link: SubformTable; rows: readonly Record<string, unknown>[] }[],
+  options: AuthorizeSubformWritesOptions = {},
+): Promise<void> {
+  const authorize = options.authorize;
+  if (!authorize) return;
+  for (const { link, rows } of children) {
+    if (!link.linkedForm) continue;
+    if (options.replace) {
+      if (!store) throw new Error('a linked-grid delete check needs the datastore');
+      const old = await childRowIds(store, link, parentRowId);
+      if (old.length) authorize(link, 'delete');
+    }
+    for (const row of rows) authorize(link, 'insert', row);
+  }
 }
 
 function stripLink(link: SubformTable, row: Record<string, unknown>): Record<string, unknown> {

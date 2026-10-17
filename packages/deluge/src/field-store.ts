@@ -62,7 +62,7 @@ function linkedGridLinksFor(app: App, form: string): SubformTable[] {
     if (!targetTable || backs.length !== 1) continue;
     const grids = parentForm.fields.filter((item) => linkedGridForm(app, item) === target);
     if (grids.length !== 1) continue;
-    links.push({ field: field.name, table: targetTable.name, parentColumn: backs[0]!.name });
+    links.push({ field: field.name, table: targetTable.name, parentColumn: backs[0]!.name, linkedForm: target });
   }
   return links;
 }
@@ -100,7 +100,12 @@ export function fieldStoreShape(app: App, form: string): FieldStoreShape {
 
 /** Names to add to the `creator-to-catalyst/shims` import. */
 export function fieldStoreImports(shape: FieldStoreShape): string[] {
-  return [...(shape.links.length ? ['saveSubforms', 'splitSubforms'] : []), ...(shape.files.length ? ['storeFileKeys'] : [])];
+  const linked = shape.links.some((link) => link.linkedForm);
+  return [
+    ...(shape.links.length ? ['saveSubforms', 'splitSubforms'] : []),
+    ...(linked ? ['authorizeDelete', 'authorizeSubformWrites'] : []),
+    ...(shape.files.length ? ['storeFileKeys'] : []),
+  ];
 }
 
 /** Extra argument for the writeLive call: the raw datastore adapter. */
@@ -154,22 +159,46 @@ async function writeLive(runtime, ctx, targetForm) {
   return { wrote: true, op: "insert" };
 }`;
   }
+  const linked = links.some((link) => link.linkedForm);
+  const gate = linked
+    ? `
+/**
+ * A grid linked to another form writes that form's records: every posted row
+ * needs the caller's create grant on the linked form, and a replace that
+ * deletes existing linked rows needs delete. authorizeSubformWrites runs the
+ * checks before any row is stored, so a refusal is a 403 naming the linked
+ * form with no parent row written. An inline subform's child table keeps the
+ * parent form's grant and skips the check.
+ */
+function linkedSubformGate(ctx) {
+  return (link, op, row) => {
+    if (!link.linkedForm) return;
+    if (op === "delete") authorizeDelete(access, ctx.principal, link.linkedForm);
+    else authorizeWrite(access, ctx.principal, link.linkedForm, row || {}, undefined, "insert");
+  };
+}
+`
+    : '';
+  const gateUpdate = linked ? `
+    await authorizeSubformWrites(datastore, rowId, split.children, { replace: true, authorize: linkedSubformGate(ctx) });` : '';
+  const gateInsert = linked ? `
+  await authorizeSubformWrites(datastore, "", split.children, { authorize: linkedSubformGate(ctx) });` : '';
   return `${consts}
-
+${gate}
 async function writeLive(runtime, ctx, targetForm, datastore) {
   const shim = ctx.shim;
   const rowId = typeof ctx.rowId === "string" ? ctx.rowId.trim() : "";${keys}
   if (rowId || ctx.writeOp === "update") {
     if (ctx.writeOp !== "update") await shim.record.prepare(ctx, targetForm);
     const split = splitSubforms(ctx.record, subformTables, targetForm);
-    if (split.children.length && !rowId) throw new Error("subform rows need the parent ROWID");
+    if (split.children.length && !rowId) throw new Error("subform rows need the parent ROWID");${gateUpdate}
     await shim.datastore.update(ctx, targetForm, { op: "==", field: "ROWID", value: rowId }, split.parent);
     if (split.children.length) await saveSubforms(datastore, rowId, split.children, { replace: true });
     ctx.persisted = true;
     return { wrote: true, op: "update" };
   }
   if (!Object.prototype.hasOwnProperty.call(ctx.record, "Added_User")) shim.record.stamp(ctx, "insert");
-  const split = splitSubforms(ctx.record, subformTables, targetForm);
+  const split = splitSubforms(ctx.record, subformTables, targetForm);${gateInsert}
   const result = await shim.datastore.insert(ctx, targetForm, split.parent);
   mergeInserted(ctx.record, result);
   if (split.children.length) {
