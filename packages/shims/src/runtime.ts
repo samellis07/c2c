@@ -1907,9 +1907,15 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     return baseResult;
   }
 
-  async function updateSplit(form: string, layout: TableSplitLayout, stored: Record<string, unknown>, parentIds: readonly unknown[]): Promise<void> {
-    const updateRows = options.datastore?.update;
-    const insertRows = options.datastore?.insert;
+  async function updateSplit(
+    form: string,
+    layout: TableSplitLayout,
+    stored: Record<string, unknown>,
+    parentIds: readonly unknown[],
+    datastore = options.datastore,
+  ): Promise<void> {
+    const updateRows = datastore?.update;
+    const insertRows = datastore?.insert;
     if (!updateRows || !insertRows) throw new Error(`no datastore write adapter for ${form}`);
     const placed = partition(form, layout, stored);
     const basePayload = rowRecord({ ...placed.base });
@@ -3500,15 +3506,32 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
           }
           return value;
         }
+        // A write from another request can land while this set's own update is
+        // awaited. Every adapter write bumps the write counter before and after
+        // the call, so this set's own calls move it by a known count; a write
+        // landing in between moves it further and the rows read above are
+        // dropped instead of kept stale.
+        const writesAtUpdate = storeWrites;
+        let ownWriteCalls = 0;
+        const countedCall = <A extends unknown[]>(fn: ((...a: A) => Promise<unknown>) | undefined) =>
+          fn && (async (...a: A) => (ownWriteCalls++, fn(...a)));
         if (layout) {
-          await updateSplit(query.form, layout, withShadows(query.form, { [field]: storedValue }), updates.map((row) => row.ROWID));
+          const ds = options.datastore!;
+          await updateSplit(query.form, layout, withShadows(query.form, { [field]: storedValue }), updates.map((row) => row.ROWID), {
+            ...ds,
+            insert: countedCall(ds.insert),
+            update: countedCall(ds.update),
+            delete: countedCall(ds.delete),
+          });
         } else {
           for (const batch of chunk(updates, LIMITS.updateRowsPerCall)) {
+            ownWriteCalls += 1;
             await updateRows(query.form, batch);
           }
         }
         const changed = [...Object.keys(withShadows(query.form, { [field]: storedValue })), ...UPDATE_STAMPED_KEYS];
-        if (!query.zcql?.length && quietRead && unrelatedToScope(changed, scoped.criteria, where, query.sort)) {
+        const foreignWrite = storeWrites !== writesAtUpdate + ownWriteCalls * 2;
+        if (!query.zcql?.length && quietRead && !foreignWrite && unrelatedToScope(changed, scoped.criteria, where, query.sort)) {
           setFieldRows.set(query, { rows: got, where, writes: storeWrites, written: new Set([...(kept?.written ?? []), ...changed]) });
         } else {
           setFieldRows.delete(query);
