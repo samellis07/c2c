@@ -1,0 +1,115 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Inventory Management",
+  "source": {
+    "file": "Inventory_Management.ds",
+    "origin": "Creator gallery app inventory-management, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-staffs-details",
+      "steps": [
+        {
+          "op": "report",
+          "report": "Staffs_Details",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "add-staffs-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Staffs",
+          "record": {
+            "Name": {
+              "first_name": "Ridge",
+              "last_name": "Fable"
+            },
+            "Email": "email.822@example.com",
+            "Phone_Number": "+1555013542"
+          },
+          "creator": {
+            "code": 3001,
+            "error": [
+              "Error details: Error in executing On Add - On Validate script User Limit Reached Line:(1)"
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          },
+          "tags": [
+            "env-artifact:trial-user-limit"
+          ]
+        }
+      ],
+      "skip": "env-artifact:trial-user-limit: Creator refused only because of the trial-account cap in an on-validate script; the behaviour behind it was never reached",
+      "tags": [
+        "env-artifact:trial-user-limit"
+      ]
+    },
+    {
+      "id": "add-staffs-invalid-duplicate-email",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Staffs",
+          "record": {
+            "Name": {
+              "first_name": "North",
+              "last_name": "Maple"
+            },
+            "Email": "email.822@example.com",
+            "Phone_Number": "+1555013245"
+          },
+          "creator": {
+            "code": 3001,
+            "error": [
+              "Error details: Error in executing On Add - On Validate script User Limit Reached Line:(1)"
+            ]
+          },
+          "expect": {
+            "outcome": "refused"
+          },
+          "tags": [
+            "env-artifact:trial-user-limit"
+          ]
+        }
+      ],
+      "skip": "env-artifact:trial-user-limit: Creator refused only because of the trial-account cap in an on-validate script; the behaviour behind it was never reached",
+      "tags": [
+        "env-artifact:trial-user-limit"
+      ]
+    },
+    {
+      "id": "post-staffs-details",
+      "steps": [
+        {
+          "op": "report",
+          "report": "Staffs_Details",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ],
+      "skip": "env-artifact:trial-user-limit: this report reads a form whose writes the trial-account cap blocked in Creator",
+      "tags": [
+        "env-artifact:trial-user-limit"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,736 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Contacts",
+  "source": {
+    "file": "Contacts.ds",
+    "origin": "Creator gallery app contacts, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-all-contacts",
+      "steps": [
+        {
+          "op": "report",
+          "report": "All_Contacts",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "new-contact-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "New_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Ivory",
+              "last_name": "Ember"
+            },
+            "Birthday": "21-Oct-2026",
+            "Company_Name": "Company_Name delta 653",
+            "Department": "Department tundra 804",
+            "Job_Title": "Job_Title delta 330",
+            "Personal_Email_ID": "personal-email-id.447@example.com",
+            "Phone_Number": "+1555012911",
+            "Mobile_Number": "+1555013482",
+            "Website": "https://example.com/website/247",
+            "Home_Address": {
+              "address_line_1": "77 Alpha Way",
+              "district_city": "Tundra",
+              "state_province": "Quartz",
+              "postal_Code": "46303",
+              "country": "United States"
+            },
+            "Work_Email_ID": "work-email-id.315@example.com",
+            "Work_Phone": "+1555016138",
+            "Work_Extension": 28,
+            "Fax": 140,
+            "Work_Address1": {
+              "address_line_1": "54 Fable Way",
+              "district_city": "Kestrel",
+              "state_province": "Maple",
+              "postal_Code": "44063",
+              "country": "United States"
+            },
+            "IM_Contact_Info": [
+              {
+                "IM": "Google Talk",
+                "Screen_Name": "Screen_Name sable 608"
+              }
+            ],
+            "Notes": "Sample Notes note 274 generated for capture."
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Picture": "Enter a Source value for Picture"
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "New_Contact": []
+        }
+      }
+    },
+    {
+      "id": "new-contact-boundary-submit",
+      "steps": [],
+      "skip": "capture unreliable: the boundary-length strings sent did not match the planned lengths, so the boundary is not pinned"
+    },
+    {
+      "id": "new-contact-invalid-missing-personal-email-id",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "New_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Quartz",
+              "last_name": "Sable"
+            },
+            "Birthday": "02-Oct-2026",
+            "Company_Name": "Company_Name prairie 493",
+            "Department": "Department quartz 426",
+            "Job_Title": "Job_Title quartz 940",
+            "Phone_Number": "+1555013739",
+            "Mobile_Number": "+1555019522",
+            "Website": "https://example.com/website/535",
+            "Home_Address": {
+              "address_line_1": "189 Ivory Way",
+              "district_city": "Alpha",
+              "state_province": "Juniper",
+              "postal_Code": "99779",
+              "country": "United States"
+            },
+            "Work_Email_ID": "work-email-id.268@example.com",
+            "Work_Phone": "+1555012970",
+            "Work_Extension": 249,
+            "Fax": 235,
+            "Work_Address1": {
+              "address_line_1": "351 Harbor Way",
+              "district_city": "Cedar",
+              "state_province": "Ridge",
+              "postal_Code": "10704",
+              "country": "United States"
+            },
+            "IM_Contact_Info": [
+              {
+                "IM": "Google Talk",
+                "Screen_Name": "Screen_Name ridge 807"
+              }
+            ],
+            "Notes": "Sample Notes note 276 generated for capture."
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Personal_Email_ID": "Enter a value for Personal Email-ID",
+              "Picture": "Enter a Source value for Picture"
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "New_Contact": []
+        }
+      }
+    },
+    {
+      "id": "new-contact-invalid-missing-phone-number",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "New_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Prairie",
+              "last_name": "Cedar"
+            },
+            "Birthday": "26-Oct-2026",
+            "Company_Name": "Company_Name onyx 518",
+            "Department": "Department bravo 135",
+            "Job_Title": "Job_Title ridge 750",
+            "Personal_Email_ID": "personal-email-id.512@example.com",
+            "Mobile_Number": "+1555014452",
+            "Website": "https://example.com/website/980",
+            "Home_Address": {
+              "address_line_1": "490 Alpha Way",
+              "district_city": "Ridge",
+              "state_province": "Fable",
+              "postal_Code": "65973",
+              "country": "United States"
+            },
+            "Work_Email_ID": "work-email-id.141@example.com",
+            "Work_Phone": "+1555013597",
+            "Work_Extension": 341,
+            "Fax": 175,
+            "Work_Address1": {
+              "address_line_1": "64 Tundra Way",
+              "district_city": "Ember",
+              "state_province": "Quartz",
+              "postal_Code": "90222",
+              "country": "United States"
+            },
+            "IM_Contact_Info": [
+              {
+                "IM": "Google Talk",
+                "Screen_Name": "Screen_Name ridge 877"
+              }
+            ],
+            "Notes": "Sample Notes note 528 generated for capture."
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Picture": "Enter a Source value for Picture",
+              "Phone_Number": "Enter a value for Phone Number"
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "New_Contact": []
+        }
+      }
+    },
+    {
+      "id": "new-contact-invalid-missing-mobile-number",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "New_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Ridge",
+              "last_name": "Quartz"
+            },
+            "Birthday": "14-Oct-2026",
+            "Company_Name": "Company_Name grain 744",
+            "Department": "Department alpha 801",
+            "Job_Title": "Job_Title juniper 567",
+            "Personal_Email_ID": "personal-email-id.927@example.com",
+            "Phone_Number": "+1555012146",
+            "Website": "https://example.com/website/16",
+            "Home_Address": {
+              "address_line_1": "845 Ivory Way",
+              "district_city": "Quartz",
+              "state_province": "Onyx",
+              "postal_Code": "78731",
+              "country": "United States"
+            },
+            "Work_Email_ID": "work-email-id.920@example.com",
+            "Work_Phone": "+1555018959",
+            "Work_Extension": 467,
+            "Fax": 335,
+            "Work_Address1": {
+              "address_line_1": "945 North Way",
+              "district_city": "Ember",
+              "state_province": "Kestrel",
+              "postal_Code": "64464",
+              "country": "United States"
+            },
+            "IM_Contact_Info": [
+              {
+                "IM": "Google Talk",
+                "Screen_Name": "Screen_Name ivory 346"
+              }
+            ],
+            "Notes": "Sample Notes note 127 generated for capture."
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Picture": "Enter a Source value for Picture",
+              "Mobile_Number": "Enter a value for Mobile Number"
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "New_Contact": []
+        }
+      }
+    },
+    {
+      "id": "new-contact-invalid-format-personal-email-id",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "New_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Delta",
+              "last_name": "Harbor"
+            },
+            "Birthday": "03-Oct-2026",
+            "Company_Name": "Company_Name bravo 780",
+            "Department": "Department harbor 170",
+            "Job_Title": "Job_Title quartz 788",
+            "Personal_Email_ID": "not-an-email",
+            "Phone_Number": "+1555018099",
+            "Mobile_Number": "+1555012799",
+            "Website": "https://example.com/website/270",
+            "Home_Address": {
+              "address_line_1": "468 Lumen Way",
+              "district_city": "Onyx",
+              "state_province": "North",
+              "postal_Code": "15469",
+              "country": "United States"
+            },
+            "Work_Email_ID": "work-email-id.22@example.com",
+            "Work_Phone": "+1555019607",
+            "Work_Extension": 155,
+            "Fax": 96,
+            "Work_Address1": {
+              "address_line_1": "629 Ember Way",
+              "district_city": "Alpha",
+              "state_province": "Prairie",
+              "postal_Code": "93055",
+              "country": "United States"
+            },
+            "IM_Contact_Info": [
+              {
+                "IM": "Google Talk",
+                "Screen_Name": "Screen_Name fable 338"
+              }
+            ],
+            "Notes": "Sample Notes note 761 generated for capture."
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Personal_Email_ID": "Enter a valid email address for Personal Email-ID",
+              "Picture": "Enter a Source value for Picture"
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "New_Contact": []
+        }
+      }
+    },
+    {
+      "id": "new-contact-invalid-format-phone-number",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "New_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Ivory",
+              "last_name": "Onyx"
+            },
+            "Birthday": "06-Oct-2026",
+            "Company_Name": "Company_Name kestrel 929",
+            "Department": "Department alpha 522",
+            "Job_Title": "Job_Title maple 665",
+            "Personal_Email_ID": "personal-email-id.276@example.com",
+            "Phone_Number": "abc-notaphone",
+            "Mobile_Number": "+1555014380",
+            "Website": "https://example.com/website/692",
+            "Home_Address": {
+              "address_line_1": "372 Bravo Way",
+              "district_city": "Harbor",
+              "state_province": "Tundra",
+              "postal_Code": "69069",
+              "country": "United States"
+            },
+            "Work_Email_ID": "work-email-id.427@example.com",
+            "Work_Phone": "+1555019305",
+            "Work_Extension": 143,
+            "Fax": 230,
+            "Work_Address1": {
+              "address_line_1": "207 Juniper Way",
+              "district_city": "Delta",
+              "state_province": "Ember",
+              "postal_Code": "27606",
+              "country": "United States"
+            },
+            "IM_Contact_Info": [
+              {
+                "IM": "Google Talk",
+                "Screen_Name": "Screen_Name quartz 179"
+              }
+            ],
+            "Notes": "Sample Notes note 736 generated for capture."
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Picture": "Enter a Source value for Picture",
+              "Phone_Number": "Enter a valid phone number"
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "New_Contact": []
+        }
+      }
+    },
+    {
+      "id": "new-contact-invalid-format-mobile-number",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "New_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Ridge",
+              "last_name": "Grain"
+            },
+            "Birthday": "25-Oct-2026",
+            "Company_Name": "Company_Name maple 984",
+            "Department": "Department cedar 215",
+            "Job_Title": "Job_Title tundra 863",
+            "Personal_Email_ID": "personal-email-id.552@example.com",
+            "Phone_Number": "+1555017287",
+            "Mobile_Number": "abc-notaphone",
+            "Website": "https://example.com/website/832",
+            "Home_Address": {
+              "address_line_1": "600 Ridge Way",
+              "district_city": "Onyx",
+              "state_province": "Ridge",
+              "postal_Code": "68812",
+              "country": "United States"
+            },
+            "Work_Email_ID": "work-email-id.910@example.com",
+            "Work_Phone": "+1555011804",
+            "Work_Extension": 406,
+            "Fax": 9,
+            "Work_Address1": {
+              "address_line_1": "17 Ridge Way",
+              "district_city": "Ridge",
+              "state_province": "Kestrel",
+              "postal_Code": "54314",
+              "country": "United States"
+            },
+            "IM_Contact_Info": [
+              {
+                "IM": "Google Talk",
+                "Screen_Name": "Screen_Name grain 987"
+              }
+            ],
+            "Notes": "Sample Notes note 951 generated for capture."
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Picture": "Enter a Source value for Picture",
+              "Mobile_Number": "Enter a valid phone number"
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "New_Contact": []
+        }
+      }
+    },
+    {
+      "id": "new-contact-invalid-format-website",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "New_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Fable",
+              "last_name": "Cedar"
+            },
+            "Birthday": "06-Oct-2026",
+            "Company_Name": "Company_Name delta 486",
+            "Department": "Department alpha 554",
+            "Job_Title": "Job_Title ember 890",
+            "Personal_Email_ID": "personal-email-id.63@example.com",
+            "Phone_Number": "+1555017020",
+            "Mobile_Number": "+1555012891",
+            "Website": "htp://not a url",
+            "Home_Address": {
+              "address_line_1": "329 Ivory Way",
+              "district_city": "Juniper",
+              "state_province": "Prairie",
+              "postal_Code": "30614",
+              "country": "United States"
+            },
+            "Work_Email_ID": "work-email-id.630@example.com",
+            "Work_Phone": "+1555016027",
+            "Work_Extension": 489,
+            "Fax": 485,
+            "Work_Address1": {
+              "address_line_1": "85 North Way",
+              "district_city": "Ember",
+              "state_province": "Onyx",
+              "postal_Code": "71230",
+              "country": "United States"
+            },
+            "IM_Contact_Info": [
+              {
+                "IM": "Google Talk",
+                "Screen_Name": "Screen_Name north 417"
+              }
+            ],
+            "Notes": "Sample Notes note 880 generated for capture."
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Picture": "Enter a Source value for Picture"
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "New_Contact": []
+        }
+      }
+    },
+    {
+      "id": "new-contact-invalid-format-work-email-id",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "New_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Cedar",
+              "last_name": "North"
+            },
+            "Birthday": "22-Oct-2026",
+            "Company_Name": "Company_Name alpha 152",
+            "Department": "Department ivory 539",
+            "Job_Title": "Job_Title sable 165",
+            "Personal_Email_ID": "personal-email-id.564@example.com",
+            "Phone_Number": "+1555017532",
+            "Mobile_Number": "+1555012422",
+            "Website": "https://example.com/website/711",
+            "Home_Address": {
+              "address_line_1": "908 Harbor Way",
+              "district_city": "Onyx",
+              "state_province": "Delta",
+              "postal_Code": "60004",
+              "country": "United States"
+            },
+            "Work_Email_ID": "not-an-email",
+            "Work_Phone": "+1555014109",
+            "Work_Extension": 366,
+            "Fax": 94,
+            "Work_Address1": {
+              "address_line_1": "951 Tundra Way",
+              "district_city": "North",
+              "state_province": "Delta",
+              "postal_Code": "53565",
+              "country": "United States"
+            },
+            "IM_Contact_Info": [
+              {
+                "IM": "Google Talk",
+                "Screen_Name": "Screen_Name lumen 704"
+              }
+            ],
+            "Notes": "Sample Notes note 295 generated for capture."
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Picture": "Enter a Source value for Picture",
+              "Work_Email_ID": "Enter a valid email address for Work Email-ID"
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "New_Contact": []
+        }
+      }
+    },
+    {
+      "id": "new-contact-invalid-format-work-phone",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "New_Contact",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Juniper"
+            },
+            "Birthday": "13-Oct-2026",
+            "Company_Name": "Company_Name quartz 564",
+            "Department": "Department alpha 183",
+            "Job_Title": "Job_Title tundra 319",
+            "Personal_Email_ID": "personal-email-id.436@example.com",
+            "Phone_Number": "+1555017733",
+            "Mobile_Number": "+1555019935",
+            "Website": "https://example.com/website/919",
+            "Home_Address": {
+              "address_line_1": "588 Maple Way",
+              "district_city": "Onyx",
+              "state_province": "Ivory",
+              "postal_Code": "36488",
+              "country": "United States"
+            },
+            "Work_Email_ID": "work-email-id.735@example.com",
+            "Work_Phone": "abc-notaphone",
+            "Work_Extension": 157,
+            "Fax": 117,
+            "Work_Address1": {
+              "address_line_1": "849 Onyx Way",
+              "district_city": "Juniper",
+              "state_province": "Alpha",
+              "postal_Code": "24623",
+              "country": "United States"
+            },
+            "IM_Contact_Info": [
+              {
+                "IM": "Google Talk",
+                "Screen_Name": "Screen_Name prairie 812"
+              }
+            ],
+            "Notes": "Sample Notes note 963 generated for capture."
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Picture": "Enter a Source value for Picture",
+              "Work_Phone": "Enter a valid phone number"
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "New_Contact": []
+        }
+      }
+    },
+    {
+      "id": "new-contact-update-company-name",
+      "steps": [
+        {
+          "op": "update",
+          "report": "All_Contacts",
+          "where": {
+            "Personal_Email_ID": "personal-email-id.447@example.com"
+          },
+          "record": {
+            "Company_Name": "Company Name updated 224"
+          },
+          "expect": {
+            "body": {
+              "matched": 0,
+              "updated": 0,
+              "refused": 0
+            }
+          },
+          "creator": {
+            "code": 3100,
+            "message": "No Data Available"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "New_Contact": []
+        }
+      }
+    },
+    {
+      "id": "post-mutation-all-contacts",
+      "steps": [
+        {
+          "op": "update",
+          "report": "All_Contacts",
+          "where": {
+            "Personal_Email_ID": "personal-email-id.447@example.com"
+          },
+          "record": {
+            "Company_Name": "Company Name updated 224"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "All_Contacts",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "new-contact-happy-path",
+      "tags": [
+        "unreachable-via-api"
+      ],
+      "skip": "unreachable via API: New_Contact.Picture is a mandatory image/file field and addRecords cannot upload a file, so Creator never stored a New_Contact record",
+      "steps": []
+    }
+  ]
+}

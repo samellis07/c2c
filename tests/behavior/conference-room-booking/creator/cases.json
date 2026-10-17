@@ -1,0 +1,1634 @@
+{
+  "version": "c2c-behavior-golden/2",
+  "app": "Conference Room Booking",
+  "source": {
+    "file": "Conference_Room_Booking.ds",
+    "origin": "Creator gallery app conference-room-booking, exported .ds (local fixture corpus, not redistributable)",
+    "redistributable": false
+  },
+  "cases": [
+    {
+      "id": "baseline-users",
+      "steps": [
+        {
+          "op": "report",
+          "report": "Users",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "baseline-booking-schedule-in-timeline",
+      "steps": [
+        {
+          "op": "report",
+          "report": "Booking_Schedule_In_Timeline",
+          "expect": {
+            "outcome": "rows",
+            "count": 0
+          },
+          "creator": {
+            "code": 9220,
+            "message": "No records exist in this report."
+          }
+        }
+      ]
+    },
+    {
+      "id": "add-room-setup-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Conference Room Added Successfully"
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Room": [
+            {
+              "Number_Of_Seats": "120",
+              "Size": "Small",
+              "Building_Floor": "Building_Floor delta 553",
+              "Available": "Active",
+              "Room_Name": "Room_Name grain 457",
+              "Location_address_line_1": "92 Tundra Way",
+              "Location_district_city": "Delta",
+              "Location_state_province": "Harbor",
+              "Location_postal_Code": "42600",
+              "Location_country": "United States"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-user-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "creator": {
+            "code": 3000,
+            "error": [
+              "Error details: Error in executing On Add - On Success script User Limit Reached Line:(1)"
+            ],
+            "message": "User Added Successfully"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          },
+          "tags": [
+            "env-artifact:trial-user-limit"
+          ]
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Status": "Active",
+              "Email": "email.965@example.com",
+              "Address_address_line_1": "92 Grain Way",
+              "Address_district_city": "Onyx",
+              "Address_state_province": "Harbor",
+              "Address_postal_Code": "35412",
+              "Address_country": "United States",
+              "Phone_Number": "+1555014004",
+              "Name_first_name": "Tundra",
+              "Name_last_name": "Onyx"
+            }
+          ]
+        }
+      },
+      "tags": [
+        "env-artifact:trial-user-limit"
+      ]
+    },
+    {
+      "id": "add-user-invalid-duplicate-email",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Ember",
+              "last_name": "Delta"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555017532",
+            "Address": {
+              "address_line_1": "796 Alpha Way",
+              "district_city": "Lumen",
+              "state_province": "Ridge",
+              "postal_Code": "68057",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "creator": {
+            "code": 3002,
+            "error": {
+              "Email": "This value already exists. Enter a unique value."
+            }
+          },
+          "expect": {
+            "outcome": "refused"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Status": "Active",
+              "Email": "email.965@example.com",
+              "Address_address_line_1": "92 Grain Way",
+              "Address_district_city": "Onyx",
+              "Address_state_province": "Harbor",
+              "Address_postal_Code": "35412",
+              "Address_country": "United States",
+              "Phone_Number": "+1555014004",
+              "Name_first_name": "Tundra",
+              "Name_last_name": "Onyx"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "booking-form-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.303@example.com",
+            "To_Time_With_Date": "17-Oct-2026 08:19:00",
+            "From_Time_With_Date": "17-Oct-2026 10:04:00",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 472 generated for capture.",
+            "Status": "Reserved",
+            "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture."
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Booked Successfully! Confirmation mail has been sent to you!!"
+          },
+          "bind": {
+            "r_booking_form_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "Status": "Reserved",
+              "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture.",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-17 08:19:00",
+              "From_Time_With_Date": "2026-10-17 10:04:00",
+              "Official_Email": "official-email.303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 472 generated for capture."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "booking-form-invalid-rule-0",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.303@example.com",
+            "To_Time_With_Date": "17-Oct-2026 08:19:00",
+            "From_Time_With_Date": "17-Oct-2026 10:04:00",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 472 generated for capture.",
+            "Status": "Reserved",
+            "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture."
+          },
+          "bind": {
+            "r_booking_form_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.303@example.com",
+            "To_Time_With_Date": "17-Oct-2026 08:19:00",
+            "From_Time_With_Date": "17-Oct-2026 10:04:00",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 472 generated for capture.",
+            "Status": "Reserved",
+            "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture."
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Booked Successfully! Confirmation mail has been sent to you!!"
+          },
+          "bind": {
+            "r_booking_form_invalid_rule_0": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "Status": "Reserved",
+              "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture.",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-17 08:19:00",
+              "From_Time_With_Date": "2026-10-17 10:04:00",
+              "Official_Email": "official-email.303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 472 generated for capture."
+            },
+            {
+              "Status": "Reserved",
+              "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture.",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-17 08:19:00",
+              "From_Time_With_Date": "2026-10-17 10:04:00",
+              "Official_Email": "official-email.303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 472 generated for capture."
+            }
+          ]
+        }
+      },
+      "tags": [
+        "creator-api-replay-unconfirmed"
+      ]
+    },
+    {
+      "id": "booking-form-update-brief-description-of-conference",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.303@example.com",
+            "To_Time_With_Date": "17-Oct-2026 08:19:00",
+            "From_Time_With_Date": "17-Oct-2026 10:04:00",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 472 generated for capture.",
+            "Status": "Reserved",
+            "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture."
+          },
+          "bind": {
+            "r_booking_form_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.303@example.com",
+            "To_Time_With_Date": "17-Oct-2026 08:19:00",
+            "From_Time_With_Date": "17-Oct-2026 10:04:00",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 472 generated for capture.",
+            "Status": "Reserved",
+            "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture."
+          },
+          "bind": {
+            "r_booking_form_invalid_rule_0": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Booking_Schedule_In_Timeline",
+          "where": {
+            "Official_Email": "official-email.303@example.com"
+          },
+          "record": {
+            "Brief_Description_of_Conference": "Brief Description of Conference updated 256"
+          },
+          "expect": {
+            "body": {
+              "matched": 2,
+              "updated": 2,
+              "refused": 0
+            }
+          },
+          "creator": {
+            "codes": [
+              3000,
+              3000
+            ],
+            "messages": [
+              "Data Updated Successfully",
+              "Data Updated Successfully"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "Status": "Reserved",
+              "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture.",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-17 08:19:00",
+              "From_Time_With_Date": "2026-10-17 10:04:00",
+              "Official_Email": "official-email.303@example.com",
+              "Brief_Description_of_Conference": "Brief Description of Conference updated 256"
+            },
+            {
+              "Status": "Reserved",
+              "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture.",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-17 08:19:00",
+              "From_Time_With_Date": "2026-10-17 10:04:00",
+              "Official_Email": "official-email.303@example.com",
+              "Brief_Description_of_Conference": "Brief Description of Conference updated 256"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "add-room-boundary-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.303@example.com",
+            "To_Time_With_Date": "17-Oct-2026 08:19:00",
+            "From_Time_With_Date": "17-Oct-2026 10:04:00",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 472 generated for capture.",
+            "Status": "Reserved",
+            "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture."
+          },
+          "bind": {
+            "r_booking_form_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.303@example.com",
+            "To_Time_With_Date": "17-Oct-2026 08:19:00",
+            "From_Time_With_Date": "17-Oct-2026 10:04:00",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 472 generated for capture.",
+            "Status": "Reserved",
+            "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture."
+          },
+          "bind": {
+            "r_booking_form_invalid_rule_0": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Booking_Schedule_In_Timeline",
+          "where": {
+            "Official_Email": "official-email.303@example.com"
+          },
+          "record": {
+            "Brief_Description_of_Conference": "Brief Description of Conference updated 256"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR",
+            "Building_Floor": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Conference Room Added Successfully"
+          },
+          "bind": {
+            "r_add_room_boundary_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Add_Room": [
+            {
+              "Number_Of_Seats": "120",
+              "Size": "Small",
+              "Building_Floor": "Building_Floor delta 553",
+              "Available": "Active",
+              "Room_Name": "Room_Name grain 457",
+              "Location_address_line_1": "92 Tundra Way",
+              "Location_district_city": "Delta",
+              "Location_state_province": "Harbor",
+              "Location_postal_Code": "42600",
+              "Location_country": "United States"
+            },
+            {
+              "Building_Floor": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+              "Room_Name": "RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR",
+              "Location_address_line_1": "92 Tundra Way",
+              "Location_district_city": "Delta",
+              "Location_state_province": "Harbor",
+              "Location_postal_Code": "42600",
+              "Location_country": "United States"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-users",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.303@example.com",
+            "To_Time_With_Date": "17-Oct-2026 08:19:00",
+            "From_Time_With_Date": "17-Oct-2026 10:04:00",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 472 generated for capture.",
+            "Status": "Reserved",
+            "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture."
+          },
+          "bind": {
+            "r_booking_form_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.303@example.com",
+            "To_Time_With_Date": "17-Oct-2026 08:19:00",
+            "From_Time_With_Date": "17-Oct-2026 10:04:00",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 472 generated for capture.",
+            "Status": "Reserved",
+            "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture."
+          },
+          "bind": {
+            "r_booking_form_invalid_rule_0": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Booking_Schedule_In_Timeline",
+          "where": {
+            "Official_Email": "official-email.303@example.com"
+          },
+          "record": {
+            "Brief_Description_of_Conference": "Brief Description of Conference updated 256"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR",
+            "Building_Floor": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_boundary_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Users",
+          "expect": {
+            "outcome": "rows",
+            "count": 1
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 1
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Add_User": [
+            {
+              "Email": "email.965@example.com",
+              "Address_country": "United States",
+              "Address_district_city": "Onyx",
+              "Address_address_line_1": "92 Grain Way",
+              "Address_state_province": "Harbor",
+              "Address_postal_Code": "35412",
+              "Phone_Number": "+1555014004",
+              "Name_last_name": "Onyx",
+              "Name_first_name": "Tundra"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "post-booking-schedule-in-timeline",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.303@example.com",
+            "To_Time_With_Date": "17-Oct-2026 08:19:00",
+            "From_Time_With_Date": "17-Oct-2026 10:04:00",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 472 generated for capture.",
+            "Status": "Reserved",
+            "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture."
+          },
+          "bind": {
+            "r_booking_form_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.303@example.com",
+            "To_Time_With_Date": "17-Oct-2026 08:19:00",
+            "From_Time_With_Date": "17-Oct-2026 10:04:00",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 472 generated for capture.",
+            "Status": "Reserved",
+            "Reason_to_Cancelled": "Sample Reason_to_Cancelled_ note 923 generated for capture."
+          },
+          "bind": {
+            "r_booking_form_invalid_rule_0": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "update",
+          "report": "Booking_Schedule_In_Timeline",
+          "where": {
+            "Official_Email": "official-email.303@example.com"
+          },
+          "record": {
+            "Brief_Description_of_Conference": "Brief Description of Conference updated 256"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR",
+            "Building_Floor": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_boundary_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Booking_Schedule_In_Timeline",
+          "expect": {
+            "outcome": "rows",
+            "count": 2
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 2
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "User": "<ref:r_add_user_valid_submit>",
+              "To_Time_With_Date": "2026-10-17 08:19:00",
+              "From_Time_With_Date": "2026-10-17 10:04:00",
+              "Brief_Description_of_Conference": "Brief Description of Conference updated 256"
+            },
+            {
+              "User": "<ref:r_add_user_valid_submit>",
+              "To_Time_With_Date": "2026-10-17 08:19:00",
+              "From_Time_With_Date": "2026-10-17 10:04:00",
+              "Brief_Description_of_Conference": "Brief Description of Conference updated 256"
+            }
+          ]
+        }
+      },
+      "notes": [
+        "User_calfield is not a stored column of Booking_Form (report/display field); not asserted"
+      ]
+    },
+    {
+      "id": "r4-booking-form-valid-submit",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:00:00",
+            "To_Time_With_Date": "24-Oct-2026 10:00:00"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Booked Successfully! Confirmation mail has been sent to you!!"
+          },
+          "bind": {
+            "r_r4_booking_form_valid_submit": "body.values.ROWID"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:00:00",
+              "From_Time_With_Date": "2026-10-24 09:00:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            }
+          ]
+        }
+      },
+      "notes": [
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "r4-booking-form-invalid-rule-0-overlap",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:00:00",
+            "To_Time_With_Date": "24-Oct-2026 10:00:00"
+          },
+          "bind": {
+            "r_r4_booking_form_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:30:00",
+            "To_Time_With_Date": "24-Oct-2026 10:30:00"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Booked Successfully! Confirmation mail has been sent to you!!"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:00:00",
+              "From_Time_With_Date": "2026-10-24 09:00:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            },
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:30:00",
+              "From_Time_With_Date": "2026-10-24 09:30:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            }
+          ]
+        }
+      },
+      "tags": [
+        "creator-api-replay-unconfirmed"
+      ],
+      "notes": [
+        "the booking-overlap rule is a Booking_Form on-add 'on validate' script: `Booking_Form[Official_Email == input.Official_Email && (overlap) && Status == \"Registered\"]` -> alert 'Already booked this room for the time period You have given'; stored bookings carry Status 'Reserved', so the Status == \"Registered\" clause can never match -- consistent with the rule never firing even on a byte-identical replay, recorded as an open Creator question (the same kind of on-validate alert fired reliably on vendors.Add_Contract and quotation-management.Create_Quotation)",
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "r4-booking-form-invalid-rule-0-exact-replay",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:00:00",
+            "To_Time_With_Date": "24-Oct-2026 10:00:00"
+          },
+          "bind": {
+            "r_r4_booking_form_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:00:00",
+            "To_Time_With_Date": "24-Oct-2026 10:00:00"
+          },
+          "creator": {
+            "code": 3000,
+            "message": "Booked Successfully! Confirmation mail has been sent to you!!"
+          },
+          "expect": {
+            "outcome": "saved"
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:00:00",
+              "From_Time_With_Date": "2026-10-24 09:00:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            },
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:00:00",
+              "From_Time_With_Date": "2026-10-24 09:00:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            }
+          ]
+        }
+      },
+      "tags": [
+        "creator-api-replay-unconfirmed"
+      ],
+      "notes": [
+        "the booking-overlap rule is a Booking_Form on-add 'on validate' script: `Booking_Form[Official_Email == input.Official_Email && (overlap) && Status == \"Registered\"]` -> alert 'Already booked this room for the time period You have given'; stored bookings carry Status 'Reserved', so the Status == \"Registered\" clause can never match -- consistent with the rule never firing even on a byte-identical replay, recorded as an open Creator question (the same kind of on-validate alert fired reliably on vendors.Add_Contract and quotation-management.Create_Quotation)",
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    },
+    {
+      "id": "r4-post-booking-schedule",
+      "steps": [
+        {
+          "op": "submit",
+          "form": "Add_Room",
+          "record": {
+            "Room_Name": "Room_Name grain 457",
+            "Building_Floor": "Building_Floor delta 553",
+            "Location": {
+              "address_line_1": "92 Tundra Way",
+              "district_city": "Delta",
+              "state_province": "Harbor",
+              "postal_Code": "42600",
+              "country": "United States"
+            },
+            "Size": "Small",
+            "Number_Of_Seats": 120,
+            "Available": "Active",
+            "Additional_Facilities": [
+              "Fan"
+            ]
+          },
+          "bind": {
+            "r_add_room_setup_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Add_User",
+          "record": {
+            "Name": {
+              "first_name": "Tundra",
+              "last_name": "Onyx"
+            },
+            "Email": "email.965@example.com",
+            "Phone_Number": "+1555014004",
+            "Address": {
+              "address_line_1": "92 Grain Way",
+              "district_city": "Onyx",
+              "state_province": "Harbor",
+              "postal_Code": "35412",
+              "country": "United States"
+            },
+            "Status": "Active"
+          },
+          "bind": {
+            "r_add_user_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:00:00",
+            "To_Time_With_Date": "24-Oct-2026 10:00:00"
+          },
+          "bind": {
+            "r_r4_booking_form_valid_submit": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:30:00",
+            "To_Time_With_Date": "24-Oct-2026 10:30:00"
+          },
+          "bind": {
+            "r_r4_booking_form_invalid_rule_0_overlap": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "submit",
+          "form": "Booking_Form",
+          "record": {
+            "User": "<ref:r_add_user_valid_submit>",
+            "Official_Email": "official-email.r4-2303@example.com",
+            "Choose_Room": "<ref:r_add_room_setup_submit>",
+            "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture.",
+            "Status": "Reserved",
+            "From_Time_With_Date": "24-Oct-2026 09:00:00",
+            "To_Time_With_Date": "24-Oct-2026 10:00:00"
+          },
+          "bind": {
+            "r_r4_booking_form_invalid_rule_0_exact_replay": "body.values.ROWID"
+          },
+          "setup": true
+        },
+        {
+          "op": "report",
+          "report": "Booking_Schedule_In_Timeline",
+          "expect": {
+            "outcome": "rows",
+            "count": 3
+          },
+          "creator": {
+            "code": 3000,
+            "rows": 3
+          }
+        }
+      ],
+      "expect": {
+        "partial": true,
+        "unordered": true,
+        "tables": {
+          "Booking_Form": [
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:00:00",
+              "From_Time_With_Date": "2026-10-24 09:00:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            },
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:30:00",
+              "From_Time_With_Date": "2026-10-24 09:30:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            },
+            {
+              "Status": "Reserved",
+              "User": "<ref:r_add_user_valid_submit>",
+              "Choose_Room": "<ref:r_add_room_setup_submit>",
+              "To_Time_With_Date": "2026-10-24 10:00:00",
+              "From_Time_With_Date": "2026-10-24 09:00:00",
+              "Official_Email": "official-email.r4-2303@example.com",
+              "Brief_Description_of_Conference": "Sample Brief_Description_of_Conference note 2472 for r4 capture."
+            }
+          ]
+        }
+      },
+      "tags": [
+        "creator-api-replay-unconfirmed"
+      ],
+      "notes": [
+        "the booking-overlap rule is a Booking_Form on-add 'on validate' script: `Booking_Form[Official_Email == input.Official_Email && (overlap) && Status == \"Registered\"]` -> alert 'Already booked this room for the time period You have given'; stored bookings carry Status 'Reserved', so the Status == \"Registered\" clause can never match -- consistent with the rule never firing even on a byte-identical replay, recorded as an open Creator question (the same kind of on-validate alert fired reliably on vendors.Add_Contract and quotation-management.Create_Quotation)",
+        "lookup fields were sent as the parent record id (Creator refused the display value with 3001); the id is the bound <ref:> of the parent submit"
+      ]
+    }
+  ]
+}
