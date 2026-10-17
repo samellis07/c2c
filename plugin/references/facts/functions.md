@@ -21,6 +21,10 @@ Rule: [UNVERIFIED] every env write replaces the whole set — merge before writi
 - `c2c deploy <ds> --function-env <file>` writes non-secret values into `env_variables` and secret-named keys (token/secret/key/password/credential, case-insensitive) as name-only `""` entries — generated files are often committed, so no secret value may appear in them. Right after the functions deploy, `c2c deploy exports/<app>.ds --confirm --function-env ~/.c2c/<app>-function-env.json` re-reads the live set (`GET …/function/<function-id>` → `data.configuration.environment.variables`) and POSTs the merged set with the real secret values to `…/function/<function-id>/configuration`, then reads back and compares every key/value. An unknown env shape or missing deployed key refuses the POST. The replace-only API has a GET-to-POST race: a concurrent console edit can be overwritten. The user types the values; they never enter the repo, the plan or the chat.
 - MCP tools: `List_All_Env_Variables`, `Create_Env_Variables`, `Update_Environment_Variable`, `Delete_Environment_Variable`.
 
+### Env var aggregate size limit (update only)
+
+Rule: [TESTED] on an **update** deploy (the function already exists), `env_variables` must satisfy `Σ(len(key) + len(value) + 3) ≤ 4096`; over that the deploy fails `HTTP Error: 400, environment_variables value has exceeded its maximum length`. It is NOT a key-count, key-length, value-length or serialized-JSON limit — a 4000-char key and a 4088-char value each pass, 292 keys pass and 293 fail only via the sum. On a **create** deploy the limit is not enforced — an over-limit env is accepted and stored — so an over-limit app deploys once and can never be redeployed. c2c writes each table id once as `TABLE_<NAME>_ID` (never the `TABLE_ID_<NAME>` double) and refuses an env over 4096 before any network call.
+
 ## Execution limits
 
 ### A ~30-second ceiling decides the function type

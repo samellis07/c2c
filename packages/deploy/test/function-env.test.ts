@@ -5,7 +5,8 @@ import { basename, join } from 'node:path';
 import { test } from 'node:test';
 import { applyFunctionEnvSecrets, buildFunctionEnv, functionIdFromList, liveFunctionVariables } from '../src/function-env.js';
 import { provisionFunctionEnvInput, type ProvisionPlanFile } from '../src/provision.js';
-import { envVariables, isSecretEnvName, RESERVED_ENV_KEYS, secretEnvValues } from '../src/function-dir.js';
+import { deployCli, readFunctionEnv } from '../src/cli.js';
+import { assertEnvVariablesWithinLimit, ENV_VARIABLES_MAX, envVariables, envVariablesSize, isSecretEnvName, RESERVED_ENV_KEYS, secretEnvValues } from '../src/function-dir.js';
 import type { RestCall, RestFn } from '../src/tables.js';
 import { repoRoot } from '../../core/src/toolchain.js';
 import { parse, deriveIr } from '../../core/src/index.js';
@@ -251,7 +252,7 @@ test('Acceptance 1: a fixture app with no third-party connections ends plan+prov
     // Catalyst refuses these names in env_variables: the generated file never carries them.
     for (const reserved of RESERVED_ENV_KEYS) assert.equal(fenv[reserved], undefined, `${reserved} must not be generated`);
     assert.equal(fenv.C2C_ZOHO_DC, 'in');
-    assert.ok(fenv.TABLE_ID === '101' || fenv.TABLE_ITEM_ID === '101' || fenv.TABLE_ID_ITEM === '101', 'table id must be autofilled');
+    assert.ok(fenv.TABLE_ID === '101' || fenv.TABLE_ITEM_ID === '101', 'table id must be autofilled');
 
     // Human checklist must have ZERO function-env human items
     const statusText = statusCap.out();
@@ -517,6 +518,139 @@ test('envVariables refuses a reserved name and keeps a non-reserved CATALYST_ na
   assert.equal(envVariables('live', { CATALYST_SOMETHING: 'x' }).CATALYST_SOMETHING, 'x');
 });
 
+// Live failure F-HRM-ENV-MAXLEN (2026-10-17): a redeploy whose env_variables
+// map summed past Catalyst's aggregate size ceiling was refused with
+// "environment_variables value has exceeded its maximum length". The HRM app
+// had 93 keys only because every table id was written twice; the deduped env
+// — one TABLE_<NAME>_ID per table — fits under the limit.
+test('an HRM-shaped env (44 tables) builds one key per table and fits the env limit', () => {
+  const tables = Array.from({ length: 44 }, (_, i) => ({ name: `Form_Number_${i + 1}`, id: `1000000000171${String(i).padStart(3, '0')}` }));
+  const env = buildFunctionEnv({ dc: 'in', bucketName: 'c2c-human-resource-management-42124967', tables });
+  assert.equal(Object.keys(env).length, 44 + 4, 'one TABLE_<NAME>_ID per table plus TABLE_ID, DC and the bucket pair');
+  assert.ok(Object.keys(env).every((k) => !/^TABLE_ID_/.test(k)));
+  envVariables('live', env);
+  assert.ok(envVariablesSize(envVariables('live', env)) <= ENV_VARIABLES_MAX);
+});
+
+test('an env over the aggregate limit is refused before any network call', () => {
+  // The probe's failing shape: 293 keys of (len 5 + len 6 + 3) = 4102 > 4096.
+  const huge = Object.fromEntries(Array.from({ length: 293 }, (_, i) => [`K${String(i).padStart(4, '0')}`, 'vvvvvv']));
+  assert.equal(envVariablesSize(huge), 293 * (5 + 6 + 3));
+  assert.ok(envVariablesSize(huge) > ENV_VARIABLES_MAX);
+  assert.throws(() => envVariables('live', huge), /env_variables is 4124 over 294 keys; Catalyst accepts at most 4096/, 'the +C2C_DEPLOY_MODE merge makes 294 keys');
+});
+
+// The limit is an exact `> 4096`: 4096 passes and 4097 is refused, so a `>=`
+// mutation fails these cases.
+test('the aggregate limit boundary: 4096 passes and 4097 is refused', () => {
+  // 5 + 4088 + 3 = 4096.
+  assert.doesNotThrow(() => assertEnvVariablesWithinLimit({ K0000: 'v'.repeat(4088) }));
+  assert.throws(() => assertEnvVariablesWithinLimit({ K0000: 'v'.repeat(4089) }), /env_variables is 4097 over 1 keys; Catalyst accepts at most 4096/);
+  // Through envVariables: C2C_DEPLOY_MODE=live adds 15 + 4 + 3 = 22, so the
+  // file key carries 4074 or 4075. 22 + 4074 = 4096; 22 + 4075 = 4097.
+  assert.equal(envVariablesSize(envVariables('live', { K0000: 'v'.repeat(4066) })), ENV_VARIABLES_MAX);
+  assert.throws(() => envVariables('live', { K0000: 'v'.repeat(4067) }), /env_variables is 4097 over 2 keys/);
+});
+
+// A confirmed deploy sizes the live env (C2C_DEPLOY_MODE=live), not the
+// 3-bytes-larger dry-run shape, so a file whose live env is exactly 4096 is
+// accepted — and one byte more is refused.
+test('the --function-env preflight sizes the env the live deploy sends', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-fenv-'));
+  const file = join(dir, 'env.json');
+  writeFileSync(file, JSON.stringify({ K0000: 'v'.repeat(4066) }));
+  assert.doesNotThrow(() => readFunctionEnv(file, true), 'a live env of exactly 4096 passes');
+  writeFileSync(file, JSON.stringify({ K0000: 'v'.repeat(4067) }));
+  assert.throws(() => readFunctionEnv(file, true), /env_variables is 4097/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// The preflight counts C2C_MAIL_FROM too: a file whose live env fits without
+// the sender (4065) but overflows with it (4097) is refused before the guard's
+// project list or the mail sender read-back — a counting io sees zero calls.
+test('a confirmed deploy refuses an env over the limit with C2C_MAIL_FROM before any network call', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-fenv-'));
+  const ds = join(dir, 'widget.ds');
+  writeFileSync(ds, 'application "Widget"\n{\n\tform Item\n\t{\n\t\tName\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t}\n\tlist Open_Items\n\t{\n\t\tshow all rows from Item\n\t}\n}\n');
+  const envFile = join(dir, 'env.json');
+  // 5 + 4035 + 3 = 4043, + C2C_DEPLOY_MODE=live (22) = 4065; the sender
+  // 'a@b.example.test' adds 13 + 16 + 3 = 32 for a live env of 4097.
+  writeFileSync(envFile, JSON.stringify({ K0000: 'v'.repeat(4035) }));
+  assert.doesNotThrow(() => readFunctionEnv(envFile, true), 'the same file fits without the sender');
+  let network = 0;
+  let err = '';
+  const io = {
+    stdout: () => {},
+    stderr: (s: string) => void (err += s),
+    env: {},
+    spawn: async () => {
+      network++;
+      throw new Error('spawn forbidden');
+    },
+    fetch: async () => {
+      network++;
+      throw new Error('fetch forbidden');
+    },
+    rest: async () => {
+      network++;
+      throw new Error('rest forbidden');
+    },
+    accessToken: async () => {
+      network++;
+      throw new Error('accessToken forbidden');
+    },
+    cliDc: () => undefined,
+    sleep: async () => {},
+  } as unknown as Io;
+  const code = await deployCli([ds, '--project', '1001', '--org', ORG, '--dc', 'in', '--confirm', '--function-env', envFile, '--mail', '--mail-from', 'a@b.example.test'], io);
+  assert.equal(code, 1);
+  assert.match(err, /env_variables is 4097 over 3 keys/);
+  assert.equal(network, 0, 'the refusal runs before the project list and the sender read-back');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('the secrets POST refuses a merged env over the aggregate limit before writing', async () => {
+  const detail = { data: { configuration: { environment: { variables: { LIVE_TOKEN: 'x' } } } } };
+  const stub = restStub((call) => {
+    if (call.path === `${PREFIX}/function`) return { status: 200, body: functionList };
+    if (call.method === 'GET') return { status: 200, body: detail };
+    return undefined;
+  });
+  await assert.rejects(
+    () => applyFunctionEnvSecrets(stub.rest, '1001', { PADDING_TOKEN: 'x'.repeat(ENV_VARIABLES_MAX) }, [], { tries: 1 }),
+    /env_variables is \d+ over \d+ keys/,
+  );
+  assert.equal(stub.calls.some((call) => call.method === 'POST'), false, 'no POST was sent');
+});
+
+// The same exact boundary guards the secrets POST: a merged env of 4096 is
+// written, 4097 is refused before the POST.
+test('the secrets POST boundary: exactly 4096 posts, 4097 is refused', async () => {
+  const detail = (variables: Record<string, string>) => ({ data: { configuration: { environment: { variables } } } });
+  // live = LIVE_TOKEN (10) + 'x' (1) + 3 = 14; PAD_TOKEN (9) + pad + 3.
+  // pad 4070 -> 14 + 4082 = 4096; pad 4071 -> 4097.
+  let posted: Record<string, string> | undefined;
+  const fits = restStub((call) => {
+    if (call.path === `${PREFIX}/function`) return { status: 200, body: functionList };
+    if (call.method === 'POST') {
+      posted = (call.body as { variables: Record<string, string> }).variables;
+      return { status: 200, body: {} };
+    }
+    if (call.method === 'GET') return { status: 200, body: detail(posted ?? { LIVE_TOKEN: 'x' }) };
+    return undefined;
+  });
+  await applyFunctionEnvSecrets(fits.rest, '1001', { PAD_TOKEN: 'v'.repeat(4070) }, [], { tries: 1 });
+  assert.equal(envVariablesSize(posted ?? {}), ENV_VARIABLES_MAX, 'the posted set is exactly the limit');
+
+  const over = restStub((call) => {
+    if (call.path === `${PREFIX}/function`) return { status: 200, body: functionList };
+    if (call.method === 'GET') return { status: 200, body: detail({ LIVE_TOKEN: 'x' }) };
+    return undefined;
+  });
+  await assert.rejects(() => applyFunctionEnvSecrets(over.rest, '1001', { PAD_TOKEN: 'v'.repeat(4071) }, [], { tries: 1 }), /env_variables is 4097/);
+  assert.equal(over.calls.some((call) => call.method === 'POST'), false, 'no POST was sent');
+});
+
 // Live failure F-CM-ENV: the provisioned env had no C2C_STRATUS_BUCKET and
 // turned the project and job-pool names learned during provision into TABLE_*.
 test('provision env carries the app bucket and TABLE_* only for real tables', () => {
@@ -558,7 +692,7 @@ test('provision env carries the app bucket and TABLE_* only for real tables', ()
   assert.equal(env.C2C_STRATUS_BUCKET, 'c2c-fixture-app-abcd1234');
   assert.equal(env.STRATUS_BUCKET, 'c2c-fixture-app-abcd1234');
   assert.equal(env.TABLE_LINEITEMS_ID, '111111');
-  assert.equal(env.TABLE_ID_LINEITEMS, '111111');
+  assert.equal(env.TABLE_ID_LINEITEMS, undefined, 'the TABLE_ID_<NAME> double is never written');
   assert.equal(env.TABLE_JOBS_ID, '222222');
   assert.equal(env.TABLE_ID, '111111');
   for (const bad of ['TABLE_CONSTRUCTIONMANAGEMENT_ID', 'TABLE_ID_CONSTRUCTIONMANAGEMENT', 'TABLE_C2C_BR_3_ID', 'TABLE_ID_C2C_BR_3']) {
@@ -567,6 +701,18 @@ test('provision env carries the app bucket and TABLE_* only for real tables', ()
   for (const [key, value] of Object.entries(env)) {
     assert.ok(value !== '333333' && value !== '444444', `${key} carries a job-pool or project id`);
   }
+});
+
+// Apps provisioned before the dedup carry the TABLE_ID_<NAME> double in their
+// function-env.json: its id folds into the canonical spelling and the legacy
+// key is dropped on the next write.
+test('a legacy TABLE_ID_<NAME> existing key folds into TABLE_<NAME>_ID', () => {
+  const env = buildFunctionEnv({
+    existingEnv: { TABLE_ID_LEGACYAPP: '777777', C2C_ZOHO_DC: 'in' },
+  });
+  assert.equal(env.TABLE_LEGACYAPP_ID, '777777');
+  assert.equal(env.TABLE_ID_LEGACYAPP, undefined);
+  assert.equal(env.TABLE_ID, '777777');
 });
 
 // Deploy asserts the env read-back even when there are no secrets to apply:

@@ -770,7 +770,7 @@ export function functionBaseFrom(output: string): string | undefined {
  * kept outside the repo (values may be secrets; only key names are ever printed).
  * "new" states a first deploy with nothing to keep. A confirmed deploy needs one or the other.
  */
-export function readFunctionEnv(value: string | undefined, confirm: boolean): Record<string, string> | undefined {
+export function readFunctionEnv(value: string | undefined, confirm: boolean, mailFrom?: string): Record<string, string> | undefined {
   if (value === undefined) {
     if (!confirm) return undefined;
     throw new Error(
@@ -789,8 +789,10 @@ export function readFunctionEnv(value: string | undefined, confirm: boolean): Re
   for (const key of Object.keys(env)) {
     if (typeof env[key] !== 'string') throw new Error(`--function-env: ${key} must be a string`);
   }
-  // Validates the names the same way the bundle does, before anything is written.
-  envVariables('dry-run', env as Record<string, string>);
+  // Validates the exact map the deploy sends — the live env carries
+  // C2C_DEPLOY_MODE=live and the verified sender — before anything is written
+  // or read over the network.
+  envVariables(confirm ? 'live' : 'dry-run', { ...(env as Record<string, string>), ...(mailFrom ? { C2C_MAIL_FROM: mailFrom } : {}) });
   return env as Record<string, string>;
 }
 
@@ -834,10 +836,17 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
       }
     }
     const confirm = rest.includes('--confirm');
+    // The deploy config and the mail sender are local reads; resolving them
+    // here lets the --function-env size check below refuse an over-limit env —
+    // C2C_MAIL_FROM included — before the guard or the mail sender read-back
+    // makes any network call.
+    const uiConfigPath = findDeployConfig(target, flag(rest, '--config'));
+    const deployConfig = uiConfigPath ? readDeployConfig(uiConfigPath) : undefined;
+    const mailFrom = flag(rest, '--mail-from') ?? deployConfig?.mail?.from;
     // Offline argument checks run before the guard, which can read the project
     // list: a named --function-env file (reserved names included) and --slate-name.
     const functionEnvFlag = flag(rest, '--function-env');
-    const namedFunctionEnv = functionEnvFlag !== undefined && !rest.includes('--backfill-shadows') ? readFunctionEnv(functionEnvFlag, confirm) : undefined;
+    const namedFunctionEnv = functionEnvFlag !== undefined && !rest.includes('--backfill-shadows') ? readFunctionEnv(functionEnvFlag, confirm, mailFrom) : undefined;
     const slateNameFlag = flag(rest, '--slate-name');
     if (rest.includes('--slate-name') && slateNameFlag === undefined) throw new Error('--slate-name needs a name');
     const slateNameError = slateNameFlag === undefined ? undefined : slateNameProblem(slateNameFlag);
@@ -899,18 +908,15 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
             ...(adminRoleId !== undefined ? { roleId: adminRoleId } : {}),
           };
     let apiBase = apiBaseFlag ?? previous?.apiBase;
-    const functionEnv = namedFunctionEnv ?? readFunctionEnv(functionEnvFlag, confirm);
+    const functionEnv = namedFunctionEnv ?? readFunctionEnv(functionEnvFlag, confirm, mailFrom);
     const slateDomain = slateHost(slateDomainFlag ?? previous?.slateUrl);
     // The UI the Slate app serves: --ui, else c2c-deploy.json `ui`, else react.
     // The flag wins so a scripted run can override a pinned config without editing it.
     // --ui vanilla keeps the previous target as the fallback.
     const uiFlag = flag(rest, '--ui');
     if (uiFlag !== undefined && uiFlag !== 'vanilla' && uiFlag !== 'react') throw new Error('--ui must be vanilla or react');
-    const uiConfigPath = findDeployConfig(target, flag(rest, '--config'));
-    const deployConfig = uiConfigPath ? readDeployConfig(uiConfigPath) : undefined;
     const ui: DeployUi = uiFlag ?? deployConfig?.ui ?? 'react';
     const subsetShims = rest.includes('--subset-shims') || io.env.C2C_SUBSET_SHIMS === '1';
-    const mailFrom = flag(rest, '--mail-from') ?? deployConfig?.mail?.from;
     if (rest.includes('--mail-sender-verified')) {
       io.stderr('c2c deploy: --mail-sender-verified is not taken as proof; pass --mail-from <address> only and verify the sender in Catalyst Mail\n');
       return 1;

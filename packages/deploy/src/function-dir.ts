@@ -149,6 +149,34 @@ export function isSecretEnvName(name: string): boolean {
   return SECRET_NAME.test(name);
 }
 
+/**
+ * The aggregate size Catalyst accepts for one function's env_variables on an
+ * update deploy: Σ(len(key) + len(value) + 3) ≤ 4096, measured live
+ * (2026-10-17, zcatalyst-cli 1.28.0 — exact boundary hit on four independent
+ * key/value shapes; creates are not checked, so an over-limit env deploys once
+ * and then can never be redeployed). Key count, per-key and per-value lengths
+ * are individually unbounded. The published docs name no numeric limit; the
+ * rule and its evidence are recorded in plugin/references/facts/functions.md.
+ */
+export const ENV_VARIABLES_MAX = 4096;
+
+/** The size Catalyst counts for an env_variables map: Σ(len(key) + len(value) + 3). */
+export function envVariablesSize(env: Readonly<Record<string, string>>): number {
+  let size = 0;
+  for (const key of Object.keys(env).sort(byPath)) size += key.length + (env[key] as string).length + 3;
+  return size;
+}
+
+/** Refuse an env_variables map over the measured aggregate limit, before any network call. */
+export function assertEnvVariablesWithinLimit(env: Readonly<Record<string, string>>): void {
+  const size = envVariablesSize(env);
+  if (size > ENV_VARIABLES_MAX) {
+    throw new Error(
+      `function env: env_variables is ${size} over ${Object.keys(env).length} keys; Catalyst accepts at most ${ENV_VARIABLES_MAX} (sum of key + value lengths + 3 per entry) — remove variables or shorten values before deploying`,
+    );
+  }
+}
+
 /** The subset of an env map whose names mark secrets, keys sorted. */
 export function secretEnvValues(env: Readonly<Record<string, string>> = {}): Record<string, string> {
   const out: Record<string, string> = {};
@@ -207,6 +235,7 @@ export function envVariables(mode: 'live' | 'dry-run', env: Readonly<Record<stri
   merged.C2C_DEPLOY_MODE = mode;
   const ordered: Record<string, string> = {};
   for (const key of Object.keys(merged).sort(byPath)) ordered[key] = merged[key] as string;
+  assertEnvVariablesWithinLimit(ordered);
   return ordered;
 }
 

@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { unquote, type App, type PropertyBlock } from '../../core/src/ir.js';
-import { API_FUNCTION, isReservedEnvKey } from './function-dir.js';
+import { API_FUNCTION, assertEnvVariablesWithinLimit, isReservedEnvKey } from './function-dir.js';
 import { restWithRetry, type RetryOptions } from './retry.js';
 import type { RestFn } from './tables.js';
 
@@ -114,7 +114,10 @@ export function buildFunctionEnv(input: FunctionEnvInput): Record<string, string
     out.STRATUS_BUCKET = bucket;
   }
 
-  // Table IDs
+  // Table IDs. Each table is written once as TABLE_<NAME>_ID: the generated
+  // code resolves tables by name and reads neither spelling, so the legacy
+  // TABLE_ID_<NAME> double is never emitted — Catalyst refuses an
+  // env_variables payload over its aggregate size limit.
   let firstTableId: string | undefined;
 
   // From input.tables
@@ -122,17 +125,19 @@ export function buildFunctionEnv(input: FunctionEnvInput): Record<string, string
     for (const table of input.tables) {
       if (table.id) {
         if (!firstTableId) firstTableId = table.id;
-        const nameKey = sanitizeEnvKey(table.name);
-        out[`TABLE_${nameKey}_ID`] = table.id;
-        out[`TABLE_ID_${nameKey}`] = table.id;
+        out[`TABLE_${sanitizeEnvKey(table.name)}_ID`] = table.id;
       }
     }
   }
 
-  // Existing table keys if not set
+  // Existing table keys if not set. A TABLE_ID_<NAME> key left over from an
+  // env written before the dedup still carries its id forward, folded into the
+  // canonical TABLE_<NAME>_ID spelling.
   for (const [k, v] of Object.entries(existing)) {
-    if (/^TABLE_.*_ID$/.test(k) || /^TABLE_ID_.*$/.test(k)) {
-      if (out[k] === undefined) out[k] = v;
+    const legacy = /^TABLE_ID_([A-Z0-9_]+)$/.exec(k)?.[1];
+    const canonical = legacy === undefined ? k : `TABLE_${legacy}_ID`;
+    if (/^TABLE_.*_ID$/.test(canonical)) {
+      if (out[canonical] === undefined) out[canonical] = v;
       if (!firstTableId && /^[0-9]+$/.test(v)) firstTableId = v;
     }
   }
@@ -151,9 +156,10 @@ export function buildFunctionEnv(input: FunctionEnvInput): Record<string, string
     }
   }
 
-  // Preserve any other existing keys, never a reserved one
+  // Preserve any other existing keys, never a reserved one. TABLE_ID_<NAME>
+  // doubles are not re-emitted: their ids already folded into TABLE_<NAME>_ID.
   for (const [k, v] of Object.entries(existing)) {
-    if (out[k] === undefined && !isReservedEnvKey(k)) {
+    if (out[k] === undefined && !isReservedEnvKey(k) && !/^TABLE_ID_[A-Z0-9_]+$/.test(k)) {
       out[k] = v;
     }
   }
@@ -300,6 +306,7 @@ export async function applyFunctionEnvSecrets(
   if (absent.length) throw new Error(`live env read-back is missing deployed variable(s) ${absent.join(', ')}; refusing a replace-only write`);
   if (!names.length) return [];
   const variables = { ...live, ...secrets };
+  assertEnvVariablesWithinLimit(variables);
   await call(rest, { method: 'POST', path: `${prefix}/function/${id}/configuration`, body: { variables } }, opts, `setting ${API_FUNCTION} env vars`);
   const verified = liveFunctionVariables(await call(rest, { method: 'GET', path: `${prefix}/function/${id}` }, opts, `verifying ${API_FUNCTION} env vars`));
   if (Object.entries(variables).some(([key, value]) => verified[key] !== value)) {
