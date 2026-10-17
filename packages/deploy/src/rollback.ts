@@ -33,22 +33,17 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { App, Field } from '../../core/src/ir.js';
 import { generateSchema, type SchemaColumn, type SchemaTable } from '../../schema/src/generator.js';
-import { SOURCE_ID_COLUMN, SYSTEM_FIELD_COLUMNS } from '../../schema/src/mapping.js';
+import { SOURCE_ID_COLUMN } from '../../schema/src/mapping.js';
 import { EXTENSION_KEY } from '../../schema/src/limits.js';
 import { canonDecimal } from '../../data/src/integrity.js';
 import { cellKind } from './csv.js';
-import { compareIds, zcql } from './row-delta.js';
+import { compareIds, STORE_SYSTEM_COLUMNS, zcql } from './row-delta.js';
 import { exactId, parseJsonExact } from './json-exact.js';
 import type { CatalystScope, FetchLike } from '../../data/src/migrate.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-/**
- * Bookkeeping columns shared by rollback and parity: the loader's source id,
- * the row id, the columns Catalyst stamps on every `SELECT *` row, and the
- * Creator system fields. Rollback never exports them. Parity ignores a stored
- * key from this set unless the table schema declares that name.
- */
-export const STORE_SYSTEM_COLUMNS = new Set<string>([SOURCE_ID_COLUMN, 'ROWID', 'CREATORID', 'CREATEDTIME', 'MODIFIEDTIME', ...SYSTEM_FIELD_COLUMNS.map((column) => column.name)]);
+/** Bookkeeping columns rollback never exports; parity ignores a stored key from this set unless the table schema declares that name. */
+export { STORE_SYSTEM_COLUMNS };
 /** ZCQL returns at most this many rows per SELECT. */
 export const ZCQL_PAGE = 300;
 

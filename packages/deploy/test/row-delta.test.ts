@@ -6,7 +6,7 @@ import type { CsvLoad } from '../src/csv.js';
 const loaded = {} as CsvLoad;
 const plan: DeltaPlan = {
   baseline: true,
-  tables: [{ table: 'Item', added: [{ id: '1', columns: { Name: 'Bolt' } }], changed: [], unchanged: 0, changedWithoutNewerTime: 0, deleted: [], missing: false }],
+  tables: [{ table: 'Item', added: [{ id: '1', columns: { Name: 'Bolt' } }], changed: [], unchanged: 0, changedWithoutNewerTime: 0, deleted: [], missing: false, store: {} }],
   next: { version: 1, source: 'json', tables: { Item: { rows: { '1': 'fingerprint' } } } },
 };
 const options = { source: 'json', applyDeletes: false, scope: [], loaded };
@@ -23,6 +23,8 @@ test('sync-delta plan-only output stays byte-identical and says writes: no', () 
       '\n' +
       'upserts: 1\n' +
       'deletions: 0 (reported only; pass --apply-deletes to delete them)\n' +
+      'conflict check: 0 changed record(s) compared with the store before writes\n' +
+      'conflict resolution: none (any conflict refuses --confirm)\n' +
       'writes: no\n' +
       '\n',
   );

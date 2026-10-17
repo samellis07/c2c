@@ -30,7 +30,7 @@ import {
   type CsvLoad,
   type DeltaCheckpoint,
 } from '../../deploy/src/index.js';
-import type { DeltaPlan } from '../../deploy/src/row-delta.js';
+import { formatConflict, withStoreFingerprints, type ConflictResolver, type DeltaPlan } from '../../deploy/src/row-delta.js';
 import { SOURCE_ID_COLUMN } from '../../schema/src/mapping.js';
 import { generateSchema } from '../../schema/src/index.js';
 import type { SchemaColumn, SchemaTable } from '../../schema/src/generator.js';
@@ -90,6 +90,8 @@ export interface RehearsalHooks {
   rollbackFiles?(files: Map<string, string>): void;
   /** Wraps the in-memory store's REST endpoint (for example to drop a write). */
   fetch?(inner: FetchLike): FetchLike;
+  /** Resolver for the first both-sides sync, which must refuse (none by default). */
+  conflictResolver?: ConflictResolver;
 }
 
 export interface RehearsalOptions {
@@ -374,10 +376,10 @@ function deltaLine(label: string, plan: DeltaPlan): string {
   return `${label}: ${t.added} new, ${t.changed} changed, ${t.deleted} deleted`;
 }
 
-async function sync(app: App, store: { fetch: FetchLike }, loaded: CsvLoad, checkpoint: DeltaCheckpoint | undefined) {
+async function sync(app: App, store: { fetch: FetchLike }, loaded: CsvLoad, checkpoint: DeltaCheckpoint | undefined, resolve?: ConflictResolver) {
   const plan = computeDelta(app, loaded, checkpoint, 'csv');
-  const result = await applyDelta({ ...STORE, fetch: store.fetch, app, loaded, plan, applyDeletes: true });
-  const next = result.ok ? withDeletionsApplied(plan.next, result.appliedDeletes) : checkpoint;
+  const result = await applyDelta({ ...STORE, fetch: store.fetch, app, loaded, plan, applyDeletes: true, ...(resolve ? { resolve } : {}) });
+  const next = result.ok ? withStoreFingerprints(withDeletionsApplied(plan.next, result.appliedDeletes), result.store) : checkpoint;
   return { plan, result, next };
 }
 
@@ -686,28 +688,59 @@ export async function rehearseCutover(app: App, options: RehearsalOptions): Prom
   }
 
   // Probe: the same record edited in the new app and in Creator, then one more sync.
-  const conflict: string[] = [];
-  if (targets.change && finalForm && finalForm.rows.length > 2) {
-    const table = tableOf(app, targets.change.form);
-    const index = finalForm.header.indexOf(targets.change.column);
-    const sourceId = finalForm.rows[2]![finalForm.rows[2]!.length - 1]!;
-    const row = store.tables.get(table)?.find((entry) => String(entry[SOURCE_ID_COLUMN]) === sourceId);
-    if (row) {
-      row[targets.change.column] = `${NEW_TEXT} new app side`;
+  // The record edited after the switch (new app only) must stay as the new app left it.
+  {
+    const failures: string[] = [];
+    const evidence: string[] = [];
+    const table = targets.change ? tableOf(app, targets.change.form) : '';
+    const column = targets.change?.column ?? '';
+    const rows = store.tables.get(table) ?? [];
+    const sourceId = finalForm && finalForm.rows.length > 2 ? finalForm.rows[2]!.at(-1)! : '';
+    const row = rows.find((entry) => String(entry[SOURCE_ID_COLUMN]) === sourceId);
+    const appOnly = postWrites.value ? rows.find((entry) => entry[column] === postWrites.value) : undefined;
+    if (!targets.change || !finalForm || !row) failures.push('no record could be edited on both sides');
+    else {
+      row[column] = `${NEW_TEXT} new app side`;
       const both = cloneExport(final);
-      both.find((form) => form.form === targets.change!.form)!.rows[2]![index] = `${NEW_TEXT} Creator side`;
-      const probe = await sync(app, store, load('export-conflict', both), finalSync.next);
-      conflict.push(`record ${table}/${sourceId} edited on both sides: sync-delta ${probe.result.ok ? 'applied' : 'failed'} with no conflict reported; store now holds "${String(row[targets.change.column])}"`);
+      both.find((form) => form.form === targets.change!.form)!.rows[2]![finalForm.header.indexOf(column)] = `${NEW_TEXT} Creator side`;
+      const bothLoad = load('export-conflict', both);
+      const refused = await sync(app, store, bothLoad, finalSync.next, hooks.conflictResolver);
+      const found = refused.result.conflicts.filter((item) => item.table === table && item.sourceId === sourceId);
+      if (refused.result.ok) failures.push(`record ${table}/${sourceId} edited on both sides: sync-delta applied without refusing`);
+      if (refused.result.conflicts.length !== 1 || found.length !== 1) failures.push(`expected 1 conflict for ${table}/${sourceId}, got ${refused.result.conflicts.length}`);
+      else {
+        const conflict = found[0]!;
+        const line = formatConflict(conflict);
+        if (conflict.rowid !== row.ROWID || !conflict.fields.some((field) => field.column === column)) failures.push(`conflict does not name ROWID ${String(row.ROWID)} and field ${column}: ${line}`);
+        if (line.includes(NEW_TEXT)) failures.push('the conflict report carries a field value');
+        evidence.push(`both-sides edit refused: ${line}`);
+      }
+      if (row[column] !== `${NEW_TEXT} new app side`) failures.push(`the refused sync overwrote ${table}/${sourceId}`);
+      const applied = await sync(app, store, bothLoad, finalSync.next, () => 'creator');
+      if (!applied.result.ok) failures.push(`--prefer creator did not apply: ${applied.result.error ?? ''}`);
+      else if (applied.result.conflicts.map((item) => item.resolution).join() !== 'creator') failures.push('the creator choice is not recorded on the conflict');
+      if (row[column] !== `${NEW_TEXT} Creator side`) failures.push(`--prefer creator left ${table}/${sourceId} at ${JSON.stringify(row[column] ?? null)}`);
+      else evidence.push(`--prefer creator: ${table}/${sourceId} holds the Creator value, resolution recorded`);
+      if (!appOnly || appOnly[column] !== postWrites.value) failures.push('the edit made only in the new app did not survive the sync');
+      else evidence.push(`new-app-only edit ${table}/ROWID ${String(appOnly.ROWID)} unchanged by both syncs`);
+      const replan = computeDelta(app, load('export-conflict', both), applied.next, 'csv');
+      const t = totals(replan);
+      if (t.added || t.changed || t.deleted) failures.push(`re-plan after the resolved sync: ${t.added}/${t.changed}/${t.deleted}`);
+      const back = rollbackExport(app, await readStoreRows({ ...STORE, fetch: store.fetch }, allTables)).files.find((file) => file.path === `import/${targets.change!.form}.csv`)?.body ?? '';
+      if (!postWrites.value || !back.includes(postWrites.value)) failures.push('the new-app-only edit is not in the rollback import back to Creator');
+      else evidence.push('new-app edits flow back to Creator through the rollback import (full export)');
     }
+    criteria.push(
+      criterion(
+        'D10.reverse-sync',
+        'Parallel run with writes on both sides: changes made in the new app flow back to Creator and conflicts are reported',
+        failures,
+        evidence,
+        'Make sync-delta refuse a record edited on both sides until --prefer or --conflicts resolves it (row-delta.ts applyDelta conflict check), keep new-app-only edits, and carry them in rollback-export.',
+      ),
+    );
   }
   criteria.push(
-    gap(
-      'D10.reverse-sync',
-      'Parallel run with writes on both sides: changes made in the new app flow back to Creator and conflicts are reported',
-      'c2c sync-delta is one-way (Creator -> Data Store) and compares only with its checkpoint: a record edited on both sides takes the Creator value with no conflict report, and rollback-export is a full one-shot CSV, not a delta back to Creator',
-      'Add a conflict check to sync-delta (store row changed since the checkpoint and Creator row changed) and a delta mode to rollback-export.',
-      conflict,
-    ),
     gap(
       'D10.custom-domain',
       'Custom domain: the new app is served on the business domain with a valid certificate',

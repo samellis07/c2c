@@ -11,7 +11,21 @@ import { assertLiveProject, fail, flag, loadApp, planGuard, prepareGuard, resolv
 import { readSourceBackup } from './backup.js';
 import { readSourceCsv, readSourceJson, type CsvLoad } from './csv.js';
 import { catalystBaseFor } from './dc.js';
-import { applyDelta, computeDelta, deltaTotals, formatDeltaPlan, MAX_DELETE_PERCENT, parseDeltaCheckpoint, withDeletionsApplied, type DeltaCheckpoint } from './row-delta.js';
+import {
+  applyDelta,
+  computeDelta,
+  deltaTotals,
+  formatConflict,
+  formatDeltaPlan,
+  MAX_DELETE_PERCENT,
+  parseDeltaCheckpoint,
+  withDeletionsApplied,
+  withStoreFingerprints,
+  type ConflictResolver,
+  type ConflictSide,
+  type DeltaCheckpoint,
+  type DeltaConflict,
+} from './row-delta.js';
 import { GuardError, planScopeLines } from './guards.js';
 import { parseStoreRows, readStoreRows, rollbackExport } from './rollback.js';
 
@@ -50,10 +64,78 @@ export function readDeltaCheckpoint(path: string): DeltaCheckpoint | undefined {
   return parseDeltaCheckpoint(readStateFile(path).delta);
 }
 
-function writeDeltaCheckpoint(path: string, checkpoint: DeltaCheckpoint): void {
+function writeState(path: string, patch: Record<string, unknown>): void {
   const state = readStateFile(path);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ ...state, delta: checkpoint }, null, 2)}\n`);
+  writeFileSync(path, `${JSON.stringify({ ...state, ...patch }, null, 2)}\n`);
+}
+
+function writeDeltaCheckpoint(path: string, checkpoint: DeltaCheckpoint): void {
+  writeState(path, { delta: checkpoint });
+}
+
+/** State-file key of the last conflict check: what `c2c proof` lists. Values are hashes, never the cells. */
+export const CONFLICTS_KEY = 'deltaConflicts';
+
+export interface ConflictRecord {
+  /** Checkpoint the conflicts were found against. */
+  since?: string;
+  conflicts: DeltaConflict[];
+}
+
+export function readConflictRecord(state: Record<string, unknown>): ConflictRecord | undefined {
+  const value = state[CONFLICTS_KEY];
+  if (!value || typeof value !== 'object' || !Array.isArray((value as ConflictRecord).conflicts)) return undefined;
+  return value as ConflictRecord;
+}
+
+function side(value: string, where: string): ConflictSide {
+  if (value === 'creator' || value === 'catalyst') return value;
+  throw new GuardError('configuration', `${where} must be creator or catalyst`);
+}
+
+/**
+ * The conflict resolver from --prefer and --conflicts. `--prefer creator|catalyst`
+ * covers every table, `--prefer <Table>=creator|catalyst` one table (repeatable),
+ * and a --conflicts JSON file `{ "<Table>": { "<source id>": "creator"|"catalyst" } }`
+ * single records; a record entry wins over its table, a table over the default.
+ */
+export function conflictResolver(args: readonly string[]): { resolve?: ConflictResolver; describe: string } {
+  let all: ConflictSide | undefined;
+  const tables = new Map<string, ConflictSide>();
+  args.forEach((arg, index) => {
+    if (arg !== '--prefer') return;
+    const value = args[index + 1];
+    if (value === undefined || value.startsWith('--')) throw new GuardError('configuration', '--prefer needs creator, catalyst or <Table>=creator|catalyst');
+    const eq = value.indexOf('=');
+    if (eq < 0) {
+      const chosen = side(value, '--prefer');
+      if (all && all !== chosen) throw new GuardError('configuration', '--prefer is given twice with different sides');
+      all = chosen;
+      return;
+    }
+    const table = value.slice(0, eq);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table)) throw new GuardError('configuration', `--prefer ${value}: the table name is not valid`);
+    tables.set(table, side(value.slice(eq + 1), `--prefer ${table}`));
+  });
+  const records = new Map<string, Map<string, ConflictSide>>();
+  const file = flag(args, '--conflicts');
+  if (args.includes('--conflicts') && !file) throw new GuardError('configuration', '--conflicts needs a file');
+  if (file) {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new GuardError('configuration', '--conflicts file must be an object of tables');
+    for (const [table, entries] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!entries || typeof entries !== 'object' || Array.isArray(entries)) throw new GuardError('configuration', `--conflicts file: ${table} must map source ids to creator or catalyst`);
+      records.set(table, new Map(Object.entries(entries as Record<string, unknown>).map(([id, value]) => [id, side(String(value), `--conflicts file ${table}.${id}`)])));
+    }
+  }
+  const parts = [
+    ...(all ? [`--prefer ${all}`] : []),
+    ...[...tables].sort(([a], [b]) => (a < b ? -1 : 1)).map(([table, value]) => `--prefer ${table}=${value}`),
+    ...(file ? [`--conflicts file (${[...records.values()].reduce((sum, map) => sum + map.size, 0)} record(s))`] : []),
+  ];
+  if (!parts.length) return { describe: 'none (any conflict refuses --confirm)' };
+  return { resolve: (table, sourceId) => records.get(table)?.get(sourceId) ?? tables.get(table) ?? all, describe: parts.join(', ') };
 }
 
 const SYNC_USAGE =
@@ -67,7 +149,13 @@ const SYNC_USAGE =
   '       own counts.json entry ("<Form>__<Subform>": <total> for a child, "<Form>__<Lookup>": <total> for a junction)\n' +
   '       or a backup — the parent forms\' counts never cover it. A backup that drops a generated-table row proves\n' +
   '       that table complete no better than a report.\n' +
-  `       Deleting over ${MAX_DELETE_PERCENT}% of a table's remembered records also needs --allow-mass-delete.\n`;
+  `       Deleting over ${MAX_DELETE_PERCENT}% of a table's remembered records also needs --allow-mass-delete.\n` +
+  '       Before --confirm writes, every changed or deleted record is checked against the store: a row also edited in the\n' +
+  '       new app since the last sync is a conflict and refuses the run until it is resolved with --prefer creator|catalyst,\n' +
+  '       --prefer <Table>=creator|catalyst (repeatable) or --conflicts <file> ({"<Table>": {"<source id>": "creator"|"catalyst"}}).\n' +
+  '       After the first run, a new record whose source id the store already holds (a restored older checkpoint, or a row\n' +
+  '       added on both sides) is a conflict too, never an in-place update; one whose stored values already match is not.\n' +
+  '       Conflicts list table, ROWID, source id and fields with a short hash of each value, never the value itself.\n';
 
 function appLinkOf(app: App, args: readonly string[]): string {
   const named = flag(args, '--app');
@@ -99,11 +187,12 @@ export async function syncDeltaCli(args: readonly string[], io: Io): Promise<num
         throw new GuardError('configuration', '--max-delete-percent must be a number from 0 to 100');
       }
     }
+    const resolver = conflictResolver(args);
     const guard = confirm ? await prepareGuard(ds, args, appLink, io) : planGuard(ds, args, appLink);
     const loaded = DELTA_SOURCES[source.kind]!(source.path, app, args.includes('--allow-empty'));
     const statePath = stateFilePath(since);
     const plan = computeDelta(app, loaded, readDeltaCheckpoint(statePath), source.kind);
-    io.stdout(formatDeltaPlan(plan, { source: source.kind, applyDeletes, scope: planScopeLines(guard), loaded, confirm, allowMassDelete, maxDeletePercent }));
+    io.stdout(formatDeltaPlan(plan, { source: source.kind, applyDeletes, scope: planScopeLines(guard), loaded, confirm, allowMassDelete, maxDeletePercent, resolution: resolver.describe }));
     if (!confirm) return 0;
     const totals = deltaTotals(plan);
     if (totals.upserts === 0 && (!applyDeletes || totals.deleted === 0)) {
@@ -124,15 +213,20 @@ export async function syncDeltaCli(args: readonly string[], io: Io): Promise<num
       catalystBase: flag(args, '--catalyst-base') ?? catalystBaseFor(guard.dc),
       fetch: io.fetch,
       scope,
+      ...(resolver.resolve ? { resolve: resolver.resolve } : {}),
     });
+    io.stdout(`conflicts: ${result.conflicts.length}${result.unchecked ? ` (${result.unchecked} changed or deleted record(s) synced before store fingerprints were kept: not checked)` : ''}\n`);
+    for (const conflict of result.conflicts) io.stdout(`  ${formatConflict(conflict)}\n`);
+    const record: ConflictRecord = { ...(plan.since ? { since: plan.since } : {}), conflicts: result.conflicts };
+    writeState(statePath, { [CONFLICTS_KEY]: record });
     for (const table of result.tables) {
-      io.stdout(`${table.table}: inserted ${table.inserted} updated ${table.updated} unchanged-in-store ${table.same} deleted ${table.deleted}\n`);
+      io.stdout(`${table.table}: inserted ${table.inserted} updated ${table.updated} unchanged-in-store ${table.same} deleted ${table.deleted}${table.kept ? ` kept-new-app ${table.kept}` : ''}\n`);
     }
     if (!result.ok) {
       io.stderr(`c2c: ${result.error ?? 'sync-delta failed'}\nc2c: checkpoint not recorded; re-run to resume (rows already written are matched by source id)\n`);
       return 1;
     }
-    writeDeltaCheckpoint(statePath, withDeletionsApplied(plan.next, result.appliedDeletes));
+    writeDeltaCheckpoint(statePath, withStoreFingerprints(withDeletionsApplied(plan.next, result.appliedDeletes), result.store));
     const applied = result.tables.reduce((sum, table) => sum + table.inserted + table.updated, 0);
     io.stdout(`applied: ${applied} upsert(s)\ncheckpoint: recorded\n`);
     return 0;

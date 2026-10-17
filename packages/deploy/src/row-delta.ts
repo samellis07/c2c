@@ -21,10 +21,20 @@
  * Lookups resolve to the parent's ROWID, read from the store when the parent is
  * not part of this delta, so a new child under an existing parent links to it.
  * Deletions are only applied with applyDeletes, children before parents.
+ *
+ * Conflicts: after a write the checkpoint also keeps, per row, a fingerprint of
+ * the row as the store reads it back (`store`). Before the next apply writes
+ * anything, every changed or deleted record that has one is read from the store
+ * again; a different fingerprint means the row was also edited in the new app
+ * since the last sync. Such a row is a conflict and is never overwritten
+ * silently: the apply is refused until each conflict is resolved, keeping the
+ * Creator or the new app value. A conflict names the table, ROWID, source id and
+ * the differing fields with a short sha256 of each side's value; no value is
+ * printed. A row edited on one side only is not a conflict.
  */
 import { createHash } from 'node:crypto';
 import type { App } from '../../core/src/ir.js';
-import { canonDecimal, changedColumns, integrityColumns, prepareColumns } from '../../data/src/integrity.js';
+import { canonDecimal, changedColumns, integrityColumns, isEmptyCell, prepareColumns, type IntegrityColumn } from '../../data/src/integrity.js';
 import {
   MAX_BATCH,
   ZCQL_IN_LIMIT,
@@ -51,6 +61,12 @@ export const MODIFIED_TIME = 'Modified_Time';
  */
 export const MAX_DELETE_PERCENT = 5;
 const UNFINGERPRINTED = new Set<string>([SOURCE_ID_COLUMN, ...SYSTEM_FIELD_COLUMNS.map((column) => column.name)]);
+/**
+ * Bookkeeping columns shared by rollback, parity and the store fingerprint: the
+ * loader's source id, the row id, the columns Catalyst stamps on every
+ * `SELECT *` row, and the Creator system fields.
+ */
+export const STORE_SYSTEM_COLUMNS = new Set<string>([SOURCE_ID_COLUMN, 'ROWID', 'CREATORID', 'CREATEDTIME', 'MODIFIEDTIME', ...SYSTEM_FIELD_COLUMNS.map((column) => column.name)]);
 
 export interface DeltaCheckpoint {
   version: 1;
@@ -66,6 +82,8 @@ export interface DeltaCheckpointTable {
   rows: Record<string, string>;
   /** Ids that left the source and are still in the store (deletions not applied). */
   deleted?: string[];
+  /** Source id → fingerprint of the stored row as read back after the last apply. */
+  store?: Record<string, string>;
 }
 
 export interface DeltaTable {
@@ -78,6 +96,8 @@ export interface DeltaTable {
   deleted: string[];
   /** The checkpoint has rows for this table and the source has none: deletions are not computed. */
   missing: boolean;
+  /** Store fingerprints from the checkpoint: the conflict check compares the store with them. */
+  store: Record<string, string>;
 }
 
 export interface DeltaPlan {
@@ -155,7 +175,8 @@ export function computeDelta(app: App, loaded: CsvLoad, checkpoint: DeltaCheckpo
     const before = checkpoint?.tables[name];
     const known = before?.rows ?? {};
     const missing = rows.length === 0 && Object.keys(known).length > 0;
-    const item: DeltaTable = { table: name, added: [], changed: [], unchanged: 0, changedWithoutNewerTime: 0, deleted: [], missing };
+    const store = before?.store ?? {};
+    const item: DeltaTable = { table: name, added: [], changed: [], unchanged: 0, changedWithoutNewerTime: 0, deleted: [], missing, store };
     const fingerprints: Record<string, string> = {};
     for (const row of rows) {
       const fingerprint = rowFingerprint(row.columns, doubles.get(name));
@@ -170,19 +191,87 @@ export function computeDelta(app: App, loaded: CsvLoad, checkpoint: DeltaCheckpo
       } else item.unchanged += 1;
     }
     if (missing) {
-      next.tables[name] = { rows: { ...known }, ...(before?.deleted?.length ? { deleted: [...before.deleted] } : {}) };
+      next.tables[name] = { rows: { ...known }, ...(before?.deleted?.length ? { deleted: [...before.deleted] } : {}), ...storeEntry(store, new Set(Object.keys(store))) };
     } else {
       const present = new Set(rows.map((row) => row.id));
       const gone = new Set([...Object.keys(known), ...(before?.deleted ?? [])].filter((id) => !present.has(id)));
       item.deleted = [...gone].sort(compareIds);
       if (rows.length || item.deleted.length) {
-        next.tables[name] = { rows: fingerprints, ...(item.deleted.length ? { deleted: item.deleted } : {}) };
+        next.tables[name] = { rows: fingerprints, ...(item.deleted.length ? { deleted: item.deleted } : {}), ...storeEntry(store, new Set([...present, ...item.deleted])) };
       }
     }
     tables.push(item);
   }
   if (latest) next.since = latest;
   return { baseline: !checkpoint, ...(since ? { since } : {}), tables, next };
+}
+
+function storeEntry(store: Readonly<Record<string, string>>, keep: ReadonlySet<string>): { store?: Record<string, string> } {
+  const out = Object.fromEntries(Object.entries(store).filter(([id]) => keep.has(id)));
+  return Object.keys(out).length ? { store: out } : {};
+}
+
+/**
+ * Fingerprint of a row as the store reads it back: every non-empty cell but the
+ * bookkeeping columns, by name. Only ever compared with another store read.
+ */
+export function storeFingerprint(row: Readonly<Record<string, unknown>>): string {
+  const parts = Object.keys(row)
+    .filter((key) => !STORE_SYSTEM_COLUMNS.has(key) && !isEmptyCell(row[key]))
+    .sort()
+    .map((key) => `${key}=${typeof row[key] === 'object' ? JSON.stringify(row[key]) : String(row[key])}`);
+  return createHash('sha256').update(parts.join('\x01')).digest('hex').slice(0, 32);
+}
+
+/** Short sha256 of one cell, salted with its table and column; an empty cell is `empty`. */
+export function valueHash(table: string, column: string, value: unknown): string {
+  if (isEmptyCell(value)) return 'empty';
+  const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  return `sha256:${createHash('sha256').update(`${table}\x01${column}\x01${text}`).digest('hex').slice(0, 12)}`;
+}
+
+export type ConflictSide = 'creator' | 'catalyst';
+
+export interface DeltaConflict {
+  table: string;
+  sourceId: string;
+  /** The stored row's ROWID; empty when the new app deleted the row. */
+  rowid: string;
+  /**
+   * changed: edited on both sides. deleted-in-creator / deleted-in-catalyst: one side deleted, the other edited.
+   * added-but-exists: new since the checkpoint, yet the store already holds a different row with its source id.
+   */
+  kind: 'changed' | 'deleted-in-creator' | 'deleted-in-catalyst' | 'added-but-exists';
+  /** Differing fields, each with a short hash of both values. */
+  fields: { column: string; creator: string; catalyst: string }[];
+  resolution?: ConflictSide;
+}
+
+/** Which side wins a conflict; undefined leaves it unresolved. */
+export type ConflictResolver = (table: string, sourceId: string) => ConflictSide | undefined;
+
+const CONFLICT_TEXT: Record<DeltaConflict['kind'], string> = {
+  changed: 'edited in Creator and in the new app',
+  'deleted-in-creator': 'deleted in Creator, edited in the new app',
+  'deleted-in-catalyst': 'edited in Creator, deleted in the new app',
+  'added-but-exists': 'new in Creator since the checkpoint, already stored in the new app',
+};
+
+export function formatConflict(conflict: DeltaConflict): string {
+  const fields = conflict.fields.map((field) => `${field.column} (Creator ${field.creator}, new app ${field.catalyst})`).join('; ');
+  const what = CONFLICT_TEXT[conflict.kind];
+  return `${conflict.table} ROWID ${conflict.rowid || '(none)'} source id ${conflict.sourceId}: ${what}${fields ? `: ${fields}` : ''}${conflict.resolution ? ` -> keep ${conflict.resolution === 'creator' ? 'Creator' : 'new app'} value` : ' -> unresolved'}`;
+}
+
+/** The checkpoint with the store fingerprints read back after an apply. */
+export function withStoreFingerprints(next: DeltaCheckpoint, store: Readonly<Record<string, Readonly<Record<string, string>>>>): DeltaCheckpoint {
+  const tables: Record<string, DeltaCheckpointTable> = {};
+  for (const [name, entry] of Object.entries(next.tables)) {
+    const merged = { ...(entry.store ?? {}), ...(store[name] ?? {}) };
+    const keep = new Set([...Object.keys(entry.rows), ...(entry.deleted ?? [])]);
+    tables[name] = { rows: entry.rows, ...(entry.deleted?.length ? { deleted: entry.deleted } : {}), ...storeEntry(merged, keep) };
+  }
+  return { ...next, tables };
 }
 
 /**
@@ -255,14 +344,25 @@ export function withDeletionsApplied(next: DeltaCheckpoint, applied: Readonly<Re
     const done = new Set(applied[name] ?? []);
     const deleted = (entry.deleted ?? []).filter((id) => !done.has(id));
     if (!Object.keys(entry.rows).length && !deleted.length) continue;
-    tables[name] = { rows: entry.rows, ...(deleted.length ? { deleted } : {}) };
+    const keep = new Set([...Object.keys(entry.rows), ...deleted]);
+    tables[name] = { rows: entry.rows, ...(deleted.length ? { deleted } : {}), ...storeEntry(entry.store ?? {}, keep) };
   }
   return { ...next, tables };
 }
 
 export function formatDeltaPlan(
   plan: DeltaPlan,
-  opts: { source: string; applyDeletes: boolean; scope: string[]; loaded: CsvLoad; confirm?: boolean; allowMassDelete?: boolean; maxDeletePercent?: number },
+  opts: {
+    source: string;
+    applyDeletes: boolean;
+    scope: string[];
+    loaded: CsvLoad;
+    confirm?: boolean;
+    allowMassDelete?: boolean;
+    maxDeletePercent?: number;
+    /** How conflicts are resolved, as the flags give it. */
+    resolution?: string;
+  },
 ): string {
   const lines = [
     'c2c sync-delta plan v1',
@@ -286,9 +386,33 @@ export function formatDeltaPlan(
   for (const refusal of deletionRefusals(opts.loaded, plan, opts)) {
     lines.push(`  ${refusal.table}: ${refusal.reason}`);
   }
+  const check = conflictCheckCounts(plan, opts.applyDeletes);
+  lines.push(
+    `conflict check: ${check.checked} changed${opts.applyDeletes ? ' or deleted' : ''} record(s) compared with the store before writes${check.added ? `; ${check.added} new record(s) checked for a row already stored` : ''}${check.unchecked ? `; ${check.unchecked} have no store fingerprint (synced before conflict checks) and are not checked` : ''}`,
+    `conflict resolution: ${opts.resolution ?? 'none (any conflict refuses --confirm)'}`,
+  );
   if (plan.next.since) lines.push(`next checkpoint: since ${plan.next.since}`);
   lines.push(opts.confirm ? `writes: yes (${totals.upserts} planned upserts)` : 'writes: no', '');
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Changed (and, with deletes, deleted) records the conflict check compares with the store, and those it cannot;
+ * after the first run, new records it looks up in the store as well.
+ */
+export function conflictCheckCounts(plan: DeltaPlan, applyDeletes: boolean): { checked: number; unchecked: number; added: number } {
+  let checked = 0;
+  let unchecked = 0;
+  let added = 0;
+  for (const table of plan.tables) {
+    if (!plan.baseline) added += table.added.length;
+    const ids = [...table.changed.map((row) => row.id), ...(applyDeletes && !table.missing ? table.deleted : [])];
+    for (const id of ids) {
+      if (table.store[id] === undefined) unchecked += 1;
+      else checked += 1;
+    }
+  }
+  return { checked, unchecked, added };
 }
 
 export function deltaTotals(plan: DeltaPlan): { added: number; changed: number; upserts: number; deleted: number } {
@@ -305,6 +429,8 @@ export interface DeltaApplyTable {
   /** Upserts whose stored values already matched. */
   same: number;
   deleted: number;
+  /** Conflicts resolved for the new app value: the stored row was left as it is. */
+  kept: number;
   refused: { sourceId: string; column: string; rule: string }[];
 }
 
@@ -313,6 +439,12 @@ export interface DeltaApplyResult {
   tables: DeltaApplyTable[];
   /** Ids actually deleted, per table. */
   appliedDeletes: Record<string, string[]>;
+  /** Records changed on both sides, with the resolution each one got. */
+  conflicts: DeltaConflict[];
+  /** Changed or deleted records the checkpoint holds no store fingerprint for: not checked for conflicts. */
+  unchecked: number;
+  /** Store fingerprints read back after the writes, per table; record them with withStoreFingerprints. */
+  store: Record<string, Record<string, string>>;
   error?: string;
 }
 
@@ -321,6 +453,127 @@ interface StoreOpts {
   catalystBase: string;
   fetch: FetchLike;
   scope: CatalystScope;
+}
+
+interface ForeignKeyRef {
+  table: string;
+  column: string;
+  parent: string;
+}
+
+/** The cells one source row writes: lookups as the parent's ROWID, cyclic lookups left for a second pass. */
+function rowCells(
+  table: string,
+  row: SeedRow,
+  keys: readonly ForeignKeyRef[],
+  deferred: ReadonlySet<string>,
+  rowIds: ReadonlyMap<string, ReadonlyMap<string, string>>,
+): { cells: Record<string, unknown>; cyclic: { column: string; parent: string; parentSource: string }[] } {
+  const cells: Record<string, unknown> = {};
+  const cyclic: { column: string; parent: string; parentSource: string }[] = [];
+  for (const [column, value] of Object.entries(row.columns)) {
+    if (value === '') continue;
+    const key = keys.find((entry) => entry.column === column);
+    if (!key) {
+      cells[column] = value;
+      continue;
+    }
+    if (deferred.has(foreignKeyId(key))) {
+      cyclic.push({ column, parent: key.parent, parentSource: value });
+      continue;
+    }
+    const parentRowId = rowIds.get(key.parent)?.get(value);
+    if (!parentRowId) throw new Error(`lookup ${table}.${column} row ${row.id} source id ${value} is not in ${key.parent}`);
+    cells[column] = parentRowId;
+  }
+  return { cells, cyclic };
+}
+
+/** The update body for a stored row: the prepared cells, plus NULL for every exported column the record left empty. */
+function updateBody(schemaTable: SchemaTable, prepared: Record<string, unknown>, existing: Record<string, unknown>, covered: ReadonlySet<string> | undefined): Record<string, unknown> {
+  const body: Record<string, unknown> = { ...prepared };
+  for (const column of covered ?? []) {
+    if (column in body || UNFINGERPRINTED.has(column) || isShadow(schemaTable, column)) continue;
+    const now = existing[column];
+    if (now !== undefined && now !== null && now !== '') body[column] = null;
+  }
+  return body;
+}
+
+/**
+ * Conflicts in the plan, read from the store before anything is written: a
+ * changed or deleted record whose stored row no longer matches the store
+ * fingerprint of the last apply. After the first run, a new record whose
+ * source id the store already holds is one too: the checkpoint never saw that
+ * row, so it cannot vouch that the new app left it alone. A record whose stored
+ * values already equal the Creator values is not a conflict.
+ */
+async function findConflicts(
+  opts: StoreOpts & { app: App; loaded: CsvLoad; plan: DeltaPlan; applyDeletes: boolean },
+  ctx: { byName: ReadonlyMap<string, SchemaTable>; deferred: ReadonlySet<string>; rowIds: Map<string, Map<string, string>>; covered: ReadonlyMap<string, Set<string>> },
+): Promise<{ conflicts: DeltaConflict[]; unchecked: number }> {
+  const conflicts: DeltaConflict[] = [];
+  let unchecked = 0;
+  for (const item of opts.plan.tables) {
+    const deletes = opts.applyDeletes && !item.missing ? item.deleted : [];
+    const ids = [...item.changed.map((row) => row.id), ...deletes];
+    const checked = ids.filter((id) => item.store[id] !== undefined);
+    unchecked += ids.length - checked.length;
+    // The first run adopts stored rows by source id; later runs never update a "new" record in place unchecked.
+    const added = opts.plan.baseline ? [] : item.added;
+    if (!checked.length && !added.length) continue;
+    const stored = await storedRows(opts, item.table, [...checked, ...added.map((row) => row.id)]);
+    const schemaTable = ctx.byName.get(item.table);
+    const columns: IntegrityColumn[] = schemaTable ? integrityColumns(schemaTable, deferredColumns(item.table, ctx.deferred), 'store') : [];
+    const keys = opts.loaded.foreignKeys.filter((key) => key.table === item.table);
+    /** User fields where the Creator record and the stored row differ, each with a short hash of both values. */
+    const differingFields = async (row: SeedRow, existing: Record<string, unknown>, schemaTable: SchemaTable): Promise<DeltaConflict['fields']> => {
+      for (const key of keys) {
+        const value = row.columns[key.column];
+        if (value && !ctx.deferred.has(foreignKeyId(key))) await rememberRowIds(opts, key.parent, [value], ctx.rowIds);
+      }
+      let cells: Record<string, unknown>;
+      try {
+        cells = rowCells(item.table, row, keys.filter((key) => !ctx.deferred.has(foreignKeyId(key))), new Set(), ctx.rowIds).cells;
+      } catch {
+        // A lookup the store cannot resolve yet: compare the plain cells only.
+        cells = Object.fromEntries(Object.entries(row.columns).filter(([column, value]) => value !== '' && !keys.some((key) => key.column === column)));
+      }
+      const body = updateBody(schemaTable, prepareColumns(columns, cells).cells, existing, ctx.covered.get(item.table));
+      // System fields and shadows follow the fields they belong to; only user fields can conflict.
+      return changedColumns(body, existing, columns)
+        .filter((column) => !UNFINGERPRINTED.has(column) && !isShadow(schemaTable, column))
+        .sort()
+        .map((column) => ({ column, creator: valueHash(item.table, column, body[column]), catalyst: valueHash(item.table, column, existing[column]) }));
+    };
+    for (const row of added) {
+      const existing = stored.get(row.id);
+      if (!existing) continue;
+      const fields = schemaTable ? await differingFields(row, existing.row, schemaTable) : [];
+      if (schemaTable && !fields.length) continue;
+      conflicts.push({ table: item.table, sourceId: row.id, rowid: existing.rowid, kind: 'added-but-exists', fields });
+    }
+    for (const row of item.changed) {
+      const before = item.store[row.id];
+      if (before === undefined) continue;
+      const existing = stored.get(row.id);
+      if (!existing) {
+        conflicts.push({ table: item.table, sourceId: row.id, rowid: '', kind: 'deleted-in-catalyst', fields: [] });
+        continue;
+      }
+      if (storeFingerprint(existing.row) === before || !schemaTable) continue;
+      const fields = await differingFields(row, existing.row, schemaTable);
+      if (!fields.length) continue;
+      conflicts.push({ table: item.table, sourceId: row.id, rowid: existing.rowid, kind: 'changed', fields });
+    }
+    for (const id of deletes) {
+      const before = item.store[id];
+      const existing = stored.get(id);
+      if (before === undefined || !existing || storeFingerprint(existing.row) === before) continue;
+      conflicts.push({ table: item.table, sourceId: id, rowid: existing.rowid, kind: 'deleted-in-creator', fields: [] });
+    }
+  }
+  return { conflicts, unchecked };
 }
 
 export async function applyDelta(
@@ -333,6 +586,8 @@ export async function applyDelta(
     allowMassDelete?: boolean;
     /** Cap on deletions as a share of a table's remembered records; default MAX_DELETE_PERCENT. */
     maxDeletePercent?: number;
+    /** Which side wins each conflict. Without one, any conflict refuses the apply. */
+    resolve?: ConflictResolver;
   },
 ): Promise<DeltaApplyResult> {
   if (!opts.scope?.org || !opts.scope.projectId || !opts.scope.token) throw new Error('sync-delta requires the guarded org, project, and token');
@@ -346,6 +601,9 @@ export async function applyDelta(
   const results: DeltaApplyTable[] = [];
   const pendingCyclic: { table: string; sourceId: string; column: string; parent: string; parentSource: string }[] = [];
   const covered = coveredColumns(opts.loaded);
+  let conflicts: DeltaConflict[] = [];
+  let unchecked = 0;
+  const store: Record<string, Record<string, string>> = {};
   try {
     // Refuse before any write: a filtered export must not turn absent ids into
     // deletes, and a mass deletion needs its own flag.
@@ -355,10 +613,31 @@ export async function applyDelta(
         throw new Error(`--apply-deletes refused: ${refusals.map((item) => `${item.table}: ${item.reason}`).join('; ')}`);
       }
     }
+    // Refuse before any write: a record edited on both sides is never overwritten silently.
+    ({ conflicts, unchecked } = await findConflicts(opts, { byName, deferred, rowIds, covered }));
+    for (const conflict of conflicts) {
+      const side = opts.resolve?.(conflict.table, conflict.sourceId);
+      if (side) conflict.resolution = side;
+    }
+    const open = conflicts.filter((conflict) => !conflict.resolution);
+    if (open.length) {
+      throw new Error(`${open.length} conflict(s): record(s) changed in Creator and in the new app since the last sync, or new in Creator but already stored; resolve each with --prefer creator|catalyst (or <Table>=creator|catalyst) or --conflicts <file>`);
+    }
+    const kept = new Map<string, Set<string>>();
+    for (const conflict of conflicts) {
+      if (conflict.resolution !== 'catalyst') continue;
+      const set = kept.get(conflict.table) ?? new Set<string>();
+      set.add(conflict.sourceId);
+      kept.set(conflict.table, set);
+    }
+    const written = new Map<string, Set<string>>();
     for (const item of opts.plan.tables) {
-      const result: DeltaApplyTable = { table: item.table, inserted: 0, updated: 0, same: 0, deleted: 0, refused: [] };
+      const keep = kept.get(item.table) ?? new Set<string>();
+      const result: DeltaApplyTable = { table: item.table, inserted: 0, updated: 0, same: 0, deleted: 0, kept: 0, refused: [] };
       results.push(result);
-      const upserts = [...item.added, ...item.changed];
+      result.kept = [...item.added, ...item.changed].filter((row) => keep.has(row.id)).length;
+      const upserts = [...item.added, ...item.changed].filter((row) => !keep.has(row.id));
+      written.set(item.table, new Set([...upserts.map((row) => row.id), ...keep]));
       if (!upserts.length) continue;
       const schemaTable = byName.get(item.table);
       if (!schemaTable) throw new Error(`table ${item.table} is not in the schema`);
@@ -372,22 +651,8 @@ export async function applyDelta(
       const inserts: Record<string, unknown>[] = [];
       const updates: Record<string, unknown>[] = [];
       for (const row of upserts) {
-        const cells: Record<string, unknown> = {};
-        for (const [column, value] of Object.entries(row.columns)) {
-          if (value === '') continue;
-          const key = keys.find((entry) => entry.column === column);
-          if (!key) {
-            cells[column] = value;
-            continue;
-          }
-          const parentRowId = rowIds.get(key.parent)?.get(value);
-          if (deferred.has(foreignKeyId(key))) {
-            pendingCyclic.push({ table: item.table, sourceId: row.id, column, parent: key.parent, parentSource: value });
-            continue;
-          }
-          if (!parentRowId) throw new Error(`lookup ${item.table}.${column} row ${row.id} source id ${value} is not in ${key.parent}`);
-          cells[column] = parentRowId;
-        }
+        const { cells, cyclic } = rowCells(item.table, row, keys, deferred, rowIds);
+        for (const entry of cyclic) pendingCyclic.push({ table: item.table, sourceId: row.id, ...entry });
         const prepared = prepareColumns(columns, cells);
         if (prepared.refusals.length) {
           for (const refusal of prepared.refusals) result.refused.push({ sourceId: row.id, column: refusal.column, rule: refusal.rule });
@@ -398,12 +663,7 @@ export async function applyDelta(
           inserts.push({ ...prepared.cells, [SOURCE_ID_COLUMN]: row.id });
           continue;
         }
-        const body: Record<string, unknown> = { ...prepared.cells };
-        for (const column of covered.get(item.table) ?? []) {
-          if (column in body || UNFINGERPRINTED.has(column) || isShadow(schemaTable, column)) continue;
-          const now = existing.row[column];
-          if (now !== undefined && now !== null && now !== '') body[column] = null;
-        }
+        const body = updateBody(schemaTable, prepared.cells, existing.row, covered.get(item.table));
         if (!changedColumns(body, existing.row, columns).length) {
           result.same += 1;
           continue;
@@ -446,21 +706,35 @@ export async function applyDelta(
     if (opts.applyDeletes) {
       for (const item of [...opts.plan.tables].reverse()) {
         if (item.missing || !item.deleted.length) continue;
-        const stored = await storedRows(opts, item.table, item.deleted);
+        const keep = kept.get(item.table) ?? new Set<string>();
+        const ids = item.deleted.filter((id) => !keep.has(id));
+        const stored = await storedRows(opts, item.table, ids);
         const result = results.find((entry) => entry.table === item.table);
-        for (const id of item.deleted) {
+        for (const id of ids) {
           const entry = stored.get(id);
           if (!entry) continue;
           await send(opts, 'DELETE', `${rowUrl(opts, item.table)}/${encodeURIComponent(entry.rowid)}`, undefined, item.table);
           if (result) result.deleted += 1;
         }
+        if (result) result.kept += item.deleted.length - ids.length;
         // An id already gone from the store needs no delete; either way it leaves the checkpoint.
-        appliedDeletes[item.table] = [...item.deleted];
+        // A deletion kept for the new app stays pending.
+        appliedDeletes[item.table] = ids;
+        const set = written.get(item.table) ?? new Set<string>();
+        for (const id of keep) set.add(id);
+        written.set(item.table, set);
       }
     }
-    return { ok: true, tables: results, appliedDeletes };
+    // Read every written or kept row back: its fingerprint is what the next run's conflict check compares with.
+    for (const [table, ids] of written) {
+      if (!ids.size) continue;
+      const prints: Record<string, string> = {};
+      for (const [id, entry] of await storedRows(opts, table, [...ids])) prints[id] = storeFingerprint(entry.row);
+      if (Object.keys(prints).length) store[table] = prints;
+    }
+    return { ok: true, tables: results, appliedDeletes, conflicts, unchecked, store };
   } catch (error) {
-    return { ok: false, tables: results, appliedDeletes: {}, error: error instanceof Error ? error.message : String(error) };
+    return { ok: false, tables: results, appliedDeletes: {}, conflicts, unchecked, store: {}, error: error instanceof Error ? error.message : String(error) };
   }
 }
 

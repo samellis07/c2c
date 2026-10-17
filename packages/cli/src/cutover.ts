@@ -33,7 +33,8 @@ import {
   type Io,
   verifyRollbackManifest,
 } from '../../deploy/src/index.js';
-import { doubleColumns } from '../../deploy/src/row-delta.js';
+import { readConflictRecord, type ConflictRecord } from '../../deploy/src/delta-cli.js';
+import { doubleColumns, formatConflict, type DeltaConflict } from '../../deploy/src/row-delta.js';
 import { generateSchema } from '../../schema/src/index.js';
 import { analyze } from './analyze.js';
 import { CLI_EXIT } from './exit-codes.js';
@@ -83,6 +84,8 @@ export interface ProofReport {
   tables: ProofTable[];
   smoke: SmokeSlot;
   readiness: { automatic: number; band: string; manual: string[] };
+  /** The last sync-delta conflict check, when it found any: field values as short hashes only. */
+  conflicts?: { since?: string; items: DeltaConflict[] };
 }
 
 export interface CutoverInput {
@@ -95,6 +98,7 @@ export interface CutoverInput {
   smoke?: SmokeSlot;
   rollback?: RollbackEvidence;
   smokeSource?: string;
+  conflicts?: ConflictRecord;
 }
 
 function fingerprints(app: App, loaded: CsvLoad): Map<string, Record<string, string>> {
@@ -163,6 +167,10 @@ export function proofReport(input: CutoverInput): ProofReport {
         : `smoke: run c2c smoke --confirm, open the #/admin/smoke page it names signed in as the owner, then ${SMOKE_PASS_HINT}`,
     );
   }
+  const conflicts = input.conflicts?.conflicts ?? [];
+  for (const conflict of conflicts.filter((item) => !item.resolution)) {
+    manual.push(`resolve conflict: ${formatConflict(conflict)}; re-run sync-delta with --prefer creator|catalyst or --conflicts <file>`);
+  }
   manual.push('sign-in: invite users and confirm each role signs in');
   manual.push('links: replace Creator app links and bookmarks with the new app URL');
   manual.push('owner sign-off');
@@ -175,6 +183,7 @@ export function proofReport(input: CutoverInput): ProofReport {
     tables,
     smoke,
     readiness: { automatic: report.score.readiness, band: report.score.band, manual },
+    ...(conflicts.length ? { conflicts: { ...(input.conflicts?.since ? { since: input.conflicts.since } : {}), items: conflicts } } : {}),
   };
 }
 
@@ -238,6 +247,27 @@ export function proofMarkdown(proof: ProofReport): string {
     '',
     ...proof.tables.map((table) => `- ${mdText(table.table)}: export ${mdText(table.sourceChecksum)}, checkpoint ${mdText(table.checkpointChecksum)}`),
     '',
+    ...(proof.conflicts
+      ? [
+          '## Conflicts',
+          '',
+          `Records changed in Creator and in the new app since the checkpoint${proof.conflicts.since ? ` of ${mdText(proof.conflicts.since)}` : ''}. Values are short sha256 hashes, never the cells.`,
+          '',
+          tableRow(['Table', 'ROWID', 'Source id', 'Kind', 'Fields (Creator / new app)', 'Resolution']),
+          '| --- | --- | --- | --- | --- | --- |',
+          ...proof.conflicts.items.map((item) =>
+            tableRow([
+              item.table,
+              item.rowid || '(none)',
+              item.sourceId,
+              item.kind,
+              item.fields.map((field) => `${field.column} ${field.creator} / ${field.catalyst}`).join('; ') || '-',
+              item.resolution === 'creator' ? 'keep Creator value' : item.resolution === 'catalyst' ? 'keep new app value' : 'unresolved',
+            ]),
+          ),
+          '',
+        ]
+      : []),
     '## Manual items',
     '',
     ...proof.readiness.manual.map((item) => `- [ ] ${mdText(item)}`),
@@ -523,6 +553,7 @@ export function cutoverInput(target: string, args: readonly string[]): CutoverIn
   const since = flag(args, '--since');
   const state = since ? readStateFile(stateFilePath(since)) : {};
   const checkpoint = parseDeltaCheckpoint(state.delta);
+  const conflicts = readConflictRecord(state);
   const projectId = typeof state.projectId === 'string' ? state.projectId : undefined;
   const slateUrl = typeof state.slateUrl === 'string' ? state.slateUrl : undefined;
   const smoke = readSmoke(flag(args, '--smoke'));
@@ -537,6 +568,7 @@ export function cutoverInput(target: string, args: readonly string[]): CutoverIn
     ...(smoke ? { smoke } : {}),
     ...(rollback ? { rollback } : {}),
     ...(flag(args, '--smoke') ? { smokeSource: flag(args, '--smoke') } : {}),
+    ...(conflicts?.conflicts.length ? { conflicts } : {}),
   };
 }
 

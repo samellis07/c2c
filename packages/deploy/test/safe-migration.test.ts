@@ -532,6 +532,255 @@ test('sync-delta updates a changed record in place by ROWID', async () => {
   assert.equal(checkpointOf(ws).since, '2026-10-07 08:00:00');
 });
 
+function stateOf(ws: ReturnType<typeof workspace>): Record<string, unknown> {
+  return JSON.parse(readFileSync(join(ws.state, STATE_FILE), 'utf8')) as Record<string, unknown>;
+}
+
+/** Baseline, then the new app edits order 1's Amount in the store and Creator edits the same record. */
+async function bothSides(ws: ReturnType<typeof workspace>, store: FakeStore, creatorAmount = '500.00', appAmount = '999.00') {
+  await baseline(ws, store);
+  const row = store.tables.get('Purchase_Order')!.find((entry) => entry.c2c_source_id === ORDERS[1]!.id)!;
+  row.Amount = appAmount;
+  const changed = ORDERS.map((o, i) => (i === 1 ? { ...o, amount: creatorAmount, modified: '07-Oct-2026 08:00:00' } : o));
+  return { row, dir: () => exportDir(VENDORS, changed) };
+}
+
+test('sync-delta refuses a record edited in Creator and in the new app and reports the conflict without its values', async () => {
+  const ws = workspace();
+  const store = fakeStore();
+  const { row, dir } = await bothSides(ws, store);
+  const checkpoint = checkpointOf(ws);
+  assert.ok(checkpoint.tables.Purchase_Order!.store?.[ORDERS[1]!.id], 'the baseline keeps a store fingerprint per row');
+  const plan = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, dir()), plan.io), 0, plan.err());
+  assert.match(plan.out(), /^conflict check: 1 changed record\(s\) compared with the store before writes$/m);
+  assert.match(plan.out(), /^conflict resolution: none \(any conflict refuses --confirm\)$/m);
+  const writes = store.writes.length;
+  const run = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, dir(), '--confirm'), run.io), 1);
+  assert.match(run.err(), /1 conflict\(s\).*--prefer creator\|catalyst/);
+  assert.match(run.err(), /checkpoint not recorded/);
+  assert.match(run.out(), /^conflicts: 1$/m);
+  assert.match(
+    run.out(),
+    new RegExp(`^  Purchase_Order ROWID ${row.ROWID} source id ${ORDERS[1]!.id}: edited in Creator and in the new app: Amount \\(Creator sha256:[0-9a-f]{12}, new app sha256:[0-9a-f]{12}\\) -> unresolved$`, 'm'),
+  );
+  // Nothing written, the new app value stays, the checkpoint is the old one.
+  assert.equal(store.writes.length, writes);
+  assert.equal(row.Amount, '999.00');
+  assert.deepEqual(checkpointOf(ws), checkpoint);
+  const state = readFileSync(join(ws.state, STATE_FILE), 'utf8');
+  const recorded = (stateOf(ws).deltaConflicts as { conflicts: { table: string; rowid: string; fields: { column: string }[]; resolution?: string }[] }).conflicts;
+  assert.deepEqual(recorded.map((c) => [c.table, c.rowid, c.fields.map((f) => f.column), c.resolution]), [['Purchase_Order', row.ROWID, ['Amount'], undefined]]);
+  for (const value of ['500', '999']) {
+    assert.equal(run.out().includes(value), false, `output carries ${value}`);
+    assert.equal(state.includes(value), false, `state carries ${value}`);
+  }
+});
+
+test('sync-delta --prefer creator applies a conflict, records the choice, and the next run is clean', async () => {
+  const ws = workspace();
+  const store = fakeStore();
+  const { row, dir } = await bothSides(ws, store);
+  const run = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, dir(), '--confirm', '--prefer', 'creator'), run.io), 0, run.err());
+  assert.match(run.out(), /^conflict resolution: --prefer creator$/m);
+  assert.match(run.out(), /-> keep Creator value$/m);
+  assert.match(run.out(), /^Purchase_Order: inserted 0 updated 1 unchanged-in-store 0 deleted 0$/m);
+  assert.equal(row.Amount, '500.00');
+  const recorded = (stateOf(ws).deltaConflicts as { conflicts: { sourceId: string; resolution?: string }[] }).conflicts;
+  assert.deepEqual(recorded.map((c) => [c.sourceId, c.resolution]), [[ORDERS[1]!.id, 'creator']]);
+  // The store fingerprint now matches the written row: a later Creator-only edit is no conflict.
+  const later = ORDERS.map((o, i) => (i === 1 ? { ...o, amount: '650.00', modified: '08-Oct-2026 08:00:00' } : o));
+  const next = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, exportDir(VENDORS, later), '--confirm'), next.io), 0, next.err());
+  assert.match(next.out(), /^conflicts: 0$/m);
+  assert.equal(row.Amount, '650.00');
+});
+
+test('sync-delta --prefer <Table>=catalyst and a conflicts file keep the new app value', async () => {
+  for (const flags of [['--prefer', 'Purchase_Order=catalyst'], ['--prefer', 'creator', '--prefer', 'Purchase_Order=catalyst'], ['--prefer', 'creator', '--conflicts', 'FILE']]) {
+    const ws = workspace();
+    const store = fakeStore();
+    const { row, dir } = await bothSides(ws, store);
+    const file = join(ws.state, 'conflicts.json');
+    writeFileSync(file, JSON.stringify({ Purchase_Order: { [ORDERS[1]!.id]: 'catalyst' } }));
+    const writes = store.writes.length;
+    const run = cli(store);
+    assert.equal(await syncDeltaCli(syncArgs(ws, dir(), '--confirm', ...flags.map((f) => (f === 'FILE' ? file : f))), run.io), 0, run.err());
+    assert.match(run.out(), /-> keep new app value$/m, flags.join(' '));
+    assert.match(run.out(), /^Purchase_Order: inserted 0 updated 0 unchanged-in-store 0 deleted 0 kept-new-app 1$/m);
+    assert.equal(row.Amount, '999.00');
+    assert.equal(store.writes.length, writes);
+    // The next run holds no change and no conflict for that record.
+    const again = cli(store);
+    assert.equal(await syncDeltaCli(syncArgs(ws, dir()), again.io), 0, again.err());
+    assert.match(again.out(), /^- Purchase_Order new 0 changed 0 unchanged 2 deleted 0$/m);
+  }
+});
+
+test('sync-delta edits on one side only are no conflict', async () => {
+  // New app only: Creator unchanged, nothing is written and the app value stays.
+  const ws = workspace();
+  const store = fakeStore();
+  await baseline(ws, store);
+  const appRow = store.tables.get('Purchase_Order')!.find((entry) => entry.c2c_source_id === ORDERS[0]!.id)!;
+  appRow.Amount = '777.00';
+  // Creator only: a different record, edited in Creator, applies with no conflict.
+  const changed = ORDERS.map((o, i) => (i === 1 ? { ...o, amount: '500.00', modified: '07-Oct-2026 08:00:00' } : o));
+  const run = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, exportDir(VENDORS, changed), '--confirm'), run.io), 0, run.err());
+  assert.match(run.out(), /^conflicts: 0$/m);
+  assert.match(run.out(), /^Purchase_Order: inserted 0 updated 1 unchanged-in-store 0 deleted 0$/m);
+  assert.equal(appRow.Amount, '777.00');
+  assert.equal(store.tables.get('Purchase_Order')!.find((entry) => entry.c2c_source_id === ORDERS[1]!.id)!.Amount, '500.00');
+});
+
+test('sync-delta: both sides holding the same new value is no conflict', async () => {
+  const ws = workspace();
+  const store = fakeStore();
+  const { dir } = await bothSides(ws, store, '500.00', '500.00');
+  const run = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, dir(), '--confirm'), run.io), 0, run.err());
+  assert.match(run.out(), /^conflicts: 0$/m);
+  // The write still refreshes the system fields and the shadow the new app left stale.
+  assert.match(run.out(), /^Purchase_Order: inserted 0 updated 1 unchanged-in-store 0 deleted 0$/m);
+});
+
+test('sync-delta reports a record deleted in the new app and edited in Creator', async () => {
+  const ws = workspace();
+  const store = fakeStore();
+  await baseline(ws, store);
+  const list = store.tables.get('Purchase_Order')!;
+  list.splice(list.findIndex((entry) => entry.c2c_source_id === ORDERS[1]!.id), 1);
+  const changed = ORDERS.map((o, i) => (i === 1 ? { ...o, amount: '500.00', modified: '07-Oct-2026 08:00:00' } : o));
+  const run = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, exportDir(VENDORS, changed), '--confirm'), run.io), 1);
+  assert.match(run.out(), new RegExp(`^  Purchase_Order ROWID \\(none\\) source id ${ORDERS[1]!.id}: edited in Creator, deleted in the new app -> unresolved$`, 'm'));
+  assert.equal(list.length, 1);
+  const again = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, exportDir(VENDORS, changed), '--confirm', '--prefer', 'creator'), again.io), 0, again.err());
+  assert.equal(list.length, 2);
+});
+
+test('sync-delta --apply-deletes refuses to delete a record the new app edited, and --prefer catalyst keeps it', async () => {
+  const ws = workspace();
+  const store = fakeStore();
+  await baseline(ws, store);
+  const row = store.tables.get('Purchase_Order')!.find((entry) => entry.c2c_source_id === ORDERS[1]!.id)!;
+  row.Amount = '999.00';
+  const dir = exportDir(VENDORS, ORDERS.slice(0, 1));
+  writeFileSync(join(dir, 'counts.json'), JSON.stringify({ Vendor: 2, Purchase_Order: 1 }));
+  const run = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, dir, '--confirm', '--apply-deletes', '--allow-mass-delete'), run.io), 1);
+  assert.match(run.out(), new RegExp(`^  Purchase_Order ROWID ${row.ROWID} source id ${ORDERS[1]!.id}: deleted in Creator, edited in the new app -> unresolved$`, 'm'));
+  assert.equal(store.writes.filter((write) => write.method === 'DELETE').length, 0);
+  const keep = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, dir, '--confirm', '--apply-deletes', '--allow-mass-delete', '--prefer', 'catalyst'), keep.io), 0, keep.err());
+  assert.equal(store.writes.filter((write) => write.method === 'DELETE').length, 0);
+  assert.equal(store.tables.get('Purchase_Order')!.length, 2);
+  // The deletion stays pending; with the new app value now recorded, a later run deletes it with no conflict.
+  assert.deepEqual(checkpointOf(ws).tables.Purchase_Order!.deleted, [ORDERS[1]!.id]);
+  const later = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, dir, '--confirm', '--apply-deletes', '--allow-mass-delete'), later.io), 0, later.err());
+  assert.match(later.out(), /^conflicts: 0$/m);
+  assert.equal(store.tables.get('Purchase_Order')!.length, 1);
+});
+
+const WASHERS: Order = { id: '1000000000003570033', title: 'Washers', vendor: VENDORS[0]!.id, date: '07-Oct-2026', amount: '12.50', modified: '07-Oct-2026 09:00:00' };
+
+/** A checkpoint older than the store: a later run stored WASHERS, the new app edited it, the state file is put back. */
+async function staleCheckpoint(ws: ReturnType<typeof workspace>, store: FakeStore) {
+  await baseline(ws, store);
+  const older = readFileSync(join(ws.state, STATE_FILE), 'utf8');
+  const add = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, exportDir(VENDORS, [...ORDERS, WASHERS]), '--confirm'), add.io), 0, add.err());
+  const row = store.tables.get('Purchase_Order')!.find((entry) => entry.c2c_source_id === WASHERS.id)!;
+  row.Amount = '777.00';
+  writeFileSync(join(ws.state, STATE_FILE), older);
+  return { row, dir: () => exportDir(VENDORS, [...ORDERS, { ...WASHERS, amount: '42.00', modified: '08-Oct-2026 09:00:00' }]) };
+}
+
+test('sync-delta refuses a new record whose source id the store already holds after the first run', async () => {
+  const ws = workspace();
+  const store = fakeStore();
+  const { row, dir } = await staleCheckpoint(ws, store);
+  const checkpoint = checkpointOf(ws);
+  const plan = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, dir()), plan.io), 0, plan.err());
+  assert.match(plan.out(), /^- Purchase_Order new 1 changed 0 unchanged 2 deleted 0$/m);
+  assert.match(plan.out(), /^conflict check: 0 changed record\(s\) compared with the store before writes; 1 new record\(s\) checked for a row already stored$/m);
+  const writes = store.writes.length;
+  const run = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, dir(), '--confirm'), run.io), 1);
+  assert.match(run.err(), /1 conflict\(s\)/);
+  assert.match(run.out(), /^conflicts: 1$/m);
+  assert.match(
+    run.out(),
+    new RegExp(`^  Purchase_Order ROWID ${row.ROWID} source id ${WASHERS.id}: new in Creator since the checkpoint, already stored in the new app: Amount \\(Creator sha256:[0-9a-f]{12}, new app sha256:[0-9a-f]{12}\\) -> unresolved$`, 'm'),
+  );
+  assert.equal(store.writes.length, writes);
+  assert.equal(row.Amount, '777.00');
+  assert.deepEqual(checkpointOf(ws), checkpoint);
+  const state = readFileSync(join(ws.state, STATE_FILE), 'utf8');
+  const recorded = (stateOf(ws).deltaConflicts as { conflicts: { sourceId: string; kind: string; rowid: string }[] }).conflicts;
+  assert.deepEqual(recorded.map((c) => [c.sourceId, c.kind, c.rowid]), [[WASHERS.id, 'added-but-exists', row.ROWID]]);
+  for (const value of ['777', '42.00']) {
+    assert.equal(run.out().includes(value), false, `output carries ${value}`);
+    assert.equal(run.err().includes(value), false, `errors carry ${value}`);
+    assert.equal(state.includes(value), false, `state carries ${value}`);
+  }
+
+  const keep = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, dir(), '--confirm', '--prefer', 'catalyst'), keep.io), 0, keep.err());
+  assert.match(keep.out(), /-> keep new app value$/m);
+  assert.equal(store.writes.length, writes);
+  assert.equal(row.Amount, '777.00');
+  // The kept row is now in the checkpoint with its store fingerprint: the next run checks it as a changed record.
+  const recordedAfter = checkpointOf(ws).tables.Purchase_Order!;
+  assert.ok(recordedAfter.rows[WASHERS.id] && recordedAfter.store?.[WASHERS.id]);
+  row.Amount = '778.00';
+  const later = exportDir(VENDORS, [...ORDERS, { ...WASHERS, amount: '43.00', modified: '09-Oct-2026 09:00:00' }]);
+  const next = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, later, '--confirm'), next.io), 1);
+  assert.match(next.out(), /edited in Creator and in the new app: Amount/);
+  assert.equal(row.Amount, '778.00');
+});
+
+test('sync-delta --prefer creator overwrites a stored row for a new record, and an identical stored row is no conflict', async () => {
+  const ws = workspace();
+  const store = fakeStore();
+  const { row, dir } = await staleCheckpoint(ws, store);
+  const run = cli(store);
+  assert.equal(await syncDeltaCli(syncArgs(ws, dir(), '--confirm', '--prefer', 'creator'), run.io), 0, run.err());
+  assert.match(run.out(), /already stored in the new app: Amount .* -> keep Creator value$/m);
+  assert.match(run.out(), /^Purchase_Order: inserted 0 updated 1 unchanged-in-store 0 deleted 0$/m);
+  assert.equal(row.Amount, '42.00');
+  // A stored row that already equals the new record (a run that wrote but never recorded its checkpoint) is not refused.
+  const again = workspace();
+  const store2 = fakeStore();
+  await staleCheckpoint(again, store2);
+  store2.tables.get('Purchase_Order')!.find((entry) => entry.c2c_source_id === WASHERS.id)!.Amount = '12.50';
+  const writes = store2.writes.length;
+  const clean = cli(store2);
+  assert.equal(await syncDeltaCli(syncArgs(again, exportDir(VENDORS, [...ORDERS, WASHERS]), '--confirm'), clean.io), 0, clean.err());
+  assert.match(clean.out(), /^conflicts: 0$/m);
+  assert.match(clean.out(), /^Purchase_Order: inserted 0 updated 0 unchanged-in-store 1 deleted 0$/m);
+  assert.equal(store2.writes.length, writes);
+});
+
+test('sync-delta refuses an unknown --prefer side before it reads anything', async () => {
+  const ws = workspace();
+  for (const value of ['both', 'Purchase_Order=both', '1x=creator']) {
+    const run = cli(fakeStore());
+    assert.equal(await syncDeltaCli(syncArgs(ws, exportDir(VENDORS, ORDERS), '--prefer', value), run.io), 2, value);
+    assert.match(run.err(), /--prefer/);
+    assert.equal(run.fetched(), 0);
+  }
+  const run = cli(fakeStore());
+  assert.equal(await syncDeltaCli(syncArgs(ws, exportDir(VENDORS, ORDERS), '--prefer', 'creator', '--prefer', 'catalyst'), run.io), 2);
+});
+
 test('sync-delta links a new child to a parent that is already stored', async () => {
   const ws = workspace();
   const store = fakeStore();
