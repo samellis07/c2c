@@ -66,7 +66,7 @@ import {
   type SourceTableData,
 } from '../../schema/src/generator.js';
 import { SOURCE_ID_COLUMN, SYSTEM_FIELD_COLUMNS, SYSTEM_FIELD_COVERAGE_GAP } from '../../schema/src/mapping.js';
-import { formatSkipped, migrateSeed, type SeedRow, type SeedTable } from './seed.js';
+import { applyDeferredReports, formatSkipped, migrateSeed, readBackRowIds, unwrittenTable, type SeedRow, type SeedTable } from './seed.js';
 import { SEED_BLOCKED_KEY } from '../../data/src/seed.js';
 import {
   duplicateUniqueRefusals,
@@ -87,7 +87,7 @@ import { confirmGuardLines, planScopeLines } from './guards.js';
 import {
   countFrom,
   deferredColumns,
-  loadRowIds,
+  type DeferredUpdateReport,
   omitColumns,
   orderTables,
   query,
@@ -283,6 +283,8 @@ export interface CsvMigrateResult extends MigrateResult {
   fidelity: string[];
   /** Mandatory/unique columns the source disproved — recorded so the report names them. */
   constraints?: ConstraintDecision[];
+  /** Deferred (self/cyclic) lookup updates per table: rows updated and not updated, as counts and ROWID ranges. */
+  deferredUpdates?: DeferredUpdateReport[];
   /**
    * Rows of a written table whose exact-decimal shadow is NULL while the varchar holds a
    * value: rows stored before the shadow column existed, which this run did not rewrite.
@@ -682,16 +684,37 @@ export async function migrateLoaded(opts: {
   const rowIds = new Map<string, Map<string, string>>();
   const written: MigrateResult['tables'] = [];
   const seeded: MigrateResult[] = [];
-  // A failed table stops the writes — a child resolved against dropped rows
-  // would write garbage foreign keys — but the read-back and count passes below
-  // still run, so the report names every table that did not land.
+  // A table that did not load (refused, failed, unresolvable lookup, or an
+  // incomplete ROWID read-back) is reported, and so is every lookup child of
+  // it, which is skipped: a child resolved against missing rows would write
+  // broken foreign keys. Independent tables still load, and the read-back and
+  // count passes below still run, so the report names every table that did not land.
   let failed = false;
+  const notLoaded = new Set<string>();
+  const acyclic = loaded.foreignKeys.filter((key) => !deferred.has(foreignKeyId(key)));
+  // ROWIDs are read back only where they are used: a lookup parent, or a table
+  // whose deferred lookups are set by row update after the load.
+  const needsRowIds = new Set(loaded.foreignKeys.flatMap((key) => (deferred.has(foreignKeyId(key)) ? [key.parent, key.table] : [key.parent])));
+  const skip = (table: (typeof loaded.tables)[number], error: string): void => {
+    const result = unwrittenTable(table, error);
+    written.push(...result.tables);
+    seeded.push(result);
+    notLoaded.add(table.table);
+    failed = true;
+  };
   for (const table of loaded.tables) {
-    const resolved = resolveForeignKeys(
-      table,
-      loaded.foreignKeys.filter((key) => !deferred.has(foreignKeyId(key))),
-      rowIds,
-    );
+    const missingParent = acyclic.find((key) => key.table === table.table && notLoaded.has(key.parent));
+    if (missingParent) {
+      skip(table, `skipped: parent ${missingParent.parent} not loaded (lookup ${missingParent.column})`);
+      continue;
+    }
+    let resolved: typeof table;
+    try {
+      resolved = resolveForeignKeys(table, acyclic, rowIds) as typeof table;
+    } catch (error) {
+      skip(table, `skipped: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
     const stripped = omitColumns(resolved, deferredColumns(table.table, deferred));
     // The remap this table's lookup cells went through, so a re-run can correct
     // a stored cell still holding the raw source id.
@@ -719,14 +742,29 @@ export async function migrateLoaded(opts: {
     seeded.push(result);
     if (!result.ok) {
       failed = true;
-      break;
+      notLoaded.add(table.table);
+      continue;
     }
-    rowIds.set(
-      table.table,
-      await loadRowIds(opts.fetch, opts.catalystBase, opts.dc, table.table, table.rows.map((row) => row.id), opts.scope),
-    );
+    if (!needsRowIds.has(table.table)) continue;
+    // A read-back that cannot map every written row leaves the table's
+    // children without parents: the table is reported and treated as not loaded.
+    const problem = await readBackRowIds(opts.fetch, opts.catalystBase, opts.dc, table, opts.scope, rowIds);
+    if (problem) {
+      for (const report of result.tables) {
+        report.mismatch = true;
+        report.error = problem;
+      }
+      failed = true;
+      notLoaded.add(table.table);
+    }
   }
-  if (!failed && deferred.size > 0) await updateDeferredForeignKeys(opts, loaded.tables, loaded.foreignKeys, deferred, rowIds);
+  // Another table's failure does not stop the deferred updates: only a table
+  // that did not load, or whose deferred parent did not, is skipped and reported.
+  const deferredUpdates = deferred.size > 0
+    ? await updateDeferredForeignKeys(opts, loaded.tables, loaded.foreignKeys, deferred, rowIds, notLoaded)
+    : [];
+  applyDeferredReports({ ok: true, dryRun: false, tables: written }, deferredUpdates);
+  if (deferredUpdates.some((report) => report.notUpdated || report.error)) failed = true;
   const counts: CsvCount[] = [];
   const counted = new Set<string>();
   for (const item of loaded.expected) {
@@ -764,6 +802,7 @@ export async function migrateLoaded(opts: {
     integrity: mergeIntegrity(seeded.map((item) => item.integrity)),
     ...preferredGaps(loaded, seeded),
     ...(warnings.length ? { warnings } : {}),
+    ...(deferredUpdates.length ? { deferredUpdates } : {}),
     ...(schema.constraints?.length ? { constraints: schema.constraints } : {}),
   };
 }

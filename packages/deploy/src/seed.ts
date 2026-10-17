@@ -44,7 +44,10 @@ import {
   omitColumns,
   orderTables,
   resolveForeignKeys,
+  formatDeferredUpdate,
   updateDeferredForeignKeys,
+  type DeferredUpdateReport,
+  type RemapTable,
   type SeedForeignKey,
 } from './remap.js';
 import { cyclicForeignKeys, foreignKeyId } from './tables.js';
@@ -433,7 +436,7 @@ export async function migrateSeed(opts: {
   seedDir?: string;
   /** Where fixture bytes are uploaded. Required for a live load of a file cell. */
   sink?: ObjectSink;
-}): Promise<MigrateResult> {
+}): Promise<SeedMigrateResult> {
   if (!opts.dryRun) requireScope(opts.scope);
   // Refuse before any write: a repeated id would be stored twice.
   const repeated = opts.tables.map((table) => ({ table, dupes: duplicateSourceIds(table) })).filter((item) => item.dupes.length);
@@ -590,21 +593,41 @@ export async function migrateSeed(opts: {
       ? { systemFieldGaps: singles.flatMap((single) => single.systemFieldGaps ?? []) }
       : {}),
   };
-  if (!merged.ok) return fixCounts(merged, byReport);
+  // Deferred lookups still run when another table failed: only a table that did
+  // not load, or whose deferred parent did not, is skipped, and it is reported.
   if (!opts.dryRun && opts.scope && deferred.size > 0) {
-    await updateDeferredForeignKeys(
+    const reports = await updateDeferredForeignKeys(
       { dc: opts.dc, catalystBase: opts.catalystBase, fetch: opts.fetch, scope: opts.scope },
       opts.tables,
       keys,
       deferred,
       rowIds,
+      notLoaded,
     );
+    return { ...fixCounts(applyDeferredReports(merged, reports), byReport), ...(reports.length ? { deferredUpdates: reports } : {}) };
   }
   return fixCounts(merged, byReport);
 }
 
+/** A seed load's result, with the deferred lookup updates each table received. */
+export type SeedMigrateResult = MigrateResult & { deferredUpdates?: DeferredUpdateReport[] };
+
+/** Mark each table whose deferred lookup updates did not all land; the run is then not ok. */
+export function applyDeferredReports<T extends MigrateResult>(result: T, reports: readonly DeferredUpdateReport[]): T {
+  for (const report of reports) {
+    if (!report.notUpdated && !report.error) continue;
+    result.ok = false;
+    for (const table of result.tables) {
+      if (table.table !== report.table) continue;
+      table.mismatch = true;
+      table.error = table.error ? `${table.error}; ${formatDeferredUpdate(report)}` : formatDeferredUpdate(report);
+    }
+  }
+  return result;
+}
+
 /** Report row for a table that was never written. */
-function unwrittenTable(table: SeedTable, error: string): MigrateResult {
+export function unwrittenTable(table: RemapTable, error: string): MigrateResult {
   return {
     ok: false,
     dryRun: false,
@@ -625,11 +648,11 @@ function unwrittenTable(table: SeedTable, error: string): MigrateResult {
 }
 
 /** Read the written ROWIDs into rowIds; returns the reason when not every row maps. */
-async function readBackRowIds(
+export async function readBackRowIds(
   fetch: FetchLike,
   base: string,
   dc: string,
-  table: SeedTable,
+  table: RemapTable,
   scope: CatalystScope,
   rowIds: Map<string, Map<string, string>>,
 ): Promise<string | undefined> {
