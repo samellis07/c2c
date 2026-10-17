@@ -474,6 +474,11 @@ export interface ShimContext {
    * Empty means on add or edit is an insert.
    */
   rowId?: string;
+  /**
+   * True while the generated delete stub runs a form's modules for a record
+   * delete. A merged form module runs its `on delete`-scoped scripts only then.
+   */
+  deleting?: boolean;
   /** Set by the generated live-write path once the row is stored, so the script does not stamp it twice. */
   persisted?: boolean;
   /**

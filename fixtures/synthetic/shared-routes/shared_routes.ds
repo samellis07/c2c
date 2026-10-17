@@ -1,0 +1,213 @@
+/*
+ * Author       : synthetic
+ * Generated on : 01-Jan-2026 09:00:00
+ * Version      : 1.0
+ */
+application "Shared_Routes"
+{
+	date format = "dd-MMM-yyyy"
+	time zone = "Asia/Kolkata"
+	time format = "24-hr"
+
+	forms
+	{
+		form Catalog
+		{
+			displayname = "Catalog"
+			must have unique Item_Code
+			(
+				type = text
+				displayname = "Item Code"
+				maxchar = 20
+			)
+			Unit_Price
+			(
+				type = decimal
+				displayname = "Unit Price"
+				decimalplace = 2
+			)
+		}
+		form Activity
+		{
+			displayname = "Activity"
+			Entry
+			(
+				type = text
+				displayname = "Entry"
+			)
+		}
+		form Order_Sheet
+		{
+			displayname = "Order Sheet"
+			must have Customer
+			(
+				type = text
+				displayname = "Customer"
+			)
+			Total
+			(
+				type = decimal
+				displayname = "Total"
+				decimalplace = 2
+			)
+			Status
+			(
+				type = picklist
+				displayname = "Status"
+				values = {"Open","Closed"}
+			)
+			Lines
+			(
+				type = grid
+				displayname = "Lines"
+				Item
+				(
+					type = text
+					displayname = "Item"
+				)
+				Qty
+				(
+					type = number
+					displayname = "Qty"
+				)
+				Price
+				(
+					type = decimal
+					displayname = "Price"
+					decimalplace = 2
+				)
+			)
+		}
+	}
+
+	reports
+	{
+		list All_Orders
+		{
+			displayName = "All Orders"
+			show all rows from Order_Sheet
+			(
+				Customer as "Customer"
+				Total as "Total"
+				Status as "Status"
+			)
+		}
+	}
+
+	workflow
+	{
+		form
+		{
+			Order_Lines as "Order lines"
+			{
+				type = form
+				form = Order_Sheet
+				on add or edit
+				{
+					actions
+					{
+					on user input of Lines.Item
+					(
+						price = Catalog[Item_Code == row.Item].Unit_Price;
+						if(price != null)
+						{
+							row.Price = price;
+						}
+					)
+					on user input of Lines.Qty
+					(
+						price = Catalog[Item_Code == row.Item].Unit_Price;
+						if(price != null && row.Qty != null)
+						{
+							row.Price = price * row.Qty;
+						}
+					)
+					}
+				}
+			}
+			Order_Add as "Order add"
+			{
+				type = form
+				form = Order_Sheet
+				on add
+				{
+					actions
+					{
+					on validate
+					(
+						added = Activity[Entry == "Order added: " + input.Customer].count();
+						if(input.Total < 0 || added > 9)
+						{
+							alert "Total cannot be negative";
+							cancel submit;
+						}
+					)
+					on success
+					(
+						insert into Activity
+						[
+							Added_User = zoho.loginuser
+							Entry = "Order added: " + input.Customer
+						];
+					)
+					}
+				}
+			}
+			Order_Edit as "Order edit"
+			{
+				type = form
+				form = Order_Sheet
+				on edit
+				{
+					actions
+					{
+					on validate
+					(
+						edits = Activity[Entry == "Order edited: " + input.Customer].count();
+						if(input.Status == "Closed" && input.Total == null || edits > 9)
+						{
+							alert "A closed order needs a total";
+							cancel submit;
+						}
+					)
+					on success
+					(
+						insert into Activity
+						[
+							Added_User = zoho.loginuser
+							Entry = "Order edited: " + input.Customer
+						];
+					)
+					}
+				}
+			}
+			Order_Remove as "Order remove"
+			{
+				type = form
+				form = Order_Sheet
+				on delete
+				{
+					actions
+					{
+					on validate
+					(
+						if(input.Status == "Closed")
+						{
+							alert "A closed order stays on file";
+							cancel delete;
+						}
+					)
+					on success
+					(
+						insert into Activity
+						[
+							Added_User = zoho.loginuser
+							Entry = "Order removed: " + input.Customer
+						];
+					)
+					}
+				}
+			}
+		}
+	}
+}
