@@ -125,7 +125,7 @@ test('a hung test is stopped by the per-test timeout', () => {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-test-limits-hang-'));
   try {
     const hang = join(dir, 'hang.test.mjs');
-    writeFileSync(hang, "import test from 'node:test';\ntest('hangs', () => new Promise(() => { setInterval(() => {}, 1000); }));\n");
+    writeFileSync(hang, "import test from 'node:test';\ntest('hangs', () => new Promise(() => { setInterval(() => {}, 1000); setTimeout(() => process.exit(1), 30000); }));\n");
     const env = { ...process.env, NODE_OPTIONS: '' };
     delete env.NODE_TEST_CONTEXT;
     const start = Date.now();
