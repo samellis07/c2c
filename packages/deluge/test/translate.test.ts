@@ -88,6 +88,48 @@ test('dry-run evaluation of a refused prefetch never runs the app function body'
   assert.equal(bodies, 1);
 });
 
+test('a local bound to a function proved read-only replays in the prefetch and decides the client condition', async () => {
+  const src = 'ok = thisapp.Check(input.ID);\nif (ok) { alert "ok"; }';
+  const t = translate(src, { clientCallFunctions: ['Check'] });
+  assert.equal(t.todos.filter((item) => item.construct === 'client-condition-uses-server').length, 0);
+  assert.match(t.prefetch, /var ok = await shim\.thisapp\.call\(ctx, \["Check"\], \[shim\.input\.get\(ctx, "ID"\)\]\)/);
+  assert.doesNotMatch(t.client, /shim\.todo|thisapp/);
+  const seen: unknown[] = [];
+  const runtime = createRuntime({
+    dryRun: false,
+    settingsTimeZone: 'UTC',
+    functions: { Check: { call: async (_ctx: unknown, id: unknown) => { seen.push(id); return id === 7; }, params: ['id'] } },
+  });
+  const run = async (code: string, record: Record<string, unknown>, slots: Record<string, unknown>) => {
+    const actions: { op: string }[] = [];
+    await (new Function('shim', 'ctx', 'slots', 'actions', `return (async () => {\n${code}\n})();`) as (...a: unknown[]) => Promise<unknown>)(
+      runtime.shim,
+      runtime.context({ record }),
+      slots,
+      actions,
+    );
+    return actions;
+  };
+  const yes: Record<string, unknown> = {};
+  await run(t.prefetch, { ID: 7 }, yes);
+  const no: Record<string, unknown> = {};
+  await run(t.prefetch, { ID: 8 }, no);
+  assert.deepEqual(seen, [7, 8]);
+  assert.deepEqual((await run(t.client, { ID: 7 }, yes)).map((a) => a.op), ['alert']);
+  assert.deepEqual((await run(t.client, { ID: 8 }, no)).map((a) => a.op), []);
+  // The client reads only the slot: with the prefetch removed it never alerts.
+  assert.deepEqual((await run(t.client, { ID: 7 }, {})).map((a) => a.op), []);
+});
+
+test('a local bound to a function not proved read-only, or with a server argument, stays a counted todo', () => {
+  const count = (src: string, fns: string[]) =>
+    translate(src, { clientCallFunctions: fns }).todos.filter((item) => item.construct === 'client-condition-uses-server').length;
+  assert.equal(count('ok = thisapp.Check(input.ID);\nif (ok) { alert "ok"; }', []), 1);
+  assert.equal(count('ok = thisapp.Check(input.ID);\nif (ok) { alert "ok"; }', ['Other']), 1);
+  assert.equal(count('ok = thisapp.Check(input.ID) && thisapp.Write(input.ID);\nif (ok) { alert "ok"; }', ['Check']), 1);
+  assert.equal(count('ok = thisapp.Check(Items[ID == input.ID].Code);\nif (ok) { alert "ok"; }', ['Check']), 1);
+});
+
 const ROW_MAP_NON_READ = /thisapp\.call|mail\.send|http\.getUrl|http\.postUrl|http\.invokeurl|datastore\.insert|zoho\.task|list\.(?:add|addAll|put|putAll|clear|insert|insertAll|remove|removeAll|update)\s*\(/;
 
 function assertRowMapStaysTodo(src: string): void {

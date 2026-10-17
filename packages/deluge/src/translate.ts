@@ -412,6 +412,13 @@ interface Binding {
    * holds. Only the effect calls in {@link NON_READ_EFFECT} refuse it.
    */
   localCopy?: boolean;
+  /**
+   * Every `thisapp` call in the code reaches a function proved read-only
+   * (the `clientCallFunctions` catalog) and every other call is an allowlisted
+   * read, so replaying the assignment in the prefetch is a read. The prefetch
+   * module calls the same `functions` registry the server handler uses.
+   */
+  readOnlyCalls?: boolean;
   rowReads?: RowRead[];
   /** Record-state keys the bound expression reads; replay is refused when a write to one predates this binding. */
   stateReads?: string[];
@@ -575,6 +582,10 @@ interface Scope {
   replayBarrier: number;
   /** List updates (`L.add(x)`) in the `for each` body being translated, for {@link loopListUpdate}. */
   listUpdates?: { name: string; value: Fx }[];
+  /** `if` / `else if` tests in that body, for {@link loopListUpdate}. */
+  listUpdateTests?: Fx[];
+  /** Plain local assignments in that body, for {@link loopListUpdate}. */
+  listUpdateTemps?: { name: string; value: Fx }[];
   /** Names bound in the prefetch module without a replayed assignment (params, `row`). */
   prefetchBound: Set<string>;
   /** The app's form link names; a bare one is the form's collection. */
@@ -933,7 +944,8 @@ function nonReadReplay(code: string): boolean {
 
 /** `nonReadReplay` for a recorded binding: a copy-on-write list update is a read of its receiver. */
 function bindingNonRead(binding: Binding): boolean {
-  return binding.localCopy ? NON_READ_EFFECT.test(binding.code) : nonReadReplay(binding.code);
+  const code = binding.readOnlyCalls ? binding.code.replace(/\bshim\.thisapp\.call\s*\(/g, 'shim.thisapp.read(') : binding.code;
+  return binding.localCopy ? NON_READ_EFFECT.test(code) : nonReadReplay(code);
 }
 
 /** An app function, an untranslated call, or a non-read must not be replayed into a row map. */
@@ -2866,6 +2878,7 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
   // evaluated, so a read there still sees the value from before the if.
   const test = expr(s.test, scope);
   const elifTests = s.elifs.map((e) => expr(e.test, scope));
+  scope.listUpdateTests?.push(test, ...elifTests);
   const atTest = snapBindings(scope);
   const atClass = copyClasses(scope);
   const afterClass = copyClasses(scope);
@@ -3075,13 +3088,21 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
   if (s.index) assigned.add(s.index);
   const declaredBefore = new Set(scope.declaredClient);
   const outerUpdates = scope.listUpdates;
+  const outerTests = scope.listUpdateTests;
+  const outerTemps = scope.listUpdateTemps;
   const updates: { name: string; value: Fx }[] = [];
+  const updateTests: Fx[] = [];
+  const updateTemps: { name: string; value: Fx }[] = [];
   scope.listUpdates = updates;
+  scope.listUpdateTests = updateTests;
+  scope.listUpdateTemps = updateTemps;
   let body: Out;
   try {
     body = underLoop(scope, assigned, () => statement(s.body, scope, stats, todos));
   } finally {
     scope.listUpdates = outerUpdates;
+    scope.listUpdateTests = outerTests;
+    scope.listUpdateTemps = outerTemps;
   }
   scope.elementVars.delete(s.name);
   scope.elementCollections.delete(s.name);
@@ -3140,7 +3161,7 @@ function forStmt(s: Extract<Stmt, { kind: 'forEach' }>, scope: Scope, stats: Tra
         ? `for (var [${jsIdent(s.index)}, ${name}] of shim.each(ctx, ${source}).entries())`
         : `for (var ${name} of shim.each(ctx, ${source}))`;
   const head = headFor(iter);
-  loopListUpdate(s, col, colRefused, updates, body.server, head, atCollection.bindings, scope);
+  loopListUpdate(s, col, colRefused, updates, updateTests, updateTemps, body.server, head, atCollection.bindings, scope);
   // Field writes on a fetched row are record.set. Deluge persists them
   // (fetch example 4: https://www.zoho.com/deluge/help/fetch-records/fetch-collection-records.html
   // and https://www.zoho.com/deluge/help/data-access/update-records.html).
@@ -3493,6 +3514,7 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
   void declType;
   if (target.kind === 'name') {
     const name = target.name;
+    scope.listUpdateTemps?.push({ name, value });
     let reads = value.reads;
     // Rewriting the dep is only for a bound expression that is itself a server
     // read: a self-referential accumulator or any other shape keeps the cycle,
@@ -3554,13 +3576,16 @@ function assignTo(target: Expr, value: Fx, span: { start: number; end: number },
     for (const u of value.unboundReads) if (!recordedReads.includes(u)) recordedReads.push(u);
     const deps = new Map<string, Binding | undefined>();
     for (const r of recordedReads) deps.set(r, scope.bindings.get(r));
+    // A call to a function proved read-only is a read the prefetch may replay.
+    const readOnlyCalls = value.appFunction && !value.todo && !scope.noClient && clientCallCode(value.code, scope) !== null;
     scope.bindings.set(name, {
       code: value.code,
       reads: recordedReads,
       unboundReads: value.unboundReads,
-      appFunction: value.appFunction,
+      appFunction: value.appFunction && !readOnlyCalls,
       todo: value.todo,
-      sideEffect: value.sideEffect,
+      sideEffect: value.sideEffect && !readOnlyCalls,
+      ...(readOnlyCalls ? { readOnlyCalls } : {}),
       rowReads: value.rowReads,
       stateReads: value.stateReads,
       deps,
@@ -3882,38 +3907,59 @@ function clientListUpdateLine(e: Expr, v: Fx, prior: Binding | undefined, scope:
  * A `for each` whose body only updates one local list declared before it
  * (`for each r in Form[…] { ids.add(r.ID); }`) leaves one value the prefetch
  * can rebuild: the same loop over the same collection, run on a copy of the
- * list's value from before the loop. Returns the name it rebound, or null when
- * the body has any other statement, the collection or an update is not a pure
- * read, or the loop shape is indexed.
+ * list's value from before the loop. The updates may sit under `if` /
+ * `else if` / `else` arms whose tests are pure reads
+ * (`if (Other[Ref == r.ID].count() == 0) { ids.add(r.ID); }`): the replayed
+ * loop evaluates each test against the same row. A plain assignment of a
+ * pure read to another local (`n = Other[Ref == r.ID].sum(Qty); if (n < r.Qty)
+ * { ids.add(r.ID); }`) replays inside the loop too. Returns the name it rebound,
+ * or null when the body has any other statement, the collection, a test, or
+ * an update is not a pure read, or the loop shape is indexed.
  */
 function loopListUpdate(
   s: Extract<Stmt, { kind: 'forEach' }>,
   col: Fx,
   colRefused: boolean,
   updates: readonly { name: string; value: Fx }[],
+  tests: readonly Fx[],
+  temps: readonly { name: string; value: Fx }[],
   serverBody: string,
   head: string,
   before: Map<string, Binding>,
   scope: Scope,
 ): string | null {
   if (s.index || s.iteratesIndex || colRefused) return null;
-  const stmts = s.body.kind === 'block' ? s.body.body : [s.body];
-  if (!stmts.length || updates.length !== stmts.length || stmts.some((st) => st.kind !== 'expr')) return null;
+  const flat = (st: Stmt): Stmt[] => (st.kind === 'block' ? st.body.flatMap(flat) : [st]);
+  // Every leaf is an update; an `if` contributes its arms' leaves.
+  const leaves = (st: Stmt): Stmt[] =>
+    flat(st).flatMap((x) => (x.kind === 'if' ? [x.then, ...x.elifs.map((e) => e.body), ...(x.else ? [x.else] : [])].flatMap(leaves) : [x]));
+  const stmts = leaves(s.body);
+  const tempLeaves = stmts.filter((st) => st.kind === 'assign');
+  if (!updates.length || updates.length + tempLeaves.length !== stmts.length || stmts.some((st) => st.kind !== 'expr' && st.kind !== 'assign')) return null;
+  // Each temp is a fresh local: a pure read that is neither the list, the loop
+  // variable, nor a value carried from an earlier iteration.
+  const tempNames = new Set(temps.map((t) => t.name));
+  if (temps.length !== tempLeaves.length || tempLeaves.some((st) => st.kind !== 'assign' || st.op !== '=' || st.target.kind !== 'name')) return null;
   const name = updates[0]!.name;
   if (name === s.name || updates.some((u) => u.name !== name)) return null;
   const prior = before.get(name);
   if (!prior || !(scope.list.has(name) || scope.map.has(name)) || heldElsewhere(name, scope)) return null;
   if (col.todo || col.appFunction || col.sideEffect || col.unboundReads.length || col.reads.includes(name) || NON_READ_EFFECT.test(col.code) || staleFx(col, scope)) return null;
   if (!updates.every((u) => listUpdateReadOnly(u.value, s.name))) return null;
+  if (!tests.every((t) => listUpdateReadOnly(t, s.name) && !staleFx(t, scope))) return null;
+  if (tempNames.has(name) || tempNames.has(s.name) || [...tempNames].some((t) => before.has(t))) return null;
+  if (!temps.every((t) => listUpdateReadOnly(t.value, s.name) && !staleFx(t.value, scope) && !t.value.reads.includes(t.name) && !t.value.reads.includes(name))) return null;
   const body = serverBody
     .split('\n')
     .filter((line) => !/^\s*\/\//.test(line))
     .join('\n');
   if (!body.trim()) return null;
-  const reads = [...col.reads, ...updates.flatMap((u) => u.value.reads)].filter((r) => r !== s.name);
+  const reads = [...col.reads, ...tests.flatMap((t) => t.reads), ...temps.flatMap((t) => t.value.reads), ...updates.flatMap((u) => u.value.reads)].filter(
+    (r) => r !== s.name && !tempNames.has(r),
+  );
   const id = jsIdent(name);
   const code = `await (async (${id}) => {\n${indent(`${head} {\n${indent(body)}\n}`)}\n  return ${id};\n})(shim.list.duplicate(${id}))`;
-  const stateReads = [...(col.stateReads ?? []), ...updates.flatMap((u) => u.value.stateReads ?? [])];
+  const stateReads = [...(col.stateReads ?? []), ...tests.flatMap((t) => t.stateReads ?? []), ...temps.flatMap((t) => t.value.stateReads ?? []), ...updates.flatMap((u) => u.value.stateReads ?? [])];
   scope.bindings.set(name, listUpdateBinding(name, prior, code, reads, stateReads, before, scope));
   return name;
 }
