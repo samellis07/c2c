@@ -23,6 +23,8 @@ interface Stored {
 interface Faults {
   /** Table whose ROWID read-back query answers 500. */
   readBackFails?: string;
+  /** Table whose row insert answers 500. */
+  failInserts?: string;
   /** 1-based deferred-update PUT numbers that answer 500. */
   failPuts?: readonly number[];
 }
@@ -31,6 +33,7 @@ interface Faults {
 function store() {
   const stored = new Map<string, Map<string, Stored>>();
   const inserts: string[] = [];
+  const putCalls: { table: string; rows: number }[] = [];
   let puts = 0;
   let seq = 10000000000000001n;
   let faults: Faults = {};
@@ -45,9 +48,10 @@ function store() {
         return response({ status: 'failure', data: { message: 'query failed' } }, 500);
       }
       const all = stored.get(table) ?? new Map<string, Stored>();
+      const inColumn = /WHERE\s+([A-Za-z_][A-Za-z0-9_]*)\s+IN/.exec(sql)?.[1];
       const list = /IN \((.*)\)/.exec(sql)?.[1];
       const wanted = list ? new Set(list.split(', ').map((item) => item.slice(1, -1).replace(/''/g, "'"))) : undefined;
-      const rows = [...all].filter(([source]) => !wanted || wanted.has(source));
+      const rows = [...all].filter(([source, row]) => !wanted || wanted.has(inColumn === 'ROWID' ? row.rowid : source));
       if (/COUNT\(/i.test(sql)) return response({ data: [{ 'COUNT(ROWID)': String(rows.length) }] });
       return response({ data: rows.map(([source, row]) => ({ ...row.columns, c2c_source_id: source, ROWID: row.rowid })) });
     }
@@ -59,6 +63,7 @@ function store() {
         puts += 1;
         if (faults.failPuts?.includes(puts)) return response({ status: 'failure', data: { message: 'update failed' } }, 500);
       }
+      putCalls.push({ table, rows: records.length });
       const bucket = stored.get(table) ?? new Map<string, Stored>();
       for (const record of records) {
         const row = [...bucket.values()].find((item) => item.rowid === String(record.ROWID));
@@ -67,6 +72,7 @@ function store() {
       }
       return response({ status: 'success', data: records });
     }
+    if (table === faults.failInserts) return response({ status: 'failure', data: { message: 'write failed' } }, 500);
     inserts.push(table);
     const bucket = stored.get(table) ?? new Map<string, Stored>();
     const echoed: Array<Record<string, unknown>> = [];
@@ -84,10 +90,12 @@ function store() {
     fetch,
     stored,
     inserts,
+    putCalls,
     setFaults(next: Faults) {
       faults = next;
       puts = 0;
       inserts.length = 0;
+      putCalls.length = 0;
     },
   };
 }
@@ -107,7 +115,8 @@ test('updateDeferredForeignKeys continues past a failed PUT batch and reports up
   const rowIds = new Map([['Employee', new Map(ids.map((rowid, i) => [`e${i + 1}`, rowid]))]]);
   const rows = ids.map((_, i): { id: string; columns: Record<string, string> } => ({ id: `e${i + 1}`, columns: i ? { Manager: `e${i}` } : {} }));
   let put = 0;
-  const fetch: FetchLike = async (_url, init) => {
+  const fetch: FetchLike = async (url, init) => {
+    if (new URL(url).pathname.endsWith('/query')) return response({ data: [] });
     assert.equal(init?.method, 'PUT');
     put += 1;
     return put === 2 ? response({ status: 'failure' }, 500) : response({ status: 'success' });
@@ -179,6 +188,7 @@ test('seed: a failed deferred PUT batch returns the report without throwing, and
   const employee = first.tables.find((table) => table.table === 'Employee');
   assert.equal(employee?.mismatch, true);
   assert.match(employee?.error ?? '', /deferred lookup update \(Manager\): 200 of 249 row\(s\) updated .*49 not updated .*re-run the load/);
+  assert.match(employee?.error ?? '', /row updates only, nothing is inserted again/);
   assert.equal(first.tables.find((table) => table.table === 'Third')?.mismatch, false, 'the independent table is reported loaded');
   assert.equal(fake.stored.get('Third')?.size, 1);
   const unset = [...fake.stored.get('Employee')!.values()].filter((row) => row.columns.c2c_source_id !== 'e1' && !row.columns.Manager);
@@ -188,6 +198,7 @@ test('seed: a failed deferred PUT batch returns the report without throwing, and
   const second = await run();
   assert.equal(second.ok, true, JSON.stringify(second.tables.map((table) => table.error)));
   assert.deepEqual(fake.inserts, [], 'the re-run inserts nothing');
+  assert.deepEqual(fake.putCalls.map((call) => call.rows), [49], 'the re-run PUTs only the rows still unset');
   assert.equal(fake.stored.get('Employee')!.size, EMPLOYEES);
   const byId = fake.stored.get('Employee')!;
   for (let i = 2; i <= EMPLOYEES; i++) assert.equal(byId.get(`e${i}`)!.columns.Manager, byId.get(`e${i - 1}`)!.rowid);
@@ -254,10 +265,52 @@ test('seed: a self-lookup table whose ROWID read-back fails reports its deferred
   assertManagersSet(fake.stored.get('Employee')!, (i) => `e${i}`);
 });
 
+test('seed: a self-lookup table whose insert failed is reported as re-inserted on re-run, and the re-run inserts it', async () => {
+  const fake = store();
+  fake.setFaults({ failInserts: 'Employee' });
+  const result = await seedRun(fake);
+  assert.equal(result.ok, false);
+  const employee = result.tables.find((table) => table.table === 'Employee');
+  assert.equal(employee?.mismatch, true);
+  assert.match(employee?.error ?? '', /deferred lookup update \(Manager\): 0 of 249 row\(s\) updated; 249 not updated: skipped: Employee not loaded/);
+  assert.match(employee?.error ?? '', /re-run the load: it inserts the missing Employee rows and then applies these updates/);
+  assert.doesNotMatch(employee?.error ?? '', /nothing is inserted again/);
+  assert.deepEqual(result.deferredUpdates?.[0]?.reRunInserts, ['Employee']);
+
+  fake.setFaults({});
+  const second = await seedRun(fake);
+  assert.equal(second.ok, true, JSON.stringify(second.tables.map((table) => table.error)));
+  assert.ok(fake.inserts.includes('Employee'), 'the re-run inserts the missing rows');
+  assertManagersSet(fake.stored.get('Employee')!, (i) => `e${i}`);
+});
+
+test('updateDeferredForeignKeys does not PUT a row whose lookup already holds the target value', async () => {
+  const sent: NonNullable<Parameters<FetchLike>[1]>[] = [];
+  const fetch: FetchLike = async (url, init) => {
+    if (new URL(url).pathname.endsWith('/query')) {
+      return response({ data: [{ ROWID: '302', Mentor: '301' }] });
+    }
+    if (init) sent.push(init);
+    return response({ status: 'success' });
+  };
+  const reports = await updateDeferredForeignKeys(
+    { dc: 'in', catalystBase: BASE, fetch, scope: SCOPE },
+    [{ table: 'Person', rows: [{ id: 'p1', columns: {} }, { id: 'p2', columns: { Mentor: 'p1' } }, { id: 'p9', columns: { Mentor: 'p1' } }] }],
+    [{ table: 'Person', column: 'Mentor', parent: 'Person' }],
+    new Set(['Person\0Mentor']),
+    new Map([['Person', new Map([['p1', '301'], ['p2', '302'], ['p9', '309']])]]),
+  );
+  assert.equal(sent.length, 1, 'only the row still holding the wrong value is updated');
+  assert.deepEqual(JSON.parse(String(sent[0]!.body)), [{ ROWID: '309', Mentor: '301' }]);
+  assert.equal(reports[0]!.updated, 2);
+  assert.equal(reports[0]!.notUpdated, 0);
+});
+
 test('updateDeferredForeignKeys skips and reports a table whose deferred parent did not load, and still updates the others', async () => {
   const sent: string[] = [];
   const fetch: FetchLike = async (url) => {
-    sent.push(decodeURIComponent(new URL(url).pathname.split('/').at(-2) ?? ''));
+    const path = new URL(url).pathname;
+    if (!path.endsWith('/query')) sent.push(decodeURIComponent(path.split('/').at(-2) ?? ''));
     return response({ status: 'success' });
   };
   const reports = await updateDeferredForeignKeys(
@@ -291,6 +344,32 @@ test('updateDeferredForeignKeys skips and reports a table whose deferred parent 
   );
   assert.deepEqual(sent, ['Person'], 'a table not tied to the failed one is updated');
   assert.equal(self[0]!.updated, 1);
+});
+
+test('updateDeferredForeignKeys names the table a re-run inserts when its insert failed, and only then', async () => {
+  const fetch: FetchLike = async () => assert.fail('a skipped table is not read or written');
+  const args: Parameters<typeof updateDeferredForeignKeys>[1] = [
+    { table: 'Dept', rows: [{ id: 'd1', columns: { Head: 'p1' } }] },
+    { table: 'Person', rows: [{ id: 'p1', columns: { Dept: 'd1' } }] },
+  ];
+  const keys = [
+    { table: 'Dept', column: 'Head', parent: 'Person' },
+    { table: 'Person', column: 'Dept', parent: 'Dept' },
+  ];
+  const deferred = new Set(['Dept\0Head', 'Person\0Dept']);
+  const rowIds = new Map([['Person', new Map([['p1', '301']])]]);
+  // The Dept insert failed: its rows are absent, so a re-run writes them first.
+  const inserted = await updateDeferredForeignKeys(
+    { dc: 'in', catalystBase: BASE, fetch, scope: SCOPE },
+    args, keys, deferred, rowIds, new Set(['Dept']), new Set(['Dept']),
+  );
+  assert.deepEqual(inserted.map((report) => report.reRunInserts), [['Dept'], ['Dept']]);
+  // A ROWID read-back failure leaves the rows behind: a re-run only updates.
+  const mapped = await updateDeferredForeignKeys(
+    { dc: 'in', catalystBase: BASE, fetch, scope: SCOPE },
+    args, keys, deferred, rowIds, new Set(['Dept']),
+  );
+  assert.deepEqual(mapped.map((report) => report.reRunInserts), [undefined, undefined]);
 });
 
 const DS = `application "Shop"
@@ -428,6 +507,7 @@ test('csv: a failed deferred PUT batch reports the rows updated and not updated,
   const second = await csvRun(fake, loaded);
   assert.equal(second.ok, true, JSON.stringify(second.tables.map((table) => table.error)));
   assert.deepEqual(fake.inserts, [], 'the re-run inserts nothing');
+  assert.deepEqual(fake.putCalls.map((call) => call.rows), [49], 'the re-run PUTs only the rows still unset');
   const byId = fake.stored.get('Employee')!;
   for (let i = 1; i < EMPLOYEES; i++) assert.equal(byId.get(String(1000 + i))!.columns.Manager, byId.get(String(1000 + i - 1))!.rowid);
 });
