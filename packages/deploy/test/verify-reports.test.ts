@@ -499,3 +499,13 @@ test('the runner command: usage errors exit 2', async () => {
   assert.equal(await verifyReportsMain(['--bogus'], io), 2);
   assert.equal(await verifyReportsMain([KITCHEN, '--n', '0'], io), 2);
 });
+
+test('expectedBuckets folds date-time category values by calendar day, like the chart fold', () => {
+  const rows = [
+    { On: '2020-01-26T00:00:00', V: 1 },
+    { On: '2020-01-26 10:30:00', V: 2 },
+    { On: '27-Jan-2020', V: 3 },
+  ];
+  const chart = { x: 'On', measures: [{ fn: 'count' as const, field: 'V', label: 'n' }], filter: [] };
+  assert.deepEqual(expectedBuckets(rows, chart), { '2020-01-26': 2, '2020-01-27': 1 });
+});

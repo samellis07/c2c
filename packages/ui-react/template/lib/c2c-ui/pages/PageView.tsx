@@ -106,7 +106,7 @@ function Element({ el }: { el: PageElement }): ReactNode {
       const report = spec.reports[el.report];
       return report ? (
         <div className="c2c-embed" data-embed="report">
-          <ReportView report={report} />
+          <ReportView report={report} asList />
         </div>
       ) : (
         <p className="todo">The {el.label} report is not part of the app.</p>
