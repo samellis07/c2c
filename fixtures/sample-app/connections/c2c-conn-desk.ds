@@ -17,15 +17,15 @@ application "c2c-conn-desk"
 		form Conn_Helpdesk_Case
 		{
 			displayname = "Conn Zoho Desk Record"
-			must have Ticket_Subject
+			Contact_First_Name
 			(
 				type = text
-				displayname = "Subject"
+				displayname = "First name"
 				row = 1
 				column = 1
 				width = medium
 			)
-			must have Case_Contact_Last_Name
+			must have Contact_Last_Name
 			(
 				type = text
 				displayname = "Contact last name"
@@ -33,7 +33,7 @@ application "c2c-conn-desk"
 				column = 1
 				width = medium
 			)
-			must have Case_Contact_Email
+			must have Contact_Email
 			(
 				type = email
 				displayname = "Contact email"
@@ -41,7 +41,7 @@ application "c2c-conn-desk"
 				column = 1
 				width = medium
 			)
-			Ticket_Description
+			Contact_Description
 			(
 				type = textarea
 				displayname = "Description"
@@ -104,10 +104,10 @@ application "c2c-conn-desk"
 			displayName = "All Conn Helpdesk Cases"
 			show all rows from Conn_Helpdesk_Case
 			(
-				Ticket_Subject as "Subject"
-				Case_Contact_Last_Name as "Contact last name"
-				Case_Contact_Email as "Contact email"
-				Ticket_Description as "Description"
+				Contact_First_Name as "First name"
+				Contact_Last_Name as "Contact last name"
+				Contact_Email as "Contact email"
+				Contact_Description as "Description"
 				Helpdesk_Response as "Desk response"
 			)
 		}
@@ -153,17 +153,14 @@ application "c2c-conn-desk"
 					{
 						custom deluge script
 						(
-							contact = Map();
-							contact.put("lastName", input.Case_Contact_Last_Name);
-							contact.put("email", input.Case_Contact_Email);
-							ticket = Map();
-							ticket.put("subject", input.Ticket_Subject);
-							ticket.put("departmentId", thisapp.c2c_desk_department_id());
-							ticket.put("contact", contact);
-							ticket.put("description", input.Ticket_Description);
-							resp = zoho.desk.create(thisapp.c2c_desk_org_id().toLong(), "tickets", ticket, "c2c_desk");
+							contactMap = Map();
+							contactMap.put("firstName", input.Contact_First_Name);
+							contactMap.put("lastName", input.Contact_Last_Name);
+							contactMap.put("email", input.Contact_Email);
+							contactMap.put("description", input.Contact_Description);
+							resp = zoho.desk.create(thisapp.c2c_desk_org_id().toLong(), "contacts", contactMap, "c2c_desk");
 							input.Helpdesk_Response = resp.toString();
-							success message "c2c-desk-ticket-sent";
+							success message "c2c-desk-contact-sent";
 						)
 					}
 				}

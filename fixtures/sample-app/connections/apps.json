@@ -92,7 +92,7 @@
     {
       "link": "c2c_desk",
       "scopes": [
-        "Desk.tickets.CREATE"
+        "Desk.contacts.CREATE"
       ]
     },
     {

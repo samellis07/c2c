@@ -48,7 +48,7 @@ function withOwnerProfile(source: string): string {
 const EXPECTED_SCOPES: Record<string, Record<string, string[]>> = {
   'c2c-conn-crm': { c2c_crm: ['ZohoCRM.modules.leads.CREATE', 'ZohoCRM.modules.leads.READ', 'ZohoCRM.modules.leads.UPDATE'] },
   'c2c-conn-books': { c2c_books: ['ZohoBooks.contacts.CREATE', 'ZohoBooks.contacts.READ'] },
-  'c2c-conn-desk': { c2c_desk: ['Desk.tickets.CREATE'] },
+  'c2c-conn-desk': { c2c_desk: ['Desk.contacts.CREATE'] },
   'c2c-conn-cliq': { c2c_cliq: ['ZohoCliq.Webhooks.CREATE'] },
   'c2c-conn-rest-getpost': { c2c_crm: ['ZohoCRM.modules.leads.CREATE', 'ZohoCRM.modules.leads.READ'] },
   'c2c-conn-rest-putdel': { c2c_crm: ['ZohoCRM.modules.leads.DELETE', 'ZohoCRM.modules.leads.UPDATE'] },
