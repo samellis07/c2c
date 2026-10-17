@@ -31,7 +31,7 @@ const SCOPE = ['--org', ORG, '--project', PROJECT, '--dc', 'in'];
 
 /** In-memory Catalyst project. `rest` is the CLI-token REST the deploy package already uses. */
 interface Sandbox {
-  tables: Map<string, { id: string; columns: Set<string> }>;
+  tables: Map<string, { id: string; columns: Set<string>; columnDetails?: Record<string, unknown>[] }>;
   nextTableId: number;
   hosted: boolean;
   embedded: boolean;
@@ -132,7 +132,7 @@ function sandboxRest(sandbox: Sandbox): { rest: (call: RestCall) => Promise<Rest
           data: [...sandbox.tables.entries()].map(([name, t]) => ({
             table_name: name,
             table_id: t.id,
-            column_details: [...t.columns].map((column_name) => ({ column_name })),
+            column_details: t.columnDetails ?? [...t.columns].map((column_name) => ({ column_name })),
           })),
         },
       };
@@ -150,7 +150,7 @@ function sandboxRest(sandbox: Sandbox): { rest: (call: RestCall) => Promise<Rest
       if (!entry) return { status: 404, body: { data: { message: 'no table' } } };
       const [, table] = entry;
       if (call.method === 'GET') {
-        return { status: 200, body: { data: { column_details: [...table.columns].map((column_name) => ({ column_name })) } } };
+        return { status: 200, body: { data: { column_details: table.columnDetails ?? [...table.columns].map((column_name) => ({ column_name })) } } };
       }
       const bodies = Array.isArray(call.body) ? call.body : [call.body];
       for (const item of bodies) table.columns.add(String((item as { column_name?: string }).column_name));
@@ -436,7 +436,8 @@ function writeMiniPlan(): string {
 
 function lastJson(out: string): Record<string, unknown> {
   // --next/--record/--run print exactly one JSON document.
-  const start = out.indexOf('{');
+  const nl = out.lastIndexOf('\n{');
+  const start = nl >= 0 ? nl + 1 : out.indexOf('{');
   assert.ok(start >= 0, `no JSON in: ${out}`);
   return JSON.parse(out.slice(start).trim()) as Record<string, unknown>;
 }
@@ -5689,5 +5690,115 @@ test('--narrow-existing-security is refused on any other step', async () => {
   const c = securityIo();
   assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'tables', '--narrow-existing-security', ...SCOPE], c.io), 2);
   assert.equal(await provisionCli(['--out', out, '--status', '--narrow-existing-security', ...SCOPE], c.io), 2);
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('unique-date drift fixture: --run tables detects drift, lists plan vs live, prints fix line, marks step drift', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-drift-'));
+  mkdirSync(join(out, 'provision'), { recursive: true });
+  const plan: PlanFile = {
+    version: 1,
+    app: 'fiscal',
+    steps: [
+      {
+        id: 'tables',
+        via: 'cli',
+        command: 'c2c provision --confirm --run tables',
+        args: { plan: 'provision/tables.json', tables: ['Make_Your_Fiscal_Year'] },
+        readBack: { via: 'mcp', tool: 'CatalystbyZoho_List_All_Tables', match: { table_name: ['Make_Your_Fiscal_Year'] } },
+      },
+    ],
+  };
+  writeFileSync(join(out, 'provision', 'plan.json'), `${JSON.stringify(plan, null, 2)}\n`);
+  writeFileSync(
+    join(out, 'provision', 'tables.json'),
+    `${JSON.stringify(
+      [
+        {
+          table: 'Make_Your_Fiscal_Year',
+          form: 'Make_Your_Fiscal_Year',
+          nosql: false,
+          columns: [
+            {
+              table: 'Make_Your_Fiscal_Year',
+              column_name: 'Fiscal_Year_From',
+              data_type: 'date',
+              is_unique: false,
+              is_mandatory: false,
+            },
+          ],
+        },
+      ],
+      null,
+      2,
+    )}\n`,
+  );
+
+  const sandbox = emptySandbox();
+  // Existing live table holding unique date column (e.g. from an older c2c run)
+  sandbox.tables.set('Make_Your_Fiscal_Year', {
+    id: '9001',
+    columns: new Set(['Fiscal_Year_From']),
+    columnDetails: [
+      {
+        column_name: 'Fiscal_Year_From',
+        column_id: '8001',
+        data_type: 'date',
+        is_unique: true,
+        is_mandatory: false,
+      },
+    ],
+  });
+
+  const c = cap(sandbox);
+  const code = await provisionCli(['--out', out, '--confirm', '--run', 'tables', ...SCOPE], c.io);
+  assert.equal(code, 0);
+
+  const stdout = c.out();
+  assert.match(stdout, /column drift detected:/);
+  assert.match(stdout, /- Make_Your_Fiscal_Year\.Fiscal_Year_From: is_unique \(plan: false, live: true\)/);
+  assert.match(stdout, /CatalystbyZoho_Update_Column/);
+  assert.match(stdout, /"column_name":\s*"Fiscal_Year_From"/);
+  assert.match(stdout, /"is_unique":\s*false/);
+  assert.match(stdout, /Update_Column MUST include column_name even for a flag-only change/);
+  assert.match(stdout, /Catalyst console → Data Store → Make_Your_Fiscal_Year → Columns → Edit Fiscal_Year_From/);
+
+  // Status is marked 'drift' in state and JSON output
+  const ran = lastJson(stdout);
+  assert.equal(ran.status, 'drift');
+  assert.equal(readState(out).steps.tables.status, 'drift');
+
+  // c2c provision --status displays drift
+  const cStatus = cap(sandbox);
+  await provisionCli(['--out', out, '--status', ...SCOPE], cStatus.io);
+  assert.match(cStatus.out(), /- tables \[cli\] drift/);
+
+  // c2c provision --next gives drift guidance
+  const cNext = cap(sandbox);
+  await provisionCli(['--out', out, '--next', ...SCOPE], cNext.io);
+  const nextJson = lastJson(cNext.out());
+  assert.match(String(nextJson.instructions), /column drift detected on tables/);
+
+  // When drift is fixed in live metadata:
+  sandbox.tables.set('Make_Your_Fiscal_Year', {
+    id: '9001',
+    columns: new Set(['Fiscal_Year_From']),
+    columnDetails: [
+      {
+        column_name: 'Fiscal_Year_From',
+        column_id: '8001',
+        data_type: 'date',
+        is_unique: false,
+        is_mandatory: false,
+      },
+    ],
+  });
+
+  const cFixed = cap(sandbox);
+  const fixedCode = await provisionCli(['--out', out, '--confirm', '--run', 'tables', ...SCOPE], cFixed.io);
+  assert.equal(fixedCode, 0);
+  assert.doesNotMatch(cFixed.out(), /column drift detected:/);
+  assert.equal(readState(out).steps.tables.status, 'existing');
+
   rmSync(out, { recursive: true, force: true });
 });

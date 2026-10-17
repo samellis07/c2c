@@ -134,6 +134,17 @@ lookups as plain bigint ROWID values without a constraint. `c2c plan` warns past
 every foreign key at generation time: ZCQL joins only run across a
 declared key.
 
+### Update column flags requires column_name
+
+Recipe: [TESTED] MCP `CatalystbyZoho_Update_Column` (or the column update API)
+requires `column_name` in the payload even when making a flag-only change
+(such as toggling `is_unique`); omitting `column_name` returns `400 INVALID_INPUT`
+("column_name cannot be null") (live probe 2026-10-17).
+
+Rule: [TESTED] always include the existing `column_name` in any column update payload or
+fix suggestion. Console path fallback: Catalyst console → Data Store →
+`<table>` → Columns → Edit `<column>`.
+
 ## Rows
 
 ### Insert rows in batches of at most 200 per call

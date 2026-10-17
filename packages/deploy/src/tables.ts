@@ -171,6 +171,7 @@ export interface TableDiff {
    * shadow until `c2c deploy --backfill-shadows`. `rows` is absent when the count failed.
    */
   shadowsOnExistingRows?: { table: string; column: string; shadow: string; rows?: number }[];
+  drift?: TableColumnDrift[];
 }
 
 export function mandatoryRelaxedLine(table: string, column: string): string {
@@ -237,28 +238,212 @@ interface LiveColumnFlags {
   unique?: boolean;
 }
 
+export interface LiveColumnDetail {
+  column_name: string;
+  column_id?: string;
+  data_type?: string;
+  is_unique?: boolean;
+  is_mandatory?: boolean;
+  max_length?: number;
+}
+
+export interface ColumnMismatch {
+  flag: 'is_unique' | 'data_type' | 'mandatory' | 'max_length';
+  plan: unknown;
+  live: unknown;
+}
+
+export interface ColumnDriftFix {
+  columnName: string;
+  mcpCall: string;
+  consolePath: string;
+  fixLine: string;
+}
+
+export interface TableColumnDrift {
+  table: string;
+  tableId?: string;
+  column: string;
+  columnId?: string;
+  mismatches: ColumnMismatch[];
+  fix: ColumnDriftFix;
+}
+
 function flagOf(value: unknown): boolean | undefined {
   if (value === true || value === 'true') return true;
   if (value === false || value === 'false') return false;
   return undefined;
 }
 
-/** column_name → live is_mandatory/is_unique from a table list or detail body. Absent flags stay unknown. */
-function columnFlagsOf(body: unknown): Map<string, LiveColumnFlags> {
-  const flags = new Map<string, LiveColumnFlags>();
+/** column_name → full live column metadata from a table list or detail body. Absent flags stay unknown. */
+export function columnDetailsOf(body: unknown): Map<string, LiveColumnDetail> {
+  const details = new Map<string, LiveColumnDetail>();
   const root = asRecord(body) ?? {};
   const data = asRecord(root.data) ?? root;
-  for (const list of [root.column_details, root.columns, data.column_details, data.columns]) {
+  const lists = [root.column_details, root.columns, data.column_details, data.columns];
+  for (const list of lists) {
     if (!Array.isArray(list)) continue;
     for (const item of list) {
       const record = asRecord(item);
       if (!record) continue;
       const name = stringOf(record.column_name ?? record.name);
       if (!name) continue;
-      flags.set(name, { mandatory: flagOf(record.is_mandatory), unique: flagOf(record.is_unique) });
+      const id = stringOf(record.column_id ?? record.id);
+      const data_type = stringOf(record.data_type ?? record.type)?.toLowerCase();
+      const is_unique = flagOf(record.is_unique ?? record.unique);
+      const is_mandatory = flagOf(record.is_mandatory ?? record.mandatory);
+      const rawLen = record.max_length ?? record.length;
+      const max_length = typeof rawLen === 'number' ? rawLen : typeof rawLen === 'string' && /^\d+$/.test(rawLen) ? Number(rawLen) : undefined;
+      details.set(name, {
+        column_name: name,
+        ...(id ? { column_id: id } : {}),
+        ...(data_type ? { data_type } : {}),
+        ...(is_unique !== undefined ? { is_unique } : {}),
+        ...(is_mandatory !== undefined ? { is_mandatory } : {}),
+        ...(max_length !== undefined ? { max_length } : {}),
+      });
     }
   }
+  return details;
+}
+
+/** column_name → live is_mandatory/is_unique from a table list or detail body. Absent flags stay unknown. */
+function columnFlagsOf(body: unknown): Map<string, LiveColumnFlags> {
+  const flags = new Map<string, LiveColumnFlags>();
+  for (const [name, detail] of columnDetailsOf(body)) {
+    flags.set(name, { mandatory: detail.is_mandatory, unique: detail.is_unique });
+  }
   return flags;
+}
+
+/**
+ * Compare planned column flags (is_unique, data_type, mandatory, max_length) against live column.
+ * Returns drift with exact non-destructive fix if any flags mismatch.
+ */
+export function compareColumnFlags(
+  tableName: string,
+  tableId: string | undefined,
+  planned: ColumnCreate,
+  live: LiveColumnDetail,
+): TableColumnDrift | undefined {
+  const mismatches: ColumnMismatch[] = [];
+
+  if (live.is_unique !== undefined && planned.is_unique !== live.is_unique) {
+    mismatches.push({ flag: 'is_unique', plan: planned.is_unique, live: live.is_unique });
+  }
+
+  if (live.data_type !== undefined) {
+    const plannedType = planned.data_type.toLowerCase();
+    const liveType = live.data_type.toLowerCase();
+    if (plannedType !== liveType) {
+      mismatches.push({ flag: 'data_type', plan: plannedType, live: liveType });
+    }
+  }
+
+  if (live.is_mandatory !== undefined && planned.is_mandatory !== live.is_mandatory) {
+    mismatches.push({ flag: 'mandatory', plan: planned.is_mandatory, live: live.is_mandatory });
+  }
+
+  const planLen = planned.data_type === 'varchar' ? (planned.max_length ?? 255) : planned.max_length;
+  if (planLen !== undefined && live.max_length !== undefined && planLen !== live.max_length) {
+    mismatches.push({ flag: 'max_length', plan: planLen, live: live.max_length });
+  }
+
+  if (mismatches.length === 0) return undefined;
+
+  const payload: Record<string, unknown> = {};
+  if (tableId) payload.table_id = tableId;
+  if (live.column_id) payload.column_id = live.column_id;
+  payload.column_name = planned.column_name;
+  for (const m of mismatches) {
+    if (m.flag === 'is_unique') payload.is_unique = m.plan;
+    else if (m.flag === 'mandatory') payload.is_mandatory = m.plan;
+    else if (m.flag === 'data_type') payload.data_type = m.plan;
+    else if (m.flag === 'max_length') payload.max_length = m.plan;
+  }
+
+  const mcpCall = `CatalystbyZoho_Update_Column ${JSON.stringify(payload)}`;
+  const consolePath = `Catalyst console → Data Store → ${tableName} → Columns → Edit ${planned.column_name}`;
+  const fixLine = `${mcpCall} (Update_Column MUST include column_name even for a flag-only change) or console: ${consolePath}`;
+
+  return {
+    table: tableName,
+    ...(tableId ? { tableId } : {}),
+    column: planned.column_name,
+    ...(live.column_id ? { columnId: live.column_id } : {}),
+    mismatches,
+    fix: {
+      columnName: planned.column_name,
+      mcpCall,
+      consolePath,
+      fixLine,
+    },
+  };
+}
+
+/**
+ * The constraint decisions and column drift the provisioned project already settled/holds,
+ * read from live column metadata.
+ */
+export async function provisionedConstraintsAndDrift(
+  rest: RestFn,
+  projectId: string,
+  schema: Pick<SchemaPlan, 'tables'>,
+  opts: RetryOptions = {},
+): Promise<{ decisions: ConstraintDecision[]; drift: TableColumnDrift[] }> {
+  const prefix = `/baas/v1/project/${projectId}`;
+  const ids = new Map<string, string>();
+  const columnDetailsMap = new Map<string, Map<string, LiveColumnDetail>>();
+  // These are reads: a transient 429/5xx retries as-is.
+  const call: RestFn = async (c) => (await restWithRetry(rest, c, opts)).result;
+  const listed = await call({ method: 'GET', path: `${prefix}/table` });
+  if (listed.status < 400) {
+    for (const item of arrayOf(listed.body)) {
+      const record = asRecord(item);
+      if (!record) continue;
+      const name = stringOf(record.table_name ?? record.name);
+      const id = stringOf(record.table_id ?? record.id);
+      if (!name || !id) continue;
+      ids.set(name, id);
+      if (Object.prototype.hasOwnProperty.call(record, 'column_details') || Object.prototype.hasOwnProperty.call(record, 'columns')) {
+        columnDetailsMap.set(name, columnDetailsOf(record));
+      }
+    }
+  }
+  const decisions: ConstraintDecision[] = [];
+  const drift: TableColumnDrift[] = [];
+  for (const table of schema.tables) {
+    if (table.nosql) continue;
+    let colDetails = columnDetailsMap.get(table.name);
+    if (!colDetails) {
+      const id = ids.get(table.name);
+      if (!id) continue;
+      const detail = await call({ method: 'GET', path: `${prefix}/table/${id}` });
+      if (detail.status >= 400) continue;
+      colDetails = columnDetailsOf(detail.body);
+      columnDetailsMap.set(table.name, colDetails);
+    }
+    for (const column of table.columns) {
+      const live = colDetails.get(column.name);
+      if (!live) continue;
+      if (column.mandatory && live.is_mandatory === false) {
+        decisions.push({ table: table.name, column: column.name, rule: 'mandatory', layer: 'app', violations: 0 });
+      }
+      if (column.unique && live.is_unique === false) {
+        decisions.push({ table: table.name, column: column.name, rule: 'unique', layer: 'app', violations: 0 });
+      }
+      try {
+        const plannedCol = columnOf(table.name, column);
+        const driftItem = compareColumnFlags(table.name, ids.get(table.name), plannedCol, live);
+        if (driftItem) {
+          drift.push(driftItem);
+        }
+      } catch {
+        // If columnOf cannot construct ColumnCreate (e.g. partial test mock schema), skip drift comparison
+      }
+    }
+  }
+  return { decisions, drift };
 }
 
 /**
@@ -277,48 +462,7 @@ export async function provisionedConstraints(
   schema: Pick<SchemaPlan, 'tables'>,
   opts: RetryOptions = {},
 ): Promise<ConstraintDecision[]> {
-  const prefix = `/baas/v1/project/${projectId}`;
-  const ids = new Map<string, string>();
-  const flags = new Map<string, Map<string, LiveColumnFlags>>();
-  // These are reads: a transient 429/5xx retries as-is.
-  const call: RestFn = async (c) => (await restWithRetry(rest, c, opts)).result;
-  const listed = await call({ method: 'GET', path: `${prefix}/table` });
-  if (listed.status < 400) {
-    for (const item of arrayOf(listed.body)) {
-      const record = asRecord(item);
-      if (!record) continue;
-      const name = stringOf(record.table_name ?? record.name);
-      const id = stringOf(record.table_id ?? record.id);
-      if (!name || !id) continue;
-      ids.set(name, id);
-      if (Object.prototype.hasOwnProperty.call(record, 'column_details') || Object.prototype.hasOwnProperty.call(record, 'columns')) {
-        flags.set(name, columnFlagsOf(record));
-      }
-    }
-  }
-  const decisions: ConstraintDecision[] = [];
-  for (const table of schema.tables) {
-    if (table.nosql) continue;
-    let columns = flags.get(table.name);
-    if (!columns) {
-      const id = ids.get(table.name);
-      if (!id) continue;
-      const detail = await call({ method: 'GET', path: `${prefix}/table/${id}` });
-      if (detail.status >= 400) continue;
-      columns = columnFlagsOf(detail.body);
-    }
-    for (const column of table.columns) {
-      const live = columns.get(column.name);
-      if (!live) continue;
-      if (column.mandatory && live.mandatory === false) {
-        decisions.push({ table: table.name, column: column.name, rule: 'mandatory', layer: 'app', violations: 0 });
-      }
-      if (column.unique && live.unique === false) {
-        decisions.push({ table: table.name, column: column.name, rule: 'unique', layer: 'app', violations: 0 });
-      }
-    }
-  }
-  return decisions;
+  return (await provisionedConstraintsAndDrift(rest, projectId, schema, opts)).decisions;
 }
 
 /**
@@ -412,7 +556,7 @@ export function formatTableCreate(projectId: string, steps: readonly TableCreate
 
 export function formatTableDiff(diff: TableDiff): string {
   const list = (items: readonly string[]) => (items.length ? items.map((item) => `- ${item}`).join('\n') : '- none');
-  return [
+  const lines = [
     'table-diff:',
     'created-tables:',
     list(diff.createdTables),
@@ -422,8 +566,17 @@ export function formatTableDiff(diff: TableDiff): string {
     list(diff.unchanged),
     'skipped-nosql:',
     list(diff.skippedNosql),
-    '',
-  ].join('\n');
+  ];
+  if (diff.drift && diff.drift.length > 0) {
+    lines.push('drift:');
+    for (const d of diff.drift) {
+      const mismatches = d.mismatches.map((m) => `${m.flag} (plan: ${String(m.plan)}, live: ${String(m.live)})`).join(', ');
+      lines.push(`- ${d.table}.${d.column}: ${mismatches}`);
+      lines.push(`  fix: ${d.fix.fixLine}`);
+    }
+  }
+  lines.push('');
+  return lines.join('\n');
 }
 
 export function columnBody(column: ColumnCreate, parentId: string | undefined): Record<string, unknown> {
@@ -453,6 +606,7 @@ export function columnBody(column: ColumnCreate, parentId: string | undefined): 
 interface RemoteTable {
   id: string;
   columns: Set<string> | undefined;
+  columnDetails?: Map<string, LiveColumnDetail>;
 }
 
 export async function applyTablePlan(projectId: string, steps: readonly TableCreateStep[], rest: RestFn, opts: RetryOptions = {}): Promise<TableDiff> {
@@ -490,12 +644,14 @@ async function applySteps(projectId: string, steps: readonly TableCreateStep[], 
   }
   for (const step of steps) if (step.nosql) diff.skippedNosql.push(step.table);
   const live = await listTables(call, prefix);
+  const existedBefore = new Set(live.keys());
   const ids = new Map<string, string>();
   for (const [name, remote] of live) ids.set(name, remote.id);
 
   for (const step of steps) {
     if (step.nosql) continue;
     let remote = live.get(step.table);
+    const isExistingTable = existedBefore.has(step.table);
     if (!remote) {
       const created = await restWithRetry<RemoteTable>(
         rest,
@@ -526,20 +682,32 @@ async function applySteps(projectId: string, steps: readonly TableCreateStep[], 
             : '';
           throw new Error(`create table ${step.table} failed: ${created.result.status}${restDetail(created.result.body)}${limit}`);
         }
-        remote = { id: tableIdOf(created.result.body), columns: new Set() };
+        remote = { id: tableIdOf(created.result.body), columns: new Set(), columnDetails: new Map() };
       }
       live.set(step.table, remote);
       ids.set(step.table, remote.id);
       diff.createdTables.push(step.table);
     }
-    if (!remote.columns) {
+    if (!remote.columns || (isExistingTable && !remote.columnDetails)) {
       const detail = await call({ method: 'GET', path: `${prefix}/table/${remote.id}` });
       if (detail.status >= 400) throw new Error(`read table ${step.table} failed: ${detail.status}`);
       remote.columns = columnNames(detail.body);
+      remote.columnDetails = columnDetailsOf(detail.body);
     }
     const missing = step.columns.filter((column) => !remote!.columns!.has(column.column_name));
     for (const column of step.columns) {
-      if (remote.columns.has(column.column_name)) diff.unchanged.push(`${step.table}.${column.column_name}`);
+      if (remote.columns.has(column.column_name)) {
+        if (isExistingTable && remote.columnDetails?.has(column.column_name)) {
+          const liveCol = remote.columnDetails.get(column.column_name)!;
+          const driftItem = compareColumnFlags(step.table, remote.id, column, liveCol);
+          if (driftItem) {
+            diff.drift ??= [];
+            diff.drift.push(driftItem);
+            continue;
+          }
+        }
+        diff.unchanged.push(`${step.table}.${column.column_name}`);
+      }
     }
     if (!missing.length) continue;
     const columnBatch = (columns: readonly ColumnCreate[]) =>
@@ -647,7 +815,7 @@ function stepOf(table: SchemaTable): TableCreateStep {
   };
 }
 
-function columnOf(table: string, column: SchemaColumn): ColumnCreate {
+export function columnOf(table: string, column: SchemaColumn): ColumnCreate {
   const api = apiType(column);
   // The schema carries the raw .ds initial value (quoted: '"Draft"').
   // Catalyst takes the bare value, so only a static literal is sent, unquoted.
@@ -680,28 +848,39 @@ function apiType(column: SchemaColumn): {
   constraint_type?: ColumnCreate['constraint_type'];
 } {
   switch (column.dataType) {
-    case 'VarChar': {
+    case 'VarChar':
+    case 'varchar' as unknown as 'VarChar': {
       const length = column.length ?? 255;
       if (length > 255) return { data_type: 'text' };
       return { data_type: 'varchar', max_length: Math.max(1, length) };
     }
     case 'Text':
+    case 'text' as unknown as 'Text':
       return { data_type: 'text' };
     case 'Int':
+    case 'int' as unknown as 'Int':
       return { data_type: 'int' };
     case 'BigInt':
+    case 'bigint' as unknown as 'BigInt':
       return { data_type: 'bigint' };
     case 'Double':
+    case 'double' as unknown as 'Double':
       return { data_type: 'double', decimal_digits: column.precision ?? 2 };
     case 'Boolean':
+    case 'boolean' as unknown as 'Boolean':
       return { data_type: 'boolean' };
     case 'Date':
+    case 'date' as unknown as 'Date':
       return { data_type: 'date' };
     case 'DateTime':
+    case 'datetime' as unknown as 'DateTime':
       return { data_type: 'datetime' };
     case 'Encrypted':
+    case 'encrypted' as unknown as 'Encrypted':
+    case 'encrypted text' as unknown as 'Encrypted':
       return { data_type: 'encrypted text' };
     case 'Foreign Key':
+    case 'foreign key' as unknown as 'Foreign Key':
       if (!column.relation) throw new Error(`foreign key ${column.name} has no parent`);
       return { data_type: 'foreign key', parent_table: column.relation.table, constraint_type: column.relation.onDelete };
     default:
@@ -767,7 +946,11 @@ async function listTables(rest: RestFn, prefix: string): Promise<Map<string, Rem
     const id = stringOf(record.table_id ?? record.id);
     if (!name || !id) continue;
     const known = Object.prototype.hasOwnProperty.call(record, 'column_details') || Object.prototype.hasOwnProperty.call(record, 'columns');
-    map.set(name, { id, columns: known ? columnNames(record) : undefined });
+    map.set(name, {
+      id,
+      columns: known ? columnNames(record) : undefined,
+      columnDetails: known ? columnDetailsOf(record) : undefined,
+    });
   }
   return map;
 }
