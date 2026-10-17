@@ -12,6 +12,8 @@ import { dirname, join, relative, sep } from 'node:path';
 import { listDsFiles, parseFileWithSidecars, widgetManualItems } from '../../core/src/index.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { decode } from '../../core/src/source.js';
+import { CUSTOMER_STEPS } from '../../deploy/src/customer-steps.js';
+import type { FieldGap } from '../../schema/src/index.js';
 import { analyze } from './analyze.js';
 import { precheck, type Severity } from './precheck.js';
 import { ownerScope, type ScopeEntry } from './scope-labels.js';
@@ -20,6 +22,14 @@ export interface ManualStep {
   severity: Severity;
   check: string;
   count: number;
+  workaround?: string;
+}
+
+export interface ConvertedInventory {
+  forms: number;
+  reports: number;
+  pages: number;
+  functions: number;
 }
 
 export interface FixtureMigrationReport {
@@ -28,11 +38,14 @@ export interface FixtureMigrationReport {
   fixture: string;
   app: string | null;
   scope: ScopeEntry[];
+  converted: ConvertedInventory;
   todoCount: number;
   todoKinds: { construct: string; count: number }[];
+  fieldGaps: FieldGap[];
   manualSteps: ManualStep[];
   /** Parts the generated app does not show to end users, with the reason each is hidden. */
   hiddenParts: { location: string; reason: string }[];
+  humanSteps: string[];
 }
 
 export interface InRepoFixture {
@@ -67,12 +80,12 @@ function manualStepsOf(ir: ReturnType<typeof parseFileWithSidecars>['ir'], sourc
     const key = `${finding.severity}\0${finding.check}`;
     const row = rows.get(key);
     if (row) row.count += 1;
-    else rows.set(key, { severity: finding.severity, check: finding.check, count: 1 });
+    else rows.set(key, { severity: finding.severity, check: finding.check, count: 1, workaround: finding.fix });
   }
   for (const widget of widgetManualItems(ir.widgets)) {
     const severity: Severity = widget.status === 'missing' ? 'blocker' : 'warning';
     const check = `widget-package:${widget.name}`;
-    rows.set(`${severity}\0${check}`, { severity, check, count: 1 });
+    rows.set(`${severity}\0${check}`, { severity, check, count: 1, workaround: widget.detail });
   }
   return [...rows.values()].sort((a, b) => (a.severity === b.severity ? compareEnUs(a.check, b.check) : a.severity === 'blocker' ? -1 : 1));
 }
@@ -81,15 +94,24 @@ export function buildFixtureMigrationReport(fixture: InRepoFixture): FixtureMigr
   const ir = parseFileWithSidecars(fixture.file).ir;
   const source = decode(readFileSync(fixture.file)).text;
   const analysis = analyze(ir);
+  const isEmpty = ir.forms.length === 0 && ir.reports.length === 0 && ir.pages.length === 0 && ir.functions.length === 0;
   return {
     schema: 'c2c-fixture-migration-report/1',
     fixture: fixture.id,
     app: ir.name ?? null,
     scope: ownerScope(),
+    converted: {
+      forms: ir.forms.length,
+      reports: ir.reports.length,
+      pages: ir.pages.length,
+      functions: ir.functions.length,
+    },
     todoCount: analysis.determinism.todoCount,
     todoKinds: analysis.determinism.todoKinds.map((kind) => ({ construct: kind.construct, count: kind.count })),
+    fieldGaps: analysis.fieldGaps,
     manualSteps: manualStepsOf(ir, source),
     hiddenParts: analysis.hiddenParts.map((part) => ({ location: part.location, reason: part.reason })),
+    humanSteps: isEmpty ? [] : [...CUSTOMER_STEPS],
   };
 }
 
@@ -97,10 +119,45 @@ export function fixtureMigrationReportAsJson(report: FixtureMigrationReport): st
   return `${JSON.stringify(report, null, 2)}\n`;
 }
 
+function convertedLinesOf(converted: ConvertedInventory): string[] {
+  const items: string[] = [];
+  if (converted.forms > 0) items.push(`- ${converted.forms} form${converted.forms === 1 ? '' : 's'}`);
+  if (converted.reports > 0) items.push(`- ${converted.reports} report${converted.reports === 1 ? '' : 's'}`);
+  if (converted.pages > 0) items.push(`- ${converted.pages} page${converted.pages === 1 ? '' : 's'}`);
+  if (converted.functions > 0) items.push(`- ${converted.functions} function${converted.functions === 1 ? '' : 's'}`);
+  return items.length ? items : ['- none'];
+}
+
+function fieldGapLinesOf(gaps: readonly FieldGap[]): string[] {
+  if (!gaps.length) return ['- none'];
+  return gaps.map((gap) => {
+    const fields = gap.fields.length ? ` (${gap.fields.map((f) => `${f.form}.${f.field}`).join(', ')})` : '';
+    return `- ${gap.matrixId}: ${gap.count}${fields} — ${gap.reason}`;
+  });
+}
+
+function manualStepLinesOf(steps: readonly ManualStep[]): string[] {
+  if (!steps.length) return ['- none'];
+  return steps.map((step) => {
+    const fix = step.workaround ? ` — ${step.workaround}` : '';
+    return `- ${step.count} ${step.severity} ${step.check}${fix}`;
+  });
+}
+
+function humanStepLinesOf(steps: readonly string[]): string[] {
+  if (!steps.length) return ['- none'];
+  return steps.map((step) => `- ${step}`);
+}
+
 export function fixtureMigrationReportAsMarkdown(report: FixtureMigrationReport): string {
+  const scope = report.scope.length ? report.scope.map((item) => `- ${item.feature} — ${item.label}`) : ['- none'];
+  const converted = convertedLinesOf(report.converted);
   const todos = report.todoKinds.length ? report.todoKinds.map((kind) => `- ${kind.count} ${kind.construct}`) : ['- none'];
-  const manual = report.manualSteps.length ? report.manualSteps.map((step) => `- ${step.count} ${step.severity} ${step.check}`) : ['- none'];
+  const gaps = fieldGapLinesOf(report.fieldGaps);
+  const manual = manualStepLinesOf(report.manualSteps);
   const hidden = report.hiddenParts.length ? report.hiddenParts.map((part) => `- ${part.location}: ${part.reason}`) : ['- none'];
+  const human = humanStepLinesOf(report.humanSteps);
+
   return [
     `# Migration report: ${report.fixture}`,
     '',
@@ -108,13 +165,21 @@ export function fixtureMigrationReportAsMarkdown(report: FixtureMigrationReport)
     '',
     '## Scope',
     '',
-    ...report.scope.map((item) => `- ${item.feature} — ${item.label}`),
+    ...scope,
+    '',
+    '## Converted inventory',
+    '',
+    ...converted,
     '',
     '## TODO counts',
     '',
     String(report.todoCount),
     '',
     ...todos,
+    '',
+    '## Field gaps',
+    '',
+    ...gaps,
     '',
     '## Manual steps',
     '',
@@ -125,6 +190,10 @@ export function fixtureMigrationReportAsMarkdown(report: FixtureMigrationReport)
     String(report.hiddenParts.length),
     '',
     ...hidden,
+    '',
+    '## Human steps',
+    '',
+    ...human,
     '',
   ].join('\n');
 }
