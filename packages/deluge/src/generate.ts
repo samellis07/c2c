@@ -154,8 +154,8 @@ interface SubmitFixup {
 /**
  * True when no post the generated UI makes reaches the `/submit` body of a
  * submit-kind `event`: every scope the event covers (`on add`, `on edit`, or
- * both) is owned by a success route. An edit post falls back to the add
- * endpoint when no edit-scoped success exists, so an add-owned form owns edits too.
+ * both) is owned by a success route. With no edit-scoped success an edit post
+ * goes to the plain `/submit`, so only an edit-scoped success owns edits.
  */
 function submitBodyUnposted(owned: SubmitOwnership | undefined, event: string): boolean {
   if (!owned) return false;
@@ -163,7 +163,7 @@ function submitBodyUnposted(owned: SubmitOwnership | undefined, event: string): 
   const add = /\badd\b|\bcreate\b/.test(e);
   const edit = /\bedit\b|\bupdate\b/.test(e);
   const addOwned = owned.add;
-  const editOwned = owned.edit || owned.add;
+  const editOwned = owned.edit;
   if (add && !edit) return addOwned;
   if (edit && !add) return editOwned;
   return addOwned && editOwned;

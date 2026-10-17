@@ -1158,7 +1158,7 @@ function submitScopeApp(successes: { name: string; recordEvent?: string; client:
 }
 
 for (const [label, successes, expected] of [
-  ['an add-only success with a client part owns add and, by fallback, edit posts', [{ name: 'Succ', recordEvent: 'on add', client: true }], { AddBody: false, EditBody: false, BothBody: false }],
+  ['an add-only success with a client part owns add; edits post to the plain submit', [{ name: 'Succ', recordEvent: 'on add', client: true }], { AddBody: false, EditBody: true, BothBody: true }],
   ['an edit-only success with a client part owns only edit posts', [{ name: 'Succ', recordEvent: 'on edit', client: true }], { AddBody: true, EditBody: false, BothBody: true }],
   ['add- and edit-scoped successes own every submit post', [{ name: 'SuccA', recordEvent: 'on add', client: true }, { name: 'SuccE', recordEvent: 'on edit', client: true }], { AddBody: false, EditBody: false, BothBody: false }],
   ['a server-only success registers no client handler and owns nothing', [{ name: 'Succ', client: false }], { AddBody: true, EditBody: true, BothBody: true }],
