@@ -33,7 +33,8 @@ export { redactString };
 import { catalystBaseFor, dcEndpoints } from './dc.js';
 import { catalystScopeArgs, scrubCatalystEnv } from './scope.js';
 import { isExactGrantList, isPerRowGrantMatch, PLAN_CLI_PATH, PLAN_EMITTED_CLI_PATHS, PLAN_STEP_TOOL, PLAN_STEP_TOOLS, STEP_KINDS, sha256, type ProvisionStep, type StepEndpoint } from './offline-plan.js';
-import { readConnectionSecretKeys, writeOrUpdateFunctionEnv } from './function-env.js';
+import { functionIdFromList, readConnectionSecretKeys, writeOrUpdateFunctionEnv } from './function-env.js';
+import { JOB_FUNCTION } from './function-dir.js';
 import { applyTablePlan, type RestCall, type RestFn, type RestResult, type TableCreateStep } from './tables.js';
 import { applyImportExistingSecurity, ImportExistingPendingError, type ImportExistingEvidence, type ImportExistingSecuritySpec } from './security.js';
 import { restWithRetry, spawnWithRetry, type ReRead, type RestRetry, type RetryOptions } from './retry.js';
@@ -1011,6 +1012,11 @@ function resolveToken(name: string, arg: string | undefined, ctx: Ctx, missing: 
     }
     case 'id':
       return (arg && ownDecimalId(ctx.state.learned.byName, arg)) || miss(`<id:${arg}>`);
+    case 'function-id': {
+      // Only a deployed function read back from the project's function list.
+      const functions = ctx.state.learned.byKind?.function;
+      return (arg && functions && ownDecimalId(functions, arg)) || miss(`<function-id:${arg}>`);
+    }
     default:
       return miss(`<${name}${arg ? `:${arg}` : ''}>`);
   }
@@ -1662,14 +1668,39 @@ async function executeCliStep(ctx: Ctx, step: ProvisionStep, args: Record<string
       }
     };
     collect(listed.body);
+    // One key everywhere: the listing's cron_name, the spec's cron_name (and
+    // its body's), and the read-back match. `name` is display text only.
+    const keyOf = (cron: (typeof crons)[number]): string =>
+      (typeof cron.cron_name === 'string' && cron.cron_name) ||
+      (typeof cron.body?.cron_name === 'string' && cron.body.cron_name) ||
+      String(cron.name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    const pending = crons.filter((cron) => !existing.has(keyOf(cron)));
+    // A cron targets a deployed function by id. Read the project's function
+    // list once, before any cron POST: a target that is not deployed refuses
+    // the step, so no cron is ever created against a missing function.
+    const targets = new Set<string>();
+    for (const cron of pending) {
+      for (const match of JSON.stringify(cron.body ?? {}).matchAll(/<function-id:([^>]+)>/g)) targets.add(match[1]!);
+    }
+    if (targets.size) {
+      const listPath = materialiseCliPath(PLAN_CLI_PATH.function, projectId);
+      const functions = (await rest({ method: 'GET', path: listPath })).result;
+      if (functions.status < 200 || functions.status >= 300) throw new Error(`GET ${listPath}: ${functions.status} — the cron target cannot be read back; no cron was posted`);
+      const learned = ((ctx.state.learned.byKind ??= {}).function ??= Object.create(null) as Record<string, string>);
+      for (const name of [...targets].sort()) {
+        const id = functionIdFromList(functions.body, name);
+        if (!id) {
+          const deploy = name === JOB_FUNCTION ? `c2c deploy --confirm (it deploys ${JOB_FUNCTION} for an app with schedules)` : `a deploy of ${name}`;
+          throw new Error(
+            `cron target ${name} is not deployed in project ${projectId}; no cron was posted. Next step: run ${deploy}, then re-run c2c provision --out ${ctx.out} --run crons --confirm`,
+          );
+        }
+        rememberName(learned, name, id);
+      }
+    }
     const created: string[] = [];
-    for (const cron of crons) {
-      // One key everywhere: the listing's cron_name, the spec's cron_name (and
-      // its body's), and the read-back match. `name` is display text only.
-      const cronKey =
-        (typeof cron.cron_name === 'string' && cron.cron_name) ||
-        (typeof cron.body?.cron_name === 'string' && cron.body.cron_name) ||
-        String(cron.name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    for (const cron of pending) {
+      const cronKey = keyOf(cron);
       if (existing.has(cronKey)) continue;
       if (cron.unsupported || !cron.body) throw new Error(`cron ${cronKey}: ${cron.unsupported ?? 'no body in provision/crons.json'}`);
       const missing: string[] = [];

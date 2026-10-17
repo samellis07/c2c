@@ -32,11 +32,11 @@ import { readSourceCsv, readSourceJson } from './csv.js';
 import { readSourceBackup } from './backup.js';
 import { destructiveRefusal, formatDelta, renameFlags, reviewSchemaChange, writeDeltaTree } from './delta.js';
 import { rollbackBackupProblem } from './rollback.js';
-import { API_FUNCTION, FUNCTION_DIR, columnTypes, functionDir } from './function-dir.js';
-import { importTableGrants, importTemplateJson } from './iac.js';
+import { API_FUNCTION, FUNCTION_DIR, JOB_FUNCTION, JOB_FUNCTION_DIR, columnTypes, functionDir, jobFunctionDir } from './function-dir.js';
+import { API_TEMPLATE_FUNCTION, importTableGrants, importTemplateJson, JOB_TEMPLATE_FUNCTION } from './iac.js';
 import { zipStore } from './iac-import.js';
 import { mailConfig } from './mail.js';
-import { deployCommands, functionSources } from './plan.js';
+import { deployCommands, functionSources, jobScheduling } from './plan.js';
 import { planCustomerSteps } from './customer-steps.js';
 import { readDeployConfig } from './provision-config.js';
 import { FIRST_USE_GATES, type FirstUseGate } from './first-use.js';
@@ -96,8 +96,9 @@ export const PLAN_STEP_TOOLS: readonly string[] = Object.values(PLAN_STEP_TOOL);
 /**
  * REST path templates c2c fills with a project id.
  * A plan step may name only the templates `c2c plan` writes (`PLAN_EMITTED_CLI_PATHS`).
- * `projectUser` and `cron` are runner templates: provision lists and creates those
- * resources itself. A plan call never names them.
+ * `projectUser`, `cron` and `function` are runner templates: provision lists and
+ * creates those resources itself (the crons step reads the function list for
+ * the c2c_jobs target id). A plan call never names them.
  */
 export const PLAN_CLI_PATH = {
   authHosted: '/baas/v1/project/<project>/authentication/enable?auth_type=hosted',
@@ -106,6 +107,7 @@ export const PLAN_CLI_PATH = {
   connections: '/baas/v1/project/<project>/connections',
   projectUser: '/baas/v1/project/<project>/project-user',
   cron: '/baas/v1/project/<project>/job_scheduling/cron',
+  function: '/baas/v1/project/<project>/function',
   environment: '/baas/v1/project/<project>/environment',
   // First-use gate probes (first-use.ts): documented reads c2c runs itself.
   gateCloudscale: FIRST_USE_GATES.cloudscale.probe,
@@ -1643,10 +1645,13 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
     // The single-import bundle: the full template plus the c2c_api code zip.
     // `provision --run import` packs both into the `code` multipart part — the
     // outer zip is built at run time from these files, so they stay reviewable.
+    // An app with schedules imports c2c_jobs beside c2c_api, so its crons have a target.
+    const scheduling = jobScheduling(ui.files);
     files.push({
       path: 'provision/iac/project-template-1.0.0.json',
       data: importTemplateJson({
         plan: schema,
+        functions: scheduling === undefined ? [API_TEMPLATE_FUNCTION] : [API_TEMPLATE_FUNCTION, JOB_TEMPLATE_FUNCTION],
         roles: auth.roles,
         tablePermissions: auth.tablePermissions,
         // The import creates the seed file-column bucket: an app with no
@@ -1669,6 +1674,16 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
         fnFiles.filter((file) => file.path.startsWith(prefix)).map((file) => ({ name: file.path.slice(prefix.length), data: file.data })),
       ),
     });
+    if (scheduling !== undefined) {
+      const jobPrefix = `${JOB_FUNCTION_DIR}/`;
+      files.push({
+        path: `provision/iac/functions/${JOB_FUNCTION}.zip`,
+        data: '',
+        bytes: zipStore(
+          jobFunctionDir(fnFiles, scheduling, { mode: 'dry-run' }).map((file) => ({ name: file.path.slice(jobPrefix.length), data: file.data })),
+        ),
+      });
+    }
   }
   if (schedules.length > 0) {
     const pool = jobPoolName(link);
@@ -1689,7 +1704,8 @@ export function buildOfflinePlan(app: App, opts: { dc: string; dcSource: DcSourc
           cron_status: false,
           cron_details: { time_of_execution: start || '<fill>' },
           jobpool_id: `<id:${pool}>`,
-          job_details: { job_name: jobName },
+          // The c2c_jobs id exists only after its deploy; the crons step reads it back.
+          job_details: { job_name: jobName, target_type: 'Function', target_id: `<function-id:${JOB_FUNCTION}>` },
         },
       };
     });

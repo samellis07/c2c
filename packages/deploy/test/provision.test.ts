@@ -41,6 +41,10 @@ interface Sandbox {
   pools: { jobpool_id: string; name: string }[];
   buckets: { bucket_name: string }[];
   crons: { cron_name: string }[];
+  /** Every cron POST body, as sent. */
+  cronBodies: unknown[];
+  /** The project function list (deployed functions). */
+  functions: { id: string; name: string }[];
 }
 
 function emptySandbox(): Sandbox {
@@ -58,6 +62,8 @@ function emptySandbox(): Sandbox {
     pools: [],
     buckets: [],
     crons: [],
+    cronBodies: [],
+    functions: [],
   };
 }
 
@@ -173,9 +179,11 @@ function sandboxRest(sandbox: Sandbox): { rest: (call: RestCall) => Promise<Rest
       return { status: 200, body: { data: { user_id: '7001' } } };
     }
     if (call.method === 'GET' && path === '/connections') return { status: 200, body: { data: { connections: [] } } };
+    if (call.method === 'GET' && path === '/function') return { status: 200, body: { status: 'success', data: [...sandbox.functions] } };
     if (call.method === 'GET' && path === '/job_scheduling/cron') return { status: 200, body: { data: [...sandbox.crons] } };
     if (call.method === 'POST' && path === '/job_scheduling/cron') {
       const body = call.body as { cron_name?: string };
+      sandbox.cronBodies.push(call.body);
       sandbox.crons.push({ cron_name: String(body.cron_name) });
       return { status: 200, body: { data: { cron_name: body.cron_name } } };
     }
@@ -816,6 +824,57 @@ test('crons: a spaced display name is keyed by cron_name — a rerun posts zero 
   assert.equal(sandbox.crons.length, 1, 'no duplicate cron');
   rmSync(out, { recursive: true, force: true });
   rmSync(out2, { recursive: true, force: true });
+});
+
+/** writeCronPlan with the generated body: the cron names c2c_jobs by its deployed id. */
+function writeTargetedCronPlan(out: string): void {
+  writeCronPlan(out);
+  const path = join(out, 'provision', 'crons.json');
+  const crons = JSON.parse(readFileSync(path, 'utf8')) as { body: Record<string, unknown> }[];
+  crons[0]!.body.job_details = { job_name: 'job/daily-report', target_type: 'Function', target_id: '<function-id:c2c_jobs>' };
+  writeFileSync(path, `${JSON.stringify(crons, null, 2)}\n`);
+}
+
+test('crons: the c2c_jobs id is read back from the function list and sent as the target_id', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-cron-target-'));
+  writeTargetedCronPlan(out);
+  const sandbox = emptySandbox();
+  sandbox.functions.push({ id: '6001', name: 'c2c_api' }, { id: '6002', name: 'c2c_jobs' });
+  const c = cap(sandbox);
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'crons', ...SCOPE], c.io), 0, c.err());
+  assert.deepEqual(sandbox.cronBodies.map((body) => (body as { job_details: unknown }).job_details), [
+    { job_name: 'job/daily-report', target_type: 'Function', target_id: '6002' },
+  ]);
+  // The read-back id is recorded under its own kind, never the flat name map.
+  assert.equal(readState(out).learned.byKind?.function?.c2c_jobs, '6002');
+  assert.equal(readState(out).learned.byName.c2c_jobs, undefined);
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('crons: a missing c2c_jobs refuses the step with the deploy next step and posts no cron', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-cron-notarget-'));
+  writeTargetedCronPlan(out);
+  const sandbox = emptySandbox();
+  // c2c_api is deployed; c2c_jobs is not.
+  sandbox.functions.push({ id: '6001', name: 'c2c_api' });
+  const c = cap(sandbox);
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'crons', ...SCOPE], c.io), 1);
+  assert.match(c.err(), /cron target c2c_jobs is not deployed in project [0-9]+; no cron was posted/);
+  assert.match(c.err(), /Next step: run c2c deploy --confirm \(it deploys c2c_jobs for an app with schedules\), then re-run c2c provision --out .* --run crons --confirm/);
+  assert.equal(c.restCalls.filter((call) => call.startsWith('POST')).length, 0, 'never POST a cron at a missing target');
+  assert.deepEqual(sandbox.crons, []);
+  assert.notEqual(readState(out).steps.crons?.status, 'done');
+  rmSync(out, { recursive: true, force: true });
+});
+
+test('crons: a spec with no function-id token never reads the function list', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-prov-cron-notoken-'));
+  writeCronPlan(out);
+  const sandbox = emptySandbox();
+  const c = cap(sandbox);
+  assert.equal(await provisionCli(['--out', out, '--confirm', '--run', 'crons', ...SCOPE], c.io), 0, c.err());
+  assert.equal(c.restCalls.some((call) => /\/function$/.test(call)), false);
+  rmSync(out, { recursive: true, force: true });
 });
 
 test('tables: a crons-shaped spec is refused by name, not a TypeError, and writes nothing', async () => {

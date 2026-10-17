@@ -24,13 +24,13 @@ import { APP_URL_LINE, applyAuthProvision, formatAuthProvision, projectUsers, ro
 import { slateHost } from '../../auth/src/slate-host.js';
 import { authPlan } from '../../auth/src/plan.js';
 import { canonicalUserIdentity } from '../../schema/src/identity.js';
-import { API_FUNCTION, FUNCTION_DIR, appOrigins, envVariables, secretEnvValues } from './function-dir.js';
+import { API_FUNCTION, FUNCTION_DIR, JOB_FUNCTION, appOrigins, envVariables, secretEnvValues } from './function-dir.js';
 import { AUTH_FUNCTION, slateOriginOf } from './auth-bridge.js';
 import { buildDeploy, commandLine, deployFiles, migrateCatalystJson, writeDeployTree, type DeployCommand, type DeployFile, type DeployUi } from './plan.js';
 import { asyncLaneBlocker } from './events.js';
 import { mailSenderEvidenceFor, mailSenderEvidenceVerified, observeMailSenders, readMailSenderEvidence } from './mail.js';
 import { humanChecklist } from './human-steps.js';
-import { applyFunctionEnvSecrets, readConnectionSecretKeys } from './function-env.js';
+import { applyFunctionEnvSecrets, functionIdFromList, readConnectionSecretKeys } from './function-env.js';
 import { CONSOLE_SERVICES, formatPostDeploySteps, postDeploySteps, servicesTouched, type ConsoleService, type PostDeployStep } from './post-deploy.js';
 import { appTimeZone, authBridgeUrl, generateUi, slateConfigSource } from '../../ui/src/generate.js';
 import { emptyRegistry, type ProjectRegistry } from './registry.js';
@@ -543,6 +543,8 @@ export interface DeployState {
   digest: string;
   done: string[];
   apiBase?: string;
+  /** The c2c_jobs function id read back after its deploy: the target every cron of the app names. */
+  jobsFunctionId?: string;
   /** Slate app URL captured from slate:link/deploy output ("App Url:"), for the CORS authorised domain. */
   slateUrl?: string;
   /** Auth provisioning op ids applied or verified by an earlier run (resume skips them). */
@@ -1418,6 +1420,20 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
           io.stderr(`next step: set the secret variables on ${API_FUNCTION} (Catalyst console env vars or the MCP env tools), then re-run deploy --confirm --resume --out ${cwd}\n`);
           return await finish(1);
         }
+      }
+      // The crons target c2c_jobs by id, which exists only once it is deployed:
+      // read it back now, so a deploy that did not land it stops here.
+      if (command.id === 'functions-jobs') {
+        const listPath = `/baas/v1/project/${guard.projectId}/function`;
+        const { result: listed } = await restWithRetry(restFn, { method: 'GET', path: listPath }, retry);
+        const id = listed.status >= 200 && listed.status < 300 ? functionIdFromList(listed.body, JOB_FUNCTION) : undefined;
+        if (!id) {
+          io.stderr(`c2c: ${JOB_FUNCTION} is not in the project function list after its deploy (GET ${listPath}: ${listed.status})\n`);
+          io.stderr(`next step: check the ${JOB_FUNCTION} deploy output above, then re-run deploy --confirm --resume --out ${cwd}; crons are provisioned only once ${JOB_FUNCTION} is deployed\n`);
+          return await finish(1);
+        }
+        state.jobsFunctionId = id;
+        io.stdout(`${JOB_FUNCTION}: function id ${id} (the cron target)\n`);
       }
       if (command.id === 'ui-build') {
         recordWebDistBuild(join(cwd, 'web'));

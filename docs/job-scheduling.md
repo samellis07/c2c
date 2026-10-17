@@ -69,7 +69,17 @@ lists it as a function target. An app without schedules gets neither, and its tr
   HTTP handlers, routes and the principal resolver stay out.
 - `job-scheduling.json`: the pool, crons and sweeper the generator wrote.
 
-`c2c deploy` runs `npm install` in `functions/c2c_jobs` and deploys it right after `c2c_api`.
+`c2c deploy` runs `npm install` in `functions/c2c_jobs` and deploys it right after `c2c_api`, then reads
+the project function list back and records the `c2c_jobs` id (`jobsFunctionId` in the deploy state). A
+deploy whose `c2c_jobs` is not in that list stops there with the resume command.
+
+A new-project plan imports `c2c_jobs` too: the import template lists it as a `job` function and
+`provision/iac/functions/c2c_jobs.zip` holds the same tree. An app without schedules imports `c2c_api` only.
+
+The `crons` provision step names its target by id (`target_id: <function-id:c2c_jobs>` in
+`provision/crons.json`). Before any cron POST it reads the project function list; when `c2c_jobs` is
+not deployed it posts nothing and names the next step: run `c2c deploy --confirm`, then re-run
+`c2c provision --run crons --confirm`.
 
 ## Not yet generated
 
