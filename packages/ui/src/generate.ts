@@ -2528,7 +2528,11 @@ ${discardDeferred}      if (err && err.code === "SUBMIT_REFUSED") {
   // (the same read an edit and a delete are scoped to) before the validate
   // scripts run, fills the fields the request did not post and sets ctx.old.
   // Filled values the scripts leave unchanged are not written back.
-  const editsLoad = validate.edit.length > 0;
+  // The scoped read is also the edit's row gate: it answers 403 before ANY
+  // pre-write edit hook (stage check, presuccess, on-edit validate, flow
+  // begin) can run its body, so it is emitted whenever one of them is.
+  const editsLoad =
+    validate.edit.length > 0 || presuccess.edit.length > 0 || stage.modules.length > 0 || flowModules.length > 0;
   const editLoad = editsLoad
     ? `    let loaded = null;
     if (ctx.rowId) {
@@ -2713,7 +2717,7 @@ ${hasPresuccess ? '  // The catch scope drops buffered presuccess effects, so th
       appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined,
       rowId: requestRowId(req),
     });
-${stageCheck}${editLoad}    // API and import inserts never saw the Slate prefill. Absent
+${editLoad}${stageCheck}    // API and import inserts never saw the Slate prefill. Absent
     // fields fall back to their Creator initial values on insert only.
     if (!ctx.rowId && ctx.writeOp !== "update") applyInitialValues(ctx.record, fields);
 ${presuccessRun}${validateRun}${editUnload}${flowBegin}    await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
