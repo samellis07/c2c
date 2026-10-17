@@ -2618,6 +2618,39 @@ test('a record-summary frame generates a link to the authorized record route', (
   assert.match(compiled.file?.source ?? '', /shim\.datastore\.query/);
 });
 
+test('record-summary iframe accepts a literal zohocreator host prefix and a bound row id', () => {
+  const template = `<%\n  rowid = Orders[Status == "Open"].ID;\n%>\n<iframe src="https://app.zohocreator.in<%=zoho.appuri%>record-summary/Orders/<%=rowid%>"></iframe>`;
+  const rewritten = rewriteRecordSummaryFrames(template);
+  assert.match(rewritten, /#\/record\/Orders\/<%=Orders\[Status == "Open"\]\.ID%>/, 'a variable bound once to the form read resolves to that read');
+  const member = `<%\n  rec = Orders[Status == "Open"];\n%>\n<iframe src="https://app.zohocreator.in<%=zoho.appuri%>record-summary/Orders/<%=rec.ID%>"></iframe>`;
+  assert.match(rewriteRecordSummaryFrames(member), /#\/record\/Orders\/<%=Orders\[Status == "Open"\]\.ID%>/, 'a variable bound once to the record resolves its .ID to the read');
+  const foreign = `<iframe src="https://evil.example.com<%=zoho.appuri%>record-summary/Orders/<%=input.id%>"></iframe>`;
+  assert.equal(rewriteRecordSummaryFrames(foreign), foreign, 'a non-Creator host prefix stays counted');
+  const reassigned = `<%\n  rowid = Orders[Status == "Open"].ID;\n  rowid = Orders[Status == "Closed"].ID;\n%>\n<iframe src="<%=zoho.appuri%>record-summary/Orders/<%=rowid%>"></iframe>`;
+  assert.equal(rewriteRecordSummaryFrames(reassigned), reassigned, 'a twice-assigned variable stays counted');
+  const notRead = `<%\n  rowid = zoho.loginuserid;\n%>\n<iframe src="<%=zoho.appuri%>record-summary/Orders/<%=rowid%>"></iframe>`;
+  assert.equal(rewriteRecordSummaryFrames(notRead), notRead, 'a variable bound to a non-read stays counted');
+  const wrongFormVar = `<%\n  rowid = Other[ID > 0].ID;\n%>\n<iframe src="<%=zoho.appuri%>record-summary/Case/<%=rowid%>"></iframe>`;
+  assert.equal(rewriteRecordSummaryFrames(wrongFormVar), wrongFormVar, 'a variable bound to another form stays counted');
+  const islandSuffix = `<%\n  rowid = Orders[Status == "Open"].ID;\n%>\n<iframe src="<%=zoho.appuri%>record-summary/Orders/<%=rowid%>?x=1"></iframe>`;
+  assert.equal(rewriteRecordSummaryFrames(islandSuffix), islandSuffix, 'a query after the id island stays counted');
+});
+
+test('a view-embed iframe of an own page becomes an inline include like page-embed', () => {
+  const body = '<iframe src="<%=zoho.appuri%>view-embed/Timer"></iframe>';
+  const app = appOf(`${ORDERS}\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t}\n\t\tpage Timer\n\t\t{\n\t\t}\n\t}`);
+  const compiled = compileHtmlpage(app, 'Home', 'hp1', `htmlpage hp1()\ncontent\n${body}`);
+  assert.equal(compiled.ok, true, compiled.reason);
+  assert.deepEqual(compiled.includes, ['Timer']);
+  assert.match(compiled.html ?? '', /data-zml="page-include:Timer"/);
+  const withParams = '<iframe src="<%=zoho.appuri%>view-embed/Timer?userType=rep"></iframe>';
+  const refused = compileHtmlpage(app, 'Home', 'hp1', `htmlpage hp1()\ncontent\n${withParams}`);
+  assert.equal(refused.ok, false, 'a view-embed with view parameters stays counted');
+  const reportName = '<iframe src="<%=zoho.appuri%>view-embed/Orders"></iframe>';
+  const refusedReport = compileHtmlpage(app, 'Home', 'hp1', `htmlpage hp1()\ncontent\n${reportName}`);
+  assert.equal(refusedReport.ok, false, 'a view-embed that names no own page stays counted');
+});
+
 test('one page with carried <style> CSS, a <script>, an ExecuteFunction button and a ZML image counts only lost constructs', () => {
   const snippet = [
     '<style>.highlight { color: red; }</style>',
@@ -2850,6 +2883,44 @@ test('shape C negative: guards that merely mention a user identity are refused',
   ];
   for (const guard of guards) {
     const snippet = `htmlpage hp1()\ncontent\n<p><%\nif (${guard}) {\n  insert into Accounts [ Email = zoho.loginuserid Role = "Admin" ];\n}\n%>Done</p>`;
+    const { model } = buildUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+    assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], guard);
+    assert.equal(uiSnippetFiles(model).length, 0, guard);
+  }
+});
+
+test('shape C: a write guarded by an identity-scoped record variable compiles', () => {
+  const snippet = `htmlpage hp1()
+content
+<p>
+<%
+adminRec = Accounts[Email == zoho.adminuserid];
+if (adminRec.count() <= 0) {
+  insert into Accounts [
+    Email = zoho.loginuserid
+    Role = "Admin"
+  ];
+}
+%>
+Ready
+</p>`;
+  const { model } = buildUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+  assert.deepEqual(model.todos, []);
+  assert.equal(uiSnippetFiles(model).length, 1);
+  const loginScoped = `htmlpage hp1()\ncontent\n<p><%\nrec = Accounts[Email == zoho.loginuserid];\nif (rec == null) {\n  insert into Accounts [ Email = zoho.loginuserid Role = "User" ];\n}\n%>Done</p>`;
+  const second = buildUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(loginScoped)}`));
+  assert.deepEqual(second.model.todos, []);
+});
+
+test('shape C negative: a guard variable not bound to an identity-scoped read stays refused', () => {
+  const guards = [
+    'rec = Accounts[Email == input.user];\nif (rec.count() <= 0) {',
+    'rec = Accounts[ID > 0];\nif (rec.count() <= 0) {',
+    'rec = Accounts[Email == zoho.adminuserid];\nrec = Accounts[ID > 0];\nif (rec.count() <= 0) {',
+    'other = Accounts[Email == zoho.adminuserid];\nif (rec.count() <= 0) {',
+  ];
+  for (const guard of guards) {
+    const snippet = `htmlpage hp1()\ncontent\n<p><%\n${guard}\n  insert into Accounts [ Email = zoho.loginuserid Role = "Admin" ];\n}\n%>Done</p>`;
     const { model } = buildUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
     assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], guard);
     assert.equal(uiSnippetFiles(model).length, 0, guard);

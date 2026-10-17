@@ -453,7 +453,8 @@ const IFRAME_OPEN = new RegExp(`^<iframe(?:${IFRAME_ATTR})*?[${TAG_WS}]+src[${TA
 const APPURI_ISLAND = /<%=[ \t]*zoho[ \t]*\.[ \t]*appuri[ \t]*%>/gi;
 
 /**
- * A literal `<iframe src="<%=zoho.appuri%>page-embed/<Page>">` of another page
+ * A literal `<iframe src="<%=zoho.appuri%>page-embed/<Page>">` (or the older
+ * `view-embed/<Page>` spelling) of another page
  * of this app becomes an inline include of that page's generated view. Creator
  * draws the named page inside the frame [UNVERIFIED]; `zc_*` query keys are
  * Creator display flags (header, footer) [UNVERIFIED] with no view effect
@@ -477,7 +478,7 @@ function inlinePageEmbeds(template: string, app: App, page: string): { template:
     const quote = open[1];
     const rest = template.slice(m.index + m[0].length);
     const tail = new RegExp(
-      `^page-embed/([A-Za-z_]\\w*)(?:\\?([^"'<>%${TAG_WS}]*))?${quote}(?:${IFRAME_ATTR})*[${TAG_WS}]*>[${TAG_WS}]*</iframe[${TAG_WS}]*>`,
+      `^(?:page-embed|view-embed)/([A-Za-z_]\\w*)(?:\\?([^"'<>%${TAG_WS}]*))?${quote}(?:${IFRAME_ATTR})*[${TAG_WS}]*>[${TAG_WS}]*</iframe[${TAG_WS}]*>`,
       'i',
     ).exec(rest);
     if (!tail) continue;
@@ -1679,7 +1680,9 @@ export function rewriteRecordSummaryFrames(template: string, app?: App): string 
   return replaceIframeElements(String(template ?? ''), (whole, attrs, inner) => {
     const src = /\bsrc\s*=\s*(["'])([\s\S]*?)\1/i.exec(attrs);
     if (!src) return whole;
-    const match = /^<%=\s*zoho\.appuri\s*%>record-summary\/([A-Za-z_]\w*)\/<%=([\s\S]+?)%>$/i.exec(src[2]);
+    // Exports sometimes spell out the app host before the appuri island; the
+    // island already carries it, so a literal zohocreator prefix is redundant.
+    const match = /^(?:https?:\/\/[A-Za-z0-9.-]*\.zohocreator\.[A-Za-z.]+)?<%=\s*zoho\.appuri\s*%>record-summary\/([A-Za-z_]\w*)\/<%=([\s\S]+?)%>$/i.exec(src[2]);
     if (!match) return whole;
     const target = match[1];
     const report = app?.reports.find((item) => item.name === target);
@@ -1689,7 +1692,26 @@ export function rewriteRecordSummaryFrames(template: string, app?: App): string 
       const criteria = reportCriteria(report.criteria?.trim() || 'true');
       if (criteriaHasTodo(criteria) || criteriaHasRelative(criteria)) return whole;
     }
-    const idExpr = match[2].trim();
+    let idExpr = match[2].trim();
+    // An id island often names a local the same script filled with the row
+    // read (`rowid = Form[criteria].ID` or `rec = Form[criteria]` used as
+    // `rec.ID`). Substitute the bound read when the variable is assigned
+    // exactly once; any other binding or count leaves the frame counted.
+    {
+      const member = /^([A-Za-z_]\w*)\s*\.\s*ID$/.exec(idExpr);
+      const ident = member ? member[1] : /^[A-Za-z_]\w*$/.test(idExpr) ? idExpr : undefined;
+      if (ident) {
+        const assigns = [...template.matchAll(new RegExp(`\\b${ident}\\s*=(?![=>])`, 'g'))];
+        if (assigns.length === 1) {
+          const rhs = /^\s*([^\n;]+)/.exec(template.slice(assigns[0]!.index + assigns[0]![0].length))?.[1]?.trim() ?? '';
+          const formRead = /^([A-Za-z_]\w*)\s*\[[^\[\]]+\](\s*\.\s*ID)?$/i.exec(rhs);
+          if (formRead && !/<%|%>/.test(rhs)) {
+            if (member && !formRead[2]) idExpr = `${rhs.trim()}.ID`;
+            else if (!member && formRead[2]) idExpr = rhs;
+          }
+        }
+      }
+    }
     const read = new RegExp(`^${form}\\s*\\[[^\\[\\]]+\\]\\s*\\.\\s*ID$`, 'i').test(idExpr);
     const param = /^input\.[A-Za-z_]\w*$/.test(idExpr);
     if (!read && !param) return whole;
