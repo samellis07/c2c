@@ -1094,7 +1094,7 @@ function materialize(
           writeComposite(hit.field, cell, spec, columns, rawCells, idInputs);
           return;
         }
-        writeColumn(header, cell, hit, plan.sheet.file, columns, rawCells, idInputs, authColumns);
+        writeColumn(header, cell, hit, plan.sheet.file, rowIndex, columns, rawCells, idInputs, authColumns);
       });
       const names = idPlan.from === 'values' ? Object.keys(idInputs).sort() : idPlan.names;
       const id = plan.hasId ? explicit : sourceHash(names, idInputs);
@@ -1148,7 +1148,7 @@ function materialize(
               accTable.written.add(sub.name);
               if (col) {
                 const prior = childColumns[col.column];
-                writeColumn(list.header, value, { kind: 'column', column: col, displayTrue: fieldProp(sub, 'displaytrue'), displayFalse: fieldProp(sub, 'displayfalse') }, plan.sheet.file, childColumns, childRaw, {}, childAuth);
+                writeColumn(list.header, value, { kind: 'column', column: col, displayTrue: fieldProp(sub, 'displaytrue'), displayFalse: fieldProp(sub, 'displayfalse') }, plan.sheet.file, rowIndex, childColumns, childRaw, {}, childAuth);
                 if (prior !== undefined && childColumns[col.column] !== prior) {
                   throw new Error(`"${list.header}" in ${plan.sheet.file} row ${rowIndex} conflicts with another ${acc.hit.field.name}.${sub.name} column`);
                 }
@@ -1639,13 +1639,16 @@ function writeColumn(
   header: string,
   cell: RawCell,
   hit: Extract<HeaderHit, { kind: 'column' }>,
-  file: string,
+  sheetFile: string,
+  rowIndex: number,
   columns: Record<string, string>,
   rawCells: Record<string, string>,
   idInputs: Record<string, string>,
   authColumns: string[],
 ): void {
   const column = hit.column;
+  // Cell errors name the data row (1 = first row after the header).
+  const file = `${sheetFile} row ${rowIndex}`;
   if (typeof cell !== 'string' && 'list' in cell && column.kind === 'multi') {
     const value = encodeMultiValue(cell.list.map((item) => cellString(item)));
     if (value === undefined) return;
