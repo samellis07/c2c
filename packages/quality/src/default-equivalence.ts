@@ -32,7 +32,7 @@ export const DEFAULT_EQUIVALENCE: readonly DefaultEquivalence[] = [
     accept: 'image/*',
     key: 'source',
     value: 'file',
-    why: 'Image comes from an uploaded file only. The generated field is a single file input that uploads the chosen image; it has no URL entry.',
+    why: 'Image comes from an uploaded file only. The generated field offers only a device file picker (a file input in the static UI, a drop zone in the React app) and uploads one chosen image; it has no URL entry.',
   },
   {
     widget: 'image',
@@ -67,7 +67,7 @@ export const DEFAULT_EQUIVALENCE: readonly DefaultEquivalence[] = [
     accept: undefined,
     key: 'browse',
     value: 'local_drive',
-    why: 'Files come from the local drive only. The generated field is a single file input with no cloud document picker.',
+    why: 'Files come from the local drive only. The generated field offers only a device file picker (a file input in the static UI, a drop zone in the React app) and has no cloud document picker.',
   },
 ];
 
