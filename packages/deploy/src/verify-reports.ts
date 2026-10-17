@@ -539,6 +539,8 @@ export interface RunReportOptions {
   n?: number;
   /** Wrap the screens' api (tests: inject a broken endpoint reply). */
   wrapApi?: (api: TemplateApi) => TemplateApi;
+  /** Override the fake SDK path (tests: inject a store whose insert fails). */
+  fakeSdk?: string;
 }
 
 /** Run every report, chart and page check of one app offline. */
@@ -548,12 +550,13 @@ export async function runReportChecks(app: App, source: string, opts: RunReportO
   const model = generateUi(app).model;
   const spec = reactAppSpec(app, model);
   const out = mkdtempSync(join(tmpdir(), 'c2c-report-check-'));
-  const backend = await startOfflineBackend(app);
+  const backend = await startOfflineBackend(app, opts.fakeSdk ? { fakeSdk: opts.fakeSdk } : {});
   const result: AppReportResult = { app: name, source, seedRows: {}, screens: [] };
   try {
     compileTemplateLib(out);
     let seeded: SeededApp;
     try {
+      await backend.reset?.();
       seeded = await loadSeed(app, backend, opts.n ?? 6);
     } catch (err) {
       result.error = `seed load failed: ${err instanceof Error ? err.message : String(err)}`;
