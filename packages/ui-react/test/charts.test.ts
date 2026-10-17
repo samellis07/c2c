@@ -10,7 +10,7 @@ import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { generateUi } from '../../ui/src/index.js';
 import { compileCriteria, decodeEntities } from '../src/charts.js';
 import { TEMPLATE_DIR, generateReactApp, reactAppSpec, writeReactApp } from '../src/index.js';
-import { bucketsToSeries, chartSeries, dayOf, matches, metricValue, textOf, todayIn, valueAt, type Day } from '../template/lib/c2c-ui/charts/data.js';
+import { aggregateFallback, bucketsToSeries, chartSeries, dayOf, matches, metricValue, textOf, todayIn, valueAt, type Day } from '../template/lib/c2c-ui/charts/data.js';
 import type { ChartSpec, MetricSpec, PageElement } from '../template/lib/c2c-ui/types.js';
 
 /** ZML inside a page `Content="..."` literal: attribute quotes are single quotes, criteria quotes are entities. */
@@ -544,4 +544,16 @@ test('a field-to-field clause compares numbers, then dates, then text', () => {
   assert.equal(matches({ D: '2026-01-05' }, { field: 'D', op: 'period', when: 'this', unit: 'year' }, today), true);
   assert.equal(matches({ D: '2025-01-05' }, { field: 'D', op: 'period', when: 'last', unit: 'year' }, today), true);
   assert.equal(matches({ D: 'soon' }, { field: 'D', op: 'period', when: 'this', unit: 'year' }, today), false);
+});
+
+test('a failed aggregate is an error state; only a missing op falls back to the row read', () => {
+  // The React reader throws on a refused group field or a server error, so the
+  // chart shows its error state instead of an empty drawing. It falls back to
+  // the row query only when the endpoint has no aggregate op at all (a 2xx
+  // without buckets, or a static host's 404/405/501).
+  assert.equal(aggregateFallback({ ok: false, status: 400 }), false, 'a refused group field is an error, not empty data');
+  assert.equal(aggregateFallback({ ok: false, status: 500 }), false, 'a server error is an error state');
+  assert.equal(aggregateFallback({ ok: false, status: 403 }), false);
+  for (const status of [404, 405, 501]) assert.equal(aggregateFallback({ ok: false, status }), true);
+  assert.equal(aggregateFallback({ ok: true, status: 200 }), true, 'a 2xx without buckets means an endpoint without the op');
 });

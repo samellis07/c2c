@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { EncryptedCriteriaError, compileCriteria, matchRow } from '../src/criteria.js';
+import { EncryptedCriteriaError, compileCriteria, matchRow, type Criteria } from '../src/criteria.js';
 import { DEFAULT_APP_TIMEZONE, TimeZoneRequired, parseLiteral, requireZone, resolveAppTimeZone } from '../src/date.js';
 import { decimal } from '../src/decimal.js';
 import { RecordAccessError, authorizeWrite, expandCompositeWrites, principalFromRequest, type AccessPolicy } from '../src/access.js';
@@ -259,6 +259,36 @@ test('ZCQL LIKE uses *, keeps %, _, and \\ literal, and widens literal * or ? in
   assert.deepEqual(matchRow({ Name: 'xab' }, { op: 'contains', field: 'Name', value: 'a*b' }), false);
   assert.deepEqual(matchRow({ Name: '10% off' }, { op: 'contains', field: 'Name', value: '10% off' }), true);
   assert.deepEqual(matchRow({ Name: 'a?b' }, { op: 'startsWith', field: 'Name', value: 'a?b' }), true);
+});
+
+test('compileCriteria never emits a bare ZCQL true/false predicate', () => {
+  // ZCQL has no boolean literal predicate: an all-rows operand carries no
+  // clause. AND drops it, OR of it stays the always-true marker (callers strip
+  // that to no WHERE), NOT of it matches nothing.
+  const cases: [Criteria, string][] = [
+    [{ op: 'and', args: [{ op: '==', field: 'ROWID', value: '42' }, { op: 'true' }] }, "(ROWID = '42')"],
+    [{ op: 'and', args: [{ op: 'true' }, { op: 'true' }] }, 'true'],
+    [{ op: 'or', args: [{ op: 'true' }, { op: '==', field: 'Status', value: 'Open' }] }, 'true'],
+    [{ op: 'and', args: [{ op: '==', field: 'Status', value: 'Open' }, { op: 'or', args: [{ op: 'true' }, { op: '==', field: 'Kind', value: 'x' }] }] }, "(Status = 'Open')"],
+    [{ op: 'not', arg: { op: 'true' } }, '(ROWID IS NULL)'],
+    [{ op: 'and', args: [{ op: 'not', arg: { op: 'true' } }, { op: '==', field: 'Status', value: 'Open' }] }, "((ROWID IS NULL) AND Status = 'Open')"],
+    // A boolean leaf compiles as `Field = true` (unquoted, [UNVERIFIED]: whether
+    // live ZCQL wants `= true` or `= 'true'` on a Boolean column needs a live
+    // probe; this keeps the pre-existing spelling until the fact lands).
+    [{ op: '==', field: 'Active', value: true }, 'Active = true'],
+    [{ op: '==', field: 'Active', value: false }, 'Active = false'],
+  ];
+  for (const [criteria, expected] of cases) {
+    const where = compileCriteria(criteria);
+    assert.equal(where, expected);
+    // No bare boolean literal as a whole predicate operand anywhere in the
+    // WHERE (`true` alone is the marker callers strip to no WHERE; a `= true`
+    // leaf operand is the unverified pre-existing spelling, not a clause).
+    const unquoted = where.replace(/'[^']*'/g, "''");
+    if (where !== 'true') assert.doesNotMatch(unquoted, /(\(|\bAND\b|\bOR\b|\bNOT\b)\s*(true|false)\b|\b(true|false)\s*(\)|\bAND\b|\bOR\b)/, where);
+  }
+  // The always-true marker stays the marker callers strip to no WHERE.
+  assert.equal(compileCriteria({ op: 'true' }), 'true');
 });
 
 test('record reads use the profile grant and the report filter, and never return a hidden field', async () => {
