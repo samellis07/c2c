@@ -5,9 +5,11 @@
  *
  * Rules:
  * 1. Writes must not be inside loops (forEach or while).
- * 2. Every write must be guarded by an enclosing if condition referencing
- *    zoho.adminuserid or zoho.loginuserid directly or via a variable assigned
- *    from a query filtered by admin/login userid.
+ * 2. Every write must be guarded by an enclosing if test that is exactly
+ *    `zoho.loginuserid == zoho.adminuserid` — the only comparison that proves
+ *    the authenticated app admin is the caller. An existence check over an
+ *    identity-scoped read (a count or null test on `Form[... == zoho.*userid]`)
+ *    says nothing about who is calling and is not a guard.
  * 3. Statements and expressions outside read-only constructs are limited to
  *    insert, update, and criteria/record field assignments.
  * 4. Runtime shims allow datastore.insert, datastore.update, and
@@ -175,66 +177,6 @@ function unwrap(e: Expr): Expr {
   return e;
 }
 
-/** The expression mentions `zoho.adminuserid` or `zoho.loginuserid`. */
-function exprHasIdentity(e: Expr): boolean {
-  let found = false;
-  walkExpr(e, (node) => {
-    if (
-      node.kind === 'member' &&
-      node.object.kind === 'name' &&
-      node.object.name.toLowerCase() === 'zoho' &&
-      (node.property.toLowerCase() === 'adminuserid' || node.property.toLowerCase() === 'loginuserid')
-    ) {
-      found = true;
-    }
-  });
-  return found;
-}
-
-/**
- * Variables bound to a criteria read filtered by `zoho.adminuserid` or
- * `zoho.loginuserid` (`rec = Form[Email == zoho.adminuserid]`). A write under
- * `if (rec.count() <= 0)` provisions the caller's own scoped row.
- */
-function collectIdentityScopedVars(ast: Script): Set<string> {
-  const scoped = new Set<string>();
-  const unscoped = new Set<string>();
-  for (const s of ast.body) {
-    walkStmt(
-      s,
-      (stmt) => {
-        if (stmt.kind === 'assign' && stmt.target.kind === 'name') {
-          let identityBound = false;
-          walkExpr(stmt.value, (node) => {
-            if (node.kind === 'criteria' && exprHasIdentity(node.criteria)) identityBound = true;
-          });
-          (identityBound ? scoped : unscoped).add(stmt.target.name.toLowerCase());
-        }
-      },
-      () => {},
-    );
-  }
-  for (const name of unscoped) scoped.delete(name);
-  return scoped;
-}
-
-function referencesVar(e: Expr, vars: Set<string>): boolean {
-  let found = false;
-  walkExpr(e, (node) => {
-    if (node.kind === 'name' && vars.has(node.name.toLowerCase())) found = true;
-  });
-  return found;
-}
-
-/** The test itself holds a criteria read filtered by the caller identity. */
-function exprHasScopedCriteria(e: Expr): boolean {
-  let found = false;
-  walkExpr(e, (node) => {
-    if (node.kind === 'criteria' && exprHasIdentity(node.criteria)) found = true;
-  });
-  return found;
-}
-
 /** Only this exact comparison proves that the authenticated app admin is the caller. */
 function isAuthenticatedAdminGuard(e: Expr): boolean {
   e = unwrap(e);
@@ -286,13 +228,11 @@ export function hasShapeCWrites(ast: Script): boolean {
 }
 
 /**
- * Verifies writes are not inside loops and are guarded by zoho.adminuserid /
- * zoho.loginuserid checks (including variables assigned from queries filtered
- * by admin/login userid).
+ * Verifies writes are not inside loops and every write sits under an if test
+ * that is exactly `zoho.loginuserid == zoho.adminuserid`.
  */
 export function isShapeCGuarded(ast: Script): boolean {
   const criteriaVars = collectCriteriaVars(ast);
-  const identityVars = collectIdentityScopedVars(ast);
 
   let allWritesValid = true;
   let writeCount = 0;
@@ -342,7 +282,7 @@ export function isShapeCGuarded(ast: Script): boolean {
         }
         break;
       case 'ifExpr': {
-        const testGuarded = isAuthenticatedAdminGuard(e.test) || referencesVar(e.test, identityVars) || exprHasScopedCriteria(e.test);
+        const testGuarded = isAuthenticatedAdminGuard(e.test);
         checkExpr(e.test, inLoop, isGuarded);
         checkExpr(e.then, inLoop, isGuarded || testGuarded);
         if (e.else) checkExpr(e.else, inLoop, isGuarded);
@@ -378,11 +318,11 @@ export function isShapeCGuarded(ast: Script): boolean {
         for (const child of s.body) checkStmt(child, inLoop, isGuarded);
         break;
       case 'if': {
-        const testGuarded = isAuthenticatedAdminGuard(s.test) || referencesVar(s.test, identityVars) || exprHasScopedCriteria(s.test);
+        const testGuarded = isAuthenticatedAdminGuard(s.test);
         checkExpr(s.test, inLoop, isGuarded);
         checkStmt(s.then, inLoop, isGuarded || testGuarded);
         for (const elif of s.elifs) {
-          const elifGuarded = isAuthenticatedAdminGuard(elif.test) || referencesVar(elif.test, identityVars) || exprHasScopedCriteria(elif.test);
+          const elifGuarded = isAuthenticatedAdminGuard(elif.test);
           checkExpr(elif.test, inLoop, isGuarded);
           checkStmt(elif.body, inLoop, isGuarded || elifGuarded);
         }

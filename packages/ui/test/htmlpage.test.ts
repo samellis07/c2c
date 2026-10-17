@@ -2889,27 +2889,22 @@ test('shape C negative: guards that merely mention a user identity are refused',
   }
 });
 
-test('shape C: a write guarded by an identity-scoped record variable compiles', () => {
-  const snippet = `htmlpage hp1()
-content
-<p>
-<%
-adminRec = Accounts[Email == zoho.adminuserid];
-if (adminRec.count() <= 0) {
-  insert into Accounts [
-    Email = zoho.loginuserid
-    Role = "Admin"
+test('shape C negative: an existence check over an identity-scoped read is not a guard', () => {
+  const guards = [
+    'adminRec = Accounts[Email == zoho.adminuserid];\nif (adminRec.count() <= 0) {',
+    'rec = Accounts[Email == zoho.loginuserid];\nif (rec == null) {',
+    'rec = Accounts[Email == zoho.loginuserid];\nif (rec.count() == 0) {',
+    'rec = Accounts[Email == zoho.loginuserid];\nif (rec.count() >= 0 || true) {',
+    'rec = Accounts[Email == zoho.adminuserid];\nif (rec == null || true) {',
+    'if (Accounts[Email == zoho.loginuserid].count() >= 0 || true) {',
+    'rec = Accounts[Email == zoho.loginuserid];\nif (rec.count() == 0 || input.force == true) {',
   ];
-}
-%>
-Ready
-</p>`;
-  const { model } = buildUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
-  assert.deepEqual(model.todos, []);
-  assert.equal(uiSnippetFiles(model).length, 1);
-  const loginScoped = `htmlpage hp1()\ncontent\n<p><%\nrec = Accounts[Email == zoho.loginuserid];\nif (rec == null) {\n  insert into Accounts [ Email = zoho.loginuserid Role = "User" ];\n}\n%>Done</p>`;
-  const second = buildUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(loginScoped)}`));
-  assert.deepEqual(second.model.todos, []);
+  for (const guard of guards) {
+    const snippet = `htmlpage hp1()\ncontent\n<p><%\n${guard}\n  insert into Accounts [ Email = zoho.loginuserid Role = "Admin" ];\n}\n%>Done</p>`;
+    const { model } = buildUi(appOf(`${ACCOUNTS}\n${pageWithSnippet(snippet)}`));
+    assert.deepEqual(model.todos.map((todo) => todo.reason), [SNIPPET_TODO], guard);
+    assert.equal(uiSnippetFiles(model).length, 0, guard);
+  }
 });
 
 test('shape C negative: a guard variable not bound to an identity-scoped read stays refused', () => {
