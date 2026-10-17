@@ -128,10 +128,12 @@ export function generateUi(app: App, opts: UiGenerateOptions = {}): UiBundle {
   }
   const covered = new Set(deluge.files.map((file) => endpointPath(file)).filter((item): item is string => !!item));
   for (const form of model.forms) {
-    if (!covered.has(form.submitEndpoint)) {
+    // The form's submit, or the edit submit when an `on add` success module owns the submit.
+    const plain = [form.submitEndpoint, form.editSubmitEndpoint].find((endpoint) => endpoint !== undefined && !covered.has(endpoint));
+    if (plain !== undefined) {
       files.push({
         path: `functions/aio/${slug(form.name)}/submit.mjs`,
-        data: submitStub(app, form, form.submitEndpoint, deluge.files, opts.schema, !!opts.asyncOnSuccess),
+        data: submitStub(app, form, plain, deluge.files, opts.schema, !!opts.asyncOnSuccess),
       });
     }
     files.push({
@@ -2504,6 +2506,37 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
       if (mod && typeof mod.handle === "function") await mod.handle(ctx);
     }
 `;
+  // Creator's on edit validate sees the whole stored record as input, not only
+  // the posted fields: the edit reads the row under the caller's modify scope
+  // (the same read an edit and a delete are scoped to) before the validate
+  // scripts run, fills the fields the request did not post and sets ctx.old.
+  // Filled values the scripts leave unchanged are not written back.
+  const editsLoad = validate.edit.length > 0;
+  const editLoad = editsLoad
+    ? `    let loaded = null;
+    if (ctx.rowId) {
+      const scoped = authorizeRead(access, principal, formName, { op: "==", field: "ROWID", value: ctx.rowId }, undefined, "modify");
+      const where = compileCriteria(scoped.criteria);
+      const storedRows = await datastore.query(formName, where === "true" ? "" : where, 1, 0, "ORDER BY ROWID");
+      const stored = Array.isArray(storedRows) && storedRows[0] && typeof storedRows[0] === "object" ? projectFields(storedRows[0], scoped.fields) : null;
+      if (stored) {
+        loaded = {};
+        for (const name of fieldNames) {
+          if (Object.prototype.hasOwnProperty.call(ctx.record, name) || !Object.prototype.hasOwnProperty.call(stored, name)) continue;
+          loaded[name] = stored[name];
+          ctx.record[name] = stored[name];
+        }
+        ctx.old = { ...stored };
+      }
+    }
+`
+    : '';
+  const editUnload = editsLoad
+    ? `    for (const name of loaded ? Object.keys(loaded) : []) {
+      if (ctx.record[name] === loaded[name]) delete ctx.record[name];
+    }
+`
+    : '';
   return `${banner([
     `Submit ${form.name}. Dry run: the record is not inserted.`,
     'authorizeWrite checks that the form is viewable and editable.',
@@ -2628,10 +2661,10 @@ ${requirePrincipal()}
       appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined,
       rowId: requestRowId(req),
     });
-${stageCheck}    // API and import inserts never saw the Slate prefill. Absent
+${stageCheck}${editLoad}    // API and import inserts never saw the Slate prefill. Absent
     // fields fall back to their Creator initial values on insert only.
     if (!ctx.rowId && ctx.writeOp !== "update") applyInitialValues(ctx.record, fields);
-${validateRun}${flowBegin}    await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
+${validateRun}${editUnload}${flowBegin}    await writeLive(runtime, ctx, formName${fieldStoreWriteArg(storeShape)});
     // The row is committed from here on. A failure after it (history row,
     // on-success script, mail) is a warning on a 200, never a failed submit:
     // a failure reply would invite a retry that inserts a second row.

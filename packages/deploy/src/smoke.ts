@@ -26,7 +26,7 @@ import {
   type CatalystScope,
   type FetchLike,
 } from '../../data/src/migrate.js';
-import { subformTablesOf, type SchemaPlan } from '../../schema/src/generator.js';
+import { columnRenamesOf, subformTablesOf, type SchemaPlan } from '../../schema/src/generator.js';
 import { smokeMarkerField, smokeNumberField, type UiField, type UiForm, type UiModel } from '../../ui/src/model.js';
 import { GuardError, confirmGuardLines, planScopeLines, type GuardOk } from './guards.js';
 
@@ -364,12 +364,10 @@ export function planSmoke(_app: App, inputs: SmokeInputs): SmokeStep[] {
   const { routes, model, schema } = inputs;
   const tableByForm = new Map<string, string>();
   const renamedByForm = new Map<string, Record<string, string>>();
+  const renames = columnRenamesOf(schema);
   for (const table of schema.tables) {
     if (table.role === 'form' && !table.nosql && ZCQL_IDENT.test(table.name)) tableByForm.set(table.form, table.name);
-    if (table.role !== 'form') continue;
-    const renamed: Record<string, string> = {};
-    for (const column of table.columns) if (column.field !== undefined) renamed[column.field] = column.name;
-    if (Object.keys(renamed).length) renamedByForm.set(table.form, renamed);
+    if (table.role === 'form' && Object.hasOwn(renames, table.name)) renamedByForm.set(table.form, renames[table.name]!);
   }
   const expectOn = (form: string, field: string): { field: string; column?: string } => {
     const renamed = renamedByForm.get(form);
