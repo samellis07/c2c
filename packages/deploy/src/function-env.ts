@@ -18,6 +18,7 @@ export interface FunctionEnvInput {
   env?: string;
   /** Accepted for callers; never written — see env. */
   projectId?: string;
+  /** Accepted for callers; never written — APP_URL and CATALYST_APP_URL are refused (RESERVED_ENV_KEYS). */
   appUrl?: string;
   bucketName?: string;
   /** Real schema tables only — a name here becomes TABLE_<NAME>_ID. Names of
@@ -105,13 +106,6 @@ export function buildFunctionEnv(input: FunctionEnvInput): Record<string, string
   // as inputs and dropped.
   const dc = input.dc ?? existing.C2C_ZOHO_DC ?? existing.DC ?? existing.CATALYST_DC;
   if (dc) out.C2C_ZOHO_DC = dc;
-
-  // Derivable App URL
-  const appUrl = input.appUrl ?? existing.APP_URL ?? existing.CATALYST_APP_URL;
-  if (appUrl) {
-    out.APP_URL = appUrl;
-    out.CATALYST_APP_URL = appUrl;
-  }
 
   // Derivable Bucket
   const bucket = input.bucketName ?? existing.C2C_STRATUS_BUCKET ?? existing.STRATUS_BUCKET;
