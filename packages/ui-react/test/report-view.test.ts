@@ -457,6 +457,35 @@ test('record controls have a real destination and custom row actions post the RO
   assert.equal(blankId.container.querySelector('a.c2c-row-open'), null);
 });
 
+test('an openUrl-only custom action is a link to its target route with values from the row', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'nav-actions');
+  const report = reactAppSpec(appOf()).reports.Orders!;
+  const view = await mount(out, {
+    ...report,
+    customActions: [
+      { name: 'Request', endpoint: '/reports/Orders/actions/request', header: true, navigate: { kind: 'form', target: 'Order', href: '#/form/Order', params: [{ name: 'Title', field: 'Title' }, { name: 'Total', field: 'Hidden_Total' }, { name: 'Kind', value: 'Loan' }] } },
+      { name: 'All Orders', endpoint: '/reports/Orders/actions/all-orders', header: true, navigate: { kind: 'report', target: 'Orders', href: '#/report/Orders', params: [] } },
+      { name: 'Stub', endpoint: '/reports/Orders/actions/stub', preview: true },
+    ],
+  }, ROWS, new Set(['Total']));
+  const links = [...view.container.querySelectorAll('a[data-action-nav]')].map((a) => `${a.textContent} ${a.getAttribute('href')}`);
+  // The row-bound header action opens per record (Hidden_Total is not on the
+  // row, so it prefills nothing); the row-free one sits in the toolbar.
+  assert.deepEqual(links.sort(), ['All Orders #/report/Orders', ...ROWS.map((row) => `Request #/form/Order?Title=${encodeURIComponent(String(row.Title))}&Kind=Loan`)].sort());
+  assert.equal(view.container.querySelector('[data-action="/reports/Orders/actions/request"]'), null, 'a navigation posts to no endpoint');
+  assert.equal((view.container.querySelector('button[data-action="/reports/Orders/actions/stub"]') as HTMLButtonElement | null)?.disabled, true, 'a counted stub stays turned off');
+});
+
+test('the React spec carries the navigation of an openUrl-only action', () => {
+  const text = source()
+    .replace('custom action "Approve"\n\t\t\t(\n\t\t\t\tcolumn header = "Approve"\n\t\t\t)', 'custom action "Approve"\n\t\t\t(\n\t\t\t\tworkflow = Open_Order\n\t\t\t)')
+    .replace(/\n}\n$/, '\n\tworkflow\n\t{\n\tfunctions\n\t{\n\t\tOpen_Order as "Open Order"\n\t\t{\n\t\t\ttype = functions\n\t\t\tform = Order\n\t\t\texecution type = for each record\n\t\t\ton start\n\t\t\t{\n\t\t\t\tactions\n\t\t\t\t{\n\t\t\t\ton click\n\t\t\t\t(\n\t\t\t\t\topenUrl("#Form:Order?Title=" + input.Title,"popup window");\n\t\t\t\t)\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\t}\n}\n');
+  assert.notEqual(text, source());
+  const action = reactAppSpec(appOf(text)).reports.Orders!.customActions.find((item) => item.name === 'Approve');
+  assert.deepEqual(action?.navigate, { kind: 'form', target: 'Order', href: '#/form/Order', params: [{ name: 'Title', field: 'Title' }] });
+  assert.equal(action?.preview, undefined);
+});
+
 test('record detail draws configured sections and related rows from the authorized record read', { skip: SKIP }, async (t) => {
   const out = await compileOnly(t, 'record-detail');
   const base = reactAppSpec(appOf()).reports.Orders!;
