@@ -2447,6 +2447,11 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
   const siblingSpecsUsed = new Set([...validate.add, ...validate.edit, ...success.add, ...success.edit].map((spec) => `${siblingPrefix}${spec.slice(2)}`));
   const usesThisapp = delugeFiles.some((file) => siblingSpecsUsed.has(file.path) && file.source.includes('from "../../thisapp.mjs"'));
   const presuccess = siblingSpecs(delugeFiles, form.name, 'handler');
+  // The form's `on start` presuccess actions run on the same record after
+  // the access gate and before on validate; a cancel submit there is a 422
+  // with nothing written. Emitted only when the form has that module.
+  const hasPresuccess = presuccess.add.length + presuccess.edit.length > 0;
+  const discardDeferred = hasPresuccess ? '      runtime.discardDeferredEffects();\n' : '';
   // State machines (approvals, blueprints) that govern this form: begin() stamps
   // the start stage before the row write, commit() logs the history row after.
   // Emitted only for governed forms, so a machine-free form's stub is unchanged.
@@ -2506,7 +2511,7 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
         if (mod && typeof mod.handle === "function") await mod.handle(ctx);
       }
     } catch (err) {
-      if (err && err.code === "SUBMIT_REFUSED") {
+${discardDeferred}      if (err && err.code === "SUBMIT_REFUSED") {
         send(res, 422, { dryRun: false, wrote: false, refused: true, error: err.message });
         return;
       }
@@ -2551,10 +2556,6 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
     }
 `
     : '';
-  // The form's \`on start\` presuccess actions run on the same record after
-  // the access gate and before on validate; a cancel submit there is a 422
-  // with nothing written. Emitted only when the form has that module.
-  const hasPresuccess = presuccess.add.length + presuccess.edit.length > 0;
   const presuccessLine = hasPresuccess
     ? `\nconst presuccessAdd = ${JSON.stringify(presuccess.add)};\nconst presuccessEdit = ${JSON.stringify(presuccess.edit)};`
     : '';
@@ -2562,9 +2563,21 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
     ? `    try {
       for (const spec of eventSpecs(presuccessAdd, presuccessEdit, ctx.rowId)) {
         const mod = await import(spec);
-        if (mod && mod.presuccess === true && typeof mod.handle === "function") await mod.handle(ctx);
+        if (mod && mod.presuccess === true && typeof mod.handle === "function") {
+          // A buffer-safe body marks deferEffects: its mail, invokeurl and
+          // other-form writes are queued until the row commits.
+          if (mod.deferEffects === true) {
+            runtime.beginDeferredEffects(formName);
+            try {
+              await mod.handle(ctx);
+            } finally {
+              runtime.endDeferredEffects();
+            }
+          } else await mod.handle(ctx);
+        }
       }
     } catch (err) {
+      runtime.discardDeferredEffects();
       if (err && err.code === "SUBMIT_REFUSED") {
         send(res, 422, { dryRun: false, wrote: false, refused: true, error: err.message });
         return;
@@ -2585,7 +2598,7 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
     'A live edit captures Catalyst MODIFIEDTIME while preparing the row, then re-reads ROWID/MODIFIEDTIME once immediately before updateRows. A change is refused as c2c code C2C_STALE_WRITE (409). This is c2c\'s stale check and one extra bounded read; Data Store itself has no optimistic lock.',
     'Creator runs On Success after the record is submitted (https://help.zoho.com/portal/en/kb/creator/developer-guide/workflows/create-and-manage-on-success-action/articles/understand-on-success-action): "The actions that you define in the On success event will be executed when a new record is successfully submitted to the database or when an existing record is updated or deleted from the database." Whether Creator rolls that row back when On Success throws is unverified; this port leaves the row.',
     ...(hasPresuccess
-      ? ['In live mode the form\'s `on start` presuccess (form properties) module runs on the accepted record before on validate; a cancel submit there answers 422 and nothing is written. [UNVERIFIED] Creator\'s exact placement relative to On Validate.']
+      ? ['In live mode the form\'s `on start` presuccess (form properties) module runs on the accepted record before on validate; a cancel submit there answers 422 and nothing is written. Its mail, invokeurl and other-form writes are held until the row is stored and dropped on any refusal — Direct to and Send Email are documented on-submission actions (https://help.zoho.com/portal/en/kb/creator/developer-guide/forms/manage-forms/articles/redirect-on-form-submission). [UNVERIFIED] Creator\'s exact placement relative to On Validate.']
       : []),
     ...(deferSuccess
       ? ['Async on-success opt-in: in live mode this endpoint validates and stores the row, then replies without running the on-success modules. The after-commit event function (functions/events/after-commit.mjs) runs them when the record trigger fires; a failure dead-letters to C2CEventDeadLetter for the sweep Job (docs/event-deadletter.md).']
@@ -2664,7 +2677,7 @@ export default async function handler(req, res) {
   }
 ${requirePrincipal()}
   const record = req && req.body && req.body.record && typeof req.body.record === "object" && !Array.isArray(req.body.record) ? req.body.record : {};
-  try {
+${hasPresuccess ? '  // The catch scope drops buffered presuccess effects, so the runtime is\n  // bound ahead of the try that creates it.\n  let runtime = null;\n' : ''}  try {
     if (req && req.body && req.body.op === "view") {
       authorizeRead(access, principal, formName, { op: "true" });
       send(res, 200, { dryRun: !live, view: true });
@@ -2681,7 +2694,7 @@ ${requirePrincipal()}
       send(res, 500, { dryRun: false, wrote: false, error: "live datastore is not configured" });
       return;
     }
-    const runtime = createRuntime({
+    ${hasPresuccess ? '' : 'const '}runtime = createRuntime({
       dryRun: false,
       appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined,${zoneLine}${decimalLine}${uniqueLine}
       ...(datastore ? { datastore, ...(datastore.now ? { now: datastore.now } : {}) } : {}),
@@ -2709,7 +2722,7 @@ ${presuccessRun}${validateRun}${editUnload}${flowBegin}    await writeLive(runti
     // a failure reply would invite a retry that inserts a second row.
     let warning = null;
     try {
-${flowCommit}${deferSuccess
+${hasPresuccess ? '      // Effects a buffer-safe presuccess body queued run once the row is\n      // committed and before the on-success modules; a failure is the same\n      // post-commit warning.\n      await runtime.flushDeferredEffects();\n' : ''}${flowCommit}${deferSuccess
         ? `      // Async on-success opt-in: the on-success modules are not run here. The
       // record trigger fires the after-commit event function on the committed
       // row, which runs them once; a failure dead-letters for the sweep Job.
@@ -2727,7 +2740,7 @@ ${flowCommit}${deferSuccess
     // values, table names and ops.
     send(res, 200, { dryRun: false, wrote: true, values: projectReadable(access, principal, formName, ctx.record, submitted), ...(warning ? { warning } : {}), ...(runtime.mail?.length ? { mail: runtime.mail } : {}) });
   } catch (err) {
-    // The row write itself failed at the store (409/422/400 naming
+${hasPresuccess ? '    // A refused or failed write drops the effects a presuccess body queued.\n    if (runtime) runtime.discardDeferredEffects();\n' : ''}    // The row write itself failed at the store (409/422/400 naming
     // the field, plus a structured log line); anything else stays a
     // sanitized 500 with dryRun of the real mode.
     if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;

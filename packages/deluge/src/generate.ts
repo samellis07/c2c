@@ -39,7 +39,8 @@ import { normType } from './types.js';
 import { mutatesParameters } from './param-mutation.js';
 import { withoutDecimalAudit } from './audit.js';
 import { resolveAppCalls } from './resolve-app-calls.js';
-import { parse as parseScript } from './parser.js';
+import { parse as parseDeluge } from './parser.js';
+import type { Expr, Stmt } from './ast.js';
 
 export interface GeneratedFile {
   path: string;
@@ -76,6 +77,13 @@ export interface GenerateResult {
  * not credited. Prefetch (`<route>/prefetch`) is not this route.
  */
 export const FORM_EVENT_SERVER_UNINVOKED = 'form-event-server-uninvoked';
+
+/**
+ * An `on start` presuccess body whose side effects cannot be held until the
+ * row write commits keeps running them up front (today's order). Counted, so
+ * the fallback is never silent.
+ */
+export const PRESUCCESS_EFFECT_UNBUFFERED = 'presuccess-effect-unbuffered';
 
 const CLIENT_RUN_GUARD = 'if (!shim.client || typeof shim.client.run !== "function") throw Object.assign(new Error("client.run unavailable; server half not run"), { c2cElementBlocked: true });\nawait shim.client.run(ctx);';
 
@@ -190,6 +198,206 @@ export interface CoverageEntry {
 /** A Creator form-properties action: `type = presuccess` with an `on start` body. */
 function isPresuccessWorkflow(w: Workflow): boolean {
   return (w.type ?? '').trim().toLowerCase() === 'presuccess';
+}
+
+/**
+ * True when a presuccess body's side effects may be buffered until the row
+ * write commits. Unsafe bodies, which keep pre-commit effects:
+ * - one that reads a stored `insert` id (`x = insert into …` — the deferred
+ *   write has no id to return),
+ * - one that reads (fetch criteria, `Form.count()`-style aggregate, or zcql)
+ *   a form it also writes (the read could not see the buffered write),
+ * - one that writes its own form (a same-form write is never deferred, so a
+ *   body that depends on it staying early keeps today's order).
+ */
+function presuccessBodyDeferrable(text: string, ownForm: string): boolean {
+  let script;
+  try {
+    script = parseDeluge(text);
+  } catch {
+    return false;
+  }
+  const writes = new Set<string>();
+  const reads = new Set<string>();
+  let unsafe = false;
+  let zcqlRead = false;
+  const nameOf = (e: Expr | undefined): string | null => {
+    const props: string[] = [];
+    let cur = e;
+    while (cur && cur.kind === 'member') {
+      props.push(cur.property);
+      cur = cur.object;
+    }
+    if (!cur || cur.kind !== 'name') return null;
+    return [cur.name, ...props.reverse()].join('.');
+  };
+  const AGGREGATES = new Set(['count', 'sum', 'avg', 'min', 'max', 'distinct', 'median']);
+  const writeTarget = (t: Expr): void => {
+    // update/delete targets the form its criteria sits on; the criteria's own
+    // expressions may still read other forms.
+    const form = t.kind === 'criteria' ? nameOf(t.object) : nameOf(t);
+    if (form) writes.add(form);
+    else unsafe = true;
+    if (t.kind === 'criteria') {
+      visitExpr(t.criteria);
+      if (t.range) {
+        visitExpr(t.range.from);
+        visitExpr(t.range.to);
+      }
+    }
+  };
+  function visitExpr(e: Expr | undefined, valuePosition = false): void {
+    if (!e) return;
+    switch (e.kind) {
+      case 'insert': {
+        const form = nameOf(e.form);
+        if (form) writes.add(form);
+        else unsafe = true;
+        if (valuePosition) unsafe = true;
+        for (const p of e.entries) visitExpr(p.value, true);
+        return;
+      }
+      case 'criteria': {
+        const form = nameOf(e.object);
+        if (form) reads.add(form);
+        visitExpr(e.criteria);
+        if (e.range) {
+          visitExpr(e.range.from);
+          visitExpr(e.range.to);
+        }
+        return;
+      }
+      case 'colonCall': {
+        const object = nameOf(e.object);
+        const leaf = e.path[e.path.length - 1]?.toLowerCase() ?? '';
+        if (object?.toLowerCase() === 'zcql') zcqlRead = true;
+        else if (object && AGGREGATES.has(leaf)) reads.add(object);
+        visitExpr(e.object);
+        for (const a of e.args) visitExpr(a, true);
+        return;
+      }
+      case 'call': {
+        if (e.callee.kind === 'member') {
+          const object = nameOf(e.callee.object);
+          if (object && AGGREGATES.has(e.callee.property.toLowerCase())) reads.add(object);
+        }
+        visitExpr(e.callee);
+        for (const a of e.args) visitExpr(a, true);
+        return;
+      }
+      case 'sendmail':
+      case 'invokeurl':
+      case 'pushnotification':
+        for (const p of e.entries) visitExpr(p.value, true);
+        return;
+      case 'mailAttachments':
+        for (const item of e.items) {
+          if (item.value) visitExpr(item.value, true);
+          if (item.record) visitExpr(item.record, true);
+          if (item.criteria) visitExpr(item.criteria, true);
+        }
+        return;
+      case 'list':
+        for (const el of e.elements) visitExpr(el, true);
+        return;
+      case 'map':
+        for (const en of e.entries) {
+          visitExpr(en.key, true);
+          visitExpr(en.value, true);
+        }
+        return;
+      case 'unary':
+        visitExpr(e.expr, true);
+        return;
+      case 'binary':
+        visitExpr(e.left, true);
+        visitExpr(e.right, true);
+        return;
+      case 'member':
+        visitExpr(e.object);
+        return;
+      case 'index':
+        visitExpr(e.object);
+        visitExpr(e.index, true);
+        return;
+      case 'paren':
+        visitExpr(e.expr, valuePosition);
+        return;
+      case 'ifExpr':
+        visitExpr(e.test, true);
+        visitExpr(e.then, true);
+        if (e.else) visitExpr(e.else, true);
+        return;
+      default:
+        return;
+    }
+  }
+  const visitStmt = (s: Stmt): void => {
+    switch (s.kind) {
+      case 'block':
+        for (const inner of s.body) visitStmt(inner);
+        return;
+      case 'if':
+        visitExpr(s.test, true);
+        visitStmt(s.then);
+        for (const el of s.elifs) {
+          visitExpr(el.test, true);
+          visitStmt(el.body);
+        }
+        if (s.else) visitStmt(s.else);
+        return;
+      case 'forEach':
+        visitExpr(s.collection, true);
+        visitStmt(s.body);
+        return;
+      case 'while':
+        visitExpr(s.test, true);
+        visitStmt(s.body);
+        return;
+      case 'try':
+        visitStmt(s.body);
+        if (s.catchBody) visitStmt(s.catchBody);
+        return;
+      case 'fn':
+        visitStmt(s.body);
+        return;
+      case 'deleteFrom':
+        writeTarget(s.target);
+        return;
+      case 'update':
+        writeTarget(s.target);
+        for (const p of s.entries) visitExpr(p.value, true);
+        return;
+      case 'assign':
+        visitExpr(s.value, true);
+        return;
+      case 'expr':
+        visitExpr(s.expr, false);
+        return;
+      case 'return':
+      case 'info':
+      case 'alert':
+      case 'successMessage':
+        if (s.value) visitExpr(s.value, true);
+        return;
+      case 'openUrl':
+        for (const a of s.args) visitExpr(a, true);
+        return;
+      case 'ui':
+        for (const t of s.targets) visitExpr(t, true);
+        return;
+      case 'unknown':
+        unsafe = true;
+        return;
+      default:
+        return;
+    }
+  };
+  for (const s of script.body) visitStmt(s);
+  if (unsafe || writes.has(ownForm)) return false;
+  if (zcqlRead && writes.size > 0) return false;
+  for (const read of reads) if (writes.has(read)) return false;
+  return true;
 }
 
 /**
@@ -776,6 +984,20 @@ function emitFormHandler(
   // the pipeline runs the whole module, never one script of a merged route.
   const presuccessModule =
     kind === 'handler' && contributed.some((item) => item.server) && contributed.every((item) => !item.server || isPresuccessWorkflow(item.w));
+  // A buffer-safe presuccess body marks the module `deferEffects`: the submit
+  // pipeline holds its mail, invokeurl and other-form writes until the row is
+  // stored. A body the buffer cannot represent keeps today's pre-commit
+  // order and is counted (presuccess-effect-unbuffered), never silent.
+  const presuccessBodies = contributed.filter((item) => item.server && isPresuccessWorkflow(item.w));
+  const unsafePresuccess = presuccessModule
+    ? presuccessBodies.filter((item) => !item.w.deluge?.text || !presuccessBodyDeferrable(item.w.deluge.text, form))
+    : [];
+  const presuccessDeferrable = presuccessModule && unsafePresuccess.length === 0;
+  if (presuccessModule) {
+    for (const item of unsafePresuccess) {
+      todos.push({ construct: PRESUCCESS_EFFECT_UNBUFFERED, start: item.w.span.start, end: item.w.span.end });
+    }
+  }
   let serverFile: string | undefined;
   if (serverBody.trim()) {
     const systemWrite =
@@ -808,6 +1030,7 @@ function emitFormHandler(
       `functions/aio/${base}.mjs`,
       aioModule({
         presuccess: presuccessModule,
+        deferEffects: presuccessDeferrable,
         app,
         form,
         title: `Form handler ${first.event || first.name}`,
@@ -4186,7 +4409,7 @@ function clientWrittenFields(app: App, formName: string | undefined): Map<string
     };
     let body: unknown;
     try {
-      body = parseScript(w.deluge.text).body;
+      body = parseDeluge(w.deluge.text).body;
     } catch {
       continue;
     }
@@ -4389,6 +4612,8 @@ function aioModule(opts: {
   presuccessSpecs?: { add: string[]; edit: string[] };
   /** This module is the form's `on start` presuccess route; the submit pipeline imports it. */
   presuccess?: boolean;
+  /** The presuccess bodies are buffer-safe: the pipeline defers their non-record effects until the row write commits. */
+  deferEffects?: boolean;
   body: string;
   /** Sourced schema plan; the embedded write rules match the provisioned store. */
   schema?: SchemaPlan;
@@ -4448,7 +4673,7 @@ function aioModule(opts: {
   lines.push('The previous row is loaded on the server. Dry run uses dryRunOld and does not read a client previous row.');
   if (opts.presuccess) {
     lines.push(
-      'Creator `on start` presuccess (form properties) actions. Nothing posts this route: the submit pipeline runs this module after the access gate and before the on-validate siblings, in the submit stub and in every live module that owns the submit URL. A cancel submit here refuses the write with 422. [UNVERIFIED] Creator\'s exact placement relative to On Validate, and whether an unscoped presuccess runs on edit; this port follows the record event scope.',
+      'Creator `on start` presuccess (form properties) actions. Nothing posts this route: the submit pipeline runs this module after the access gate and before the on-validate siblings, in the submit stub and in every live module that owns the submit URL. Field sets reach on validate and the stored row; mail, invokeurl and other-form writes are held until the row is stored and dropped on any refusal (Direct to and Send Email are documented on-submission actions: https://help.zoho.com/portal/en/kb/creator/developer-guide/forms/manage-forms/articles/redirect-on-form-submission). A cancel submit here refuses the write with 422. [UNVERIFIED] Creator\'s exact placement relative to On Validate, and whether an unscoped presuccess runs on edit; this port follows the record event scope.',
     );
   }
   lines.push('Client tasks for this handler, if any, are in the matching client/handlers module.');
@@ -4537,10 +4762,20 @@ ${usesConnections ? '    zohoConnections: await zohoConnections(req, live),\n' :
   const successBody = opts.systemWrite
     ? `    if (live) {
 ${storedFill}${hasPresuccess ? `      // The form's \`on start\` presuccess actions run first, on the same
-      // record, before the on-validate siblings and the row write.
+      // record, before the on-validate siblings and the row write. A module
+      // marked deferEffects holds its non-record effects until the row commits.
       for (const spec of presuccessSpecsFor(ctx.rowId)) {
         const mod = await import(spec);
-        if (mod && mod.presuccess === true && typeof mod.handle === "function") await mod.handle(ctx);
+        if (mod && mod.presuccess === true && typeof mod.handle === "function") {
+          if (mod.deferEffects === true) {
+            runtime.beginDeferredEffects(formName);
+            try {
+              await mod.handle(ctx);
+            } finally {
+              runtime.endDeferredEffects();
+            }
+          } else await mod.handle(ctx);
+        }
       }
 ` : ''}      for (const spec of validateSpecsFor(ctx.rowId)) {
         const mod = await import(spec);
@@ -4551,7 +4786,7 @@ ${storedUnfill}      await writeLive(runtime, ctx, formName${fieldStoreWriteArg(
     let result = null;
     let warning = null;${savesSuccessSets ? '\n    const committed = live && ctx.persisted ? successSnapshot(ctx.record) : null;' : ''}
     try {
-      result = ${opts.deferSuccess ? 'live ? { deferred: "after-commit event" } : await handle(ctx)' : 'await handle(ctx)'};${savesSuccessSets ? '\n      if (committed) await saveSuccessSets(ctx, formName, committed);' : ''}
+${hasPresuccess ? '      // Presuccess effects buffered on a buffer-safe body run once the row\n      // is committed and before this module\'s body; a failure is the same\n      // post-commit warning an on-success failure is.\n      if (live) await runtime.flushDeferredEffects();\n' : ''}      result = ${opts.deferSuccess ? 'live ? { deferred: "after-commit event" } : await handle(ctx)' : 'await handle(ctx)'};${savesSuccessSets ? '\n      if (committed) await saveSuccessSets(ctx, formName, committed);' : ''}
     } catch (err) {
       if (!ctx.persisted) throw err;
       // The row is committed. A failure after it (on-success script, mail, a
@@ -4597,6 +4832,9 @@ ${storedUnfill}      await writeLive(runtime, ctx, formName${fieldStoreWriteArg(
 `
       : '';
   const refusal = `${deleteRefusal}${submitRefusal}`;
+  // A presuccess body may have queued effects; any refusal or failed write
+  // drops them. Buffering starts only on a module marked deferEffects.
+  const discardDeferred = hasPresuccess ? '    runtime.discardDeferredEffects();\n' : '';
   const shimNames = opts.systemWrite
     ? ['authorizeRead', 'authorizeWrite', 'applyInitialValues', 'compileCriteria', 'createRuntime', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'postCommitWarning', 'principalFromRequest', 'projectFields', 'projectReadable', 'replyStoreError']
     : ['authorizeRead', 'authorizeWrite', 'createRuntime', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'principalFromRequest'];
@@ -4617,6 +4855,7 @@ export const recordEvent = ${JSON.stringify(opts.recordEvent ?? null)};
 ${opts.recordEvents ? `export const recordEvents = ${JSON.stringify(opts.recordEvents)};
 ` : ''}${opts.scriptEvents ? `export const scriptEvents = ${JSON.stringify(opts.scriptEvents)};
 ` : ''}${opts.presuccess ? `export const presuccess = true;
+` : ''}${opts.deferEffects ? `export const deferEffects = true;
 ` : ''}${schemaExports}
 ${subformRowHelper}${liveHelpersBlock}export async function handle(ctx) {
   const shim = ctx.shim;
@@ -4695,7 +4934,7 @@ ${runtimeSetup}
 ${opts.systemWrite && schema ? '  // API and import inserts never saw the Slate prefill. Absent\n  // fields fall back to their Creator initial values here, so validate\n  // scripts and the row write see the same record as the form path.\n  if (!ctx.rowId && ctx.writeOp !== "update") applyInitialValues(ctx.record, fields);\n' : ''}${scriptEventGate}  try {
 ${successBody}
   } catch (err) {
-${refusal}${opts.systemWrite ? '    // The row write itself failed at the store. Map the refusal\n    // (409/422/400 naming the field) and log it; anything else stays a\n    // sanitized 500.\n    if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;\n    if (err && err.code === "C2C_STALE_WRITE") {\n      send(res, 409, { dryRun: !live, wrote: false, code: "C2C_STALE_WRITE", error: err.message });\n      return;\n    }\n' : ''}    const denied = err && err.code === "RECORD_ACCESS_DENIED";
+${discardDeferred}${refusal}${opts.systemWrite ? '    // The row write itself failed at the store. Map the refusal\n    // (409/422/400 naming the field) and log it; anything else stays a\n    // sanitized 500.\n    if (replyStoreError(res, err, { live, table: formName, wrote: false })) return;\n    if (err && err.code === "C2C_STALE_WRITE") {\n      send(res, 409, { dryRun: !live, wrote: false, code: "C2C_STALE_WRITE", error: err.message });\n      return;\n    }\n' : ''}    const denied = err && err.code === "RECORD_ACCESS_DENIED";
     send(res, denied ? 403 : 500, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, error: denied ? err.message : "request failed", slots: null, ${opts.systemWrite ? '...debugTranscript' : 'transcript: runtime.transcript'} });
   }
 }
