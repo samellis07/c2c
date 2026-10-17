@@ -297,10 +297,10 @@ application "Kitchen_Sink_Studio"
 				displayname = "Total Hours"
 				value = Hours * 2
 			)
-			Ticket
+			Pass
 			(
 				type = autonumber
-				displayname = "Ticket"
+				displayname = "Pass"
 			)
 		}
 	}
