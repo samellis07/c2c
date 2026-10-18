@@ -191,10 +191,13 @@
       "reason": "Not a Creator field type. Latitude and longitude exist only inside Address (and Added/Modified Location). No geo column is invented for this token. If a source still says geolocation, it is reported unsupported."
     }
   ],
+  "todoSteps": [],
   "humanSteps": [
     "Accept invite: accept the app invite mail",
     "Sign in once: sign in to the deployed app once",
     "Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)",
     "Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)"
-  ]
+  ],
+  "silentDrops": 0,
+  "residuals": []
 }

@@ -41,6 +41,10 @@ App: Library_System_Application
 
 - none
 
+## Residual TODO steps
+
+- none
+
 ## Hidden from end users
 
 8
@@ -60,3 +64,46 @@ App: Library_System_Application
 - Sign in once: sign in to the deployed app once
 - Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
 - Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
+
+## Not converted
+
+Silent drops: 19 (still counted; each has a guided step below)
+
+- `field-property:Book.Genre property others option` — not converted. property others option is not carried by the generated dropdown field. Varchar plus the .ds choice list. The server rejects values outside the list. A choice longer than 255 is promoted to text. A values = Form.Field target is a lookup, not a dropdown. module = users is the Users field.
+  - Step: Set property others option on Book.Genre manually in the Catalyst console/app; not converted.
+- `field-property:Book_Transaction.Member property displayformat` — not converted. property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type "foreign key" and on_delete "ON-DELETE-SET-NULL" (optional) or "ON-DELETE-CASCADE" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says "FK needs console". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).
+  - Step: Set property displayformat on Book_Transaction.Member manually in the Catalyst console/app; not converted.
+- `field-property:Book_Transaction.Member property sortorder` — not converted. property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type "foreign key" and on_delete "ON-DELETE-SET-NULL" (optional) or "ON-DELETE-CASCADE" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says "FK needs console". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).
+  - Step: Set property sortorder on Book_Transaction.Member manually in the Catalyst console/app; not converted.
+- `field-property:Book_Transaction.Book property displayformat` — not converted. property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type "foreign key" and on_delete "ON-DELETE-SET-NULL" (optional) or "ON-DELETE-CASCADE" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says "FK needs console". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).
+  - Step: Set property displayformat on Book_Transaction.Book manually in the Catalyst console/app; not converted.
+- `field-property:Book_Transaction.Book property sortorder` — not converted. property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type "foreign key" and on_delete "ON-DELETE-SET-NULL" (optional) or "ON-DELETE-CASCADE" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says "FK needs console". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).
+  - Step: Set property sortorder on Book_Transaction.Book manually in the Catalyst console/app; not converted.
+- `field-property:Staff_Members.Staff_Name property personal data` — not converted. property personal data is not carried by the generated name field. One varchar per part (prefix, first_name, last_name, suffix). Deluge sees one value; a shim joins the parts. Parts are not separate field-type rows.
+  - Step: Set property personal data on Staff_Members.Staff_Name manually in the Catalyst console/app; not converted.
+- `field-property:Staff_Members.Staff_Email property personal data` — not converted. property personal data is not carried by the generated email field. There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.
+  - Step: Set property personal data on Staff_Members.Staff_Email manually in the Catalyst console/app; not converted.
+- `field-property:Staff_Members.Phone_Number property defaultcountry` — not converted. property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
+  - Step: Set property defaultcountry on Staff_Members.Phone_Number manually in the Catalyst console/app; not converted.
+- `field-property:Staff_Members.Phone_Number property personal data` — not converted. property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
+  - Step: Set property personal data on Staff_Members.Phone_Number manually in the Catalyst console/app; not converted.
+- `report-feature:Book_Report block options` — not converted. Report Book_Report block options is not in the generated report. Add one: either emit it or record the manual step.
+  - Step: Set Book_Report block options manually in the Catalyst console/app; not converted.
+- `report-feature:Book_by_Genre block options` — not converted. Report Book_by_Genre block options is not in the generated report. Add one: either emit it or record the manual step.
+  - Step: Set Book_by_Genre block options manually in the Catalyst console/app; not converted.
+- `report-feature:All_Member_Infos block options` — not converted. Report All_Member_Infos block options is not in the generated report. Add one: either emit it or record the manual step.
+  - Step: Set All_Member_Infos block options manually in the Catalyst console/app; not converted.
+- `report-feature:All_Book_Transactions block options` — not converted. Report All_Book_Transactions block options is not in the generated report. Add one: either emit it or record the manual step.
+  - Step: Set All_Book_Transactions block options manually in the Catalyst console/app; not converted.
+- `report-feature:All_Staff_Members block options` — not converted. Report All_Staff_Members block options is not in the generated report. Add one: either emit it or record the manual step.
+  - Step: Set All_Staff_Members block options manually in the Catalyst console/app; not converted.
+- `page-element:DashBoard.Book_Report #1` — not converted. ZML element <search> Book_Report on page DashBoard is generated without its criteria. Add one: either emit the element or record the manual step.
+  - Step: Set DashBoard.Book_Report manually in the Catalyst console/app; not converted.
+- `page-element:DashBoard.Book_Report #2` — not converted. ZML element <button> Book_Report on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.
+  - Step: Set DashBoard.Book_Report manually in the Catalyst console/app; not converted.
+- `page-element:DashBoard.All_Book_Transactions #1` — not converted. ZML element <text> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.
+  - Step: Set DashBoard.All_Book_Transactions manually in the Catalyst console/app; not converted.
+- `page-element:DashBoard.All_Book_Transactions #2` — not converted. ZML element <button> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.
+  - Step: Set DashBoard.All_Book_Transactions manually in the Catalyst console/app; not converted.
+- `translation:translation Language_Settings` — not converted. The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.
+  - Step: Set translation Language_Settings manually in the Catalyst console/app; not converted.

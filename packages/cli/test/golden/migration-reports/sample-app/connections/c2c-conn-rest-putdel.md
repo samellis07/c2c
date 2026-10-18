@@ -33,6 +33,10 @@ App: c2c-conn-rest-putdel
 
 - none
 
+## Residual TODO steps
+
+- none
+
 ## Hidden from end users
 
 0
@@ -45,3 +49,9 @@ App: c2c-conn-rest-putdel
 - Sign in once: sign in to the deployed app once
 - Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
 - Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
+
+## Not converted
+
+Silent drops: 0 (still counted; each has a guided step below)
+
+- none
