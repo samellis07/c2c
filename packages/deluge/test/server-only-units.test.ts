@@ -150,7 +150,8 @@ test('a dropped client statement in a server-only unit is not a counted gap', as
     name: 'Scan',
     event: 'on load',
     form: 'Orders',
-    deluge: { text: 'input.Name = input.Name.toUpperCase();\ninfo "done";', span: Z },
+    // Keep this sample server-only: toLowerCase remains outside the browser shim surface.
+    deluge: { text: 'input.Name = input.Name.toLowerCase();\ninfo "done";', span: Z },
     properties: [],
     span: Z,
   } as Workflow;
