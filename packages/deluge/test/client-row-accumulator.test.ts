@@ -22,7 +22,7 @@ function form(name: string, fields: string[]): App['forms'][number] {
   return { name, properties: [], fields: fields.map(field), actions: [], blocks: [], span: Z };
 }
 
-function onLoad(script: string): { client: string; prefetch: string | undefined; todos: string[] } {
+function onLoad(script: string): { client: string; prefetch: string | undefined; todos: string[]; files: { path: string; source: string }[] } {
   const wf: Workflow = { name: 'on load', form: 'Orders', event: 'on load', deluge: { text: script, span: Z }, properties: [], span: Z };
   const g = generate({
     ...emptyApp('empty'),
@@ -33,7 +33,7 @@ function onLoad(script: string): { client: string; prefetch: string | undefined;
   const client = g.files.find((f) => f.path === 'client/handlers/orders/on-load.mjs');
   assert.ok(client);
   const prefetch = g.files.find((f) => f.path === 'functions/aio/orders/on-load-prefetch.mjs');
-  return { client: client.source, prefetch: prefetch?.source, todos: g.todos.map((t) => t.construct) };
+  return { client: client.source, prefetch: prefetch?.source, todos: g.todos.map((t) => t.construct), files: g.files };
 }
 
 async function load(source: string, name: string): Promise<Record<string, unknown>> {
@@ -105,7 +105,10 @@ test('a local summed from client-iterated prefetched rows is assigned on the cli
   );
 });
 
-test('a row-summed local compared with another server read stays a counted client todo', () => {
+test('a row-summed local compared with another server read becomes a server-condition call', () => {
+  // `total` is client-bound (the client iterates the rows), so the caller
+  // passes it; only the Limits read happens server-side in the emitted
+  // c2cCond_* function — no counted todo.
   const out = onLoad([
     'total = 0;',
     'for each rec in Orders[Status == "Open"] {',
@@ -113,8 +116,13 @@ test('a row-summed local compared with another server read stays a counted clien
     '}',
     'if (total > Limits[Code == "A"].Cap) { alert "over"; }',
   ].join('\n'));
-  assert.deepEqual(out.todos, ['client-condition-uses-server']);
-  assert.match(stripComments(out.client), /if \(await shim\.todo\(ctx, "client-condition-uses-server"\)\)/);
+  assert.deepEqual(out.todos, []);
+  assert.match(stripComments(out.client), /await shim\.client\.call\(ctx, "c2cCond_[0-9a-f]+", \[total\]\)\)\?\.value === true/);
+  const cond = out.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+\.mjs$/.test(f.path));
+  const endpoint = out.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path));
+  assert.ok(cond && endpoint, out.files.map((f) => f.path).join('\n'));
+  assert.match(cond.source, /async function c2cCond_[0-9a-f]+\(ctx, shim, total\)/);
+  assert.match(cond.source, /shim\.datastore\.field\(ctx, shim\.datastore\.query\(ctx, "Limits"/);
 });
 
 test('a local summed per row from a second server read stays a counted client todo', () => {

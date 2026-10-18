@@ -2605,6 +2605,140 @@ test('a read-only thisapp callee becomes an event-time client call and endpoint'
   assert.deepEqual(blocked.map((a) => a.op), ['info'], 'a failed call fails closed and discards queued actions');
 });
 
+test('a client condition needing server data compiles to a c2cCond_* call through the client-call route', async () => {
+  // Two loop elements plus a server read is past the element round-trip cap:
+  // the condition becomes a read-only server function on the existing
+  // /functions/<name>/call route instead of a counted todo.
+  const build = () =>
+    app({
+      forms: [
+        plainForm('Reservation', [plainField('Check_In', 'date'), plainField('Check_Out', 'date')]),
+        plainForm('Pods', [plainField('Pod_No')]),
+      ],
+      profiles: [ADMIN, { name: 'Guest', type: 'Users_Permissions', properties: [], modules: [], span: Z }],
+      workflows: [
+        workflow({
+          name: 'Overlap check',
+          form: 'Reservation',
+          event: 'on user input',
+          deluge: {
+            text: 'for each a in Pods[ID != 0].Pod_No { for each b in Pods[ID != 0].Pod_No { if(a == b && Reservation[ID != 0].count() > 0) { alert "overlap"; } else { alert "free"; } } }',
+            span: Z,
+          },
+        }),
+      ],
+    });
+  const g = generate(build());
+  assert.equal(g.todos.some((t) => t.construct === 'client-condition-uses-server'), false);
+  const condMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+\.mjs$/.test(f.path) && !f.path.endsWith('-call.mjs'));
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path));
+  assert.ok(condMod && callMod, g.files.map((f) => f.path).join('\n'));
+  assert.match(stripComments(condMod.source), /async function c2cCond_[0-9a-f]+\(ctx, shim, a, b\)/);
+  assert.match(stripComments(condMod.source), /return \{ value: Boolean\(await/);
+  check(condMod.source, 'cond.mjs');
+  check(callMod.source, 'cond-call.mjs');
+  const client = g.files.find((f) => f.path === 'client/handlers/reservation/on-user-input.mjs')!;
+  check(client.source, 'cond-client.mjs');
+  assert.match(stripComments(client.source), /await shim\.client\.call\(ctx, "c2cCond_[0-9a-f]+", \[a, b\]\)\)\?\.value === true/);
+  // The registry routes the dotted name to the condition module.
+  const registry = g.files.find((f) => f.path === 'functions/thisapp.mjs')!;
+  assert.match(registry.source, /"c2cCond_[0-9a-f]+": \{ call: async \(\.\.\.a\) => \(await import\("\.\/custom\/c2ccond-[0-9a-f]+\.mjs"\)\)\.call/);
+
+  // Endpoint gates: unauthenticated callers get 401; a profile with no read
+  // grant on the forms the body reads is denied; the success envelope is
+  // exactly { ok, nonce, value }.
+  const mod = (await loadTree(g, callMod.path)) as Record<string, (req: unknown, res: unknown) => unknown>;
+  const anon = await invoke(mod.default, { body: { nonce: 'n1', args: [1, 1] } });
+  assert.equal(anon.status, 401);
+  assert.equal(anon.body.ok, false);
+  const denied = await invoke(mod.default, { user: { profile: 'Guest', loginUser: 'g@t' }, body: { nonce: 'n1', args: [1, 1] } });
+  assert.equal(denied.status, 403, JSON.stringify(denied.body));
+  assert.equal(denied.body.ok, false);
+  const dry = await invoke(mod.default, { user: { profile: 'Administrator', loginUser: 'a@t' }, body: { nonce: 'n1', args: [1, 1] } });
+  assert.equal(dry.status, 200, JSON.stringify(dry.body));
+  assert.equal(dry.body.ok, true);
+  assert.equal(dry.body.nonce, 'n1');
+  assert.equal(dry.body.value, null, 'dry run never reports a truthy condition value');
+  const { datastore } = mockDatastore({});
+  const realMode = process.env.C2C_DEPLOY_MODE;
+  const realZone = process.env.C2C_APP_TIMEZONE;
+  const realStore = (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+  process.env.C2C_DEPLOY_MODE = 'live';
+  process.env.C2C_APP_TIMEZONE = 'Asia/Kolkata';
+  (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = datastore;
+  try {
+    await datastore.insert('Reservation', [{ ID: 7 }]);
+    const res = await withTree(g, callMod.path, (liveMod) =>
+      invoke(liveMod.default as (req: unknown, res: unknown) => unknown, { user: { profile: 'Administrator', loginUser: 'a@t' }, body: { nonce: 'n2', args: ['9A', '9A'] } }),
+    );
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.deepEqual(Object.keys(res.body).sort(), ['nonce', 'ok', 'value'], 'success body is exactly {ok, nonce, value}');
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.nonce, 'n2');
+    assert.deepEqual(res.body.value, { value: true });
+    const miss = await withTree(g, callMod.path, (liveMod) =>
+      invoke(liveMod.default as (req: unknown, res: unknown) => unknown, { user: { profile: 'Administrator', loginUser: 'a@t' }, body: { nonce: 'n3', args: ['9A', '7C'] } }),
+    );
+    assert.deepEqual(miss.body.value, { value: false }, 'unequal elements take the false branch');
+  } finally {
+    if (realMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+    else process.env.C2C_DEPLOY_MODE = realMode;
+    if (realZone === undefined) delete process.env.C2C_APP_TIMEZONE;
+    else process.env.C2C_APP_TIMEZONE = realZone;
+    if (realStore === undefined) delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+    else (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = realStore;
+  }
+
+  // The client branches on .value; a tampered or stale nonce fails closed and
+  // the failed call discards the handler's queued actions.
+  const clientMod = (await loadModule(client.source, 'cond-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string }[]>>;
+  const rt = createRuntime({
+    dryRun: true,
+    clientPrefetch: (path, nonce, request) => {
+      if (String(path).endsWith('/call')) {
+        assert.deepEqual(request?.args, ['9A', '9A']);
+        return { ok: true, nonce, value: { value: true } };
+      }
+      return { ok: true, nonce, slots: { c2: ['9A'], c1: ['9A'] } };
+    },
+  });
+  const hit = await clientMod.clientActions!(rt.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(hit, [{ op: 'alert', message: 'overlap' }]);
+  const stale = createRuntime({ dryRun: true, clientPrefetch: (path, nonce) => (String(path).endsWith('/call') ? { ok: true, nonce: 'old', value: { value: true } } : { ok: true, nonce, slots: { c2: ['9A'], c1: ['9A'] } }) });
+  const staleActions = await clientMod.clientActions!(stale.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(staleActions.map((a) => a.op), ['info'], 'a tampered nonce fails closed');
+  const deniedCall = createRuntime({ dryRun: true, clientPrefetch: (path, nonce) => (String(path).endsWith('/call') ? { ok: false, nonce, error: 'denied' } : { ok: true, nonce, slots: { c2: ['9A'], c1: ['9A'] } }) });
+  const deniedActions = await clientMod.clientActions!(deniedCall.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(deniedActions.map((a) => a.op), ['info'], 'a non-200 or refused call evaluates false and shows the call-failure message');
+});
+
+test('a client condition on a record element or an unreadable local stays a counted todo', () => {
+  const g = generate(
+    app({
+      forms: [
+        plainForm('Reservation', [plainField('Check_In', 'date')]),
+        plainForm('Pods', [plainField('Pod_No')]),
+      ],
+      workflows: [
+        workflow({
+          name: 'Row check',
+          form: 'Reservation',
+          event: 'on user input',
+          deluge: { text: 'for each r in Pods[ID != 0] { if(r.Pod_No == "9A" && Reservation[ID != 0].count() > 0) { alert "x"; } }', span: Z },
+        }),
+        workflow({
+          name: 'Write check',
+          form: 'Reservation',
+          event: 'on user input',
+          deluge: { text: 'x = insert into Pods [Pod_No = "1A"];\nif(x == 1) { alert "x"; }', span: Z },
+        }),
+      ],
+    }),
+  );
+  assert.equal(g.todos.filter((t) => t.construct === 'client-condition-uses-server').length >= 1, true, 'record-element and write conditions keep their counted todo');
+  assert.equal(g.files.some((f) => /c2ccond/.test(f.path)), false, 'no condition endpoint is emitted for a refused condition');
+});
+
 test('a callee that mutates a parameter list or map is not a read-only client call', () => {
   const generateWith = (body: string) =>
     generate(

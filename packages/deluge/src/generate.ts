@@ -34,7 +34,7 @@ import { applyFillLock, reportLock, type FillLock, type StaleFill } from './fill
 import { afterCommitModule, ASYNC_ON_SUCCESS_WARNING, assertAsyncSuccessDeferrable, deadLetterModule, EVENT_FUNCTION_MODULE, eventSweeperModule, successSpecs, type AsyncCandidate } from './events.js';
 import { EVENT_SWEEPER_MODULE, JOB_LIVE_IMPORTS, jobLiveHelpers, planSchedules, schedulingConfig, sweeperModule, SWEEPER_MODULE, type SchedulePlan } from './schedules.js';
 import { unsupportedClientShims } from './client-shim.js';
-import { emittedReadOnly, emittedThisappCalls, jsIdent, reportCriteria, translate, type AlertEventClass, type ClientGap, type CriteriaFunction, type StatementCover, type TodoItem, type TranslateOptions, type TranslateStats } from './translate.js';
+import { emittedReadOnly, emittedThisappCalls, jsIdent, reportCriteria, translate, type AlertEventClass, type ClientGap, type CriteriaFunction, type ServerConditionDef, type StatementCover, type TodoItem, type TranslateOptions, type TranslateStats } from './translate.js';
 import { normType } from './types.js';
 import { mutatesParameters } from './param-mutation.js';
 import { withoutDecimalAudit } from './audit.js';
@@ -662,9 +662,10 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
     group.push(w);
     handlerGroups.set(key, group);
   }
+  const serverConditions: ServerConditionDef[] = [];
   const emitHandlers = (w: Workflow): void => {
     const group = handlerGroups.get(`${w.form || 'form'}${eventKind(w.event)}`);
-    if (group && group[0] === w) emitFormHandler(app, group, put, stats, todos, statementCoverage, alertDiagnostics, warnings, clientCalls.names, calledFunctions, options?.schema, !!options?.asyncOnSuccess, recordHandler, coverage, files, successServerForms, submitFixups);
+    if (group && group[0] === w) emitFormHandler(app, group, put, stats, todos, statementCoverage, alertDiagnostics, warnings, clientCalls.names, calledFunctions, options?.schema, !!options?.asyncOnSuccess, recordHandler, coverage, files, successServerForms, submitFixups, serverConditions);
   };
   const thisappEntries: ThisappEntry[] = [];
   const warnings: GenerateWarning[] = [];
@@ -752,6 +753,56 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
       `functions/custom/${name}-call.mjs`,
       functionCallModule({ app, name: fn.name, signature: fn.signature, params: fnParams(fn.signature), reads: readForms, schema: options?.schema }),
     );
+  }
+  // Server conditions a client handler was compiled into: read-only
+  // `c2cCond_*` functions reached through the same client-call route as a
+  // read-only `thisapp` callee — the catalog's dispatch and authorization are
+  // reused, and the runtime's caller-scoped datastore applies as usual.
+  const emittedCondition = new Set<string>();
+  for (const cond of serverConditions) {
+    if (!emittedCondition.add(cond.name)) continue;
+    const condReads = emittedReadForms(cond.body);
+    if (condReads === null) continue;
+    // A replayed binding may call a proved read-only `thisapp` function: the
+    // endpoint authorizes the callee's transitive form reads too, exactly like
+    // the catalog's own fixpoint.
+    const readSet = new Set(condReads);
+    let unscoped = false;
+    for (const path of emittedThisappCalls(cond.body) ?? []) {
+      const joined = path.join('.');
+      const calleeReads = clientCalls.reads.get(joined) ?? clientCalls.reads.get(joined.toLowerCase());
+      if (!calleeReads) {
+        unscoped = true;
+        break;
+      }
+      for (const f of calleeReads) readSet.add(f);
+    }
+    if (unscoped) continue;
+    const name = slug(cond.name);
+    const readForms = [...readSet].sort(compareEnUs);
+    const grants = callAccess?.profiles ?? {};
+    const partial = readForms
+      .filter((form) =>
+        Object.keys(grants)
+          .sort(compareEnUs)
+          .some((profile) => {
+            const grant = grants[profile][form];
+            return !!grant && grant.read !== false && (grant.ownerScope === 'view' || !!grant.recordFilter);
+          }),
+      );
+    if (partial.length) {
+      warnings.push({
+        construct: 'client-call-caller-scoped-read',
+        name: cond.name,
+        note: `The ${name}-call endpoint reads ${partial.join(', ')} as the caller. A profile whose grant on those forms is owner- or criteria-scoped gets counts and lookups over only the rows it can see, so the condition's result can differ from Creator. Re-check the same rule server-side at submit.`,
+      });
+    }
+    put(`functions/custom/${name}.mjs`, conditionFunctionModule({ def: cond }));
+    put(
+      `functions/custom/${name}-call.mjs`,
+      functionCallModule({ app, name: cond.name, params: cond.params.map((p) => p.field), reads: readForms, schema: options?.schema, condition: true }),
+    );
+    thisappEntries.push({ name: cond.name, spec: `./custom/${name}.mjs`, exported: 'call', params: cond.params.map((p) => p.field), recordParams: {}, rowForm: '' });
   }
   if (asyncSuccess) {
     put('functions/c2c-deadletter.mjs', deadLetterModule());
@@ -954,6 +1005,7 @@ function emitFormHandler(
   files: readonly GeneratedFile[] = [],
   successServerForms?: Map<string, SubmitOwnership>,
   submitFixups?: SubmitFixup[],
+  serverConditions?: ServerConditionDef[],
 ): void {
   const first = group[0]!;
   const form = first.form || 'form';
@@ -981,6 +1033,7 @@ function emitFormHandler(
     const todosBefore = todos.length;
     const translated = w.deluge ? translateInApp(app, w.deluge.text, { ...workflowScriptOptions(app, w), clientCallFunctions: [...clientCallFunctions], slotStart: slot }) : emptyTranslate();
     slot = translated.nextSlot || slot;
+    if (translated.serverConditions?.length) serverConditions?.push(...translated.serverConditions);
     addStats(stats, translated.stats);
     todos.push(...shift(translated.todos, w.deluge));
     statementCoverage.push(...coverShift(translated.coverage, w.deluge, `workflow ${w.name || w.form || 'workflow'} (${w.event})`));
@@ -2103,7 +2156,7 @@ function emitFunction(
   }
 }
 
-function emptyTranslate(): { server: string; client: string; prefetch: string; usesElement?: boolean; nextSlot: number; stats: TranslateStats; todos: TodoItem[]; clientGaps: ClientGap[]; coverage: StatementCover[] } {
+function emptyTranslate(): { server: string; client: string; prefetch: string; usesElement?: boolean; nextSlot: number; stats: TranslateStats; todos: TodoItem[]; clientGaps: ClientGap[]; coverage: StatementCover[]; serverConditions?: ServerConditionDef[] } {
   return { server: '', client: '', prefetch: '', nextSlot: 0, stats: EMPTY_STATS(), todos: [], clientGaps: [], coverage: [] };
 }
 
@@ -2581,6 +2634,9 @@ export function workflowScriptOptions(app: App, w: Workflow): TranslateOptions {
   return {
     alertEvent: alertEventClass(w.event),
     prefetchBound: subformEventField(w.event) ? ['row'] : [],
+    // Server-condition functions are named for the workflow they came from:
+    // form link name + script name, with the line number inside the script.
+    conditionContext: { form: w.form ?? '', script: w.name || w.event || '' },
     ...workflowRowOptions(app, w),
   };
 }
@@ -5869,6 +5925,8 @@ export function functionCallModule(opts: {
   reads: string[];
   writes?: { form: string; op: 'insert' | 'update' | 'delete' }[];
   schema?: SchemaPlan;
+  /** A compiled `c2cCond_*` server condition: same route and auth, and the success body is exactly `{ok, nonce, value}`. */
+  condition?: boolean;
 }): string {
   const path = `/functions/${slug(opts.name)}/call`;
   const pathArgs = JSON.stringify(opts.name.split('.'));
@@ -5877,7 +5935,7 @@ export function functionCallModule(opts: {
   const needsRows = readForms.length > 0 || writeForms.length > 0;
   return `${banner([
     `Client call for ${opts.name}`,
-    opts.signature ? `Signature (verbatim): ${opts.signature.replace(/\*\//g, '* /')}` : 'No signature on the IR node.',
+    opts.signature ? `Signature (verbatim): ${opts.signature.replace(/\*\//g, '* /')}` : opts.condition ? 'A client condition compiled into a read-only server function.' : 'No signature on the IR node.',
     `Advanced I/O POST ${path}`,
     writeForms.length ? 'Runs one translated app function from a generated ExecuteFunction button.' : 'Runs one app function the generator proved read-only from its emitted server body.',
     'body.args are plain JSON data, one per declared parameter, at most 64 KB encoded. Branded, non-plain, or over-deep values are refused.',
@@ -5967,11 +6025,40 @@ export default async function handler(req, res) {
     });
     const value = await ctx.shim.thisapp.call(ctx, ${pathArgs}, requestArgs(req, ${opts.params.length}));
     ${writeForms.length ? 'await ctx.shim.datastore.flush(ctx);' : ''}
-    send(res, 200, { ok: true, dryRun: !live, nonce: ctx.formNonce ?? null, value: live ? (value ?? null) : null, ...(live ? {} : { transcript: runtime.transcript }) });
+    ${opts.condition
+      ? 'send(res, 200, { ok: true, nonce: ctx.formNonce ?? null, value: live ? (value ?? null) : null });'
+      : 'send(res, 200, { ok: true, dryRun: !live, nonce: ctx.formNonce ?? null, value: live ? (value ?? null) : null, ...(live ? {} : { transcript: runtime.transcript }) });'}
   } catch (err) {
     const denied = err && (err.code === "RECORD_ACCESS_DENIED" || err.name === "RecordAccessError");
     send(res, denied ? 403 : 500, { ok: false, dryRun: !live, error: denied ? err.message : "request failed" });
   }
+}
+`;
+}
+
+/**
+ * The callee module for a compiled server condition: the emitted read-only
+ * `async function` plus a `call` export matching the thisapp registry shape
+ * (`call(ctx, ...args)`), so `ctx.shim.thisapp.call` dispatches to it exactly
+ * like a read-only app function. Not an HTTP route — the generated
+ * `<slug>-call.mjs` endpoint is the only way in.
+ */
+function conditionFunctionModule(opts: { def: ServerConditionDef }): string {
+  return `${banner([
+    `Server condition ${opts.def.name}`,
+    'A client condition the browser cannot evaluate, compiled to a read-only',
+    'server function. Reachable only through the generated client-call',
+    `endpoint (POST /functions/${slug(opts.def.name)}/call); routes.json has no`,
+    'path for it. Parameters are the bound field values the caller sent.',
+  ])}${opts.def.body}
+
+export async function call(ctx, ...args) {
+  return ${opts.def.name}(ctx, ctx.shim, ...args);
+}
+
+export default async function handler(req, res) {
+  res.writeHead(404, { "Content-Type": "application/json" });
+  res.end('{"error":"no such endpoint"}');
 }
 `;
 }
