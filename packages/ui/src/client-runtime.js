@@ -314,19 +314,125 @@ function validDate(value) {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
-/** A real calendar date in either the ISO or the `dd-MMM-yyyy` app format. */
-function clientDateValid(value) {
+/**
+ * A typed date-control value: ISO, `dd-MMM-yyyy`, or exactly the app `date
+ * format` (the inverse of clientFormat, so what the control is filled with
+ * reads back; a two-digit year does not). Anything else is undefined; no
+ * free-form parse.
+ */
+function parseControlDate(value) {
   const parts = parseClientDate(value);
+  if (parts || typeof value !== 'string') return parts;
+  const pattern = datePlaceholder();
+  const order = [];
+  let source = '';
+  let rest = pattern;
+  while (rest) {
+    const token = /^(yyyy|yy|MMMM|MMM|MM|dd|d)/.exec(rest);
+    if (token) {
+      order.push(token[1]);
+      source += /^MMM/.test(token[1]) ? '([A-Za-z]{3})' : token[1] === 'yyyy' ? '(\\d{4})' : token[1] === 'd' ? '(\\d{1,2})' : '(\\d{2})';
+      rest = rest.slice(token[1].length);
+    } else {
+      source += rest[0].replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&');
+      rest = rest.slice(1);
+    }
+  }
+  const m = new RegExp(`^${source}$`).exec(value.trim());
+  if (!m) return undefined;
+  const out = {};
+  order.forEach((token, i) => {
+    const text = m[i + 1];
+    if (token === 'yyyy') out.y = Number(text);
+    else if (token === 'yy') out.y = NaN; // a two-digit year has no century to read back
+    else if (token === 'MMMM' || token === 'MMM') out.m = MONTHS.findIndex((x) => x.toLowerCase() === text.toLowerCase()) + 1;
+    else if (token === 'MM') out.m = Number(text);
+    else out.d = Number(text);
+  });
+  if (!out.y || !out.m || !out.d) return undefined;
+  return { y: out.y, m: out.m, d: out.d, hh: 0, mm: 0, ss: 0 };
+}
+
+/** A real calendar date in a form the date control accepts (parseControlDate). */
+function clientDateValid(value) {
+  const parts = parseControlDate(value);
   if (!parts) return false;
   const date = new Date(Date.UTC(parts.y, parts.m - 1, parts.d));
   return date.getUTCFullYear() === parts.y && date.getUTCMonth() === parts.m - 1 && date.getUTCDate() === parts.d;
 }
 
-/** The app `date format` setting (dd-MMM-yyyy), used as the date placeholder. */
+/** The app model: the shipped bundle's `model`, else the one boot() was given. */
+let bootedModel = null;
+function appModelOf() {
+  return (typeof model !== 'undefined' && model) || bootedModel;
+}
+
+/** The app `date format` setting (dd-MMM-yyyy), used as the date placeholder and for date display. */
 function datePlaceholder() {
-  const fromModel = typeof model !== 'undefined' && model && typeof model.dateFormat === 'string' ? model.dateFormat : '';
+  const shipped = appModelOf();
+  const fromModel = shipped && typeof shipped.dateFormat === 'string' ? shipped.dateFormat : '';
   const fromConfig = typeof globalThis.C2C_DATE_FORMAT === 'string' ? globalThis.C2C_DATE_FORMAT : '';
   return fromModel || fromConfig || 'dd-MMM-yyyy';
+}
+
+/** The app `time format` setting ("24-hr" or "12-hr"); unset keeps the stored 24-hour clock. */
+function appTimeFormat() {
+  const shipped = appModelOf();
+  const fromModel = shipped && typeof shipped.timeFormat === 'string' ? shipped.timeFormat : '';
+  const fromConfig = typeof globalThis.C2C_TIME_FORMAT === 'string' ? globalThis.C2C_TIME_FORMAT : '';
+  return fromModel || fromConfig || '24-hr';
+}
+
+/**
+ * A date or date-time value as Creator shows it: the app date format, and for
+ * a date-time the app clock (hh:mm:ss AM/PM for "12-hr", HH:mm:ss otherwise).
+ * A date is a calendar date and is never moved through a time zone. A
+ * date-time with an explicit offset or Z is an instant, shown in the app time
+ * zone; one without is already app wall time. Unparsable text stays as given.
+ */
+export function displayDateValue(value, kind) {
+  if (value == null) return '';
+  if (typeof value === 'string' && value.trim() === '') return value;
+  const pattern = datePlaceholder();
+  if (kind === 'date') {
+    const parts = parseClientDate(typeof value === 'string' ? value.trim().replace(/[T\s].*$/, '') : value);
+    return parts ? clientFormat(parts, pattern) : String(value);
+  }
+  let parts = parseClientDate(value);
+  if (!parts && typeof value === 'string' && /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value.trim())) {
+    const instant = new Date(value.trim());
+    try {
+      if (!Number.isNaN(instant.getTime())) parts = clientPartsInZone(instant, clientAppZone());
+    } catch {
+      parts = undefined;
+    }
+  }
+  if (!parts) return typeof value === 'string' ? value : clientDateText(value);
+  const pad = (n) => String(n).padStart(2, '0');
+  const clock = /^12/.test(appTimeFormat())
+    ? `${pad(((parts.hh || 0) % 12) || 12)}:${pad(parts.mm || 0)}:${pad(parts.ss || 0)} ${(parts.hh || 0) < 12 ? 'AM' : 'PM'}`
+    : `${pad(parts.hh || 0)}:${pad(parts.mm || 0)}:${pad(parts.ss || 0)}`;
+  return `${clientFormat(parts, pattern)} ${clock}`;
+}
+
+/** The date kind of a report field: its column flag, else its form field's date or date-time widget. */
+function reportDateKind(report, fieldName) {
+  if (!report || !fieldName) return undefined;
+  const column = (report.columns || []).find((item) => item.field === fieldName);
+  if (column && column.date) return column.date;
+  const shipped = appModelOf();
+  const forms = shipped && Array.isArray(shipped.forms) ? shipped.forms : [];
+  const form = forms.find((item) => item.name === report.form);
+  const field = form && (form.fields || []).find((item) => item.name === fieldName);
+  return field && (field.widget === 'date' || field.widget === 'datetime') ? field.widget : undefined;
+}
+
+/** A report cell's text: a date or date-time field in the app format, anything else as stored. */
+function reportCellText(report, row, fieldName) {
+  const raw = row && fieldName && row[fieldName] != null ? row[fieldName] : null;
+  if (raw == null) return '';
+  const kind = reportDateKind(report, fieldName);
+  return kind ? displayDateValue(raw, kind) : String(raw);
 }
 
 const CURRENCY_SYMBOLS = {
@@ -613,14 +719,14 @@ export function boardLanes(report, rows) {
 }
 
 /** A board card's phone fields: label and value of each phone column, shown only on a phone. */
-function boardPhoneFields(doc, phone, row) {
+function boardPhoneFields(doc, phone, row, report) {
   const fields = doc.createElement('dl');
   fields.setAttribute('data-phone-fields', '');
   for (const column of phone) {
     const term = doc.createElement('dt');
     term.textContent = column.label || column.field;
     const value = doc.createElement('dd');
-    value.textContent = cellText(row, column.field);
+    value.textContent = reportCellText(report, row, column.field);
     fields.appendChild(term);
     fields.appendChild(value);
   }
@@ -635,19 +741,21 @@ function fillBoard(report, board, rows) {
     const box = doc.createElement('div');
     box.setAttribute('data-lane', lane.key);
     const head = doc.createElement('h3');
-    head.textContent = `${lane.key || '(none)'} (${lane.rows.length})`;
+    const laneKind = report.view === 'kanban' ? reportDateKind(report, report.groupField) : 'date';
+    const laneText = laneKind ? displayDateValue(lane.key, laneKind) : lane.key;
+    head.textContent = `${laneText || '(none)'} (${lane.rows.length})`;
     box.appendChild(head);
     const list = doc.createElement('ul');
     for (const row of lane.rows) {
       const item = doc.createElement('li');
-      const title = cellText(row, report.titleField);
+      const title = reportCellText(report, row, report.titleField);
       if (report.view === 'kanban') item.textContent = title;
       else {
-        const end = cellText(row, report.endField);
-        const start = cellText(row, report.startField);
+        const end = reportCellText(report, row, report.endField);
+        const start = reportCellText(report, row, report.startField);
         item.textContent = end ? `${title} — ${start} to ${end}` : `${title} — ${start}`;
       }
-      if (phone.length) item.appendChild(boardPhoneFields(doc, phone, row));
+      if (phone.length) item.appendChild(boardPhoneFields(doc, phone, row, report));
       list.appendChild(item);
     }
     box.appendChild(list);
@@ -1850,7 +1958,7 @@ export function renderReportRows(report, rows) {
             // `column header` custom action: a per-record button, not a value.
             return `<td${head}${primary}${numeric}${style}>${actionButtonHtml(report, column.action, column.label || column.field, source)}</td>`;
           }
-          const text = column.multiValue ? multiValueItems(source[column.field]).join(', ') : source[column.field] != null ? String(source[column.field]) : '';
+          const text = column.multiValue ? multiValueItems(source[column.field]).join(', ') : reportCellText(report, source, column.field);
           if (report.detail && id && index === 0) {
             return `<td${head}${primary}${numeric}${style}><a href="#/report/${encodeURIComponent(report.name)}/row/${encodeURIComponent(id)}" data-row-link="">${escapeHtml(text)}</a></td>`;
           }
@@ -2186,7 +2294,12 @@ function fillFormValues(formEl, form, record) {
       continue;
     }
     // A multi-value cell is stored as list text (["No"]): select each choice it holds.
-    writeFieldValue(formEl, field.name, field.widget === 'multiselect' ? multiValueItems(value) : value);
+    // A stored ISO date fills the text control in the app date format it accepts.
+    // A format that cannot read back (a two-digit year) keeps the stored ISO.
+    const shownDate = field.widget === 'date' && typeof value === 'string' && validDate(value.trim()) ? displayDateValue(value, 'date') : undefined;
+    const roundTrips = shownDate !== undefined && clientDateValid(shownDate) && isoOfParts(parseControlDate(shownDate)) === value.trim();
+    const shown = field.widget === 'multiselect' ? multiValueItems(value) : roundTrips ? shownDate : value;
+    writeFieldValue(formEl, field.name, shown);
   }
 }
 
@@ -2540,6 +2653,11 @@ function parseClientDate(value) {
   m = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(text);
   if (m) return { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]), hh: Number(m[4] ?? 0), mm: Number(m[5] ?? 0), ss: Number(m[6] ?? 0) };
   return undefined;
+}
+
+/** yyyy-MM-dd of a parsed date. */
+function isoOfParts(parts) {
+  return `${parts.y}-${String(parts.m).padStart(2, '0')}-${String(parts.d).padStart(2, '0')}`;
 }
 
 function dateKey(parts) {
@@ -5164,10 +5282,9 @@ export async function submitRecord(formEl, form, upload) {
         field.widget === 'datetime' ||
         field.widget === 'time');
     let out = value;
-    // The text control takes the app format (dd-MMM-yyyy); the store takes ISO.
+    // The text control takes the app date format; the store takes ISO.
     if (!blankTyped && field.widget === 'date' && typeof out === 'string' && !validDate(out.trim()) && clientDateValid(out.trim())) {
-      const parts = parseClientDate(out.trim());
-      out = `${parts.y}-${String(parts.m).padStart(2, '0')}-${String(parts.d).padStart(2, '0')}`;
+      out = isoOfParts(parseControlDate(out.trim()));
     }
     // A whole number posts as a JS number: server scripts add and compare it
     // (input.Qty + rec.Stock), and "5" + 100 is "5100". Digits past 2^53 stay
@@ -5923,6 +6040,7 @@ function mountSmoke(appModel, main, view) {
 export function boot(appModel, doc) {
   const documentRef = doc || (typeof document !== 'undefined' ? document : null);
   if (!documentRef || !appModel) return;
+  bootedModel = appModel;
   const view = documentRef.defaultView || globalThis;
   const main = documentRef.getElementById('main');
   const bulkSelections = new Map();
@@ -6774,6 +6892,7 @@ export function boot(appModel, doc) {
       }
       return Object.values(value).map((item) => summaryValue(item)).filter(Boolean).sort().join(', ');
     }
+    if (field && (field.widget === 'date' || field.widget === 'datetime')) return displayDateValue(value, field.widget);
     return String(value);
   }
 

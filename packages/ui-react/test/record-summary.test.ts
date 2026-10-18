@@ -37,6 +37,8 @@ function compile(out: string): void {
 
 const form = { name: 'F', label: 'Form', layout: 'one', fields: [
   { name: 'Name', label: 'Name', widget: 'text', required: false, readonly: false, generated: true },
+  { name: 'Start_Date', label: 'Start Date', widget: 'date', required: false, readonly: false, generated: true },
+  { name: 'Checked_Out', label: 'Checked Out', widget: 'datetime', required: false, readonly: false, generated: true },
   { name: 'Lines', label: 'Lines', widget: 'subform', required: false, readonly: false, generated: true, subfields: [{ name: 'Description', label: 'Description', widget: 'text', required: false, readonly: false, generated: true }] },
 ], recordEndpoint: '/forms/F/record', submitEndpoint: '/forms/F/submit', buttons: { add: [], edit: [] } } as unknown as FormSpec;
 
@@ -61,7 +63,7 @@ test('RecordSummary handles 403, 404, and renders only declared fields', { skip:
   const root = createRoot(container);
   const paint = async (status: number, body: Record<string, unknown>) => {
     const api = { post: async () => ({ ok: status === 200, status, body }) };
-    const env = { view, doc: view.document, spec: { name: 'App', spec: 1, theme: {}, nav: [], forms: {}, reports: {} }, api };
+    const env = { view, doc: view.document, spec: { name: 'App', spec: 1, theme: {}, dateFormat: 'dd-MMM-yyyy', timeFormat: '24-hr', nav: [], forms: {}, reports: {} }, api };
     await React.act(async () => { root.render(React.createElement(EnvContext.Provider, { value: env }, React.createElement(RecordSummary, { form, rowId: '1' }))); });
     await React.act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
   };
@@ -70,8 +72,10 @@ test('RecordSummary handles 403, 404, and renders only declared fields', { skip:
     assert.match(container.textContent ?? '', /This record is not available/);
     await paint(404, {});
     assert.match(container.textContent ?? '', /No record is available/);
-    await paint(200, { record: { Name: 'Visible', Lines: [{ Description: 'Child', CREATORID: 'secret-id', Hidden: 'secret-value' }] } });
+    await paint(200, { record: { Name: 'Visible', Start_Date: '2026-10-17', Checked_Out: '2026-10-17 14:05:00', Lines: [{ Description: 'Child', CREATORID: 'secret-id', Hidden: 'secret-value' }] } });
     assert.match(container.textContent ?? '', /Visible.*Child/s);
+    assert.match(container.textContent ?? '', /Start Date17-Oct-2026.*Checked Out17-Oct-2026 14:05:00/s, 'dates show in the app date format and clock');
+    assert.doesNotMatch(container.textContent ?? '', /2026-10-17/);
     assert.doesNotMatch(container.textContent ?? '', /secret-id|secret-value|CREATORID|Hidden/);
   } finally { root.unmount(); }
 });

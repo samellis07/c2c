@@ -84,15 +84,15 @@ test('library: each criterion reports what the current bundle does', async () =>
     'mobile-web': 'PASS',
     'offline-message': 'FAIL',
     accessibility: 'FAIL',
-    'locale-formats': 'FAIL',
+    'locale-formats': 'PASS',
   });
   assert.equal(r.status, 'FAIL');
   for (const c of r.criteria) for (const k of c.checks) assert.ok(k.evidence.length > 20, `${c.id}/${k.id} has no evidence`);
   const all = r.criteria.flatMap((c) => c.checks);
-  // The measured gaps: shipped dates paint as stored, the time format is not read.
-  assert.equal(byId(all, 'report-date-display').status, 'FAIL');
+  // Dates paint in the app format and the shipped time format is measured.
+  assert.equal(byId(all, 'report-date-display').status, 'PASS');
   assert.match(byId(all, 'report-date-display').evidence, /17-Oct-2026/);
-  assert.equal(byId(all, 'time-format').status, 'GAP');
+  assert.equal(byId(all, 'time-format').status, 'PASS');
   assert.equal(byId(all, 'time-zone').status, 'PASS');
   assert.equal(byId(all, 'date-format').status, 'PASS');
   // States-gate rows carry the issue that owns them.

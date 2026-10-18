@@ -27,7 +27,7 @@ import { EmptyState } from '../arc/components/empty-state/empty-state';
 import { FilterToolbar } from '../arc/components/filter-toolbar/filter-toolbar';
 import { Pagination } from '../arc/components/pagination/pagination';
 import { SortableDataTable, type DataColumn, type SortState } from '../arc/components/sortable-data-table/sortable-data-table';
-import type { FormSpec, ReportSpec } from '../types';
+import type { AppSpec, FormSpec, ReportSpec } from '../types';
 import { useEnv } from '../runtime/env';
 import { Slot, useCustomization } from '../runtime/extend';
 import { actionNavHref, hrefFor, navNeedsRow } from '../runtime/router';
@@ -35,6 +35,8 @@ import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreen
 import { matchCriteria } from './criteria';
 import { multiValueItems } from '../form/value';
 import { isSafeStyleProperty, isSafeStyleValue, STYLE_TEXT_MAX } from '../style-allowlist';
+import { displayDateValue, type DateKind } from '../form/dates';
+import type { AppWindow } from '../runtime/api';
 
 type Row = Record<string, unknown>;
 type Load = { state: 'loading' } | { state: 'error'; status: number } | { state: 'ready'; rows: Row[]; notice?: string };
@@ -81,6 +83,22 @@ export function formatValue(value: unknown): string {
   return String(value);
 }
 
+/** The date kind of a report field: its column flag, else its form field's date or date-time widget. */
+function dateKindOf(report: ReportSpec, spec: AppSpec, field: string): DateKind | undefined {
+  const column = report.columns.find((c) => c.field === field);
+  if (column?.date) return column.date;
+  const widget = report.form ? spec.forms[report.form]?.fields.find((f) => f.name === field)?.widget : undefined;
+  return widget === 'date' || widget === 'datetime' ? widget : undefined;
+}
+
+/** A report field's display text: a date or date-time in the app date format and clock, anything else via formatValue. */
+export function reportFieldText(report: ReportSpec, spec: AppSpec, view: AppWindow | undefined, field: string, value: unknown): string {
+  const kind = dateKindOf(report, spec, field);
+  const zone = view && typeof view.C2C_APP_TIMEZONE === 'string' ? view.C2C_APP_TIMEZONE : undefined;
+  const text = kind ? displayDateValue(value, kind, { dateFormat: spec.dateFormat, timeFormat: spec.timeFormat, timeZone: zone }) : null;
+  return text ?? formatValue(value);
+}
+
 /** The query the report endpoint answers: the Creator sort (or the header sort), search text and named filter. */
 export function buildQuery(report: ReportSpec, opts: { page: number; q: string; filter: string; sort: SortState | null }): Record<string, unknown> {
   const sort = opts.sort
@@ -90,12 +108,12 @@ export function buildQuery(report: ReportSpec, opts: { page: number; q: string; 
 }
 
 /** Group rows in first-seen order, like the export's lanes. Keys are display text; '' is the empty group. */
-export function groupRows(rows: Row[], field: string): { key: string; rows: Row[] }[] {
+export function groupRows(rows: Row[], field: string, text: (value: unknown) => string = formatValue): { key: string; rows: Row[] }[] {
   const lanes: { key: string; rows: Row[] }[] = [];
   const byKey = new Map<string, { key: string; rows: Row[] }>();
   for (const row of rows) {
-    const text = formatValue(row[field]);
-    const key = text === '–' ? '' : text;
+    const shown = text(row[field]);
+    const key = shown === '–' ? '' : shown;
     let lane = byKey.get(key);
     if (!lane) {
       lane = { key, rows: [] };
@@ -213,6 +231,7 @@ function ViewStub({ report }: { report: ReportSpec }) {
 
 function ReportList({ report }: { report: ReportSpec }) {
   const { api, spec, view } = useEnv();
+  const fieldText = (field: string, value: unknown) => reportFieldText(report, spec, view, field, value);
   const custom = useCustomization();
   const own = custom.reports?.[report.name];
   const [page, setPage] = useState(0);
@@ -373,7 +392,7 @@ function ReportList({ report }: { report: ReportSpec }) {
         );
       }
       const paint = rowStyles(report, row).get(index);
-      const text = own?.cells?.[column.field]?.(value, row) ?? formatValue(column.multiValue ? multiValueItems(value) : value);
+      const text = own?.cells?.[column.field]?.(value, row) ?? (column.multiValue ? formatValue(multiValueItems(value)) : fieldText(column.field, value));
       if (report.detail && index === 0 && row.ROWID !== undefined && row.ROWID !== '') {
         return (
           <a href={hrefFor('report', report.name, 'row', String(row.ROWID))} data-row-link="">
@@ -477,7 +496,7 @@ function ReportList({ report }: { report: ReportSpec }) {
   const named = report.filters.map((f) => f.label).filter((label): label is string => !!label);
   // A field-only filter has no criteria to offer; name it instead of dropping it silently.
   const groupField = report.groupBy[0]?.field;
-  const groups = groupField ? groupRows(shown, groupField) : null;
+  const groups = groupField ? groupRows(shown, groupField, (value) => fieldText(groupField, value)) : null;
   const showPages = load.state === 'ready' && (page > 0 || live.length >= report.pageSize);
   const headerActions = report.customActions.filter((a) => a.header === true && !(a.navigate && navNeedsRow(a.navigate)));
 
@@ -612,7 +631,8 @@ function groupLabel(key: string): string {
 
 /** One record through the form's record endpoint: labelled values, the edit opener, and the way back. */
 function RecordDetail({ report, rowId }: { report: ReportSpec; rowId: string }) {
-  const { api } = useEnv();
+  const { api, spec, view } = useEnv();
+  const fieldText = (field: string, value: unknown) => reportFieldText(report, spec, view, field, value);
   const custom = useCustomization();
   const own = custom.reports?.[report.name];
   const [detail, setDetail] = useState<{ state: 'loading' } | { state: 'error'; status: number } | { state: 'ready'; record: Row }>({ state: 'loading' });
@@ -641,7 +661,7 @@ function RecordDetail({ report, rowId }: { report: ReportSpec; rowId: string }) 
   }, [api, deny, report.recordEndpoint, rowId, attempt]);
 
   const firstValue = report.columns.find((c) => !c.action)?.field ?? 'ROWID';
-  const title = detail.state === 'ready' ? formatValue(detail.record[report.titleField ?? firstValue]) : rowId;
+  const title = detail.state === 'ready' ? fieldText(report.titleField ?? firstValue, detail.record[report.titleField ?? firstValue]) : rowId;
   return (
     <section className="c2c-card" data-report={report.name} data-view={report.view} data-row={rowId}>
       <h1>{report.label}</h1>
@@ -678,7 +698,7 @@ function RecordDetail({ report, rowId }: { report: ReportSpec; rowId: string }) 
                     {block.fields.map((field) => (
                       <div key={field.field}>
                         <dt>{field.label}</dt>
-                        <dd>{own?.cells?.[field.field]?.(detail.record[field.field], detail.record) ?? formatValue(detail.record[field.field])}</dd>
+                        <dd>{own?.cells?.[field.field]?.(detail.record[field.field], detail.record) ?? fieldText(field.field, detail.record[field.field])}</dd>
                       </div>
                     ))}
                   </dl>
@@ -692,7 +712,7 @@ function RecordDetail({ report, rowId }: { report: ReportSpec; rowId: string }) 
                 .map((column) => (
                   <div key={column.field}>
                     <dt>{column.label}</dt>
-                    <dd>{own?.cells?.[column.field]?.(detail.record[column.field], detail.record) ?? formatValue(column.multiValue ? multiValueItems(detail.record[column.field]) : detail.record[column.field])}</dd>
+                    <dd>{own?.cells?.[column.field]?.(detail.record[column.field], detail.record) ?? (column.multiValue ? formatValue(multiValueItems(detail.record[column.field])) : fieldText(column.field, detail.record[column.field]))}</dd>
                   </div>
                 ))}
             </dl>

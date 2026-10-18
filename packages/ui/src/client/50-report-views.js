@@ -36,11 +36,13 @@ function reportOf(name) {
   return null;
 }
 
-function viewCell(row, field) {
+/** A cell's text; with its report, a date or date-time field shows in the app date format and clock. */
+function viewCell(row, field, report) {
   if (!row || field == null) return '';
   const value = row[field];
   if (value == null || typeof value === 'object') return '';
-  return String(value);
+  const kind = report ? reportDateKind(report, field) : undefined;
+  return kind ? displayDateValue(value, kind) : String(value);
 }
 
 function columnLabel(report, field) {
@@ -236,7 +238,7 @@ function tableFor(doc, columns, rows, cardCells, report) {
         btn.textContent = column.label || column.field;
         td.appendChild(btn);
       } else {
-        td.textContent = viewCell(rows[r], column.field);
+        td.textContent = viewCell(rows[r], column.field, report);
       }
       tr.appendChild(td);
     }
@@ -331,7 +333,7 @@ function drawList(doc, section, report) {
     if (groupField) {
       const head = doc.createElement('h3');
       head.setAttribute('data-group', groups[i].key);
-      head.textContent = groups[i].key || '(none)';
+      head.textContent = (groups[i].key && viewCell(groups[i].rows[0], groupField, report)) || '(none)';
       host.appendChild(head);
     }
     host.appendChild(tableFor(doc, report.columns || [], groups[i].rows, cells, report));
@@ -422,7 +424,7 @@ function drawDetail(doc, section, report, id, row) {
       const term = doc.createElement('dt');
       term.textContent = columns[f].label || columns[f].field;
       const value = doc.createElement('dd');
-      value.textContent = viewCell(row, columns[f].field);
+      value.textContent = viewCell(row, columns[f].field, report);
       list.appendChild(term);
       list.appendChild(value);
     }
@@ -445,7 +447,7 @@ function drawDetail(doc, section, report, id, row) {
         const term = doc.createElement('dt');
         term.textContent = fields[f].label || fields[f].field;
         const value = doc.createElement('dd');
-        value.textContent = viewCell(row, fields[f].field);
+        value.textContent = viewCell(row, fields[f].field, report);
         list.appendChild(term);
         list.appendChild(value);
       }

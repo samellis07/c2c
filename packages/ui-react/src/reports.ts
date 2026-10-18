@@ -35,6 +35,7 @@ function reportColumns(app: App, ir: IrReport | undefined, ui: UiReport): Column
   const actionOf = new Map(ui.columns.map((c) => [c.field, c.action]));
   const numericOf = new Set(ui.columns.filter((c) => c.numeric).map((c) => c.field));
   const multiOf = new Set(ui.columns.filter((c) => c.multiValue).map((c) => c.field));
+  const dateOf = new Map(ui.columns.filter((c) => c.date).map((c) => [c.field, c.date!]));
   const quick = ir?.views.find((v) => v.kind === 'quickview' && v.device === 'phone');
   const phoneFields = new Set(quick ? quick.blocks.flatMap((b) => b.fields).map((c) => c.field) : []);
   const anyPhone = columns.some((c) => phoneFields.has(c.field));
@@ -49,6 +50,7 @@ function reportColumns(app: App, ir: IrReport | undefined, ui: UiReport): Column
       // value; a number-family column keeps its flag so string values sort as numbers.
       ...(action ? { action } : numericOf.has(c.field) ? { numeric: true as const } : {}),
       ...(!action && multiOf.has(c.field) ? { multiValue: true as const } : {}),
+      ...(!action && dateOf.has(c.field) ? { date: dateOf.get(c.field)! } : {}),
     };
   });
 }
