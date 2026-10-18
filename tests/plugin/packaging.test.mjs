@@ -11,6 +11,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { scanDirectory } from '../../scripts/check-hygiene.mjs';
 import { shippedLicenses } from '../../scripts/vendor-plugin.mjs';
+import { cleanCliEnv } from '../cli-test-env.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const node = process.execPath;
@@ -21,7 +22,7 @@ const onPinnedNode = process.versions.node === PINNED_NODE;
 const PINNED_SKIP = 'pinned-node check runs on the Node 20 leg';
 
 function run(args, cwd = repo) {
-  return spawnSync(node, [script, ...args], { cwd, encoding: 'utf8' });
+  return spawnSync(node, [script, ...args], { cwd, encoding: 'utf8', env: cleanCliEnv() });
 }
 
 function writeJson(file, value) {
@@ -133,13 +134,13 @@ test('repo versions match and bin/c2c doctor --local starts', (t) => {
     const bin = path.join(repo, 'plugin/bin/c2c');
     const res = spawnSync(bin, ['doctor', '--local'], {
       encoding: 'utf8',
-      env: {
+      env: cleanCliEnv({
         ...process.env,
         PATH: `${path.dirname(node)}${path.delimiter}${process.env.PATH ?? ''}`,
         HOME: workspace,
         CODEX_HOME: workspace,
         C2C_WORKSPACE: workspace,
-      },
+      }),
     });
     assert.ok(res.status === 0 || res.status === 1, `stdout=${res.stdout}\nstderr=${res.stderr}`);
     assert.match(res.stdout, /local run; doctor\.json not updated/);
@@ -177,10 +178,10 @@ test('vendored plugin analyze matches the repo build', (t) => {
       C2C_WORKSPACE: workspace,
     };
     const fixture = path.join(repo, 'packages/cli/test/fixtures/precheck/clean.ds');
-    const viaPlugin = spawnSync(bin, ['analyze', fixture], { cwd: workspace, env, encoding: 'utf8' });
+    const viaPlugin = spawnSync(bin, ['analyze', fixture], { cwd: workspace, env: cleanCliEnv(env), encoding: 'utf8' });
     const viaDist = spawnSync(node, [path.join(repo, 'dist/cli/src/c2c.js'), 'analyze', fixture], {
       cwd: workspace,
-      env,
+      env: cleanCliEnv(env),
       encoding: 'utf8',
     });
     assert.equal(viaDist.status, 0, viaDist.stderr || viaDist.stdout);
@@ -259,7 +260,7 @@ test('vendored plugin customer verbs match the repo build on notes-HTML', (t) =>
       const wsDist = path.join(root, `ws-d-${verb}`);
       mkdirSync(wsPlugin, { recursive: true });
       mkdirSync(wsDist, { recursive: true });
-      const envFor = (ws) => ({
+      const envFor = (ws) => cleanCliEnv({
         ...process.env,
         PATH: `${path.dirname(node)}${path.delimiter}${process.env.PATH ?? ''}`,
         HOME: ws,
@@ -364,7 +365,7 @@ test('a vendored CLI with no jsdom exits 1 with one clean DomUnavailableError li
     mkdirSync(ws, { recursive: true });
     const res = spawnSync(node, [path.join(out, 'dist/cli/src/c2c.js'), 'analyze', fixture], {
       cwd: ws,
-      env: { ...process.env, HOME: ws, CODEX_HOME: ws, C2C_WORKSPACE: ws },
+      env: cleanCliEnv({ ...process.env, HOME: ws, CODEX_HOME: ws, C2C_WORKSPACE: ws }),
       encoding: 'utf8',
     });
     assert.equal(res.status, 1, `stdout=${res.stdout}\nstderr=${res.stderr}`);
@@ -388,13 +389,13 @@ test('vendored analyze and plan run without a repo-root .nvmrc', () => {
     const analyze = spawnSync(bin, ['analyze', fixture], {
       cwd: temp,
       encoding: 'utf8',
-      env: { ...process.env, HOME: temp, C2C_WORKSPACE: temp },
+      env: cleanCliEnv({ ...process.env, HOME: temp, C2C_WORKSPACE: temp }),
     });
     assert.equal(analyze.status, 0, analyze.stderr || analyze.stdout);
     const plan = spawnSync(bin, ['plan', fixture, '--dc', 'us', '--out', path.join(temp, 'plan')], {
       cwd: temp,
       encoding: 'utf8',
-      env: { ...process.env, HOME: temp, C2C_WORKSPACE: temp },
+      env: cleanCliEnv({ ...process.env, HOME: temp, C2C_WORKSPACE: temp }),
     });
     assert.equal(plan.status, 0, plan.stderr || plan.stdout);
   } finally {

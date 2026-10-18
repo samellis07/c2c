@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+// @ts-ignore shared JavaScript test helper
+import { cleanCliEnv } from '../../../tests/cli-test-env.mjs';
 
 const cli = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'dist/cli/src/c2c.js');
 // The `node c2c.js` children below share a V8 compile cache so each e2e spawn
@@ -12,7 +14,7 @@ const cli = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'dist/c
 process.env.NODE_COMPILE_CACHE ??= join(tmpdir(), 'c2c-node-compile-cache');
 
 function run(...args: string[]) {
-  return spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+  return spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env: cleanCliEnv() });
 }
 
 test('precheck on a missing file keeps exit 3 and points at the next step', () => {
