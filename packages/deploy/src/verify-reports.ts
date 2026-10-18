@@ -25,8 +25,10 @@ import { deriveIr, parse } from '../../core/src/index.js';
 import type { App } from '../../core/src/ir.js';
 import { canonicalSeedJson, generateSeed, seedCompositeMap } from '../../data/src/seed.js';
 import { columnRenamesOf, generateSchema } from '../../schema/src/generator.js';
-import { matchRow, type Criteria } from '../../shims/src/criteria.js';
+import { bindRelativeCriteria, criteriaHasRelative, matchRow, type Criteria } from '../../shims/src/criteria.js';
 import { generateUi, type UiModel } from '../../ui/src/index.js';
+import { appTimeZone, dateFieldKinds } from '../../ui/src/generate.js';
+import { comparisonZone } from './temporal.js';
 import { compileTemplateLib, mountTemplateScreen, reactAppSpec, templateRuntimeReady, TEMPLATE_MISSING, type MountedScreen, type TemplateApi, type TemplateScreen } from '../../ui-react/src/index.js';
 import type { AppSpec, ChartSpec, FilterClause, MetricSpec, PageElement, ReportSpec } from '../../ui-react/template/lib/c2c-ui/types.js';
 import { deferredColumns, foreignKeysForApp, omitColumns, orderTables, resolveForeignKeys, sourceIds } from './remap.js';
@@ -277,11 +279,188 @@ function numberOf(value: unknown): number | undefined {
 
 const round = (n: number) => Math.round(n * 100) / 100;
 
-function seedRowsFor(model: UiModel, seeded: SeededApp, reportName: string, form: string | undefined): Row[] | undefined {
+/**
+ * The served read refuses a criteria it cannot bind (zoho.loginuser has no
+ * offline session value): the screen is the error state, counted, never
+ * unfiltered rows. `refused` keeps that expectation distinct from "no table".
+ */
+const REFUSED = 'refused' as const;
+type ExpectedRows = Row[] | typeof REFUSED | undefined;
+
+const NEVER_ROWS: Criteria = { op: 'isNull', field: 'ID' };
+const ALWAYS_ROWS: Criteria = { op: 'notNull', field: 'ID' };
+/** Lookup-path leaf ops the served report resolves against the parent read; anything else narrows to no rows. */
+const LOOKUP_POSITIVE_OPS = new Set(['==', '<', '>', '<=', '>=', 'contains', 'startsWith', 'endsWith', 'in', 'isNull', 'notNull']);
+
+interface CriteriaOracle {
+  app: App;
+  seeded: SeededApp;
+  /** Application zone the served read binds relative dates in; '' fails closed like the server. */
+  zone: string;
+  /** The offline session principal: the harness session email, no Creator login user. */
+  userId: string;
+  loginUser?: string;
+  /** Reserved-word renames per table: criteria fields are Creator names, cells are store columns. */
+  renames: Record<string, Record<string, string>>;
+}
+
+/** The store column a criteria field of `table` lands on (`To` → `To_col`; unmapped names stay). */
+function storeField(oracle: CriteriaOracle, table: string, field: string): string {
+  return oracle.renames[table]?.[field] ?? field;
+}
+
+function oracleFor(oracle: CriteriaOracle, form: string): { kinds: Record<string, 'date' | 'datetime'>; parents: Record<string, string> } {
+  const parents: Record<string, string> = {};
+  for (const field of oracle.app.forms.find((f) => f.name === form)?.fields ?? []) {
+    if (field.lookup?.form) parents[field.name] = field.lookup.form;
+  }
+  return { kinds: dateFieldKinds(oracle.app, form), parents };
+}
+
+/**
+ * The value a `{ __bind }` marker resolves to for the offline session, or
+ * REFUSED when the principal cannot supply it — the same refusal authorizeRead
+ * raises on the served read.
+ */
+function oracleBind(bind: unknown, oracle: CriteriaOracle): unknown {
+  if (bind === 'loginUserId') return oracle.userId;
+  if (bind === 'loginUser') return oracle.loginUser ?? REFUSED;
+  // zoho.adminuser/adminuserid resolve against deploy configuration the offline
+  // tree does not set; the dry-run sentinels are the served default.
+  if (bind === 'adminUserId') return 'admin@example.test';
+  if (bind === 'adminUser') return 'admin';
+  return REFUSED;
+}
+
+/** First matching parent's field value for a `{ __rows }` dependent query; undefined when no row matches. */
+function oracleRecordQuery(query: { form?: string; criteria?: Criteria; path?: string[] }, oracle: CriteriaOracle): unknown {
+  const form = typeof query.form === 'string' ? query.form : '';
+  const rows = oracle.seeded.stored.get(form);
+  const inner = query.criteria && typeof query.criteria === 'object' ? query.criteria : undefined;
+  const field = Array.isArray(query.path) && query.path.length === 1 ? query.path[0] : undefined;
+  if (!rows || !inner || !field) return undefined;
+  const bound = oracleCriteria(inner, oracle, form);
+  if (bound === REFUSED) return undefined;
+  try {
+    const hit = rows.find((row) => matchRow(row, bound));
+    return hit ? hit[field] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * One leaf value of a criteria the served read resolves: `{ __bind }` to the
+ * session principal, `{ __rows }` to the first matching parent's field under
+ * the seeded rows. `{ __rel }` is bound later, after lookup resolution, the
+ * same order the generated report applies.
+ */
+function oracleLeafValue(value: unknown, oracle: CriteriaOracle): unknown {
+  if (Array.isArray(value)) {
+    const out = value.map((item) => oracleLeafValue(item, oracle));
+    return out.includes(REFUSED) ? REFUSED : out;
+  }
+  if (!value || typeof value !== 'object') return value;
+  const marker = value as { __bind?: unknown; __rows?: unknown; __rel?: unknown };
+  if (typeof marker.__bind === 'string') return oracleBind(marker.__bind, oracle);
+  if (marker.__rows && typeof marker.__rows === 'object') {
+    const resolved = oracleRecordQuery(marker.__rows as { form?: string; criteria?: Criteria; path?: string[] }, oracle);
+    return resolved === undefined ? undefined : resolved;
+  }
+  return value;
+}
+
+/**
+ * The criteria the served report query evaluates, resolved against the seeded
+ * rows: lookup-path leaves become `ROWID IN` on the lookup cell, `{ __bind }`
+ * and `{ __rows }` values resolve, `{ __rel }` binds at now in the app zone.
+ * REFUSED mirrors the served refusal (a bind the session cannot satisfy); a
+ * `{ __rel }` inside a lookup leaf is refused the same way — the served parent
+ * read compiles it before relatives bind, which is a query error.
+ */
+function oracleCriteria(criteria: Criteria, oracle: CriteriaOracle, form: string): Criteria | typeof REFUSED {
+  if (criteria.op === 'and' || criteria.op === 'or') {
+    const args = criteria.args.map((arg) => oracleCriteria(arg, oracle, form));
+    return args.includes(REFUSED) ? REFUSED : { op: criteria.op, args: args as Criteria[] };
+  }
+  if (criteria.op === 'not') {
+    const arg = oracleCriteria(criteria.arg, oracle, form);
+    return arg === REFUSED ? REFUSED : { op: 'not', arg };
+  }
+  if (criteria.op === 'todo' || criteria.op === 'true' || !('field' in criteria)) return criteria;
+  // Bind marker values first; a refused bind refuses the read.
+  const raw = 'value' in criteria ? criteria.value : undefined;
+  const value = oracleLeafValue(raw, oracle);
+  if (value === REFUSED) return REFUSED;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw) && (raw as { __rows?: unknown }).__rows) {
+    if (value === undefined) return criteria.op === '!=' ? ALWAYS_ROWS : NEVER_ROWS;
+  }
+  const field = typeof criteria.field === 'string' ? criteria.field : '';
+  const head = field.slice(0, field.indexOf('.'));
+  const dot = field.indexOf('.');
+  const store = dot <= 0 ? storeField(oracle, form, field) : storeField(oracle, form, head);
+  if (dot <= 0 || dot === field.length - 1) {
+    const renamed = field === store ? criteria : ({ ...criteria, field: store } as Criteria);
+    return value === raw ? renamed : ({ ...renamed, value } as Criteria);
+  }
+  const { parents: lookupParents } = oracleFor(oracle, form);
+  const parent = Object.hasOwn(lookupParents, head) ? lookupParents[head]! : '';
+  if (!parent) return NEVER_ROWS;
+  const rest = storeField(oracle, parent, field.slice(dot + 1));
+  if (rest.includes('.')) return NEVER_ROWS;
+  if (value && typeof value === 'object' && !Array.isArray(value) && (value as { __rel?: unknown }).__rel) return REFUSED;
+  const parentRows = oracle.seeded.stored.get(parent) ?? [];
+  const leaf = (op: string): Criteria => ({ op, field: rest, value } as Criteria);
+  if (criteria.op === '!=') {
+    const excluded = parentIds(parentRows, leaf('=='));
+    if (excluded === undefined) return NEVER_ROWS;
+    return excluded.length ? { op: 'not', arg: { op: 'in', field: store, value: excluded } } : ALWAYS_ROWS;
+  }
+  if (!LOOKUP_POSITIVE_OPS.has(criteria.op)) return NEVER_ROWS;
+  const ids = parentIds(parentRows, leaf(criteria.op));
+  if (ids === undefined) return NEVER_ROWS;
+  return ids.length ? { op: 'in', field: store, value: ids } : NEVER_ROWS;
+}
+
+/** ROWIDs of the seeded parent rows a leaf matches; undefined when the leaf is not evaluable. */
+function parentIds(rows: readonly Row[], leaf: Criteria): string[] | undefined {
+  try {
+    return rows.filter((row) => matchRow(row, leaf)).map((row) => String(row.ROWID));
+  } catch {
+    return undefined;
+  }
+}
+
+/** The rows a report's served query returns for the seed, evaluated the way the generated endpoint does. */
+function expectedReportRows(model: UiModel, app: App, seeded: SeededApp, reportName: string, form: string | undefined): ExpectedRows {
   const rows = form ? seeded.stored.get(form) : undefined;
   if (!rows) return undefined;
   const criteria = model.reports.find((r) => r.name === reportName)?.criteria as Criteria | undefined;
-  return criteria ? rows.filter((row) => matchRow(row, criteria)) : rows;
+  if (!criteria) return rows;
+  const oracle: CriteriaOracle = {
+    app,
+    seeded,
+    zone: comparisonZone(process.env.C2C_APP_TIMEZONE?.trim() || appTimeZone(app)) ?? '',
+    userId: 'admin@example.test',
+    renames: columnRenamesOf(generateSchema(app)),
+  };
+  const resolved = oracleCriteria(criteria, oracle, form!);
+  if (resolved === REFUSED) return REFUSED;
+  let bound = resolved;
+  if (criteriaHasRelative(resolved)) {
+    try {
+      bound = bindRelativeCriteria(resolved, new Date(), oracle.zone, oracleFor(oracle, form!).kinds);
+    } catch {
+      // The served read fails closed (zero rows, "filter not migrated") when the zone is missing.
+      return [];
+    }
+  }
+  try {
+    return rows.filter((row) => matchRow(row, bound));
+  } catch {
+    // A todo criteria fails closed on the served read: zero rows and a notice, never unfiltered.
+    return [];
+  }
 }
 
 /** Reads a cell by field name or by a dotted lookup path (`Lookup.Field`). */
@@ -490,9 +669,9 @@ async function settleLoading(screen: MountedScreen): Promise<string | undefined>
   return pending();
 }
 
-async function listChecks(model: UiModel, spec: AppSpec, report: ReportSpec, seeded: SeededApp, mount: (s: TemplateScreen) => Promise<MountedScreen>): Promise<ScreenCheck[]> {
+async function listChecks(model: UiModel, spec: AppSpec, report: ReportSpec, seeded: SeededApp, app: App, mount: (s: TemplateScreen) => Promise<MountedScreen>): Promise<ScreenCheck[]> {
   const checks: ScreenCheck[] = [];
-  const expected = seedRowsFor(model, seeded, report.name, report.form);
+  const expected = expectedReportRows(model, app, seeded, report.name, report.form);
   const screen = await mount({ kind: 'report', report: report.name });
   try {
     const pending = await settleLoading(screen);
@@ -500,7 +679,15 @@ async function listChecks(model: UiModel, spec: AppSpec, report: ReportSpec, see
     const columns = report.columns.filter((c) => !c.action).map((c) => ({ key: c.field, label: c.label, numeric: !!c.numeric }));
     const table = readTable(screen.container, columns);
     if (pending !== undefined) checks.push({ check: 'rows', status: 'fail', detail: `the report screen never left its loading state: ${pending.slice(0, 200) || 'loading'}` });
-    else if (error) checks.push({ check: 'rows', status: 'fail', detail: `the report screen shows an error: ${error}` });
+    else if (expected === REFUSED) {
+      checks.push(
+        error
+          ? gap('rows', 'the served read refuses this criteria (a bind the offline session cannot satisfy); the refusal is counted, never unfiltered')
+          : table.rows.length
+            ? { check: 'rows', status: 'fail', detail: 'the report renders rows for a criteria the served read refuses' }
+            : gap('rows', 'the served read refuses this criteria (a bind the offline session cannot satisfy); the screen shows no error or rows'),
+      );
+    } else if (error) checks.push({ check: 'rows', status: 'fail', detail: `the report screen shows an error: ${error}` });
     else if (!expected) checks.push({ check: 'rows', status: 'fail', detail: `no seeded table for form ${report.form ?? '(none)'}` });
     else {
       const shown = Math.min(expected.length, report.pageSize || expected.length);
@@ -534,7 +721,7 @@ async function listChecks(model: UiModel, spec: AppSpec, report: ReportSpec, see
   } finally {
     await screen.unmount();
   }
-  if (report.detail && expected?.length) {
+  if (report.detail && Array.isArray(expected) && expected.length) {
     const row = expected[0]!;
     const detail = await mount({ kind: 'report', report: report.name, row: String(row.ROWID) });
     try {
@@ -558,13 +745,14 @@ async function listChecks(model: UiModel, spec: AppSpec, report: ReportSpec, see
   return checks;
 }
 
-function chartCheck(model: UiModel, spec: AppSpec, report: ReportSpec, chart: ChartSpec | undefined, seeded: SeededApp, root: Element | undefined): ScreenCheck {
+function chartCheck(model: UiModel, spec: AppSpec, report: ReportSpec, chart: ChartSpec | undefined, seeded: SeededApp, app: App, root: Element | undefined): ScreenCheck {
   if (!chart) return { check: 'chart', status: 'fail', detail: 'the chart settings of this report are not generated' };
   if (!root) return { check: 'chart', status: 'fail', detail: `chart ${chart.title} did not render` };
   const error = errorState(root);
+  const rows = expectedReportRows(model, app, seeded, report.name, report.form);
+  if (rows === REFUSED) return error ? gap('chart', 'the served read refuses this criteria (a bind the offline session cannot satisfy)') : { check: 'chart', status: 'fail', detail: `${chart.title}: renders for a criteria the served read refuses` };
   if (error) return { check: 'chart', status: 'fail', detail: `the chart shows an error: ${error}` };
-  const rows = seedRowsFor(model, seeded, report.name, report.form) ?? [];
-  const want = expectedBuckets(rows, chart, lookupReader(spec, seeded, report.form));
+  const want = expectedBuckets(rows ?? [], chart, lookupReader(spec, seeded, report.form));
   if (!want) return gap('chart', 'the chart filter or measure is not evaluable from the seed');
   const got = readChart(root);
   if (!Object.keys(want).length && !Object.keys(got).length) return gap('chart', `${chart.title}: no seeded rows to compare`);
@@ -579,7 +767,7 @@ function* walk(elements: readonly PageElement[]): Generator<PageElement> {
   }
 }
 
-async function pageChecks(model: UiModel, spec: AppSpec, name: string, seeded: SeededApp, mount: (s: TemplateScreen) => Promise<MountedScreen>): Promise<ScreenCheck[]> {
+async function pageChecks(model: UiModel, spec: AppSpec, name: string, seeded: SeededApp, app: App, mount: (s: TemplateScreen) => Promise<MountedScreen>): Promise<ScreenCheck[]> {
   const page = spec.pages![name]!;
   const screen = await mount({ kind: 'page', page: name });
   const checks: ScreenCheck[] = [];
@@ -591,8 +779,8 @@ async function pageChecks(model: UiModel, spec: AppSpec, name: string, seeded: S
     const tiles = [...screen.container.querySelectorAll('[data-metric]')];
     metrics.forEach((metric, i) => {
       const report = metric.value.report ? spec.reports[metric.value.report] : undefined;
-      const rows = report ? seedRowsFor(model, seeded, report.name, report.form) : undefined;
-      const want = rows ? expectedMetric(rows, metric.value, lookupReader(spec, seeded, report?.form)) : undefined;
+      const rows = report ? expectedReportRows(model, app, seeded, report.name, report.form) : undefined;
+      const want = rows && rows !== REFUSED ? expectedMetric(rows, metric.value, lookupReader(spec, seeded, report?.form)) : undefined;
       const got = tiles[i]?.getAttribute('data-value');
       if (want === undefined) checks.push(gap('metric', `${metric.label}: the metric's report or filter is not evaluable from the seed`));
       else checks.push(got !== undefined && got !== '' && Number(got) === want ? { check: 'metric', status: 'pass', detail: `${metric.label} = ${want} matches the seed` } : { check: 'metric', status: 'fail', detail: `${metric.label} differs from the seed`, expected: want, actual: got ?? '<not rendered>' });
@@ -602,10 +790,10 @@ async function pageChecks(model: UiModel, spec: AppSpec, name: string, seeded: S
     for (const el of els) {
       if (el.kind === 'report') {
         const report = spec.reports[el.report];
-        const rows = report ? seedRowsFor(model, seeded, report.name, report.form) : undefined;
+        const rows = report ? expectedReportRows(model, app, seeded, report.name, report.form) : undefined;
         const host = screen.container.querySelector(`[data-report="${el.report}"]`) ?? screen.container;
         const shown = host.querySelectorAll('tbody tr td[data-th]').length ? [...host.querySelectorAll('tbody tr')].filter((tr) => tr.querySelector('td[data-th]')).length : 0;
-        const want = rows ? Math.min(rows.length, report?.pageSize || rows.length) : undefined;
+        const want = rows && rows !== REFUSED ? Math.min(rows.length, report?.pageSize || rows.length) : undefined;
         checks.push(
           want === 0 && shown === 0
             ? gap('rows', `embedded ${el.report}: no seeded rows to compare`)
@@ -617,7 +805,7 @@ async function pageChecks(model: UiModel, spec: AppSpec, name: string, seeded: S
       if (el.kind === 'chart') {
         const report = el.chart.report ? spec.reports[el.chart.report] : undefined;
         const root = charts[chartAt++];
-        if (report) checks.push(chartCheck(model, spec, report, el.chart, seeded, root));
+        if (report) checks.push(chartCheck(model, spec, report, el.chart, seeded, app, root));
         else checks.push({ check: 'chart', status: 'fail', detail: `chart ${el.chart.title} has no report to read` });
       }
       if (el.kind === 'todo') checks.push(gap('view', `page element <${el.tag}> is not generated: ${el.reason}`));
@@ -675,7 +863,7 @@ export async function runReportChecks(app: App, source: string, opts: RunReportO
         try {
           const checks = pending !== undefined
             ? [{ check: 'chart' as const, status: 'fail' as const, detail: `the chart screen never left its loading state: ${pending.slice(0, 200) || 'loading'}` }]
-            : [chartCheck(model, spec, report, report.chart, seeded, chartRoots(screen.container)[0])];
+            : [chartCheck(model, spec, report, report.chart, seeded, app, chartRoots(screen.container)[0])];
           checks.push(...EXPORT_FORMATS.map((f) => gap(f, `the generated chart screen offers no ${f.toUpperCase()} export (${CREATOR_EXPORT})`)), gap('print', `the generated chart screen offers no print view (${CREATOR_EXPORT})`));
           result.screens.push({ screen: report.name, kind: 'chart', checks });
         } finally {
@@ -694,12 +882,12 @@ export async function runReportChecks(app: App, source: string, opts: RunReportO
         });
         continue;
       }
-      const checks = await listChecks(model, spec, report, seeded, mount);
+      const checks = await listChecks(model, spec, report, seeded, app, mount);
       const pivot = ui?.type === 'pivottable';
       if (pivot) checks.unshift(gap('view', ui?.note ?? 'the pivot table renders as a list'));
       result.screens.push({ screen: report.name, kind: pivot ? 'pivot' : 'list', checks });
     }
-    for (const page of Object.keys(spec.pages ?? {}).sort()) result.screens.push({ screen: page, kind: 'dashboard', checks: await pageChecks(model, spec, page, seeded, mount) });
+    for (const page of Object.keys(spec.pages ?? {}).sort()) result.screens.push({ screen: page, kind: 'dashboard', checks: await pageChecks(model, spec, page, seeded, app, mount) });
     return result;
   } finally {
     await backend.close();

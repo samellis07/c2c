@@ -153,7 +153,8 @@ function lit(value: unknown): string {
   if (isRecordQuery(value)) throw new UntranslatedConstruct('report-criteria');
   if (value === null || value === undefined) return 'null';
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  // ZCQL has no boolean literal: a decision cell is the varchar 'true'/'false'.
+  if (typeof value === 'boolean') return `'${value ? 'true' : 'false'}'`;
   if (typeof value === 'bigint') return value.toString();
   const text = typeof value === 'string' ? value : JSON.stringify(value);
   return `'${text.replace(/'/g, "''")}'`;
@@ -737,6 +738,9 @@ export function sameCell(left: unknown, right: unknown): boolean {
   if (typeof left === 'number' && typeof right === 'number') return left === right;
   if (typeof left === 'string' && typeof right === 'string') return left === right;
   if (typeof left === 'boolean' && typeof right === 'boolean') return left === right;
+  // A decision cell reads back as the varchar 'true'/'false'; it equals its boolean.
+  if (typeof left === 'boolean' && (right === 'true' || right === 'false')) return left === (right === 'true');
+  if (typeof right === 'boolean' && (left === 'true' || left === 'false')) return right === (left === 'true');
   if (left == null || right == null) return left == null && right == null;
   return left === right;
 }

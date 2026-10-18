@@ -272,18 +272,17 @@ test('compileCriteria never emits a bare ZCQL true/false predicate', () => {
     [{ op: 'and', args: [{ op: '==', field: 'Status', value: 'Open' }, { op: 'or', args: [{ op: 'true' }, { op: '==', field: 'Kind', value: 'x' }] }] }, "(Status = 'Open')"],
     [{ op: 'not', arg: { op: 'true' } }, '(ROWID IS NULL)'],
     [{ op: 'and', args: [{ op: 'not', arg: { op: 'true' } }, { op: '==', field: 'Status', value: 'Open' }] }, "((ROWID IS NULL) AND Status = 'Open')"],
-    // A boolean leaf compiles as `Field = true` (unquoted, [UNVERIFIED]: whether
-    // live ZCQL wants `= true` or `= 'true'` on a Boolean column needs a live
-    // probe; this keeps the pre-existing spelling until the fact lands).
-    [{ op: '==', field: 'Active', value: true }, 'Active = true'],
-    [{ op: '==', field: 'Active', value: false }, 'Active = false'],
+    // A boolean leaf compiles as `Field = 'true'` quoted: decision cells are
+    // the varchar 'true'/'false' and ZCQL has no boolean literal (an unquoted
+    // `= false` is a syntax error, so the served read 500s).
+    [{ op: '==', field: 'Active', value: true }, "Active = 'true'"],
+    [{ op: '==', field: 'Active', value: false }, "Active = 'false'"],
   ];
   for (const [criteria, expected] of cases) {
     const where = compileCriteria(criteria);
     assert.equal(where, expected);
     // No bare boolean literal as a whole predicate operand anywhere in the
-    // WHERE (`true` alone is the marker callers strip to no WHERE; a `= true`
-    // leaf operand is the unverified pre-existing spelling, not a clause).
+    // WHERE (`true` alone is the marker callers strip to no WHERE).
     const unquoted = where.replace(/'[^']*'/g, "''");
     if (where !== 'true') assert.doesNotMatch(unquoted, /(\(|\bAND\b|\bOR\b|\bNOT\b)\s*(true|false)\b|\b(true|false)\s*(\)|\bAND\b|\bOR\b)/, where);
   }
