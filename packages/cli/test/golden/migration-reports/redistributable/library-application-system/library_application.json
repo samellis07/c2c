@@ -186,10 +186,193 @@
       "reason": "<button>: the Staff Activity Log button opens without its values (Staff Activity Log)"
     }
   ],
+  "todoSteps": [],
   "humanSteps": [
     "Accept invite: accept the app invite mail",
     "Sign in once: sign in to the deployed app once",
     "Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)",
     "Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)"
+  ],
+  "silentDrops": 19,
+  "residuals": [
+    {
+      "id": "field-property:Book.Genre property others option",
+      "kind": "field-property",
+      "construct": "Book.Genre property others option",
+      "form": "Book",
+      "field": "Genre",
+      "property": "property others option",
+      "reason": "property others option is not carried by the generated dropdown field. Varchar plus the .ds choice list. The server rejects values outside the list. A choice longer than 255 is promoted to text. A values = Form.Field target is a lookup, not a dropdown. module = users is the Users field.",
+      "step": "Set property others option on Book.Genre manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "field-property:Book_Transaction.Member property displayformat",
+      "kind": "field-property",
+      "construct": "Book_Transaction.Member property displayformat",
+      "form": "Book_Transaction",
+      "field": "Member",
+      "property": "property displayformat",
+      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
+      "step": "Set property displayformat on Book_Transaction.Member manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "field-property:Book_Transaction.Member property sortorder",
+      "kind": "field-property",
+      "construct": "Book_Transaction.Member property sortorder",
+      "form": "Book_Transaction",
+      "field": "Member",
+      "property": "property sortorder",
+      "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
+      "step": "Set property sortorder on Book_Transaction.Member manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "field-property:Book_Transaction.Book property displayformat",
+      "kind": "field-property",
+      "construct": "Book_Transaction.Book property displayformat",
+      "form": "Book_Transaction",
+      "field": "Book",
+      "property": "property displayformat",
+      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
+      "step": "Set property displayformat on Book_Transaction.Book manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "field-property:Book_Transaction.Book property sortorder",
+      "kind": "field-property",
+      "construct": "Book_Transaction.Book property sortorder",
+      "form": "Book_Transaction",
+      "field": "Book",
+      "property": "property sortorder",
+      "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
+      "step": "Set property sortorder on Book_Transaction.Book manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "field-property:Staff_Members.Staff_Name property personal data",
+      "kind": "field-property",
+      "construct": "Staff_Members.Staff_Name property personal data",
+      "form": "Staff_Members",
+      "field": "Staff_Name",
+      "property": "property personal data",
+      "reason": "property personal data is not carried by the generated name field. One varchar per part (prefix, first_name, last_name, suffix). Deluge sees one value; a shim joins the parts. Parts are not separate field-type rows.",
+      "step": "Set property personal data on Staff_Members.Staff_Name manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "field-property:Staff_Members.Staff_Email property personal data",
+      "kind": "field-property",
+      "construct": "Staff_Members.Staff_Email property personal data",
+      "form": "Staff_Members",
+      "field": "Staff_Email",
+      "property": "property personal data",
+      "reason": "property personal data is not carried by the generated email field. There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.",
+      "step": "Set property personal data on Staff_Members.Staff_Email manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "field-property:Staff_Members.Phone_Number property defaultcountry",
+      "kind": "field-property",
+      "construct": "Staff_Members.Phone_Number property defaultcountry",
+      "form": "Staff_Members",
+      "field": "Phone_Number",
+      "property": "property defaultcountry",
+      "reason": "property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
+      "step": "Set property defaultcountry on Staff_Members.Phone_Number manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "field-property:Staff_Members.Phone_Number property personal data",
+      "kind": "field-property",
+      "construct": "Staff_Members.Phone_Number property personal data",
+      "form": "Staff_Members",
+      "field": "Phone_Number",
+      "property": "property personal data",
+      "reason": "property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
+      "step": "Set property personal data on Staff_Members.Phone_Number manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "report-feature:Book_Report block options",
+      "kind": "report-feature",
+      "construct": "Book_Report block options",
+      "reason": "Report Book_Report block options is not in the generated report. Add one: either emit it or record the manual step.",
+      "step": "Set Book_Report block options manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "report-feature:Book_by_Genre block options",
+      "kind": "report-feature",
+      "construct": "Book_by_Genre block options",
+      "reason": "Report Book_by_Genre block options is not in the generated report. Add one: either emit it or record the manual step.",
+      "step": "Set Book_by_Genre block options manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "report-feature:All_Member_Infos block options",
+      "kind": "report-feature",
+      "construct": "All_Member_Infos block options",
+      "reason": "Report All_Member_Infos block options is not in the generated report. Add one: either emit it or record the manual step.",
+      "step": "Set All_Member_Infos block options manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "report-feature:All_Book_Transactions block options",
+      "kind": "report-feature",
+      "construct": "All_Book_Transactions block options",
+      "reason": "Report All_Book_Transactions block options is not in the generated report. Add one: either emit it or record the manual step.",
+      "step": "Set All_Book_Transactions block options manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "report-feature:All_Staff_Members block options",
+      "kind": "report-feature",
+      "construct": "All_Staff_Members block options",
+      "reason": "Report All_Staff_Members block options is not in the generated report. Add one: either emit it or record the manual step.",
+      "step": "Set All_Staff_Members block options manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "page-element:DashBoard.Book_Report #1",
+      "kind": "page-element",
+      "construct": "DashBoard.Book_Report",
+      "reason": "ZML element <search> Book_Report on page DashBoard is generated without its criteria. Add one: either emit the element or record the manual step.",
+      "step": "Set DashBoard.Book_Report manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "page-element:DashBoard.Book_Report #2",
+      "kind": "page-element",
+      "construct": "DashBoard.Book_Report",
+      "reason": "ZML element <button> Book_Report on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
+      "step": "Set DashBoard.Book_Report manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "page-element:DashBoard.All_Book_Transactions #1",
+      "kind": "page-element",
+      "construct": "DashBoard.All_Book_Transactions",
+      "reason": "ZML element <text> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
+      "step": "Set DashBoard.All_Book_Transactions manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "page-element:DashBoard.All_Book_Transactions #2",
+      "kind": "page-element",
+      "construct": "DashBoard.All_Book_Transactions",
+      "reason": "ZML element <button> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
+      "step": "Set DashBoard.All_Book_Transactions manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    },
+    {
+      "id": "translation:translation Language_Settings",
+      "kind": "translation",
+      "construct": "translation Language_Settings",
+      "reason": "The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.",
+      "step": "Set translation Language_Settings manually in the Catalyst console/app; not converted.",
+      "stepSource": "generic"
+    }
   ]
 }
