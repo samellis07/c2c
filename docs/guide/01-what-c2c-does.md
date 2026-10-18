@@ -59,6 +59,10 @@ Each one is named in the report when your app uses it:
 - **Offline mode.** The web app does not keep your records on the
   device. While you are offline it says that data is unavailable
   ([what the web app generates](../../docs/ui.md)).
+- **Push notifications stay manual.** A Deluge `pushnotification`
+  action is not converted. It is counted, and its report item
+  carries what the action was sending and names the Catalyst
+  push-notification setup step for you to do by hand.
 - **Form Email.** Inbound Form Email is not supported in this
   version.
 - **Cliq integration-function bots.** Cliq bots relying on Integration

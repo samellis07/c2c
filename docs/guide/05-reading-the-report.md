@@ -29,6 +29,12 @@ means for you.
    lose "no duplicates", async workflows, simplified views). Your
    answers are recorded and the plan is re-run until it passes.
 
+Beyond the verdict, the report also lists what converted cleanly —
+the forms, reports, pages and functions it built — and, for what
+did not, the field-level gaps with their reasons. Each manual step
+carries the workaround to use in the meantime, and the same
+human-checklist items the run will ask of you appear in it too.
+
 ## Where each answer lives
 
 | Question | File the AI shows you |
@@ -36,6 +42,7 @@ means for you.
 | What is broken in my export? | `precheck.json` — every blocker with Creator's own error text |
 | Will it convert? | `analyze.json` — readiness score, Deluge coverage, deterministic flag |
 | What exactly will be built? | `plan.md` — the blueprint you review and approve before anything runs |
+| What converted and what did not? | the migration report — converted inventory, field gaps with reasons, workarounds on manual steps, and your human checklist |
 | What did the run do? | `c2c-deploy-report.json` — written **even when a step failed**, so a failure still leaves a full record |
 | Did my data arrive whole? | per-table counts vs Creator's `counts.json`; links resolved 100% |
 | Is it proven working? | `c2c-proof.json` (and `c2c-proof.md`) — per-table counts and checksums, the smoke result, and readiness plus every manual item by name. The list of what you now own comes in the AI's summary |
