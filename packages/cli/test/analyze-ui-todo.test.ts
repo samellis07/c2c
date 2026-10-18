@@ -155,7 +155,7 @@ test('a pivot report without a group-by falls back to a generated list view with
   assert.equal(totals.view, 'list');
   assert.equal(totals.type, 'pivottable');
   assert.equal(totals.todo, undefined);
-  assert.ok(totals.note?.includes('row, column and measure'));
+  assert.ok(totals.note?.includes('row field, one column field, and a count or sum measure'));
   assert.deepEqual(
     totals.columns.map((column) => column.field),
     ['Title'],

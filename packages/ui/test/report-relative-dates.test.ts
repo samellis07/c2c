@@ -382,7 +382,7 @@ test('a report criteria Field is this week compiles and a failed criteria still 
   assert.equal(weekModel?.todo, undefined);
   assert.equal(
     brokenModel?.todo,
-    'Filter not migrated: dynamic or unsupported criteria need manual translation; the report returns no rows.',
+    'Filter not migrated on report Broken: manually translate the source criterion for Add_Invoice in the new app; until then this report returns no rows.',
   );
   const migration = JSON.parse(sourceOf(new Map(builtUi.files.map((file) => [file.path, file.data])), 'migration-report.json')) as {
     untranslated?: { construct: string }[];

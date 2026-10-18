@@ -357,12 +357,12 @@ test('app-level report criteria are listed once with scope app', () => {
       { location: 'report Gappy', construct: 'report-criteria', scope: 'app' },
       {
         location: 'report Gappy',
-        construct: 'Filter not migrated: dynamic or unsupported criteria need manual translation; the report returns no rows.',
+        construct: 'Filter not migrated on report Gappy: manually translate the source criterion for Item in the new app; until then this report returns no rows.',
         scope: 'ui',
       },
       {
         location: 'report Filtered',
-        construct: 'Named filter "Broken" is not migrated; selecting it returns no rows.',
+        construct: 'Named filter "Broken" on report Filtered is not migrated: manually translate its source criterion for Item in the new app; selecting it returns no rows.',
         scope: 'ui',
       },
     ],
@@ -418,7 +418,7 @@ test('relative report criteria compile while unsupported relative comparisons fa
       { location: 'report Unsupported', construct: 'report-criteria', scope: 'app' },
       {
         location: 'report Unsupported',
-        construct: 'Filter not migrated: dynamic or unsupported criteria need manual translation; the report returns no rows.',
+        construct: 'Filter not migrated on report Unsupported: manually translate the source criterion for Item in the new app; until then this report returns no rows.',
         scope: 'ui',
       },
     ],
