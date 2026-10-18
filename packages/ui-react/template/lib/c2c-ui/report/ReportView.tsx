@@ -34,6 +34,7 @@ import { actionNavHref, hrefFor, navNeedsRow } from '../runtime/router';
 import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
 import { matchCriteria } from './criteria';
 import { multiValueItems } from '../form/value';
+import { isSafeStyleProperty, isSafeStyleValue, STYLE_TEXT_MAX } from '../style-allowlist';
 
 type Row = Record<string, unknown>;
 type Load = { state: 'loading' } | { state: 'error'; status: number } | { state: 'ready'; rows: Row[]; notice?: string };
@@ -111,12 +112,16 @@ const CAMEL = /-([a-z])/g;
 /** A `conditional formatting` fragment (`color:#19bc9f;`) as a React style. */
 export function parseFormat(format: string): CSSProperties {
   const style: Record<string, string> = {};
-  for (const part of String(format ?? '').split(';')) {
+  const source = String(format ?? '');
+  if (source.length > STYLE_TEXT_MAX) return style as CSSProperties;
+  for (const part of source.split(';')) {
     const at = part.indexOf(':');
     if (at < 0) continue;
-    const name = part.slice(0, at).trim().toLowerCase().replace(CAMEL, (_, ch: string) => ch.toUpperCase());
-    const value = part.slice(at + 1).trim();
-    if (name && value) style[name] = value;
+    const rawName = part.slice(0, at).trim().toLowerCase();
+    const value = part.slice(at + 1).trim().replace(/!\s*important\s*$/i, '').trim();
+    if (!isSafeStyleProperty(rawName) || !isSafeStyleValue(value, rawName)) continue;
+    const name = rawName.replace(CAMEL, (_, ch: string) => ch.toUpperCase());
+    style[name] = value;
   }
   return style as CSSProperties;
 }
