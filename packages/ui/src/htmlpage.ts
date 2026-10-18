@@ -58,7 +58,7 @@ export interface HtmlpageCompiled {
   /** `zc-component` embeds that can resolve to generated in-app forms or reports. */
   components?: { kind: 'form' | 'report'; name: string }[];
   /** Component embeds without a generated inline target; each remains a counted TODO. */
-  componentTodos?: string[];
+  componentTodos?: { target: string; step?: string }[];
 }
 
 /** Decode the XML entities the ZML attribute escapes the template with. */
@@ -502,8 +502,15 @@ function inlinePageEmbeds(template: string, app: App, page: string): { template:
 }
 
 const ZC_LINK = /^(form|view|report|page)linkname$/i;
-const ZC_PARAMS = /^params$/i;
 const SAFE_COMPONENT_NAME = /^[A-Za-z_]\w*$/;
+/**
+ * A tag that declares itself a zc-component even when its attribute list does
+ * not parse (a repeated or unquoted attribute, a stray quote). Anything the
+ * strict parser cannot read stays a counted TODO, never an inlined target.
+ */
+const ZC_COMPONENT_ELNAME = /\belname\s*=\s*['"]zc-component(?=['"\s>]|$)/i;
+/** Fold a link name or display name to one comparison shape, the way Creator link names compare. */
+const linkNameKey = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
 /** Parse a whole component tag's attributes; malformed quoting never proves an embed target. */
 function componentAttributes(tag: string): Map<string, string> | null {
@@ -582,34 +589,97 @@ function hostileUrlValue(value: string): boolean {
   return flat.startsWith('data:') && !SAFE_DATA_IMAGE.test(flat);
 }
 
+/** Marker suffix for an embed whose `zc_Header=false` hides the view title. */
+export const COMPONENT_UNTITLED = ':untitled';
+
+/**
+ * `params` display flags of a zc-component embed [UNVERIFIED], each with the
+ * values the generated view already shows or can apply. `zc_Header=false`
+ * hides the view title; the form flags are accepted only at the values the
+ * generated form uses (Creator's default labels, no autofocus). Any other key,
+ * value, field criteria or Deluge island is not applied, so the embed stays a
+ * counted TODO.
+ */
+const COMPONENT_FLAGS: Record<string, { kinds: readonly string[]; values: readonly string[] }> = {
+  zc_header: { kinds: ['form', 'report'], values: ['true', 'false'] },
+  zc_focus: { kinds: ['form'], values: ['false'] },
+  zc_succmsg: { kinds: ['form'], values: ['data added successfully!'] },
+  zc_submitval: { kinds: ['form'], values: ['submit'] },
+  zc_resetval: { kinds: ['form'], values: ['reset'] },
+};
+
+/** The embed's applicable params, or null when any one cannot be applied. */
+function componentParams(raw: string, kind: string): { untitled: boolean } | null {
+  const text = raw.replace(/&amp;/gi, '&').trim();
+  if (!text) return { untitled: false };
+  let untitled = false;
+  for (const part of text.split('&')) {
+    if (!part) continue;
+    const eq = part.indexOf('=');
+    if (eq < 0) return null;
+    const key = part.slice(0, eq).trim().toLowerCase();
+    const value = part.slice(eq + 1).trim().toLowerCase();
+    const flag = Object.prototype.hasOwnProperty.call(COMPONENT_FLAGS, key) ? COMPONENT_FLAGS[key] : undefined;
+    if (!flag || !flag.kinds.includes(kind) || !flag.values.includes(value)) return null;
+    if (key === 'zc_header') untitled = value === 'false';
+  }
+  return { untitled };
+}
+
 /**
  * Creator zc-component divs can name a generated form/report [UNVERIFIED]. Only a literal
- * link name without a params attribute is provable; other embeds stay TODOs.
+ * link name whose params are all applicable display flags is provable; other embeds stay TODOs.
  */
-function embeddedComponents(template: string, app: App): { template: string; components: EmbeddedComponent[]; todos: string[] } {
+function embeddedComponents(template: string, app: App): { template: string; components: EmbeddedComponent[]; markers: string[]; todos: { target: string; step?: string }[] } {
   const components: EmbeddedComponent[] = [];
-  const todos: string[] = [];
+  const markers: string[] = [];
+  const todos: { target: string; step?: string }[] = [];
   const rewritten = template.replace(/<div\b[^>]*>/gi, (tag) => {
     if (!/\belname\s*=/i.test(tag)) return tag;
     const attrs = componentAttributes(tag);
-    const componentAttr = attrs?.get('elname');
-    if (!attrs || !componentAttr || componentAttr.toLowerCase() !== 'zc-component') return tag;
+    if (!attrs) {
+      // A zc-component tag that does not parse still counts: it never renders,
+      // but the customer has an embed to migrate by hand.
+      if (ZC_COMPONENT_ELNAME.test(tag)) todos.push({ target: 'component' });
+      return tag;
+    }
+    const componentAttr = attrs.get('elname');
+    if (!componentAttr || componentAttr.toLowerCase() !== 'zc-component') return tag;
     const attrKeys = [...attrs.keys()].sort();
     const linkEntry = [...attrs.entries()].sort().find(([key]) => ZC_LINK.test(key));
     const linkKind = linkEntry?.[0].replace(/linkname$/i, '').toLowerCase() ?? '';
     const kind = linkKind === 'view' || linkKind === 'report' ? 'report' : linkKind;
     const name = linkEntry?.[1] ?? '';
+    const target = linkEntry ? `${kind || linkEntry[0].replace(/linkname$/i, '').toLowerCase()} "${name}"` : 'component';
+    // An embed of another app's component is never inlined against the local
+    // same-named target. `ownerName` cannot be verified against this app (the
+    // IR carries no owner), so its presence always counts as cross-app.
+    const appLink = attrs.get('applinkname');
+    const owner = attrs.get('ownername');
+    const crossApp = appLink !== undefined && linkNameKey(appLink) !== linkNameKey(app.name ?? '');
+    if (crossApp || owner !== undefined) {
+      const where = crossApp ? `application "${appLink}"` : `owner "${owner}"`;
+      todos.push({
+        target: `${target} of ${where}`,
+        step: `The embed points at ${target} in another application (${crossApp ? appLink : owner}). Migrate that component into this application, or link the other application, before it can render inline.`,
+      });
+      return tag;
+    }
     const known = SAFE_COMPONENT_NAME.test(name) && (kind === 'form' ? app.forms.some((form) => form.name === name) : kind === 'report' ? app.reports.some((report) => report.name === name) : false);
     const hostile = attrKeys.some((key) => /^on/i.test(key)) || [...attrs.values()].sort().some(hostileUrlValue);
-    if (known && !hostile && !attrKeys.some((key) => ZC_PARAMS.test(key))) {
+    const rawParams = attrs.get('params');
+    const params = rawParams === undefined ? { untitled: false } : componentParams(rawParams, kind);
+    if (known && !hostile && params) {
       const component = { kind: kind as 'form' | 'report', name };
       components.push(component);
-      return tag.replace(/>$/, ` data-zml="component-${component.kind}:${component.name}">`);
+      const marker = `component-${component.kind}:${component.name}${params.untitled ? COMPONENT_UNTITLED : ''}`;
+      markers.push(marker);
+      return tag.replace(/>$/, ` data-zml="${marker}">`);
     }
-    todos.push(linkEntry ? `${kind || linkEntry[0].replace(/linkname$/i, '').toLowerCase()} "${name}"` : 'component');
+    todos.push({ target });
     return tag;
   });
-  return { template: rewritten, components, todos };
+  return { template: rewritten, components, markers, todos };
 }
 
 /** Split the decoded template into static markup and `<% %>` / `<%{ }%>` / `<%= %>` islands. */
@@ -2179,7 +2249,7 @@ export function compileHtmlpage(
     // allowlist removed would be an embed that silently vanished.
     const html = done.html ?? '';
     for (const name of includes) if (!html.includes(`data-zml="${PAGE_INCLUDE_PREFIX}${name}"`)) return fail('page embed did not survive markup sanitization');
-    for (const item of embedded.components) if (!html.includes(`data-zml="component-${item.kind}:${item.name}"`)) return fail('component embed did not survive markup sanitization');
+    for (const marker of embedded.markers) if (!html.includes(`data-zml="${marker}"`)) return fail('component embed did not survive markup sanitization');
     return { ...done, ...(includes.length ? { includes } : {}), ...(embedded.components.length ? { components: embedded.components } : {}), ...(embedded.todos.length ? { componentTodos: embedded.todos } : {}) };
   };
   const chunks = splitChunks(head.template);

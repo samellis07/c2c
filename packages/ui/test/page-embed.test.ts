@@ -358,7 +358,7 @@ test('zc-component embeds with params or unknown targets remain counted TODOs', 
 content
 <%{
 %>
-<div elName='zc-component' formLinkName='Intake' params='zc_Header=false'>Loading Form...</div>
+<div elName='zc-component' formLinkName='Intake' params='zc_SubmitVal=Send'>Loading Form...</div>
 <div elname="zc-component" viewLinkName="Missing">Loading...</div>
 <%
 }%>`;
@@ -368,6 +368,140 @@ content
     'Embedded zc-component report "Missing" has no generated view',
   ]);
   assert.equal(snippetOf(model, 'Outer')?.components, undefined);
+});
+
+test('zc-component display params render the generated view inline', async () => {
+  const snippet = `htmlpage Outer1()
+content
+<%{ %><div elName='zc-component' formLinkName='Intake' params='zc_Header=false&amp;zc_SuccMsg=Data Added Successfully!&amp;zc_SubmitVal=Submit&amp;zc_ResetVal=Reset&amp;zc_Focus=false'>Loading Form...</div><div elName='zc-component' viewLinkName='All_Rows' params='zc_Header=true'></div><% }%>`;
+  const { model } = buildUi(componentApp(snippet));
+  assert.deepEqual(snippetTodos(model), []);
+  const el = snippetOf(model, 'Outer');
+  assert.deepEqual(el?.components, [{ kind: 'form', name: 'Intake' }, { kind: 'report', name: 'All_Rows' }]);
+  assert.match(el?.html ?? '', /data-zml="component-form:Intake:untitled"/);
+  assert.match(el?.html ?? '', /data-zml="component-report:All_Rows"/);
+  const runtime = await loadRuntime();
+  const dom = new JSDOM('<!doctype html><body><main id="main"></main></body>');
+  const main = mainOf(dom);
+  main.innerHTML = runtime.renderPage(model.pages.find((page) => page.name === 'Outer'), dom.window.document, model);
+  runtime.hydrateComponentEmbeds(main, model, { fetch: async () => ({ status: 200, ok: true }) });
+  const form = main.querySelector('[data-zml="component-form:Intake:untitled"]');
+  assert.ok(form?.querySelector('form[data-form="Intake"]'), main.innerHTML);
+  assert.equal(form?.querySelector('h1'), null, 'zc_Header=false hides the form title');
+  assert.ok(main.querySelector('section[data-report="All_Rows"] > h1'), 'zc_Header=true keeps the report title');
+});
+
+test('zc-component params that cannot be applied stay counted TODOs', () => {
+  const tags = [
+    `<div elName='zc-component' viewLinkName='All_Rows' params='zc_AddRec=false'></div>`,
+    `<div elName='zc-component' viewLinkName='All_Rows' params='zc_SubmitVal=Submit'></div>`,
+    `<div elName='zc-component' viewLinkName='All_Rows' params='Name=Ann'></div>`,
+    `<div elName='zc-component' viewLinkName='All_Rows' params='zc_Header=no'></div>`,
+    `<div elName='zc-component' viewLinkName='All_Rows' params='zc_Header'></div>`,
+    `<div elName='zc-component' formLinkName='Intake' params='zc_SuccMsg=Saved'></div>`,
+    `<div elName='zc-component' formLinkName='Intake' params='zc_Focus=true'></div>`,
+    `<div elName='zc-component' formLinkName='Intake' params='zc_Header=false&amp;Name=<%=input.Name%>'></div>`,
+    `<div elName='zc-component' formLinkName='Intake' params='__proto__=x'></div>`,
+  ];
+  for (const tag of tags) {
+    const { model } = buildUi(componentApp(`htmlpage Outer1()\ncontent\n<%{ %>${tag}<% }%>`));
+    // A Deluge island in params keeps the whole snippet counted as server-side.
+    const reason = tag.includes('<%') ? /Server-side Deluge snippet/ : /Embedded zc-component/;
+    assert.equal(snippetTodos(model).filter((todo) => reason.test(todo)).length, 1, tag);
+    assert.equal(snippetOf(model, 'Outer')?.components, undefined, tag);
+  }
+  // A repeated params attribute is malformed and never proves an inline target.
+  const repeated = `<div elName='zc-component' viewLinkName='All_Rows' params='zc_Header=false' params='Name=Ann'></div>`;
+  const { model } = buildUi(componentApp(`htmlpage Outer1()\ncontent\n<%{ %>${repeated}<% }%>`));
+  assert.equal(snippetOf(model, 'Outer')?.components, undefined);
+});
+
+test('an embedded report keeps the caller filter and rejects widening display criteria', () => {
+  const safe = `<div elName='zc-component' viewLinkName='All_Rows'></div>`;
+  const widening = `<div elName='zc-component' viewLinkName='All_Rows' params='criteria=Name%3DAnn'></div>`;
+  const { model: safeModel } = buildUi(componentApp(`htmlpage Outer1()\ncontent\n<%{ %>${safe}<% }%>`));
+  assert.deepEqual(snippetOf(safeModel, 'Outer')?.components, [{ kind: 'report', name: 'All_Rows' }]);
+  const { model: wideningModel } = buildUi(componentApp(`htmlpage Outer1()\ncontent\n<%{ %>${widening}<% }%>`));
+  assert.equal(snippetOf(wideningModel, 'Outer')?.components, undefined);
+  assert.deepEqual(snippetTodos(wideningModel), ['Embedded zc-component report "All_Rows" has no generated view']);
+});
+
+test('a zc-component embed of another application is counted, never inlined', () => {
+  const tags = [
+    `<div elName='zc-component' appLinkName='Other_App' formLinkName='Intake'></div>`,
+    `<div elName='zc-component' applinkname='other-app' viewLinkName='All_Rows'></div>`,
+    `<div elName='zc-component' ownerName='someone' viewLinkName='All_Rows'></div>`,
+    `<div elName='zc-component' appLinkName='Demo' ownerName='someone' formLinkName='Intake'></div>`,
+  ];
+  for (const tag of tags) {
+    const { model } = buildUi(componentApp(`htmlpage Outer1()\ncontent\n<%{ %>${tag}<% }%>`));
+    const el = snippetOf(model, 'Outer');
+    assert.equal(el?.components, undefined, tag);
+    assert.ok(!/data-zml="component-(?:form|report):/.test(el?.html ?? ''), tag);
+    assert.equal(snippetTodos(model).filter((todo) => /Embedded zc-component/.test(todo)).length, 1, tag);
+    const todo = model.todos.find((item) => /Embedded zc-component/.test(item.reason));
+    assert.match(todo?.reason ?? '', /of (application "(?:Other_App|other-app)"|owner "someone")/, tag);
+    assert.match(todo?.manualStep ?? '', /another application \((?:Other_App|other-app|someone)\)/, tag);
+    assert.match(todo?.manualStep ?? '', /Migrate that component into this application, or link the other application/, tag);
+  }
+});
+
+test('a same-app appLinkName keeps the embed inline', () => {
+  const snippet = `htmlpage Outer1()\ncontent\n<%{ %><div elName='zc-component' appLinkName='Demo' formLinkName='Intake'></div><% }%>`;
+  const { model } = buildUi(componentApp(snippet));
+  const el = snippetOf(model, 'Outer');
+  assert.deepEqual(el?.components, [{ kind: 'form', name: 'Intake' }]);
+  assert.match(el?.html ?? '', /data-zml="component-form:Intake"/);
+  assert.deepEqual(snippetTodos(model), []);
+});
+
+test('a malformed or repeated-attribute zc-component tag is a counted TODO', () => {
+  const tags = [
+    `<div elName='zc-component' formLinkName='Intake' broken>`,
+    `<div elName='zc-component' formLinkName='Intake' params='zc_Header=false' params='Name=Ann'></div>`,
+    `<div elName='zc-component' formLinkName=Intake></div>`,
+  ];
+  for (const tag of tags) {
+    const { model } = buildUi(componentApp(`htmlpage Outer1()\ncontent\n<%{ %>${tag}<% }%>`));
+    const el = snippetOf(model, 'Outer');
+    assert.equal(el?.components, undefined, tag);
+    assert.ok(!/data-zml="component-(?:form|report):/.test(el?.html ?? ''), tag);
+    assert.equal(
+      snippetTodos(model).filter((todo) => /Embedded zc-component/.test(todo)).length,
+      1,
+      tag,
+    );
+  }
+});
+
+test('a malformed tag that does not declare zc-component records no component TODO', () => {
+  const tags = [
+    `<div elName='zc-panel' broken>`,
+    `<div elName='zc-component-x' broken>`,
+    `<div elName=zc-component broken>`,
+  ];
+  for (const tag of tags) {
+    const { model } = buildUi(componentApp(`htmlpage Outer1()\ncontent\n<%{ %>${tag}<% }%>`));
+    assert.equal(
+      snippetTodos(model).filter((todo) => /Embedded zc-component/.test(todo)).length,
+      0,
+      tag,
+    );
+  }
+});
+
+test('an untitled embed of a hidden target honors the same 403 gate', async () => {
+  const snippet = `htmlpage Outer1()\ncontent\n<%{ %><div elName='zc-component' viewLinkName='All_Rows' params='zc_Header=false'></div><% }%>`;
+  const { model } = buildUi(componentApp(snippet));
+  model.nav = [{ name: 'Back', hidden: true, items: [{ kind: 'report', name: 'All_Rows', label: 'All rows', href: '#/report/All_Rows' }] }];
+  const runtime = await loadRuntime();
+  const dom = new JSDOM('<!doctype html><body><main id="main"></main></body>');
+  const main = mainOf(dom);
+  main.innerHTML = runtime.renderPage(model.pages.find((page) => page.name === 'Outer'), dom.window.document, model);
+  runtime.hydrateComponentEmbeds(main, model, { fetch: async () => ({ status: 403, ok: false }) });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(main.querySelector('[data-access-status]')?.getAttribute('data-access-status'), '403');
+  assert.equal(main.querySelector('section[data-report="All_Rows"]'), null);
 });
 
 test('a denied embedded report renders no rows and never requests them', async () => {
