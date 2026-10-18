@@ -5456,7 +5456,7 @@ export function functionCallModule(opts: {
   const path = `/functions/${slug(opts.name)}/call`;
   const pathArgs = JSON.stringify(opts.name.split('.'));
   const readForms = [...new Set(opts.reads)].sort(compareEnUs);
-  const writeForms = [...(opts.writes ?? [])].sort((a, b) => compareEnUs(a.form, b.form) || a.op.localeCompare(b.op));
+  const writeForms = [...(opts.writes ?? [])].sort((a, b) => compareEnUs(a.form, b.form) || compareEnUs(a.op, b.op));
   const needsRows = readForms.length > 0 || writeForms.length > 0;
   return `${banner([
     `Client call for ${opts.name}`,
