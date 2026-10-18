@@ -19,7 +19,7 @@ import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { parseZml } from '../../core/src/zml.js';
 import { clientRuntimeSource } from '../src/generate.js';
 import { buildModel, type UiModel } from '../src/model.js';
-import { buildUi, elementsFromZml } from '../src/index.js';
+import { buildUi, elementsFromZml, type UiElement } from '../src/index.js';
 
 function appOf(source: string): App {
   return deriveIr(parse(source));
@@ -1044,4 +1044,246 @@ test('G17: a view answer that lands after the route moved on opens no modal', as
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(win.document.querySelector('[data-modal-form]'), null, 'a popup belongs to the page that asked for it');
   assert.equal(win.document.querySelector('form[data-form="Form_Products"]') !== null, true, 'the new route painted');
+});
+
+// --- G18: ZML image and button click Form navigation actions -------------------
+
+function findUiElement(elements: UiElement[], pred: (el: UiElement) => boolean): UiElement | undefined {
+  for (const el of elements) {
+    if (pred(el)) return el;
+    if (el.children) {
+      const found = findUiElement(el.children, pred);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+test('G18: ZML <image> with a Form click action referencing an existing form generates a form route link and 0 TODOs', async () => {
+  const zml = `<zml><layout><row><column width='100%'><panel><pr><pc><image type='icon' value='shopping-tag-sale' action='Form' componentLinkName='Vendor'/></pc></pr></panel></column></row></layout></zml>`;
+  const app = appOf(`application "SalesApp" {
+    section Main {
+      form Vendor {
+        must have Vendor_Name ( type = text )
+      }
+    }
+    pages {
+      page Home {
+        Content = "${zml}"
+      }
+    }
+  }`);
+  const model = buildModel(app);
+  const home = model.pages.find((p) => p.name === 'Home');
+  assert.ok(home, 'Home page exists');
+  assert.equal(home.status, 'generated');
+  const todoItems = model.todos.filter((t) => t.name.startsWith('Home.'));
+  assert.equal(todoItems.length, 0, `expected 0 page TODOs but got: ${JSON.stringify(todoItems)}`);
+  const icon = findUiElement(home.elements, (el) => el.icon === 'shopping-tag-sale');
+  assert.ok(icon, 'icon element found');
+  assert.equal(icon.href, '#/form/Vendor');
+
+  // Verify client runtime rendering wraps icon in link
+  const client = await loadClient();
+  const view = dom(shell('#/page/Home'), 'http://127.0.0.1/slate/index.html#/page/Home');
+  const win = view.window as unknown as { document: Doc };
+  await client.boot(model, win.document);
+  const anchor = win.document.querySelector('a[href="#/form/Vendor"]');
+  assert.ok(anchor, 'rendered icon is wrapped in anchor linking to #/form/Vendor');
+});
+
+test('G18: a snippet <image> with Form action referencing an existing form renders link and 0 TODOs', () => {
+  const snippet = "<image type='icon' action='Form' componentLinkName='Vendor' value='zc-li-solid shopping-tag-sale' />";
+  const zml = `<zml><layout><row><column width='100%'><dspZml id='zml_snippet1'><![CDATA[${snippet}]]></dspZml></column></row></layout></zml>`;
+  const app = appOf(`application "SalesApp" {
+    section Main {
+      form Vendor {
+        must have Vendor_Name ( type = text )
+      }
+    }
+    pages {
+      page Home {
+        Content = "${zml}"
+      }
+    }
+  }`);
+  const model = buildModel(app);
+  const home = model.pages.find((p) => p.name === 'Home');
+  assert.ok(home, 'Home page exists');
+  assert.equal(home.status, 'generated');
+  const todos = model.todos.filter((t) => t.name.startsWith('Home.'));
+  assert.equal(todos.length, 0, 'snippet form action resolved without TODOs');
+  const dsp = findUiElement(home.elements, (el) => el.tag === 'dspZml');
+  assert.ok(dsp, 'dsp element found');
+  assert.match(dsp.html ?? '', /<a href="#\/form\/Vendor"/);
+});
+
+test('G18: a button with declarative Form action produces an active route button rather than a TODO stub', async () => {
+  const zml = `<zml><layout><row><column width='100%'><button action='Form' componentLinkName='Vendor' text='Add Vendor'/></column></row></layout></zml>`;
+  const app = appOf(`application "SalesApp" {
+    section Main {
+      form Vendor {
+        must have Vendor_Name ( type = text )
+      }
+    }
+    pages {
+      page Home {
+        Content = "${zml}"
+      }
+    }
+  }`);
+  const model = buildModel(app);
+  const home = model.pages.find((p) => p.name === 'Home');
+  assert.ok(home, 'Home page exists');
+  assert.equal(home.status, 'generated');
+  const button = findUiElement(home.elements, (el) => el.kind === 'button');
+  assert.ok(button, 'button element exists');
+  assert.equal(button.href, '#/form/Vendor');
+  assert.equal(button.kind, 'button');
+  const todos = model.todos.filter((t) => t.name.startsWith('Home.'));
+  assert.equal(todos.length, 0, 'no TODO stub created for existing form');
+
+  // Verify client runtime renders <a class="button" href="#/form/Vendor">Add Vendor</a>
+  const client = await loadClient();
+  const view = dom(shell('#/page/Home'), 'http://127.0.0.1/slate/index.html#/page/Home');
+  const win = view.window as unknown as { document: Doc };
+  await client.boot(model, win.document);
+  const btnLink = win.document.querySelector('a.button[href="#/form/Vendor"]');
+  assert.ok(btnLink, 'rendered active route button');
+  assert.equal(btnLink.textContent, 'Add Vendor');
+});
+
+test('G18: a button with Form action targeting a non-existent form produces a TODO stub', () => {
+  const zml = `<zml><layout><row><column width='100%'><button action='Form' componentLinkName='Missing_Form' text='Add Missing'/></column></row></layout></zml>`;
+  const app = appOf(`application "SalesApp" {
+    section Main {
+      form Vendor {
+        must have Vendor_Name ( type = text )
+      }
+    }
+    pages {
+      page Home {
+        Content = "${zml}"
+      }
+    }
+  }`);
+  const model = buildModel(app);
+  const home = model.pages.find((p) => p.name === 'Home');
+  assert.ok(home, 'Home page exists');
+  assert.equal(home.status, 'todo');
+  const todo = model.todos.find((t) => t.name.startsWith('Home.'));
+  assert.ok(todo, 'TODO stub is emitted');
+  assert.match(todo.reason, /<button> "Add Missing" click action Form is not generated/);
+});
+
+test('G18: a click action calling a Deluge function (ExecuteFunction) continues to emit the manual step TODO', () => {
+  const zml = `<zml><layout><row><column width='100%'><button action='ExecuteFunction' functionName='notify_admin' text='Ping Admin'/></column></row></layout></zml>`;
+  const app = appOf(`application "SalesApp" {
+    section Main {
+      form Vendor {
+        must have Vendor_Name ( type = text )
+      }
+    }
+    pages {
+      page Home {
+        Content = "${zml}"
+      }
+    }
+  }`);
+  const model = buildModel(app);
+  const home = model.pages.find((p) => p.name === 'Home');
+  assert.ok(home, 'Home page exists');
+  assert.equal(home.status, 'todo');
+  const todo = model.todos.find((t) => t.name.startsWith('Home.'));
+  assert.ok(todo, 'manual step TODO is emitted');
+  assert.match(todo.reason, /<button> "Ping Admin" click action ExecuteFunction calling function notify_admin is not generated/);
+});
+
+function salesApp(zml: string): App {
+  return appOf(`application "SalesApp" {
+    section Main {
+      form Vendor {
+        must have Vendor_Name ( type = text )
+      }
+    }
+    pages {
+      page Home {
+        Content = "${zml}"
+      }
+    }
+  }`);
+}
+
+function homeOf(zml: string) {
+  const model = buildModel(salesApp(zml));
+  const home = model.pages.find((p) => p.name === 'Home');
+  assert.ok(home, 'Home page exists');
+  return { model, home, todos: model.todos.filter((t) => t.name.startsWith('Home.')) };
+}
+
+test('G18: a free-text # button href is never turned into a live link', async () => {
+  const hrefs = ['#javascript:alert(1)', '#%6aavascript:alert(1)', '#//evil.com', '#c2c_auth=tok&amp;state=s', '#/form/NotAForm', '#/report/NoSuchReport'];
+  const zml = `<zml><layout><row><column width='100%'>${hrefs.map((h, i) => `<button url='${h}' text='B${i}'/>`).join('')}</column></row></layout></zml>`;
+  const { model, home } = homeOf(zml);
+  const client = await loadClient();
+  const view = dom(shell('#/page/Home'), 'http://127.0.0.1/slate/index.html#/page/Home');
+  const win = view.window as unknown as { document: Doc };
+  await client.boot(model, win.document);
+  for (let i = 0; i < hrefs.length; i += 1) {
+    const button = findUiElement(home.elements, (el) => el.kind === 'button' && el.text === `B${i}`);
+    assert.ok(button, `button B${i} exists`);
+    assert.equal(button.href, undefined, `free text ${hrefs[i]} is not kept as an href`);
+  }
+  assert.equal(win.document.querySelectorAll('a.button').length, 0, 'no free-text # href renders as a link');
+});
+
+test('G18: the runtime renders a link only for a route to a form or report the app has', async () => {
+  const { model, home } = homeOf(`<zml><layout><row><column width='100%'><button action='Form' componentLinkName='Vendor' text='Add Vendor'/></column></row></layout></zml>`);
+  const button = findUiElement(home.elements, (el) => el.kind === 'button');
+  assert.ok(button);
+  // A hand-edited model carries a free-text href: the runtime keeps it inert.
+  button.href = '#javascript:alert(1)';
+  const client = await loadClient();
+  const view = dom(shell('#/page/Home'), 'http://127.0.0.1/slate/index.html#/page/Home');
+  const win = view.window as unknown as { document: Doc };
+  await client.boot(model, win.document);
+  assert.equal(win.document.querySelectorAll('a.button').length, 0);
+  button.href = '#/form/NotAForm';
+  const again = dom(shell('#/page/Home'), 'http://127.0.0.1/slate/index.html#/page/Home');
+  const win2 = again.window as unknown as { document: Doc };
+  await client.boot(model, win2.document);
+  assert.equal(win2.document.querySelectorAll('a.button').length, 0);
+});
+
+test('G18: an OpenReport button with an unknown report gets no route', () => {
+  const { home } = homeOf(`<zml><layout><row><column width='100%'><button action='OpenReport' componentLinkName='NoSuchReport' text='Open'/></column></row></layout></zml>`);
+  const button = findUiElement(home.elements, (el) => el.kind === 'button');
+  assert.ok(button);
+  assert.equal(button.href, undefined);
+});
+
+test('G18: Form targets must be an exact app form link name', () => {
+  for (const attrs of ["componentLinkName='vendor'", "name='Vendor'"]) {
+    const { home, todos } = homeOf(`<zml><layout><row><column width='100%'><panel><pr><pc><image type='icon' value='tag' action='Form' ${attrs}/></pc></pr></panel></column></row></layout></zml>`);
+    const icon = findUiElement(home.elements, (el) => el.icon === 'tag');
+    assert.ok(icon);
+    assert.equal(icon.href, undefined, `${attrs} is not a form route`);
+    assert.ok(todos.some((t) => /click action Form is not generated/.test(t.reason)), `${attrs} keeps its TODO`);
+  }
+});
+
+test('G18: a snippet icon whose Form target is not an app form keeps its TODO and gets no link', () => {
+  const snippet = "<image type='icon' action='Form' componentLinkName='NotAForm' value='tag' />";
+  const { home, todos } = homeOf(`<zml><layout><row><column width='100%'><dspZml id='zml_snippet1'><![CDATA[${snippet}]]></dspZml></column></row></layout></zml>`);
+  const dsp = findUiElement(home.elements, (el) => el.tag === 'dspZml');
+  assert.ok(dsp);
+  assert.doesNotMatch(dsp.html ?? '', /href="#\/form/);
+  assert.ok(todos.some((t) => /click action Form is not generated/.test(t.reason)));
+});
+
+test('G18: a non-icon <image value> stays a non-icon with its no-generated-component TODO', () => {
+  const { home, todos } = homeOf(`<zml><layout><row><column width='100%'><panel><pr><pc><image type='url' value='https://x.example/logo.png'/></pc></pr></panel></column></row></layout></zml>`);
+  assert.equal(findUiElement(home.elements, (el) => el.icon !== undefined), undefined, 'not an icon');
+  assert.equal(home.status, 'todo');
+  assert.ok(todos.some((t) => /ZML <image> has no generated component/.test(t.reason)));
 });

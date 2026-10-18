@@ -354,8 +354,13 @@ function metricPanel(children: PageElement[]): PageElement[] {
   return out;
 }
 
-function safeHref(url: string): string | undefined {
-  return /^https?:\/\//i.test(url.trim()) ? url.trim() : undefined;
+/** An http(s) address, or a generated route to a form or report this app has. */
+function safeHref(ctx: Ctx, url: string): string | undefined {
+  const trimmed = url.trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  const route = /^#\/(form|report)\/([A-Za-z0-9_]+)$/.exec(trimmed);
+  if (!route) return undefined;
+  return (route[1] === 'form' ? ctx.forms.has(route[2]) : ctx.reports.has(route[2])) ? trimmed : undefined;
 }
 
 function convert(ctx: Ctx, node: ZmlElement): PageElement[] {
@@ -442,10 +447,10 @@ function convert(ctx: Ctx, node: ZmlElement): PageElement[] {
   if (ui.kind === 'button') {
     const label = decodeEntities(ui.text ?? ui.name ?? 'Button');
     const action = (attrOf(node.attributes, 'action') ?? '').toLowerCase();
-    const target = attrOf(node.attributes, 'componentLinkName');
-    const route = action === 'openform' ? 'form' : action === 'openreport' ? 'report' : action === 'openpage' ? 'page' : undefined;
+    const target = attrOf(node.attributes, 'componentLinkName', 'formLinkName', 'linkName', 'form');
+    const route = action === 'openform' || action === 'form' ? 'form' : action === 'openreport' ? 'report' : action === 'openpage' ? 'page' : undefined;
     const known = route === 'form' ? ctx.forms.has(target ?? '') : route === 'report' ? ctx.reports.has(target ?? '') : route === 'page' ? ctx.model.pages.some((p) => p.name === target) : false;
-    const href = route && target && known ? `#/${route}/${encodeURIComponent(target)}` : ui.href ? safeHref(ui.href) : undefined;
+    const href = route && target && known ? `#/${route}/${encodeURIComponent(target)}` : ui.href ? safeHref(ctx, ui.href) : undefined;
     if (!href) return [{ kind: 'todo', tag: node.tag, reason: `the ${label} button has no action the app can run` }, ...kids()];
     const parameters = attrOf(node.attributes, 'parameters');
     return [
@@ -455,7 +460,7 @@ function convert(ctx: Ctx, node: ZmlElement): PageElement[] {
     ];
   }
   if (key === 'embed') {
-    const href = safeHref(attrOf(node.attributes, 'url', 'src') ?? '');
+    const href = safeHref(ctx, attrOf(node.attributes, 'url', 'src') ?? '');
     return [href ? { kind: 'link', label: attrOf(node.attributes, 'title') ?? 'Open the embedded page', href } : { kind: 'todo', tag: node.tag, reason: 'the embed has no web address' }, ...kids()];
   }
   if (key === 'suffix') {

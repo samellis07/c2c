@@ -1569,8 +1569,72 @@ export interface ZmlImageAction {
   /** Stable occurrence identifier within the source snippet. */
   siteId?: string;
   fn?: string;
+  form?: string;
   label?: string;
   element?: 'button';
+}
+
+const WINDOW_TARGETS = new Set([
+  'popup',
+  'popup window',
+  'new-window',
+  'new window',
+  'same-window',
+  'same window',
+  '_blank',
+  '_self',
+]);
+
+function getZmlAttr(attributes: Record<string, string> | undefined, keys: string[]): string | undefined {
+  if (!attributes) return undefined;
+  const byLower = new Map<string, string>();
+  for (const key of Object.keys(attributes).sort()) {
+    const lower = key.toLowerCase();
+    if (!byLower.has(lower)) byLower.set(lower, attributes[key]);
+  }
+  for (const key of keys) {
+    const value = byLower.get(key.toLowerCase());
+    if (value?.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+export function isFormAction(action: string, attributes?: Record<string, string>): boolean {
+  const act = (action || '').trim().toLowerCase();
+  if (act === 'form' || act === 'openform' || act.startsWith('#form:')) return true;
+  if (/openUrl\s*\(\s*(?:&quot;|["'])#Form:/i.test(action || '')) return true;
+  if (attributes) {
+    const href = (getZmlAttr(attributes, ['url', 'href']) || '').toLowerCase();
+    if (href.startsWith('#form:') || /openUrl\s*\(\s*(?:&quot;|["'])#Form:/i.test(href)) return true;
+  }
+  return false;
+}
+
+export function formActionTarget(action: string, attributes?: Record<string, string>): string | undefined {
+  const act = (action || '').trim();
+  const lower = act.toLowerCase();
+  if (lower.startsWith('#form:')) {
+    return act.slice(6).trim().split(/[?&,"') ]/)[0] || undefined;
+  }
+  const openUrlMatch = /openUrl\s*\(\s*(?:&quot;|["'])#Form:([A-Za-z_]\w*)/i.exec(act);
+  if (openUrlMatch) return openUrlMatch[1];
+  if (attributes) {
+    const href = (getZmlAttr(attributes, ['url', 'href']) || '').trim();
+    if (href.toLowerCase().startsWith('#form:')) {
+      return href.slice(6).trim().split(/[?&,"') ]/)[0] || undefined;
+    }
+    const openUrlHref = /openUrl\s*\(\s*(?:&quot;|["'])#Form:([A-Za-z_]\w*)/i.exec(href);
+    if (openUrlHref) return openUrlHref[1];
+  }
+  if (lower === 'form' || lower === 'openform') {
+    if (attributes) {
+      const explicit = getZmlAttr(attributes, ['componentLinkName', 'formLinkName', 'linkName', 'form', 'targetForm']);
+      if (explicit) return explicit;
+      const rawTarget = getZmlAttr(attributes, ['target']);
+      if (rawTarget && !WINDOW_TARGETS.has(rawTarget.toLowerCase())) return rawTarget;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -1589,7 +1653,14 @@ export function zmlImageActions(template: string): ZmlImageAction[] {
     if (!action) continue;
     const fn = (attrs.functionname ?? attrs.function ?? '').trim();
     const label = ['elementname', 'name', 'id', 'value', 'src', 'alt'].map((k) => (attrs[k] ?? '').trim()).find(Boolean);
-    out.push({ action, siteId: `image-${m.index}`, ...(fn ? { fn } : {}), ...(label ? { label } : {}) });
+    const form = isFormAction(action, attrs) ? formActionTarget(action, attrs) : undefined;
+    out.push({
+      action,
+      siteId: `image-${m.index}`,
+      ...(fn ? { fn } : {}),
+      ...(label ? { label } : {}),
+      ...(form ? { form } : {}),
+    });
   }
   return out;
 }
@@ -1610,7 +1681,11 @@ export function zmlExecuteFunctionButtons(template: string): ZmlImageAction[] {
   return out;
 }
 
-export function convertZmlSnippetToHtml(template: string): string {
+/**
+ * `forms` is the set of app form link names: an icon's Form click action
+ * becomes a `#/form/<name>` link only when its target is exactly one of them.
+ */
+export function convertZmlSnippetToHtml(template: string, forms: ReadonlySet<string> = new Set()): string {
   if (!/<\/?(panel|pr|pc|prefix|suffix|text|row|column|image)\b/i.test(template)) {
     return template;
   }
@@ -1706,8 +1781,13 @@ export function convertZmlSnippetToHtml(template: string): string {
         // A ZML icon image is a decorative styled tile, as on a page-level
         // ZML layout: the box keeps its size, colours and corner radius, and
         // the icon glyph name is not rendered.
-        if (tag === 'image' && !isClosing && (parseZmlAttributes(attrStr).type ?? '').trim().toLowerCase() === 'icon') {
-          out += `<div data-zml="icon"${zmlAttributesToStyle(parseZmlAttributes(attrStr))}></div>`;
+        const imageAttrs = parseZmlAttributes(attrStr);
+        const imgType = (imageAttrs.type ?? imageAttrs.imagetype ?? '').trim().toLowerCase();
+        if (tag === 'image' && !isClosing && imgType === 'icon') {
+          const formTarget = isFormAction(imageAttrs.action ?? '', imageAttrs) ? formActionTarget(imageAttrs.action ?? '', imageAttrs) : undefined;
+          const iconDiv = `<div data-zml="icon"${zmlAttributesToStyle(imageAttrs)}></div>`;
+          const linked = formTarget && /^[A-Za-z0-9_]+$/.test(formTarget) && forms.has(formTarget);
+          out += linked ? `<a href="#/form/${formTarget}">${iconDiv}</a>` : iconDiv;
           at += full.length;
           if (!isSelfClosing) {
             const closeMatch = /^\s*<\/image>/i.exec(template.slice(at));
@@ -2228,7 +2308,7 @@ export function compileHtmlpage(
   const fail = (reason: string): HtmlpageCompiled => ({ ok: false, reason });
   const head = splitTemplate(decoded);
   head.template = rewriteRecordSummaryFrames(head.template, app);
-  head.template = convertZmlSnippetToHtml(head.template);
+  head.template = convertZmlSnippetToHtml(head.template, new Set(app.forms.map((f) => f.name)));
   head.template = rewriteEmbedIframes(head.template, app);
   const fnFiles: HtmlpageFile[] = [];
   if (hasExecuteFunctionButton(head.template)) {
