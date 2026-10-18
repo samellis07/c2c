@@ -50,6 +50,8 @@ import {
 } from './dispatch.js';
 import { connectionArgIndex, resolveConnectionArgument, walk, type DeclaredConnection } from './connections.js';
 import { parse, parseExpression } from './parser.js';
+import { createHash } from 'node:crypto';
+import { emitServerConditionFromCode, serverConditionSafeSource } from './server-condition.js';
 import { unsupportedClientShims } from './client-shim.js';
 import { lex } from './lexer.js';
 import { criteriaHasRecordQuery, criteriaHasTodo, type Criteria } from '../../shims/src/criteria.js';
@@ -105,6 +107,24 @@ export interface TranslateResult {
    * nowhere — a generator bug the no-silent-drop audit fails on.
    */
   coverage: StatementCover[];
+  /**
+   * Client conditions compiled into read-only server functions instead of a
+   * `client-condition-uses-server` todo (see {@link serverConditionCall}). The
+   * generator merges them into the client-call catalog: each becomes a
+   * `functions/custom/<slug>.mjs` target plus its `<slug>-call.mjs` endpoint.
+   * Absent unless the caller named the translation unit (`conditionContext`).
+   */
+  serverConditions?: ServerConditionDef[];
+}
+
+/** One client condition emitted as a read-only server function. */
+export interface ServerConditionDef {
+  /** `c2cCond_` + 12 hex of sha256(form|script|line). */
+  name: string;
+  /** Caller-supplied arguments, in order: input fields or client-bound locals. */
+  params: { field: string; type: string }[];
+  /** `async function <name>(ctx, shim, ...params)` source. */
+  body: string;
 }
 
 /** One visited statement and the stats bucket it counted into. */
@@ -236,6 +256,14 @@ export interface TranslateOptions {
    * `client-condition-uses-server` todo.
    */
   clientCallFunctions?: readonly string[];
+  /**
+   * Names the translation unit for server-condition naming: the workflow's
+   * form and script. A client condition that needs a server read is compiled
+   * into a `c2cCond_*` function the browser calls through the client-call
+   * route — but only when the generator will emit that route, so a direct
+   * `translate()` call (no context) keeps the counted todo.
+   */
+  conditionContext?: { form?: string; script?: string };
 }
 
 export type AlertEventClass = 'allowed' | 'disallowed' | 'unverified';
@@ -329,6 +357,10 @@ interface Fx {
    * handler's own update. See {@link staleRead}.
    */
   stateReads?: string[];
+  /** Raw Deluge text of the expression, sliced from the translated script. */
+  sourceText?: string;
+  /** Offset of the expression in the translated script (for `sourceText` line math). */
+  sourceStart?: number;
 }
 
 interface SimpleKeyLookup {
@@ -645,6 +677,12 @@ interface Scope {
   connections: DeclaredConnection[];
   /** Live `expr()` depth. Past {@link EXPR_STACK_LIMIT} the walk returns a todo. */
   exprDepth: number;
+  /** Read-only server functions compiled out of client conditions (see {@link serverConditionCall}). */
+  serverConditions: ServerConditionDef[];
+  /** Emitted body per condition name, for dedupe and collision detection. */
+  serverConditionIndex: Map<string, string>;
+  /** `TranslateOptions.conditionContext`; null on a direct translate(). */
+  conditionContext: { form: string; script: string } | null;
 }
 
 interface Out {
@@ -727,10 +765,20 @@ function allClientReads(value: Fx, scope: Scope): boolean {
   return value.reads.every(ok) && value.unboundReads.every(ok);
 }
 
-function clientExpr(value: Fx, scope: Scope, todoConstruct = 'client-condition-uses-server', allowClientCall = false): { code: string; todo: boolean; shim: boolean } {
+function clientExpr(value: Fx, scope: Scope, todoConstruct = 'client-condition-uses-server', allowClientCall = false, asCondition = false): { code: string; todo: boolean; shim: boolean } {
   // A server-only unit has no client to evaluate anything on: no slot, no
   // replayed call, and no client-split todo.
   if (scope.noClient) return { code: 'undefined', todo: false, shim: false };
+  // A condition the client cannot evaluate may still run as an event-time
+  // server call: the whole expression is compiled into a read-only
+  // `c2cCond_*` function the browser calls through the client-call route,
+  // branching on the returned `value`. Only a real boolean test (`if` /
+  // `while`) qualifies — an openUrl message or `:ui` argument needs the
+  // expression's value, not its truthiness.
+  const counted = (): { code: string; todo: boolean; shim: boolean } => {
+    const call = asCondition && todoConstruct === 'client-condition-uses-server' ? serverConditionCall(value, scope) : null;
+    return call !== null ? { code: call, todo: false, shim: true } : { code: `await shim.todo(ctx, ${JSON.stringify(todoConstruct)})`, todo: true, shim: true };
+  };
   // A read-only app function is an event-time server call, not a prefetch
   // replay. Every `thisapp` call in the expression must resolve to a callee
   // the generator classified read-only; one writer keeps the counted todo.
@@ -756,9 +804,7 @@ function clientExpr(value: Fx, scope: Scope, todoConstruct = 'client-condition-u
   // client prefetch; their bodies may have side effects. A bare call to a
   // declared function is not server-only, so the refusal precedes the
   // server-only check — the placeholder is what keeps the construct counted.
-  if (value.appFunction || value.todo) {
-    return { code: `await shim.todo(ctx, ${JSON.stringify(todoConstruct)})`, todo: true, shim: true };
-  }
+  if (value.appFunction || value.todo) return counted();
   // A shim the browser runtime does not implement is evaluated like a server
   // read: the prefetch computes it and the client reads the slot.
   const clientReady = value.clientReady || (!value.sideEffect && allClientReads(value, scope));
@@ -802,22 +848,136 @@ function clientExpr(value: Fx, scope: Scope, todoConstruct = 'client-condition-u
   // A refused or ambiguous element read is a counted todo. It is not a row map:
   // a non-record element has no row ID. A record loop variable is client data
   // (so the walk above sets `blocked`) and still uses the row map.
-  if (elements.size > 0) {
-    return { code: `await shim.todo(ctx, ${JSON.stringify(todoConstruct)})`, todo: true, shim: true };
-  }
+  if (elements.size > 0) return counted();
   const closure = rowClosure(value, scope);
   if (!value.todo && closure.rows.length && closure.ok) {
     const mapped = queueRowMap(value, closure.rows, scope);
     if (mapped) return { code: mapped, todo: false, shim: true };
   }
-  if (closure.rows.length || value.reads.some((r) => scope.clientData.has(r)) || blocked) {
-    return { code: `await shim.todo(ctx, ${JSON.stringify(todoConstruct)})`, todo: true, shim: true };
-  }
+  if (closure.rows.length || value.reads.some((r) => scope.clientData.has(r)) || blocked) return counted();
   const slot = slotExpr(value, scope);
-  if (slot === null) {
-    return { code: `await shim.todo(ctx, ${JSON.stringify(todoConstruct)})`, todo: true, shim: true };
-  }
+  if (slot === null) return counted();
   return { code: slot, todo: false, shim: true };
+}
+
+/**
+ * Compile a client condition into a read-only server function the browser
+ * reaches through the existing client-call route. `value`'s Deluge source is
+ * re-translated standalone by {@link emitServerConditionFunction}; every free
+ * name must be a value the caller can send back: an input field becomes a
+ * parameter the browser posts, and a client-bound local (a `var` the client
+ * emitted, a declared slot copy, a non-record loop element) is passed by its
+ * client binding. Anything else — a server-bound local, a fetched row, an
+ * `old` read, a whole-record `input` — has no value at the caller, so the
+ * condition keeps its counted todo.
+ *
+ * Returns the client-side test expression
+ * `((await shim.client.call(ctx, "<name>", [args]))?.value === true)`: the
+ * call throws on a refused or failed request (the run is discarded, same as a
+ * `thisapp` client call), a dry run reports `value: null`, and any non-`true`
+ * result takes the false branch — fail closed either way.
+ */
+function serverConditionCall(value: Fx, scope: Scope): string | null {
+  if (!scope.conditionContext) return null;
+  const raw = value.sourceText;
+  if (!raw || !serverConditionSafeSource(raw)) return null;
+  if (value.todo || value.appFunction || value.sideEffect || value.unboundReads.length) return null;
+  // A caller-supplied parameter: an input field, or a client-bound local the
+  // browser passes by its emitted identifier. A field name colliding with a
+  // replayed `var` or another parameter would capture it — refuse instead.
+  const params = new Map<string, { field: string; type: string; arg: string }>();
+  const paramNames = new Set<string>();
+  const addParam = (name: string, type: string, arg: string): boolean => {
+    if (!/^[$A-Za-z_][$\w]*$/.test(name) || RESERVED.has(name) || paramNames.has(name)) return false;
+    paramNames.add(name);
+    params.set(name, { field: name, type, arg });
+    return true;
+  };
+  // `shim.input.get(ctx, "F")` in replayed code or the expression reads the
+  // bound field the caller sent; rewrite it to the parameter identifier.
+  const bindFieldReads = (code: string, allowCall: boolean): string | null => {
+    let bad = false;
+    const out = code.replace(/\bshim\.input\.get\(ctx,\s*("(?:\\.|[^"\\])*")\)/g, (m, j: string) => {
+      let field: unknown;
+      try {
+        field = JSON.parse(j);
+      } catch {
+        bad = true;
+        return m;
+      }
+      const arg = `shim.input.get(ctx, ${j})`;
+      if (typeof field === 'string' && params.get(field)?.arg === arg) return field;
+      if (typeof field !== 'string' || !addParam(field, scope.decimalFields.has(field) ? 'decimal' : 'auto', arg)) {
+        bad = true;
+        return m;
+      }
+      return field;
+    });
+    if (bad || /\bshim\.(?:input|old|record)\.|\bctx\.(?:old|record|args|row|subformRow|element)\b|\bshim\.todo\(|\bshim\.client\./.test(out)) return null;
+    // A `shim.thisapp.call` survives only in a binding the generator already
+    // proved read-only; anything else that reaches the server must not invoke.
+    if (!allowCall && /\bshim\.thisapp\./.test(out)) return null;
+    return out;
+  };
+  // A server-bound local the condition reads is replayed inside the emitted
+  // function, exactly the binding the program computed — the same dominance,
+  // staleness, and read-only rules a prefetch replay requires. Anything the
+  // replay cannot reproduce keeps the counted todo.
+  const prelude: string[] = [];
+  const replayed = new Set<string>();
+  const dep = (name: string, stack: Set<string>): boolean => {
+    if (stack.has(name)) return false;
+    const ident = jsIdent(name);
+    // A record or query value cannot cross the call boundary: the endpoint
+    // accepts plain JSON args only, and a row proxy would lose its shim state.
+    if (scope.row.has(name) || scope.query.has(name)) return false;
+    if (scope.clientData.has(name) || scope.clientDeclared.has(name) || (scope.local.has(name) && !scope.serverOnly.has(name))) {
+      return params.get(ident)?.arg === ident || addParam(ident, 'auto', ident);
+    }
+    if (!scope.local.has(name) || !scope.serverOnly.has(name)) return false;
+    const binding = scope.bindings.get(name);
+    if (!binding || !dominates(name, binding, scope)) return false;
+    if (replayed.has(name)) return true;
+    stack.add(name);
+    const ok = binding.reads.every((d) => dep(d, stack));
+    stack.delete(name);
+    if (!ok) return false;
+    const code = bindFieldReads(binding.code, !!binding.readOnlyCalls);
+    // A replayed `var` must not shadow a caller-supplied parameter.
+    if (code === null || paramNames.has(ident)) return false;
+    paramNames.add(ident);
+    replayed.add(name);
+    prelude.push(`var ${ident} = ${code};`);
+    return true;
+  };
+  for (const r of value.reads) {
+    if (scope.row.has(r) || scope.query.has(r) || r === 'input' || r === 'old') return null;
+    if (!dep(r, new Set())) return null;
+  }
+  const expression = bindFieldReads(value.code, false);
+  if (expression === null) return null;
+  const line = 1 + (scope.src.slice(0, value.sourceStart ?? 0).match(/\n/g) ?? []).length;
+  const key = `${scope.conditionContext.form}|${scope.conditionContext.script}|${line}`;
+  const base = `c2cCond_${createHash('sha256').update(key).digest('hex').slice(0, 12)}`;
+  const emitBody = (fnName: string) =>
+    emitServerConditionFromCode(expression, prelude, [...params.keys()], fnName);
+  let name = base;
+  let body = emitBody(name);
+  const prior = scope.serverConditionIndex.get(name);
+  if (prior !== undefined && prior !== body) {
+    // Two distinct conditions hashed to one name (same line, e.g. a one-line
+    // script): disambiguate deterministically instead of aliasing.
+    name = `${base}_${createHash('sha256').update(raw).digest('hex').slice(0, 4)}`;
+    body = emitBody(name);
+    if (scope.serverConditionIndex.has(name) && scope.serverConditionIndex.get(name) !== body) return null;
+  }
+  if (body === null) return null;
+  if (!scope.serverConditionIndex.has(name)) {
+    scope.serverConditionIndex.set(name, body);
+    scope.serverConditions.push({ name, params: [...params.values()].map(({ field, type }) => ({ field, type })), body });
+  }
+  const args = [...params.values()].map((p) => p.arg);
+  return `((await shim.client.call(ctx, ${JSON.stringify(name)}, [${args.join(', ')}]))?.value === true)`;
 }
 
 /**
@@ -2498,6 +2658,11 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     schema: options.schema,
     connections: options.connections ?? [],
     exprDepth: 0,
+    serverConditions: [],
+    serverConditionIndex: new Map(),
+    conditionContext: options.conditionContext
+      ? { form: options.conditionContext.form ?? '', script: options.conditionContext.script ?? '' }
+      : null,
   };
   for (const n of scope.row) scope.local.add(n);
   const stats: TranslateStats = { statements: 0, translated: 0, shimmed: 0, todo: 0 };
@@ -2511,8 +2676,9 @@ export function translate(src: string, options: TranslateOptions = {}): Translat
     ? `if (ctx.rangeSlot) {\n${scope.deferred.join('\n')}\n}${eager.trim() ? ` else {\n${eager}\n}` : ''}`
     : eager;
   const client = [scope.clientDecls.join('\n'), out.client].filter((s) => s.trim()).join('\n');
-  if (scope.noClient) return { server: out.server, client: '', prefetch: '', usesElement: false, nextSlot: scope.slot, stats, todos, clientGaps: scope.clientGaps, coverage: scope.cover };
-  return { server: out.server, client, prefetch, usesElement: scope.elementSlots > 0, nextSlot: scope.slot, stats, todos, clientGaps: scope.clientGaps, coverage: scope.cover };
+  const conditionFields = scope.serverConditions.length ? { serverConditions: scope.serverConditions } : {};
+  if (scope.noClient) return { server: out.server, client: '', prefetch: '', usesElement: false, nextSlot: scope.slot, stats, todos, clientGaps: scope.clientGaps, coverage: scope.cover, ...conditionFields };
+  return { server: out.server, client, prefetch, usesElement: scope.elementSlots > 0, nextSlot: scope.slot, stats, todos, clientGaps: scope.clientGaps, coverage: scope.cover, ...conditionFields };
 }
 
 /** Line-start offsets of lines that directly follow a `//` comment-only line. */
@@ -3004,7 +3170,7 @@ function ifStmt(s: Extract<Stmt, { kind: 'if' }>, scope: Scope, stats: Translate
   const condShim = test.shim || elifTests.some((t) => t.shim);
   const constructs = [...test.constructs, ...elifTests.flatMap((t) => t.constructs)];
   const clientTests = clientBits
-    ? withBindings(scope, atTest, () => [clientExpr(test, scope, 'client-condition-uses-server', true), ...elifTests.map((t) => clientExpr(t, scope, 'client-condition-uses-server', true))])
+    ? withBindings(scope, atTest, () => [clientExpr(test, scope, 'client-condition-uses-server', true, true), ...elifTests.map((t) => clientExpr(t, scope, 'client-condition-uses-server', true, true))])
     : [];
   // A test only the server can evaluate over arms that only bind locals: the
   // server runs the if and the client keeps no copy of it.
@@ -3337,7 +3503,7 @@ function whileStmt(s: Extract<Stmt, { kind: 'while' }>, scope: Scope, stats: Tra
   const body = underLoop(scope, assignedNames(s.body), () => statement(s.body, scope, stats, todos));
   const constructs = [...test.constructs];
   const needsSnapshot = !!(body.client.trim() && test.serverOnly && !test.clientReady);
-  const snap = needsSnapshot ? clientExpr(test, scope, 'client-condition-uses-server', true) : undefined;
+  const snap = needsSnapshot ? clientExpr(test, scope, 'client-condition-uses-server', true, true) : undefined;
   if (snap?.todo) constructs.push('client-condition-uses-server');
   account(stats, todos, { todo: test.todo || !!snap?.todo, shim: test.shim || !!snap, constructs }, s.span);
   const server = body.server.trim() || test.serverOnly ? `while (${test.code}) {\n${indent(body.server)}\n}` : '';
@@ -4642,7 +4808,14 @@ function expr(e: Expr, scope: Scope): Fx {
   if (depth > EXPR_STACK_LIMIT) return tooDeepExpr();
   scope.exprDepth = depth;
   try {
-    return exprBody(e, scope);
+    const out = exprBody(e, scope);
+    // The raw text backs the server-condition emission: a client condition's
+    // Deluge source is re-translated standalone by emitServerConditionFunction.
+    if (out.sourceText === undefined) {
+      out.sourceText = scope.src.slice(e.span.start, e.span.end);
+      out.sourceStart = e.span.start;
+    }
+    return out;
   } finally {
     scope.exprDepth = depth - 1;
   }
