@@ -935,6 +935,15 @@ function embedLinkOutKind(rawUrl, parsed) {
   return '';
 }
 
+// A generated route to a form or report the app has; any other `#` text stays inert.
+function routeHref(href, appModel) {
+  const m = /^#\/(form|report)\/([A-Za-z0-9_]+)$/.exec(typeof href === 'string' ? href : '');
+  const app = elementModel(appModel);
+  if (!m || !app) return '';
+  const list = m[1] === 'form' ? app.forms : app.reports;
+  return (list || []).some((item) => item && item.name === m[2]) ? href : '';
+}
+
 function renderElement(el, doc, parentReport, appModel) {
   const childReport =
     el.kind === 'container' && typeof el.href === 'string' && el.href.startsWith('#/report/')
@@ -944,7 +953,9 @@ function renderElement(el, doc, parentReport, appModel) {
   if (el.icon) {
     // Decorative icon: a glyph, never the exported icon name as text.
     const mark = typeof c2cIconGlyph === 'function' ? c2cIconGlyph(el.icon) : '';
-    return `<span class="zicon" data-icon="${escapeHtml(el.icon)}" aria-hidden="true"${styleAttr(el)}>${mark}</span>${kids}`;
+    const span = `<span class="zicon" data-icon="${escapeHtml(el.icon)}" aria-hidden="true"${styleAttr(el)}>${mark}</span>`;
+    const link = routeHref(el.href, appModel);
+    return `${link ? `<a href="${escapeHtml(link)}">${span}</a>` : span}${kids}`;
   }
   if (el.kind === 'container') {
     const width = el.width ? ` data-width="${escapeHtml(el.width)}"` : '';
@@ -1029,6 +1040,10 @@ function renderElement(el, doc, parentReport, appModel) {
   }
   if (el.kind === 'gauge') return `<figure class="gauge"${styleAttr(el)}><figcaption>${escapeHtml(el.name || el.tag)}</figcaption><output>${escapeHtml(el.text || '')}</output></figure>${kids}`;
   if (el.kind === 'button') {
+    const link = routeHref(el.href, appModel);
+    if (link) {
+      return `<a class="button" href="${escapeHtml(link)}"${styleAttr(el)}>${escapeHtml(el.text || el.name || 'Button')}</a>${kids}`;
+    }
     const href = el.href && el.href.startsWith('http') ? ` data-url="${escapeHtml(el.href)}"` : '';
     return `<button type="button"${href}${styleAttr(el)}>${escapeHtml(el.text || el.name || 'Button')}</button>${kids}`;
   }

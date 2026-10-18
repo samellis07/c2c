@@ -512,6 +512,26 @@ test('a page button or embed runs only an in-app route or an http(s) address; an
   assert.ok(!all.some((el) => el.kind === 'link' && /^javascript:/i.test(el.href)), 'a script embed is never a link');
 });
 
+test('a free-text # href is a route only to a form or report the app has', () => {
+  const zml = [
+    "<zml><layout><row><column width='100%'>",
+    "<button text='Hash' url='#javascript:alert(1)'/>",
+    "<button text='Slash' url='#//evil.com'/>",
+    "<button text='Stray' url='#/form/No_Such_Form'/>",
+    "<button action='Form' componentLinkName='Add_Order' text='New'/>",
+    "<embed title='Frag' url='#c2c_auth=tok'/>",
+    "</column></row></layout></zml>",
+  ].join('');
+  const page = reactAppSpec(appOf(zml)).pages?.Dashboard;
+  assert.ok(page, 'the page is in the spec');
+  const all = leaves(page.elements);
+  const hrefs = all.flatMap((el) => ('href' in el && typeof el.href === 'string' ? [el.href] : []));
+  assert.deepEqual(hrefs, ['#/form/Add_Order'], `only the generated route to an app form survives: ${hrefs.join(', ')}`);
+  const reasons = all.flatMap((el) => (el.kind === 'todo' ? [el.reason] : []));
+  for (const label of ['Hash', 'Slash', 'Stray']) assert.ok(reasons.includes(`the ${label} button has no action the app can run`), reasons.join(' | '));
+  assert.ok(reasons.includes('the embed has no web address'));
+});
+
 test('entity decoding keeps an out-of-range or zero code point as written', () => {
   assert.equal(decodeEntities('&#65;&#x42;&lt;&AMP;'), 'AB<&');
   assert.equal(decodeEntities('&#0;&#x110000;&bogus;'), '&#0;&#x110000;&bogus;');

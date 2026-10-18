@@ -8,13 +8,16 @@
  */
 
 import { createRequire } from 'node:module';
-import type { App } from '../../core/src/ir.js';
+import type { App, Form } from '../../core/src/ir.js';
 import type { ZmlElement } from '../../core/src/zml.js';
 import type { SchemaPlan } from '../../schema/src/generator.js';
 import {
   compileHtmlpage,
+  convertZmlSnippetToHtml,
   decodeXmlEntities,
   EXECUTE_FUNCTION_BUTTON,
+  formActionTarget,
+  isFormAction,
   zmlExecuteFunctionButtons,
   zmlImageActions,
   type HtmlpageFile,
@@ -878,26 +881,57 @@ function dedupeImageActions(actions: ZmlImageAction[]): ZmlImageAction[] {
   return actions;
 }
 
+/** Link names a generated `#/form/<name>` or `#/report/<name>` route can carry. */
+const ROUTE_LINK_NAME = /^[A-Za-z0-9_]+$/;
+
+/** The app form whose link name is exactly `target`; any other target stays a manual step. */
+function findMatchingForm(forms: Form[] | undefined, target: string | undefined): Form | undefined {
+  if (!forms || !target || !ROUTE_LINK_NAME.test(target)) return undefined;
+  return forms.find((f) => f.name === target);
+}
+
+/**
+ * A free-text `#` href survives only as a generated route to a form or report
+ * the app has: `#/form/<name>` or `#/report/<name>` with an exact link name.
+ */
+function knownRouteHref(app: App | undefined, href: string | undefined): string | undefined {
+  const m = /^#\/(form|report)\/([A-Za-z0-9_]+)$/.exec((href ?? '').trim());
+  if (!m || !app) return undefined;
+  const known = m[1] === 'form' ? app.forms.some((f) => f.name === m[2]) : app.reports.some((r) => r.name === m[2]);
+  return known ? `#/${m[1]}/${m[2]}` : undefined;
+}
+
 /**
  * One counted manual step per image or button click action the generated page drops.
  * Generated pages have no client path that calls a Creator function, so the
- * action is never rewired or relabelled here.
+ * action is never rewired or relabelled here. Declarative Form navigation actions
+ * targeting forms in app.forms are emitted as client routes and omitted here.
  */
-function imageActionTodos(actions: ZmlImageAction[], why?: string): UiElement[] {
-  return actions.map((a) => {
-    const element = a.element ?? 'image';
-    const what = a.label ? `ZML <${element}> "${a.label}"` : `ZML <${element}>`;
-    const call = a.fn ? ` calling function ${a.fn}` : '';
-    const reason = why ? ` (the snippet stays manual: ${why})` : '';
-    return {
-      tag: element,
-      kind: 'todo' as const,
-      ...(a.fn ? { name: a.fn } : a.label ? { name: a.label } : {}),
-      ...(a.siteId ? { siteId: a.siteId } : {}),
-      todo: `${what} click action ${a.action}${call} is not generated; wire the click to the function by hand${reason}`,
-      children: [],
-    };
-  });
+function imageActionTodos(actions: ZmlImageAction[], why?: string, app?: App): UiElement[] {
+  return actions
+    .filter((a) => {
+      if (a.form || isFormAction(a.action)) {
+        const target = a.form ?? formActionTarget(a.action);
+        if (target && findMatchingForm(app?.forms, target)) {
+          return false;
+        }
+      }
+      return true;
+    })
+    .map((a) => {
+      const element = a.element ?? 'image';
+      const what = a.label ? `ZML <${element}> "${a.label}"` : `ZML <${element}>`;
+      const call = a.fn ? ` calling function ${a.fn}` : '';
+      const reason = why ? ` (the snippet stays manual: ${why})` : '';
+      return {
+        tag: element,
+        kind: 'todo' as const,
+        ...(a.fn ? { name: a.fn } : a.label ? { name: a.label } : {}),
+        ...(a.siteId ? { siteId: a.siteId } : {}),
+        todo: `${what} click action ${a.action}${call} is not generated; wire the click to the function by hand${reason}`,
+        children: [],
+      };
+    });
 }
 
 function attr(attributes: Record<string, string>, keys: string[]): string | undefined {
@@ -987,14 +1021,29 @@ export function elementFromZml(
   const width = attr(attributes, ['width']);
   const style = styleOf(attributes);
   const body = text?.trim() ? text : undefined;
-  if (key === 'image' && (attr(attributes, ['type']) || '').toLowerCase() === 'icon') {
+  const isIcon = (attr(attributes, ['type', 'imagetype']) || '').toLowerCase() === 'icon';
+  if (key === 'image' && isIcon) {
     const icon = attr(attributes, ['value']) ?? '';
     const tile = { ...style };
     if (width && tile.width === undefined) tile.width = width;
     const action = (attr(attributes, ['action']) ?? '').trim();
     const fn = (attr(attributes, ['functionName', 'function']) ?? '').trim();
-    const dropped = action ? imageActionTodos([{ action, ...(fn ? { fn } : {}), ...(icon ? { label: icon } : {}) }]) : [];
-    return { tag, kind: 'text', ...(icon ? { name: icon, icon } : {}), text: '', ...(Object.keys(tile).length ? { style: tile } : {}), children: [...children, ...dropped] };
+    const isForm = isFormAction(action, attributes);
+    const formTarget = isForm ? formActionTarget(action, attributes) : undefined;
+    const matchingForm = formTarget ? findMatchingForm(env?.app?.forms, formTarget) : undefined;
+    const href = matchingForm ? `#/form/${matchingForm.name}` : undefined;
+    const dropped = action && !matchingForm
+      ? imageActionTodos([{ action, ...(fn ? { fn } : {}), ...(icon ? { label: icon } : {}) }], undefined, env?.app)
+      : [];
+    return {
+      tag,
+      kind: 'text',
+      ...(icon ? { name: icon, icon } : {}),
+      ...(href ? { href } : {}),
+      text: '',
+      ...(Object.keys(tile).length ? { style: tile } : {}),
+      children: [...children, ...dropped],
+    };
   }
   if (key === 'pc' && (attr(attributes, ['action']) || '').replace(/\s+/g, '').toLowerCase() === 'openreport') {
     const target = namedAttr(attributes, ['componentLinkName', 'linkName', 'formLinkName']);
@@ -1056,12 +1105,12 @@ export function elementFromZml(
       if (compiled?.ok) for (const extra of compiled.files ?? []) env?.emit?.(extra);
       const styleRules = droppedStyleRules(decoded);
       const lostCss = styleRules ? { droppedStyleRules: styleRules, staticCss: decoded } : {};
-      // A compiled snippet wired every ExecuteFunction button to its generated
+// A compiled snippet wired every ExecuteFunction button to its generated
       // client-call endpoint (any unwired one refuses the compile), so only
       // the image actions remain manual steps.
       const actionItems = compiled?.ok
-        ? imageActionTodos(dedupeImageActions(zmlImageActions(decoded)))
-        : imageActionTodos(imageActions, compiled ? compiled.reason : undefined);
+        ? imageActionTodos(dedupeImageActions(zmlImageActions(decoded)), undefined, env?.app)
+        : imageActionTodos(imageActions, compiled ? compiled.reason : undefined, env?.app);
       if (compiled?.ok) {
         const inline = (compiled.components ?? []).filter((item) => env?.components?.[item.kind === 'form' ? 'forms' : 'reports'].has(item.name));
         const unavailable = (compiled.components ?? []).filter((item) => !inline.includes(item)).map((item) => `${item.kind} "${item.name}"`);
@@ -1133,10 +1182,10 @@ export function elementFromZml(
       };
     }
     const droppedTags: string[] = [];
-    const html = sanitizeSnippet(source, undefined, droppedTags);
+    const html = sanitizeSnippet(convertZmlSnippetToHtml(source, new Set((env?.app?.forms ?? []).map((f) => f.name))), undefined, droppedTags);
     const styleRules = droppedStyleRules(source);
     const lostCss = styleRules ? { droppedStyleRules: styleRules, staticCss: source } : {};
-    const actionItems = imageActionTodos(imageActions);
+    const actionItems = imageActionTodos(imageActions, undefined, env?.app);
     return {
       tag,
       kind,
@@ -1148,7 +1197,7 @@ export function elementFromZml(
       children: [...actionItems, ...children],
     };
   }
-  if (kind === 'text' || kind === 'gauge' || kind === 'button' || kind === 'search') {
+  if (kind === 'text' || kind === 'gauge' || kind === 'search' || kind === 'button') {
     if ((attr(attributes, ['type']) || '').toLowerCase() === 'form data') {
       const value = attr(attributes, ['value']) ?? '';
       const criteria = attr(attributes, ['criteria']);
@@ -1165,8 +1214,54 @@ export function elementFromZml(
         children,
       };
     }
+  }
+  if (kind === 'button') {
     const label = attr(attributes, ['value', 'text', 'label', 'title', 'content']) ?? body?.trim() ?? name ?? tag;
-    const href = kind === 'button' || kind === 'search' ? attr(attributes, ['url', 'href', 'linkName']) : undefined;
+    const action = (attr(attributes, ['action']) ?? '').trim();
+    const fn = (attr(attributes, ['functionName', 'function']) ?? '').trim();
+    const isForm = isFormAction(action, attributes);
+    const formTarget = isForm ? formActionTarget(action, attributes) : undefined;
+    const matchingForm = formTarget ? findMatchingForm(env?.app?.forms, formTarget) : undefined;
+    if (isForm && matchingForm) {
+      const href = `#/form/${matchingForm.name}`;
+      return { tag, kind: 'button', ...(name ? { name } : {}), text: label, href, ...(style ? { style } : {}), children };
+    }
+    if (isForm && env?.app && !matchingForm) {
+      const what = label ? `ZML <button> "${label}"` : `ZML <button>`;
+      return {
+        tag,
+        kind: 'todo',
+        ...(label ? { name: label } : {}),
+        todo: `${what} click action ${action} is not generated; wire the click to the function by hand`,
+        children,
+      };
+    }
+    const isExecFn = /^(executefunction|function)$/i.test(action.replace(/\s+/g, ''));
+    if (isExecFn || fn) {
+      const what = label ? `ZML <button> "${label}"` : `ZML <button>`;
+      const call = fn ? ` calling function ${fn}` : '';
+      return {
+        tag,
+        kind: 'todo',
+        ...(fn ? { name: fn } : label ? { name: label } : {}),
+        todo: `${what} click action ${action || 'ExecuteFunction'}${call} is not generated; wire the click to the function by hand`,
+        children,
+      };
+    }
+    // A free-text `#` href is kept only as a route to a form or report the app has.
+    const free = attr(attributes, ['url', 'href', 'linkName']);
+    let href = free?.trim().startsWith('#') ? knownRouteHref(env?.app, free) : free;
+    const act = action.replace(/\s+/g, '').toLowerCase();
+    if (act === 'openreport' || act === 'report') {
+      const reportTarget = namedAttr(attributes, ['componentLinkName', 'linkName', 'formLinkName']);
+      const reportHref = knownRouteHref(env?.app, reportTarget ? `#/report/${reportTarget}` : undefined);
+      if (reportHref) href = reportHref;
+    }
+    return { tag, kind: 'button', ...(name ? { name } : {}), text: label, ...(href ? { href } : {}), ...(style ? { style } : {}), children };
+  }
+  if (kind === 'text' || kind === 'gauge' || kind === 'search') {
+    const label = attr(attributes, ['value', 'text', 'label', 'title', 'content']) ?? body?.trim() ?? name ?? tag;
+    const href = kind === 'search' ? attr(attributes, ['url', 'href', 'linkName']) : undefined;
     return { tag, kind, ...(name ? { name } : {}), text: label, ...(href ? { href } : {}), ...(style ? { style } : {}), children };
   }
   const href =

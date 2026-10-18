@@ -15,6 +15,7 @@ import { deriveIr, parse, parseFile, type App } from '../../core/src/index.js';
 import { mockDatastore } from '../../shims/test/zcql-mock.js';
 import { buildUi, generateUi } from '../src/index.js';
 import { compileHtmlpage, convertZmlSnippetToHtml, islandReadOnly, renderAuditSource, rewriteRecordSummaryFrames } from '../src/htmlpage.js';
+import { isFormAction } from '../src/htmlpage.js';
 import { renderedDocumentViolation, renderedHtmlElements } from '../../shims/src/rendered-guard.js';
 import { c2cUrlFunctionSource } from '../src/url-policy.js';
 import { uiSnippetFiles } from '../src/model.js';
@@ -3206,4 +3207,9 @@ test('shape C endpoint refuses every origin when the deploy config lists none', 
   } finally {
     live.restore();
   }
+});
+
+
+test('ZML attributes choose requested key order despite case variants', () => {
+  assert.equal(isFormAction('noop', { URL: '#Form:First', url: '#Form:Second' }), true);
 });
