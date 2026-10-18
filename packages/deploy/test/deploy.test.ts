@@ -2891,7 +2891,7 @@ test('a cyclic must-have lookup is created not mandatory and recorded as a cover
           const id = table === 'Parent' ? '9' : table === 'A' ? '1' : table === 'B' ? '2' : '3';
           return response({ data: [{ c2c_source_id: id, ROWID: `row-${table}` }] });
         }
-        return response({ data: inserted.filter((post) => post.table === table).map((post) => ({ ...post.columns })) });
+        return response({ data: inserted.filter((post) => post.table === table).map((post) => ({ ...post.columns, ROWID: `row-${table}` })) });
       }
       if (method === 'PUT') return response([]);
       const table = decodeURIComponent(path.split('/').at(-2) ?? '');
