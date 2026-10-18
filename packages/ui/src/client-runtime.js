@@ -220,7 +220,7 @@ function cleanStyle(value) {
  */
 function safeStyleValue(raw, prop) {
   let text = String(raw ?? '').trim();
-  if (!text || text.length > STYLE_TEXT_MAX || /[;\\@]/.test(text) || text.includes('/*')) return false;
+  if (!text || text.length > STYLE_TEXT_MAX || /[;\\@<>]/.test(text) || text.includes('/*')) return false;
   if (prop === 'font-family') text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
   if (/['"]/.test(text)) return false;
   const flat = flatUrl(text);
@@ -1720,7 +1720,11 @@ function rowFormatStyles(report, source, columns) {
     for (const name of targets) {
       const index = columns.findIndex((column) => column.field === name);
       if (index < 0) continue;
-      styles.set(index, `${styles.get(index) || ''}${format.format}`);
+      // Conditional formats are author-provided CSS; run them through the
+      // same declaration sanitizer as other inline styles before serializing.
+      const safe = cleanStyle(format.format).style;
+      if (!safe) continue;
+      styles.set(index, `${styles.get(index) || ''}${safe}`);
     }
   }
   return styles;

@@ -121,6 +121,8 @@ const VECTORS: Array<[string, string, string | null, string[]]> = [
   ['var() inside a colour', 'color: rgb(var(--x), 0, 0)', null, ['color']],
   ['unknown function', 'color: paint(x)', null, ['color']],
   ['url() after a colour token', 'border: 1px solid rgb(1, 2, 3) url(//example.test/x)', null, ['border']],
+  ['style tag close in value', 'color:</style>', null, ['color']],
+  ['10k style value', 'color:' + 'a'.repeat(10000), null, ['?']],
 ];
 
 function styleOf(html: string): { style: string | null; dropped: string | null } {

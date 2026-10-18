@@ -22,6 +22,7 @@ import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { compareCells, compareDecimalCells } from '../../shims/src/criteria.js';
 import { TEMPLATE_DIR, compileTemplateLib, hiddenParts, reactAppSpec } from '../src/index.js';
 import type { FormSpec, ReportSpec } from '../template/lib/c2c-ui/types.js';
+import { cleanStyle } from '../../ui/src/pages.js';
 
 function source(): string {
   return `application "Shop"
@@ -646,4 +647,40 @@ test('a custom action whose endpoint is a dry-run stub is turned off and named, 
   assert.doesNotMatch(view.container.textContent ?? '', /ran\./, 'no run is reported');
   const note = view.container.querySelector('[data-action-preview]')?.textContent ?? '';
   assert.match(note, /Not available yet, so turned off: .*Mark as Lost.*Export All/);
+});
+
+test('the conditional format allowlist mirrors the static sanitizer and rejects unsafe tokens', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'allowlist');
+  const { isSafeStyleProperty, isSafeStyleValue } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/style-allowlist.js')).href)) as {
+    isSafeStyleProperty: (n: string) => boolean;
+    isSafeStyleValue: (v: string, p?: string) => boolean;
+  };
+  const { parseFormat } = (await import(pathToFileURL(join(out, 'lib/c2c-ui/report/ReportView.js')).href)) as {
+    parseFormat: (f: string) => Record<string, string>;
+  };
+  const cases: { prop: string; value: string; safe: boolean }[] = [
+    { prop: 'color', value: '#19bc9f', safe: true },
+    { prop: 'color', value: 'red', safe: true },
+    { prop: 'color', value: 'rgb(1, 2, 3)', safe: true },
+    { prop: 'font-weight', value: 'bold', safe: true },
+    { prop: 'font-style', value: 'italic', safe: true },
+    { prop: 'color', value: 'expression(alert(1))', safe: false },
+    { prop: 'background', value: 'url(//example.test/x)', safe: false },
+    { prop: 'color', value: 'javascript:alert(1)', safe: false },
+    { prop: 'color', value: 'red"', safe: false },
+    { prop: 'color', value: '</style>', safe: false },
+    { prop: 'color', value: 'a'.repeat(10000), safe: false },
+  ];
+  for (const { prop, value, safe } of cases) {
+    assert.equal(isSafeStyleProperty(prop), prop !== 'x' && prop !== 'behavior', `${prop} property allowlist`);
+    assert.equal(isSafeStyleValue(value, prop), safe, `isSafeStyleValue("${value.slice(0, 40)}...", ${prop})`);
+    const format = `${prop}:${value};`;
+    const got = parseFormat(format);
+    const want = safe ? { [prop.replace(/-([a-z])/g, (_, ch: string) => ch.toUpperCase())]: value } : {};
+    assert.deepEqual(got, want, `parseFormat("${format.slice(0, 60)}...")`);
+    const cleaned = cleanStyle(format);
+    assert.equal(cleaned.style !== '', safe, `cleanStyle parity for "${format.slice(0, 60)}..."`);
+  }
+  assert.equal(isSafeStyleProperty('behavior'), false, 'behavior is refused');
+  assert.equal(isSafeStyleProperty('-moz-binding'), false, '-moz-binding is refused');
 });
