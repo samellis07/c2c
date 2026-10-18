@@ -636,6 +636,12 @@
       "label": "silent drop report-feature: Book_Report block options",
       "detail": "Report Book_Report block options is not in the generated report. Add one: either emit it or record the manual step.",
       "scope": "app"
+    },
+    {
+      "kind": "deluge",
+      "label": "silent drop translation: translation Language_Settings",
+      "detail": "The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.",
+      "scope": "app"
     }
   ],
   "determinism": {
@@ -644,7 +650,7 @@
     "fillLockEntries": 0,
     "todoKinds": [],
     "uiTodoCount": 0,
-    "silentDrops": 18,
+    "silentDrops": 19,
     "silentDropKinds": [
       {
         "construct": "field-property",
@@ -657,6 +663,10 @@
       {
         "construct": "page-element",
         "count": 4
+      },
+      {
+        "construct": "translation",
+        "count": 1
       }
     ]
   },

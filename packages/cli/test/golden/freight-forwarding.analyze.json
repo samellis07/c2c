@@ -2646,6 +2646,12 @@
     },
     {
       "kind": "deluge",
+      "label": "silent drop translation: translation Language_Settings",
+      "detail": "The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.",
+      "scope": "app"
+    },
+    {
+      "kind": "deluge",
       "label": "workflow Zoho_Book_Customer_Update:13",
       "detail": "client-condition-uses-server",
       "scope": "unit"
@@ -2732,7 +2738,7 @@
       }
     ],
     "uiTodoCount": 1,
-    "silentDrops": 214,
+    "silentDrops": 215,
     "silentDropKinds": [
       {
         "construct": "field-property",
@@ -2741,6 +2747,10 @@
       {
         "construct": "report-feature",
         "count": 68
+      },
+      {
+        "construct": "translation",
+        "count": 1
       }
     ]
   },
