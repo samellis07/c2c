@@ -209,6 +209,7 @@ export function reactAppSpec(app: App, model: UiModel = generateUi(app).model, f
     spec: SPEC_VERSION,
     theme: { accent: palette.accent, accentInk: '#ffffff', menu: palette.menu, ...(model.theme?.font ? { font: model.theme.font } : {}) },
     ...(model.dateFormat ? { dateFormat: model.dateFormat } : {}),
+    ...(model.timeFormat ? { timeFormat: model.timeFormat } : {}),
     nav,
     ...(denied.length ? { denied } : {}),
     forms,
