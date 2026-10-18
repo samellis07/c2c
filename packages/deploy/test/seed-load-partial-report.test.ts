@@ -116,7 +116,9 @@ test('updateDeferredForeignKeys continues past a failed PUT batch and reports up
   const rows = ids.map((_, i): { id: string; columns: Record<string, string> } => ({ id: `e${i + 1}`, columns: i ? { Manager: `e${i}` } : {} }));
   let put = 0;
   const fetch: FetchLike = async (url, init) => {
-    if (new URL(url).pathname.endsWith('/query')) return response({ data: [] });
+    if (new URL(url).pathname.endsWith('/query')) {
+      return response({ data: ids.map((ROWID) => ({ ROWID, Manager: null })) });
+    }
     assert.equal(init?.method, 'PUT');
     put += 1;
     return put === 2 ? response({ status: 'failure' }, 500) : response({ status: 'success' });
@@ -288,7 +290,7 @@ test('updateDeferredForeignKeys does not PUT a row whose lookup already holds th
   const sent: NonNullable<Parameters<FetchLike>[1]>[] = [];
   const fetch: FetchLike = async (url, init) => {
     if (new URL(url).pathname.endsWith('/query')) {
-      return response({ data: [{ ROWID: '302', Mentor: '301' }] });
+      return response({ data: [{ ROWID: '301', Mentor: '301' }, { ROWID: '302', Mentor: '301' }, { ROWID: '309', Mentor: '302' }] });
     }
     if (init) sent.push(init);
     return response({ status: 'success' });
@@ -308,9 +310,13 @@ test('updateDeferredForeignKeys does not PUT a row whose lookup already holds th
 
 test('updateDeferredForeignKeys skips and reports a table whose deferred parent did not load, and still updates the others', async () => {
   const sent: string[] = [];
-  const fetch: FetchLike = async (url) => {
+  const fetch: FetchLike = async (url, init) => {
     const path = new URL(url).pathname;
-    if (!path.endsWith('/query')) sent.push(decodeURIComponent(path.split('/').at(-2) ?? ''));
+    if (path.endsWith('/query')) {
+      const query = String((JSON.parse(String(init?.body ?? '{}')) as { query?: string }).query ?? '');
+      return response({ data: /FROM Person\b/.test(query) ? [{ ROWID: '301', Mentor: null }, { ROWID: '302', Mentor: null }] : [] });
+    }
+    sent.push(decodeURIComponent(path.split('/').at(-2) ?? ''));
     return response({ status: 'success' });
   };
   const reports = await updateDeferredForeignKeys(
