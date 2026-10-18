@@ -48,6 +48,13 @@ export function scrubCatalystEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     if (key.startsWith('CATALYST_') || key.startsWith('ZC_')) continue;
     next[key] = value;
   }
+  // Node emits a warning on every child stderr when both variables are set.
+  // These children have machine-parsed stderr, so prevent the warning while
+  // preserving all unrelated customer environment variables.
+  if (next.FORCE_COLOR !== undefined && next.NO_COLOR !== undefined) {
+    delete next.FORCE_COLOR;
+    delete next.NO_COLOR;
+  }
   return next;
 }
 

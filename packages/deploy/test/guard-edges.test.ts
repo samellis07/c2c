@@ -13,7 +13,14 @@ import { crc32 } from 'node:zlib';
 import { deployMailRecipients, findDeployConfig, readCliActiveDc, readCliActiveOrg } from '../src/dc.js';
 import { GuardError } from '../src/guards.js';
 import { emptyRegistry } from '../src/registry.js';
-import { assertProjectDetails } from '../src/scope.js';
+import { assertProjectDetails, scrubCatalystEnv } from '../src/scope.js';
+
+test('scrubCatalystEnv removes conflicting Node color variables from child environments', () => {
+  const env = scrubCatalystEnv({ FORCE_COLOR: '1', NO_COLOR: '1', KEEP_ME: 'yes' });
+  assert.equal(env.FORCE_COLOR, undefined);
+  assert.equal(env.NO_COLOR, undefined);
+  assert.equal(env.KEEP_ME, 'yes');
+});
 import {
   catalystCreatedMs,
   importingAgeState,
