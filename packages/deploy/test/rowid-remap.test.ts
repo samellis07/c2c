@@ -7,6 +7,7 @@ import { deriveIr, parse } from '../../core/src/index.js';
 import { emptyCheckpoint, type FetchLike, type MigrateResponse } from '../../data/src/migrate.js';
 import { migrateCsv as migrateCsvReal, readSourceCsv, resolveForeignKeys, assertSeedReferences } from '../src/index.js';
 import { rowEndpoint } from '../../data/test/catalyst-row-fake.js';
+import { updateDeferredForeignKeys } from '../src/remap.js';
 
 const migrateCsv: typeof migrateCsvReal = (opts) => migrateCsvReal({ ...opts, fetch: rowEndpoint(opts.fetch) });
 
@@ -213,4 +214,28 @@ test('a multi lookup stored as a JSON id list remaps every element', () => {
     () => resolveForeignKeys(bad[0]!, keys, rowIds),
     /lookup Owned_Vehicles row u1 source id v9 is not in Add_Vehicle/,
   );
+});
+
+test('deferred lookup reruns fail closed when comparison reads throw or are partial', async () => {
+  const table = { table: 'Book', rows: [{ id: 'book-1', columns: { Author: 'author-1' } }, { id: 'book-2', columns: { Author: 'author-1' } }] };
+  const keys = [{ table: 'Book', column: 'Author', parent: 'Author' }];
+  const run = async (queryBody: unknown, putBodies: unknown[] = [], throwRead = false) => updateDeferredForeignKeys(
+    { dc: 'us', catalystBase: 'https://catalyst.zoho.com', scope: SCOPE, fetch: async (_url, init) => {
+      if (init?.method === 'PUT') { putBodies.push(JSON.parse(String(init.body))); return response({}, 200); }
+      if (throwRead) throw new Error('read unavailable');
+      return response(queryBody);
+    } },
+    [table], keys, new Set(['Book\0Author']),
+    new Map([['Book', new Map([['book-1', '101'], ['book-2', '102']])], ['Author', new Map([['author-1', '201']])]]),
+  );
+  const thrown = await run([], [], true);
+  assert.equal(thrown[0]?.error, 'not re-run: could not read current values (read unavailable); next step: re-run when the read works');
+  const partialPuts: unknown[] = [];
+  const partial = await run([{ ROWID: '101', Author: '201' }], partialPuts);
+  assert.match(partial[0]?.error ?? '', /not re-run: could not read current values/);
+  assert.deepEqual(partialPuts, []);
+  const puts: unknown[] = [];
+  const complete = await run([{ ROWID: '101', Author: '201' }, { ROWID: '102', Author: '999' }], puts);
+  assert.equal(complete[0]?.updated, 2);
+  assert.deepEqual(puts, [[{ ROWID: '102', Author: '201' }]]);
 });
