@@ -1626,7 +1626,7 @@ test('cleanup: a probe bucket this run created is a WARN naming the bucket, the 
 });
 
 test('cleanup: only the exact c2cprobe-p<project> name of this project is ever touched', async () => {
-  const OTHER_PROJECT = '10000000000013201';
+  const OTHER_PROJECT = '10000000000000099';
   for (const foreign of [`c2cprobe-p${OTHER_PROJECT}`, `c2cprobe-o${ORG}`, `c2cprobe${'a'.repeat(32)}`, 'customer-data', `c2cprobe-p${PROJECT}x`]) {
     const calls: { method: string; path: string }[] = [];
     const rest: NonNullable<DoctorIo['rest']> = async (call) => {
