@@ -62,8 +62,9 @@
  *   listed by the connections analysis diagnostic that names the declared
  *   scopes. Anything else has no consumer and must be listed.
  * - translation: nothing consumes translation blocks, so each one must be
- *   listed as an explicit manual step (migration-report.json warnings,
- *   construct 'translation-not-migrated').
+ *   listed as an explicit manual step (a todo inside its span). The
+ *   migration-report warning (construct 'translation-not-migrated') is not a
+ *   counted manual item: a warning-only block is a drop.
  *
  * A construct labelled 'manual' that the generator actually produces is a
  * false listing, not coverage: the produced check runs first and wins.
@@ -1584,23 +1585,28 @@ export function assertCovered(app: App, outputs?: AuditOutputs): CoverageRow[] {
   return rows;
 }
 
-/** Translation blocks are never produced; each one needs an explicit manual step. */
+/**
+ * Translation blocks are never produced; each one needs an explicit manual
+ * step. A block is counted only by a todo inside its span — a migration-report
+ * warning (`translation-not-migrated`) is never coverage: warnings are not
+ * counted manual items, so a block that only carries a warning is a drop.
+ */
 function auditTranslationDeclarations(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
   for (const t of app.translations) {
     const lang = translationLanguage(t);
-    const listed = out.warnings.some(
-      (w) => w.construct === 'translation-not-migrated' && (lang === undefined || w.name.includes(lang)),
-    );
-    if (listed) {
-      rows.push({ kind: 'translation', name: lang ? `translation ${lang}` : 'translation block', status: 'counted', via: 'migration-report warning' });
+    if (out.todos.some((todo) => within(todo, t.span))) {
+      rows.push({ kind: 'translation', name: lang ? `translation ${lang}` : 'translation block', status: 'counted', via: 'todo' });
       continue;
     }
+    const warned = out.warnings.some(
+      (w) => w.construct === 'translation-not-migrated' && (lang === undefined || w.name.includes(lang)),
+    );
     rows.push({
       kind: 'translation',
       name: lang ? `translation ${lang}` : 'translation block',
       status: 'dropped',
       via: 'none',
-      note: `${lang ? `The ${lang} translation block` : 'A translation block'} is not migrated and has no manual step. List the language, the string count, and what the user must copy into the generated client.`,
+      note: `${lang ? `The ${lang} translation block` : 'A translation block'} is not migrated and has no manual step${warned ? ' — only a migration-report warning, which is not a counted manual item' : ''}. List the language, the string count, and what the user must copy into the generated client.`,
     });
   }
 }

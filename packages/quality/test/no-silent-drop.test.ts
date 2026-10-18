@@ -76,16 +76,20 @@ test('a produced construct is never listed as a drop', () => {
 test('an unlisted translation fails until the manual step exists', () => {
   const withTranslation = app({
     ...coveredApp(),
-    translations: [{ json: '{"de":{"FormField.Orders.Title":" Titel "}}', data: { de: { 'FormField.Orders.Title': ' Titel ' } }, span: Z }],
+    translations: [{ json: '{"de":{"FormField.Orders.Title":" Titel "}}', data: { de: { 'FormField.Orders.Title': ' Titel ' } }, span: { start: 10, end: 200 } }],
   });
-  // The generator lists the manual step, so the audit passes.
-  assert.deepEqual(auditApp(withTranslation), []);
-  // Without the listing, the same construct fails.
-  const unlisted = collectOutputs(withTranslation);
-  unlisted.warnings = [];
-  const drops = auditApp(withTranslation, unlisted);
-  assert.equal(drops.length, 1);
-  assert.equal(drops[0]!.kind, 'translation');
+  // The generator's migration-report warning is not a manual step: the block
+  // is still a drop, and the note names the warning.
+  const drops = auditApp(withTranslation);
+  assert.deepEqual(
+    drops.map((d) => `${d.kind}: ${d.name}`),
+    ['translation: translation de'],
+  );
+  assert.match(drops[0]!.note, /migration-report warning/);
+  // A todo inside the block's span is the counted manual step.
+  const listed = collectOutputs(withTranslation);
+  listed.todos = [...listed.todos, { construct: 'manual', start: 20, end: 30 }];
+  assert.deepEqual(auditApp(withTranslation, listed), []);
 });
 
 test('an unsurfaced integration call fails until the connections report lists it', () => {
@@ -691,17 +695,19 @@ test('only a blank or fully commented script is vacuous', () => {
   assert.deepEqual(kinds(one(ruled)), ['workflow']);
 });
 
-test('a translation block with several languages is named as a block and listed by any warning', () => {
-  const multi = app({ translations: [{ json: '{}', data: { de: {}, fr: {} }, span: Z }] });
+test('a translation block with several languages is named as a block and counted only by a todo', () => {
+  const multi = app({ translations: [{ json: '{}', data: { de: {}, fr: {} }, span: { start: 10, end: 200 } }] });
   const out = collectOutputs(multi);
-  out.warnings = [];
   assert.deepEqual(auditApp(multi, out).map((d) => d.name), ['translation block']);
-  out.warnings = [{ construct: 'translation-not-migrated', name: 'translations' } as (typeof out.warnings)[number]];
+  // A todo inside the span counts it once; a todo outside does not.
+  out.todos = [{ construct: 'manual', start: 0, end: 5 }];
+  assert.deepEqual(auditApp(multi, out).map((d) => d.name), ['translation block']);
+  out.todos = [{ construct: 'manual', start: 20, end: 30 }];
   assert.deepEqual(auditApp(multi, out), []);
-  // A single-language block needs a warning naming its language.
+  // A single-language block is named by its language, warned or not.
   const de = app({ translations: [{ json: '{}', data: { de: {} }, span: Z }] });
   const deOut = collectOutputs(de);
-  deOut.warnings = [{ construct: 'translation-not-migrated', name: 'translation fr' } as (typeof deOut.warnings)[number]];
+  deOut.warnings = [{ construct: 'translation-not-migrated', name: 'translation de' } as (typeof deOut.warnings)[number]];
   assert.deepEqual(auditApp(de, deOut).map((d) => d.name), ['translation de']);
 });
 
