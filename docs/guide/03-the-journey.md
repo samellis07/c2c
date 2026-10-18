@@ -15,6 +15,14 @@ You get three lists: **must fix in Creator first** (blocking faults
 — fix them there and re-export), **converts with a TODO**, and
 **Catalyst limits to decide on in the plan**.
 
+The analysis also warns about two slow patterns it would rather
+catch now than after go-live: a report filter that reads through a
+record link (each matching row re-reads its parent form, and the
+read stops answering above about a thousand matches), and an
+on-success script — with the functions it calls — that makes more
+than four Data Store calls on one save. Both are counted in your
+migration report.
+
 ## Step 2 — Plan: the full blueprint
 
 Still offline. The AI builds the whole migration plan — tables,
@@ -38,6 +46,12 @@ created by the import, or by you in the console) becomes a
 precise instruction: exact page, exact click, then "tell me when
 done", and the AI verifies it afterwards.
 
+If a table already exists in the project and its columns differ
+from the plan — uniqueness, type, mandatory or length — the step
+stops marked **drift** instead of changing anything: the output
+lists each differing column with the planned and live values and
+prints the non-destructive fix.
+
 ## Step 4 — Deploy: move the code in
 
 With your yes, the AI deploys the translated functions and links
@@ -47,6 +61,10 @@ similar) go into a file **you** fill in — the AI never reads or
 repeats them — because a deploy writes the full set at once and
 would otherwise wipe them
 ([facts/functions.md](../../plugin/references/facts/functions.md)).
+Before anything is sent, the AI also measures the full environment
+against Catalyst's size limit and refuses an over-limit set —
+naming the size and the limit, never the values — so a deploy
+cannot create something it could never update later.
 
 ## Step 5 — Sign-in and access: lock the doors, invite yourself
 
@@ -63,15 +81,20 @@ Needs your yes. The AI loads your records table by table (in small
 batches), remaps links between records, uploads files to the file
 bucket, and proves it: **per-table counts must equal Creator's own
 counts**, and every link must resolve 100%. A mismatch stops the
-step — it is never smoothed over.
+step — it is never smoothed over. And if a table's columns have
+drifted from the plan since provisioning, the AI warns and names
+them before loading rows into it.
 
 ## After that — verify, then go live (your call)
 
 - **Verify:** the AI runs the checks the plan flags (small scratch
-  resources it creates, measures and deletes, with your OK), a
-  smoke test you run in your own browser (step 4 of your five
-  steps), and your 3–5 most important business rules stated as
-  given/when/then and tried through the screens.
+  resources it creates, measures and deletes, with your OK), an
+  offline pass that mounts each report, chart and dashboard screen
+  and compares its rows, totals and file exports against known
+  data — a screen that cannot render or export is counted, never
+  passed — a smoke test you run in your own browser (step 4 of
+  your five steps), and your 3–5 most important business rules
+  stated as given/when/then and tried through the screens.
 - **Cutover (optional, you drive):** when you are satisfied, *you*
   click **Deploy to Production** in the console (a payment method is
   required on the account —

@@ -61,6 +61,19 @@ writes `dry-run`.
   ever printed. `C2C_DEPLOY_MODE` is always this deploy's mode.
 - `--function-env new`: a first deploy, with nothing to keep.
 
+Before any network call the deploy measures the environment it
+would send — including the mail sender — against Catalyst's
+measured limit and refuses an over-limit set. On an update,
+Catalyst rejects an environment whose sum of
+`len(key) + len(value) + 3` over all variables exceeds 4096; a
+create does not check it, so an environment created over the limit
+could never be updated. The rule is applied on both create and
+update, to the function environment and to the secrets update
+alike, and the refusal names the size and the limit, never the
+values. Each table id is written once, as `TABLE_<NAME>_ID`; a
+legacy `TABLE_ID_<NAME>` key in an existing function environment
+folds into it.
+
 **Secret values never enter the generated tree.** The generated project is the
 customer's and is often committed, so a `--function-env` name matching
 `token`, `secret`, `key`, `password` or `credential` (case-insensitive) is
