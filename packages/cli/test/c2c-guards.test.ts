@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+// @ts-ignore shared JavaScript test helper
+import { cleanCliEnv } from '../../../tests/cli-test-env.mjs';
 
 const cli = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'dist/cli/src/c2c.js');
 
@@ -16,12 +18,12 @@ function run(args: string[]): { status: number | null; stdout: string; stderr: s
     const result = spawnSync(process.execPath, [cli, ...args], {
       cwd: workspace,
       encoding: 'utf8',
-      env: {
+            env: cleanCliEnv({
         PATH: process.env.PATH ?? '',
         HOME: home,
         C2C_WORKSPACE: workspace,
         ...(process.env.NODE_V8_COVERAGE ? { NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE } : {}),
-      },
+            }),
       input: '',
       timeout: 30_000,
     });
