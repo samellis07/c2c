@@ -346,6 +346,8 @@ async function loadStoredColumns(
     const body = await query(fetch, base, dc, `SELECT ROWID, ${columns.join(', ')} FROM ${table} WHERE ROWID IN (${list})`, scope);
     for (const [rowid, values] of columnValuesFrom(body, columns)) found.set(rowid, values);
   }
+  const missing = rowids.filter((rowid) => !found.has(rowid));
+  if (missing.length) throw new Error(`comparison read returned ${rowids.length - missing.length} of ${rowids.length} row(s) (missing ROWID ${missing[0]})`);
   return found;
 }
 
@@ -473,11 +475,24 @@ export async function updateDeferredForeignKeys(
     }
     // Rows already holding the target value (an earlier run applied them) are
     // read back and not written again; only the rows that still differ are PUT.
-    let stored = new Map<string, Record<string, string>>();
+    let stored: Map<string, Record<string, string>>;
     try {
       stored = await loadStoredColumns(opts.fetch, opts.catalystBase, opts.dc, table, ids, entry.columns, opts.scope);
-    } catch {
-      // The compare read is best-effort: without it every pending row is updated as before.
+    } catch (caught) {
+      // A failed or incomplete comparison read must never turn into a write-all
+      // fallback: seed values could overwrite newer Catalyst values.
+      const detail = caught instanceof Error ? caught.message : String(caught);
+      reports.push({
+        table,
+        columns: entry.columns,
+        rows: ids.length,
+        updated: 0,
+        notUpdated: ids.length,
+        updatedRanges: [],
+        notUpdatedRanges: rangesOf([{ ids, ok: false }], false),
+        error: `not re-run: could not read current values (${detail}); next step: re-run when the read works`,
+      });
+      continue;
     }
     const applied = new Set(
       ids.filter((id) => {
