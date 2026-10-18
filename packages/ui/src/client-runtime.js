@@ -1420,26 +1420,29 @@ export function hydratePopups(root, appModel, viewRef) {
 
 /** Page input for server-rendered snippets: the URL's query parameters. */
 export function snippetPageInput(docRef) {
-  // A null-prototype bag: caller-controlled parameter names can never alias a
-  // built-in property or pollute a prototype chain.
-  const out = Object.create(null);
+  // Caller-controlled parameter names are collected in a Map (never written as
+  // object properties), the prototype-related names are dropped, and the result
+  // is a null-prototype object, so a name can never alias a built-in property
+  // or pollute a prototype chain.
+  const params = new Map();
   const loc = docRef && docRef.location;
-  if (!loc) return out;
   const read = (query) => {
     try {
       for (const [key, value] of new URLSearchParams(query)) {
         if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
-        if (!Object.prototype.hasOwnProperty.call(out, key)) out[key] = value;
+        if (!params.has(key)) params.set(key, value);
       }
     } catch (err) {
       /* malformed query */
     }
   };
-  read(loc.search || '');
-  const hash = loc.hash || '';
-  const q = hash.indexOf('?');
-  if (q >= 0) read(hash.slice(q + 1));
-  return out;
+  if (loc) {
+    read(loc.search || '');
+    const hash = loc.hash || '';
+    const q = hash.indexOf('?');
+    if (q >= 0) read(hash.slice(q + 1));
+  }
+  return Object.setPrototypeOf(Object.fromEntries(params), null);
 }
 
 /**
