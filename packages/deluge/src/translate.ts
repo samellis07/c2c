@@ -930,7 +930,10 @@ function serverConditionCall(value: Fx, scope: Scope): string | null {
     const ident = jsIdent(name);
     // A record or query value cannot cross the call boundary: the endpoint
     // accepts plain JSON args only, and a row proxy would lose its shim state.
-    if (scope.row.has(name) || scope.query.has(name)) return false;
+    // Query locals are safe to replay in the read-only condition function;
+    // they execute under the endpoint's caller-scoped datastore runtime. A
+    // row proxy still cannot cross the call boundary.
+    if (scope.row.has(name)) return false;
     if (scope.clientData.has(name) || scope.clientDeclared.has(name) || (scope.local.has(name) && !scope.serverOnly.has(name))) {
       return params.get(ident)?.arg === ident || addParam(ident, 'auto', ident);
     }
@@ -951,7 +954,7 @@ function serverConditionCall(value: Fx, scope: Scope): string | null {
     return true;
   };
   for (const r of value.reads) {
-    if (scope.row.has(r) || scope.query.has(r) || r === 'input' || r === 'old') return null;
+    if (scope.row.has(r) || r === 'input' || r === 'old') return null;
     if (!dep(r, new Set())) return null;
   }
   const expression = bindFieldReads(value.code, false);
