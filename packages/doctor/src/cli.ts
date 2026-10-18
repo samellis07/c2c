@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { basename } from 'node:path';
 import { runDoctorChecks, type DoctorContext } from './checks.js';
+import { scrubCatalystEnv } from '../../deploy/src/scope.js';
 import { listCatalystProjects, peekCliTokenTag, refreshCliAccessToken } from '../../deploy/src/rest.js';
 import { EvidenceRejected, EvidenceStale, mcpRecord, parseEvidence, type McpEvidence } from './evidence.js';
 import { beginMcpRequest, closeMcpRequest, mcpRequestInstructions, ObservationRejected, parseObservation, readStdinBounded, type Observed } from './observed.js';
@@ -52,7 +53,7 @@ const USAGE =
 /** One spawn with a deadline; a killed child reports as code 124. */
 export function doctorSpawn(command: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: opts.cwd, env: opts.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { cwd: opts.cwd, env: scrubCatalystEnv(opts.env), stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     let timedOut = false;

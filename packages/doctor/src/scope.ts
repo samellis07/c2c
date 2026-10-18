@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { readRegularFile } from './read-file.js';
+import { scrubCatalystEnv } from '../../deploy/src/scope.js';
 
 export const DEPLOY_CONFIG = 'c2c-deploy.json';
 
@@ -350,7 +351,7 @@ try {
  */
 function readCliStoreKey(env: NodeJS.ProcessEnv, key: 'active_dc' | 'active_org'): string | undefined {
   try {
-    const which = spawnSync('/usr/bin/which', ['catalyst'], { env, encoding: 'utf8', timeout: 5000 });
+    const which = spawnSync('/usr/bin/which', ['catalyst'], { env: scrubCatalystEnv(env), encoding: 'utf8', timeout: 5000 });
     const found = which.status === 0 ? (which.stdout ?? '').trim() : '';
     if (!found) return undefined;
     let dir = dirname(realpathSync(found));
@@ -366,7 +367,7 @@ function readCliStoreKey(env: NodeJS.ProcessEnv, key: 'active_dc' | 'active_org'
     }
     if (!lib) return undefined;
     const result = spawnSync(process.execPath, ['-e', ACTIVE_KEY_SCRIPT], {
-      env: { ...env, C2C_CLI_LIB: lib, C2C_STORE_KEY: key },
+      env: { ...scrubCatalystEnv(env), C2C_CLI_LIB: lib, C2C_STORE_KEY: key },
       encoding: 'utf8',
       timeout: 15_000,
     });
