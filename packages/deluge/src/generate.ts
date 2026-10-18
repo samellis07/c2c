@@ -4800,9 +4800,10 @@ import { fileURLToPath } from "node:url";
   // fields are written back after the script (successSetsHelper).
   const savesSuccessSets = !!opts.systemWrite && !opts.deferSuccess && /shim\.input\.(?:set|insert)\(/.test(opts.body);
   const successSetsBlock = savesSuccessSets ? `\n${successSetsHelper(storeShape)}` : '';
-  const validatePick = opts.systemWrite === 'update' ? 'edit' : opts.systemWrite === 'insert' ? 'add' : 'either';
   const hasPresuccess = !!opts.presuccessSpecs && opts.presuccessSpecs.add.length + opts.presuccessSpecs.edit.length > 0;
-  const liveHelpersBlock = opts.systemWrite ? `\n${aioLiveHelpers(opts.validateSpecs ?? { add: [], edit: [] }, validatePick, writeLiveSource(opts.form, storeShape), opts.presuccessSpecs)}${successSetsBlock}${usesConnections ? `\n${connectionsLiveHelpers()}` : ''}${usesOutbound || usesGetUrl ? `\n${outboundLiveHelpers()}` : ''}${usesApp ? `\n${appUsersHelper(administratorProfiles(opts.app))}` : ''}\n` : '\n';
+  // The request ROWID determines add versus edit even when this module is
+  // itself scoped to `on add`; an edit must skip add-only validate siblings.
+  const liveHelpersBlock = opts.systemWrite ? `\n${aioLiveHelpers(opts.validateSpecs ?? { add: [], edit: [] }, 'either', writeLiveSource(opts.form, storeShape), opts.presuccessSpecs)}${successSetsBlock}${usesConnections ? `\n${connectionsLiveHelpers()}` : ''}${usesOutbound || usesGetUrl ? `\n${outboundLiveHelpers()}` : ''}${usesApp ? `\n${appUsersHelper(administratorProfiles(opts.app))}` : ''}\n` : '\n';
   const zoneFields = `${timeZoneFields(opts.app)}${schemaRuntimeOptions(opts.app, opts.schema)}`;
   const runtimeSetup = opts.systemWrite
     ? `  const datastore = loadedStore || (live ? await liveDatastore() : null);
