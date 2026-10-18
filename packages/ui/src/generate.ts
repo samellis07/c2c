@@ -479,6 +479,175 @@ function composeDisplay(row, terms, parts, readable) {
 `;
 }
 
+/**
+ * The criteria resolution every scoped read of a report-gated view needs:
+ * readableField, lookupDisplayScope, neverRows/alwaysRows and the lookup-path
+ * resolver (record query values plus `Field.Column` parent rewrites). Needs
+ * `access` and `isHidden` (policyPrelude), `lookupParents`, `parentParts`,
+ * `parentDecimals`, `readScoped` (scopedReadSource) and `zcqlPredicate` in scope.
+ */
+function lookupCriteriaSource(): string {
+  return `// A caller filters, searches and sorts only by fields its profile reads: a
+// condition on a hidden field would tell, row by row, what that field holds.
+// readable is the grant's field list; none means every field is readable.
+function readableField(field, readable) {
+  return field === "ROWID" || field === "ID" || !Array.isArray(readable) || readable.includes(field);
+}
+
+// The parent read scope for one lookup display, or null when the caller may
+// not read that display: a hidden parent form or display field, a parent read
+// authorizeRead refuses, or a field allowlist without the display field
+// (authorizeRead normally refuses first; this holds even if it did not). No
+// allowlist at all means every field is readable. The criteria is ANDed with
+// the caller's record filter on the parent form.
+function lookupDisplayScope(principal, form, display, criteria) {
+  if (isHidden(form) || isHidden(display)) return null;
+  let scoped;
+  try {
+    scoped = authorizeRead(access, principal, form, criteria, display);
+  } catch (err) {
+    return null;
+  }
+  if (Array.isArray(scoped.fields) && !scoped.fields.includes(display)) return null;
+  return scoped;
+}
+
+// A criteria leaf that never matches a stored row (ID isNull: ROWID is never
+// NULL) and one that always matches. A lookup-path leaf that cannot be
+// resolved narrows to neverRows — the read fails closed, never widened.
+function neverRows() {
+  return { op: "isNull", field: "ID" };
+}
+function alwaysRows() {
+  return { op: "notNull", field: "ID" };
+}
+
+const LOOKUP_POSITIVE_OPS = new Set(["==", "<", ">", "<=", ">=", "contains", "startsWith", "endsWith", "in", "isNull", "notNull"]);
+const LOOKUP_PARENT_PAGE_CAP = 1000;
+
+// Every field name a criteria tree compares on, so the inner read can be
+// checked against the caller's field grant the same way the value path is.
+function criteriaFields(criteria, out) {
+  if (!criteria || typeof criteria !== "object") return out;
+  if ((criteria.op === "and" || criteria.op === "or") && Array.isArray(criteria.args)) {
+    for (const arg of criteria.args) criteriaFields(arg, out);
+    return out;
+  }
+  if (criteria.op === "not") return criteriaFields(criteria.arg, out);
+  if (typeof criteria.field === "string") out.push(criteria.field);
+  return out;
+}
+
+// The value a Form[criteria].field comparison reads: the first matching row's
+// field, queried under the caller's record-access scope on that form (the same
+// scope lookupParentIds applies, so a refused or failing read keeps the leaf
+// closed). undefined means no comparable value. A bare Form[criteria] fetch is
+// the row's id; a lookup cell resolves to its stored id. A hidden form, or a
+// path or inner-criteria field outside the caller's field grant, never yields
+// a value: the sub-query must not leak what FieldPermissions hide.
+async function recordQueryValue(datastore, spec, principal) {
+  const form = spec && typeof spec.form === "string" ? spec.form : "";
+  const inner = spec && spec.criteria && typeof spec.criteria === "object" ? spec.criteria : null;
+  const path = spec && Array.isArray(spec.path) ? spec.path : [];
+  if (!form || !inner || isHidden(form) || path.length > 1 || path.some((key) => typeof key !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))) return undefined;
+  let rows;
+  try {
+    const scoped = authorizeRead(access, principal, form, inner);
+    // The grant's field allowlist binds the sub-query too: a path or an inner
+    // criteria on a hidden field would read what FieldPermissions deny.
+    if (Array.isArray(scoped.fields)) {
+      if (path.length && !readableField(path[0], scoped.fields)) return undefined;
+      if (criteriaFields(inner, []).some((field) => !readableField(field, scoped.fields))) return undefined;
+    }
+    rows = await readScoped(datastore, form, scoped.criteria, 0, 1);
+  } catch (err) {
+    return undefined;
+  }
+  const row = Array.isArray(rows) && rows[0] && typeof rows[0] === "object" ? rows[0] : null;
+  if (!row) return undefined;
+  if (!path.length) return row.ROWID ?? row.rowid ?? row.c2c_source_id;
+  let value = row;
+  for (const key of path) value = value && typeof value === "object" ? value[key] : undefined;
+  if (value && typeof value === "object" && !Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, "id")) value = value.id;
+  return value;
+}
+
+// ROWIDs of the parent rows one lookup-path leaf matches, read under the
+// caller's scope (the same lookupDisplayScope a display column uses). null
+// when the parent read is refused or fails — the leaf then matches nothing.
+async function lookupParentIds(datastore, form, field, leaf, principal) {
+  const scoped = lookupDisplayScope(principal, form, field, leaf);
+  if (!scoped) return null;
+  const ids = [];
+  const page = ${LIMITS.zcqlRowsPerQuery};
+  for (let offset = 0; ; offset += page) {
+    let rows;
+    try {
+      rows = await readScoped(datastore, form, scoped.criteria, offset, page);
+    } catch (err) {
+      return null;
+    }
+    const list = Array.isArray(rows) ? rows : [];
+    for (const row of list) {
+      const id = row && row.ROWID != null && row.ROWID !== "" ? String(row.ROWID) : "";
+      if (id && !ids.includes(id)) ids.push(id);
+    }
+    if (list.length < page) break;
+    if (ids.length > LOOKUP_PARENT_PAGE_CAP) return null;
+  }
+  return ids;
+}
+
+// A criteria leaf on a lookup display path (Call_Owner.Email) is not a
+// base-table column: the lookup stores the parent ROWID. The leaf runs as a
+// parent query and rewrites onto the lookup column — Call_Owner IN (ids) for
+// the positive ops, NOT (Call_Owner IN (ids)) for !=. A leaf on a parent
+// composite part (Owner.Name.first_name) reads its stored column through
+// parentParts. A path the maps do not know, or a parent read that is refused,
+// fails closed to neverRows.
+async function resolveLookupCriteria(datastore, criteria, principal) {
+  if (!criteria || typeof criteria !== "object") return criteria;
+  if (criteria.op === "and" || criteria.op === "or") {
+    const args = [];
+    for (const arg of criteria.args) args.push(await resolveLookupCriteria(datastore, arg, principal));
+    return { ...criteria, args };
+  }
+  if (criteria.op === "not") return { ...criteria, arg: await resolveLookupCriteria(datastore, criteria.arg, principal) };
+  // A dependent record query value (Form[criteria].field or a thisapp
+  // function returning one) resolves to the first matching row's field under
+  // the caller's scope on that form. No match narrows like a failed lookup
+  // parent read: neverRows, or alwaysRows under !=.
+  const query = criteria.value && typeof criteria.value === "object" && !Array.isArray(criteria.value) ? criteria.value.__rows : null;
+  if (query && typeof query === "object") {
+    const resolved = await recordQueryValue(datastore, query, principal);
+    if (resolved === undefined) return criteria.op === "!=" ? alwaysRows() : neverRows();
+    criteria = { ...criteria, value: resolved };
+  }
+  const field = typeof criteria.field === "string" ? criteria.field : "";
+  const dot = field.indexOf(".");
+  if (dot <= 0 || dot === field.length - 1) return criteria;
+  const head = field.slice(0, dot);
+  let rest = field.slice(dot + 1);
+  const parent = Object.prototype.hasOwnProperty.call(lookupParents, head) ? lookupParents[head] : "";
+  if (!parent) return neverRows();
+  if (rest.indexOf(".") >= 0) {
+    const parts = Object.prototype.hasOwnProperty.call(parentParts, parent) ? parentParts[parent] : {};
+    rest = Object.prototype.hasOwnProperty.call(parts, rest) ? parts[rest] : "";
+    if (!rest) return neverRows();
+  }
+  if (criteria.op === "!=") {
+    const excluded = await lookupParentIds(datastore, parent, rest, { op: "==", field: rest, value: criteria.value }, principal);
+    if (excluded === null) return neverRows();
+    return excluded.length ? { op: "not", arg: { op: "in", field: head, value: excluded } } : alwaysRows();
+  }
+  if (!LOOKUP_POSITIVE_OPS.has(criteria.op)) return neverRows();
+  const ids = await lookupParentIds(datastore, parent, rest, { op: criteria.op, field: rest, value: criteria.value }, principal);
+  if (ids === null) return neverRows();
+  return ids.length ? { op: "in", field: head, value: ids } : neverRows();
+}
+`;
+}
+
 function filesModule(): string {
   return `${banner([
     'Stratus file store slot for upload and download signing.',
@@ -1228,7 +1397,7 @@ ${bound ? '      const shown = relative ? rows.filter((row) => matchRow(row, res
 }
 
 /** Columns whose relative bounds are dates (`yyyy-MM-dd`) rather than datetimes. */
-function dateFieldKinds(app: App, formName: string): Record<string, 'date' | 'datetime'> {
+export function dateFieldKinds(app: App, formName: string): Record<string, 'date' | 'datetime'> {
   const out: Record<string, 'date' | 'datetime'> = { Added_Time: 'datetime', Modified_Time: 'datetime' };
   const form = app.forms.find((item) => item.name === formName);
   const put = (name: string, owner: string, field: string) => {
@@ -1736,13 +1905,6 @@ ${relativePrelude}function searchCriteria(q, fields) {
   return { op: "or", args };
 }
 
-// A caller filters, searches and sorts only by fields its profile reads: a
-// condition on a hidden field would tell, row by row, what that field holds.
-// readable is the grant's field list; none means every field is readable.
-function readableField(field, readable) {
-  return field === "ROWID" || field === "ID" || !Array.isArray(readable) || readable.includes(field);
-}
-
 /** body.sort, or undefined (the report's own sort) when it names a field the caller cannot read. */
 function readableSort(bodySort, readable) {
   const chosen = Array.isArray(bodySort) && bodySort.length ? bodySort[0] : null;
@@ -1777,24 +1939,7 @@ function combineCriteria(base, extras) {
 ${aggregateHelpers}
 ${scopedReadSource()}
 ${composeDisplaySource()}
-// The parent read scope for one lookup display, or null when the caller may
-// not read that display: a hidden parent form or display field, a parent read
-// authorizeRead refuses, or a field allowlist without the display field
-// (authorizeRead normally refuses first; this holds even if it did not). No
-// allowlist at all means every field is readable. The criteria is ANDed with
-// the caller's record filter on the parent form.
-function lookupDisplayScope(principal, form, display, criteria) {
-  if (isHidden(form) || isHidden(display)) return null;
-  let scoped;
-  try {
-    scoped = authorizeRead(access, principal, form, criteria, display);
-  } catch (err) {
-    return null;
-  }
-  if (Array.isArray(scoped.fields) && !scoped.fields.includes(display)) return null;
-  return scoped;
-}
-
+${lookupCriteriaSource()}
 // A lookup column stores the parent ROWID (a multi lookup a list of them); the
 // report shows the parent display value instead. One ROWID IN query per lookup
 // column, through the same authorizeRead scope as the lookup endpoint: the
@@ -1857,140 +2002,6 @@ async function resolveLookupDisplays(datastore, rows, columns, principal) {
       else if (isId(value)) row[column.column] = shown(value);
     }
   }
-}
-
-// A criteria leaf that never matches a stored row (ID isNull: ROWID is never
-// NULL) and one that always matches. A lookup-path leaf that cannot be
-// resolved narrows to neverRows — the read fails closed, never widened.
-function neverRows() {
-  return { op: "isNull", field: "ID" };
-}
-function alwaysRows() {
-  return { op: "notNull", field: "ID" };
-}
-
-const LOOKUP_POSITIVE_OPS = new Set(["==", "<", ">", "<=", ">=", "contains", "startsWith", "endsWith", "in", "isNull", "notNull"]);
-const LOOKUP_PARENT_PAGE_CAP = 1000;
-
-// Every field name a criteria tree compares on, so the inner read can be
-// checked against the caller's field grant the same way the value path is.
-function criteriaFields(criteria, out) {
-  if (!criteria || typeof criteria !== "object") return out;
-  if ((criteria.op === "and" || criteria.op === "or") && Array.isArray(criteria.args)) {
-    for (const arg of criteria.args) criteriaFields(arg, out);
-    return out;
-  }
-  if (criteria.op === "not") return criteriaFields(criteria.arg, out);
-  if (typeof criteria.field === "string") out.push(criteria.field);
-  return out;
-}
-
-// The value a Form[criteria].field comparison reads: the first matching row's
-// field, queried under the caller's record-access scope on that form (the same
-// scope lookupParentIds applies, so a refused or failing read keeps the leaf
-// closed). undefined means no comparable value. A bare Form[criteria] fetch is
-// the row's id; a lookup cell resolves to its stored id. A hidden form, or a
-// path or inner-criteria field outside the caller's field grant, never yields
-// a value: the sub-query must not leak what FieldPermissions hide.
-async function recordQueryValue(datastore, spec, principal) {
-  const form = spec && typeof spec.form === "string" ? spec.form : "";
-  const inner = spec && spec.criteria && typeof spec.criteria === "object" ? spec.criteria : null;
-  const path = spec && Array.isArray(spec.path) ? spec.path : [];
-  if (!form || !inner || isHidden(form) || path.length > 1 || path.some((key) => typeof key !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))) return undefined;
-  let rows;
-  try {
-    const scoped = authorizeRead(access, principal, form, inner);
-    // The grant's field allowlist binds the sub-query too: a path or an inner
-    // criteria on a hidden field would read what FieldPermissions deny.
-    if (Array.isArray(scoped.fields)) {
-      if (path.length && !readableField(path[0], scoped.fields)) return undefined;
-      if (criteriaFields(inner, []).some((field) => !readableField(field, scoped.fields))) return undefined;
-    }
-    rows = await readScoped(datastore, form, scoped.criteria, 0, 1);
-  } catch (err) {
-    return undefined;
-  }
-  const row = Array.isArray(rows) && rows[0] && typeof rows[0] === "object" ? rows[0] : null;
-  if (!row) return undefined;
-  if (!path.length) return row.ROWID ?? row.rowid ?? row.c2c_source_id;
-  let value = row;
-  for (const key of path) value = value && typeof value === "object" ? value[key] : undefined;
-  if (value && typeof value === "object" && !Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, "id")) value = value.id;
-  return value;
-}
-
-// ROWIDs of the parent rows one lookup-path leaf matches, read under the
-// caller's scope (the same lookupDisplayScope a display column uses). null
-// when the parent read is refused or fails — the leaf then matches nothing.
-async function lookupParentIds(datastore, form, field, leaf, principal) {
-  const scoped = lookupDisplayScope(principal, form, field, leaf);
-  if (!scoped) return null;
-  const ids = [];
-  const page = ${LIMITS.zcqlRowsPerQuery};
-  for (let offset = 0; ; offset += page) {
-    let rows;
-    try {
-      rows = await readScoped(datastore, form, scoped.criteria, offset, page);
-    } catch (err) {
-      return null;
-    }
-    const list = Array.isArray(rows) ? rows : [];
-    for (const row of list) {
-      const id = row && row.ROWID != null && row.ROWID !== "" ? String(row.ROWID) : "";
-      if (id && !ids.includes(id)) ids.push(id);
-    }
-    if (list.length < page) break;
-    if (ids.length > LOOKUP_PARENT_PAGE_CAP) return null;
-  }
-  return ids;
-}
-
-// A criteria leaf on a lookup display path (Call_Owner.Email) is not a
-// base-table column: the lookup stores the parent ROWID. The leaf runs as a
-// parent query and rewrites onto the lookup column — Call_Owner IN (ids) for
-// the positive ops, NOT (Call_Owner IN (ids)) for !=. A leaf on a parent
-// composite part (Owner.Name.first_name) reads its stored column through
-// parentParts. A path the maps do not know, or a parent read that is refused,
-// fails closed to neverRows.
-async function resolveLookupCriteria(datastore, criteria, principal) {
-  if (!criteria || typeof criteria !== "object") return criteria;
-  if (criteria.op === "and" || criteria.op === "or") {
-    const args = [];
-    for (const arg of criteria.args) args.push(await resolveLookupCriteria(datastore, arg, principal));
-    return { ...criteria, args };
-  }
-  if (criteria.op === "not") return { ...criteria, arg: await resolveLookupCriteria(datastore, criteria.arg, principal) };
-  // A dependent record query value (Form[criteria].field or a thisapp
-  // function returning one) resolves to the first matching row's field under
-  // the caller's scope on that form. No match narrows like a failed lookup
-  // parent read: neverRows, or alwaysRows under !=.
-  const query = criteria.value && typeof criteria.value === "object" && !Array.isArray(criteria.value) ? criteria.value.__rows : null;
-  if (query && typeof query === "object") {
-    const resolved = await recordQueryValue(datastore, query, principal);
-    if (resolved === undefined) return criteria.op === "!=" ? alwaysRows() : neverRows();
-    criteria = { ...criteria, value: resolved };
-  }
-  const field = typeof criteria.field === "string" ? criteria.field : "";
-  const dot = field.indexOf(".");
-  if (dot <= 0 || dot === field.length - 1) return criteria;
-  const head = field.slice(0, dot);
-  let rest = field.slice(dot + 1);
-  const parent = Object.prototype.hasOwnProperty.call(lookupParents, head) ? lookupParents[head] : "";
-  if (!parent) return neverRows();
-  if (rest.indexOf(".") >= 0) {
-    const parts = Object.prototype.hasOwnProperty.call(parentParts, parent) ? parentParts[parent] : {};
-    rest = Object.prototype.hasOwnProperty.call(parts, rest) ? parts[rest] : "";
-    if (!rest) return neverRows();
-  }
-  if (criteria.op === "!=") {
-    const excluded = await lookupParentIds(datastore, parent, rest, { op: "==", field: rest, value: criteria.value }, principal);
-    if (excluded === null) return neverRows();
-    return excluded.length ? { op: "not", arg: { op: "in", field: head, value: excluded } } : alwaysRows();
-  }
-  if (!LOOKUP_POSITIVE_OPS.has(criteria.op)) return neverRows();
-  const ids = await lookupParentIds(datastore, parent, rest, { op: criteria.op, field: rest, value: criteria.value }, principal);
-  if (ids === null) return neverRows();
-  return ids.length ? { op: "in", field: head, value: ids } : neverRows();
 }
 
 // ZCQL has no boolean literal predicate: "WHERE true" is a syntax error. An always-true read sends no WHERE clause.
@@ -2771,6 +2782,17 @@ function stageFieldModules(app: App, formName: string): { modules: string[]; col
   return { modules: specs.map((item) => `../../flow/${item.slug}.mjs`), columns };
 }
 
+/** True when a criteria leaf is a lookup display path or a dependent record query — shapes only the served resolver rewrites before compileCriteria. */
+function criteriaNeedsResolve(criteria: Criteria): boolean {
+  if (criteria.op === 'and' || criteria.op === 'or') return criteria.args.some(criteriaNeedsResolve);
+  if (criteria.op === 'not') return criteriaNeedsResolve(criteria.arg);
+  if (criteria.op === 'todo' || criteria.op === 'true' || !('field' in criteria)) return false;
+  if (criteria.field.includes('.')) return true;
+  const value = 'value' in criteria ? criteria.value : undefined;
+  if (value && typeof value === 'object' && !Array.isArray(value) && (value as { __rows?: unknown }).__rows) return true;
+  return Array.isArray(value) && value.some((item) => item && typeof item === 'object' && (item as { __rows?: unknown }).__rows);
+}
+
 /**
  * Scoped single-row read for the edit flow's prefill. Dry run answers an
  * empty record carrying only the requested ROWID; live runs the caller-
@@ -2825,6 +2847,23 @@ function boundCriteria(criteria) {
     ).map((profile) => profile.name);
     return [[report.name, { criteria: scopeCriteria, fields: report.columns.map((column) => column.field), profiles }]];
   }));
+  // A report scope whose criteria has a lookup-path leaf or a dependent record
+  // query needs the served resolver (the same one report stubs emit) before
+  // compileCriteria: `Account.Status` is not a column on this table.
+  // determinism-allow: .some() only yields a boolean; scope order never reaches generated bytes
+  const needsResolve = Object.values(reportScopes).some((scope) => criteriaNeedsResolve(scope.criteria));
+  const parents = needsResolve ? lookupParentsOf(app, form.name) : {};
+  // determinism-allow: the deduplicated parent forms are sorted on the same line
+  const parentForms = [...new Set(Object.values(parents))].sort();
+  const appDecimals = decimalColumnsOf(app);
+  const parentDecimals = Object.fromEntries(parentForms.flatMap((form) => (Object.hasOwn(appDecimals, form) ? [[form, appDecimals[form]!]] : [])));
+  const resolveImport = needsResolve ? SCOPED_READ_IMPORT : '';
+  const resolveConst = needsResolve
+    ? `/** Parent form of each lookup field on this form; a report-scope leaf on a lookup display path resolves against it. */\nconst lookupParents = ${JSON.stringify(parents)};\n/** Stored part column of each lookup parent's composite parts. */\nconst parentParts = ${JSON.stringify(compositePartsOfParents(app, parents, schemaOf(app)))};\nconst parentDecimals = ${JSON.stringify(parentDecimals)};\n`
+    : '';
+  const resolveSource = needsResolve
+    ? `\n// ZCQL has no boolean literal predicate: "WHERE true" is a syntax error. An always-true read sends no WHERE clause.\nfunction zcqlPredicate(where) {\n  const text = typeof where === "string" ? where.trim() : "";\n  return text === "true" ? "" : text;\n}\n\n${scopedReadSource()}\n${lookupCriteriaSource()}`
+    : '';
   const queryName = subformLinks.length ? 'queried' : 'rows';
   const attachRows = subformLinks.length ? `if (Array.isArray(queried)) await attachSubforms(datastore, subformTables, formName, queried, {
       authorize(table) {
@@ -2859,12 +2898,12 @@ function boundCriteria(criteria) {
     send(res, 200, { dryRun: false, record: shown, stages: Object.fromEntries(${JSON.stringify(stage.columns)}.map((column) => [column, stored[column] ?? null])) });`
     : `
     send(res, 200, { dryRun: false, record: row });`;
-  return `${banner(bannerLines)}${policyPrelude('../../access-policy.json', false, shimImport)}
+  return `${banner(bannerLines)}${policyPrelude('../../access-policy.json', false, shimImport + resolveImport)}
 export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(path)}, dryRun: true };
 export const formName = ${JSON.stringify(form.name)};
 const reportScopes = ${JSON.stringify(reportScopes)};
 
-${subformConst}${stageConst}${relativePrelude}${deployHelpers('../../c2c-deploy.json', '../../c2c-store.mjs')}
+${resolveConst}${subformConst}${stageConst}${relativePrelude}${deployHelpers('../../c2c-deploy.json', '../../c2c-store.mjs')}${resolveSource}
 
 export default async function handler(req, res) {
   const deploy = deployConfig();
@@ -2894,7 +2933,8 @@ ${requirePrincipal()}
     }
     const rowCriteria = { op: "==", field: "ROWID", value: rowId };
     const criteria = reportScope ? { op: "and", args: [rowCriteria, reportScope.criteria] } : rowCriteria;
-    const scoped = authorizeRead(access, principal, formName, criteria);
+    ${needsResolve ? 'const flat = await resolveLookupCriteria(datastore, criteria, principal);' : 'const flat = criteria;'}
+    const scoped = authorizeRead(access, principal, formName, flat);
     const selectedFields = reportScope ? (scoped.fields ? reportScope.fields.filter((field) => scoped.fields.includes(field)) : reportScope.fields) : scoped.fields;
     // A criteria the record query cannot evaluate (an unmigrated clause in the
     // report scope or the record filter) fails closed, like the report stub
@@ -2913,6 +2953,7 @@ ${requirePrincipal()}
       return;
     }
     if (!live) {
+      authorizeRead(access, principal, formName, criteria);
       send(res, 200, { dryRun: true, record: { ROWID: rowId } });
       return;
     }

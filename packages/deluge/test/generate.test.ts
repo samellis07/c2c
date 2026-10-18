@@ -872,9 +872,10 @@ test('a compound criteria batches and evaluates: static conjunct filters rows, q
         { ROWID: '4', Status: 'Open', Code: 'C' },
       ],
       Customers: [
-        { ROWID: '10', Code: 'A', Name: 'Ada', Active: true },
-        { ROWID: '20', Code: 'B', Name: 'Bea', Active: false },
-        { ROWID: '30', Code: "O'Brien", Name: 'Obi', Active: true },
+        { ROWID: '10', Code: 'A', Name: 'Ada', Active: 'true' },
+        { ROWID: '20', Code: 'B', Name: 'Bea', Active: 'false' },
+        { ROWID: '30', Code: "O'Brien", Name: 'Obi', Active: 'true' },
+        { ROWID: '40', Code: 'C', Name: 'Cy', Active: true },
       ],
     },
   });
@@ -885,12 +886,13 @@ test('a compound criteria batches and evaluates: static conjunct filters rows, q
   const customersFetch = fetchCalls.find((e) => e.form === 'Customers')!;
   // The key set is quote-safe: O'Brien arrives as a doubled-quote literal.
   assert.match(String(customersFetch.where), /O''Brien/);
-  assert.match(String(customersFetch.where), /Active = true/);
+  // criteria.ts lit() quotes decision cells because Data Store returns them as varchar strings.
+  assert.match(String(customersFetch.where), /Active = 'true'/);
   const map = slots['c0'] as Record<string, unknown>;
   assert.deepEqual(
     [map['1'], map['2'], map['3'], map['4']],
-    ['Ada', null, 'Obi', null],
-    'active rows map; inactive and missing keys map to null',
+    ['Ada', null, 'Obi', 'Cy'],
+    'active rows map; inactive and missing keys map to null; boolean seed uses sameCell bridge',
   );
   const clientRuntime = createRuntime({
     dryRun: true,
@@ -898,7 +900,7 @@ test('a compound criteria batches and evaluates: static conjunct filters rows, q
     clientPrefetch: async (_path, nonce) => ({ nonce, slots }),
   });
   const actions = await cmod.clientActions(clientRuntime.context({ record: {} }));
-  assert.deepEqual(actions.map((a) => a.message), ['Ada', null, 'Obi', null]);
+  assert.deepEqual(actions.map((a) => a.message), ['Ada', null, 'Obi', 'Cy']);
 });
 
 test('two server field reads in one client condition batch into two map lookups on shared keys', async () => {
