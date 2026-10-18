@@ -1065,7 +1065,14 @@ export function elementFromZml(
       if (compiled?.ok) {
         const inline = (compiled.components ?? []).filter((item) => env?.components?.[item.kind === 'form' ? 'forms' : 'reports'].has(item.name));
         const unavailable = (compiled.components ?? []).filter((item) => !inline.includes(item)).map((item) => `${item.kind} "${item.name}"`);
-        const notes = [...(compiled.componentTodos ?? []), ...unavailable].map((item) => ({ tag, kind: 'todo' as const, todo: `Embedded zc-component ${item} has no generated view`, children: [] }));
+        const componentNote = (item: { target: string; step?: string } | string) => ({
+          tag,
+          kind: 'todo' as const,
+          todo: `Embedded zc-component ${typeof item === 'string' ? item : item.target} has no generated view`,
+          ...(typeof item === 'object' && item.step ? { manualStep: item.step } : {}),
+          children: [],
+        });
+        const notes = [...(compiled.componentTodos ?? []), ...unavailable].map(componentNote);
         children = [...notes, ...children];
       }
       if (compiled?.ok && compiled.staticOnly) {

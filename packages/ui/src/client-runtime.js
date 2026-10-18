@@ -1103,9 +1103,9 @@ export function hydrateComponentEmbeds(root, appModel, viewRef) {
   const call = (viewRef && viewRef.fetch) || globalThis.fetch;
   for (const slot of root.querySelectorAll('[data-zml^="component-"]')) {
     if (slot.getAttribute('data-component-done') === 'true') continue;
-    const match = /^component-(form|report):([A-Za-z_]\w*)$/.exec(slot.getAttribute('data-zml') || '');
+    const match = /^component-(form|report):([A-Za-z_]\w*)(:untitled)?$/.exec(slot.getAttribute('data-zml') || '');
     if (!match) continue;
-    const [, kind, name] = match;
+    const [, kind, name, untitled] = match;
     const host = slot.closest('[data-page-components]');
     const declared = host ? (host.getAttribute('data-page-components') || '').split(' ') : [];
     if (!declared.includes(`${kind}:${name}`)) continue;
@@ -1116,6 +1116,8 @@ export function hydrateComponentEmbeds(root, appModel, viewRef) {
     slot.setAttribute('data-component-done', 'true');
     const paint = () => {
       slot.innerHTML = renderRoute(appModel, { name: kind, id: name }, slot.ownerDocument);
+      // The embed's zc_Header=false hides the view title, nothing else.
+      if (untitled) for (const title of slot.querySelectorAll(':scope > section > h1:first-child')) title.remove();
       const mount = componentMounts.get(appModel);
       if (mount) mount(slot, kind, target, viewRef);
     };
