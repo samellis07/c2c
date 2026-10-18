@@ -29,6 +29,8 @@ export const DROPPED_TAGS = new Set([
 
 const ALLOWED_ATTRS = {
   a: new Set(['href', 'title']),
+  // A generated ExecuteFunction button carries its call route, encoded
+  // arguments, and success message; the delegated click wires the POST.
   button: new Set(['type', 'data-fn-call', 'data-fn-args', 'data-fn-argc', 'data-fn-msg', 'data-fn-refresh']),
   img: new Set(['src', 'alt', 'title', 'width', 'height']),
   font: new Set(['color', 'face', 'size']),
@@ -1418,12 +1420,17 @@ export function hydratePopups(root, appModel, viewRef) {
 
 /** Page input for server-rendered snippets: the URL's query parameters. */
 export function snippetPageInput(docRef) {
-  const out = {};
+  // A null-prototype bag: caller-controlled parameter names can never alias a
+  // built-in property or pollute a prototype chain.
+  const out = Object.create(null);
   const loc = docRef && docRef.location;
   if (!loc) return out;
   const read = (query) => {
     try {
-      for (const [key, value] of new URLSearchParams(query)) if (!(key in out)) out[key] = value;
+      for (const [key, value] of new URLSearchParams(query)) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+        if (!Object.prototype.hasOwnProperty.call(out, key)) out[key] = value;
+      }
     } catch (err) {
       /* malformed query */
     }
@@ -6164,6 +6171,88 @@ export function boot(appModel, doc) {
   documentRef.addEventListener('click', (event) => {
     const target = event.target && event.target.closest ? event.target : null;
     if (target) {
+      // A generated ExecuteFunction button: POST the encoded constants and
+      // page parameters to the callee's client-call endpoint, then toast the
+      // successMsg or the endpoint's error.
+      const fnBtn = target.closest('button[data-fn-call]');
+      if (fnBtn) {
+        event.preventDefault();
+        const path = fnBtn.getAttribute('data-fn-call') || '';
+        const call = view.fetch || globalThis.fetch;
+        // Only a generated client-call route is a valid target; any other
+        // value in sanitized markup is inert.
+        if (typeof call === 'function' && /^\/functions\/[a-z0-9-]+\/call$/i.test(path)) {
+          const input = snippetPageInput(documentRef);
+          const args = [];
+          let bad = false;
+          const argc = fnBtn.getAttribute('data-fn-argc');
+          if (argc !== null) {
+            const count = /^\d+$/.test(argc) ? Number(argc) : -1;
+            for (let i = 0; i < count; i++) {
+              const raw = fnBtn.getAttribute(`data-fn-arg-${i}`);
+              if (raw === null) {
+                bad = true;
+                break;
+              }
+              const kind = raw.slice(0, 2);
+              const value = raw.slice(2);
+              try {
+                if (kind === 'j:') args.push(JSON.parse(value));
+                else if (kind === 'p:') {
+                  const param = Object.prototype.hasOwnProperty.call(input, value) ? input[value] : undefined;
+                  args.push(param === undefined ? null : param);
+                } else if (kind === 'n:') {
+                  const n = Number(value);
+                  if (!Number.isFinite(n)) throw new Error('not a number');
+                  args.push(n);
+                } else if (kind === 'b:') {
+                  if (value !== 'true' && value !== 'false') throw new Error('not a boolean');
+                  args.push(value === 'true');
+                } else if (kind === 's:') args.push(value);
+                else bad = true;
+              } catch (err) {
+                bad = true;
+              }
+            }
+          } else {
+            for (const part of (fnBtn.getAttribute('data-fn-args') || '').split('&')) {
+              if (!part) continue;
+              const eq = part.indexOf('=');
+              try {
+                if (part.slice(0, eq) === 'c') args.push(JSON.parse(decodeURIComponent(part.slice(eq + 1))));
+                else if (part.slice(0, eq) === 'p') {
+                  const name = decodeURIComponent(part.slice(eq + 1));
+                  const value = Object.prototype.hasOwnProperty.call(input, name) ? input[name] : undefined;
+                  args.push(value === undefined ? null : value);
+                } else bad = true;
+              } catch (err) {
+                bad = true;
+              }
+            }
+          }
+          if (!bad) {
+            apiCall(call, view, path, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ args }),
+            })
+              .then(async (res) => {
+                if (res && res.ok) {
+                  showToast(documentRef, 'success', fnBtn.getAttribute('data-fn-msg') || 'Done');
+                  if (fnBtn.getAttribute('data-fn-refresh') === 'true' && documentRef.location && typeof documentRef.location.reload === 'function') documentRef.location.reload();
+                  return;
+                }
+                const body = await readJson(res);
+                const message = body && typeof body.error === 'string' && body.error.trim() ? body.error : 'The action did not complete.';
+                showToast(documentRef, 'failure', message);
+              })
+              .catch(() => {
+                showToast(documentRef, 'failure', 'The action did not complete.');
+              });
+          }
+        }
+        return;
+      }
       const bulk = target.closest('[data-bulk-edit]');
       if (bulk) {
         event.preventDefault();
