@@ -981,7 +981,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
     // The export never carries the pivot's row, column and measure shelves,
     // so the underlying rows render as a list and the pivot stays manual.
     view = 'list';
-    note = 'Shown as a list: the export does not carry the pivot row, column and measure shelves.';
+    note = `Shown as a list: ${report.name} has no exported pivot shelves; rebuild it on this report using one row field, one column field, and a count or sum measure from ${report.form || 'the report form'} (${columns.map((column) => column.field).join(', ') || 'no exported columns'}).`;
     todos.push({
       area: 'report',
       name: report.name,
@@ -1001,7 +1001,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   }
   if (compiledCriteria?.op === 'todo') {
     status = 'todo';
-    todo = [todo, 'Filter not migrated: dynamic or unsupported criteria need manual translation; the report returns no rows.'].filter(Boolean).join(' ');
+    todo = [todo, `Filter not migrated on report ${report.name}: manually translate the source criterion for ${report.form || 'the report form'} in the new app; until then this report returns no rows.`].filter(Boolean).join(' ');
     // zoho.adminuserid is the application owner's email; the generated app
     // is not configured with one, so the comparison is left to the developer.
     if (report.criteria && /\bzoho\.adminuserid\b/i.test(report.criteria)) {
@@ -1010,7 +1010,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   }
   for (const filter of report.filters) {
     if (filter.criteria?.trim() && criteriaHasTodo(reportCriteria(filter.criteria, app.functions))) {
-      todos.push({ area: 'report', name: report.name, reason: `Named filter "${filter.label ?? ''}" is not migrated; selecting it returns no rows.` });
+      todos.push({ area: 'report', name: report.name, reason: `Named filter "${filter.label ?? ''}" on report ${report.name} is not migrated: manually translate its source criterion for ${report.form || 'the report form'} in the new app; selecting it returns no rows.` });
     }
   }
   if (todo) todos.push({ area: 'report', name: report.name, reason: todo });
