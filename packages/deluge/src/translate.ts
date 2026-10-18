@@ -937,7 +937,9 @@ function serverConditionCall(value: Fx, scope: Scope): string | null {
     if (scope.clientData.has(name) || scope.clientDeclared.has(name) || (scope.local.has(name) && !scope.serverOnly.has(name))) {
       return params.get(ident)?.arg === ident || addParam(ident, 'auto', ident);
     }
-    if (!scope.local.has(name) || !scope.serverOnly.has(name)) return false;
+    // Query bindings are server values even when the broader flow also keeps
+    // a client representation; replay the read in this isolated condition.
+    if (!scope.local.has(name) || (!scope.serverOnly.has(name) && !scope.query.has(name))) return false;
     const binding = scope.bindings.get(name);
     if (!binding || !dominates(name, binding, scope)) return false;
     if (replayed.has(name)) return true;
