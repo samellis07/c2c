@@ -124,6 +124,8 @@ export interface ColumnSpec {
   numeric?: boolean;
   /** Multi select or checkboxes: the cell is stored list text, shown as its choices. */
   multiValue?: boolean;
+  /** Date or date-time column: shown in the app date format (and clock), not as stored ISO. */
+  date?: 'date' | 'datetime';
   /** A `column header` custom action: the cell is a per-record button posting here, not a value. */
   action?: string;
 }
@@ -257,6 +259,8 @@ export interface AppSpec {
   spec: 1;
   theme: { accent: string; accentInk: string; menu: 'rail' | 'list'; font?: string };
   dateFormat?: string;
+  /** The app `time format` setting ("24-hr" / "12-hr"); date-time cells use its clock. */
+  timeFormat?: string;
   nav: NavSection[];
   /**
    * Screen names a `hide = true` section hides from this profile, minus any

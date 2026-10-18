@@ -11,6 +11,7 @@
  * locally and fail under CI, where the install step is part of the run.
  */
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -21,7 +22,7 @@ import ts from 'typescript';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { compareCells, compareDecimalCells } from '../../shims/src/criteria.js';
 import { TEMPLATE_DIR, compileTemplateLib, hiddenParts, reactAppSpec } from '../src/index.js';
-import type { FormSpec, ReportSpec } from '../template/lib/c2c-ui/types.js';
+import type { AppSpec, FormSpec, ReportSpec } from '../template/lib/c2c-ui/types.js';
 import { cleanStyle } from '../../ui/src/pages.js';
 
 function source(): string {
@@ -166,7 +167,7 @@ interface Mounted {
 }
 
 /** Mount <ReportView> against a fake endpoint that applies the posted sort like the report endpoint. */
-async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: ReadonlySet<string>, forms: Record<string, FormSpec> = {}, rowId?: string, recordReply?: () => Promise<{ ok: boolean; status: number; body?: unknown }>): Promise<Mounted> {
+async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: ReadonlySet<string>, forms: Record<string, FormSpec> = {}, rowId?: string, recordReply?: () => Promise<{ ok: boolean; status: number; body?: unknown }>, appSettings: Partial<AppSpec> = {}): Promise<Mounted> {
   const { JSDOM } = await import('jsdom');
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true });
   const view = dom.window as unknown as Record<string, unknown> & Window;
@@ -232,7 +233,7 @@ async function mount(out: string, report: ReportSpec, rows: Row[], numericKeys: 
 
   const container = view.document.getElementById('root') as HTMLElement;
   const root = createRoot(container);
-  const spec = { name: 'Shop', spec: 1 as const, theme: { accent: '#000000', accentInk: '#ffffff', menu: 'list' as const }, nav: [], forms, reports: { [report.name]: report } };
+  const spec = { name: 'Shop', spec: 1 as const, theme: { accent: '#000000', accentInk: '#ffffff', menu: 'list' as const }, nav: [], forms, reports: { [report.name]: report }, ...appSettings };
   const env = { view, doc: view.document, spec, api };
   const flush = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
   await act(async () => {
@@ -683,4 +684,94 @@ test('the conditional format allowlist mirrors the static sanitizer and rejects 
   }
   assert.equal(isSafeStyleProperty('behavior'), false, 'behavior is refused');
   assert.equal(isSafeStyleProperty('-moz-binding'), false, '-moz-binding is refused');
+});
+
+const DATE_SOURCE = `application "Library"
+{
+date format = "dd-MMM-yyyy"
+time zone = "Asia/Kolkata"
+time format = "24-hr"
+form Member
+{
+Name
+(
+type = text
+)
+Start_Date
+(
+type = date
+)
+Checked_Out
+(
+type = datetime
+)
+}
+list Member_Report
+{
+show all rows from Member
+(
+Name
+Start_Date
+Checked_Out
+)
+group by
+(
+Start_Date
+)
+}
+}`;
+
+const DATE_ROWS: Row[] = [{ ROWID: '1', Name: 'Ada', Start_Date: '2026-10-17', Checked_Out: '2026-10-17 14:05:00' }];
+
+test('the report spec carries the app time format and the date column kinds', () => {
+  const spec = reactAppSpec(appOf(DATE_SOURCE));
+  assert.equal(spec.dateFormat, 'dd-MMM-yyyy');
+  assert.equal(spec.timeFormat, '24-hr');
+  assert.deepEqual(spec.reports.Member_Report!.columns.map((c) => [c.field, c.date ?? null]), [['Name', null], ['Start_Date', 'date'], ['Checked_Out', 'datetime']]);
+});
+
+test('date and date-time cells and their group header show the app date format and 24-hour clock', { skip: SKIP }, async (t) => {
+  const spec = reactAppSpec(appOf(DATE_SOURCE));
+  const out = await compileOnly(t, 'dates');
+  const view = await mount(out, spec.reports.Member_Report!, DATE_ROWS, new Set(), {}, undefined, undefined, { dateFormat: spec.dateFormat, timeFormat: spec.timeFormat });
+  assert.deepEqual(view.textOf('Start_Date'), ['17-Oct-2026']);
+  assert.deepEqual(view.textOf('Checked_Out'), ['17-Oct-2026 14:05:00']);
+  assert.equal(view.container.querySelector('[data-group]')?.getAttribute('data-group'), '17-Oct-2026', 'the group header names the day in the app format');
+  assert.doesNotMatch(view.container.textContent ?? '', /2026-10-17/);
+});
+
+test('a 12-hour app shows a date-time with AM/PM and another date format', { skip: SKIP }, async (t) => {
+  const spec = reactAppSpec(appOf(DATE_SOURCE.replace('dd-MMM-yyyy', 'MM/dd/yyyy').replace('24-hr', '12-hr')));
+  const out = await compileOnly(t, 'dates12');
+  const view = await mount(out, spec.reports.Member_Report!, DATE_ROWS, new Set(), {}, undefined, undefined, { dateFormat: spec.dateFormat, timeFormat: spec.timeFormat });
+  assert.deepEqual(view.textOf('Start_Date'), ['10/17/2026']);
+  assert.deepEqual(view.textOf('Checked_Out'), ['10/17/2026 02:05:00 PM']);
+});
+
+test('record detail shows a stored date in the app format', { skip: SKIP }, async (t) => {
+  const spec = reactAppSpec(appOf(DATE_SOURCE));
+  const out = await compileOnly(t, 'date-detail');
+  const report = { ...spec.reports.Member_Report!, detail: true, recordEndpoint: '/forms/Member/record' };
+  const reply = async () => ({ ok: true, status: 200, body: { record: DATE_ROWS[0] } });
+  const view = await mount(out, report, [], new Set(), {}, '1', reply, { dateFormat: spec.dateFormat, timeFormat: spec.timeFormat });
+  const values = [...view.container.querySelectorAll('.c2c-record dd')].map((el) => el.textContent);
+  assert.deepEqual(values, ['Ada', '17-Oct-2026', '17-Oct-2026 14:05:00']);
+});
+
+test('a DATE value shows the same calendar day under TZ=America/Los_Angeles and TZ=Asia/Kolkata', { skip: SKIP }, async (t) => {
+  const out = await compileOnly(t, 'date-tz');
+  const mod = pathToFileURL(join(out, 'lib/c2c-ui/form/dates.js')).href;
+  const script = `const { displayDateValue } = await import(${JSON.stringify(mod)});
+process.stdout.write(JSON.stringify([displayDateValue('2026-10-17', 'date'), displayDateValue('2026-01-01T00:00:00Z', 'date'), displayDateValue('2026-10-17T08:35:00Z', 'datetime', { timeFormat: '24-hr', timeZone: 'Asia/Kolkata' }), new Date(2026, 0, 1).getTimezoneOffset()]));`;
+  const seen = ['America/Los_Angeles', 'Asia/Kolkata'].map((zone) => {
+    const run = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, TZ: zone }, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    return JSON.parse(run.stdout) as [string, string, string, number];
+  });
+  assert.notEqual(seen[0]![3], seen[1]![3], 'the two runs really use different browser zones');
+  for (const [date, newYear, instant] of seen) {
+    assert.equal(date, '17-Oct-2026');
+    assert.equal(newYear, '01-Jan-2026');
+    assert.equal(instant, '17-Oct-2026 14:05:00', 'an instant shows in the app zone, whatever the browser zone');
+  }
 });

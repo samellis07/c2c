@@ -168,7 +168,7 @@ export interface UiReport {
   note?: string;
   /** Compiled `show all rows from Form [criteria]`. Same predicate the report stub exports as `baseCriteria`. `{ op: 'todo' }` when it did not translate. */
   criteria?: Criteria;
-  columns: { field: string; label: string; lookup?: { form: string; field: string }; numeric?: boolean; multiValue?: boolean; action?: string }[];
+  columns: { field: string; label: string; lookup?: { form: string; field: string }; numeric?: boolean; multiValue?: boolean; date?: 'date' | 'datetime'; action?: string }[];
   /** Phone record card fields in card order (decorations/report-views.ts); the list columns are the web layout. */
   phoneColumns?: { field: string; label: string }[];
   filters: { field?: string; label?: string }[];
@@ -318,6 +318,8 @@ export interface UiModel {
   theme?: { theme?: string; font?: string; iconColor?: string; menu?: 'rail' | 'list' };
   /** The app `date format` setting, used for date placeholders and entry. */
   dateFormat?: string;
+  /** The app `time format` setting ("24-hr" / "12-hr"), used for date-time cells. */
+  timeFormat?: string;
 }
 
 export interface UiForm {
@@ -583,6 +585,7 @@ export function buildModel(app: App, delugeFiles: readonly GeneratedFile[] = [])
     else if (addSuccess && !editSuccess) form.editSubmitEndpoint = plainSubmitEndpoint(form.name);
   }
   const dateFormat = app.settings.find((item) => item.key.toLowerCase() === 'date format');
+  const timeFormat = app.settings.find((item) => item.key.toLowerCase() === 'time format');
   const model: UiModel = {
     dryRun: true,
     framework: 'vanilla',
@@ -595,6 +598,7 @@ export function buildModel(app: App, delugeFiles: readonly GeneratedFile[] = [])
     handlers,
     todos,
     ...(dateFormat ? { dateFormat: unquote(dateFormat.value) } : {}),
+    ...(timeFormat ? { timeFormat: unquote(timeFormat.value) } : {}),
   };
   Object.defineProperty(model, UI_SNIPPET_FILES, { value: snippetFiles, enumerable: false });
   applyDecorations(model, app);
@@ -1037,6 +1041,8 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
     ...(numericColumn(form, column.field) ? { numeric: true as const } : {}),
     // A multi select or checkboxes cell is stored list text: the report shows its choices.
     ...(multiValueColumn(form, column.field) ? { multiValue: true as const } : {}),
+    // A date or date-time cell shows in the app date format and clock, not as stored ISO.
+    ...dateColumn(form, column.field),
   }));
   // A custom action with `column header` renders as a record column, not a
   // toolbar button. The cell's button posts to the action endpoint.
@@ -1149,6 +1155,12 @@ function numericColumn(form: Form | undefined, fieldName: string): boolean {
   const field = formField(form, fieldName);
   const id = field ? resolveRow(field)?.id : undefined;
   return id === 'number' || id === 'decimal' || id === 'percent' || id === 'currency';
+}
+
+function dateColumn(form: Form | undefined, fieldName: string): { date: 'date' | 'datetime' } | Record<string, never> {
+  const field = formField(form, fieldName);
+  const id = field ? resolveRow(field)?.id : undefined;
+  return id === 'date' ? { date: 'date' } : id === 'date-time' ? { date: 'datetime' } : {};
 }
 
 function multiValueColumn(form: Form | undefined, fieldName: string): boolean {

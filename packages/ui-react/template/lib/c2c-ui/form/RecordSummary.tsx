@@ -2,12 +2,17 @@ import { useEffect, useState } from 'react';
 import { Alert } from '../arc/components/alert/alert';
 import { useEnv } from '../runtime/env';
 import type { FormSpec } from '../types';
+import { displayDateValue, type DateDisplay } from './dates';
 
 type Row = Record<string, unknown>;
 type State = { status: 'loading' } | { status: 'ready'; row: Row } | { status: 'empty' } | { status: 'error'; code: number };
 
-function valueText(value: unknown, field?: FormSpec['fields'][number]): string {
+function valueText(value: unknown, field?: FormSpec['fields'][number], dates?: DateDisplay): string {
   if (value == null || value === '') return '–';
+  if (field && (field.widget === 'date' || field.widget === 'datetime')) {
+    const shown = displayDateValue(value, field.widget, dates);
+    if (shown !== null) return shown;
+  }
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (Array.isArray(value)) return value.map((item) => valueText(item, field)).join(', ');
   if (typeof value === 'object') {
@@ -24,7 +29,8 @@ function valueText(value: unknown, field?: FormSpec['fields'][number]): string {
 
 /** A standalone, read-only record view. The untrusted route id is always scoped by the server's record endpoint. */
 export function RecordSummary({ form, rowId }: { form: FormSpec; rowId?: string }) {
-  const { api } = useEnv();
+  const { api, spec, view } = useEnv();
+  const dates: DateDisplay = { dateFormat: spec.dateFormat, timeFormat: spec.timeFormat, ...(typeof view.C2C_APP_TIMEZONE === 'string' ? { timeZone: view.C2C_APP_TIMEZONE } : {}) };
   const [state, setState] = useState<State>({ status: 'loading' });
 
   useEffect(() => {
@@ -50,7 +56,7 @@ export function RecordSummary({ form, rowId }: { form: FormSpec; rowId?: string 
       {state.status === 'error' ? <Alert tone="danger" title={state.code === 403 ? 'This record is not available.' : 'This record could not be loaded.'} /> : null}
       {state.status === 'ready' ? (
         <table><tbody>{form.fields.filter((field) => Object.prototype.hasOwnProperty.call(state.row, field.name)).map((field) => (
-          <tr key={field.name}><th scope="row">{field.label || field.name}</th><td>{valueText(state.row[field.name], field)}</td></tr>
+          <tr key={field.name}><th scope="row">{field.label || field.name}</th><td>{valueText(state.row[field.name], field, dates)}</td></tr>
         ))}</tbody></table>
       ) : null}
     </section>
