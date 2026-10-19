@@ -615,3 +615,42 @@ test('convert.toMap refuses adversarial input on both runtimes', async () => {
   }
   assert.equal((Object.prototype as Record<string, unknown>).polluted, undefined);
 });
+
+test('remaining allowlisted collection, comparison, and scalar builtins agree', async () => {
+  const browser = (await browserRuntime()).browserShim() as unknown as Record<string, unknown>;
+  const server = runtime.shim as unknown as Record<string, unknown>;
+  const invoke = (api: Record<string, unknown>, ns: string, name: string, args: unknown[]) => {
+    try {
+      const fn = (api[ns] as Record<string, (...xs: unknown[]) => unknown>)[name]!;
+      return { ok: plain(fn(...args)) };
+    } catch (err) {
+      return { error: `${(err as Error).name}:${(err as Error).message}` };
+    }
+  };
+  const cases: Array<[string, string, unknown[]]> = [
+    ['compare', 'eq', [null, '']], ['compare', 'ne', ['é', 'e']],
+    ['string', 'getAlphaNumeric', [' café-2026!']], ['string', 'removeAllAlpha', ['a1é-2']],
+    ['string', 'toUpperCase', ['ß café']], ['string', 'trim', ['  漢字  ']],
+    ['list', 'add', [[1, 2], null]], ['list', 'addAll', [[1], ['é', null]]],
+    ['list', 'clear', [[1, 2]]], ['list', 'contains', [[null, 'é'], null]],
+    ['list', 'containsKey', [{ 'é': 1 }, 'é']], ['list', 'containsValue', [{ a: null }, null]],
+    ['list', 'deleteAll', [[1, null, 1], 1]], ['list', 'deleteItem', [[1, null], null]],
+    ['list', 'deleteKey', [{ a: 1, 'é': 2 }, 'é']], ['list', 'deleteKeys', [{ a: 1, b: 2 }, ['a', null]]],
+    ['list', 'distinct', [[1, null, 1, 'é', 'é']]], ['list', 'duplicate', [{ a: 1, nested: ['é'] }]],
+    ['list', 'get', [['é', null], 0]], ['list', 'getKey', [{ a: null, b: 2 }, null]],
+    ['list', 'getLastKey', [{ a: null, b: 2 }, null]], ['list', 'indexOf', [['a', null, 'a'], null]],
+    ['list', 'insert', [[1, 3], 1, 'é']], ['list', 'insertAll', [[1, 4], 1, ['é', null]]],
+    ['list', 'intersect', [[1, null, 'é'], [null, 'é']]], ['list', 'keys', [{ a: 1, 'é': 2 }]],
+    ['list', 'lastIndexOf', [['a', null, 'a'], 'a']], ['list', 'length', [[1, null]]],
+    ['list', 'notContains', [[1, null], 'é']], ['list', 'put', [{ a: 1 }, 'é', null]],
+    ['list', 'putAll', [{ a: 1 }, { 'é': null }]], ['list', 'remove', [[1, 2, 3], 1]],
+    ['list', 'removeAll', [[1, null, 1], [1, null]]], ['list', 'removeElement', [[1, null], null]],
+    ['list', 'size', [{ a: 1, 'é': null }]], ['list', 'sort', [[3, null, 1], true]],
+    ['list', 'sortKey', [{ b: 2, a: 1 }]], ['list', 'subList', [[1, null, 'é'], 0, 2]],
+    ['list', 'update', [[1, 2], 1, null]], ['list', 'values', [{ a: 1, 'é': null }]],
+    ['math', 'round', [1.005, 2]], ['math', 'sqrt', [9007199254740993n]],
+  ];
+  for (const [ns, name, args] of cases) {
+    assert.deepEqual(invoke(browser, ns, name, args), invoke(server, ns, name, args), `${ns}.${name}`);
+  }
+});
