@@ -2472,8 +2472,8 @@
       "kind": "report-feature",
       "construct": "SOFs block options",
       "reason": "Report SOFs block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set SOFs block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the SOFs report were not converted. In the Catalyst console, open the SOFs report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Cargo_Type",
@@ -2848,160 +2848,160 @@
       "kind": "report-feature",
       "construct": "Leads block options",
       "reason": "Report Leads block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Leads report were not converted. In the Catalyst console, open the Leads report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Converted_Leads block options",
       "kind": "report-feature",
       "construct": "Converted_Leads block options",
       "reason": "Report Converted_Leads block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Converted_Leads block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Converted_Leads report were not converted. In the Catalyst console, open the Converted_Leads report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Accounts block options",
       "kind": "report-feature",
       "construct": "Accounts block options",
       "reason": "Report Accounts block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Accounts block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Accounts report were not converted. In the Catalyst console, open the Accounts report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Contacts block options",
       "kind": "report-feature",
       "construct": "Contacts block options",
       "reason": "Report Contacts block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Contacts block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Contacts report were not converted. In the Catalyst console, open the Contacts report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Deals block options",
       "kind": "report-feature",
       "construct": "Deals block options",
       "reason": "Report Deals block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Deals block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Deals report were not converted. In the Catalyst console, open the Deals report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Quotations block options",
       "kind": "report-feature",
       "construct": "Quotations block options",
       "reason": "Report Quotations block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Quotations block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Quotations report were not converted. In the Catalyst console, open the Quotations report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Delivery_Orders block options",
       "kind": "report-feature",
       "construct": "Delivery_Orders block options",
       "reason": "Report Delivery_Orders block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Delivery_Orders block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Delivery_Orders report were not converted. In the Catalyst console, open the Delivery_Orders report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Invoices block options",
       "kind": "report-feature",
       "construct": "Invoices block options",
       "reason": "Report Invoices block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Invoices block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Invoices report were not converted. In the Catalyst console, open the Invoices report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Airports block options",
       "kind": "report-feature",
       "construct": "Airports block options",
       "reason": "Report Airports block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Airports block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Airports report were not converted. In the Catalyst console, open the Airports report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Ports block options",
       "kind": "report-feature",
       "construct": "Ports block options",
       "reason": "Report Ports block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Ports block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Ports report were not converted. In the Catalyst console, open the Ports report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:HS_Codes block options",
       "kind": "report-feature",
       "construct": "HS_Codes block options",
       "reason": "Report HS_Codes block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set HS_Codes block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the HS_Codes report were not converted. In the Catalyst console, open the HS_Codes report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Users block options",
       "kind": "report-feature",
       "construct": "Users block options",
       "reason": "Report Users block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Users block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Users report were not converted. In the Catalyst console, open the Users report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Containers block options",
       "kind": "report-feature",
       "construct": "Containers block options",
       "reason": "Report Containers block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Containers block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Containers report were not converted. In the Catalyst console, open the Containers report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Vendors block options",
       "kind": "report-feature",
       "construct": "Vendors block options",
       "reason": "Report Vendors block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Vendors block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Vendors report were not converted. In the Catalyst console, open the Vendors report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Products block options",
       "kind": "report-feature",
       "construct": "Products block options",
       "reason": "Report Products block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Products block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Products report were not converted. In the Catalyst console, open the Products report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Vessels block options",
       "kind": "report-feature",
       "construct": "Vessels block options",
       "reason": "Report Vessels block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Vessels block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Vessels report were not converted. In the Catalyst console, open the Vessels report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Tax_Rates block options",
       "kind": "report-feature",
       "construct": "Tax_Rates block options",
       "reason": "Report Tax_Rates block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Tax_Rates block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Tax_Rates report were not converted. In the Catalyst console, open the Tax_Rates report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Mode_to_SubMode block options",
       "kind": "report-feature",
       "construct": "Mode_to_SubMode block options",
       "reason": "Report Mode_to_SubMode block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Mode_to_SubMode block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Mode_to_SubMode report were not converted. In the Catalyst console, open the Mode_to_SubMode report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Submode_to_CT_ST_CMT block options",
       "kind": "report-feature",
       "construct": "Submode_to_CT_ST_CMT block options",
       "reason": "Report Submode_to_CT_ST_CMT block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Submode_to_CT_ST_CMT block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Submode_to_CT_ST_CMT report were not converted. In the Catalyst console, open the Submode_to_CT_ST_CMT report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Table_of_Containers block options",
       "kind": "report-feature",
       "construct": "Table_of_Containers block options",
       "reason": "Report Table_of_Containers block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Table_of_Containers block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Table_of_Containers report were not converted. In the Catalyst console, open the Table_of_Containers report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "translation:translation Language_Settings",

@@ -299,40 +299,40 @@
       "kind": "report-feature",
       "construct": "Book_Report block options",
       "reason": "Report Book_Report block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Book_Report block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Book_Report report were not converted. In the Catalyst console, open the Book_Report report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Book_by_Genre block options",
       "kind": "report-feature",
       "construct": "Book_by_Genre block options",
       "reason": "Report Book_by_Genre block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Book_by_Genre block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the Book_by_Genre report were not converted. In the Catalyst console, open the Book_by_Genre report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:All_Member_Infos block options",
       "kind": "report-feature",
       "construct": "All_Member_Infos block options",
       "reason": "Report All_Member_Infos block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set All_Member_Infos block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the All_Member_Infos report were not converted. In the Catalyst console, open the All_Member_Infos report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:All_Book_Transactions block options",
       "kind": "report-feature",
       "construct": "All_Book_Transactions block options",
       "reason": "Report All_Book_Transactions block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set All_Book_Transactions block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the All_Book_Transactions report were not converted. In the Catalyst console, open the All_Book_Transactions report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:All_Staff_Members block options",
       "kind": "report-feature",
       "construct": "All_Staff_Members block options",
       "reason": "Report All_Staff_Members block options is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set All_Staff_Members block options manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The options for the All_Staff_Members report were not converted. In the Catalyst console, open the All_Staff_Members report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "page-element:DashBoard.Book_Report #1",

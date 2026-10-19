@@ -88,15 +88,15 @@ Silent drops: 19 (still counted; each has a guided step below)
 - `field-property:Staff_Members.Phone_Number property personal data` — not converted. property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
   - Step: Set property personal data on Staff_Members.Phone_Number manually in the Catalyst console/app; not converted.
 - `report-feature:Book_Report block options` — not converted. Report Book_Report block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Book_Report block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Book_Report report were not converted. In the Catalyst console, open the Book_Report report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Book_by_Genre block options` — not converted. Report Book_by_Genre block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Book_by_Genre block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Book_by_Genre report were not converted. In the Catalyst console, open the Book_by_Genre report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:All_Member_Infos block options` — not converted. Report All_Member_Infos block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set All_Member_Infos block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the All_Member_Infos report were not converted. In the Catalyst console, open the All_Member_Infos report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:All_Book_Transactions block options` — not converted. Report All_Book_Transactions block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set All_Book_Transactions block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the All_Book_Transactions report were not converted. In the Catalyst console, open the All_Book_Transactions report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:All_Staff_Members block options` — not converted. Report All_Staff_Members block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set All_Staff_Members block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the All_Staff_Members report were not converted. In the Catalyst console, open the All_Staff_Members report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `page-element:DashBoard.Book_Report #1` — not converted. ZML element <search> Book_Report on page DashBoard is generated without its criteria. Add one: either emit the element or record the manual step.
   - Step: Set DashBoard.Book_Report manually in the Catalyst console/app; not converted.
 - `page-element:DashBoard.Book_Report #2` — not converted. ZML element <button> Book_Report on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.

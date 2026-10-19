@@ -44,7 +44,7 @@ export function genericResidualStep(drop: Pick<SilentDrop, 'name' | 'form' | 'fi
 export function specificResidualStep(drop: Pick<SilentDrop, 'kind' | 'name' | 'form' | 'field' | 'property'>): string | undefined {
   if (drop.kind === 'field-property' && drop.form && drop.field && drop.property) {
     const field = `${drop.form}.${drop.field}`;
-    switch (drop.property) {
+    switch (drop.property.replace(/^property /, '')) {
       case 'displayformat':
         return `The lookup display format for ${field} was not converted. In the Catalyst console, set the lookup's display field or display format for ${field}, then preview the form and confirm the lookup shows the intended value.`;
       case 'sortorder':

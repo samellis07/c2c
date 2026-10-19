@@ -366,7 +366,7 @@ Silent drops: 215 (still counted; each has a guided step below)
 - `report-feature:Container_Movement_Tracking block report properties` — not converted. Report Container_Movement_Tracking block report properties is not in the generated report. Add one: either emit it or record the manual step.
   - Step: Set Container_Movement_Tracking block report properties manually in the Catalyst console/app; not converted.
 - `report-feature:SOFs block options` — not converted. Report SOFs block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set SOFs block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the SOFs report were not converted. In the Catalyst console, open the SOFs report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Leads column Cargo_Type` — not converted. Report Leads column Cargo_Type is not in the generated report. Add one: either emit it or record the manual step.
   - Step: Set Leads column Cargo_Type manually in the Catalyst console/app; not converted.
 - `report-feature:Leads column Shipment_Terms` — not converted. Report Leads column Shipment_Terms is not in the generated report. Add one: either emit it or record the manual step.
@@ -460,44 +460,44 @@ Silent drops: 215 (still counted; each has a guided step below)
 - `report-feature:Leads column Voyage_Number` — not converted. Report Leads column Voyage_Number is not in the generated report. Add one: either emit it or record the manual step.
   - Step: Set Leads column Voyage_Number manually in the Catalyst console/app; not converted.
 - `report-feature:Leads block options` — not converted. Report Leads block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Leads report were not converted. In the Catalyst console, open the Leads report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Converted_Leads block options` — not converted. Report Converted_Leads block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Converted_Leads block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Converted_Leads report were not converted. In the Catalyst console, open the Converted_Leads report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Accounts block options` — not converted. Report Accounts block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Accounts block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Accounts report were not converted. In the Catalyst console, open the Accounts report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Contacts block options` — not converted. Report Contacts block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Contacts block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Contacts report were not converted. In the Catalyst console, open the Contacts report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Deals block options` — not converted. Report Deals block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Deals block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Deals report were not converted. In the Catalyst console, open the Deals report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Quotations block options` — not converted. Report Quotations block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Quotations block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Quotations report were not converted. In the Catalyst console, open the Quotations report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Delivery_Orders block options` — not converted. Report Delivery_Orders block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Delivery_Orders block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Delivery_Orders report were not converted. In the Catalyst console, open the Delivery_Orders report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Invoices block options` — not converted. Report Invoices block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Invoices block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Invoices report were not converted. In the Catalyst console, open the Invoices report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Airports block options` — not converted. Report Airports block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Airports block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Airports report were not converted. In the Catalyst console, open the Airports report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Ports block options` — not converted. Report Ports block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Ports block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Ports report were not converted. In the Catalyst console, open the Ports report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:HS_Codes block options` — not converted. Report HS_Codes block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set HS_Codes block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the HS_Codes report were not converted. In the Catalyst console, open the HS_Codes report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Users block options` — not converted. Report Users block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Users block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Users report were not converted. In the Catalyst console, open the Users report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Containers block options` — not converted. Report Containers block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Containers block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Containers report were not converted. In the Catalyst console, open the Containers report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Vendors block options` — not converted. Report Vendors block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Vendors block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Vendors report were not converted. In the Catalyst console, open the Vendors report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Products block options` — not converted. Report Products block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Products block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Products report were not converted. In the Catalyst console, open the Products report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Vessels block options` — not converted. Report Vessels block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Vessels block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Vessels report were not converted. In the Catalyst console, open the Vessels report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Tax_Rates block options` — not converted. Report Tax_Rates block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Tax_Rates block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Tax_Rates report were not converted. In the Catalyst console, open the Tax_Rates report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Mode_to_SubMode block options` — not converted. Report Mode_to_SubMode block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Mode_to_SubMode block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Mode_to_SubMode report were not converted. In the Catalyst console, open the Mode_to_SubMode report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Submode_to_CT_ST_CMT block options` — not converted. Report Submode_to_CT_ST_CMT block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Submode_to_CT_ST_CMT block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Submode_to_CT_ST_CMT report were not converted. In the Catalyst console, open the Submode_to_CT_ST_CMT report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Table_of_Containers block options` — not converted. Report Table_of_Containers block options is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Table_of_Containers block options manually in the Catalyst console/app; not converted.
+  - Step: The options for the Table_of_Containers report were not converted. In the Catalyst console, open the Table_of_Containers report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `translation:translation Language_Settings` — not converted. The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.
   - Step: Set translation Language_Settings manually in the Catalyst console/app; not converted.
