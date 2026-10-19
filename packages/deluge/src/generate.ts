@@ -2217,7 +2217,7 @@ function fieldRuleSource(app: App, w: Workflow, todos: TodoItem[]): string {
       }
       // Field rules run only in the browser: a condition it cannot evaluate is a counted gap.
       if (unsupportedClientShims(guard).length) {
-        todos.push({ construct: 'client-shim-unsupported', start: rule.span.start, end: rule.span.end });
+        todos.push({ construct: `client-shim-unsupported: ${unsupportedClientShims(guard).join(', ')}`, start: rule.span.start, end: rule.span.end });
         return '';
       }
       return `if (${guard}) {\n${indent(lines)}\n}`;
@@ -2256,7 +2256,7 @@ function gateAction(
   }
   if (shipsClient && clientGuardGap(translated.client, guard.code)) {
     // The server keeps the guard; the browser cannot evaluate it, so the client part is a counted gap.
-    todos.push({ construct: 'client-shim-unsupported', start: w.span.start, end: w.span.end });
+    todos.push({ construct: `client-shim-unsupported: ${unsupportedClientShims(translated.client).join(', ')}`, start: w.span.start, end: w.span.end });
     return { server: gate(translated.server, guard.code), client: '' };
   }
   return { server: gate(translated.server, guard.code), client: gate(translated.client, guard.code) };

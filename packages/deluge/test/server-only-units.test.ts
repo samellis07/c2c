@@ -141,7 +141,7 @@ test('a dropped client statement in a server-only unit is not a counted gap', as
     functions: [fnDef('openOrders', FETCH_LOOP)],
   };
   const g = generate(app);
-  assert.ok(!g.todos.some((t) => t.construct === 'client-shim-unsupported'));
+  assert.ok(!g.todos.some((t) => t.construct.startsWith('client-shim-unsupported:')));
   assert.equal(g.files.find((f) => f.path.startsWith('client/handlers/functions/')), undefined);
 
   // A unit with a real client half keeps the counted gap for a statement the
@@ -156,7 +156,7 @@ test('a dropped client statement in a server-only unit is not a counted gap', as
     span: Z,
   } as Workflow;
   const mixed = generate({ ...app, workflows: [wf] });
-  assert.ok(mixed.todos.some((t) => t.construct === 'client-shim-unsupported'));
+  assert.ok(mixed.todos.some((t) => t.construct.startsWith('client-shim-unsupported:')));
 });
 
 test('a server-only unit statement whose server half is a todo stays counted', () => {

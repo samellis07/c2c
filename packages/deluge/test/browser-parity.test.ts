@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { DelugeDate } from '../../shims/src/date.js';
 import { createRuntime } from '../../shims/src/runtime.js';
 import { CLIENT_SHIM_METHODS } from '../src/client-shim.js';
+import { Decimal } from '../../shims/src/decimal.js';
 
 // Every browser-implemented method below runs on the shims runtime and on the
 // real browserShim() and must agree, like client-list-prefetch-crosscheck.test.
@@ -665,4 +666,87 @@ test('remaining allowlisted collection, comparison, and scalar builtins agree', 
       assert.deepEqual(invoke(browser, ns, name, []), invoke(server, ns, name, []), `${ns}.${name} blank input`);
     }
   }
+});
+
+test('list.aggregate agrees on both runtimes, blanks and Decimal precision included', async () => {
+  const browser = (await browserRuntime()).browserShim() as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  const server = runtime.shim as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>;
+  // Fresh inputs per run: neither runtime mutates, but Decimal instances must
+  // stay class instances (no structuredClone/JSON round-trip).
+  const cases: { rows: () => unknown; fn: unknown; field?: unknown; exact?: unknown }[] = [];
+  const valueLists: unknown[][] = [
+    [1, 2, 3],
+    [],
+    [null],
+    [''],
+    ['   '],
+    [null, '', '  ', 5],
+    [1, '2', 3.5],
+    ['10.10', '0.20'],
+    [' 2 ', '+3', '.5', '4.'],
+    [0.1, 0.2],
+    [Decimal.from('10.10'), Decimal.from('0.20')],
+    [Decimal.from('1.5'), 2, '3'],
+    [1n, 2n],
+    [9007199254740993n, 1n],
+    ['abc'],
+    [1, 'abc'],
+    [true],
+    [{ a: 1 }],
+    [5, null, '', '7', '  '],
+  ];
+  const rowSets: unknown[][] = [
+    [{ Amount: 10 }, { Amount: 20 }, { Amount: null }, {}],
+    [{ __row: true, form: 'F', values: { Amount: '10.10' } }, { __row: true, form: 'F', values: { Amount: '0.20' } }],
+    [{ Name: 'a' }, { Name: 'b' }, { Name: 'a' }],
+    [{ When: new DelugeDate(2026, 10, 16) }, { When: new DelugeDate(2026, 10, 15) }],
+    [{ When: '15-Oct-2026' }, { When: '2026-10-15' }],
+  ];
+  const fns: unknown[] = ['sum', 'avg', 'average', 'min', 'minimum', 'max', 'maximum', 'count', 'median', 'distinct', 'SUM', 'bogus'];
+  for (const list of valueLists) {
+    for (const fn of fns) cases.push({ rows: () => [...list], fn });
+  }
+  cases.push({ rows: () => [], fn: 'sum' });
+  cases.push({ rows: () => null, fn: 'sum' });
+  cases.push({ rows: () => null, fn: 'count' });
+  cases.push({ rows: () => 5, fn: 'sum' });
+  cases.push({ rows: () => 'x', fn: 'sum' });
+  cases.push({ rows: () => 'x', fn: 'count' });
+  for (const rows of rowSets) {
+    for (const fn of fns) cases.push({ rows: () => [...rows], fn, field: 'Amount' });
+  }
+  for (const rows of rowSets) {
+    for (const fn of fns) cases.push({ rows: () => [...rows], fn, field: 'Name' });
+  }
+  cases.push({ rows: () => [{ Amount: '10.10' }, { Amount: '0.20' }], fn: 'sum', field: 'Amount', exact: true });
+  cases.push({ rows: () => [{ Amount: '10.10' }, { Amount: '0.20' }], fn: 'sum', field: 'Amount' });
+  cases.push({ rows: () => [{ Amount: '10.10' }, { Amount: '0.20' }], fn: 'avg', field: 'Amount', exact: true });
+  cases.push({ rows: () => [{ Amount: 10 }, { Amount: '' }, { Amount: null }], fn: 'count', field: 'Amount' });
+  cases.push({ rows: () => [{ Amount: 10 }, { Amount: '' }], fn: 'count', field: '' });
+  cases.push({ rows: () => [{ When: new DelugeDate(2026, 10, 16) }, { When: new DelugeDate(2026, 10, 15) }], fn: 'min', field: 'When' });
+  cases.push({ rows: () => [{ When: new DelugeDate(2026, 10, 16) }, { When: new DelugeDate(2026, 10, 15) }], fn: 'max', field: 'When' });
+  cases.push({ rows: () => [{ V: 3 }, { V: 1 }, { V: 2 }, { V: 4 }], fn: 'median', field: 'V' });
+  cases.push({ rows: () => [{ V: 3 }, { V: 1 }, { V: 2 }], fn: 'median', field: 'V' });
+  cases.push({ rows: () => [3, 1, 2, 4], fn: 'median' });
+  cases.push({ rows: () => [3, 1, 2], fn: 'median' });
+  cases.push({ rows: () => [Decimal.from('1'), Decimal.from('2'), Decimal.from('4'), Decimal.from('3')], fn: 'median' });
+  cases.push({ rows: () => ['15-Oct-2026', '16-Oct-2026'], fn: 'min' });
+  cases.push({ rows: () => ['15-Oct-2026', '16-Oct-2026'], fn: 'max' });
+  cases.push({ rows: () => [new DelugeDate(2026, 10, 16), new DelugeDate(2026, 10, 15)], fn: 'min' });
+  cases.push({ rows: () => [new DelugeDate(2026, 10, 16), '15-Oct-2026'], fn: 'max' });
+  cases.push({ rows: () => ['15-Oct-2026', 5], fn: 'min' });
+  cases.push({ rows: () => ['15-Oct-2026', '16-Oct-2026'], fn: 'median' });
+  let compared = 0;
+  for (const c of cases) {
+    const run = (api: Record<string, (...args: unknown[]) => unknown>) => {
+      try {
+        return { ok: plain(api.aggregate!(c.rows(), c.fn, c.field, c.exact)) };
+      } catch (err) {
+        return { error: `${(err as Error).name}:${(err as Error).message}` };
+      }
+    };
+    assert.deepEqual(run(browser.list), run(server.list), `aggregate(${c.fn}, field=${String(c.field)}, exact=${String(c.exact)})`);
+    compared++;
+  }
+  assert.ok(compared > 200);
 });
