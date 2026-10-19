@@ -288,12 +288,15 @@ test('a page navigation carries only declared params, applied as encoded data va
   assert.equal(query.param1, '<img src=x onerror=alert(1)>../');
   assert.equal(query.param2, 'Fixed');
   // The page route reads the query back as data values only.
-  assert.deepEqual(rt.snippetPageInput({ location: { hash: '#/page/Detail?param1=a%20b&param2=%3Cimg%3E' } }), {
+  // snippetPageInput returns a null-prototype object by design; spreading
+  // copies its exact entries into a plain object so deepEqual checks the same
+  // keys and values without tripping on the prototype.
+  assert.deepEqual({ ...rt.snippetPageInput({ location: { hash: '#/page/Detail?param1=a%20b&param2=%3Cimg%3E' } }) }, {
     param1: 'a b',
     param2: '<img>',
   });
   // Prototype-shaping names never become input keys.
-  assert.deepEqual(rt.snippetPageInput({ location: { hash: '#/page/Detail?__proto__=x&constructor=y&param1=z' } }), { param1: 'z' });
+  assert.deepEqual({ ...rt.snippetPageInput({ location: { hash: '#/page/Detail?__proto__=x&constructor=y&param1=z' } }) }, { param1: 'z' });
 });
 
 test('the page receives declared params as its snippet render input', async () => {

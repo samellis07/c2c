@@ -637,7 +637,7 @@ export function actionNavigation(app: App, report: Report, workflow: string | un
     if (targetForm) {
       if (!formField(targetForm, name)) return undefined;
     } else if (targetPage) {
-      if (!targetPage.params.includes(name)) return undefined;
+      if (!(targetPage.params ?? []).includes(name)) return undefined;
     } else return undefined;
     const read = /^\u0000(\d+)\u0000$/.exec(raw);
     if (read) {

@@ -262,8 +262,11 @@ export interface Page {
   name: string;
   displayName?: string;
   section?: string;
-  /** Declared `page Name(a, b)` input parameters, in order; empty when none. */
-  params: string[];
+  /**
+   * Declared `page Name(a, b)` input parameters, in order; empty when none.
+   * Optional so hand-built pages need not list it; the parser always sets it.
+   */
+  params?: string[];
   /** The `Content="<zml>..."` value, decoded from its string literal. */
   content?: string;
   /** ZML element tree of `content`. */
