@@ -623,6 +623,7 @@ export function actionNavigation(app: App, report: Report, workflow: string | un
   const kind = m[1]!.toLowerCase() as UiActionNav['kind'];
   const target = m[2]!;
   const targetForm = kind === 'form' ? app.forms.find((form) => form.name === target) : undefined;
+  const targetPage = kind === 'page' ? app.pages.find((item) => item.name === target) : undefined;
   if (kind === 'form' ? !targetForm : kind === 'report' ? !app.reports.some((item) => item.name === target) : !app.pages.some((item) => item.name === target)) return undefined;
   const params: UiActionNav['params'] = [];
   for (const pair of (m[3] ?? '').split('&').filter(Boolean)) {
@@ -633,7 +634,11 @@ export function actionNavigation(app: App, report: Report, workflow: string | un
       if (raw.includes('\u0000')) return undefined;
       continue;
     }
-    if (!targetForm || !formField(targetForm, name)) return undefined;
+    if (targetForm) {
+      if (!formField(targetForm, name)) return undefined;
+    } else if (targetPage) {
+      if (!targetPage.params.includes(name)) return undefined;
+    } else return undefined;
     const read = /^\u0000(\d+)\u0000$/.exec(raw);
     if (read) {
       const field = reads[Number(read[1])]!;

@@ -262,6 +262,8 @@ export interface Page {
   name: string;
   displayName?: string;
   section?: string;
+  /** Declared `page Name(a, b)` input parameters, in order; empty when none. */
+  params: string[];
   /** The `Content="<zml>..."` value, decoded from its string literal. */
   content?: string;
   /** ZML element tree of `content`. */
@@ -969,7 +971,7 @@ function visit(ctx: Ctx, stmts: Statement[], level: Level, sectionName?: string,
       const ps = props(ctx, inner, 'page.property');
       const content = prop(ps, 'content');
       claim(ctx, s, 'page');
-      app.pages.push(page(ctx, ws[1], content, ps, s, sectionName));
+      app.pages.push(page(ctx, ws[1], content, ps, s, sectionName, pageParams(s)));
       section?.components.push({ kind: 'page', name: ws[1] });
       continue;
     }
@@ -1113,12 +1115,38 @@ function showFrom(stmts: Statement[]): string | undefined {
 // ---------------------------------------------------------------------------
 // pages, translations
 
-function page(ctx: Ctx, name: string, content: string | undefined, ps: Property[], s: { start: number; end: number }, sectionName?: string): Page {
+/**
+ * Declared `page Name(a, b)` input parameters: the `(` group after the name
+ * holds comma-separated identifiers. Anything else (no group, an empty or
+ * malformed list) declares nothing.
+ */
+function pageParams(s: Statement): string[] {
+  for (const child of s.children) {
+    if (!isGroup(child) || child.open.text !== '(') continue;
+    const params: string[] = [];
+    let expectIdent = true;
+    for (const item of child.children) {
+      if (isToken(item) && (item.kind === 'ws' || item.kind === 'nl')) continue;
+      if (expectIdent && isToken(item) && item.kind === 'ident' && /^[A-Za-z_]\w*$/.test(item.text)) {
+        params.push(item.text);
+        expectIdent = false;
+      } else if (!expectIdent && isToken(item) && item.kind === 'punct' && item.text === ',') {
+        expectIdent = true;
+      } else return [];
+    }
+    if (expectIdent && params.length) return [];
+    return params;
+  }
+  return [];
+}
+
+function page(ctx: Ctx, name: string, content: string | undefined, ps: Property[], s: { start: number; end: number }, sectionName?: string, params: string[] = []): Page {
   const zml = content !== undefined ? parseZml(content) : [];
   return {
     name,
     displayName: prop(ps, 'displayname'),
     section: sectionName,
+    params,
     content,
     zml,
     references: zmlReferences(zml),
