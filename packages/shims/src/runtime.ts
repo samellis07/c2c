@@ -982,6 +982,9 @@ export interface Shim {
      * One event-time call to a generated read-only function endpoint. A stale,
      * refused, or failed response throws `c2cElementBlocked`, so the handler
      * discards queued actions instead of deciding on an unproven condition.
+     * The error carries the endpoint's machine-readable `code` when the reply
+     * had one, so a server-condition caller can tell an integrity failure
+     * (abort) from a read failure (false) without reading the message.
      */
     call(ctx: ShimContext, path: string, args: unknown[]): Promise<unknown>;
     /**
@@ -4010,7 +4013,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       },
       async call(ctx, path, args) {
         const result = await callOnce(ctx, path, args);
-        if (!result.ok) throw elementBlocked(result.message ?? BLOCKED);
+        if (!result.ok) throw elementBlocked(result.message ?? BLOCKED, result.code);
         return result.value;
       },
       async element(ctx, name, value, slot) {
@@ -4061,9 +4064,13 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
   /**
    * The throw that discards a handler run's queued actions: a refused or
    * failed element round trip must not leave partial client actions applied.
+   * `code` is the endpoint's machine-readable failure code when the reply
+   * carried one; callers classify on the code, never on the message.
    */
-  function elementBlocked(message: string): Error {
-    return Object.assign(new Error(message), { c2cElementBlocked: true });
+  function elementBlocked(message: string, code?: string): Error {
+    const err = Object.assign(new Error(message), { c2cElementBlocked: true });
+    if (typeof code === 'string' && code) (err as { code?: string }).code = code;
+    return err;
   }
 
   /** A dry-run placeholder or `{ ok: false }` refusal — never a truthy slot. */
@@ -4124,7 +4131,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     }
   }
 
-  async function callOnce(ctx: ShimContext, path: string, args: unknown[]): Promise<{ ok: boolean; value?: unknown; message?: string }> {
+  async function callOnce(ctx: ShimContext, path: string, args: unknown[]): Promise<{ ok: boolean; value?: unknown; message?: string; code?: string }> {
     const nonce = ctx.formNonce ?? (ctx.formNonce = nextFormNonce());
     if (!options.clientPrefetch) {
       note({ op: 'client-call', path, nonce, performed: false, dryRun: true, ok: false, reason: 'no-adapter' });
@@ -4142,7 +4149,9 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
           ok: false,
           reason: ctx.formNonce !== nonce ? 'stale' : 'rejected',
         });
-        return { ok: false, message: parsed.message ?? BLOCKED };
+        // A reply for a superseded nonce belongs to dead form state: it
+        // aborts even when it carries a read-failure code.
+        return { ok: false, message: parsed.message ?? BLOCKED, ...(ctx.formNonce === nonce && parsed.code ? { code: parsed.code } : {}) };
       }
       note({ op: 'client-call', path, nonce, performed: true, ok: true });
       return { ok: true, value: parsed.value };
@@ -4245,12 +4254,15 @@ function clientCallPath(path: string): string {
   return `/functions/${segment || 'handler'}/call`;
 }
 
-function readClientCall(raw: unknown, sentNonce: string): { ok: boolean; value?: unknown; message?: string } {
+function readClientCall(raw: unknown, sentNonce: string): { ok: boolean; value?: unknown; message?: string; code?: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, message: PREFETCH_BLOCKED };
   const body = raw as Record<string, unknown>;
+  // The endpoint's machine-readable failure code, when it sent one. The
+  // caller classifies on this code, never on the message text.
+  const code = typeof body.code === 'string' && body.code ? body.code : undefined;
   if (body.ok === false || typeof body.error === 'string') {
     const message = typeof body.message === 'string' ? body.message : typeof body.error === 'string' ? body.error : PREFETCH_BLOCKED;
-    return { ok: false, message };
+    return { ok: false, message, ...(code ? { code } : {}) };
   }
   const nonce = typeof body.nonce === 'string' ? body.nonce : '';
   if (body.ok !== true || nonce !== sentNonce) return { ok: false, message: PREFETCH_BLOCKED };

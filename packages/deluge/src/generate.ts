@@ -5942,6 +5942,7 @@ export function functionCallModule(opts: {
     'Dry run reports value null — a placeholder must never take the true branch of a client condition.',
     writeForms.length ? 'The client form, record, old row, and field names are not read. Authorization is checked for every form the callee reads, and authorizeWrite/authorizeDelete checks every form the callee writes.' : 'The client form, record, old row, and field names are not read. Authorization is checked for every form the callee reads.',
     'The response nonce is the form state the condition ran for.',
+    'Error replies carry a machine-readable code (never match the message): integrity failures abort the caller, read failures (READ_DENIED, STORE_UNAVAILABLE) evaluate false.',
     'functions/c2c-deploy.json mode (or C2C_DEPLOY_MODE) decides: "live" runs the function; anything else returns the runtime dry-run result.',
   ])}import { authorizeDelete, authorizeRead, authorizeWrite, createRuntime, jsonReplacer, principalFromRequest } from "creator-to-catalyst/shims";
 import { functions } from "../thisapp.mjs";
@@ -5970,18 +5971,18 @@ ${liveHelpers('../')}
 export default async function handler(req, res) {
   const deniedForm = [...readForms, ...writeForms.map((w) => w.form)].find(isHidden);
   if (deniedForm) {
-    send(res, 403, { ok: false, error: "hidden form" });
+    send(res, 403, { ok: false, code: "HIDDEN_FORM", error: "hidden form" });
     return;
   }
   const principal = principalFromRequest(req);
   if (!principal) {
-    send(res, 401, { ok: false, error: "client call: authenticated caller required" });
+    send(res, 401, { ok: false, code: "UNAUTHENTICATED", error: "client call: authenticated caller required" });
     return;
   }
   const body = req && req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
   const sentArgs = Array.isArray(body.args) ? body.args : [];
   if (body.args !== undefined && (!Array.isArray(body.args) || sentArgs.length ${writeForms.length ? "!==" : ">"} ${opts.params.length} || sentArgs.some((arg) => !plainJsonArg(arg, 0)) || Buffer.byteLength(JSON.stringify(sentArgs), "utf8") > 65536)) {
-    send(res, 400, { ok: false, error: "invalid function argument" });
+    send(res, 400, { ok: false, code: "INVALID_ARGUMENT", error: "invalid function argument" });
     return;
   }
   const deploy = deployConfig();
@@ -5994,7 +5995,7 @@ export default async function handler(req, res) {
     ? callName
     : Object.keys(functions).find((key) => key.toLowerCase() === callName.toLowerCase());
   if (resolvedKey !== callName) {
-    send(res, 403, { ok: false, error: "client call: target did not resolve to its declared name" });
+    send(res, 403, { ok: false, code: "UNKNOWN_FUNCTION", error: "client call: target did not resolve to its declared name" });
     return;
   }
   try {
@@ -6005,7 +6006,7 @@ export default async function handler(req, res) {
     }
     const datastore = live && ${needsRows ? 'true' : 'false'} ? await liveDatastore() : null;
     if (live && ${needsRows ? 'true' : 'false'} && !datastore) {
-      send(res, 500, { ok: false, dryRun: false, error: "live datastore is not configured" });
+      send(res, 500, { ok: false, dryRun: false, code: "STORE_UNAVAILABLE", error: "live datastore is not configured" });
       return;
     }
     const runtime = createRuntime({
@@ -6030,7 +6031,7 @@ export default async function handler(req, res) {
       : 'send(res, 200, { ok: true, dryRun: !live, nonce: ctx.formNonce ?? null, value: live ? (value ?? null) : null, ...(live ? {} : { transcript: runtime.transcript }) });'}
   } catch (err) {
     const denied = err && (err.code === "RECORD_ACCESS_DENIED" || err.name === "RecordAccessError");
-    send(res, denied ? 403 : 500, { ok: false, dryRun: !live, error: denied ? err.message : "request failed" });
+    send(res, denied ? 403 : 500, { ok: false, dryRun: !live, code: denied ? "READ_DENIED" : "CALL_FAILED", error: denied ? err.message : "request failed" });
   }
 }
 `;

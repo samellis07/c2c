@@ -4546,9 +4546,14 @@ function clientSystemValue(row, name) {
 }
 
 /** The error that makes a generated handler discard its queued actions. */
-function clientBlocked(body) {
+function clientBlocked(body, code, status) {
   const message = body && typeof body.message === 'string' ? body.message : body && typeof body.error === 'string' ? body.error : CLIENT_BLOCKED;
-  return Object.assign(new Error(message), { c2cElementBlocked: true });
+  const err = Object.assign(new Error(message), { c2cElementBlocked: true });
+  // The endpoint's machine-readable failure code (and HTTP status when the
+  // reply carried one). Callers classify on the code, never on the message.
+  if (typeof code === 'string' && code) err.code = code;
+  if (typeof status === 'number' && status) err.status = status;
+  return err;
 }
 
 /** The generated call route for one read-only `thisapp` callee (clientCallPath in packages/shims/src/runtime.ts). */
@@ -4625,13 +4630,39 @@ export function browserShimSurface(fetchImpl) {
      * One read-only `thisapp` call on the function's generated call route
      * (clientCallPath in packages/shims/src/runtime.ts). A refused, stale, or
      * failed call throws `c2cElementBlocked`: the handler discards the actions
-     * it queued instead of deciding on an unproven value.
+     * it queued instead of deciding on an unproven value. The error carries
+     * the reply's machine-readable `code` (and HTTP status) when there is
+     * one, so a server-condition caller can tell an integrity failure (abort)
+     * from a read failure (false) without reading the message. A reply for a
+     * superseded nonce belongs to dead form state and always aborts.
      */
     async call(ctx, path, args) {
       if (!ctx.formNonce) client.touch(ctx);
       const nonce = ctx.formNonce;
-      const body = await postJson(clientCallRoute(path), { nonce, args: Array.isArray(args) ? args : [] });
-      if (!body || body.ok !== true || typeof body.error === 'string' || body.nonce !== nonce || ctx.formNonce !== nonce) throw clientBlocked(body);
+      // postJson drops refused statuses, but the code lives in the error
+      // body, so read the reply directly like client.run does.
+      let status = 0;
+      let body = null;
+      if (typeof call === 'function') {
+        try {
+          const res = await apiCall(call, globalThis, clientCallRoute(path), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ nonce, args: Array.isArray(args) ? args : [] }, jsonReplacer),
+          });
+          status = typeof res.status === 'number' ? res.status : 0;
+          try {
+            body = await responseJson(res);
+          } catch {
+            body = null;
+          }
+        } catch {
+          body = null;
+        }
+      }
+      const stale = ctx.formNonce !== nonce;
+      const code = !stale && body && typeof body.code === 'string' && body.code ? body.code : undefined;
+      if (!body || body.ok !== true || typeof body.error === 'string' || body.nonce !== nonce || stale) throw clientBlocked(body, code, status || undefined);
       return body.value;
     },
     /**
