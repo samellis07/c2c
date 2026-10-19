@@ -10,6 +10,11 @@
  *   placeholder list below and does not sit in a vendored file listed below
  * - any other 13 to 19 digit id (record, form, field ids) that is not on the
  *   placeholder list and is not obviously synthetic (see longIdAllowed)
+ * - in a test file, a spawnSync/execFileSync/spawn call whose '-e' / '--eval'
+ *   / env value is built from a file read, a JSON.stringify of a *SOURCE* /
+ *   *runtime* value, or a *SOURCE* / *runtime* named variable (see
+ *   scanInlineArgs: one Linux argument is capped at 128 KB while macOS
+ *   allows far more, so such a spawn passes locally and fails Linux CI)
  *
  * Two quoted vendor addresses are allowed because the product repeats them.
  */
@@ -174,6 +179,237 @@ export function scanText(file, text) {
   return hits;
 }
 
+/**
+ * Copies of rejected spawns that the inline-arg rule must flag. The tree scan
+ * skips this directory (the files deliberately violate the rule); the unit
+ * test in tests/plugin/hygiene.test.mjs feeds them to scanInlineArgs
+ * directly, so the guard is proven to fail on them while the tree passes.
+ */
+const INLINE_ARG_FIXTURE_DIRS = ['tests/plugin/fixtures/inline-arg/'];
+
+function isTestFile(file) {
+  return /\.test\.[cm]?[jt]s$/.test(file) || /(^|\/)tests?\/.*\.[cm]?[jt]s$/.test(file);
+}
+
+/** A spawn call site: spawnSync, execFileSync, or spawn, called, not `x.spawn`. */
+const SPAWN_CALL = /(?<![\w$.])(spawnSync|execFileSync|spawn)\s*\(/g;
+
+/** The node eval flags that inline a script in one argument. */
+const EVAL_FLAG = /(['"])-(-eval|e)\1/;
+
+/**
+ * A file read feeding the spawn. A read of fd 0 (child stdin) is not a file
+ * read: piping a fixture through stdin stays far under the argument cap.
+ */
+const INLINE_FILE_READ = /(?<![\w$])readFile(Sync)?\s*\(\s*(?!0[\s,)])/;
+
+/**
+ * Return the call argument list starting at the `(` at `open`: the text up to
+ * the matching close paren, skipping over single/double-quoted strings,
+ * template literals (with nested ${} interpolations), and comments. Regex
+ * literals are not recognised: a paren inside one extends the region, which
+ * only risks a hit, never a miss. Capped at 4000 characters so an unbalanced
+ * call still yields a deterministic region.
+ */
+function balancedCall(text, open) {
+  const limit = Math.min(text.length, open + 4000);
+  let depth = 0;
+  let i = open;
+  const stack = [];
+  while (i < limit) {
+    const c = text[i];
+    const top = stack[stack.length - 1];
+    if (top === "'" || top === '"') {
+      if (c === '\\') i += 2;
+      else {
+        if (c === top) stack.pop();
+        i++;
+      }
+      continue;
+    }
+    if (top === '`') {
+      if (c === '\\') i += 2;
+      else if (c === '`') {
+        stack.pop();
+        i++;
+      } else if (c === '$' && text[i + 1] === '{') {
+        stack.push('{');
+        i += 2;
+      } else i++;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') {
+      stack.push(c);
+      i++;
+      continue;
+    }
+    if (c === '/' && text[i + 1] === '/') {
+      const nl = text.indexOf('\n', i + 2);
+      i = nl < 0 ? limit : nl + 1;
+      continue;
+    }
+    if (c === '/' && text[i + 1] === '*') {
+      const close = text.indexOf('*/', i + 2);
+      i = close < 0 ? limit : close + 2;
+      continue;
+    }
+    if (c === '{') {
+      stack.push(c);
+      i++;
+      continue;
+    }
+    if (c === '}') {
+      if (top === '{') stack.pop();
+      i++;
+      continue;
+    }
+    if (c === '(') depth++;
+    else if (c === ')') {
+      depth--;
+      i++;
+      if (depth === 0) return text.slice(open, i);
+      continue;
+    }
+    i++;
+  }
+  return text.slice(open, limit);
+}
+
+/**
+ * The region with string literals and comments blanked (newlines kept) so
+ * identifier matching sees variables, not prose. Template literal
+ * interpolations are kept: `${SOURCE}` is a variable use, not prose.
+ */
+function stripToCode(region) {
+  let out = '';
+  let i = 0;
+  const stack = [];
+  while (i < region.length) {
+    const c = region[i];
+    const top = stack[stack.length - 1];
+    if (top === "'" || top === '"') {
+      if (c === '\n') out += '\n';
+      else out += ' ';
+      if (c === '\\') {
+        out += ' ';
+        i += 2;
+        continue;
+      }
+      if (c === top) stack.pop();
+      i++;
+      continue;
+    }
+    if (top === '`') {
+      if (c === '\\') {
+        out += '  ';
+        i += 2;
+        continue;
+      }
+      if (c === '`') {
+        stack.pop();
+        out += ' ';
+        i++;
+        continue;
+      }
+      if (c === '$' && region[i + 1] === '{') {
+        stack.push('{');
+        out += '  ';
+        i += 2;
+        continue;
+      }
+      out += c === '\n' ? '\n' : ' ';
+      i++;
+      continue;
+    }
+    if (top === '{' || stack.length === 0) {
+      if (c === "'" || c === '"' || c === '`') {
+        stack.push(c);
+        out += ' ';
+        i++;
+        continue;
+      }
+      if (c === '/' && region[i + 1] === '/') {
+        const nl = region.indexOf('\n', i + 2);
+        const end = nl < 0 ? region.length : nl + 1;
+        out += ' '.repeat(end - i - (nl < 0 ? 0 : 1)) + (nl < 0 ? '' : '\n');
+        i = end;
+        continue;
+      }
+      if (c === '/' && region[i + 1] === '*') {
+        const close = region.indexOf('*/', i + 2);
+        const end = close < 0 ? region.length : close + 2;
+        let chunk = '';
+        for (let k = i; k < end; k++) chunk += region[k] === '\n' ? '\n' : ' ';
+        out += chunk;
+        i = end;
+        continue;
+      }
+      if (c === '{') {
+        stack.push(c);
+        out += c;
+        i++;
+        continue;
+      }
+      if (c === '}') {
+        if (top === '{') stack.pop();
+        out += c;
+        i++;
+        continue;
+      }
+      out += c;
+      i++;
+      continue;
+    }
+    out += c === '\n' ? '\n' : ' ';
+    i++;
+  }
+  return out;
+}
+
+/** A bare variable use whose name contains source or runtime, not `x.source`. */
+const SOURCE_VARIABLE = /(?<![\w$.])[\w$]*(?:source|runtime)[\w$]*/i;
+
+const INLINE_ARG_FIX =
+  'write the script to a file under a mkdtempSync directory and spawn the file instead ' +
+  '(one Linux argument is capped at 128 KB; macOS allows more, so this passes locally and fails Linux CI)';
+
+/** The taint kind for a spawn region with an eval flag, or '' when clean. */
+function inlineArgDetail(region) {
+  if (INLINE_FILE_READ.test(region)) return 'file read';
+  for (const match of region.matchAll(/JSON\s*\.\s*stringify\s*\(\s*([^(),]{1,80}?)\)/g)) {
+    if (/(?:source|runtime)/i.test(match[1])) return 'JSON.stringify of a source value';
+  }
+  const variable = stripToCode(region).match(SOURCE_VARIABLE);
+  if (variable) return `variable "${variable[0]}"`;
+  return '';
+}
+
+/**
+ * Flag spawnSync/execFileSync/spawn calls in a test file whose '-e' /
+ * '--eval' / env value is built from a file read, a JSON.stringify of a
+ * *SOURCE* / *runtime* value, or a *SOURCE* / *runtime* named variable.
+ * Only the call's own argument list is inspected, so a helper that spawns a
+ * file (probe.mjs) next to a `const SOURCE = ...` declaration stays clean
+ * while an inline `-e` template embedding `${JSON.stringify(SOURCE)}` is
+ * flagged. Small inline scripts, JSON.stringify of small names, env TZ/LANG
+ * settings, and stdin reads (readFileSync(0, ...)) never match.
+ */
+export function scanInlineArgs(file, text) {
+  if (!isTestFile(file)) return [];
+  const hits = [];
+  SPAWN_CALL.lastIndex = 0;
+  let match;
+  while ((match = SPAWN_CALL.exec(text)) !== null) {
+    const region = balancedCall(text, match.index + match[0].length - 1);
+    if (!EVAL_FLAG.test(region)) continue;
+    const detail = inlineArgDetail(region);
+    if (!detail) continue;
+    const line = text.slice(0, match.index).split('\n').length;
+    hits.push(`${file}:${line}: inline-arg spawned -e/--eval/env value built from ${detail}; ${INLINE_ARG_FIX}`);
+  }
+  return hits;
+}
+
 const BINARY = /\.(png|jpe?g|gif|ico|pdf|zip|woff2?|ttf|otf)$/;
 
 function skipped(rel, ignore, skipSegments) {
@@ -236,7 +472,13 @@ export function scanTree(dir = root) {
       throw err;
     }
     if (buf.includes(0)) continue;
-    hits.push(...scanText(file, buf.toString('utf8')));
+    const text = buf.toString('utf8');
+    hits.push(...scanText(file, text));
+    // The guard's own test data deliberately violates the inline-arg rule;
+    // the unit test proves it fails there, so the tree scan skips it.
+    if (!INLINE_ARG_FIXTURE_DIRS.some((fixtureDir) => file.startsWith(fixtureDir))) {
+      hits.push(...scanInlineArgs(file, text));
+    }
   }
   return hits;
 }
