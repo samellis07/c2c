@@ -36,6 +36,9 @@ const NAV = {
   'Go Home': ['Go_Home', `openUrl(zoho.appuri + "#Page:Home","same window");`],
   'Open Secret': ['Open_Secret', `openUrl("#Form:Secret?Item_Ref=" + input.ID,"popup window");`],
   'By Holder': ['By_Holder', `openUrl("#Form:Request?Item_Ref=" + input.Holder.ID,"popup window");`],
+  'Page Detail': ['Page_Detail', `openUrl("#Page:Detail?param1=" + input.Name + "&param2=Fixed","same window");`],
+  'Bill Page': ['Bill_Page', `openUrl("#Page:Detail?param1=" + input.ID,"same window");`],
+  'Literal Attack': ['Literal_Attack', `openUrl("#Page:Detail?param1=<img src=x onerror=alert(1)>","same window");`],
 } as const;
 
 const COUNTED = {
@@ -48,6 +51,9 @@ const COUNTED = {
   'Unknown Form': ['Unknown_Form', `openUrl("#Form:Nowhere","popup window");`],
   'Deep Read': ['Deep_Read', `openUrl("#Form:Request?Item_Ref=" + input.Name.ID,"popup window");`],
   'Foreign Host': ['Foreign_Host', `openUrl("https://elsewhere.example" + zoho.appuri + "#Form:Request","popup window");`],
+  'Undeclared Param': ['Undeclared_Param', `openUrl("#Page:Detail?nope=" + input.Name,"same window");`],
+  'Case Mismatch': ['Case_Mismatch', `openUrl("#Page:Detail?PARAM1=" + input.Name,"same window");`],
+  'Missing Page Params': ['Missing_Page_Params', `openUrl("#Page:Nowhere?param1=" + input.Name,"same window");`],
 } as const;
 
 // A body with any other statement is no navigation; this one generates a
@@ -100,6 +106,10 @@ ${tab(3)}Note
 ${tab(2)})
 ${tab(1)}}
 ${tab(1)}page Home
+${tab(1)}{
+${tab(2)}Content=${page}
+${tab(1)}}
+${tab(1)}page Detail(param1, param2)
 ${tab(1)}{
 ${tab(2)}Content=${page}
 ${tab(1)}}
@@ -159,6 +169,22 @@ test('an openUrl-only workflow to an own form, report or page is a navigation; a
   assert.deepEqual(byName.get('See Requests')?.navigate, { kind: 'report', target: 'All_Requests', href: '#/report/All_Requests', params: [] });
   assert.deepEqual(byName.get('By Holder')?.navigate, { kind: 'form', target: 'Request', href: '#/form/Request', params: [{ name: 'Item_Ref', field: 'Holder' }] });
   assert.deepEqual(byName.get('Go Home')?.navigate, { kind: 'page', target: 'Home', href: '#/page/Home', params: [] });
+  assert.deepEqual(byName.get('Page Detail')?.navigate, {
+    kind: 'page',
+    target: 'Detail',
+    href: '#/page/Detail',
+    params: [
+      { name: 'param1', field: 'Name' },
+      { name: 'param2', value: 'Fixed' },
+    ],
+  });
+  assert.deepEqual(byName.get('Bill Page')?.navigate, { kind: 'page', target: 'Detail', href: '#/page/Detail', params: [{ name: 'param1', field: 'ROWID' }] });
+  assert.deepEqual(byName.get('Literal Attack')?.navigate, {
+    kind: 'page',
+    target: 'Detail',
+    href: '#/page/Detail',
+    params: [{ name: 'param1', value: '<img src=x onerror=alert(1)>' }],
+  });
   for (const name of Object.keys(NAV)) assert.equal(byName.get(name)?.preview, undefined, `${name} is enabled`);
   for (const name of Object.keys(COUNTED)) {
     assert.equal(byName.get(name)?.preview, true, `${name} stays turned off`);
@@ -197,6 +223,9 @@ test('the static client links each navigation with values only from the row it r
     'Go Home #/page/Home',
     'Open Secret #/form/Secret?Item_Ref=7',
     'By Holder #/form/Request?Item_Ref=42',
+    'Page Detail #/page/Detail?param1=Desk%20%26%20chair&param2=Fixed',
+    'Bill Page #/page/Detail?param1=7',
+    'Literal Attack #/page/Detail?param1=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E',
   ]);
   // Row 8's Name is not on the row (the caller cannot read it): no Note prefill.
   assert.deepEqual(links(second!), [
@@ -206,9 +235,12 @@ test('the static client links each navigation with values only from the row it r
     'Go Home #/page/Home',
     'Open Secret #/form/Secret?Item_Ref=8',
     'By Holder #/form/Request',
+    'Page Detail #/page/Detail?param2=Fixed',
+    'Bill Page #/page/Detail?param1=8',
+    'Literal Attack #/page/Detail?param1=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E',
   ]);
   // Counted actions draw no link.
-  assert.doesNotMatch(rows, /External|Mixed|Computed|Filtered Report/);
+  assert.doesNotMatch(rows, /External|Mixed|Computed|Filtered Report|Undeclared Param|Case Mismatch|Missing Page/);
   // The phone card carries the same links.
   const card = rt.cardActions(ui, '7', { ROWID: '7', Name: 'Desk' }).filter((item) => item.href && !item.href.startsWith('#/report/All_Items'));
   assert.equal(card.find((item) => item.label === 'Note It')?.href, '#/form/Request?Note=Desk&Kind=Loan');
@@ -235,6 +267,57 @@ test('a prefilled form route fills only the target form fields, and an edit rout
   assert.equal(value('Note'), 'Desk');
   assert.equal(value('Kind'), '');
   assert.equal(dom.window.document.querySelector('[name="Bogus"]'), null);
+});
+
+test('a page navigation carries only declared params, applied as encoded data values', async () => {
+  const rt = (await runtime()) as Runtime & {
+    actionNavHref(nav: unknown, row: unknown): string;
+    snippetPageInput(doc: unknown): Record<string, string>;
+    hydrateSnippets(root: unknown, model: unknown, view: unknown): void;
+  };
+  const { model } = built();
+  const nav = report(model).customActions.find((item) => item.name === 'Page Detail')?.navigate!;
+  assert.ok(nav, 'a page action with declared params migrates');
+  // A hostile row value stays a literal data value: encoded in the query,
+  // never in the path, and decoding returns the exact input.
+  const href = rt.actionNavHref(nav, { ROWID: '7', Name: '<img src=x onerror=alert(1)>../' });
+  assert.ok(href.startsWith('#/page/Detail?'), href);
+  assert.doesNotMatch(href, /[<>"]/);
+  assert.ok(!href.includes('../'), 'no path traversal in the link');
+  const query = Object.fromEntries(new URLSearchParams(href.split('?')[1]).entries());
+  assert.equal(query.param1, '<img src=x onerror=alert(1)>../');
+  assert.equal(query.param2, 'Fixed');
+  // The page route reads the query back as data values only.
+  assert.deepEqual(rt.snippetPageInput({ location: { hash: '#/page/Detail?param1=a%20b&param2=%3Cimg%3E' } }), {
+    param1: 'a b',
+    param2: '<img>',
+  });
+  // Prototype-shaping names never become input keys.
+  assert.deepEqual(rt.snippetPageInput({ location: { hash: '#/page/Detail?__proto__=x&constructor=y&param1=z' } }), { param1: 'z' });
+});
+
+test('the page receives declared params as its snippet render input', async () => {
+  const rt = (await runtime()) as Runtime & {
+    snippetPageInput(doc: unknown): Record<string, string>;
+    hydrateSnippets(root: unknown, model: unknown, view: unknown): void;
+  };
+  const { model } = built();
+  const posted: { url: string; input: unknown }[] = [];
+  const dom = new JSDOM('<div><div data-snippet-src="/htmlpages/Detail/s0">shell</div></div>', {
+    url: 'http://localhost/app/index.html#/page/Detail?param1=Desk&param2=<b>',
+  });
+  const root = dom.window.document.querySelector('div')!;
+  rt.hydrateSnippets(root, model, {
+    fetch: async (url: string, init: { body: string }) => {
+      posted.push({ url, input: (JSON.parse(init.body) as { input: unknown }).input });
+      return { ok: true, status: 200, json: async () => ({ html: '<p>ok</p>' }), text: async () => '{}' };
+    },
+    location: dom.window.location,
+  });
+  await flush();
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0]!.url, '/htmlpages/Detail/s0');
+  assert.deepEqual(posted[0]!.input, { param1: 'Desk', param2: '<b>' });
 });
 
 test('a navigation to a screen the caller cannot open is refused by that screen gate', async () => {

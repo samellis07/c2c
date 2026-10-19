@@ -712,6 +712,31 @@ test('ir v1: page ZML tree and component references', () => {
   assert.deepEqual(a.pages[0].references, [{ kind: 'report', name: 'All_Items', via: 'linkName' }]);
 });
 
+test('ir v1: page header parameters are kept as declared params', () => {
+  const { app: a } = load(
+    app(`\tsection S
+\t{
+\t\tpage With_Params(Request_ID, invoice_ID)
+\t\t{
+\t\t\tdisplayname = "With"
+\t\t\tContent="<zml></zml>"
+\t\t}
+\t\tpage Bare
+\t\t{
+\t\t\tdisplayname = "Bare"
+\t\t\tContent="<zml></zml>"
+\t\t}
+\t}`),
+  );
+  assert.deepEqual(
+    a.pages.map((p) => [p.name, p.params]),
+    [
+      ['With_Params', ['Request_ID', 'invoice_ID']],
+      ['Bare', []],
+    ],
+  );
+});
+
 test('features: matrix rows are counted from IR nodes and Deluge tokens', () => {
   const { app: a } = load(
     app(`\tform Item
