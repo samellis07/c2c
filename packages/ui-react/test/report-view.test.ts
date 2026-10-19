@@ -12,7 +12,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -100,9 +100,8 @@ test('the client cell order matches the endpoint ORDER BY on the same fixture', 
   // compareReportCells ships inside the template; compile it alone (it has no
   // imports) and check it against the comparators the endpoint applies, on
   // the same cells, in both directions, a page at a time.
-  const out = join(tmpdir(), `c2c-report-order-${process.pid}`);
+  const out = mkdtempSync(join(tmpdir(), 'c2c-report-order-'));
   t.after(() => rmSync(out, { recursive: true, force: true }));
-  mkdirSync(out, { recursive: true });
   const file = join(TEMPLATE_DIR, 'lib', 'c2c-ui', 'order.ts');
   const { outputText } = ts.transpileModule(readFileSync(file, 'utf8'), {
     fileName: file,
