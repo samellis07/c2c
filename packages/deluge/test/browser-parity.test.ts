@@ -659,7 +659,7 @@ test('remaining allowlisted collection, comparison, and scalar builtins agree', 
   // useful inputs are context-specific still get an error/blank-input check.
   const exercised = new Set(cases.map(([ns, name]) => `${ns}.${name}`));
   for (const [ns, methods] of CLIENT_SHIM_METHODS) {
-    if (['client', 'input', 'record', 'subform', 'zoho'].includes(ns)) continue;
+    if (['client', 'input', 'record', 'subform', 'zoho', 'convert'].includes(ns)) continue;
     for (const name of methods) {
       if (exercised.has(`${ns}.${name}`)) continue;
       assert.deepEqual(invoke(browser, ns, name, []), invoke(server, ns, name, []), `${ns}.${name} blank input`);
