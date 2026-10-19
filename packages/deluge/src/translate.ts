@@ -965,6 +965,7 @@ function serverConditionCall(value: Fx, scope: Scope): string | null {
   const key = `${scope.conditionContext.form}|${scope.conditionContext.script}|${line}`;
   const base = `c2cCond_${createHash('sha256').update(key).digest('hex').slice(0, 12)}`;
   const emitBody = (fnName: string) =>
+    // determinism-allow: params is filled while walking the condition source, so key order is source order
     emitServerConditionFromCode(expression, prelude, [...params.keys()], fnName);
   let name = base;
   let body = emitBody(name);
@@ -979,8 +980,10 @@ function serverConditionCall(value: Fx, scope: Scope): string | null {
   if (body === null) return null;
   if (!scope.serverConditionIndex.has(name)) {
     scope.serverConditionIndex.set(name, body);
+    // determinism-allow: params is filled while walking the condition source; parameter and argument order must stay that source order
     scope.serverConditions.push({ name, params: [...params.values()].map(({ field, type }) => ({ field, type })), body });
   }
+  // determinism-allow: params is filled while walking the condition source; parameter and argument order must stay that source order
   const args = [...params.values()].map((p) => p.arg);
   return `((await shim.client.call(ctx, ${JSON.stringify(name)}, [${args.join(', ')}]))?.value === true)`;
 }
