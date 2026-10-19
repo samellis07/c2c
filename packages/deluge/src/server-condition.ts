@@ -29,6 +29,7 @@ function returnExpression(server: string): string | null {
  */
 export function emitServerConditionFunction(condition: string, options: ServerConditionOptions = {}): string | null {
   if (!condition.trim() || FORBIDDEN.test(withoutLiterals(condition))) return null;
+  // determinism-allow: Set keeps first-seen order of the caller's field list, which is source order
   const inputFields = [...new Set(options.inputFields ?? [])].filter((name) => /^[$A-Za-z_][$\w]*$/.test(name));
   const translated = translate(`return (${condition});`, {
     inputFields,
