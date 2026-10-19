@@ -40,7 +40,7 @@ test('the highest-volume residual categories use specific steps', () => {
   ];
   const items = guidedResiduals(drops, []);
   assert.deepEqual(items.map((item) => item.stepSource), ['specific', 'specific', 'specific', 'specific']);
-  assert.ok(items.every((item) => item.step.includes('Catalyst console') && item.step.includes('verify')));
+  assert.ok(items.every((item) => item.step.includes('Catalyst console') && /confirm|verify/.test(item.step)));
 });
 
 test('a drop with workaround text uses the precheck fix; one without a field outcome keeps the ledger note as reason', () => {

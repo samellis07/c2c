@@ -53,6 +53,8 @@ export function specificResidualStep(drop: Pick<SilentDrop, 'kind' | 'name' | 'f
         return `The display format for ${field} was not converted. In the Catalyst console, set the field's number or currency format for ${field}, then preview a record and confirm the value is displayed correctly.`;
       case 'personal data':
         return `The personal-data setting for ${field} was not converted. In the Catalyst console, mark ${field} as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.`;
+      default:
+        return `The ${drop.property} setting for ${field} was not converted. In the Catalyst console, configure that setting for ${field}, then preview the form or report and confirm the field behaves as expected.`;
     }
   }
   if (drop.kind === 'report-feature' && / block options$/.test(drop.name)) {

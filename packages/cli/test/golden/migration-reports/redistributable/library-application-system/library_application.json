@@ -203,8 +203,8 @@
       "field": "Genre",
       "property": "property others option",
       "reason": "property others option is not carried by the generated dropdown field. Varchar plus the .ds choice list. The server rejects values outside the list. A choice longer than 255 is promoted to text. A values = Form.Field target is a lookup, not a dropdown. module = users is the Users field.",
-      "step": "Set property others option on Book.Genre manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The property others option setting for Book.Genre was not converted. In the Catalyst console, configure that setting for Book.Genre, then preview the form or report and confirm the field behaves as expected.",
+      "stepSource": "specific"
     },
     {
       "id": "field-property:Book_Transaction.Member property displayformat",
@@ -214,8 +214,8 @@
       "field": "Member",
       "property": "property displayformat",
       "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "Set property displayformat on Book_Transaction.Member manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The lookup display format for Book_Transaction.Member was not converted. In the Catalyst console, set the lookup's display field or display format for Book_Transaction.Member, then preview the form and confirm the lookup shows the intended value.",
+      "stepSource": "specific"
     },
     {
       "id": "field-property:Book_Transaction.Member property sortorder",
@@ -225,8 +225,8 @@
       "field": "Member",
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "Set property sortorder on Book_Transaction.Member manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The sort order for Book_Transaction.Member was not converted. In the Catalyst console, set the field's sort order for Book_Transaction.Member, then preview the form or report and confirm values appear in that order.",
+      "stepSource": "specific"
     },
     {
       "id": "field-property:Book_Transaction.Book property displayformat",
@@ -236,8 +236,8 @@
       "field": "Book",
       "property": "property displayformat",
       "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "Set property displayformat on Book_Transaction.Book manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The lookup display format for Book_Transaction.Book was not converted. In the Catalyst console, set the lookup's display field or display format for Book_Transaction.Book, then preview the form and confirm the lookup shows the intended value.",
+      "stepSource": "specific"
     },
     {
       "id": "field-property:Book_Transaction.Book property sortorder",
@@ -247,8 +247,8 @@
       "field": "Book",
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "Set property sortorder on Book_Transaction.Book manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The sort order for Book_Transaction.Book was not converted. In the Catalyst console, set the field's sort order for Book_Transaction.Book, then preview the form or report and confirm values appear in that order.",
+      "stepSource": "specific"
     },
     {
       "id": "field-property:Staff_Members.Staff_Name property personal data",
@@ -258,8 +258,8 @@
       "field": "Staff_Name",
       "property": "property personal data",
       "reason": "property personal data is not carried by the generated name field. One varchar per part (prefix, first_name, last_name, suffix). Deluge sees one value; a shim joins the parts. Parts are not separate field-type rows.",
-      "step": "Set property personal data on Staff_Members.Staff_Name manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The personal-data setting for Staff_Members.Staff_Name was not converted. In the Catalyst console, mark Staff_Members.Staff_Name as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
+      "stepSource": "specific"
     },
     {
       "id": "field-property:Staff_Members.Staff_Email property personal data",
@@ -269,8 +269,8 @@
       "field": "Staff_Email",
       "property": "property personal data",
       "reason": "property personal data is not carried by the generated email field. There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.",
-      "step": "Set property personal data on Staff_Members.Staff_Email manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The personal-data setting for Staff_Members.Staff_Email was not converted. In the Catalyst console, mark Staff_Members.Staff_Email as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
+      "stepSource": "specific"
     },
     {
       "id": "field-property:Staff_Members.Phone_Number property defaultcountry",
@@ -280,8 +280,8 @@
       "field": "Phone_Number",
       "property": "property defaultcountry",
       "reason": "property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
-      "step": "Set property defaultcountry on Staff_Members.Phone_Number manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected.",
+      "stepSource": "specific"
     },
     {
       "id": "field-property:Staff_Members.Phone_Number property personal data",
@@ -291,8 +291,8 @@
       "field": "Phone_Number",
       "property": "property personal data",
       "reason": "property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
-      "step": "Set property personal data on Staff_Members.Phone_Number manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The personal-data setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, mark Staff_Members.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Book_Report block options",
