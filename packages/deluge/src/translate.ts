@@ -877,6 +877,18 @@ function clientExpr(value: Fx, scope: Scope, todoConstruct = 'client-condition-u
  * `thisapp` client call), a dry run reports `value: null`, and any non-`true`
  * result takes the false branch — fail closed either way.
  */
+/**
+ * Collection-mutator emissions the read-only server-condition envelope must
+ * never hold. The endpoint receives plain JSON copies of the caller's
+ * arguments and answers `{ value }` only, so a `m.put`/`ids.add` admitted
+ * here would run server-side against a discarded copy while the browser's
+ * collection stays unchanged — a silent divergence from client evaluation.
+ * Anything matching keeps its counted `client-condition-uses-server` todo.
+ * (`delete`/`insert`/`update` already carry sideEffect and never reach here.)
+ */
+const SERVER_CONDITION_MUTATOR =
+  /\bshim\.set\s*\(|\bshim\.list\.(?:addall|add|putall|put|clear|insertall|insert|removeall|removeelement|remove|retainall|sort|deleteitem|deleteall|deletekeys?|delete|update)\s*\(/i;
+
 function serverConditionCall(value: Fx, scope: Scope): string | null {
   if (!scope.conditionContext) return null;
   const raw = value.sourceText;
@@ -917,6 +929,10 @@ function serverConditionCall(value: Fx, scope: Scope): string | null {
     // A `shim.thisapp.call` survives only in a binding the generator already
     // proved read-only; anything else that reaches the server must not invoke.
     if (!allowCall && /\bshim\.thisapp\./.test(out)) return null;
+    // A collection mutator runs where the expression runs: server-side it
+    // would mutate a discarded argument copy, so refuse it here — in both
+    // the condition expression and every replayed binding.
+    if (SERVER_CONDITION_MUTATOR.test(out)) return null;
     return out;
   };
   // A server-bound local the condition reads is replayed inside the emitted
