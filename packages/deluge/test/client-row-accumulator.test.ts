@@ -117,7 +117,7 @@ test('a row-summed local compared with another server read becomes a server-cond
     'if (total > Limits[Code == "A"].Cap) { alert "over"; }',
   ].join('\n'));
   assert.deepEqual(out.todos, []);
-  assert.match(stripComments(out.client), /await shim\.client\.call\(ctx, "c2cCond_[0-9a-f]+", \[total\]\)\)\?\.value === true/);
+  assert.match(stripComments(out.client), /await Promise\.resolve\(\)\.then\(\(\) => shim\.client\.call\(ctx, "c2cCond_[0-9a-f]+", \[total\]\)\)/);
   const cond = out.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+\.mjs$/.test(f.path));
   const endpoint = out.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path));
   assert.ok(cond && endpoint, out.files.map((f) => f.path).join('\n'));

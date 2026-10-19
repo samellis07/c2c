@@ -881,7 +881,7 @@ function serverConditionCall(value: Fx, scope: Scope): string | null {
   if (!scope.conditionContext) return null;
   const raw = value.sourceText;
   if (!raw || !serverConditionSafeSource(raw)) return null;
-  if (value.todo || value.appFunction || value.sideEffect || value.unboundReads.length) return null;
+  if (value.todo || value.sideEffect || value.unboundReads.length) return null;
   // A caller-supplied parameter: an input field, or a client-bound local the
   // browser passes by its emitted identifier. A field name colliding with a
   // replayed `var` or another parameter would capture it — refuse instead.
@@ -947,7 +947,12 @@ function serverConditionCall(value: Fx, scope: Scope): string | null {
     const ok = binding.reads.every((d) => dep(d, stack));
     stack.delete(name);
     if (!ok) return false;
-    const code = bindFieldReads(binding.code, !!binding.readOnlyCalls);
+    const resolvedCallee = (joined: string): string | undefined =>
+      scope.clientCallFunctions.has(joined) ? joined : scope.clientCallFunctionsFolded.get(joined.toLowerCase());
+    const replayCall = emittedThisappCalls(binding.code);
+    const replayReadOnly = replayCall !== null && replayCall.every((path) => !!resolvedCallee(path.join('.'))) &&
+      emittedReadOnly(binding.code, (path) => !!resolvedCallee(path.join('.')));
+    const code = bindFieldReads(binding.code, !!binding.readOnlyCalls || replayReadOnly);
     // A replayed `var` must not shadow a caller-supplied parameter.
     if (code === null || paramNames.has(ident)) return false;
     paramNames.add(ident);
@@ -985,7 +990,7 @@ function serverConditionCall(value: Fx, scope: Scope): string | null {
   }
   // determinism-allow: params is filled while walking the condition source; parameter and argument order must stay that source order
   const args = [...params.values()].map((p) => p.arg);
-  return `((await shim.client.call(ctx, ${JSON.stringify(name)}, [${args.join(', ')}]))?.value === true)`;
+  return `((await Promise.resolve().then(() => shim.client.call(ctx, ${JSON.stringify(name)}, [${args.join(', ')}])).then((r) => r?.value === true, () => false)))`;
 }
 
 /**
@@ -2330,6 +2335,7 @@ export function emittedReadOnly(code: string, isReadOnly: (path: readonly string
   for (const m of code.matchAll(SHIM_CALL)) {
     const fn = m[2];
     if (m[1] === 'thisapp' && fn === 'call') continue;
+    if (m[1] === 'set' && fn === undefined) continue;
     if (fn === undefined) {
       if (!ELEMENT_SHIM_ALLOW_SINGLE.has(m[1]!)) return false;
       continue;
@@ -5916,6 +5922,9 @@ function asCriteria(e: Expr): Extract<Expr, { kind: 'criteria' }> {
 
 function zohoCall(e: Extract<Expr, { kind: 'call' }>, args: Fx[], scope: Scope): Fx | null {
   if (rootName(e) !== 'zoho' || e.callee.kind !== 'member') return null;
+  let terminal: Expr = e.callee;
+  while (terminal.kind === 'member') terminal = terminal.object;
+  if (terminal.kind !== 'name' || terminal.name !== 'zoho') return null;
   const path = callPath(e);
   if (!path.length) return null;
   const head = path[0]!.toLowerCase();

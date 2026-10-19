@@ -2639,7 +2639,7 @@ test('a client condition needing server data compiles to a c2cCond_* call throug
   check(callMod.source, 'cond-call.mjs');
   const client = g.files.find((f) => f.path === 'client/handlers/reservation/on-user-input.mjs')!;
   check(client.source, 'cond-client.mjs');
-  assert.match(stripComments(client.source), /await shim\.client\.call\(ctx, "c2cCond_[0-9a-f]+", \[a, b\]\)\)\?\.value === true/);
+  assert.match(stripComments(client.source), /await Promise\.resolve\(\)\.then\(\(\) => shim\.client\.call\(ctx, "c2cCond_[0-9a-f]+", \[a, b\]\)\)/);
   // The registry routes the dotted name to the condition module.
   const registry = g.files.find((f) => f.path === 'functions/thisapp.mjs')!;
   assert.match(registry.source, /"c2cCond_[0-9a-f]+": \{ call: async \(\.\.\.a\) => \(await import\("\.\/custom\/c2ccond-[0-9a-f]+\.mjs"\)\)\.call/);
