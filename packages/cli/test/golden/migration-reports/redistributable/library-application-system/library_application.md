@@ -98,12 +98,12 @@ Silent drops: 19 (still counted; each has a guided step below)
 - `report-feature:All_Staff_Members block options` — not converted. Report All_Staff_Members block options is not in the generated report. Add one: either emit it or record the manual step.
   - Step: The options for the All_Staff_Members report were not converted. In the Catalyst console, open the All_Staff_Members report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `page-element:DashBoard.Book_Report #1` — not converted. ZML element <search> Book_Report on page DashBoard is generated without its criteria. Add one: either emit the element or record the manual step.
-  - Step: Set DashBoard.Book_Report manually in the Catalyst console/app; not converted.
+  - Step: The DashBoard.Book_Report page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.
 - `page-element:DashBoard.Book_Report #2` — not converted. ZML element <button> Book_Report on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.
-  - Step: Set DashBoard.Book_Report manually in the Catalyst console/app; not converted.
+  - Step: The DashBoard.Book_Report page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.
 - `page-element:DashBoard.All_Book_Transactions #1` — not converted. ZML element <text> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.
-  - Step: Set DashBoard.All_Book_Transactions manually in the Catalyst console/app; not converted.
+  - Step: The DashBoard.All_Book_Transactions page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.
 - `page-element:DashBoard.All_Book_Transactions #2` — not converted. ZML element <button> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.
-  - Step: Set DashBoard.All_Book_Transactions manually in the Catalyst console/app; not converted.
+  - Step: The DashBoard.All_Book_Transactions page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.
 - `translation:translation Language_Settings` — not converted. The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.
-  - Step: Set translation Language_Settings manually in the Catalyst console/app; not converted.
+  - Step: The translation Language_Settings was not converted. In the Catalyst console, add the language and copy the source translation strings into the generated app, then preview the translated text and verify it is correct.

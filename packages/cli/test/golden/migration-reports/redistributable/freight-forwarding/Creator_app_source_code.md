@@ -364,101 +364,101 @@ Silent drops: 215 (still counted; each has a guided step below)
 - `field-property:New_Table_of_Container.Destination_Airport property sortorder` — not converted. property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type "foreign key" and on_delete "ON-DELETE-SET-NULL" (optional) or "ON-DELETE-CASCADE" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says "FK needs console". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).
   - Step: The sort order for New_Table_of_Container.Destination_Airport was not converted. In the Catalyst console, set the field's sort order for New_Table_of_Container.Destination_Airport, then preview the form or report and confirm values appear in that order.
 - `report-feature:Container_Movement_Tracking block report properties` — not converted. Report Container_Movement_Tracking block report properties is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Container_Movement_Tracking block report properties manually in the Catalyst console/app; not converted.
+  - Step: The report properties for Container_Movement_Tracking were not converted. In the Catalyst console, open the Container_Movement_Tracking report and configure its report properties, then preview it and verify the layout and visible data match the source app.
 - `report-feature:SOFs block options` — not converted. Report SOFs block options is not in the generated report. Add one: either emit it or record the manual step.
   - Step: The options for the SOFs report were not converted. In the Catalyst console, open the SOFs report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Leads column Cargo_Type` — not converted. Report Leads column Cargo_Type is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Cargo_Type manually in the Catalyst console/app; not converted.
+  - Step: The Cargo_Type column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Shipment_Terms` — not converted. Report Leads column Shipment_Terms is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Shipment_Terms manually in the Catalyst console/app; not converted.
+  - Step: The Shipment_Terms column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Container_Movement_Type` — not converted. Report Leads column Container_Movement_Type is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Container_Movement_Type manually in the Catalyst console/app; not converted.
+  - Step: The Container_Movement_Type column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Lead_Source` — not converted. Report Leads column Lead_Source is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Lead_Source manually in the Catalyst console/app; not converted.
+  - Step: The Lead_Source column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Industry` — not converted. Report Leads column Industry is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Industry manually in the Catalyst console/app; not converted.
+  - Step: The Industry column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Freight_Prepaid_Collect` — not converted. Report Leads column Freight_Prepaid_Collect is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Freight_Prepaid_Collect manually in the Catalyst console/app; not converted.
+  - Step: The Freight_Prepaid_Collect column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Include_Insurance` — not converted. Report Leads column Include_Insurance is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Include_Insurance manually in the Catalyst console/app; not converted.
+  - Step: The Include_Insurance column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Value_of_Goods` — not converted. Report Leads column Value_of_Goods is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Value_of_Goods manually in the Catalyst console/app; not converted.
+  - Step: The Value_of_Goods column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column No_of_Containers_Req` — not converted. Report Leads column No_of_Containers_Req is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column No_of_Containers_Req manually in the Catalyst console/app; not converted.
+  - Step: The No_of_Containers_Req column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Container_Size` — not converted. Report Leads column Container_Size is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Container_Size manually in the Catalyst console/app; not converted.
+  - Step: The Container_Size column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Is_Stackable` — not converted. Report Leads column Is_Stackable is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Is_Stackable manually in the Catalyst console/app; not converted.
+  - Step: The Is_Stackable column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Gate_Way_Airport` — not converted. Report Leads column Gate_Way_Airport is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Gate_Way_Airport manually in the Catalyst console/app; not converted.
+  - Step: The Gate_Way_Airport column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Destination_Airport` — not converted. Report Leads column Destination_Airport is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Destination_Airport manually in the Catalyst console/app; not converted.
+  - Step: The Destination_Airport column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column ETD` — not converted. Report Leads column ETD is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column ETD manually in the Catalyst console/app; not converted.
+  - Step: The ETD column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column ETA` — not converted. Report Leads column ETA is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column ETA manually in the Catalyst console/app; not converted.
+  - Step: The ETA column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column TRN` — not converted. Report Leads column TRN is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column TRN manually in the Catalyst console/app; not converted.
+  - Step: The TRN column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column MFD_Required` — not converted. Report Leads column MFD_Required is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column MFD_Required manually in the Catalyst console/app; not converted.
+  - Step: The MFD_Required column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column No_of_Employees` — not converted. Report Leads column No_of_Employees is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column No_of_Employees manually in the Catalyst console/app; not converted.
+  - Step: The No_of_Employees column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Photograph` — not converted. Report Leads column Photograph is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Photograph manually in the Catalyst console/app; not converted.
+  - Step: The Photograph column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Website` — not converted. Report Leads column Website is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Website manually in the Catalyst console/app; not converted.
+  - Step: The Website column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Annual_Revenue` — not converted. Report Leads column Annual_Revenue is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Annual_Revenue manually in the Catalyst console/app; not converted.
+  - Step: The Annual_Revenue column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Rating` — not converted. Report Leads column Rating is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Rating manually in the Catalyst console/app; not converted.
+  - Step: The Rating column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column USED_OR_NEW_INDICATOR` — not converted. Report Leads column USED_OR_NEW_INDICATOR is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column USED_OR_NEW_INDICATOR manually in the Catalyst console/app; not converted.
+  - Step: The USED_OR_NEW_INDICATOR column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Dangerous_Goods` — not converted. Report Leads column Dangerous_Goods is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Dangerous_Goods manually in the Catalyst console/app; not converted.
+  - Step: The Dangerous_Goods column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Carrier_Vessel` — not converted. Report Leads column Carrier_Vessel is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Carrier_Vessel manually in the Catalyst console/app; not converted.
+  - Step: The Carrier_Vessel column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Storage_Request_Code` — not converted. Report Leads column Storage_Request_Code is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Storage_Request_Code manually in the Catalyst console/app; not converted.
+  - Step: The Storage_Request_Code column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column General_Description` — not converted. Report Leads column General_Description is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column General_Description manually in the Catalyst console/app; not converted.
+  - Step: The General_Description column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Groupage_Sub_Category` — not converted. Report Leads column Groupage_Sub_Category is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Groupage_Sub_Category manually in the Catalyst console/app; not converted.
+  - Step: The Groupage_Sub_Category column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Lead_Expiration_Date` — not converted. Report Leads column Lead_Expiration_Date is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Lead_Expiration_Date manually in the Catalyst console/app; not converted.
+  - Step: The Lead_Expiration_Date column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Type_of_Container` — not converted. Report Leads column Type_of_Container is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Type_of_Container manually in the Catalyst console/app; not converted.
+  - Step: The Type_of_Container column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Unit_of_Temperature` — not converted. Report Leads column Unit_of_Temperature is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Unit_of_Temperature manually in the Catalyst console/app; not converted.
+  - Step: The Unit_of_Temperature column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Message_Type` — not converted. Report Leads column Message_Type is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Message_Type manually in the Catalyst console/app; not converted.
+  - Step: The Message_Type column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Rotaion_Number` — not converted. Report Leads column Rotaion_Number is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Rotaion_Number manually in the Catalyst console/app; not converted.
+  - Step: The Rotaion_Number column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column BOX_Partnering_Line_Code` — not converted. Report Leads column BOX_Partnering_Line_Code is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column BOX_Partnering_Line_Code manually in the Catalyst console/app; not converted.
+  - Step: The BOX_Partnering_Line_Code column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column BOX_Partnering_Agent_Code` — not converted. Report Leads column BOX_Partnering_Agent_Code is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column BOX_Partnering_Agent_Code manually in the Catalyst console/app; not converted.
+  - Step: The BOX_Partnering_Agent_Code column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Manifest_Registration_Number` — not converted. Report Leads column Manifest_Registration_Number is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Manifest_Registration_Number manually in the Catalyst console/app; not converted.
+  - Step: The Manifest_Registration_Number column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Slac_Indicator` — not converted. Report Leads column Slac_Indicator is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Slac_Indicator manually in the Catalyst console/app; not converted.
+  - Step: The Slac_Indicator column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Place_of_Delivery` — not converted. Report Leads column Place_of_Delivery is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Place_of_Delivery manually in the Catalyst console/app; not converted.
+  - Step: The Place_of_Delivery column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Place_of_Load` — not converted. Report Leads column Place_of_Load is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Place_of_Load manually in the Catalyst console/app; not converted.
+  - Step: The Place_of_Load column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Port_of_Loading` — not converted. Report Leads column Port_of_Loading is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Port_of_Loading manually in the Catalyst console/app; not converted.
+  - Step: The Port_of_Loading column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Port_of_Discharge` — not converted. Report Leads column Port_of_Discharge is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Port_of_Discharge manually in the Catalyst console/app; not converted.
+  - Step: The Port_of_Discharge column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column IMO_Class` — not converted. Report Leads column IMO_Class is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column IMO_Class manually in the Catalyst console/app; not converted.
+  - Step: The IMO_Class column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Dangerous_Goods_indicator` — not converted. Report Leads column Dangerous_Goods_indicator is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Dangerous_Goods_indicator manually in the Catalyst console/app; not converted.
+  - Step: The Dangerous_Goods_indicator column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Storage_request_for_Dangerous_Goods` — not converted. Report Leads column Storage_request_for_Dangerous_Goods is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Storage_request_for_Dangerous_Goods manually in the Catalyst console/app; not converted.
+  - Step: The Storage_request_for_Dangerous_Goods column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column UN_Number` — not converted. Report Leads column UN_Number is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column UN_Number manually in the Catalyst console/app; not converted.
+  - Step: The UN_Number column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads column Voyage_Number` — not converted. Report Leads column Voyage_Number is not in the generated report. Add one: either emit it or record the manual step.
-  - Step: Set Leads column Voyage_Number manually in the Catalyst console/app; not converted.
+  - Step: The Voyage_Number column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.
 - `report-feature:Leads block options` — not converted. Report Leads block options is not in the generated report. Add one: either emit it or record the manual step.
   - Step: The options for the Leads report were not converted. In the Catalyst console, open the Leads report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Converted_Leads block options` — not converted. Report Converted_Leads block options is not in the generated report. Add one: either emit it or record the manual step.
@@ -500,4 +500,4 @@ Silent drops: 215 (still counted; each has a guided step below)
 - `report-feature:Table_of_Containers block options` — not converted. Report Table_of_Containers block options is not in the generated report. Add one: either emit it or record the manual step.
   - Step: The options for the Table_of_Containers report were not converted. In the Catalyst console, open the Table_of_Containers report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `translation:translation Language_Settings` — not converted. The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.
-  - Step: Set translation Language_Settings manually in the Catalyst console/app; not converted.
+  - Step: The translation Language_Settings was not converted. In the Catalyst console, add the language and copy the source translation strings into the generated app, then preview the translated text and verify it is correct.
