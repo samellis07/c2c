@@ -23,6 +23,13 @@ on-success script — with the functions it calls — that makes more
 than four Data Store calls on one save. Both are counted in your
 migration report.
 
+The report also identifies constructs that need a deliberate manual
+follow-up. Pivot reports include the row, column, and measure choices
+needed to rebuild the pivot in Catalyst. Form-event gaps include the
+event, script, and concrete guided steps needed to reproduce it;
+residual items from unsupported translations stay in the same guided
+list rather than being silently omitted.
+
 ## Step 2 — Plan: the full blueprint
 
 Still offline. The AI builds the whole migration plan — tables,

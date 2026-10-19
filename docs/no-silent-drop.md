@@ -9,3 +9,5 @@ A form-event server module is credited only when the generated client posts that
 Every silent drop carries a guided next step in the migration report that names what to do by hand.
 
 A function that emits no module is credited only by a TODO inside its span. A migration-report warning that names the function is not a counted manual item, so a warned-but-otherwise-unlisted function is reported as a silent drop, with the drop note naming the warning. A TODO inside a warned function still counts once.
+
+Warnings that describe a translation limitation are also silent drops: a warning-only translation is not treated as generated output. It is recorded in the report's silent-drop list, while the warning itself is not emitted as a second manual item. This keeps the count one-per-construct and preserves the warning text as the explanation.
