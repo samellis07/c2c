@@ -904,6 +904,16 @@ const SERVER_CONDITION_MUTATOR =
  */
 const SERVER_CONDITION_READ_CODES: ReadonlySet<string> = new Set(['READ_DENIED', 'STORE_UNAVAILABLE']);
 
+/**
+ * A string as a JS literal for emitted code. JSON.stringify leaves `<`,
+ * `>`, `/`, U+2028 and U+2029 raw, which can close an embedding `<script>`
+ * block or break the literal; the `\uXXXX` escapes decode to the same
+ * string.
+ */
+function jsLiteral(value: string): string {
+  return JSON.stringify(value).replace(/[<>/\u2028\u2029]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
 function serverConditionCall(value: Fx, scope: Scope): string | null {
   if (!scope.conditionContext) return null;
   const raw = value.sourceText;
@@ -1025,8 +1035,8 @@ function serverConditionCall(value: Fx, scope: Scope): string | null {
   // rethrows so the handler discards its queued actions. The split keys on
   // the endpoint's machine-readable code, never on the message text, and an
   // unrecognized failure aborts: fail closed.
-  const readFailure = [...SERVER_CONDITION_READ_CODES].map((code) => `e.code === ${JSON.stringify(code)}`).join(' || ');
-  return `((await Promise.resolve().then(() => shim.client.call(ctx, ${JSON.stringify(name)}, [${args.join(', ')}])).then((r) => r?.value === true, (e) => { if (e && (${readFailure})) return false; throw e; })))`;
+  const readFailure = [...SERVER_CONDITION_READ_CODES].map((code) => `e.code === ${jsLiteral(code)}`).join(' || ');
+  return `((await Promise.resolve().then(() => shim.client.call(ctx, ${jsLiteral(name)}, [${args.join(', ')}])).then((r) => r?.value === true, (e) => { if (e && (${readFailure})) return false; throw e; })))`;
 }
 
 /**
