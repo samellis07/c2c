@@ -4262,7 +4262,13 @@ function readClientCall(raw: unknown, sentNonce: string): { ok: boolean; value?:
   const code = typeof body.code === 'string' && body.code ? body.code : undefined;
   if (body.ok === false || typeof body.error === 'string') {
     const message = typeof body.message === 'string' ? body.message : typeof body.error === 'string' ? body.error : PREFETCH_BLOCKED;
-    return { ok: false, message, ...(code ? { code } : {}) };
+    // Assign the code instead of spreading `{ code } | {}`: this file is
+    // vendored into generated apps with types erased, and checkJs then
+    // infers a union with `message`/`code` missing from the success member,
+    // so the guarded `parsed` reads in `callOnce` fail TS2339.
+    const failure: { ok: boolean; message: string; code?: string } = { ok: false, message };
+    if (code) failure.code = code;
+    return failure;
   }
   const nonce = typeof body.nonce === 'string' ? body.nonce : '';
   if (body.ok !== true || nonce !== sentNonce) return { ok: false, message: PREFETCH_BLOCKED };
