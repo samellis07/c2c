@@ -31,13 +31,35 @@ export interface GuidedResidual {
   property?: string;
   reason: string;
   step: string;
-  stepSource: 'workaround' | 'generic';
+  stepSource: 'workaround' | 'specific' | 'generic';
 }
 
 /** The manual step for a drop with no workaround text. */
 export function genericResidualStep(drop: Pick<SilentDrop, 'name' | 'form' | 'field' | 'property'>): string {
   const what = drop.property !== undefined && drop.form !== undefined && drop.field !== undefined ? `${drop.property} on ${drop.form}.${drop.field}` : drop.name;
   return `Set ${what} manually in the Catalyst console/app; not converted.`;
+}
+
+/** Plain-language instructions for the highest-volume field/report gaps. */
+export function specificResidualStep(drop: Pick<SilentDrop, 'kind' | 'name' | 'form' | 'field' | 'property'>): string | undefined {
+  if (drop.kind === 'field-property' && drop.form && drop.field && drop.property) {
+    const field = `${drop.form}.${drop.field}`;
+    switch (drop.property) {
+      case 'displayformat':
+        return `The lookup display format for ${field} was not converted. In the Catalyst console, set the lookup's display field or display format for ${field}, then preview the form and confirm the lookup shows the intended value.`;
+      case 'sortorder':
+        return `The sort order for ${field} was not converted. In the Catalyst console, set the field's sort order for ${field}, then preview the form or report and confirm values appear in that order.`;
+      case 'format':
+        return `The display format for ${field} was not converted. In the Catalyst console, set the field's number or currency format for ${field}, then preview a record and confirm the value is displayed correctly.`;
+      case 'personal data':
+        return `The personal-data setting for ${field} was not converted. In the Catalyst console, mark ${field} as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.`;
+    }
+  }
+  if (drop.kind === 'report-feature' && / block options$/.test(drop.name)) {
+    const report = drop.name.replace(/ block options$/, '');
+    return `The options for the ${report} report were not converted. In the Catalyst console, open the ${report} report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.`;
+  }
+  return undefined;
 }
 
 function workaround(drop: SilentDrop, outcome: FieldOutcome | undefined): string | undefined {
@@ -65,6 +87,7 @@ export function guidedResiduals(drops: readonly SilentDrop[], fields: readonly F
     seen.set(base, n);
     const outcome = drop.form !== undefined && drop.field !== undefined ? outcomes.get(`${drop.form}\0${drop.field}`) : undefined;
     const fix = workaround(drop, outcome);
+    const specific = fix ? undefined : specificResidualStep(drop);
     return {
       id: (total.get(base) ?? 0) > 1 ? `${base} #${n}` : base,
       kind: drop.kind,
@@ -73,8 +96,8 @@ export function guidedResiduals(drops: readonly SilentDrop[], fields: readonly F
       ...(drop.field === undefined ? {} : { field: drop.field }),
       ...(drop.property === undefined ? {} : { property: drop.property }),
       reason: reasonOf(drop, outcome),
-      step: fix ?? genericResidualStep(drop),
-      stepSource: fix ? 'workaround' : 'generic',
+      step: fix ?? specific ?? genericResidualStep(drop),
+      stepSource: fix ? 'workaround' : specific ? 'specific' : 'generic',
     };
   });
 }
