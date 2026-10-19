@@ -651,6 +651,8 @@ test('remaining allowlisted collection, comparison, and scalar builtins agree', 
     ['math', 'round', [1.005, 2]], ['math', 'sqrt', [9007199254740993n]],
   ];
   for (const [ns, name, args] of cases) {
-    assert.deepEqual(invoke(browser, ns, name, args), invoke(server, ns, name, args), `${ns}.${name}`);
+    // List operations intentionally mutate their input; give each runtime an
+    // independent copy so the comparison observes only semantic differences.
+    assert.deepEqual(invoke(browser, ns, name, structuredClone(args)), invoke(server, ns, name, structuredClone(args)), `${ns}.${name}`);
   }
 });
