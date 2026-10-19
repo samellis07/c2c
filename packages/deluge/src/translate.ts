@@ -871,11 +871,13 @@ function clientExpr(value: Fx, scope: Scope, todoConstruct = 'client-condition-u
  * `old` read, a whole-record `input` — has no value at the caller, so the
  * condition keeps its counted todo.
  *
- * Returns the client-side test expression
- * `((await shim.client.call(ctx, "<name>", [args]))?.value === true)`: the
- * call throws on a refused or failed request (the run is discarded, same as a
- * `thisapp` client call), a dry run reports `value: null`, and any non-`true`
- * result takes the false branch — fail closed either way.
+ * Returns the client-side test expression, which awaits the endpoint's
+ * `{ value }` reply and takes the true branch only when
+ * `value === true` (a dry run reports `value: null`, so it takes the false
+ * branch). A failed call splits two ways: a read failure
+ * ({@link SERVER_CONDITION_READ_CODES}) evaluates false, while an integrity
+ * failure rethrows — the run is discarded, same as a refused `thisapp`
+ * client call. Fail closed either way.
  */
 /**
  * Collection-mutator emissions the read-only server-condition envelope must
@@ -888,6 +890,19 @@ function clientExpr(value: Fx, scope: Scope, todoConstruct = 'client-condition-u
  */
 const SERVER_CONDITION_MUTATOR =
   /\bshim\.set\s*\(|\bshim\.list\.(?:addall|add|putall|put|clear|insertall|insert|removeall|removeelement|remove|retainall|sort|deleteitem|deleteall|deletekeys?|delete|update)\s*\(/i;
+
+/**
+ * Endpoint failure codes that make a server-backed UI condition evaluate
+ * false (Creator's no-record path): the read was refused by the caller's
+ * scope, or the store was unavailable. Every other failure — a tampered,
+ * missing, or replayed nonce, an unknown or case-folded function name, a
+ * wrong argument count or type, an unsupported protocol version, or anything
+ * unrecognized — rethrows, so the handler discards its queued actions
+ * exactly like a refused `thisapp` client call. The codes come from the
+ * generated client-call endpoint (functionCallModule in generate.ts); the
+ * client-call shims copy them onto the thrown error.
+ */
+const SERVER_CONDITION_READ_CODES: ReadonlySet<string> = new Set(['READ_DENIED', 'STORE_UNAVAILABLE']);
 
 function serverConditionCall(value: Fx, scope: Scope): string | null {
   if (!scope.conditionContext) return null;
@@ -1006,7 +1021,12 @@ function serverConditionCall(value: Fx, scope: Scope): string | null {
   }
   // determinism-allow: params is filled while walking the condition source; parameter and argument order must stay that source order
   const args = [...params.values()].map((p) => p.arg);
-  return `((await Promise.resolve().then(() => shim.client.call(ctx, ${JSON.stringify(name)}, [${args.join(', ')}])).then((r) => r?.value === true, () => false)))`;
+  // A read failure evaluates false (Creator's no-record path); anything else
+  // rethrows so the handler discards its queued actions. The split keys on
+  // the endpoint's machine-readable code, never on the message text, and an
+  // unrecognized failure aborts: fail closed.
+  const readFailure = [...SERVER_CONDITION_READ_CODES].map((code) => `e.code === ${JSON.stringify(code)}`).join(' || ');
+  return `((await Promise.resolve().then(() => shim.client.call(ctx, ${JSON.stringify(name)}, [${args.join(', ')}])).then((r) => r?.value === true, (e) => { if (e && (${readFailure})) return false; throw e; })))`;
 }
 
 /**

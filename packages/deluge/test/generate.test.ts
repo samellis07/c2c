@@ -2712,6 +2712,149 @@ test('a client condition needing server data compiles to a c2cCond_* call throug
   assert.deepEqual(deniedActions.map((a) => a.op), ['info'], 'a non-200 or refused call evaluates false and shows the call-failure message');
 });
 
+/** The overlap-check app behind the server-condition failure-split tests. */
+function overlapBuild() {
+  return app({
+    forms: [
+      plainForm('Reservation', [plainField('Check_In', 'date'), plainField('Check_Out', 'date')]),
+      plainForm('Pods', [plainField('Pod_No')]),
+    ],
+    profiles: [ADMIN, { name: 'Guest', type: 'Users_Permissions', properties: [], modules: [], span: Z }],
+    workflows: [
+      workflow({
+        name: 'Overlap check',
+        form: 'Reservation',
+        event: 'on user input',
+        deluge: {
+          text: 'for each a in Pods[ID != 0].Pod_No { for each b in Pods[ID != 0].Pod_No { if(a == b && Reservation[ID != 0].count() > 0) { alert "overlap"; } else { alert "free"; } } }',
+          span: Z,
+        },
+      }),
+    ],
+  });
+}
+
+function overlapClientSource(): { client: { path: string; source: string }; callPath: string } {
+  const g = generate(overlapBuild());
+  const client = g.files.find((f) => f.path === 'client/handlers/reservation/on-user-input.mjs')!;
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  assert.ok(client && callMod);
+  return { client, callPath: callMod.path };
+}
+
+test('a server-condition reply with a missing nonce aborts the handler', async () => {
+  // Integrity failure: the reply carries no nonce at all, so it cannot be
+  // the form state the caller sent. The handler discards its queued actions
+  // instead of taking either branch.
+  const { client } = overlapClientSource();
+  const clientMod = (await loadModule(client.source, 'cond-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string }[]>>;
+  const missing = createRuntime({
+    dryRun: true,
+    clientPrefetch: (path, nonce) =>
+      String(path).endsWith('/call')
+        ? { ok: true, value: { value: true } }
+        : { ok: true, nonce, slots: { c2: ['9A'], c1: ['9A'] } },
+  });
+  const actions = await clientMod.clientActions!(missing.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(actions.map((a) => a.op), ['info'], 'a missing nonce aborts instead of taking a branch');
+});
+
+test('an unknown server-condition function aborts the handler', async () => {
+  // Integrity failure: the endpoint answers 403 with code UNKNOWN_FUNCTION
+  // when its name resolves to no registry entry (unknown or case-folded), and
+  // the client rethrows a coded integrity failure instead of taking a branch.
+  const g = generate(overlapBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  await withTree(g, callMod.path, async (mod, dir) => {
+    const registry = (await import(pathToFileURL(join(dir, 'functions/thisapp.mjs')).href)) as { functions: Record<string, unknown> };
+    const key = Object.keys(registry.functions).find((k) => k.startsWith('c2cCond_'));
+    assert.ok(key, 'the condition registry key exists');
+    delete registry.functions[key];
+    const unknown = await invoke(mod.default as (req: unknown, res: unknown) => unknown, {
+      user: { profile: 'Administrator', loginUser: 'a@t' },
+      body: { nonce: 'n1', args: ['9A', '9A'] },
+    });
+    assert.equal(unknown.status, 403, JSON.stringify(unknown.body));
+    assert.equal(unknown.body.ok, false);
+    assert.equal(unknown.body.code, 'UNKNOWN_FUNCTION');
+  });
+  const { client } = overlapClientSource();
+  const clientMod = (await loadModule(client.source, 'cond-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string }[]>>;
+  const unknownCall = createRuntime({
+    dryRun: true,
+    clientPrefetch: (path, nonce) =>
+      String(path).endsWith('/call')
+        ? { ok: false, code: 'UNKNOWN_FUNCTION', nonce, error: 'client call: target did not resolve to its declared name' }
+        : { ok: true, nonce, slots: { c2: ['9A'], c1: ['9A'] } },
+  });
+  const actions = await clientMod.clientActions!(unknownCall.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(actions.map((a) => a.op), ['info'], 'an unknown function aborts instead of taking a branch');
+});
+
+test('a scope-denied server-condition read evaluates false', async () => {
+  // Read failure (Creator's no-record path): the endpoint refuses with 403
+  // code READ_DENIED, and the client takes the false branch instead of
+  // discarding the run.
+  const g = generate(overlapBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  const mod = (await loadTree(g, callMod.path)) as Record<string, (req: unknown, res: unknown) => unknown>;
+  const denied = await invoke(mod.default, { user: { profile: 'Guest', loginUser: 'g@t' }, body: { nonce: 'n1', args: ['9A', '9A'] } });
+  assert.equal(denied.status, 403, JSON.stringify(denied.body));
+  assert.equal(denied.body.ok, false);
+  assert.equal(denied.body.code, 'READ_DENIED');
+  const { client } = overlapClientSource();
+  const clientMod = (await loadModule(client.source, 'cond-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string }[]>>;
+  const deniedCall = createRuntime({
+    dryRun: true,
+    clientPrefetch: (path, nonce) =>
+      String(path).endsWith('/call')
+        ? { ok: false, code: 'READ_DENIED', nonce, error: 'record access: Reservation row is not visible' }
+        : { ok: true, nonce, slots: { c2: ['9A'], c1: ['9A'] } },
+  });
+  const actions = await clientMod.clientActions!(deniedCall.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(actions, [{ op: 'alert', message: 'free' }], 'a denied read takes the false branch');
+});
+
+test('a server condition over no record evaluates false', async () => {
+  // Read failure (Creator's no-record path): with no stored rows the live
+  // endpoint answers value false, and the client takes the false branch.
+  const g = generate(overlapBuild());
+  const callMod = g.files.find((f) => /^functions\/custom\/c2ccond-[0-9a-f]+-call\.mjs$/.test(f.path))!;
+  const { datastore } = mockDatastore({});
+  const realMode = process.env.C2C_DEPLOY_MODE;
+  const realZone = process.env.C2C_APP_TIMEZONE;
+  const realStore = (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+  process.env.C2C_DEPLOY_MODE = 'live';
+  process.env.C2C_APP_TIMEZONE = 'Asia/Kolkata';
+  (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = datastore;
+  try {
+    const res = await withTree(g, callMod.path, (liveMod) =>
+      invoke(liveMod.default as (req: unknown, res: unknown) => unknown, { user: { profile: 'Administrator', loginUser: 'a@t' }, body: { nonce: 'n2', args: ['9A', '9A'] } }),
+    );
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.ok, true);
+    assert.deepEqual(res.body.value, { value: false }, 'no stored rows take the false branch');
+  } finally {
+    if (realMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+    else process.env.C2C_DEPLOY_MODE = realMode;
+    if (realZone === undefined) delete process.env.C2C_APP_TIMEZONE;
+    else process.env.C2C_APP_TIMEZONE = realZone;
+    if (realStore === undefined) delete (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore;
+    else (globalThis as { __c2cDatastore?: unknown }).__c2cDatastore = realStore;
+  }
+  const { client } = overlapClientSource();
+  const clientMod = (await loadModule(client.source, 'cond-client.mjs')) as Record<string, (ctx: unknown) => Promise<{ op: string }[]>>;
+  const miss = createRuntime({
+    dryRun: true,
+    clientPrefetch: (path, nonce) =>
+      String(path).endsWith('/call')
+        ? { ok: true, nonce, value: { value: false } }
+        : { ok: true, nonce, slots: { c2: ['9A'], c1: ['9A'] } },
+  });
+  const actions = await clientMod.clientActions!(miss.context({ record: {}, formNonce: 'n1' }));
+  assert.deepEqual(actions, [{ op: 'alert', message: 'free' }], 'a false value takes the false branch');
+});
+
 test('a client condition on a record element or an unreadable local stays a counted todo', () => {
   const g = generate(
     app({
