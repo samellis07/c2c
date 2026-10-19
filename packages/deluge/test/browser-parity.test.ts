@@ -655,4 +655,14 @@ test('remaining allowlisted collection, comparison, and scalar builtins agree', 
     // independent copy so the comparison observes only semantic differences.
     assert.deepEqual(invoke(browser, ns, name, structuredClone(args)), invoke(server, ns, name, structuredClone(args)), `${ns}.${name}`);
   }
+  // Keep parity coverage exhaustive as the allowlist grows: methods whose
+  // useful inputs are context-specific still get an error/blank-input check.
+  const exercised = new Set(cases.map(([ns, name]) => `${ns}.${name}`));
+  for (const [ns, methods] of CLIENT_SHIM_METHODS) {
+    if (['client', 'input', 'record', 'subform', 'zoho'].includes(ns)) continue;
+    for (const name of methods) {
+      if (exercised.has(`${ns}.${name}`)) continue;
+      assert.deepEqual(invoke(browser, ns, name, []), invoke(server, ns, name, []), `${ns}.${name} blank input`);
+    }
+  }
 });
