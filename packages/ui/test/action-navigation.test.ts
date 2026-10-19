@@ -312,7 +312,7 @@ test('the page receives declared params as its snippet render input', async () =
       posted.push({ url, input: (JSON.parse(init.body) as { input: unknown }).input });
       return { ok: true, status: 200, json: async () => ({ html: '<p>ok</p>' }), text: async () => '{}' };
     },
-    location: dom.window.location,
+    location: (dom.window as unknown as { location: unknown }).location,
   });
   await flush();
   assert.equal(posted.length, 1);
