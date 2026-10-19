@@ -8,8 +8,8 @@ import { translate } from '../src/translate.js';
 test('unsupportedClientShims names what the browser runtime lacks', () => {
   assert.deepEqual(unsupportedClientShims('if (!shim.list.contains(l, x)) shim.each(ctx, l); shim.list(); shim.client.call(ctx, "f", []);'), []);
   assert.deepEqual(
-    unsupportedClientShims('shim.string.toLowerCase(a) + shim.list.aggregate(r, "sum") + shim.zoho.task(ctx, ["x"]) + shim.old.set(ctx, ["A"], 1) + shim.string.toLowerCase(b) + shim.xml'),
-    ['list.aggregate', 'old.set', 'string.toLowerCase', 'xml', 'zoho.task'],
+    unsupportedClientShims('shim.string.toLowerCase(a) + shim.list.aggregate(r, "sum") + shim.list.numberList(l, "average") + shim.zoho.task(ctx, ["x"]) + shim.old.set(ctx, ["A"], 1) + shim.string.toLowerCase(b) + shim.xml'),
+    ['old.set', 'string.toLowerCase', 'xml', 'zoho.task'],
   );
   assert.deepEqual(unsupportedClientShims('var x = 1;'), []);
 });
@@ -46,7 +46,7 @@ test('a client effect the browser cannot run is a client gap with no client code
   // The server part is unchanged, so server-only callers see no todo; the client emitter counts the gap.
   assert.deepEqual(out.todos, []);
   assert.equal(out.stats.todo, 0);
-  assert.deepEqual(out.clientGaps, [{ todo: { construct: 'client-shim-unsupported', start: 0, end: 37 }, bucket: 'shimmed' }]);
+  assert.deepEqual(out.clientGaps, [{ todo: { construct: 'client-shim-unsupported: string.toLowerCase', start: 0, end: 37 }, bucket: 'shimmed' }]);
 
   const alerted = translate('alert input.Name.toLowerCase();', { inputFields: ['Name'] });
   assert.doesNotMatch(alerted.client, /shim\.string/);
@@ -78,7 +78,7 @@ test('the form handler emitter counts a client gap; a server-only script does no
   const text = 'input.Name = input.Name.toLowerCase();\ninfo "done";';
   const handler: Workflow = { name: 'Check', form: 'Orders', event: 'on user input', deluge: { text, span }, properties: [], span };
   const g = generate({ ...emptyApp('empty'), name: 'Demo_App', workflows: [handler] });
-  assert.deepEqual(g.todos.map((t) => t.construct), ['client-shim-unsupported']);
+  assert.deepEqual(g.todos.map((t) => t.construct), ['client-shim-unsupported: string.toLowerCase']);
   assert.equal(g.stats.todo, 1);
   assert.equal(g.stats.statements, g.stats.translated + g.stats.shimmed + g.stats.todo);
   for (const f of g.files) if (f.path.startsWith('client/')) assert.deepEqual(unsupportedClientShims(f.source), [], f.path);
@@ -99,6 +99,9 @@ test('newly client-supported builtins emit client code; unsupported siblings kee
     ['m = input.Name.toMap();', /shim\.convert\.toMap\(shim\.input\.get/],
     ['input.Price = input.Price.sqrt();', /shim\.math\.sqrt\(shim\.input\.get/],
     ['input.Name = input.Name.toUpperCase();', /shim\.string\.toUpperCase\(shim\.input\.get/],
+    ['l = {1,2,3};\ninfo l.sum();', /shim\.list\.aggregate\(l, "sum"\)/],
+    ['l = {1,2,3};\ninfo l.count();', /shim\.list\.aggregate\(l, "count"\)/],
+    ['l = {1,2,3};\ninfo l.average();', /shim\.list\.aggregate\(shim\.list\.numberList\(l, "average"\), "avg"\)/],
   ];
   for (const [src, want] of supported) {
     const out = translate(src, { inputFields: ['Name', 'Price'] });
@@ -110,5 +113,5 @@ test('newly client-supported builtins emit client code; unsupported siblings kee
   // A sibling name the browser still lacks keeps the SAME counted todo.
   const gap = translate('input.Name = input.Name.toLowerCase();', { inputFields: ['Name'] });
   assert.doesNotMatch(gap.client, /shim\.string\.toLowerCase/);
-  assert.deepEqual(gap.clientGaps, [{ todo: { construct: 'client-shim-unsupported', start: 0, end: 37 }, bucket: 'shimmed' }]);
+  assert.deepEqual(gap.clientGaps, [{ todo: { construct: 'client-shim-unsupported: string.toLowerCase', start: 0, end: 37 }, bucket: 'shimmed' }]);
 });

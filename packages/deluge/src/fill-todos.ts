@@ -1070,7 +1070,7 @@ function pushFormGroup(state: WalkState, app: App, group: readonly Workflow[]): 
     pushClientGapNotes(state, fragment);
     const guard = actionGuardFor(app, workflow);
     if (!guard.todo && clientGuardGap(fragment.clientText, guard.code)) {
-      pushNoteDraft(state, 'client-shim-unsupported', workflow.span, workflow.actionCondition ?? '', workflowIr(workflow, workflow.span), 'client-shim');
+      pushNoteDraft(state, `client-shim-unsupported: ${unsupportedClientShims(fragment.clientText).join(', ')}`, workflow.span, workflow.actionCondition ?? '', workflowIr(workflow, workflow.span), 'client-shim');
     }
     const { fragment: gated, suppressed } = gateFragment(state, app, workflow, fragment, true);
     if (suppressed) pushGateNote(state, workflow);
@@ -1088,7 +1088,7 @@ function pushFormGroup(state: WalkState, app: App, group: readonly Workflow[]): 
       if (!rule.condition) continue;
       const emitted = emittedFieldRuleConditionFor(app, workflow.form, rule.condition);
       if (emitted.startsWith('await shim.todo(') || !unsupportedClientShims(emitted).length) continue;
-      pushNoteDraft(state, 'client-shim-unsupported', rule.span, rule.condition, workflowIr(workflow, rule.span), 'client-shim');
+      pushNoteDraft(state, `client-shim-unsupported: ${unsupportedClientShims(emitted).join(', ')}`, rule.span, rule.condition, workflowIr(workflow, rule.span), 'client-shim');
     }
   }
 }

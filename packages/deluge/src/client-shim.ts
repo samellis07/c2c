@@ -71,6 +71,7 @@ export const CLIENT_SHIM_METHODS: ReadonlyMap<string, ReadonlySet<string>> = new
     new Set([
       'add',
       'addAll',
+      'aggregate',
       'clear',
       'column',
       'contains',
@@ -93,6 +94,7 @@ export const CLIENT_SHIM_METHODS: ReadonlyMap<string, ReadonlySet<string>> = new
       'lastIndexOf',
       'length',
       'notContains',
+      'numberList',
       'put',
       'putAll',
       'remove',

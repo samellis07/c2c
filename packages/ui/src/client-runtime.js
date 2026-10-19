@@ -3415,6 +3415,75 @@ function clientReadField(row, field) {
   return Object.hasOwn(rec, field) ? (rec[field] ?? null) : null;
 }
 
+/*
+ * Aggregate helpers: a port of the aggregate half of packages/shims/src/list.ts
+ * (same blank rules, same exact-decimal detection, same results and error
+ * messages). The browser has no Decimal class: a server Decimal arrives here
+ * either through the explicit `exact` flag (a decimal, percent or currency
+ * field) or as a Decimal instance in node-side tests, detected by shape the
+ * same way clientRealArg detects one. Canonical decimal strings stay exact
+ * through clientDecimal(), the same bigint scale rules as decimal.ts.
+ */
+
+/** A server Decimal instance, by shape: { digits: bigint, ... } with toString. */
+function clientIsDecimalLike(value) {
+  return !!value && typeof value === 'object' && typeof value.digits === 'bigint' && typeof value.toString === 'function';
+}
+
+/** Blank aggregate input is skipped: null or whitespace-only text. */
+function clientBlankAggregate(value) {
+  return value == null || (typeof value === 'string' && value.trim() === '');
+}
+
+/** Exact decimal text of an aggregate value, like list.ts decimalText. */
+function clientAggregateText(value) {
+  if (clientIsDecimalLike(value)) return value.toString();
+  if (typeof value === 'bigint') return value.toString();
+  return String(value).trim();
+}
+
+/** Numeric value of an aggregate member, like list.ts asNumber. */
+function clientAggregateNumber(value) {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'bigint') return Number(value);
+  if (clientIsDecimalLike(value)) return Number(value.toString());
+  const n = Number(String(value).trim());
+  if (!Number.isFinite(n)) throw clientListError(`Cannot apply an aggregate function on a non numeric value ${String(value)}`);
+  return n;
+}
+
+/** A date the aggregate can order: Deluge wire parts or a parseable literal. */
+function clientAggregateDateLike(value) {
+  if (value != null && typeof value === 'object' && !Array.isArray(value)
+    && typeof value.y === 'number' && typeof value.m === 'number' && typeof value.d === 'number') return true;
+  if (typeof value !== 'string') return false;
+  try {
+    return clientAsDate(value) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** Exact sum of already-filtered aggregate values, like list.ts exactSum. */
+function clientAggregateSum(values) {
+  const D = clientDecimal();
+  let total = '0';
+  for (const v of values) {
+    const text = clientAggregateText(v);
+    // Validates the value; a non-numeric value is the aggregate error.
+    if (!clientIsDecimalLike(v)) clientAggregateNumber(v);
+    total = D.add(total, text);
+  }
+  return total;
+}
+
+/** Trichotomy on exact decimal text, like Decimal.compare. */
+function clientAggregateDecimalOrder(a, b) {
+  const D = clientDecimal();
+  if (D.cmp(a, b, '==')) return 0;
+  return D.cmp(a, b, '<') ? -1 : 1;
+}
+
 export function clientListMethods() {
   const contains = (value, needle) => {
     if (Array.isArray(value)) return value.some((item) => clientSameId(item, needle));
@@ -3624,6 +3693,66 @@ export function clientListMethods() {
       if (Array.isArray(rows)) return rows.map((row) => clientReadField(row, name));
       if (rows && typeof rows === 'object') return [clientReadField(rows, name)];
       return [];
+    },
+    numberList(value, fn) {
+      if (!Array.isArray(value)) throw clientListError(`${String(fn)}: expected a number list`);
+      for (const item of value) {
+        // The number pages permit numeric values written in quotes, but do not
+        // describe nulls, blanks, or non-numeric text as list members.
+        if (item == null || (typeof item === 'string' && item.trim() === '')) {
+          throw clientListError(`${String(fn)}: expected numeric list members`);
+        }
+        if (typeof item === 'string' && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(item.trim())) {
+          throw clientListError(`${String(fn)}: expected numeric list members`);
+        }
+        if (typeof item === 'number' && !Number.isFinite(item)) {
+          throw clientListError(`${String(fn)}: expected numeric list members`);
+        }
+        if (typeof item !== 'number' && typeof item !== 'bigint' && typeof item !== 'string' && !clientIsDecimalLike(item)) {
+          throw clientListError(`${String(fn)}: expected numeric list members`);
+        }
+      }
+      return value;
+    },
+    aggregate(rows, fn, field, exact) {
+      const D = clientDecimal();
+      const list = Array.isArray(rows) ? rows : rows == null ? [] : [rows];
+      const name = String(fn).toLowerCase();
+      const op = name === 'average' ? 'avg' : name === 'maximum' ? 'max' : name === 'minimum' ? 'min' : name;
+      const raw = field == null || field === '' ? list : list.map((row) => clientReadField(row, String(field)));
+      // `count(field)` counts the values the field holds. A stored empty string
+      // counts; null does not. Without a field, count is the number of rows.
+      if (op === 'count') return field == null || field === '' ? list.length : raw.filter((v) => v != null).length;
+      if (op === 'distinct') return distinct(raw);
+      const values = raw.filter((v) => !clientBlankAggregate(v));
+      if (!values.length) return null;
+      const decimalMode = exact === true || values.some((v) => clientIsDecimalLike(v));
+      if (op === 'min' || op === 'max' || op === 'median') {
+        const byDate = op !== 'median' && values.every(clientAggregateDateLike);
+        const sorted = values.slice().sort((a, b) => {
+          if (byDate) return dateKey(parseClientDate(a)) - dateKey(parseClientDate(b));
+          if (decimalMode) return clientAggregateDecimalOrder(clientAggregateText(a), clientAggregateText(b));
+          const x = clientAggregateNumber(a);
+          const y = clientAggregateNumber(b);
+          return x < y ? -1 : x > y ? 1 : 0;
+        });
+        // Stored numbers can arrive as text; the result is a number (or an exact
+        // decimal for a decimal field), never the text.
+        const typed = (v) => (byDate ? clientDateOf(parseClientDate(v)) : decimalMode ? D.from(clientAggregateText(v)) : clientAggregateNumber(v));
+        if (op === 'min') return typed(sorted[0]);
+        if (op === 'max') return typed(sorted[sorted.length - 1]);
+        const mid = Math.floor(sorted.length / 2);
+        if (sorted.length % 2) return typed(sorted[mid]);
+        const half = D.div(clientAggregateSum([sorted[mid - 1], sorted[mid]]), 2);
+        return decimalMode ? half : Number(half);
+      }
+      if (op === 'sum' || op === 'avg') {
+        // Summed exactly either way, so 10.10 + 0.20 is 10.3, with no binary floating-point rounding error.
+        const total = clientAggregateSum(values);
+        const result = op === 'sum' ? total : D.div(total, values.length);
+        return decimalMode ? result : Number(result);
+      }
+      throw clientListError(`Unknown aggregate function ${String(fn)}`);
     },
     deleteKey(value, key) {
       if (clientIsPlain(value)) {

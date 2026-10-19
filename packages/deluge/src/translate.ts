@@ -2854,7 +2854,8 @@ function gateClientShims(s: Stmt, o: Out, scope: Scope, stats: TranslateStats, b
   if (!COMPOUND_KINDS.has(s.kind) && !CLIENT_EFFECT.test(dropped)) return;
   if (scope.noClient) return;
   const bucket = stats.todo > before.todo ? 'todo' : stats.shimmed > before.shimmed ? 'shimmed' : stats.translated > before.translated ? 'translated' : 'todo';
-  scope.clientGaps.push({ todo: { construct: 'client-shim-unsupported', start: s.span.start, end: s.span.end }, bucket });
+  const names = unsupportedClientShims(dropped);
+  scope.clientGaps.push({ todo: { construct: `client-shim-unsupported: ${names.join(', ')}`, start: s.span.start, end: s.span.end }, bucket });
 }
 
 /** The stats bucket a statement counted into between `before` and now. */
