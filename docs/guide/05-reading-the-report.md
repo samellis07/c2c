@@ -35,6 +35,12 @@ did not, the field-level gaps with their reasons. Each manual step
 carries the workaround to use in the meantime, and the same
 human-checklist items the run will ask of you appear in it too.
 
+For report-backed screens, the served record keeps the report's
+criteria, and date and date-time cells use the app's configured
+format and clock. Embedded forms and reports retain their display
+parameters and access checks. A manual item is guided: it names the
+construct, explains the residual behavior, and gives the next step.
+
 ## Where each answer lives
 
 | Question | File the AI shows you |
