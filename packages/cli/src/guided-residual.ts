@@ -61,6 +61,23 @@ export function specificResidualStep(drop: Pick<SilentDrop, 'kind' | 'name' | 'f
     const report = drop.name.replace(/ block options$/, '');
     return `The options for the ${report} report were not converted. In the Catalyst console, open the ${report} report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.`;
   }
+  if (drop.kind === 'report-feature' && / block report properties$/.test(drop.name)) {
+    const report = drop.name.replace(/ block report properties$/, '');
+    return `The report properties for ${report} were not converted. In the Catalyst console, open the ${report} report and configure its report properties, then preview it and verify the layout and visible data match the source app.`;
+  }
+  if (drop.kind === 'report-feature' && / column .+$/.test(drop.name)) {
+    const match = /^(.*) column (.+)$/.exec(drop.name);
+    if (match) {
+      const [, report, column] = match;
+      return `The ${column} column in the ${report} report was not converted. In the Catalyst console, open the ${report} report and add or configure that column, then preview the report and verify the displayed value matches the source app.`;
+    }
+  }
+  if (drop.kind === 'page-element') {
+    return `The ${drop.name} page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.`;
+  }
+  if (drop.kind === 'translation') {
+    return `The ${drop.name} was not converted. In the Catalyst console, add the language and copy the source translation strings into the generated app, then preview the translated text and verify it is correct.`;
+  }
   return undefined;
 }
 
