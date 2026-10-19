@@ -15,7 +15,7 @@ const library = join(root, 'fixtures/redistributable/library-application-system/
 
 const outcome: FieldOutcome = { form: 'Orders', field: 'Due', creatorType: 'date', matrixId: 'field-date', status: 'supported', reason: 'Date-only column.' };
 
-test('a field-property drop gets the field-gap reason and a generic step naming the setting', () => {
+test('a displayformat field-property drop gets a specific verification step', () => {
   const drop: SilentDrop = { kind: 'field-property', name: 'Orders.Due displayformat', note: 'not in the generated field', form: 'Orders', field: 'Due', property: 'displayformat' };
   const [item] = guidedResiduals([drop], [outcome]);
   assert.deepEqual(item, {
@@ -26,9 +26,21 @@ test('a field-property drop gets the field-gap reason and a generic step naming 
     field: 'Due',
     property: 'displayformat',
     reason: 'displayformat is not carried by the generated field-date field. Date-only column.',
-    step: 'Set displayformat on Orders.Due manually in the Catalyst console/app; not converted.',
-    stepSource: 'generic',
+    step: 'The lookup display format for Orders.Due was not converted. In the Catalyst console, set the lookup\'s display field or display format for Orders.Due, then preview the form and confirm the lookup shows the intended value.',
+    stepSource: 'specific',
   });
+});
+
+test('the highest-volume residual categories use specific steps', () => {
+  const drops: SilentDrop[] = [
+    { kind: 'field-property', name: 'Orders.Due sortorder', note: 'not emitted', form: 'Orders', field: 'Due', property: 'sortorder' },
+    { kind: 'report-feature', name: 'Orders block options', note: 'not emitted' },
+    { kind: 'field-property', name: 'Orders.Total format', note: 'not emitted', form: 'Orders', field: 'Total', property: 'format' },
+    { kind: 'field-property', name: 'Orders.Email personal data', note: 'not emitted', form: 'Orders', field: 'Email', property: 'personal data' },
+  ];
+  const items = guidedResiduals(drops, []);
+  assert.deepEqual(items.map((item) => item.stepSource), ['specific', 'specific', 'specific', 'specific']);
+  assert.ok(items.every((item) => item.step.includes('Catalyst console') && item.step.includes('verify')));
 });
 
 test('a drop with workaround text uses the precheck fix; one without a field outcome keeps the ledger note as reason', () => {
