@@ -339,40 +339,40 @@
       "kind": "page-element",
       "construct": "DashBoard.Book_Report",
       "reason": "ZML element <search> Book_Report on page DashBoard is generated without its criteria. Add one: either emit the element or record the manual step.",
-      "step": "Set DashBoard.Book_Report manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The DashBoard.Book_Report page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.",
+      "stepSource": "specific"
     },
     {
       "id": "page-element:DashBoard.Book_Report #2",
       "kind": "page-element",
       "construct": "DashBoard.Book_Report",
       "reason": "ZML element <button> Book_Report on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "step": "Set DashBoard.Book_Report manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The DashBoard.Book_Report page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.",
+      "stepSource": "specific"
     },
     {
       "id": "page-element:DashBoard.All_Book_Transactions #1",
       "kind": "page-element",
       "construct": "DashBoard.All_Book_Transactions",
       "reason": "ZML element <text> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "step": "Set DashBoard.All_Book_Transactions manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The DashBoard.All_Book_Transactions page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.",
+      "stepSource": "specific"
     },
     {
       "id": "page-element:DashBoard.All_Book_Transactions #2",
       "kind": "page-element",
       "construct": "DashBoard.All_Book_Transactions",
       "reason": "ZML element <button> All_Book_Transactions on page DashBoard is generated without its parameters. Add one: either emit the element or record the manual step.",
-      "step": "Set DashBoard.All_Book_Transactions manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The DashBoard.All_Book_Transactions page element was not converted. In the Catalyst console, open the page and add or configure this element, then preview the page and verify it behaves as expected.",
+      "stepSource": "specific"
     },
     {
       "id": "translation:translation Language_Settings",
       "kind": "translation",
       "construct": "translation Language_Settings",
       "reason": "The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.",
-      "step": "Set translation Language_Settings manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The translation Language_Settings was not converted. In the Catalyst console, add the language and copy the source translation strings into the generated app, then preview the translated text and verify it is correct.",
+      "stepSource": "specific"
     }
   ]
 }

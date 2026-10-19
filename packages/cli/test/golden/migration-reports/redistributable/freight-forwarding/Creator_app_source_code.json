@@ -2464,8 +2464,8 @@
       "kind": "report-feature",
       "construct": "Container_Movement_Tracking block report properties",
       "reason": "Report Container_Movement_Tracking block report properties is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Container_Movement_Tracking block report properties manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The report properties for Container_Movement_Tracking were not converted. In the Catalyst console, open the Container_Movement_Tracking report and configure its report properties, then preview it and verify the layout and visible data match the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:SOFs block options",
@@ -2480,368 +2480,368 @@
       "kind": "report-feature",
       "construct": "Leads column Cargo_Type",
       "reason": "Report Leads column Cargo_Type is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Cargo_Type manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Cargo_Type column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Shipment_Terms",
       "kind": "report-feature",
       "construct": "Leads column Shipment_Terms",
       "reason": "Report Leads column Shipment_Terms is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Shipment_Terms manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Shipment_Terms column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Container_Movement_Type",
       "kind": "report-feature",
       "construct": "Leads column Container_Movement_Type",
       "reason": "Report Leads column Container_Movement_Type is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Container_Movement_Type manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Container_Movement_Type column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Lead_Source",
       "kind": "report-feature",
       "construct": "Leads column Lead_Source",
       "reason": "Report Leads column Lead_Source is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Lead_Source manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Lead_Source column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Industry",
       "kind": "report-feature",
       "construct": "Leads column Industry",
       "reason": "Report Leads column Industry is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Industry manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Industry column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Freight_Prepaid_Collect",
       "kind": "report-feature",
       "construct": "Leads column Freight_Prepaid_Collect",
       "reason": "Report Leads column Freight_Prepaid_Collect is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Freight_Prepaid_Collect manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Freight_Prepaid_Collect column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Include_Insurance",
       "kind": "report-feature",
       "construct": "Leads column Include_Insurance",
       "reason": "Report Leads column Include_Insurance is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Include_Insurance manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Include_Insurance column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Value_of_Goods",
       "kind": "report-feature",
       "construct": "Leads column Value_of_Goods",
       "reason": "Report Leads column Value_of_Goods is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Value_of_Goods manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Value_of_Goods column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column No_of_Containers_Req",
       "kind": "report-feature",
       "construct": "Leads column No_of_Containers_Req",
       "reason": "Report Leads column No_of_Containers_Req is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column No_of_Containers_Req manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The No_of_Containers_Req column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Container_Size",
       "kind": "report-feature",
       "construct": "Leads column Container_Size",
       "reason": "Report Leads column Container_Size is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Container_Size manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Container_Size column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Is_Stackable",
       "kind": "report-feature",
       "construct": "Leads column Is_Stackable",
       "reason": "Report Leads column Is_Stackable is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Is_Stackable manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Is_Stackable column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Gate_Way_Airport",
       "kind": "report-feature",
       "construct": "Leads column Gate_Way_Airport",
       "reason": "Report Leads column Gate_Way_Airport is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Gate_Way_Airport manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Gate_Way_Airport column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Destination_Airport",
       "kind": "report-feature",
       "construct": "Leads column Destination_Airport",
       "reason": "Report Leads column Destination_Airport is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Destination_Airport manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Destination_Airport column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column ETD",
       "kind": "report-feature",
       "construct": "Leads column ETD",
       "reason": "Report Leads column ETD is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column ETD manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The ETD column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column ETA",
       "kind": "report-feature",
       "construct": "Leads column ETA",
       "reason": "Report Leads column ETA is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column ETA manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The ETA column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column TRN",
       "kind": "report-feature",
       "construct": "Leads column TRN",
       "reason": "Report Leads column TRN is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column TRN manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The TRN column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column MFD_Required",
       "kind": "report-feature",
       "construct": "Leads column MFD_Required",
       "reason": "Report Leads column MFD_Required is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column MFD_Required manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The MFD_Required column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column No_of_Employees",
       "kind": "report-feature",
       "construct": "Leads column No_of_Employees",
       "reason": "Report Leads column No_of_Employees is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column No_of_Employees manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The No_of_Employees column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Photograph",
       "kind": "report-feature",
       "construct": "Leads column Photograph",
       "reason": "Report Leads column Photograph is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Photograph manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Photograph column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Website",
       "kind": "report-feature",
       "construct": "Leads column Website",
       "reason": "Report Leads column Website is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Website manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Website column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Annual_Revenue",
       "kind": "report-feature",
       "construct": "Leads column Annual_Revenue",
       "reason": "Report Leads column Annual_Revenue is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Annual_Revenue manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Annual_Revenue column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Rating",
       "kind": "report-feature",
       "construct": "Leads column Rating",
       "reason": "Report Leads column Rating is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Rating manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Rating column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column USED_OR_NEW_INDICATOR",
       "kind": "report-feature",
       "construct": "Leads column USED_OR_NEW_INDICATOR",
       "reason": "Report Leads column USED_OR_NEW_INDICATOR is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column USED_OR_NEW_INDICATOR manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The USED_OR_NEW_INDICATOR column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Dangerous_Goods",
       "kind": "report-feature",
       "construct": "Leads column Dangerous_Goods",
       "reason": "Report Leads column Dangerous_Goods is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Dangerous_Goods manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Dangerous_Goods column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Carrier_Vessel",
       "kind": "report-feature",
       "construct": "Leads column Carrier_Vessel",
       "reason": "Report Leads column Carrier_Vessel is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Carrier_Vessel manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Carrier_Vessel column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Storage_Request_Code",
       "kind": "report-feature",
       "construct": "Leads column Storage_Request_Code",
       "reason": "Report Leads column Storage_Request_Code is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Storage_Request_Code manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Storage_Request_Code column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column General_Description",
       "kind": "report-feature",
       "construct": "Leads column General_Description",
       "reason": "Report Leads column General_Description is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column General_Description manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The General_Description column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Groupage_Sub_Category",
       "kind": "report-feature",
       "construct": "Leads column Groupage_Sub_Category",
       "reason": "Report Leads column Groupage_Sub_Category is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Groupage_Sub_Category manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Groupage_Sub_Category column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Lead_Expiration_Date",
       "kind": "report-feature",
       "construct": "Leads column Lead_Expiration_Date",
       "reason": "Report Leads column Lead_Expiration_Date is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Lead_Expiration_Date manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Lead_Expiration_Date column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Type_of_Container",
       "kind": "report-feature",
       "construct": "Leads column Type_of_Container",
       "reason": "Report Leads column Type_of_Container is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Type_of_Container manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Type_of_Container column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Unit_of_Temperature",
       "kind": "report-feature",
       "construct": "Leads column Unit_of_Temperature",
       "reason": "Report Leads column Unit_of_Temperature is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Unit_of_Temperature manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Unit_of_Temperature column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Message_Type",
       "kind": "report-feature",
       "construct": "Leads column Message_Type",
       "reason": "Report Leads column Message_Type is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Message_Type manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Message_Type column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Rotaion_Number",
       "kind": "report-feature",
       "construct": "Leads column Rotaion_Number",
       "reason": "Report Leads column Rotaion_Number is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Rotaion_Number manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Rotaion_Number column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column BOX_Partnering_Line_Code",
       "kind": "report-feature",
       "construct": "Leads column BOX_Partnering_Line_Code",
       "reason": "Report Leads column BOX_Partnering_Line_Code is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column BOX_Partnering_Line_Code manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The BOX_Partnering_Line_Code column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column BOX_Partnering_Agent_Code",
       "kind": "report-feature",
       "construct": "Leads column BOX_Partnering_Agent_Code",
       "reason": "Report Leads column BOX_Partnering_Agent_Code is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column BOX_Partnering_Agent_Code manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The BOX_Partnering_Agent_Code column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Manifest_Registration_Number",
       "kind": "report-feature",
       "construct": "Leads column Manifest_Registration_Number",
       "reason": "Report Leads column Manifest_Registration_Number is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Manifest_Registration_Number manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Manifest_Registration_Number column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Slac_Indicator",
       "kind": "report-feature",
       "construct": "Leads column Slac_Indicator",
       "reason": "Report Leads column Slac_Indicator is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Slac_Indicator manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Slac_Indicator column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Place_of_Delivery",
       "kind": "report-feature",
       "construct": "Leads column Place_of_Delivery",
       "reason": "Report Leads column Place_of_Delivery is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Place_of_Delivery manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Place_of_Delivery column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Place_of_Load",
       "kind": "report-feature",
       "construct": "Leads column Place_of_Load",
       "reason": "Report Leads column Place_of_Load is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Place_of_Load manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Place_of_Load column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Port_of_Loading",
       "kind": "report-feature",
       "construct": "Leads column Port_of_Loading",
       "reason": "Report Leads column Port_of_Loading is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Port_of_Loading manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Port_of_Loading column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Port_of_Discharge",
       "kind": "report-feature",
       "construct": "Leads column Port_of_Discharge",
       "reason": "Report Leads column Port_of_Discharge is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Port_of_Discharge manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Port_of_Discharge column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column IMO_Class",
       "kind": "report-feature",
       "construct": "Leads column IMO_Class",
       "reason": "Report Leads column IMO_Class is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column IMO_Class manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The IMO_Class column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Dangerous_Goods_indicator",
       "kind": "report-feature",
       "construct": "Leads column Dangerous_Goods_indicator",
       "reason": "Report Leads column Dangerous_Goods_indicator is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Dangerous_Goods_indicator manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Dangerous_Goods_indicator column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Storage_request_for_Dangerous_Goods",
       "kind": "report-feature",
       "construct": "Leads column Storage_request_for_Dangerous_Goods",
       "reason": "Report Leads column Storage_request_for_Dangerous_Goods is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Storage_request_for_Dangerous_Goods manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Storage_request_for_Dangerous_Goods column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column UN_Number",
       "kind": "report-feature",
       "construct": "Leads column UN_Number",
       "reason": "Report Leads column UN_Number is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column UN_Number manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The UN_Number column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads column Voyage_Number",
       "kind": "report-feature",
       "construct": "Leads column Voyage_Number",
       "reason": "Report Leads column Voyage_Number is not in the generated report. Add one: either emit it or record the manual step.",
-      "step": "Set Leads column Voyage_Number manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The Voyage_Number column in the Leads report was not converted. In the Catalyst console, open the Leads report and add or configure that column, then preview the report and verify the displayed value matches the source app.",
+      "stepSource": "specific"
     },
     {
       "id": "report-feature:Leads block options",
@@ -3008,8 +3008,8 @@
       "kind": "translation",
       "construct": "translation Language_Settings",
       "reason": "The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.",
-      "step": "Set translation Language_Settings manually in the Catalyst console/app; not converted.",
-      "stepSource": "generic"
+      "step": "The translation Language_Settings was not converted. In the Catalyst console, add the language and copy the source translation strings into the generated app, then preview the translated text and verify it is correct.",
+      "stepSource": "specific"
     }
   ]
 }
