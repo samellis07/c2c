@@ -83,7 +83,7 @@ export interface UiField {
   readonly: boolean;
   status: 'generated' | 'todo';
   choices?: string[];
-  lookup?: { form: string; field?: string; endpoint: string };
+  lookup?: { form: string; field?: string; endpoint: string; sort?: 'asc' | 'desc' };
   maxLength?: number;
   minLength?: number;
   pattern?: string;
@@ -643,7 +643,7 @@ export function applyDecorations(model: UiModel, app: App, dir?: string): void {
  * A pass that returns a new model copies those fields onto the model being built.
  */
 const SWAPPED_DECORATION = new Set(['applyLabels']);
-const DECORATION_HELPER = new Set(['displayRefs', 'displayTerms', 'displayChoice', 'lookupFormats', 'reportFieldLabel']);
+const DECORATION_HELPER = new Set(['displayRefs', 'displayTerms', 'displayChoice', 'lookupFormats', 'lookupSorts', 'sortDirOf', 'reportFieldLabel']);
 
 function invokeDecoration(key: string, fn: (model: UiModel, app: App) => void, model: UiModel, app: App): void {
   if (DECORATION_HELPER.has(key)) return;
