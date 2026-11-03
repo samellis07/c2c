@@ -1845,7 +1845,13 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
     .filter((column) => column.lookup)
     .map((column) => {
       const format = (column.lookup as { displayFormat?: unknown }).displayFormat;
-      return { column: column.field, form: column.lookup!.form, field: column.lookup!.field, ...(Array.isArray(format) ? { format } : {}) };
+      return {
+        column: column.field,
+        form: column.lookup!.form,
+        field: column.lookup!.field,
+        ...(column.lookup!.source ? { source: column.lookup!.source } : {}),
+        ...(Array.isArray(format) ? { format } : {}),
+      };
     });
   const shimNames = ['criteriaHasTodo', 'needsExactRead', 'queryExact', ...(subformLinks.length ? ['attachSubforms'] : []), ...(wantsRelative ? ['criteriaHasRelative', 'bindRelativeCriteria', 'matchRow'] : [])];
   const shimImport = `import { ${shimNames.join(', ')} } from "creator-to-catalyst/shims";\n`;
@@ -2162,7 +2168,7 @@ async function resolveLookupDisplays(datastore, rows, columns, principal) {
     const seen = {};
     const ids = [];
     for (const row of rows) {
-      const value = row ? row[column.column] : undefined;
+      const value = row ? row[column.source || column.column] : undefined;
       for (const item of Array.isArray(value) ? value : [value]) {
         if (!isId(item) || seen[item]) continue;
         seen[item] = true;
@@ -2190,7 +2196,7 @@ async function resolveLookupDisplays(datastore, rows, columns, principal) {
     }
     const shown = (id) => (Object.prototype.hasOwnProperty.call(names, id) ? names[id] : "");
     for (const row of rows) {
-      const value = row ? row[column.column] : undefined;
+      const value = row ? row[column.source || column.column] : undefined;
       if (Array.isArray(value)) row[column.column] = value.map((item) => (isId(item) ? shown(item) : item));
       else if (isId(value)) row[column.column] = shown(value);
     }
