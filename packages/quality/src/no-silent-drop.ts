@@ -761,16 +761,20 @@ function auditReportFeatures(app: App, out: AuditOutputs, rows: CoverageRow[]): 
 }
 
 function reportFeatures(report: Report): ReportFeature[] {
-  const cols = (list: Report['columns'], prefix: string): ReportFeature[] =>
-    list.flatMap((column) => [
-      {
-        label: `${prefix}column ${column.field}`,
-        start: column.span.start,
-        end: column.span.end,
-        prove: (built, bag) => (take(bag.columns, column.field) || takeGroupField(built, bag, column.field) ? 'emitted' : 'dropped'),
-      },
-      ...cols(column.subcolumns, `${prefix}column ${column.field} `),
-    ]);
+  const cols = (list: Report['columns'], prefix: string, parent?: string): ReportFeature[] =>
+    list.flatMap((column) => {
+      // A part column renders as `<Parent>.<part>`: the view column it proves is the qualified path.
+      const path = parent ? `${parent}.${column.field}` : column.field;
+      return [
+        {
+          label: `${prefix}column ${column.field}`,
+          start: column.span.start,
+          end: column.span.end,
+          prove: (built, bag) => (take(bag.columns, path) || takeGroupField(built, bag, column.field) ? 'emitted' : 'dropped'),
+        },
+        ...cols(column.subcolumns, `${prefix}column ${column.field} `, path),
+      ];
+    });
   return [
     ...(report.criteria?.trim()
       ? [

@@ -1792,3 +1792,114 @@ test('a report column naming the group field is emitted by the group headers', (
   for (const block of mutated.detailBlocks ?? []) block.fields = block.fields.filter((item) => item.field !== 'Status');
   assert.equal(rowStatus(source, gone, name), 'dropped');
 });
+
+const CARRY_REPORT = `
+	form Appointment_Booking
+	{
+		Customer_Name
+		(
+			type = name
+			displayname = "Customer Name"
+			first_name
+			(
+				type = first_name
+			)
+			last_name
+			(
+				type = last_name
+			)
+		)
+		Phone_Number
+		(
+			type = text
+		)
+	}
+	list All_Appointments
+	{
+		show all rows from Appointment_Booking
+		(
+			Phone_Number
+			Customer_Name
+			(
+				first_name
+				last_name
+			)
+		)
+	}
+`;
+
+test('composite report subcolumns are carried as view columns, unknown columns stay dropped', () => {
+  const source = dsApp(CARRY_REPORT);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'All_Appointments column Customer_Name column first_name'), 'emitted');
+  assert.equal(rowStatus(source, out, 'All_Appointments column Customer_Name column last_name'), 'emitted');
+
+  const ghost = dsApp(`
+	form Appointment_Booking
+	{
+		Phone_Number
+		(
+			type = text
+		)
+	}
+	list All_Appointments
+	{
+		show all rows from Appointment_Booking
+		(
+			Phone_Number
+			Ghost_Field
+			Phone_Number ( bogus_part )
+		)
+	}
+`);
+  const ghostOut = collectOutputs(ghost);
+  // Fails closed: a column that names nothing the form stores is a drop,
+  // not an empty column the audit calls emitted.
+  assert.equal(rowStatus(ghost, ghostOut, 'All_Appointments column Ghost_Field'), 'dropped');
+  assert.equal(rowStatus(ghost, ghostOut, 'All_Appointments column Phone_Number column bogus_part'), 'dropped');
+});
+
+test('a quickview that omits declared columns does not drop them', () => {
+  const source = dsApp(`${CARRY_REPORT}
+	web
+	{
+		reports
+		{
+			report All_Appointments
+			{
+				quickview
+				(
+					layout
+					(
+						datablock1
+						(
+							fields
+							(
+								Phone_Number
+							)
+						)
+					)
+				)
+			}
+		}
+	}
+`);
+  const out = collectOutputs(source);
+  for (const name of [
+    'All_Appointments column Customer_Name',
+    'All_Appointments column Customer_Name column first_name',
+    'All_Appointments column Customer_Name column last_name',
+  ]) {
+    assert.equal(rowStatus(source, out, name), 'emitted', name);
+  }
+});
+
+test('a report column is proved only by the generated view (mutation)', () => {
+  const source = dsApp(CARRY_REPORT);
+  const out = collectOutputs(source);
+  const mutated = cloneOutputs(out);
+  mutated.model.reports[0]!.columns = mutated.model.reports[0]!.columns.filter(
+    (column) => column.field !== 'Customer_Name.last_name',
+  );
+  assert.equal(rowStatus(source, mutated, 'All_Appointments column Customer_Name column last_name'), 'dropped');
+});
