@@ -488,9 +488,10 @@ test(
 
   const crm = analyze(galleryDs('customer-relationship-manager', 'Customer_Relationship_Manager.ds'));
   assertCountedOnce(crm);
-  // 1c9611919 counts static <style> rules the page sanitizer drops, and 2acdf2f86 counts
-  // client statements that need a shim the browser runtime lacks instead of shipping a stub.
-  assert.equal(crm.determinism.todoCount, 26);
+  // 34378cc85 compiles read-only htmlpage Deluge islands into server-rendered endpoints,
+  // clearing most of the residual CRM snippets; the remaining 11 are 7 UI snippets + 4
+  // page static-style drops (1c9611919 still counts those style rules).
+  assert.equal(crm.determinism.todoCount, 11);
   assert.equal(crm.determinism.uiTodoCount, 11);
   assert.deepEqual(
     crm.deluge.todoLocations.filter((item) => item.scope === 'app').map((item) => `${item.location}|${item.construct}`),
@@ -513,11 +514,10 @@ test(
   () => {
   const education = analyze(galleryDs('education-management', 'Education_Management.ds'));
   assertCountedOnce(education);
-  // The 21 pin predates three honest counting changes: 1c9611919 counts static <style>
-  // rules the page sanitizer drops, 2acdf2f86 counts client statements that need a shim
-  // the browser runtime lacks instead of shipping a stub, and 15f9c923f keeps conditions
-  // that would read a stale prefetch slot counted as client-split todos.
-  assert.equal(education.determinism.todoCount, 29);
+  // 93465d901 (and the preceding prefetch-replay server-condition work) compiles client
+  // conditions that only need replayable server reads into the client-call route, so the
+  // residual count is now 9 UI snippets + 2 client-condition-uses-server + 1 client-loop-uses-server.
+  assert.equal(education.determinism.todoCount, 12);
   assert.equal(education.deluge.todoLocations.filter((item) => item.scope === 'app').length, 0);
   const fieldScripts8 = education.deluge.todoLocations.filter((item) => item.location === 'workflow Field_scripts8:21');
   assert.equal(fieldScripts8.length, 2);
