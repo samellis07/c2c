@@ -430,11 +430,16 @@ function reportDateKind(report, fieldName) {
 /** A report cell's text: a date or date-time field in the app format, anything else as stored. */
 function reportCellText(report, row, fieldName) {
   let raw = row && fieldName && row[fieldName] != null ? row[fieldName] : undefined;
-  // A `Parent.part` column reads the part inside the composite object.
+  // A `Parent.part` column reads the part inside the composite object; the
+  // store keeps the same part flat as `Parent_part`.
   if (raw === undefined && row && typeof fieldName === 'string' && fieldName.indexOf('.') > 0) {
-    raw = row;
-    for (const key of fieldName.split('.')) {
-      raw = raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, key) ? raw[key] : undefined;
+    const flat = fieldName.split('.').join('_');
+    if (Object.prototype.hasOwnProperty.call(row, flat)) raw = row[flat];
+    if (raw === undefined) {
+      raw = row;
+      for (const key of fieldName.split('.')) {
+        raw = raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, key) ? raw[key] : undefined;
+      }
     }
   }
   if (raw == null) return '';

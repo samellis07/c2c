@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -378,6 +378,129 @@ test('a report cell shows the joined parts of the parent composite display', asy
       delete process.env.C2C_DEPLOY_MODE;
       delete (globalThis as Record<string, unknown>).__c2cDatastore;
     }
+  } finally {
+    rmSync(built.dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * The shipped shape: `values = Add_Customer.ID` + `displayformat = [Customer_Name]`
+ * + a `Customer ( Email )` subcolumn. Resolving the parent display rewrites the
+ * shared `Customer` cell, so the subcolumn must resolve from the original ids.
+ */
+function bookingBody(): string {
+  const grant = (form: string, report: string, fields: string[]) => `\t\t\t\t${form}
+\t\t\t\t{
+\t\t\t\t\tenabled = true
+\t\t\t\t\tReportPermissions
+\t\t\t\t\t{
+\t\t\t\t\t\t${report} = {"View"}
+\t\t\t\t\t}
+\t\t\t\t\tFieldPermissions
+\t\t\t\t\t{
+${fields.map((name) => `\t\t\t\t\t\t${name}\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tvisibility:true,readonly:false\n\t\t\t\t\t\t}`).join('\n')}
+\t\t\t\t\t}
+\t\t\t\t}`;
+  return `\tsection Main
+\t{
+\t\tform Add_Customer
+\t\t{
+${field('Customer_Name', 'text', '\t\t\tdisplayname = "Customer Name"')}
+${field('Email', 'email', '\t\t\tdisplayname = "Email Address"')}
+\t\t}
+\t\tform Appointment_Booking
+\t\t{
+\t\t\tCustomer
+\t\t\t(
+\t\t\t\ttype = lookup
+\t\t\t\tvalues = Add_Customer.ID
+    \t\t\tdisplayformat = [Customer_Name]
+\t\t\t)
+${field('Note', 'text')}
+\t\t}
+\t\tlist All_Customers
+\t\t{
+\t\t\tshow all rows from Add_Customer
+\t\t\t(
+\t\t\t\tCustomer_Name
+\t\t\t\tEmail
+\t\t\t)
+\t\t}
+\t\tlist All_Appointments
+\t\t{
+\t\t\tshow all rows from Appointment_Booking
+\t\t\t(
+\t\t\t\tNote
+\t\t\t\tCustomer
+\t\t\t\t(
+\t\t\t\t\tEmail
+\t\t\t\t)
+\t\t\t)
+\t\t}
+\t}
+\tshare_settings
+\t{
+\t\t"Staff"
+\t\t{
+\t\t\tname = "Staff"
+\t\t\ttype = Users_Permissions
+\t\t\tModulePermissions
+\t\t\t{
+${grant('Add_Customer', 'All_Customers', ['Customer_Name', 'Email'])}
+${grant('Appointment_Booking', 'All_Appointments', ['Customer', 'Note'])}
+\t\t\t}
+\t\t}
+\t}`;
+}
+
+test('a lookup subcolumn resolves from the stored id after displayformat rewrites the parent cell', async () => {
+  const built = await writeBuilt(bookingBody());
+  try {
+    // Extra deny profiles: no parent-form grant, a field grant without Email,
+    // and a record filter no parent row matches.
+    const policyPath = join(built.dir, 'functions/access-policy.json');
+    const policy = JSON.parse(readFileSync(policyPath, 'utf8')) as {
+      profiles: Record<string, Record<string, { fields?: string[]; recordFilter?: unknown }>>;
+    };
+    policy.profiles.NoParent = { Appointment_Booking: {} };
+    policy.profiles.NoEmail = { Appointment_Booking: {}, Add_Customer: { fields: ['ID', 'Customer_Name'] } };
+    policy.profiles.OwnBob = { Appointment_Booking: {}, Add_Customer: { recordFilter: { op: '==', field: 'Added_User', value: 'bob' } } };
+    writeFileSync(policyPath, JSON.stringify(policy));
+    const report = await built.load('functions/reports/all-appointments.mjs');
+    const parentWheres: string[] = [];
+    const query = (form: string, where: string) => {
+      if (form === 'Add_Customer') {
+        parentWheres.push(where);
+        if (/Added_User\s*=\s*'bob'/.test(String(where))) return [];
+        return [{ ROWID: '1001', ID: '1001', Customer_Name: 'Ada Lovelace', Email: 'ada@example.com', Added_User: 'alice' }];
+      }
+      return [{ ROWID: '9', Customer: '1001', Note: 'n' }];
+    };
+    await withStore(query, async () => {
+      const row = async (profile: string) => {
+        const res = await invoke(report.default, { user: { profile }, body: { op: 'query' } });
+        assert.equal(res.status, 200, `${profile}: ${JSON.stringify(res.body)}`);
+        return (res.body.rows as Record<string, unknown>[])[0];
+      };
+      const staff = await row('Staff');
+      assert.equal(staff?.Customer, 'Ada Lovelace', 'the parent cell shows the displayformat field');
+      assert.equal(staff?.['Customer.Email'], 'ada@example.com', 'the subcolumn resolves from the original id');
+      assert.ok(parentWheres.length >= 2, 'the parent and the subcolumn each query the parent form');
+      const noParent = await row('NoParent');
+      assert.equal(noParent?.Customer, '');
+      assert.notEqual(noParent?.['Customer.Email'], 'ada@example.com');
+      const parentReads = parentWheres.length;
+      const noEmail = await row('NoEmail');
+      assert.equal(noEmail?.Customer, 'Ada Lovelace');
+      assert.equal(noEmail?.['Customer.Email'], '', 'a grant without Email leaves the subcolumn empty');
+      const ownBob = await row('OwnBob');
+      assert.equal(ownBob?.Customer, '');
+      assert.notEqual(ownBob?.['Customer.Email'], 'ada@example.com');
+      assert.ok(
+        parentWheres.slice(parentReads).some((where) => /Added_User\s*=\s*'bob'/.test(where)),
+        'the caller record filter is ANDed into the parent query',
+      );
+    });
   } finally {
     rmSync(built.dir, { recursive: true, force: true });
   }

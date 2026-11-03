@@ -1970,12 +1970,26 @@ async function resolveLookupDisplays(datastore, rows, columns, principal) {
     return parts.join(" ");
   };
   const isId = (value) => typeof value === "string" && /^[0-9]+$/.test(value);
+  // A subcolumn's source is the parent lookup's cell, and the parent's display
+  // write replaces the ROWID there. Snapshot every source cell before the first
+  // write so each column resolves against the original ids.
+  const originals = (Array.isArray(rows) ? rows : []).map((row) => {
+    const snap = {};
+    for (const column of columns || []) {
+      const key = column && typeof column.column === "string" ? column.source || column.column : null;
+      if (key && !Object.prototype.hasOwnProperty.call(snap, key)) {
+        snap[key] = row && typeof row === "object" ? row[key] : undefined;
+      }
+    }
+    return snap;
+  });
   for (const column of columns || []) {
     if (!column || typeof column.column !== "string" || typeof column.form !== "string" || typeof column.field !== "string") continue;
+    const source = column.source || column.column;
     const seen = {};
     const ids = [];
-    for (const row of rows) {
-      const value = row ? row[column.source || column.column] : undefined;
+    for (const snap of originals) {
+      const value = snap[source];
       for (const item of Array.isArray(value) ? value : [value]) {
         if (!isId(item) || seen[item]) continue;
         seen[item] = true;
@@ -2002,8 +2016,9 @@ async function resolveLookupDisplays(datastore, rows, columns, principal) {
       names[String(parent.ROWID)] = text === undefined ? "" : text;
     }
     const shown = (id) => (Object.prototype.hasOwnProperty.call(names, id) ? names[id] : "");
-    for (const row of rows) {
-      const value = row ? row[column.source || column.column] : undefined;
+    for (let index = 0; index < originals.length; index += 1) {
+      const row = rows[index];
+      const value = originals[index][source];
       if (Array.isArray(value)) row[column.column] = value.map((item) => (isId(item) ? shown(item) : item));
       else if (isId(value)) row[column.column] = shown(value);
     }
