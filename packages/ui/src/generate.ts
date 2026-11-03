@@ -1894,7 +1894,7 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
     parentForms.push(form);
   }
   const parentDecimals = Object.fromEntries(parentForms.flatMap((form) => (Object.hasOwn(appDecimals, form) ? [[form, appDecimals[form]!]] : [])));
-  const exactConst = `${exact ? `export const decimalColumns = ${JSON.stringify(decimals)};\n` : `const decimalColumns = {};\n`}${subformConst}const parentDecimals = ${JSON.stringify(parentDecimals)};\nconst projection = ${JSON.stringify(projection)};\n`;
+  const exactConst = `${exact ? `export const decimalColumns = ${JSON.stringify(decimals)};\n` : `const decimalColumns = {};\n`}${subformConst}const parentDecimals = ${JSON.stringify(parentDecimals)};\nconst projection = ${JSON.stringify(projection)};\nconst navPaths = ${JSON.stringify(navPaths)};\n`;
   const attachRows = subformLinks.length ? `\n      if (Array.isArray(queried)) await attachSubforms(datastore, subformTables, formName, queried);` : '';
   const liveQuery = exact
     ? `const resolved = await resolveLookupCriteria(datastore, ${criteriaRef}, principal);
@@ -2307,7 +2307,7 @@ ${stageLoad('      ')}      ${rowWord} = (Array.isArray(queried) ? queried : [])
         if (${JSON.stringify(columns.includes('ID'))} && projected.ID === undefined && row && typeof row === "object") projected.ID = row.ROWID ?? row.rowid;
         return projected;
       });
-${wantsRelative ? '      if (relative) rows = rows.filter((row) => matchRow(row, resolved, decimalColumns));\n' : ''}      await resolveLookupPaths(datastore, rows, ${JSON.stringify(navPaths)}, principal);
+${wantsRelative ? '      if (relative) rows = rows.filter((row) => matchRow(row, resolved, decimalColumns));\n' : ''}      await resolveLookupPaths(datastore, rows, navPaths, principal);
       await resolveLookupDisplays(datastore, rows, lookupColumns, principal);
       const queryShape = sqlIdent
         ? \`SELECT \${projection.join(", ")} FROM \${sqlIdent}\${whereClause(where)} \${orderBy} LIMIT \${offset + 1}, \${pageSize}\`

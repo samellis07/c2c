@@ -274,7 +274,7 @@ async function loadReport(app: App, reportName: string, staged = true) {
 
 /** A lookup display needs its parent form readable, as on the unstaged read. Grant each parent in full. */
 function grantParents(loaded: Awaited<ReturnType<typeof loadReport>>, profile = 'Staff'): void {
-  const forms = loaded.access.profiles[profile]!;
+  const forms = (loaded.access.profiles[profile] ??= {});
   for (const parent of Object.values(loaded.lookupParents)) forms[parent] = {};
 }
 
@@ -1077,6 +1077,7 @@ test('a navigation lookup path reads the related field under the caller scope, a
   const app = appOf(`\tform Request
 \t{
 ${textField('Note')}
+${textField('Item_Ref')}
 \t}
 \tform Item
 \t{
@@ -1117,6 +1118,7 @@ ${lookupField('Holder', 'Request', 'Note')}
 ${share('Item', ['All_Items'])}`);
   const loaded = await loadReport(app, 'All_Items', false);
   try {
+    loaded.access.profiles.Staff = { Item: {} };
     grantParents(loaded);
     assert.match(loaded.source, /const navPaths = \[/, 'the stub bakes the navigation lookup path');
     assert.match(loaded.source, /await resolveLookupPaths\(datastore, rows, navPaths, principal\)/, 'the list read resolves it before display');
