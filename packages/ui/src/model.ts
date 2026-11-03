@@ -616,6 +616,24 @@ export function actionNavigation(app: App, report: Report, workflow: string | un
       // `input.<Lookup>.ID` is the parent ROWID the lookup column stores.
       text += `\u0000${reads.length}\u0000`;
       reads.push(part.object.property);
+    } else if (
+      part.kind === 'member' &&
+      /^[A-Za-z_]\w*$/.test(part.property) &&
+      part.object.kind === 'member' &&
+      part.object.object.kind === 'name' &&
+      part.object.object.name === 'input' &&
+      /^[A-Za-z_]\w*$/.test(part.object.property)
+    ) {
+      // `input.<Lookup>.<Field>` reads one field of the related record. The
+      // head must be a lookup on the report's form and the leaf a stored
+      // scalar column of the lookup target (no subfields: composites and
+      // subforms are not single values). Anything deeper stays a todo.
+      const lookupField = source ? formField(source, part.object.property) : undefined;
+      const target = lookupField?.lookup ? app.forms.find((form) => form.name === lookupField.lookup!.form) : undefined;
+      const leaf = target ? formField(target, part.property) : undefined;
+      if (!lookupField?.lookup || !target || !leaf || leaf.subfields.length > 0) return undefined;
+      text += `\u0000${reads.length}\u0000`;
+      reads.push(`${part.object.property}.${part.property}`);
     } else return undefined;
   }
   const m = /^#(Form|Report|Page):([A-Za-z_]\w*)(?:\?(.*))?$/.exec(text);
@@ -643,7 +661,18 @@ export function actionNavigation(app: App, report: Report, workflow: string | un
     if (read) {
       const field = reads[Number(read[1])]!;
       if (field === 'ID') params.push({ name, field: 'ROWID' });
-      else if (source && formField(source, field)) params.push({ name, field });
+      else if (field.includes('.')) {
+        // A one-level lookup read travels under its dotted row key; the
+        // server attaches it (or leaves it off when the caller may not
+        // read it) and the client sends only a value the row holds.
+        const dot = field.indexOf('.');
+        const lookupName = field.slice(0, dot);
+        const leafName = field.slice(dot + 1);
+        const lookupField = source ? formField(source, lookupName) : undefined;
+        const target = lookupField?.lookup ? app.forms.find((form) => form.name === lookupField.lookup!.form) : undefined;
+        if (!lookupField?.lookup || !target || !formField(target, leafName)) return undefined;
+        params.push({ name, field });
+      } else if (source && formField(source, field)) params.push({ name, field });
       else return undefined;
     } else if (raw.includes('\u0000')) return undefined;
     else params.push({ name, value: raw });

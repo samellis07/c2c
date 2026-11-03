@@ -975,13 +975,26 @@ export function navNeedsRow(nav) {
  * scalar; a field the caller cannot read is not on the row and prefills
  * nothing.
  */
+/** A nav param field reads the row's dotted key first, then a nested object path — the same order lookup cells resolve. Only scalars travel. */
+function navFieldValue(row, field) {
+  if (!row || typeof row !== 'object' || typeof field !== 'string' || field === '') return undefined;
+  if (Object.prototype.hasOwnProperty.call(row, field)) return row[field];
+  if (field.indexOf('.') < 0) return undefined;
+  let value = row;
+  for (const part of field.split('.')) {
+    if (value == null || typeof value !== 'object' || !Object.prototype.hasOwnProperty.call(value, part)) return undefined;
+    value = value[part];
+  }
+  return value;
+}
+
 export function actionNavHref(nav, row) {
   const query = [];
   for (const param of nav.params || []) {
     if (!param || typeof param.name !== 'string') continue;
     let value;
     if (typeof param.field === 'string') {
-      const raw = row && typeof row === 'object' && Object.prototype.hasOwnProperty.call(row, param.field) ? row[param.field] : undefined;
+      const raw = navFieldValue(row, param.field);
       if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') value = String(raw);
     } else if (typeof param.value === 'string') value = param.value;
     if (value !== undefined && value !== '') query.push(`${encodeURIComponent(param.name)}=${encodeURIComponent(value)}`);

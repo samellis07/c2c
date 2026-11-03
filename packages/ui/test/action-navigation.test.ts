@@ -36,6 +36,7 @@ const NAV = {
   'Go Home': ['Go_Home', `openUrl(zoho.appuri + "#Page:Home","same window");`],
   'Open Secret': ['Open_Secret', `openUrl("#Form:Secret?Item_Ref=" + input.ID,"popup window");`],
   'By Holder': ['By_Holder', `openUrl("#Form:Request?Item_Ref=" + input.Holder.ID,"popup window");`],
+  'Holder Note': ['Holder_Note', `openUrl("#Form:Request?Item_Ref=" + input.Holder.Note,"popup window");`],
   'Page Detail': ['Page_Detail', `openUrl("#Page:Detail?param1=" + input.Name + "&param2=Fixed","same window");`],
   'Bill Page': ['Bill_Page', `openUrl("#Page:Detail?param1=" + input.ID,"same window");`],
   'Literal Attack': ['Literal_Attack', `openUrl("#Page:Detail?param1=<img src=x onerror=alert(1)>","same window");`],
@@ -50,8 +51,12 @@ const COUNTED = {
   'Unknown Read': ['Unknown_Read', `openUrl("#Form:Request?Note=" + input.Missing,"popup window");`],
   'Unknown Form': ['Unknown_Form', `openUrl("#Form:Nowhere","popup window");`],
   'Deep Read': ['Deep_Read', `openUrl("#Form:Request?Item_Ref=" + input.Name.ID,"popup window");`],
+  'Deep Lookup': ['Deep_Lookup', `openUrl("#Form:Request?Item_Ref=" + input.Holder.Note.Extra,"popup window");`],
+  'Missing Leaf': ['Missing_Leaf', `openUrl("#Form:Request?Item_Ref=" + input.Holder.Nope,"popup window");`],
+  'Head Not Lookup': ['Head_Not_Lookup', `openUrl("#Form:Request?Item_Ref=" + input.Name.Note,"popup window");`],
   'Foreign Host': ['Foreign_Host', `openUrl("https://elsewhere.example" + zoho.appuri + "#Form:Request","popup window");`],
   'Undeclared Param': ['Undeclared_Param', `openUrl("#Page:Detail?nope=" + input.Name,"same window");`],
+  'Undeclared Nested': ['Undeclared_Nested', `openUrl("#Page:Detail?nope=" + input.Holder.Note,"same window");`],
   'Case Mismatch': ['Case_Mismatch', `openUrl("#Page:Detail?PARAM1=" + input.Name,"same window");`],
   'Missing Page Params': ['Missing_Page_Params', `openUrl("#Page:Nowhere?param1=" + input.Name,"same window");`],
 } as const;
@@ -168,6 +173,7 @@ test('an openUrl-only workflow to an own form, report or page is a navigation; a
   assert.deepEqual(byName.get('New Request')?.navigate, { kind: 'form', target: 'Request', href: '#/form/Request', params: [] });
   assert.deepEqual(byName.get('See Requests')?.navigate, { kind: 'report', target: 'All_Requests', href: '#/report/All_Requests', params: [] });
   assert.deepEqual(byName.get('By Holder')?.navigate, { kind: 'form', target: 'Request', href: '#/form/Request', params: [{ name: 'Item_Ref', field: 'Holder' }] });
+  assert.deepEqual(byName.get('Holder Note')?.navigate, { kind: 'form', target: 'Request', href: '#/form/Request', params: [{ name: 'Item_Ref', field: 'Holder.Note' }] });
   assert.deepEqual(byName.get('Go Home')?.navigate, { kind: 'page', target: 'Home', href: '#/page/Home', params: [] });
   assert.deepEqual(byName.get('Page Detail')?.navigate, {
     kind: 'page',
@@ -223,6 +229,7 @@ test('the static client links each navigation with values only from the row it r
     'Go Home #/page/Home',
     'Open Secret #/form/Secret?Item_Ref=7',
     'By Holder #/form/Request?Item_Ref=42',
+    'Holder Note #/form/Request',
     'Page Detail #/page/Detail?param1=Desk%20%26%20chair&param2=Fixed',
     'Bill Page #/page/Detail?param1=7',
     'Literal Attack #/page/Detail?param1=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E',
@@ -235,12 +242,13 @@ test('the static client links each navigation with values only from the row it r
     'Go Home #/page/Home',
     'Open Secret #/form/Secret?Item_Ref=8',
     'By Holder #/form/Request',
+    'Holder Note #/form/Request',
     'Page Detail #/page/Detail?param2=Fixed',
     'Bill Page #/page/Detail?param1=8',
     'Literal Attack #/page/Detail?param1=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E',
   ]);
   // Counted actions draw no link.
-  assert.doesNotMatch(rows, /External|Mixed|Computed|Filtered Report|Undeclared Param|Case Mismatch|Missing Page/);
+  assert.doesNotMatch(rows, /External|Mixed|Computed|Filtered Report|Undeclared Param|Undeclared Nested|Case Mismatch|Missing Page|Deep Lookup|Missing Leaf|Head Not Lookup/);
   // The phone card carries the same links.
   const card = rt.cardActions(ui, '7', { ROWID: '7', Name: 'Desk' }).filter((item) => item.href && !item.href.startsWith('#/report/All_Items'));
   assert.equal(card.find((item) => item.label === 'Note It')?.href, '#/form/Request?Note=Desk&Kind=Loan');
@@ -250,6 +258,34 @@ test('the static client links each navigation with values only from the row it r
   const toolbar = [...shell.querySelectorAll('[data-report-tools] a[data-action-nav]')].map((a) => `${a.textContent} ${a.getAttribute('href')}`);
   assert.deepEqual(toolbar, ['See Requests #/report/All_Requests']);
   assert.equal(shell.querySelector('[data-report-tools] [data-action]')?.textContent, undefined, 'no row-bound action in the toolbar');
+});
+
+test('a one-level lookup read prefills from the row dotted key, and nothing when the caller could not read it', async () => {
+  const rt = (await runtime()) as Runtime & { actionNavHref(nav: unknown, row: unknown): string };
+  const { model } = built();
+  const nav = report(model).customActions.find((item) => item.name === 'Holder Note')?.navigate!;
+  assert.ok(nav, 'a one-level lookup read migrates');
+  assert.deepEqual(nav.params, [{ name: 'Item_Ref', field: 'Holder.Note' }]);
+  const href = (row: unknown) => rt.actionNavHref(nav, row);
+  // The dotted key the server attached under the caller scope prefills.
+  assert.equal(href({ ROWID: '7', 'Holder.Note': 'First note' }), '#/form/Request?Item_Ref=First%20note');
+  // A nested object cell (a supplied row) resolves the same path.
+  assert.equal(href({ ROWID: '7', Holder: { Note: 'Nested' } }), '#/form/Request?Item_Ref=Nested');
+  // No key on the row (the caller cannot read the lookup or its field):
+  // the param is left out, never leaked.
+  assert.equal(href({ ROWID: '7', Holder: '42' }), '#/form/Request');
+  assert.equal(href({ ROWID: '7' }), '#/form/Request');
+  // A non-scalar cell never travels.
+  assert.equal(href({ ROWID: '7', 'Holder.Note': { text: 'x' } }), '#/form/Request');
+  assert.equal(href({ ROWID: '7', 'Holder.Note': ['a'] }), '#/form/Request');
+  // A hostile related value stays a literal data value: encoded in the query,
+  // never in the path, and decoding returns the exact input.
+  const hostile = href({ ROWID: '7', 'Holder.Note': '<img src=x onerror=alert(1)>../' });
+  assert.ok(hostile.startsWith('#/form/Request?'), hostile);
+  assert.doesNotMatch(hostile, /[<>"]/);
+  assert.ok(!hostile.includes('../'), 'no path traversal in the link');
+  const query = Object.fromEntries(new URLSearchParams(hostile.split('?')[1]).entries());
+  assert.equal(query.Item_Ref, '<img src=x onerror=alert(1)>../');
 });
 
 test('a prefilled form route fills only the target form fields, and an edit route never prefills', async () => {
