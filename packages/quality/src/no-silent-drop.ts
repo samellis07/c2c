@@ -86,6 +86,7 @@ import { adapterFor } from '../../shims/src/zoho-adapters.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
 import { generateSchema, schemaIdent, type SchemaColumn, type SchemaPlan } from '../../schema/src/generator.js';
 import { buildModel, type UiField, type UiModel, type UiReport } from '../../ui/src/model.js';
+import { displayChoice, type DisplayTerm } from '../../ui/src/decorations/lookups.js';
 import type { UiElement } from '../../ui/src/pages.js';
 import { defaultEquivalent } from './default-equivalence.js';
 
@@ -337,7 +338,7 @@ function fieldSettingItems(field: Field, app: App, formName: string, schema: Sch
       label: `annotation ${annotation.name}`,
       start: annotation.span?.start ?? span.start,
       end: annotation.span?.end ?? span.end,
-      proved: () => false,
+      proved: (ui) => annotationProved(annotation, ui),
     });
   }
   for (const flag of field.flags) {
@@ -345,7 +346,7 @@ function fieldSettingItems(field: Field, app: App, formName: string, schema: Sch
       label: `flag ${flag}`,
       start: span.start,
       end: span.end,
-      proved: (ui) => flagProved(flag, ui),
+      proved: (ui) => flagProved(flag, ui, field),
     });
   }
   if (field.choices) {
@@ -422,6 +423,9 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
     const plain = unquote(raw);
     return ui?.label === plain || ui?.label === plain.trim();
   }
+  if (key === 'displayformat') return displayFormatProved(raw, field, ui);
+  if (key === 'value') return ui?.widget === 'notes' && ui.notesHtml === unquote(raw);
+  if (key === 'searchable') return searchableProved(text, ui);
   if (key === 'values') return choicesProved(field, ui) || lookupProved(field.lookup, ui, columns, app);
   if (key === 'initial value') return initialProved(raw, ui, columns);
   if (key === 'maxchar' || key === 'max char' || key === 'max length') return lengthProved(text, ui?.maxLength, columns, 'max');
@@ -572,9 +576,79 @@ function modifierProved(modifier: string, ui: UiField | undefined, columns: Sche
   return false;
 }
 
-function flagProved(flag: string, ui: UiField | undefined): boolean {
+function flagProved(flag: string, ui: UiField | undefined, field: Field): boolean {
   if (/scan|qr|barcode/i.test(flag)) return ui?.scan === true;
+  // `description` declares the field's help text. It is carried when the
+  // field's `type = help_text` annotation message reaches ui.help
+  // (decorations/labels.ts helpMessage); a bare flag with no such message is not.
+  if (flag === 'description') {
+    const message = helpTextMessage(field);
+    return message !== undefined && ui?.help === message;
+  }
   return false;
+}
+
+/** Message of the field's first `type = help_text` annotation, decoded. */
+function helpTextMessage(field: Field): string | undefined {
+  for (const annotation of field.annotations) {
+    const message = helpTextOf(annotation);
+    if (message !== undefined) return message;
+  }
+  return undefined;
+}
+
+/** Message of one annotation when it is `type = help_text`, else undefined. */
+function helpTextOf(annotation: PropertyBlock): string | undefined {
+  const kind = annotation.properties.find((p) => p.key.trim().toLowerCase() === 'type');
+  if (!kind || unquote(kind.value).trim().toLowerCase() !== 'help_text') return undefined;
+  const message = annotation.properties.find((p) => p.key.trim().toLowerCase() === 'message');
+  return message === undefined ? undefined : unquote(message.value);
+}
+
+/**
+ * A `type = help_text` annotation is carried as UiField.help
+ * (decorations/labels.ts helpMessage). Proved only when the generated help
+ * equals this annotation's message — a different or missing help means this
+ * annotation was not the one carried. Any other annotation kind has no
+ * generated consumer.
+ */
+function annotationProved(annotation: PropertyBlock, ui: UiField | undefined): boolean {
+  const message = helpTextOf(annotation);
+  return message !== undefined && ui?.help === message;
+}
+
+/**
+ * `displayformat = [...]` on a lookup names the parent field(s) the select and
+ * report cell show. The generator resolves the bracket through displayChoice
+ * and writes the result onto the field's lookup (decorations/lookups.ts
+ * decorateLookup): the displayed parent `field`, a `displayFields` list when
+ * the format spans several parent fields, and `displayFormat` terms when they
+ * do not share one top field. The lookup endpoint and lookupFormats feed the
+ * same resolution into functions/lookups/lookup.mjs. Proved only when the
+ * generated lookup carries exactly this property's resolution — a lookup that
+ * displays a different field, or none, is still a silent drop.
+ */
+function displayFormatProved(raw: string, field: Field, ui: UiField | undefined): boolean {
+  const lookup = field.lookup;
+  const got = ui?.lookup as ({ form: string; field?: string; displayFields?: string[]; displayFormat?: DisplayTerm[] } | undefined);
+  if (!lookup || !got || lookup.displayFormat === undefined) return false;
+  if (unquote(raw).trim() !== lookup.displayFormat.trim()) return false;
+  const choice = displayChoice(lookup);
+  if (got.field !== choice.field) return false;
+  if (JSON.stringify(got.displayFields ?? null) !== JSON.stringify(choice.displayFields ?? null)) return false;
+  if (JSON.stringify(got.displayFormat ?? null) !== JSON.stringify(choice.displayFormat ?? null)) return false;
+  return true;
+}
+
+/**
+ * `searchable = true` asks the lookup's option list to be searchable. The
+ * generated `/lookups/:form/:field` endpoint accepts `?q=` for every emitted
+ * lookup (generate.ts searchText/pagingArgs), so the setting is carried
+ * whenever the field generated a lookup widget. A field without one — or a
+ * `searchable = false` that the always-on endpoint does not honour — is not.
+ */
+function searchableProved(text: string, ui: UiField | undefined): boolean {
+  return text.toLowerCase() === 'true' && ui?.lookup !== undefined;
 }
 
 function spanCovered(out: AuditOutputs, start: number, end: number): boolean {
@@ -693,7 +767,7 @@ function reportFeatures(report: Report): ReportFeature[] {
         label: `${prefix}column ${column.field}`,
         start: column.span.start,
         end: column.span.end,
-        prove: (_built, bag) => (take(bag.columns, column.field) ? 'emitted' : 'dropped'),
+        prove: (built, bag) => (take(bag.columns, column.field) || takeGroupField(built, bag, column.field) ? 'emitted' : 'dropped'),
       },
       ...cols(column.subcolumns, `${prefix}column ${column.field} `),
     ]);
@@ -823,6 +897,13 @@ function takeFormat(bag: ReportBag, name: string): 'emitted' | 'counted' | 'drop
   const format = bag.formats[index]!;
   bag.formats.splice(index, 1);
   return criteriaIsTodo(format.criteria) ? 'counted' : 'emitted';
+}
+
+/** A column naming the report's group-by field renders as the group headers (built.groupField), not a cell column. Consumed once. */
+function takeGroupField(built: UiReport, bag: ReportBag, field: string): boolean {
+  if (bag.groupFieldUsed || built.groupField !== field) return false;
+  bag.groupFieldUsed = true;
+  return true;
 }
 
 function takeGroup(built: UiReport, bag: ReportBag, field: string): boolean {

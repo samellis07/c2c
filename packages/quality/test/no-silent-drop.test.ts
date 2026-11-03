@@ -1461,3 +1461,269 @@ test('alloweddays is emitted only for every weekday on a generated date widget',
   notDate.model.forms[0]!.fields.find((item) => item.name === 'Day')!.widget = 'text';
   assert.equal(rowStatus(all, notDate, 'Visit.Day property alloweddays'), 'dropped');
 });
+
+const LOOKUP_APP = `
+	form Course
+	{
+		Course_Name
+		(
+			type = text
+		)
+	}
+	form Enrolment
+	{
+		Course
+		(
+			type = picklist
+			values = Course.ID
+			displayformat = [Course_Name]
+			searchable = true
+		)
+	}
+`;
+
+type CarriedLookup = { form: string; field?: string; displayFields?: string[]; displayFormat?: unknown[] };
+
+function lookupUi(out: ReturnType<typeof collectOutputs>) {
+  return out.model.forms.find((f) => f.name === 'Enrolment')!.fields.find((f) => f.name === 'Course')!;
+}
+
+test('displayformat is emitted only when the generated lookup carries its resolved display field', () => {
+  const source = dsApp(LOOKUP_APP);
+  const out = collectOutputs(source);
+  const name = 'Enrolment.Course property displayformat';
+  assert.equal(lookupUi(out).lookup?.field, 'Course_Name');
+  assert.equal(rowStatus(source, out, name), 'emitted');
+
+  // The generated lookup resolves to a different parent field: the .ds format was not carried.
+  const wrong = cloneOutputs(out);
+  lookupUi(wrong).lookup!.field = 'ID';
+  assert.equal(rowStatus(source, wrong, name), 'dropped');
+
+  // No generated lookup at all: the format has nowhere to live.
+  const gone = cloneOutputs(out);
+  delete lookupUi(gone).lookup;
+  assert.equal(rowStatus(source, gone, name), 'dropped');
+});
+
+test('a multi-field displayformat is emitted only when the generated lookup carries its format terms', () => {
+  const source = dsApp(`
+	form Person
+	{
+		First_Name
+		(
+			type = text
+		)
+	}
+	form Booking
+	{
+		Guest
+		(
+			type = picklist
+			values = Person.ID
+			displayformat = [Person.First_Name + " (" + Person.ID + ")"]
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const name = 'Booking.Guest property displayformat';
+  const ui = out.model.forms.find((f) => f.name === 'Booking')!.fields.find((f) => f.name === 'Guest')!;
+  const carried = ui.lookup as CarriedLookup | undefined;
+  assert.equal(carried?.field, 'Person');
+  assert.ok(carried?.displayFields?.length || carried?.displayFormat?.length);
+  assert.equal(rowStatus(source, out, name), 'emitted');
+
+  // The generated lookup kept only the first field of the format: terms dropped.
+  const flat = cloneOutputs(out);
+  const got = flat.model.forms.find((f) => f.name === 'Booking')!.fields.find((f) => f.name === 'Guest')!;
+  const gotLookup = got.lookup as CarriedLookup | undefined;
+  delete gotLookup!.displayFields;
+  delete gotLookup!.displayFormat;
+  assert.equal(rowStatus(source, flat, name), 'dropped');
+});
+
+test('a notes field value is emitted only as the generated notesHtml', () => {
+  const source = dsApp(`
+	form Board
+	{
+		Note
+		(
+			type = add-notes
+			value = "<b>Info</b> banner"
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const name = 'Board.Note property value';
+  const ui = out.model.forms[0]!.fields.find((f) => f.name === 'Note')!;
+  assert.equal(ui.widget, 'notes');
+  assert.equal(ui.notesHtml, '<b>Info</b> banner');
+  assert.equal(rowStatus(source, out, name), 'emitted');
+
+  // The notes widget lost its stored markup.
+  const gone = cloneOutputs(out);
+  delete gone.model.forms[0]!.fields.find((f) => f.name === 'Note')!.notesHtml;
+  assert.equal(rowStatus(source, gone, name), 'dropped');
+
+  // A different markup text: the .ds value was not carried.
+  const wrong = cloneOutputs(out);
+  wrong.model.forms[0]!.fields.find((f) => f.name === 'Note')!.notesHtml = '<b>Other</b>';
+  assert.equal(rowStatus(source, wrong, name), 'dropped');
+
+  // The same property on a non-notes widget is never proved by notesHtml.
+  const text = dsApp(`
+	form Board
+	{
+		Note
+		(
+			type = text
+			value = "x"
+		)
+	}
+`);
+  assert.equal(rowStatus(text, collectOutputs(text), 'Board.Note property value'), 'dropped');
+});
+
+test('flag description and a help_text annotation are emitted only as the generated help', () => {
+  const source = dsApp(`
+	form Visit
+	{
+		Notes
+		(
+			type = text
+			description
+			[
+				type = help_text
+				message = "Bring ID"
+			]
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const ui = out.model.forms[0]!.fields.find((f) => f.name === 'Notes')!;
+  assert.equal(ui.help, 'Bring ID');
+  const annotationRow = coverageLedger(source, out).find((row) => row.name.startsWith('Visit.Notes annotation'));
+  assert.equal(annotationRow?.status, 'emitted');
+  assert.equal(rowStatus(source, out, 'Visit.Notes flag description'), 'emitted');
+
+  // The generated field carries different help text: neither item was carried.
+  const wrong = cloneOutputs(out);
+  wrong.model.forms[0]!.fields.find((f) => f.name === 'Notes')!.help = 'Other text';
+  assert.equal(rowStatus(source, wrong, 'Visit.Notes flag description'), 'dropped');
+  assert.equal(coverageLedger(source, wrong).find((row) => row.name.startsWith('Visit.Notes annotation'))?.status, 'dropped');
+
+  // No generated help at all.
+  const gone = cloneOutputs(out);
+  delete gone.model.forms[0]!.fields.find((f) => f.name === 'Notes')!.help;
+  assert.equal(rowStatus(source, gone, 'Visit.Notes flag description'), 'dropped');
+
+  // A description flag with no help_text message has nothing carried.
+  const bare = dsApp(`
+	form Visit
+	{
+		Notes
+		(
+			type = text
+			description
+		)
+	}
+`);
+  assert.equal(rowStatus(bare, collectOutputs(bare), 'Visit.Notes flag description'), 'dropped');
+});
+
+test('a non-help_text annotation is still a silent drop', () => {
+  const source = dsApp(`
+	form Visit
+	{
+		Notes
+		(
+			type = text
+			[
+				type = tooltip
+				message = "Hover me"
+			]
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const row = coverageLedger(source, out).find((r) => r.name.startsWith('Visit.Notes annotation'));
+  assert.equal(row?.status, 'dropped');
+});
+
+test('searchable is emitted only when the field generated a lookup widget', () => {
+  const source = dsApp(LOOKUP_APP);
+  const out = collectOutputs(source);
+  const name = 'Enrolment.Course property searchable';
+  assert.equal(rowStatus(source, out, name), 'emitted');
+
+  // The lookup widget is gone: the ?q= endpoint it searches no longer exists.
+  const gone = cloneOutputs(out);
+  delete lookupUi(gone).lookup;
+  assert.equal(rowStatus(source, gone, name), 'dropped');
+
+  // searchable = false is not honoured by the always-searchable endpoint.
+  const off = dsApp(`
+	form Course
+	{
+		Course_Name
+		(
+			type = text
+		)
+	}
+	form Enrolment
+	{
+		Course
+		(
+			type = picklist
+			values = Course.ID
+			searchable = false
+		)
+	}
+`);
+  assert.equal(rowStatus(off, collectOutputs(off), 'Enrolment.Course property searchable'), 'dropped');
+});
+
+test('a report column naming the group field is emitted by the group headers', () => {
+  const source = dsApp(`
+	form Project
+	{
+		Status
+		(
+			type = picklist
+			values = {"Open","Closed"}
+		)
+		Title
+		(
+			type = text
+		)
+	}
+	report By_Status
+	{
+		show all rows from Project
+		(
+			Status as "Status"
+			Title
+		)
+		group by
+		(
+			Status ascending
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  const built = out.model.reports.find((r) => r.name === 'By_Status')!;
+  assert.equal(built.groupField, 'Status');
+  const name = 'By_Status column Status';
+  if (!built.columns.some((column) => column.field === 'Status')) {
+    // The column reached the model only through the group headers.
+    assert.equal(rowStatus(source, out, name), 'emitted');
+  }
+  // Without the generated group field the column is a silent drop.
+  const gone = cloneOutputs(out);
+  const mutated = gone.model.reports.find((r) => r.name === 'By_Status')!;
+  delete mutated.groupField;
+  mutated.columns = mutated.columns.filter((column) => column.field !== 'Status');
+  mutated.phoneColumns = (mutated.phoneColumns ?? []).filter((column) => column.field !== 'Status');
+  for (const block of mutated.detailBlocks ?? []) block.fields = block.fields.filter((item) => item.field !== 'Status');
+  assert.equal(rowStatus(source, gone, name), 'dropped');
+});
