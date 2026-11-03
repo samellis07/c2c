@@ -1072,3 +1072,92 @@ test('a staged lookup display applies a parent decimal record filter when the re
     await plain.close();
   }
 });
+
+test('a navigation lookup path reads the related field under the caller scope, and stays empty when unreadable', async () => {
+  const app = appOf(`\tform Request
+\t{
+${textField('Note')}
+\t}
+\tform Item
+\t{
+${lookupField('Holder', 'Request', 'Note')}
+\t}
+\tlist All_Items
+\t{
+\t\tshow all rows from Item
+\t\t(
+\t\t\tHolder
+\t\t\tcustom action "Leaf"
+\t\t\t(
+\t\t\t\tworkflow = Leaf_Nav
+\t\t\t)
+\t\t)
+\t}
+\tworkflow
+\t{
+\t\tfunctions
+\t\t{
+\t\t\tLeaf_Nav as "Leaf Nav"
+\t\t\t{
+\t\t\t\ttype = functions
+\t\t\t\tform = Item
+\t\t\t\texecution type = for each record
+\t\t\t\ton start
+\t\t\t\t{
+\t\t\t\t\tactions
+\t\t\t\t{
+\t\t\t\t\ton click
+\t\t\t\t\t(
+\t\t\t\t\t\topenUrl("#Form:Request?Item_Ref=" + input.Holder.Note,"popup window");
+\t\t\t\t\t)
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t}
+${share('Item', ['All_Items'])}`);
+  const loaded = await loadReport(app, 'All_Items', false);
+  try {
+    grantParents(loaded);
+    assert.match(loaded.source, /const navPaths = \[/, 'the stub bakes the navigation lookup path');
+    assert.match(loaded.source, /await resolveLookupPaths\(datastore, rows, navPaths, principal\)/, 'the list read resolves it before display');
+    const tables: Record<string, Record<string, unknown>[]> = {
+      Request: [{ ROWID: '1', Note: 'First note' }],
+      Item: [{ ROWID: '7', Holder: '1' }],
+    };
+    const adapter = {
+      async query(form: string, where: string) {
+        const rows = (tables[form] ?? []).map((row) => ({ ...row }));
+        const w = String(where || '').trim();
+        if (!w) return rows;
+        const inn = /^(\w+) IN \((.*)\)$/.exec(w);
+        assert.ok(inn, `unhandled where: ${w}`);
+        const set = new Set(
+          inn[2]!.split(', ').map((value) => value.replace(/^'(.*)'$/s, '$1').replace(/''/g, "'")),
+        );
+        return rows.filter((row) => set.has(String(row[inn[1]!])));
+      },
+    };
+    loaded.store.setDatastore(adapter);
+    const live = await invoke(loaded.handler, { op: 'query', page: 0, pageSize: PAGE });
+    assert.equal(live.status, 200, JSON.stringify(live.body).slice(0, 400));
+    const row = (live.body.rows as Record<string, unknown>[])[0]!;
+    assert.equal(row['Holder.Note'], 'First note', 'the related field reads through the caller scope');
+    // Hiding the parent field leaves the key off the row: no value to leak.
+    const staff = loaded.access.profiles.Staff!;
+    const savedRequest = staff.Request;
+    staff.Request = { fields: ['ROWID'] };
+    const hidden = await invoke(loaded.handler, { op: 'query', page: 0, pageSize: PAGE });
+    assert.equal(hidden.status, 200, JSON.stringify(hidden.body).slice(0, 400));
+    assert.equal(Object.hasOwn((hidden.body.rows as Record<string, unknown>[])[0]!, 'Holder.Note'), false);
+    // Hiding the lookup itself leaves it off too.
+    staff.Request = savedRequest;
+    const savedItem = staff.Item;
+    staff.Item = { fields: ['ROWID'] };
+    const headless = await invoke(loaded.handler, { op: 'query', page: 0, pageSize: PAGE });
+    assert.equal(headless.status, 200, JSON.stringify(headless.body).slice(0, 400));
+    assert.equal(Object.hasOwn((headless.body.rows as Record<string, unknown>[])[0]!, 'Holder.Note'), false);
+    staff.Item = savedItem;
+  } finally {
+    await loaded.close();
+  }
+});

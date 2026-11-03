@@ -1860,6 +1860,27 @@ function reportStub(app: App, report: UiModel['reports'][number], projection: re
   const parents = lookupParentsOf(app, formName);
   const parentParts = compositePartsOfParents(app, parents, schemaOf(app));
   const parentColumns = storedColumnsOfParents(app, parents, schemaOf(app));
+  // Navigation lookup paths (`input.<Lookup>.<Field>` params): the dotted row
+  // keys the list read attaches so the client link prefills from the related
+  // record. Only a lookup head of this form with a stored-column leaf of the
+  // parent survives; the per-caller scope check runs in resolveLookupPaths.
+  const navPaths: Array<{ key: string; head: string; form: string; field: string; rest: string }> = [];
+  for (const action of report.customActions) {
+    for (const param of action.navigate?.params ?? []) {
+      if (typeof param.field !== 'string' || !param.field.includes('.')) continue;
+      const dot = param.field.indexOf('.');
+      const head = param.field.slice(0, dot);
+      const rest = param.field.slice(dot + 1);
+      if (!head || !rest || rest.includes('.') || navPaths.some((item) => item.key === param.field)) continue;
+      const parent = Object.prototype.hasOwnProperty.call(parents, head) ? parents[head]! : '';
+      if (!parent) continue;
+      const parts = Object.prototype.hasOwnProperty.call(parentParts, parent) ? parentParts[parent]! : {};
+      const field = Object.prototype.hasOwnProperty.call(parts, rest) ? parts[rest]! : rest;
+      const columns = Object.prototype.hasOwnProperty.call(parentColumns, parent) ? parentColumns[parent]! : [];
+      if (!columns.includes(field)) continue;
+      navPaths.push({ key: `${head}.${rest}`, head, form: parent, field, rest });
+    }
+  }
   const parentForms: string[] = [];
   const seenParents = new Set<string>();
   for (const item of lookups) {
@@ -2286,7 +2307,8 @@ ${stageLoad('      ')}      ${rowWord} = (Array.isArray(queried) ? queried : [])
         if (${JSON.stringify(columns.includes('ID'))} && projected.ID === undefined && row && typeof row === "object") projected.ID = row.ROWID ?? row.rowid;
         return projected;
       });
-${wantsRelative ? '      if (relative) rows = rows.filter((row) => matchRow(row, resolved, decimalColumns));\n' : ''}      await resolveLookupDisplays(datastore, rows, lookupColumns, principal);
+${wantsRelative ? '      if (relative) rows = rows.filter((row) => matchRow(row, resolved, decimalColumns));\n' : ''}      await resolveLookupPaths(datastore, rows, ${JSON.stringify(navPaths)}, principal);
+      await resolveLookupDisplays(datastore, rows, lookupColumns, principal);
       const queryShape = sqlIdent
         ? \`SELECT \${projection.join(", ")} FROM \${sqlIdent}\${whereClause(where)} \${orderBy} LIMIT \${offset + 1}, \${pageSize}\`
         : "not emitted: the form name is not a bare ZCQL identifier";
