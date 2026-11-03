@@ -446,7 +446,7 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
   let i = 0;
   const skip = () => { while (i < css.length && (css[i]!.trim() === '' || css[i] === ';')) i++; };
   // Safe declarations are kept; each refused one is named by its property.
-  const declarations = (body: string): string[] => {
+  const declarations = (body: string): string[] | null => {
     const out: string[] = []; let start = 0, depth = 0, quote = '', comment = false, lineComment = false;
     for (let n = 0; n <= body.length; n++) {
       const ch = body[n] ?? ';';
@@ -456,6 +456,7 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
       if (ch === '/' && body[n + 1] === '*') { comment = true; n++; continue; }
       if (depth === 0 && ch === '/' && body[n + 1] === '/') { lineComment = true; n++; continue; }
       if (ch === '"' || ch === "'") { quote = ch; continue; }
+      if (ch === '{' || ch === '}') return null;
       if (ch === '(') depth++; else if (ch === ')') depth--;
       else if (ch === ';' && depth === 0) {
         const part = body.slice(start, n).trim(); start = n + 1;
@@ -467,6 +468,7 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
         out.push(names.size && /^\s*(?:-[a-z]+-)?animation(?:-name)?\s*:/i.test(cleaned) ? renameAnimations(cleaned, names, prefix) : cleaned);
       }
     }
+    if (depth !== 0 || quote || comment) return null;
     return out;
   };
   while (i < css.length) {
@@ -551,6 +553,7 @@ export function carryStaticStyle(css: string, scope: string, inMedia = false, ke
     if (!selectorSyntaxOkay || selectorDepth !== 0 || selectorQuote || !sels.every(safeSelector)) { drop('selector'); continue; }
     const before = dropped.length;
     const decl = declarations(body);
+    if (!decl) { drop('unparsed declaration'); continue; }
     // A rule keeps its safe declarations; one whose declarations were all refused is left out.
     if (decl.length || dropped.length === before) rules.push(`${sels.map((s) => `${scope} ${s}`).join(',')}{${decl.join(';')}}`);
   }
@@ -641,8 +644,10 @@ function renameAnimations(declaration: string, names: Set<string>, prefix: strin
  * whole rule is refused (undefined). Refused declarations inside a frame are
  * reported by `declarations`.
  */
-function keyframesRule(head: string, body: string, prefix: string, declarations: (body: string) => string[]): string | undefined {
+function keyframesRule(head: string, body: string, prefix: string, declarations: (body: string) => string[] | null): string | undefined {
   const [, at, name] = /^@((?:-webkit-|-moz-|-o-)?keyframes)\s+(\S+)$/i.exec(head)!;
+  // Names in the c2c-* namespace are reserved for the prefix we generate.
+  if (/^c2c-/i.test(name)) return undefined;
   const frames: string[] = [];
   let i = 0;
   for (;;) {
@@ -653,6 +658,7 @@ function keyframesRule(head: string, body: string, prefix: string, declarations:
     const selector = body.slice(i, open).trim();
     if (!/^(?:from|to|\d{1,3}(?:\.\d{1,4})?%)(?:\s*,\s*(?:from|to|\d{1,3}(?:\.\d{1,4})?%)){0,20}$/i.test(selector)) return undefined;
     const decl = declarations(body.slice(open + 1, close));
+    if (decl === null) return undefined;
     if (decl.length) frames.push(`${selector.toLowerCase()}{${decl.join(';')}}`);
     i = close + 1;
   }
@@ -682,7 +688,7 @@ function declarationLabel(prop: string): string {
  */
 function safeStyleValue(raw: string, prop?: string): boolean {
   let text = String(raw ?? '').trim();
-  if (!text || text.length > STYLE_TEXT_MAX || /[;\\@<>]/.test(text) || text.includes('/*')) return false;
+  if (!text || text.length > STYLE_TEXT_MAX || /[;\\@<>{}]/.test(text) || text.includes('/*')) return false;
   if (prop === 'font-family' || prop === 'font') text = text.replace(/"[A-Za-z0-9 _-]*"|'[A-Za-z0-9 _-]*'/g, 'x');
   if (/['"]/.test(text)) return false;
   const flat = flatCss(text);
