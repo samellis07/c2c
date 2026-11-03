@@ -70,6 +70,8 @@
  * false listing, not coverage: the produced check runs first and wins.
  */
 
+import vm from 'node:vm';
+
 import type { App, Field, Property, PropertyBlock, Report, ReportView, Workflow } from '../../core/src/ir.js';
 import { formLink, unquote } from '../../core/src/ir.js';
 import { authPlan, type AuthPlan } from '../../auth/src/plan.js';
@@ -86,6 +88,7 @@ import { adapterFor } from '../../shims/src/zoho-adapters.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
 import { generateSchema, schemaIdent, type SchemaColumn, type SchemaPlan } from '../../schema/src/generator.js';
 import { buildModel, labelWidthOption, recordsPerRowOption, reportPageSizeOption, type UiField, type UiModel, type UiReport } from '../../ui/src/model.js';
+import { clientRuntimeSource } from '../../ui/src/generate.js';
 import { displayChoice, type DisplayTerm } from '../../ui/src/decorations/lookups.js';
 import type { UiElement } from '../../ui/src/pages.js';
 import { defaultEquivalent } from './default-equivalence.js';
@@ -825,7 +828,16 @@ function reportFeatures(report: Report): ReportFeature[] {
           label: `${prefix}column ${column.field}`,
           start: column.span.start,
           end: column.span.end,
-          prove: (built, bag) => (take(bag.columns, path) || takeGroupField(built, bag, column.field) ? 'emitted' : 'dropped'),
+          prove: (built, bag) => {
+            if (!take(bag.columns, path)) {
+              return takeGroupField(built, bag, column.field) ? 'emitted' : 'dropped';
+            }
+            // A composite part column renders only when the shipped cell
+            // reader resolves the stored flat `Parent_part` key; a lookup
+            // subcolumn's cell is written under its own dotted key instead.
+            if (parent && !emittedLookup(built, path) && !flatPartRenders(built, path)) return 'dropped';
+            return 'emitted';
+          },
         },
         ...cols(column.subcolumns, `${prefix}column ${column.field} `, path),
       ];
@@ -934,6 +946,40 @@ function reportBag(built: UiReport): ReportBag {
     groups: built.groupBy.map((item) => item.field),
     groupFieldUsed: false,
   };
+}
+
+/** The emitted `Parent.part` column is a related-record read when its head column is a lookup. */
+function emittedLookup(built: UiReport, path: string): boolean {
+  const head = path.split('.')[0];
+  for (const column of built.columns) {
+    if ((column.field === path || column.field === head) && column.lookup) return true;
+  }
+  return false;
+}
+
+let cachedRowRenderer: ((report: unknown, rows: unknown[]) => string) | null | undefined;
+
+/** `renderReportRows` from the shipped client runtime, evaluated once per audit. */
+function reportRowRenderer(): ((report: unknown, rows: unknown[]) => string) | null {
+  if (cachedRowRenderer !== undefined) return cachedRowRenderer;
+  cachedRowRenderer = null;
+  try {
+    const source = clientRuntimeSource().replace(/^export (?=(?:async )?function |const )/gm, '');
+    const rendered: unknown = vm.runInNewContext(`${source}\n;renderReportRows`, {}, { timeout: 2000 });
+    if (typeof rendered === 'function') cachedRowRenderer = rendered as (report: unknown, rows: unknown[]) => string;
+  } catch {
+    cachedRowRenderer = null;
+  }
+  return cachedRowRenderer;
+}
+
+/** The stored row keeps composite parts flat (`Parent_part`): the shipped cell reader must reach it. */
+function flatPartRenders(built: UiReport, path: string): boolean {
+  const render = reportRowRenderer();
+  if (!render) return true;
+  const probe = 'zzC2CflatProbezz';
+  const flat = path.split('.').join('_');
+  return render(built, [{ ROWID: '1', [flat]: probe }]).includes(probe);
 }
 
 function take(bag: string[], value: string): boolean {
