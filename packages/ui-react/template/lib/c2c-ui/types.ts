@@ -198,6 +198,10 @@ export interface ReportSpec {
   /** Calendar and timeline placement columns. */
   startField?: string;
   endField?: string;
+  /** `options { display records per row = N }`: the list draws each record as a card, N cards per row. */
+  recordsPerRow?: number;
+  /** `options { label width = 20% }`: the record-card label column width. */
+  labelWidth?: string;
   conditionalFormats: ConditionalFormatSpec[];
   /** Single-row read of the report's form, for the detail view. */
   recordEndpoint?: string;

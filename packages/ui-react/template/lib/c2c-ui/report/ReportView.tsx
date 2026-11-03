@@ -591,7 +591,15 @@ function ReportList({ report }: { report: ReportSpec }) {
           {Empty ? <Empty report={report} /> : <EmptyState title="No records found" description={needle || filter ? 'No record matches.' : 'Records added through the form appear here.'} />}
         </div>
       ) : (
-        <div className="table-wrap">
+        <div
+          className="table-wrap"
+          {...(report.recordsPerRow
+            ? {
+                'data-records-per-row': report.recordsPerRow,
+                style: { '--records-per-row': report.recordsPerRow, ...(report.labelWidth ? { '--c2c-label-width': report.labelWidth } : {}) } as CSSProperties,
+              }
+            : {})}
+        >
           {groups ? (
             groups.map((group) => (
               <div key={group.key} data-group={group.key}>

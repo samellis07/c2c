@@ -958,12 +958,17 @@ export function renderReport(report) {
     : `<div class="table-wrap"><table><thead><tr>${bulkHead}${cols}${opsHead}</tr></thead><tbody></tbody></table></div>`;
   const detailAttr = report.detail ? ' data-detail="true"' : '';
   const formAttr = report.form ? ` data-form="${escapeHtml(report.form)}"` : '';
+  // `display records per row`: the card grid and its label column width are
+  // CSS variables on the section; every repaint table under [data-rows] reads them.
+  const densityAttr = report.recordsPerRow
+    ? ` data-records-per-row="${report.recordsPerRow}" style="--records-per-row:${report.recordsPerRow}${report.labelWidth ? `;--c2c-label-width:${escapeHtml(report.labelWidth)}` : ''}"`
+    : '';
   const bulk = report.form && report.rowActions && report.rowActions.edit
     ? '<div class="report-tools"><button type="button" data-bulk-edit disabled>Edit selected</button><span data-bulk-count aria-live="polite">No rows selected</span></div>'
     : '';
   // Toolbar, grid, and pagination start hidden: the export's default controls
   // appear only after a successful non-empty load (see setReportChrome).
-  return `<section class="card" data-report="${escapeHtml(report.name)}" data-view="${escapeHtml(report.view)}" data-endpoint="${escapeHtml(report.queryEndpoint)}" data-page-size="${report.pageSize || PAGE_SIZE}"${detailAttr}${formAttr}><h1>${escapeHtml(report.label || report.name)}</h1>${viewNote}${previewActionsNote(report)}${bulk}<div class="report-tools" data-report-tools hidden><form data-report-search><input name="q" type="search" aria-label="Search"><button type="submit">Search</button></form>${filterSelect}${actions}</div><div data-state></div><div data-rows hidden>${rowsHtml}</div><nav data-pages aria-label="Report pages" hidden><button type="button" data-prev>Previous</button><span data-page-label>Page 1</span><button type="button" data-next>Next</button></nav></section>`;
+  return `<section class="card" data-report="${escapeHtml(report.name)}" data-view="${escapeHtml(report.view)}" data-endpoint="${escapeHtml(report.queryEndpoint)}" data-page-size="${report.pageSize || PAGE_SIZE}"${detailAttr}${formAttr}${densityAttr}><h1>${escapeHtml(report.label || report.name)}</h1>${viewNote}${previewActionsNote(report)}${bulk}<div class="report-tools" data-report-tools hidden><form data-report-search><input name="q" type="search" aria-label="Search"><button type="submit">Search</button></form>${filterSelect}${actions}</div><div data-state></div><div data-rows hidden>${rowsHtml}</div><nav data-pages aria-label="Report pages" hidden><button type="button" data-prev>Previous</button><span data-page-label>Page 1</span><button type="button" data-next>Next</button></nav></section>`;
 }
 
 /** The model this page renders with: the boot argument, else the module import. */

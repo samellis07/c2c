@@ -85,7 +85,7 @@ import { criteriaHasTodo } from '../../shims/src/criteria.js';
 import { adapterFor } from '../../shims/src/zoho-adapters.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
 import { generateSchema, schemaIdent, type SchemaColumn, type SchemaPlan } from '../../schema/src/generator.js';
-import { buildModel, type UiField, type UiModel, type UiReport } from '../../ui/src/model.js';
+import { buildModel, labelWidthOption, recordsPerRowOption, reportPageSizeOption, type UiField, type UiModel, type UiReport } from '../../ui/src/model.js';
 import { displayChoice, type DisplayTerm } from '../../ui/src/decorations/lookups.js';
 import type { UiElement } from '../../ui/src/pages.js';
 import { defaultEquivalent } from './default-equivalence.js';
@@ -948,6 +948,9 @@ function optionProved(built: UiReport, property: Property): boolean {
   if (key === 'display field') return built.groupField === value || built.titleField === value;
   if (key === 'start date') return built.startField === value;
   if (key === 'end date') return built.endField === value;
+  if (key === 'display rows') return built.pageSize === reportPageSizeOption(value);
+  if (key === 'display records per row') return built.recordsPerRow === recordsPerRowOption(value);
+  if (key === 'label width') return built.labelWidth !== undefined && built.labelWidth === labelWidthOption(value);
   return false;
 }
 

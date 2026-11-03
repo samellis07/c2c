@@ -1228,6 +1228,71 @@ test('a kanban view that the model does not keep, and an options icon, are drops
   assert.deepEqual(dropNames(icon, collectOutputs(icon)), ['Book_by_Genre block options']);
 });
 
+test('options display rows, records per row and label width clear only when the generated report carries them', () => {
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text')], actions: [], blocks: [], span: Z }],
+    reports: [
+      {
+        name: 'All_Orders',
+        type: 'list',
+        modifiers: [],
+        form: 'Orders',
+        flags: [],
+        properties: [],
+        columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }],
+        customActions: [],
+        conditionalFormats: [],
+        filters: [],
+        groupBy: [],
+        sortBy: [],
+        blocks: [
+          {
+            name: 'options',
+            properties: [
+              { key: 'display rows', value: '10', span: Z },
+              { key: 'display records per row', value: '2', span: Z },
+              { key: 'label width', value: '20%', span: Z },
+            ],
+            blocks: [],
+            items: [],
+            span: Z,
+          },
+        ],
+        views: [],
+        span: Z,
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  assert.equal(out.model.reports[0]!.pageSize, 10);
+  assert.equal(out.model.reports[0]!.recordsPerRow, 2);
+  assert.equal(out.model.reports[0]!.labelWidth, '20%');
+  assert.deepEqual(dropNames(source, out), []);
+
+  // A mutation to any carried setting returns the drop (audit proves the
+  // generated output, not the export).
+  const tampered = cloneOutputs(out);
+  tampered.model.reports[0]!.recordsPerRow = 3;
+  assert.deepEqual(dropNames(source, tampered), ['All_Orders block options']);
+  const shrunk = cloneOutputs(out);
+  shrunk.model.reports[0]!.pageSize = 300;
+  assert.deepEqual(dropNames(source, shrunk), ['All_Orders block options']);
+
+  // Unknown keys and values that are not carried fail closed.
+  const prop = (key: string, value: string) => ({ key, value, span: Z });
+  const withBlock = (properties: ReturnType<typeof prop>[]) =>
+    app({ ...source, reports: [{ ...source.reports[0]!, blocks: [{ name: 'options', properties, blocks: [], items: [], span: Z }] }] });
+  assert.deepEqual(dropNames(withBlock([prop('display rows', 'many')]), collectOutputs(withBlock([prop('display rows', 'many')]))), [
+    'All_Orders block options',
+  ]);
+  assert.deepEqual(dropNames(withBlock([prop('record count', 'enable')]), collectOutputs(withBlock([prop('record count', 'enable')]))), [
+    'All_Orders block options',
+  ]);
+  // A board view never draws the rows table: the density stays a drop.
+  const board = app({ ...source, reports: [{ ...source.reports[0]!, type: 'kanban', groupBy: [{ field: 'Title' }] }] });
+  assert.deepEqual(dropNames(board, collectOutputs(board)), ['All_Orders block options']);
+});
+
 // A submit-kind body on /forms/<form>/submit runs only for the posts the
 // generated UI still sends there: add posts go to submitEndpoint, edit posts
 // to editSubmitEndpoint (falling back to submitEndpoint). Each case pins which
