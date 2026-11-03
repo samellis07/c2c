@@ -366,6 +366,10 @@ const VIEWS_APP = appOf(`\tform Create_BOM
 \t\t(
 \t\t\ttype = text
 \t\t)
+\t\tSales_Qty
+\t\t(
+\t\t\ttype = number
+\t\t)
 \t}
 \tform Form_Sales
 \t{
@@ -1179,4 +1183,192 @@ test('a populated report shows the toolbar, sort and group captions, and an acti
   };
   edit?.dispatchEvent(new view.MouseEvent('click', { bubbles: true }));
   assert.equal(view.location.hash, '#/form/Add_Stock/edit/1');
+});
+
+// Composite and lookup report columns carry their declared parts: a
+// `Name ( first_name ... )` column expands to `Name.first_name`, a
+// `Customer ( Email )` lookup column resolves the related field through the
+// caller's own read access, and a column the form does not store stays a
+// silent drop (the view fails closed).
+const CARRY_EXCERPT = `
+	form Appointment_Booking
+	{
+		Customer_Name
+		(
+			type = name
+			displayname = "Customer Name"
+			first_name
+			(
+				type = first_name
+			)
+			last_name
+			(
+				type = last_name
+			)
+		)
+		Customer
+		(
+			type = lookup
+			values = Add_Customer.ID
+		)
+		Phone_Number
+		(
+			type = text
+		)
+		Note
+		(
+			type = text
+		)
+	}
+	form Add_Customer
+	{
+		Email
+		(
+			type = email
+			displayname = "Email Address"
+		)
+	}
+	list All_Appointments
+	{
+		show all rows from Appointment_Booking
+		(
+			Phone_Number as "Phone"
+			Customer_Name as "Customer Name"
+			(
+				first_name as "First Name"
+				last_name as "Last Name"
+			)
+			Customer
+			(
+				Email
+			)
+			Note
+		)
+	}
+	web
+	{
+		reports
+		{
+			report All_Appointments
+			{
+				quickview
+				(
+					layout
+					(
+						datablock1
+						(
+							fields
+							(
+								Phone_Number as "Quick Phone"
+								Note as "Quick Note"
+							)
+						)
+					)
+				)
+			}
+		}
+	}
+`;
+
+test('a generated report lists every declared column even when the quickview omits it', () => {
+  const model = buildUi(appOf(CARRY_EXCERPT)).model;
+  const report = model.reports.find((item) => item.name === 'All_Appointments');
+  assert.ok(report);
+  const fields = report.columns.map((column) => column.field);
+  // The quickview order leads; every declared column the quickview left out
+  // follows in show-columns order. Nothing declared is absent.
+  assert.deepEqual(fields.slice(0, 2), ['Phone_Number', 'Note']);
+  for (const field of ['Customer_Name', 'Customer_Name.first_name', 'Customer_Name.last_name', 'Customer', 'Customer.Email']) {
+    assert.ok(fields.includes(field), `${field} carried`);
+  }
+  const email = report.columns.find((column) => column.field === 'Customer.Email');
+  assert.deepEqual(email?.lookup, { form: 'Add_Customer', field: 'Email', source: 'Customer' });
+  const first = report.columns.find((column) => column.field === 'Customer_Name.first_name');
+  assert.equal(first?.label, 'First Name');
+});
+
+test('declared report columns keep show-columns order without a quickview', () => {
+  const model = buildUi(
+    appOf(`
+	form Appointment_Booking
+	{
+		Customer_Name
+		(
+			type = name
+			first_name
+			(
+				type = first_name
+			)
+			last_name
+			(
+				type = last_name
+			)
+		)
+		Phone_Number
+		(
+			type = text
+		)
+	}
+	list All_Appointments
+	{
+		show all rows from Appointment_Booking
+		(
+			Phone_Number
+			Customer_Name
+			(
+				first_name
+				last_name
+			)
+		)
+	}
+`),
+  ).model;
+  const report = model.reports.find((item) => item.name === 'All_Appointments');
+  assert.deepEqual(
+    report?.columns.map((column) => column.field),
+    ['Phone_Number', 'Customer_Name', 'Customer_Name.first_name', 'Customer_Name.last_name'],
+  );
+});
+
+test('composite parts and joined related values render their own cells', async () => {
+  const model = buildUi(appOf(CARRY_EXCERPT)).model;
+  const report = model.reports.find((item) => item.name === 'All_Appointments')!;
+  const runtime = await loadRuntime();
+  const html = runtime.renderReportRows(report, [
+    { ROWID: '9', Customer_Name: { first_name: 'Ada', last_name: 'Lovelace' }, Phone_Number: '555', Note: 'x', 'Customer.Email': 'ada@example.com' },
+  ]);
+  const rendered = new JSDOM(`<table>${html}</table>`).window.document as unknown as Document;
+  const cells = Array.from(rendered.querySelectorAll('td')).map((td) => td.textContent);
+  assert.ok(cells.includes('Ada'), 'first_name part cell');
+  assert.ok(cells.includes('Lovelace'), 'last_name part cell');
+  assert.ok(cells.includes('Ada Lovelace'), 'composite cell joins its parts');
+  assert.ok(cells.includes('ada@example.com'), 'related field cell');
+});
+
+test('a column naming nothing the form stores stays out of the generated view', () => {
+  const model = buildUi(
+    appOf(`
+	form Appointment_Booking
+	{
+		Phone_Number
+		(
+			type = text
+		)
+	}
+	list All_Appointments
+	{
+		show all rows from Appointment_Booking
+		(
+			Phone_Number
+			Ghost_Field
+			Phone_Number ( bogus_part )
+		)
+	}
+`),
+  ).model;
+  const report = model.reports.find((item) => item.name === 'All_Appointments');
+  const fields = report?.columns.map((column) => column.field) ?? [];
+  assert.equal(fields.includes('Ghost_Field'), false);
+  assert.equal(fields.some((field) => field.includes('bogus_part')), false);
+  assert.deepEqual(fields, ['Phone_Number', 'Phone_Number']);
 });

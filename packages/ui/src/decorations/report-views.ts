@@ -69,7 +69,10 @@ function applyReportViews(model: UiModel, app: App): void {
   for (const report of model.reports) {
     const source = byName.get(report.name);
     if (!source) continue;
-    report.phoneColumns = phoneFields(app, source);
+    // Only columns the generated view carries make the phone card: a column
+    // the model dropped (a name the form does not store) stays dropped.
+    const carried = new Set(report.columns.map((column) => column.field));
+    report.phoneColumns = phoneFields(app, source).filter((column) => carried.has(column.field));
     const quick = pickView(source, 'quickview');
     const quickFields = quick ? fieldsOf(quick) : [];
     if (quickFields.length) {
@@ -89,9 +92,10 @@ function applyReportViews(model: UiModel, app: App): void {
         const action = actions.get(field.field);
         return { field: field.field, label, ...(action ? { action: action.endpoint } : {}) };
       });
-      // A `column header` action the quickview does not list still renders.
+      // Declared columns the quickview does not list still render, in
+      // show-columns order; a `column header` action among them keeps its cell.
       for (const column of prior.values()) { // determinism-allow: map insertion order is the export's report column order
-        if (column.action && !merged.some((item) => item.field === column.field)) merged.push(column);
+        if (!merged.some((item) => item.field === column.field)) merged.push(column);
       }
       report.columns = merged;
     }

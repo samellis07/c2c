@@ -112,6 +112,14 @@ ${field('Batch_No', 'text', '\t\t\tdisplayname = "Batch No"')}
 \t\t\t\tvalues  = Add_User.ID
     \t\t\tdisplayformat = [" " + Name.prefix + " " + Name.first_name + " " + Name.last_name + " " + Name.suffix]
 \t\t\t)
+\t\t\tThis_is_also_the_subassembly
+\t\t\t(
+\t\t\t\ttype = decision-check-box
+\t\t\t)
+\t\t\tList_Of_Subassemblies
+\t\t\t(
+\t\t\t\ttype = grid
+\t\t\t)
 \t\t}
 \t\tlist Active_BOM
 \t\t{
