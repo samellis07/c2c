@@ -169,16 +169,32 @@ export function isCallerFilteredVariable(source: string, varName: string, form: 
   const matches = [...code.matchAll(assignRe)];
   if (matches.length !== 1) return false;
   const match = matches[0];
-  if (!/(?:^|[;{}\r\n])\s*$/.test(code.slice(0, match.index))) return false;
+  // Statement-start check, kept linear: strip trailing non-newline whitespace,
+  // then the last character must be a separator or the text all whitespace.
+  const before = code.slice(0, match.index).replace(/[^\S\r\n]+$/, '');
+  if (before !== '' && !/[;{}\r\n]$/.test(before)) return false;
 
   const afterEqual = code.slice(match.index + match[0].length);
   const semiIdx = afterEqual.indexOf(';');
   const rhs = (semiIdx >= 0 ? afterEqual.slice(0, semiIdx) : afterEqual.split(/[\r\n}]/)[0] ?? '').trim();
 
-  const rhsMatch = /^([A-Za-z_]\w*)\s*\[\s*([^\[\]]+?)\s*\]\s*\.\s*ID$/i.exec(rhs);
-  if (!rhsMatch) return false;
-  if (rhsMatch[1].toLowerCase() !== form.toLowerCase()) return false;
-  return CALLER_FILTER_CRITERIA.test(rhsMatch[2]);
+  // `<form>[<criteria>].ID`, parsed with indexOf instead of a lazy-bracket
+  // regex so adversarial whitespace cannot trigger polynomial backtracking.
+  const openIdx = rhs.indexOf('[');
+  const closeIdx = openIdx < 0 ? -1 : rhs.indexOf(']', openIdx + 1);
+  const rhsForm = openIdx < 0 ? '' : rhs.slice(0, openIdx).trim();
+  const criteria = closeIdx < 0 ? '' : rhs.slice(openIdx + 1, closeIdx);
+  if (
+    closeIdx < 0 ||
+    !/^[A-Za-z_]\w*$/.test(rhsForm) ||
+    criteria.length === 0 ||
+    criteria.includes('[') ||
+    !/^\s*\.\s*ID$/i.test(rhs.slice(closeIdx + 1))
+  ) {
+    return false;
+  }
+  if (rhsForm.toLowerCase() !== form.toLowerCase()) return false;
+  return CALLER_FILTER_CRITERIA.test(criteria);
 }
 
 export function isKnownReportSummaryUrl(url: string, app?: App, source?: string): boolean {

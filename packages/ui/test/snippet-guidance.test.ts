@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { deriveIr, parse } from '../../core/src/index.js';
 import { buildUi, generateUi } from '../src/index.js';
-import { SNIPPET_REASONS, serverSnippetGuidance } from '../src/snippet-guidance.js';
+import { SNIPPET_REASONS, isCallerFilteredVariable, serverSnippetGuidance } from '../src/snippet-guidance.js';
 
 const REASON = 'Server-side Deluge snippet requires manual translation';
 
@@ -107,4 +107,15 @@ test('generated output exports the guided steps next to the counted TODOs', () =
   for (const reason of manualSteps[0]?.reasons ?? []) assert.ok((SNIPPET_REASONS as readonly string[]).includes(reason), reason);
   const plain = generateUi(appWith({ readOnly: '<% x = Orders[ID == 1]; %><b><%= x.Total %></b>' }));
   assert.equal(plain.files.some((f) => f.path === 'ui-manual-steps.json'), false);
+});
+
+test('caller-filtered variable parse stays linear on adversarial right-hand sides', () => {
+  const shapes = [`_[${'\t'.repeat(50_000)}`, `a[${' '.repeat(50_000)}x`];
+  for (const rhs of shapes) {
+    const started = performance.now();
+    const result = isCallerFilteredVariable(`x = ${rhs}`, 'x', 'a');
+    const elapsed = performance.now() - started;
+    assert.equal(result, false);
+    assert.ok(elapsed < 50, `${rhs.length}-char rhs took ${elapsed.toFixed(1)} ms`);
+  }
 });
