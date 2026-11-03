@@ -17,7 +17,8 @@ import { unquote, type App, type Field, type Property, type ReportColumn } from 
 import type { UiField, UiModel, UiReport } from '../model.js';
 
 export type DisplayTerm = { ref: string } | { text: string };
-type DisplayLookup = { form: string; field?: string; endpoint?: string; displayFields?: string[]; displayFormat?: DisplayTerm[] };
+export type SortDir = 'asc' | 'desc';
+type DisplayLookup = { form: string; field?: string; endpoint?: string; displayFields?: string[]; displayFormat?: DisplayTerm[]; sort?: SortDir };
 type DisplayColumn = UiReport['columns'][number] & {
   displayTrue?: string;
   displayFalse?: string;
@@ -124,6 +125,49 @@ export function displayChoice(lookup: { form: string; field?: string; displayFor
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 /**
+ * The `sortorder = ascending|descending` direction of a field, or undefined
+ * for anything else — an unrecognised value orders nothing and stays a drop.
+ */
+export function sortDirOf(field: Field): SortDir | undefined {
+  const text = propOf(field.properties, 'sortorder')?.trim().toLowerCase();
+  if (text === 'asc' || text === 'ascending') return 'asc';
+  if (text === 'desc' || text === 'descending') return 'desc';
+  return undefined;
+}
+
+/**
+ * Parent form -> lookup display field -> the sort a `sortorder` declares, for
+ * every lookup in the app. The ref is the display's first field ref (a
+ * composite part ref sorts by its stored part column); generate.ts resolves it
+ * to a stored column. The first lookup (form order, then field order) wins a
+ * shared key. Names that would reach an object prototype are left out, and the
+ * maps have no prototype.
+ */
+export function lookupSorts(app: App): Record<string, Record<string, { ref: string; dir: SortDir }>> {
+  const byForm = new Map<string, Map<string, { ref: string; dir: SortDir }>>();
+  const visit = (fields: readonly Field[]): void => {
+    for (const field of fields) {
+      if (field.lookup) {
+        const dir = sortDirOf(field);
+        const choice = displayChoice(field.lookup);
+        const form = field.lookup.form;
+        if (dir && !UNSAFE_KEYS.has(form) && !UNSAFE_KEYS.has(choice.field)) {
+          const refs = field.lookup.displayFormat ? displayRefs(field.lookup.displayFormat) : [];
+          let byField = byForm.get(form);
+          if (!byField) byForm.set(form, (byField = new Map()));
+          if (!byField.has(choice.field)) byField.set(choice.field, { ref: refs[0] ?? choice.field, dir });
+        }
+      }
+      if (field.subfields) visit(field.subfields);
+    }
+  };
+  for (const form of app.forms) visit(form.fields);
+  const out: Record<string, Record<string, { ref: string; dir: SortDir }>> = Object.create(null);
+  for (const [form, byField] of byForm) out[form] = Object.assign(Object.create(null), Object.fromEntries(byField));
+  return out;
+}
+
+/**
  * Parent form -> lookup key field -> format terms, for every lookup in the
  * app whose `displayformat` spans several parent fields. The lookup endpoint
  * and the report's parent read compose the display text from these terms.
@@ -153,18 +197,25 @@ export function lookupFormats(app: App): Record<string, Record<string, DisplayTe
   return out;
 }
 
-function decorateLookup(target: DisplayLookup | undefined, choice: ReturnType<typeof displayChoice>): void {
+function decorateLookup(target: DisplayLookup | undefined, choice: ReturnType<typeof displayChoice>, sort?: SortDir): void {
   if (!target) return;
   target.field = choice.field;
   if (choice.displayFields) target.displayFields = choice.displayFields;
   if (choice.displayFormat) target.displayFormat = choice.displayFormat;
+  if (sort) target.sort = sort;
   if (target.endpoint) {
     target.endpoint = `/lookups/${encodeURIComponent(target.form)}/${encodeURIComponent(choice.field)}`;
   }
 }
 
 function decorateField(ui: UiField, field: Field | undefined): void {
-  if (field?.lookup && ui.lookup) decorateLookup(ui.lookup as DisplayLookup, displayChoice(field.lookup));
+  if (field?.lookup && ui.lookup) decorateLookup(ui.lookup as DisplayLookup, displayChoice(field.lookup), sortDirOf(field));
+  // `sortorder` on an inline choice list sorts the offered options.
+  if (field && !field.lookup && ui.choices?.length) {
+    const dir = sortDirOf(field);
+    if (dir === 'asc') ui.choices = [...ui.choices].sort();
+    else if (dir === 'desc') ui.choices = [...ui.choices].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+  }
   if (ui.subfields && field?.subfields) {
     for (const sub of ui.subfields) {
       decorateField(sub, field.subfields.find((item) => item.name === sub.name));
