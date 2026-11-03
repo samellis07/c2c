@@ -15,7 +15,7 @@ fields are not counted here.
 |---|---:|
 | corpus apps | 67 |
 | apps with exact-decimal columns | 40 |
-| `Form[criteria]` sites emitted | 5356 |
+| `Form[criteria]` sites emitted | 5396 |
 | …criteria on an exact-decimal field | 18 |
 | …sort by an exact-decimal field | 4 |
 | report criteria/filters on an exact-decimal field | 0 |
