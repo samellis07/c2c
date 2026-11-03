@@ -182,6 +182,10 @@ export interface UiReport {
   /** Kanban card or calendar entry title (`options { display field }` on calendar/timeline). */
   titleField?: string;
   pageSize: number;
+  /** `options { display records per row = N }`: the list draws each record as a card, N cards per row. */
+  recordsPerRow?: number;
+  /** `options { label width = 20% }`: the record-card label column width (only meaningful with `recordsPerRow`). */
+  labelWidth?: string;
   queryEndpoint: string;
   /** Scoped single-row endpoint used by this report's detail route. */
   recordEndpoint?: string;
@@ -936,6 +940,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   let todo: string | undefined;
   const options = reportOptions(report);
   const displayField = options.get('display field');
+  const pageSize = reportPageSizeOption(options.get('display rows')) ?? LIMITS.zcqlRowsPerQuery;
   let groupField = groupBy[0]?.field;
   // Creator writes the kanban lane field as `options { display field = Status }`.
   if (view === 'kanban' && displayField && formField(form, displayField)) groupField = displayField;
@@ -1052,6 +1057,11 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
     builtColumns.push({ field: action.name, label: head || action.name, action: actions[index].endpoint });
   });
   const formats = conditionalFormats(app, report);
+  // `display records per row` is a list density: carried only by a generated
+  // report that draws the rows table (boards and charts never read it).
+  const recordsPerRow = status === 'generated' && DENSITY_VIEWS.has(view) ? recordsPerRowOption(options.get('display records per row')) : undefined;
+  // The card label column exists only when records draw as cards.
+  const labelWidth = recordsPerRow !== undefined ? labelWidthOption(options.get('label width')) : undefined;
   return {
     name: report.name,
     label: report.displayName || report.name,
@@ -1074,7 +1084,9 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
     ...(startField ? { startField } : {}),
     ...(endField ? { endField } : {}),
     ...(titleField ? { titleField } : {}),
-    pageSize: LIMITS.zcqlRowsPerQuery,
+    pageSize,
+    ...(recordsPerRow !== undefined ? { recordsPerRow } : {}),
+    ...(labelWidth ? { labelWidth } : {}),
     queryEndpoint: `/reports/${encodeURIComponent(report.name)}`,
     ...(form ? { recordEndpoint: `/forms/${encodeURIComponent(form.name)}/record` } : {}),
     ...(view === 'spreadsheet' ? { editEndpoint: `/reports/${encodeURIComponent(report.name)}/rows` } : {}),
@@ -1115,6 +1127,29 @@ function formatFieldList(raw: string | undefined): string[] {
 function reportProp(properties: Property[] | undefined, key: string): string | undefined {
   const found = (properties ?? []).find((p) => p.key.toLowerCase() === key);
   return found ? unquote(found.value) : undefined;
+}
+
+/** `display rows = N` in a report `options` block: the Creator page size, carried as `UiReport.pageSize` (never above the ZCQL page cap). */
+export function reportPageSizeOption(value: string | undefined): number | undefined {
+  if (!value || !/^\d+$/.test(value)) return undefined;
+  const n = Number(value);
+  return n >= 1 && n <= LIMITS.zcqlRowsPerQuery ? n : undefined;
+}
+
+/** Views that draw the report rows table; `display records per row` is carried only for these. */
+const DENSITY_VIEWS = new Set<UiReport['view']>(['list', 'summary', 'spreadsheet', 'map', 'pivot', 'detail']);
+
+/** `display records per row = N`: record cards drawn N per list row. Creator offers 1-6; anything else is not carried. */
+export function recordsPerRowOption(value: string | undefined): number | undefined {
+  if (!value || !/^\d+$/.test(value)) return undefined;
+  const n = Number(value);
+  return n >= 1 && n <= 6 ? n : undefined;
+}
+
+/** `label width = 20%`: a CSS width for the record-card label column; only a plain CSS length carries. */
+export function labelWidthOption(value: string | undefined): string | undefined {
+  const v = (value ?? '').trim();
+  return /^\d+(?:\.\d+)?(?:%|px|em|rem)$/.test(v) ? v : undefined;
 }
 
 function reportOptions(report: Report): Map<string, string> {

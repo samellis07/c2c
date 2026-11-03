@@ -160,6 +160,14 @@ svg.chart{display:block;width:100%;max-width:40rem;height:auto}
 .chart-tick{font-size:var(--c2c-font-size-2xs);fill:var(--c2c-muted)}
 .chart-empty{color:var(--c2c-muted);text-align:center;padding:var(--c2c-space-6) var(--c2c-space-4);margin:0}
 .chart-note{color:var(--c2c-muted);font-size:var(--c2c-font-size-2xs);margin:var(--c2c-space-2) 0 0}
+/* display records per row = N: the list draws each record as a card, N per row. */
+[data-report][data-records-per-row] thead{display:none}
+[data-report][data-records-per-row] [data-rows] table,[data-report][data-records-per-row] [data-rows] tbody{display:block}
+[data-report][data-records-per-row] [data-rows] tbody{display:grid;grid-template-columns:repeat(var(--records-per-row,1),minmax(0,1fr));gap:var(--c2c-space-3);align-items:start}
+[data-report][data-records-per-row] [data-rows] tr{display:flex;flex-direction:column;background:var(--c2c-surface);border:1px solid var(--c2c-border);border-radius:var(--c2c-radius-m);box-shadow:var(--c2c-shadow-s)}
+[data-report][data-records-per-row] [data-rows] td{display:flex;gap:var(--c2c-space-3);align-items:baseline;border:0;border-bottom:1px solid var(--c2c-border);padding:var(--c2c-space-2) var(--c2c-space-3);text-align:left}
+[data-report][data-records-per-row] [data-rows] td:last-child{border-bottom:0}
+[data-report][data-records-per-row] [data-rows] td::before{content:attr(data-th);flex:none;width:var(--c2c-label-width,auto);max-width:45%;font-weight:600;color:var(--c2c-muted)}
 /* A phone card field the list does not show. */
 [data-report] td[data-phone-only]{display:none}
 [data-board] [data-phone-fields]{display:none}

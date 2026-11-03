@@ -133,6 +133,60 @@ test('kanban with nothing to group is a counted manual TODO without an invented 
   assert.doesNotThrow(() => runtime.renderReport(bare));
 });
 
+test('list reports carry display rows into pageSize and records-per-row into the card grid', async () => {
+  const model = buildUi(
+    appOf(
+      [
+        FORM,
+        report('list', 'Paged', 'display rows = 10\ndisplay records per row = 2'),
+        report('summary', 'Wide', 'display rows = 1\ndisplay records per row = 1\nlabel width = 20%'),
+        report('list', 'Default', ''),
+        report('kanban', 'Board', 'display field = Status\ndisplay records per row = 3'),
+      ].join('\n'),
+    ),
+  ).model;
+  const r = Object.fromEntries(model.reports.map((item) => [item.name, item]));
+  assert.equal(r.Paged.pageSize, 10);
+  assert.equal(r.Paged.recordsPerRow, 2);
+  assert.equal(r.Wide.pageSize, 1);
+  assert.equal(r.Wide.recordsPerRow, 1);
+  assert.equal(r.Wide.labelWidth, '20%');
+  assert.equal(r.Default.pageSize, 300);
+  assert.equal(r.Default.recordsPerRow, undefined);
+  // A board view draws lanes, never the rows table: the density is not carried.
+  assert.equal(r.Board.recordsPerRow, undefined);
+  const runtime = await loadRuntime();
+  const pagedHtml = runtime.renderReport(r.Paged);
+  assert.match(pagedHtml, /data-page-size="10"/);
+  assert.match(pagedHtml, /data-records-per-row="2"/);
+  assert.match(pagedHtml, /--records-per-row:2/);
+  assert.match(runtime.renderReport(r.Wide), /--c2c-label-width:20%/);
+  assert.doesNotMatch(runtime.renderReport(r.Default), /data-records-per-row/);
+  assert.match(BASE_CSS, /\[data-report\]\[data-records-per-row\] \[data-rows\] tbody\{display:grid/);
+  // The carried page size is the page the runtime asks the endpoint for.
+  const { bodies } = await bootReport(model, 'Paged', [{ ROWID: '1', Guest: 'A' }]);
+  assert.equal((bodies.find((body) => body.op === 'query') as { pageSize?: number } | undefined)?.pageSize, 10);
+});
+
+test('out-of-range, non-numeric and context-less density options are not carried', () => {
+  const r = reportsOf(
+    report('list', 'Zero', 'display rows = 0\ndisplay records per row = 0'),
+    report('list', 'Text', 'display rows = many\ndisplay records per row = two'),
+    report('list', 'Huge', 'display rows = 9999\ndisplay records per row = 99'),
+    report('list', 'BadWidth', 'display records per row = 2\nlabel width = wide'),
+    report('list', 'BareWidth', 'label width = 20%'),
+  );
+  for (const name of ['Zero', 'Text', 'Huge']) {
+    assert.equal(r[name].pageSize, 300, name);
+    assert.equal(r[name].recordsPerRow, undefined, name);
+  }
+  assert.equal(r.BadWidth.recordsPerRow, 2);
+  assert.equal(r.BadWidth.labelWidth, undefined);
+  // The label width needs the card grid: alone it is not carried.
+  assert.equal(r.BareWidth.recordsPerRow, undefined);
+  assert.equal(r.BareWidth.labelWidth, undefined);
+});
+
 interface Runtime {
   boot(model: UiModel, doc: Document): Promise<void>;
   renderReport(report: UiModel['reports'][number]): string;

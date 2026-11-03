@@ -76,6 +76,13 @@ body { background: var(--c2c-page-bg); color: var(--foreground); font-family: va
 .c2c-record dt { color: var(--text-secondary); font-size: var(--text-xs); }
 .c2c-record dd { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
 .table-wrap { overflow-x: auto; }
+/* `display records per row = N`: the list draws each record as a card, N per row. */
+.table-wrap[data-records-per-row] thead { display: none; }
+.table-wrap[data-records-per-row] table, .table-wrap[data-records-per-row] tbody { display: block; }
+.table-wrap[data-records-per-row] tbody { display: grid; grid-template-columns: repeat(var(--records-per-row, 1), minmax(0, 1fr)); gap: var(--space-3); align-items: start; }
+.table-wrap[data-records-per-row] tbody tr { display: flex; flex-direction: column; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
+.table-wrap[data-records-per-row] tbody td { display: flex; gap: var(--space-3); padding: var(--space-1) 0; text-align: left; }
+.table-wrap[data-records-per-row] tbody td::before { content: attr(data-th); flex: none; width: var(--c2c-label-width, auto); max-width: 45%; font-weight: 600; color: var(--text-secondary); }
 .c2c-row-open { color: var(--accent); font-weight: 500; }
 .c2c-pages { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-4); }
 .c2c-loading { color: var(--text-secondary); }
