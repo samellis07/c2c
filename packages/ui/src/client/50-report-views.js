@@ -40,11 +40,16 @@ function reportOf(name) {
 function viewCell(row, field, report) {
   if (!row || field == null) return '';
   let value = row[field];
-  // A `Parent.part` column reads the part inside the composite object.
+  // A `Parent.part` column reads the part inside the composite object; the
+  // store keeps the same part flat as `Parent_part`.
   if (value === undefined && typeof field === 'string' && field.indexOf('.') > 0) {
-    value = row;
-    for (const key of field.split('.')) {
-      value = value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined;
+    const flat = field.split('.').join('_');
+    if (Object.prototype.hasOwnProperty.call(row, flat)) value = row[flat];
+    if (value === undefined) {
+      value = row;
+      for (const key of field.split('.')) {
+        value = value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined;
+      }
     }
   }
   if (value == null) return '';

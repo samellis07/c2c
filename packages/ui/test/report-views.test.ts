@@ -1345,6 +1345,21 @@ test('composite parts and joined related values render their own cells', async (
   assert.ok(cells.includes('ada@example.com'), 'related field cell');
 });
 
+test('composite part columns render from the flat stored row shape', async () => {
+  const model = buildUi(appOf(CARRY_EXCERPT)).model;
+  const report = model.reports.find((item) => item.name === 'All_Appointments')!;
+  const runtime = await loadRuntime();
+  // The store keeps one column per part (`Customer_Name_first_name`); the row
+  // carries neither the nested object nor the dotted key.
+  const html = runtime.renderReportRows(report, [
+    { ROWID: '9', Customer_Name_first_name: 'Ada', Customer_Name_last_name: 'Lovelace', Phone_Number: '555', Note: 'x' },
+  ]);
+  const rendered = new JSDOM(`<table>${html}</table>`).window.document as unknown as Document;
+  const cells = Array.from(rendered.querySelectorAll('td')).map((td) => td.textContent);
+  assert.ok(cells.includes('Ada'), 'flat first_name part cell');
+  assert.ok(cells.includes('Lovelace'), 'flat last_name part cell');
+});
+
 test('a column naming nothing the form stores stays out of the generated view', () => {
   const model = buildUi(
     appOf(`
