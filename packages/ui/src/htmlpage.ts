@@ -31,7 +31,7 @@ import { ALLOWED_ATTRS, ALLOWED_TAGS, DROPPED_TAGS, allowedAttr, droppedStyles, 
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { c2cUrlFunctionSource, flatUrl } from './url-policy.js';
 import { hasShapeCWrites, isShapeCGuarded, shapeCStmtOk, shapeCServerOk, type ShapeCGuard } from './htmlpage-shape-c.js';
-import { INTERNAL_RECORD_SUMMARY, serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
+import { INTERNAL_RECORD_SUMMARY, isCallerFilteredVariable, serverSnippetGuidance, type SnippetReason } from './snippet-guidance.js';
 
 export interface HtmlpageFile {
   path: string;
@@ -1842,7 +1842,7 @@ export const EXECUTE_FUNCTION_BUTTON = 'ZML ExecuteFunction button';
  * URL's row id is still untrusted: the route uses the form's record endpoint,
  * which applies authorizeRead to that exact ROWID before returning fields.
  */
-export function rewriteRecordSummaryFrames(template: string, app?: App): string {
+export function rewriteRecordSummaryFrames(template: string, app?: App, source?: string): string {
   return replaceIframeElements(String(template ?? ''), (whole, attrs, inner) => {
     const src = /\bsrc\s*=\s*(["'])([\s\S]*?)\1/i.exec(attrs);
     if (!src) return whole;
@@ -1859,7 +1859,7 @@ export function rewriteRecordSummaryFrames(template: string, app?: App): string 
     const idExpr = match[2].trim();
     const read = new RegExp(`^${form}\\s*\\[[^\\[\\]]+\\]\\s*\\.\\s*ID$`, 'i').test(idExpr);
     const param = /^input\.[A-Za-z_]\w*$/.test(idExpr);
-    const variable = /^[A-Za-z_]\w*$/.test(idExpr);
+    const variable = /^[A-Za-z_]\w*$/.test(idExpr) && isCallerFilteredVariable(source ?? template, idExpr, form);
     if (!read && !param && !variable) return whole;
     const routed = report ? `#/report/${report.name}/row/<%=${idExpr}%>` : `#/record/${form}/<%=${idExpr}%>`;
     const nextAttrs = attrs.slice(0, src.index) + `src=${src[1]}${routed}${src[1]}` + attrs.slice(src.index + src[0].length);
@@ -2314,7 +2314,7 @@ export function compileHtmlpage(
     manualReasons: serverSnippetGuidance(decoded, reason, elementName, app).reasons,
   });
   const head = splitTemplate(decoded);
-  head.template = rewriteRecordSummaryFrames(head.template, app);
+  head.template = rewriteRecordSummaryFrames(head.template, app, decoded);
   head.template = convertZmlSnippetToHtml(head.template, new Set(app.forms.map((f) => f.name)));
   head.template = rewriteEmbedIframes(head.template, app);
   const fnFiles: HtmlpageFile[] = [];

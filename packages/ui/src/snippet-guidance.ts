@@ -6,7 +6,9 @@
  * The reasons come from the snippet source and the compiler's refusal, in a
  * fixed order, so the same snippet always yields the same step text.
  */
-import type { App } from '../../core/src/index.js';
+import type { App, Report } from '../../core/src/index.js';
+import { reportCriteria } from '../../deluge/src/translate.js';
+import { criteriaHasRelative, criteriaHasTodo } from '../../shims/src/criteria.js';
 import { DROPPED_TAGS, droppedStyles } from './pages.js';
 
 export const INTERNAL_RECORD_SUMMARY =
@@ -104,14 +106,43 @@ function headerParams(source: string): string[] {
     .filter((p) => /^[A-Za-z_]\w*$/.test(p));
 }
 
-function readsForCaller(code: string, params: string[]): boolean {
+const CALLER_FILTER_CRITERIA =
+  /^\s*(?:[A-Za-z_]\w*\s*==\s*zoho\.loginuser(?:id)?|zoho\.loginuser(?:id)?\s*==\s*[A-Za-z_]\w*)\s*$/i;
+
+interface KnownSummary {
+  report: Report;
+  form: string;
+  varName?: string;
+}
+
+function isSummaryVarReadMatch(
+  code: string,
+  matchIndex: number,
+  matchLength: number,
+  form: string,
+  criteria: string,
+  summaries: KnownSummary[],
+): boolean {
+  if (!summaries.length || !CALLER_FILTER_CRITERIA.test(criteria)) return false;
+  const before = code.slice(0, matchIndex);
+  const lhs = /(?:^|[;{}\r\n])\s*([A-Za-z_]\w*)\s*=\s*$/.exec(before);
+  if (!lhs) return false;
+  const varName = lhs[1];
+  const after = code.slice(matchIndex + matchLength);
+  if (!/^\s*\.\s*ID\s*(?:;|$|[\r\n}])/i.test(after)) return false;
+  return summaries.some((s) => s.varName === varName && s.form.toLowerCase() === form.toLowerCase());
+}
+
+function readsForCaller(code: string, params: string[], summaries: KnownSummary[] = []): boolean {
   if (/\bzoho\.creator\.getRecords?(?:ById)?\s*\(/i.test(code)) return true;
   const caller = [/\bzoho\.loginuser(?:id)?\b/i, /\binput\.\w+/];
   for (const p of params) caller.push(new RegExp(`\\b${p}\\b`));
   // A form read `Form[criteria]`; an `insert into Form [ ... ]` block is a write, not a read.
-  for (const match of code.matchAll(/(?<!\binsert\s+into\s+)\b[A-Za-z_]\w*\s*\[([^\]]*)\]/gi)) {
-    const criteria = match[1] ?? '';
+  for (const match of code.matchAll(/(?<!\binsert\s+into\s+)\b([A-Za-z_]\w*)\s*\[([^\]]*)\]/gi)) {
+    const form = match[1] ?? '';
+    const criteria = match[2] ?? '';
     if (!/==|!=|<|>|\b(?:in|contains|startsWith|endsWith)\b/i.test(criteria)) continue;
+    if (isSummaryVarReadMatch(code, match.index ?? 0, match[0].length, form, criteria, summaries)) continue;
     if (caller.some((re) => re.test(criteria))) return true;
   }
   return false;
@@ -126,30 +157,89 @@ function droppedTags(markup: string): string[] {
   return [...found].sort();
 }
 
-function hasKnownReportSummary(source: string, app?: App): boolean {
+/**
+ * True when the snippet code assigns `varName` exactly once, and that single assignment
+ * derives from `<Form>[<field> == zoho.loginuserid|zoho.loginuser].ID` where `form` matches
+ * the report's base form.
+ */
+export function isCallerFilteredVariable(source: string, varName: string, form: string): boolean {
+  if (!/^[A-Za-z_]\w*$/.test(varName) || !/^[A-Za-z_]\w*$/.test(form)) return false;
+  const code = source.includes('<%') ? islandCode(source) : source;
+  const assignRe = new RegExp(`(?<![.\\w])${varName}(?![\\w])\\s*=(?!=)`, 'g');
+  const matches = [...code.matchAll(assignRe)];
+  if (matches.length !== 1) return false;
+  const match = matches[0];
+  if (!/(?:^|[;{}\r\n])\s*$/.test(code.slice(0, match.index))) return false;
+
+  const afterEqual = code.slice(match.index + match[0].length);
+  const semiIdx = afterEqual.indexOf(';');
+  const rhs = (semiIdx >= 0 ? afterEqual.slice(0, semiIdx) : afterEqual.split(/[\r\n}]/)[0] ?? '').trim();
+
+  const rhsMatch = /^([A-Za-z_]\w*)\s*\[\s*([^\[\]]+?)\s*\]\s*\.\s*ID$/i.exec(rhs);
+  if (!rhsMatch) return false;
+  if (rhsMatch[1].toLowerCase() !== form.toLowerCase()) return false;
+  return CALLER_FILTER_CRITERIA.test(rhsMatch[2]);
+}
+
+export function isKnownReportSummaryUrl(url: string, app?: App, source?: string): boolean {
   if (!app) return false;
+  const match = INTERNAL_RECORD_SUMMARY.exec(url.trim());
+  if (!match) return false;
+  const target = match[1];
+  const report = app.reports.find((r) => r.name === target);
+  if (!report) return false;
+  const form = report.form ?? target;
+  if (!app.forms.some((f) => f.name === form) || !/^[A-Za-z_]\w*$/.test(form)) return false;
+  const criteria = reportCriteria(report.criteria?.trim() || 'true');
+  if (criteriaHasTodo(criteria) || criteriaHasRelative(criteria)) return false;
+
+  const idExpr = match[2].trim();
+  const read = new RegExp(`^${form}\\s*\\[[^\\[\\]]+\\]\\s*\\.\\s*ID$`, 'i').test(idExpr);
+  const param = /^input\.[A-Za-z_]\w*$/.test(idExpr);
+  const variable = /^[A-Za-z_]\w*$/.test(idExpr) && isCallerFilteredVariable(source ?? '', idExpr, form);
+  return read || param || variable;
+}
+
+function findKnownSummaries(source: string, app?: App): KnownSummary[] {
+  if (!app) return [];
+  const results: KnownSummary[] = [];
   for (const m of source.matchAll(/<iframe\b((?:[^>"']|"[^"]*"|'[^']*')*?)>/gi)) {
     const src = /\bsrc\s*=\s*(["'])([\s\S]*?)\1/i.exec(m[1]);
     if (!src) continue;
-    const match = INTERNAL_RECORD_SUMMARY.exec(src[2].trim());
-    if (match && app.reports.some((r) => r.name === match[1])) return true;
+    const url = src[2].trim();
+    const match = INTERNAL_RECORD_SUMMARY.exec(url);
+    if (!match) continue;
+    const target = match[1];
+    const report = app.reports.find((r) => r.name === target);
+    if (!report) continue;
+    const form = report.form ?? target;
+    if (!app.forms.some((f) => f.name === form) || !/^[A-Za-z_]\w*$/.test(form)) continue;
+    const criteria = reportCriteria(report.criteria?.trim() || 'true');
+    if (criteriaHasTodo(criteria) || criteriaHasRelative(criteria)) continue;
+    const idExpr = match[2].trim();
+    const read = new RegExp(`^${form}\\s*\\[[^\\[\\]]+\\]\\s*\\.\\s*ID$`, 'i').test(idExpr);
+    const param = /^input\.[A-Za-z_]\w*$/.test(idExpr);
+    const isVar = /^[A-Za-z_]\w*$/.test(idExpr) && isCallerFilteredVariable(source, idExpr, form);
+    if (read || param || isVar) {
+      results.push({ report, form, varName: isVar ? idExpr : undefined });
+    }
   }
-  return false;
+  return results;
 }
 
-function hasOtherEmbedOrIslandUrl(source: string, markup: string, app?: App): { hasEmbed: boolean; hasIslandUrl: boolean } {
-  const stripKnown = (text: string) =>
-    text.replace(/<iframe\b((?:[^>"']|"[^"]*"|'[^']*')*?)>(?:[\s\S]*?<\/iframe\s*>)?/gi, (whole, attrs) => {
-      const src = /\bsrc\s*=\s*(["'])([\s\S]*?)\1/i.exec(attrs);
-      if (!src) return whole;
-      const match = INTERNAL_RECORD_SUMMARY.exec(src[2].trim());
-      if (match && app?.reports.some((r) => r.name === match[1])) return '';
-      return whole;
-    });
-  const strippedMarkup = stripKnown(markup);
-  const strippedSource = stripKnown(source);
-  const hasEmbed = [...strippedMarkup.matchAll(/<\s*([A-Za-z][\w-]*)/g)].some((m) => EMBED_TAGS.has((m[1] ?? '').toLowerCase()));
-  const hasIslandUrl = /\b(?:src|href|action|formaction|data|poster)\s*=\s*["']?[^"'>\s]*<%/i.test(strippedSource);
+function hasOtherEmbedOrIslandUrl(source: string, markup: string, summaries: KnownSummary[], app?: App): { hasEmbed: boolean; hasIslandUrl: boolean } {
+  const nonIframeEmbeds = [...markup.matchAll(/<\s*([A-Za-z][\w-]*)/g)].some((m) => {
+    const tag = (m[1] ?? '').toLowerCase();
+    return EMBED_TAGS.has(tag) && tag !== 'iframe';
+  });
+  const totalIframes = [...source.matchAll(/<iframe\b/gi)].length;
+  const hasEmbed = nonIframeEmbeds || totalIframes > summaries.length;
+
+  const urlAttrs = [...source.matchAll(/\b(?:src|href|action|formaction|data|poster)\s*=\s*(?:(["'])([\s\S]*?)\1|([^\s>]+))/gi)];
+  const islandUrls = urlAttrs.filter((m) => (m[2] ?? m[3] ?? '').includes('<%'));
+  const allowedIslandUrls = islandUrls.filter((m) => isKnownReportSummaryUrl((m[2] ?? m[3] ?? '').trim(), app, source));
+  const hasIslandUrl = islandUrls.length > allowedIslandUrls.length;
+
   return { hasEmbed, hasIslandUrl };
 }
 
@@ -161,32 +251,24 @@ function hasOtherEmbedOrIslandUrl(source: string, markup: string, app?: App): { 
 export function serverSnippetGuidance(source: string, refusal: string | undefined, location: string, app?: App): SnippetGuidance {
   const code = islandCode(source);
   const markup = splitIslands(source).markup.replace(/^\s*htmlpage\b[^\n]*\n?/i, '');
+  const summaries = findKnownSummaries(source, app);
   const reasons: SnippetReason[] = [];
   if (WRITE_PATTERNS.some((re) => re.test(code)) || refusal === 'island is not a read-only render' || refusal === 'island writes are unguarded' || refusal === 'island is not an allowed write render') reasons.push('write');
   if (/\bopenUrl\s*\(/i.test(code) || refusal === 'openUrl could not be rewritten') reasons.push('render-navigation');
-  if (readsForCaller(code, headerParams(source))) reasons.push('caller-read');
+  if (readsForCaller(code, headerParams(source), summaries)) reasons.push('caller-read');
   const embeds = [...markup.matchAll(/<\s*([A-Za-z][\w-]*)/g)].some((m) => EMBED_TAGS.has((m[1] ?? '').toLowerCase()));
   const islandUrl = /\b(?:src|href|action|formaction|data|poster)\s*=\s*["']?[^"'>\s]*<%/i.test(source);
-  if (embeds || islandUrl || (refusal !== undefined && URL_REFUSALS.has(refusal))) reasons.push('dynamic-url');
+  if (embeds || islandUrl || (refusal !== undefined && URL_REFUSALS.has(refusal))) {
+    const { hasEmbed, hasIslandUrl } = summaries.length
+      ? hasOtherEmbedOrIslandUrl(source, markup, summaries, app)
+      : { hasEmbed: embeds, hasIslandUrl: islandUrl };
+    if (hasEmbed || hasIslandUrl || (refusal !== undefined && URL_REFUSALS.has(refusal))) {
+      reasons.push('dynamic-url');
+    }
+  }
   const lost = [...droppedTags(markup).map((t) => `<${t}>`), ...[...new Set(droppedStyles(markup))].sort()];
   if (lost.length || refusal === 'static markup contains a dropped style declaration') reasons.push('sanitizer-loss');
   if (!reasons.length || (refusal !== undefined && TRANSLATION_REFUSALS.has(refusal))) reasons.push('untranslated');
-
-  if (hasKnownReportSummary(source, app)) {
-    const { hasEmbed, hasIslandUrl } = hasOtherEmbedOrIslandUrl(source, markup, app);
-    if (!hasEmbed && !hasIslandUrl && (refusal === undefined || !URL_REFUSALS.has(refusal))) {
-      const idx = reasons.indexOf('dynamic-url');
-      if (idx >= 0) reasons.splice(idx, 1);
-    }
-    const codeWithoutSummaryRead = code.replace(/\b[A-Za-z_]\w*\s*=\s*[A-Za-z_]\w*\s*\[[^\]]*\]\s*\.\s*ID\s*;?/gi, '');
-    if (!readsForCaller(codeWithoutSummaryRead, headerParams(source))) {
-      const idx = reasons.indexOf('caller-read');
-      if (idx >= 0) reasons.splice(idx, 1);
-    }
-    if (!reasons.length && refusal !== undefined && TRANSLATION_REFUSALS.has(refusal)) {
-      reasons.push('untranslated');
-    }
-  }
 
   reasons.sort((a, b) => SNIPPET_REASONS.indexOf(a) - SNIPPET_REASONS.indexOf(b));
   const steps = reasons.map((reason) => {

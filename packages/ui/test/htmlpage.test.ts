@@ -3053,6 +3053,129 @@ content
   assert.ok(snippetTodo.manualReasons?.includes('dynamic-url'));
 });
 
+test('record-summary iframe rejects non-caller-filtered variable shapes (unfiltered read, input.* copy, literal, path traversal)', () => {
+  const employeeApp = `${ORDERS}
+\tform Add_Employee
+\t{
+\t\tOfficial_Email
+\t\t(
+\t\t\ttype = text
+\t\t)
+\t}
+\tlist Employee_Profile1
+\t{
+\t\tshow all rows from Add_Employee
+\t\t(
+\t\t\tOfficial_Email
+\t\t)
+\t}`;
+  const app = appOf(employeeApp);
+
+  // 1. Unfiltered read
+  const unfilteredSnippet = `htmlpage hp1()
+content
+<%{
+\tloginuserid = Add_Employee[ID != 0].ID;
+\tif(loginuserid != null)
+\t{
+\t\t%>
+<iframe src="https://app.zohocreator.in<%=zoho.appuri%>record-summary/Employee_Profile1/<%=loginuserid%>"></iframe>
+<%
+\t}
+}%>`;
+  const compiledUnfiltered = compileHtmlpage(app, 'Home', 'hp1', unfilteredSnippet);
+  assert.equal(compiledUnfiltered.ok, false, 'unfiltered read must fail compilation');
+  assert.equal(compiledUnfiltered.file, undefined, 'no route file generated for unfiltered read');
+  const uiUnfiltered = generateUi(appOf(`${employeeApp}\n${pageWithSnippet(unfilteredSnippet)}`));
+  assert.ok(uiUnfiltered.model.todos.some((t) => t.reason === SNIPPET_TODO), 'unfiltered read keeps TODO');
+  assert.equal(rewriteRecordSummaryFrames(unfilteredSnippet, app), unfilteredSnippet, 'rewrite leaves unfiltered read unchanged');
+
+  // 2. input.* copied to variable
+  const inputCopySnippet = `htmlpage hp1(int pid)
+content
+<%{
+\tloginuserid = input.pid;
+\tif(loginuserid != null)
+\t{
+\t\t%>
+<iframe src="https://app.zohocreator.in<%=zoho.appuri%>record-summary/Employee_Profile1/<%=loginuserid%>"></iframe>
+<%
+\t}
+}%>`;
+  const compiledInputCopy = compileHtmlpage(app, 'Home', 'hp1', inputCopySnippet);
+  assert.equal(compiledInputCopy.ok, false, 'input.* copy must fail compilation');
+  assert.equal(compiledInputCopy.file, undefined, 'no route file generated for input.* copy');
+  const uiInputCopy = generateUi(appOf(`${employeeApp}\n${pageWithSnippet(inputCopySnippet)}`));
+  assert.ok(uiInputCopy.model.todos.some((t) => t.reason === SNIPPET_TODO), 'input.* copy keeps TODO');
+  assert.equal(rewriteRecordSummaryFrames(inputCopySnippet, app), inputCopySnippet, 'rewrite leaves input.* copy unchanged');
+
+  // 3. String literal variable
+  const literalSnippet = `htmlpage hp1()
+content
+<%{
+\tloginuserid = "1001";
+\tif(loginuserid != null)
+\t{
+\t\t%>
+<iframe src="https://app.zohocreator.in<%=zoho.appuri%>record-summary/Employee_Profile1/<%=loginuserid%>"></iframe>
+<%
+\t}
+}%>`;
+  const compiledLiteral = compileHtmlpage(app, 'Home', 'hp1', literalSnippet);
+  assert.equal(compiledLiteral.ok, false, 'string literal must fail compilation');
+  assert.equal(compiledLiteral.file, undefined, 'no route file generated for string literal');
+  const uiLiteral = generateUi(appOf(`${employeeApp}\n${pageWithSnippet(literalSnippet)}`));
+  assert.ok(uiLiteral.model.todos.some((t) => t.reason === SNIPPET_TODO), 'string literal keeps TODO');
+  assert.equal(rewriteRecordSummaryFrames(literalSnippet, app), literalSnippet, 'rewrite leaves string literal unchanged');
+
+  // 4. Path traversal / '../..'
+  const pathSnippet = `htmlpage hp1()
+content
+<%{
+\tloginuserid = "../../form/Add_Employee";
+\tif(loginuserid != null)
+\t{
+\t\t%>
+<iframe src="https://app.zohocreator.in<%=zoho.appuri%>record-summary/Employee_Profile1/<%=loginuserid%>"></iframe>
+<%
+\t}
+}%>`;
+  const compiledPath = compileHtmlpage(app, 'Home', 'hp1', pathSnippet);
+  assert.equal(compiledPath.ok, false, 'path traversal variable must fail compilation');
+  assert.equal(compiledPath.file, undefined, 'no route file generated for path traversal variable');
+  const uiPath = generateUi(appOf(`${employeeApp}\n${pageWithSnippet(pathSnippet)}`));
+  assert.ok(uiPath.model.todos.some((t) => t.reason === SNIPPET_TODO), 'path traversal variable keeps TODO');
+  assert.equal(rewriteRecordSummaryFrames(pathSnippet, app), pathSnippet, 'rewrite leaves path traversal variable unchanged');
+
+  // 4b. Direct '../..' in URL
+  const directPathSnippet = `htmlpage hp1()
+content
+<iframe src="https://app.zohocreator.in<%=zoho.appuri%>record-summary/Employee_Profile1/../.."></iframe>`;
+  const compiledDirectPath = compileHtmlpage(app, 'Home', 'hp1', directPathSnippet);
+  assert.equal(compiledDirectPath.ok, false, 'direct path traversal in URL must fail compilation');
+  assert.equal(compiledDirectPath.file, undefined, 'no route file generated for direct path traversal');
+  const uiDirectPath = generateUi(appOf(`${employeeApp}\n${pageWithSnippet(directPathSnippet)}`));
+  assert.ok(uiDirectPath.model.todos.some((t) => t.reason === SNIPPET_TODO), 'direct path traversal keeps TODO');
+
+  // 5. Page-parameter read (Form[ID == input.pid].ID) keeps caller-read and dynamic-url
+  const paramReadSnippet = `htmlpage hp1(int pid)
+content
+<%{
+\tloginuserid = Add_Employee[ID == input.pid].ID;
+\tif(loginuserid != null)
+\t{
+\t\t%>
+<iframe src="https://app.zohocreator.in<%=zoho.appuri%>record-summary/Employee_Profile1/<%=loginuserid%>"></iframe>
+<%
+\t}
+}%>`;
+  const compiledParamRead = compileHtmlpage(app, 'Home', 'hp1', paramReadSnippet);
+  assert.equal(compiledParamRead.ok, false, 'page-parameter read variable must fail compilation');
+  assert.equal(compiledParamRead.file, undefined, 'no route file generated for page-parameter read variable');
+  assert.ok(compiledParamRead.manualReasons?.includes('caller-read'), 'page-parameter read retains caller-read guidance');
+  assert.ok(compiledParamRead.manualReasons?.includes('dynamic-url'), 'page-parameter read retains dynamic-url guidance');
+});
+
 test('one page with carried <style> CSS, a <script>, an ExecuteFunction button and a ZML image counts only lost constructs', () => {
   const snippet = [
     '<style>.highlight { color: red; }</style>',
