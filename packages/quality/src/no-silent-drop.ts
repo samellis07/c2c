@@ -86,6 +86,8 @@ import { adapterFor } from '../../shims/src/zoho-adapters.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
 import { generateSchema, schemaIdent, type SchemaColumn, type SchemaPlan } from '../../schema/src/generator.js';
 import { buildModel, type UiField, type UiModel, type UiReport } from '../../ui/src/model.js';
+import { displayChoice } from '../../ui/src/decorations/lookups.js';
+import { lookupOrderMap } from '../../ui/src/generate.js';
 import type { UiElement } from '../../ui/src/pages.js';
 import { defaultEquivalent } from './default-equivalence.js';
 
@@ -160,10 +162,12 @@ export interface AuditOutputs {
   coverage?: WorkflowCoverage[];
   /** Statement coverage ledger rows the generators emitted (generate().statementCoverage, absolute spans). */
   statementCoverage: CoverageEntry[];
+  /** The generated UI bundle files (buildUi), when the caller produced them — the audit reads the emitted lookup query from here. */
+  uiFiles?: readonly { path: string; data: string | Buffer }[];
 }
 
 /** Run every generator over the app and bundle the outputs the audit reads. `parts` reuses already-computed results (analyze runs the same generators). */
-export function collectOutputs(app: App, parts?: { schema?: SchemaPlan; gen?: GenerateResult; model?: UiModel }): AuditOutputs {
+export function collectOutputs(app: App, parts?: { schema?: SchemaPlan; gen?: GenerateResult; model?: UiModel; uiFiles?: readonly { path: string; data: string | Buffer }[] }): AuditOutputs {
   const schema = parts?.schema ?? generateSchema(app);
   const gen = parts?.gen ?? generate(app);
   const model = parts?.model ?? buildModel(app, gen.files);
@@ -184,7 +188,7 @@ export function collectOutputs(app: App, parts?: { schema?: SchemaPlan; gen?: Ge
   } catch {
     warnings = [];
   }
-  return { schema, model, files: gen.files, todos: gen.todos, warnings, auth, connections, schedules, specs: flowSpecs(app), coverage: gen.coverage, statementCoverage: gen.statementCoverage };
+  return { schema, model, files: gen.files, todos: gen.todos, warnings, auth, connections, schedules, specs: flowSpecs(app), coverage: gen.coverage, statementCoverage: gen.statementCoverage, uiFiles: parts?.uiFiles };
 }
 
 function within(inner: { start: number; end: number }, outer: { start: number; end: number }): boolean {
@@ -272,7 +276,7 @@ function auditFieldProperties(app: App, out: AuditOutputs, rows: CoverageRow[]):
   eachField(app, (formName, field) => {
     const status = fieldRow.get(`${formName}.${field.name}`);
     if (status !== 'emitted' && status !== 'counted') return;
-    const items = fieldSettingItems(field, app, formName, out.schema);
+    const items = fieldSettingItems(field, app, formName, out);
     if (status === 'counted' || fieldListed(out, formName, field)) {
       for (const item of items) {
         rows.push({ kind: 'field-property', name: `${formName}.${field.name} ${item.label}`, status: 'counted', via: 'field manual item' });
@@ -312,7 +316,7 @@ interface FieldSetting {
   proved: (ui: UiField | undefined, columns: SchemaColumn[]) => boolean;
 }
 
-function fieldSettingItems(field: Field, app: App, formName: string, schema: SchemaPlan): FieldSetting[] {
+function fieldSettingItems(field: Field, app: App, formName: string, out: AuditOutputs): FieldSetting[] {
   const span = field.span;
   const items: FieldSetting[] = [];
   for (const p of field.properties) {
@@ -321,7 +325,7 @@ function fieldSettingItems(field: Field, app: App, formName: string, schema: Sch
       label: `property ${p.key}`,
       start: p.span.start,
       end: p.span.end,
-      proved: (ui, columns) => (bidirectional ? bidirectionalProved(p, field, formName, app, schema) : propertyProved(p, field, ui, columns, app)),
+      proved: (ui, columns) => (bidirectional ? bidirectionalProved(p, field, formName, app, out.schema) : propertyProved(p, field, ui, columns, app, out)),
     });
   }
   for (const modifier of field.modifiers) {
@@ -412,7 +416,7 @@ function findColumns(schema: SchemaPlan, formName: string, fieldName: string): S
   return columns;
 }
 
-function propertyProved(p: Property, field: Field, ui: UiField | undefined, columns: SchemaColumn[], app: App): boolean {
+function propertyProved(p: Property, field: Field, ui: UiField | undefined, columns: SchemaColumn[], app: App, out: AuditOutputs): boolean {
   const key = p.key.trim().toLowerCase().replace(/\s+/g, ' ');
   const raw = p.value;
   const text = unquote(raw).trim();
@@ -423,6 +427,7 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
     return ui?.label === plain || ui?.label === plain.trim();
   }
   if (key === 'values') return choicesProved(field, ui) || lookupProved(field.lookup, ui, columns, app);
+  if (key === 'sortorder') return sortOrderProved(text, field, ui, app, out);
   if (key === 'initial value') return initialProved(raw, ui, columns);
   if (key === 'maxchar' || key === 'max char' || key === 'max length') return lengthProved(text, ui?.maxLength, columns, 'max');
   if (key === 'minchar' || key === 'min char' || key === 'min length') return lengthProved(text, ui?.minLength, columns, 'min');
@@ -442,6 +447,34 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
     });
   }
   return false;
+}
+
+/**
+ * `sortorder = ascending|descending`. On a lookup the generated
+ * `/lookups/:form/:field` query emits `ORDER BY <stored column> DIR, ROWID`
+ * (lookupOrderMap): proved only when that clause is in the emitted stub — when
+ * the UI bundle is among the outputs — and the widget carries the direction.
+ * A sort the generator could not bind to a stored column emits nothing and
+ * stays a drop. On an inline choice list the decoration sorts `ui.choices`.
+ */
+function sortOrderProved(text: string, field: Field, ui: UiField | undefined, app: App, out: AuditOutputs): boolean {
+  const lower = text.toLowerCase();
+  const dir = lower === 'asc' || lower === 'ascending' ? 'asc' : lower === 'desc' || lower === 'descending' ? 'desc' : undefined;
+  if (!dir) return false;
+  if (field.lookup) {
+    if (ui?.lookup?.sort !== dir) return false;
+    const choice = displayChoice(field.lookup);
+    const entry = lookupOrderMap(app)[field.lookup.form]?.[choice.field];
+    if (!entry || entry.dir !== dir) return false;
+    const stub = out.uiFiles?.find((file) => file.path === 'functions/lookups/lookup.mjs');
+    if (stub === undefined) return true;
+    const source = typeof stub.data === 'string' ? stub.data : stub.data.toString('utf8');
+    return source.includes(entry.orderBy);
+  }
+  const choices = field.choices;
+  if (!choices?.length || ui?.choices?.length !== choices.length) return false;
+  const sorted = dir === 'asc' ? [...choices].sort() : [...choices].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+  return ui.choices.every((choice, index) => choice === sorted[index]);
 }
 
 function lengthProved(text: string, uiLength: number | undefined, columns: SchemaColumn[], bound: 'max' | 'min'): boolean {
