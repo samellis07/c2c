@@ -20,7 +20,7 @@ import { CURRENCY_CODES, fieldTypeRow, normalizeType, type FieldTypeRow } from '
 import { criteriaHasTodo, sealRelativeCriteria, type Criteria } from '../../shims/src/criteria.js';
 import { LIMITS } from '../../shims/src/index.js';
 import { multiValueDefault } from '../../shims/src/multi-value.js';
-import { isMultiChoiceField } from '../../schema/src/generator.js';
+import { derivedFieldColumns, isMultiChoiceField } from '../../schema/src/generator.js';
 import {
   droppedStyleReason,
   carriedStyleRules,
@@ -171,7 +171,16 @@ export interface UiReport {
   note?: string;
   /** Compiled `show all rows from Form [criteria]`. Same predicate the report stub exports as `baseCriteria`. `{ op: 'todo' }` when it did not translate. */
   criteria?: Criteria;
-  columns: { field: string; label: string; lookup?: { form: string; field: string }; numeric?: boolean; multiValue?: boolean; date?: 'date' | 'datetime'; action?: string }[];
+  columns: {
+    field: string;
+    label: string;
+    /** `form`/`field` name the related display on the parent form; `source` is the row column holding the parent ROWID when it differs from `field` (a `Lookup.Part` subcolumn). */
+    lookup?: { form: string; field: string; source?: string };
+    numeric?: boolean;
+    multiValue?: boolean;
+    date?: 'date' | 'datetime';
+    action?: string;
+  }[];
   /** Phone record card fields in card order (decorations/report-views.ts); the list columns are the web layout. */
   phoneColumns?: { field: string; label: string }[];
   filters: { field?: string; label?: string }[];
@@ -1073,10 +1082,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   const type = report.type.toLowerCase();
   let view = REPORT_VIEW[type] ?? 'todo';
   const form = report.form ? app.forms.find((item) => item.name === report.form) : undefined;
-  const columns = report.columns.map((column) => ({
-    field: column.field,
-    label: formField(form, column.field)?.displayName || column.label || column.field,
-  }));
+  const columns = report.columns.flatMap((column) => reportViewColumns(app, form, column));
   const groupBy = report.groupBy.map((item) => ({ field: item.field }));
   let status: 'generated' | 'todo' = view === 'todo' ? 'todo' : 'generated';
   let todo: string | undefined;
@@ -1308,6 +1314,80 @@ function reportOptions(report: Report): Map<string, string> {
 
 function formField(form: Form | undefined, fieldName: string): Field | undefined {
   return form?.fields.find((item) => item.name === fieldName);
+}
+
+/** Record columns every form table stores; a report may list them without declaring them. */
+const RECORD_COLUMNS = new Set([
+  'ID',
+  'ROWID',
+  'Added_User',
+  'Added_Time',
+  'Modified_User',
+  'Modified_Time',
+  'Added_User_IP_Address',
+  'Modified_User_IP_Address',
+]);
+
+/**
+ * A report column resolves when its head names a field of the report's form
+ * or a stored record column. When the report names no form the column list
+ * is kept as declared — there is no form to verify it against.
+ */
+function knownColumnHead(form: Form | undefined, fieldName: string): boolean {
+  if (!form) return true;
+  const head = fieldName.slice(0, fieldName.indexOf('.') > 0 ? fieldName.indexOf('.') : undefined);
+  return !!formField(form, head) || RECORD_COLUMNS.has(head);
+}
+
+/** Stored part names of a composite field: declared subfields, else the type's default parts. */
+function compositePartNames(field: Field): string[] {
+  const prefix = `${field.name}_`;
+  return derivedFieldColumns(field)
+    .filter((name) => name.startsWith(prefix) && !name.endsWith('__n'))
+    .map((name) => name.slice(prefix.length));
+}
+
+interface ReportViewColumn {
+  field: string;
+  label: string;
+  lookup?: { form: string; field: string; source?: string };
+}
+
+/**
+ * One declared report column as generated view columns: the column itself,
+ * then each part it lists as `<Parent>.<part>`. A composite part renders the
+ * stored part cell; a lookup part resolves the related field through the
+ * caller's own read access on the parent form (an unreadable parent shows
+ * empty, never a ROWID). A column — or part — naming nothing the form stores
+ * stays a silent drop: the view fails closed instead of claiming a column it
+ * cannot fill.
+ */
+function reportViewColumns(app: App, form: Form | undefined, column: Report['columns'][number], path = column.field): ReportViewColumn[] {
+  if (!knownColumnHead(form, path)) return [];
+  const out: ReportViewColumn[] = [
+    {
+      field: path,
+      label: formField(form, column.field)?.displayName || column.label || path,
+    },
+  ];
+  const parentField = path === column.field && !column.field.includes('.') ? formField(form, column.field) : undefined;
+  const composite = parentField && resolveRow(parentField)?.kind === 'composite' ? new Set(compositePartNames(parentField)) : undefined;
+  const parentForm = parentField?.lookup?.form ? app.forms.find((item) => item.name === parentField.lookup?.form) : undefined;
+  for (const sub of column.subcolumns) {
+    if (composite?.has(sub.field)) {
+      out.push(...reportViewColumns(app, form, sub, `${path}.${sub.field}`));
+      continue;
+    }
+    if (parentForm && (formField(parentForm, sub.field) || RECORD_COLUMNS.has(sub.field))) {
+      out.push({
+        field: `${path}.${sub.field}`,
+        label: sub.label || formField(parentForm, sub.field)?.displayName || sub.field,
+        lookup: { form: parentForm.name, field: sub.field, source: path },
+      });
+    }
+    // Any other subcolumn names a part the parent does not have: dropped.
+  }
+  return out;
 }
 
 function dateField(form: Form | undefined, fieldName: string): boolean {

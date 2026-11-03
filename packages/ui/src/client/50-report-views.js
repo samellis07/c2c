@@ -39,8 +39,24 @@ function reportOf(name) {
 /** A cell's text; with its report, a date or date-time field shows in the app date format and clock. */
 function viewCell(row, field, report) {
   if (!row || field == null) return '';
-  const value = row[field];
-  if (value == null || typeof value === 'object') return '';
+  let value = row[field];
+  // A `Parent.part` column reads the part inside the composite object.
+  if (value === undefined && typeof field === 'string' && field.indexOf('.') > 0) {
+    value = row;
+    for (const key of field.split('.')) {
+      value = value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined;
+    }
+  }
+  if (value == null) return '';
+  // A composite cell (a name or address object) joins its non-empty scalar parts.
+  if (typeof value === 'object') {
+    const parts = [];
+    for (const key of Object.keys(value)) {
+      const part = value[key];
+      if (part != null && part !== '' && typeof part !== 'object') parts.push(String(part));
+    }
+    return parts.join(' ');
+  }
   const kind = report ? reportDateKind(report, field) : undefined;
   return kind ? displayDateValue(value, kind) : String(value);
 }
