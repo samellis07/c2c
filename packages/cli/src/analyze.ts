@@ -441,7 +441,7 @@ export function analyze(app: App, options?: { lock?: FillLock }): AnalyzeReport 
   const schema = generateSchema(app);
   // C3 coverage invariant: walk every declared construct; a construct that is
   // neither emitted nor counted is a named silent drop and fails the app.
-  const silentDrops = auditApp(app, collectOutputs(app, { gen: whole, schema, model: uiBundle.model }));
+  const silentDrops = auditApp(app, collectOutputs(app, { gen: whole, schema, model: uiBundle.model, uiFiles: uiBundle.files }));
 
   const blockers: Blocker[] = [];
   for (const u of feat.used) {

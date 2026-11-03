@@ -23,7 +23,7 @@ import { columnRenamesOf, generateSchema, type SchemaPlan } from '../../schema/s
 import { EXTENSION_KEY, limitValue, planReportQuery, planZcql, ZcqlLimitError } from '../../schema/src/limits.js';
 import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
 import { buildSlate, type OutFile } from './build.js';
-import { lookupFormats } from './decorations/lookups.js';
+import { lookupFormats, lookupSorts, type SortDir } from './decorations/lookups.js';
 import { actionDispatchTarget, buildModel, slug, smokeMarkerField, smokeNumberField, summarize, uiSnippetFiles, type UiModel, type UiSummary } from './model.js';
 import { iconColorRgb, paletteFor } from './theme-map.js';
 import { pwaFiles, pwaServiceWorkerSource } from './pwa.js';
@@ -448,13 +448,21 @@ function scopedReadSource(): string {
   return `// Decimal, currency and percent fields are varchar: a record filter on one
 // compiles to its Double shadow column, and queryExact drops the rows the
 // shadow over-matches. Never compare the raw varchar.
-async function readScoped(datastore, form, criteria, offset, limit) {
+async function readScoped(datastore, form, criteria, offset, limit, sort) {
   const decimals = Object.prototype.hasOwnProperty.call(parentDecimals, form) ? parentDecimals[form] : {};
   const where = zcqlPredicate(compileCriteria(criteria, undefined, decimals));
-  if (needsExactRead(criteria, undefined, decimals)) {
-    return queryExact((name, w, size, off, order) => datastore.query(name, w, size, off, order), form, where, { criteria, decimals, range: { from: offset + 1, to: offset + limit } });
+  const exact = sort && typeof sort.field === "string" ? { field: sort.field, dir: sort.dir } : undefined;
+  if (needsExactRead(criteria, exact, decimals)) {
+    return queryExact((name, w, size, off, order) => datastore.query(name, w, size, off, order), form, where, { criteria, decimals, ...(exact ? { sort: exact } : {}), range: { from: offset + 1, to: offset + limit } });
   }
-  return datastore.query(form, where, limit, offset, "ORDER BY ROWID");
+  return datastore.query(form, where, limit, offset, sortOrderOf(sort));
+}
+
+// A declared sortorder orders by its stored column; ROWID stays the final
+// tiebreaker so OFFSET pages of tied rows cannot overlap or skip. The emitted
+// clause is the only text accepted — anything else is ROWID order.
+function sortOrderOf(sort) {
+  return sort && typeof sort.orderBy === "string" && /^ORDER BY [A-Za-z_][A-Za-z0-9_]* (ASC|DESC), ROWID$/.test(sort.orderBy) ? sort.orderBy : "ORDER BY ROWID";
 }
 `;
 }
@@ -769,6 +777,8 @@ export const endpoint = { type: "advancedio", method: "GET", path: "/lookups/:fo
 const parentDecimals = ${JSON.stringify(decimalColumnsOf(app))};
 /** Parent form -> lookup key field -> displayformat terms, for a format over several fields. */
 const lookupFormats = ${JSON.stringify(formats)};
+/** Parent form -> display field -> the ORDER BY a declared sortorder emits (field, dir, orderBy). */
+const lookupSort = ${JSON.stringify(lookupOrderMap(app))};
 /** Parent form -> stored part column of each composite part: "Name.first_name" -> "Name_first_name". */
 const parentParts = ${JSON.stringify(parts)};
 const SEARCH_MAX = 100;
@@ -1003,6 +1013,11 @@ ${requirePrincipal()}
     const terms = Object.prototype.hasOwnProperty.call(formats, display) ? formats[display] : null;
     const option = (row) => toOption(row, scoped.fields, display, terms, route.form);
     const canAdd = canCreate(access, principal, route.form);
+    // A declared sortorder applies only while its display field is one the
+    // caller can read — the same readable check the option text passes.
+    const sorts = Object.prototype.hasOwnProperty.call(lookupSort, route.form) ? lookupSort[route.form] : {};
+    const entry = Object.prototype.hasOwnProperty.call(sorts, display) ? sorts[display] : undefined;
+    const sort = entry && !isHidden(entry.field) && (!Array.isArray(scoped.fields) || scoped.fields.includes(entry.field)) ? entry : undefined;
     if (deploy.mode === "live") {
       const datastore = await liveDatastore();
       if (!datastore || typeof datastore.query !== "function") {
@@ -1011,13 +1026,21 @@ ${requirePrincipal()}
       }
       const { page, pageSize } = pagingArgs;
       const criteria = search ? searchCriteria(scoped.criteria, searchColumns(route.form, display, terms, scoped.fields), search) : scoped.criteria;
-      const queried = await readScoped(datastore, route.form, criteria, page * pageSize, pageSize);
+      const queried = await readScoped(datastore, route.form, criteria, page * pageSize, pageSize, sort);
       const rows = (Array.isArray(queried) ? queried : []).map(option);
       send(res, 200, { dryRun: false, rows, field: display, page, pageSize, canAdd, ...(search ? { q: search } : {}) });
       return;
     }
     let rows = suppliedRows(req).map(option);
     if (search) rows = rows.filter((row) => String(row[display] ?? "").toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+    if (sort) {
+      const mul = sort.dir === "desc" ? -1 : 1;
+      rows = rows.slice().sort((left, right) => {
+        const a = String(left[display] ?? "");
+        const b = String(right[display] ?? "");
+        return a < b ? -mul : a > b ? mul : 0;
+      });
+    }
     send(res, 200, { dryRun: true, rows, field: display, pageSize: ${LIMITS.zcqlRowsPerQuery}, canAdd, ...(search ? { q: search } : {}) });
   } catch (err) {
     fail(res, err);
@@ -1431,6 +1454,37 @@ function storedColumnsOfParents(app: App, parents: Record<string, string>, plan:
     const table = plan.tables.find((item) => item.role === 'form' && item.form === parentForm && !item.nosql);
     if (!table) continue;
     out[parentForm] = table.columns.filter((column) => !column.shadowFor).map((column) => column.name);
+  }
+  return out;
+}
+
+/**
+ * Parent form -> display field -> the ORDER BY a declared `sortorder` emits on
+ * the lookup option read. The ref of {@link lookupSorts} resolves against the
+ * generated schema: a composite part ref to its stored part column, an
+ * exact-decimal field to its Double shadow, anything else to its stored
+ * column. A ref with no stored column emits nothing (the read stays in ROWID
+ * order and the audit still counts the setting as a drop — fail closed). Only
+ * schema column names reach the clause, never `.ds` text.
+ */
+export function lookupOrderMap(app: App): Record<string, Record<string, { field: string; dir: SortDir; orderBy: string }>> {
+  const plan = schemaOf(app);
+  const decimals = decimalColumnsOf(app);
+  const out: Record<string, Record<string, { field: string; dir: SortDir; orderBy: string }>> = Object.create(null);
+  for (const [form, byField] of Object.entries(lookupSorts(app)).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
+    const table = plan.tables.find((item) => item.role === 'form' && item.form === form && !item.nosql);
+    if (!table) continue;
+    const parts = compositePartsOfParents(app, { [form]: form }, plan)[form] ?? {};
+    const formDecimals = decimals[form] ?? {};
+    for (const [display, sort] of Object.entries(byField).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
+      const top = sort.ref.split('.')[0]!;
+      let column: string | undefined;
+      if (sort.ref.includes('.')) column = parts[sort.ref];
+      else if (Object.hasOwn(formDecimals, top)) column = formDecimals[top]!.shadow;
+      else column = table.columns.find((item) => !item.shadowFor && (item.field === top || item.name === top))?.name;
+      if (!column || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(column)) continue;
+      (out[form] ??= Object.create(null))[display] = { field: top, dir: sort.dir, orderBy: `ORDER BY ${column} ${sort.dir === 'desc' ? 'DESC' : 'ASC'}, ROWID` };
+    }
   }
   return out;
 }
