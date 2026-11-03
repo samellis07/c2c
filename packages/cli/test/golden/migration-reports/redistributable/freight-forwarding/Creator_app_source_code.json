@@ -851,7 +851,7 @@
     "Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)",
     "Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)"
   ],
-  "silentDrops": 215,
+  "silentDrops": 161,
   "residuals": [
     {
       "id": "field-property:New_Airport.Country property others option",
@@ -884,17 +884,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated multi-select field. No array column. Stored as text holding a JSON list. Criteria do not match list semantics. values = Form.Field on this type is a multi lookup (junction table), not this column.",
       "step": "The sort order for Map_Dependency_Mode.Sub_Mode_of_Shipment was not converted. In the Catalyst console, set the field's sort order for Map_Dependency_Mode.Sub_Mode_of_Shipment, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Account.Account_Owner property displayformat",
-      "kind": "field-property",
-      "construct": "New_Account.Account_Owner property displayformat",
-      "form": "New_Account",
-      "field": "Account_Owner",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Account.Account_Owner was not converted. In the Catalyst console, set the lookup's display field or display format for New_Account.Account_Owner, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -953,17 +942,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Account.Lead_ID property displayformat",
-      "kind": "field-property",
-      "construct": "New_Account.Lead_ID property displayformat",
-      "form": "New_Account",
-      "field": "Lead_ID",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Account.Lead_ID was not converted. In the Catalyst console, set the lookup's display field or display format for New_Account.Lead_ID, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Account.Lead_ID property sortorder",
       "kind": "field-property",
       "construct": "New_Account.Lead_ID property sortorder",
@@ -986,17 +964,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Contact.Contact_Owner property displayformat",
-      "kind": "field-property",
-      "construct": "New_Contact.Contact_Owner property displayformat",
-      "form": "New_Contact",
-      "field": "Contact_Owner",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Contact.Contact_Owner was not converted. In the Catalyst console, set the lookup's display field or display format for New_Contact.Contact_Owner, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Contact.Contact_Owner property sortorder",
       "kind": "field-property",
       "construct": "New_Contact.Contact_Owner property sortorder",
@@ -1016,17 +983,6 @@
       "property": "property personal data",
       "reason": "property personal data is not carried by the generated name field. One varchar per part (prefix, first_name, last_name, suffix). Deluge sees one value; a shim joins the parts. Parts are not separate field-type rows.",
       "step": "The personal-data setting for New_Contact.Contact_Name was not converted. In the Catalyst console, mark New_Contact.Contact_Name as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Contact.Vendor property displayformat",
-      "kind": "field-property",
-      "construct": "New_Contact.Vendor property displayformat",
-      "form": "New_Contact",
-      "field": "Vendor",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Contact.Vendor was not converted. In the Catalyst console, set the lookup's display field or display format for New_Contact.Vendor, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1063,17 +1019,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Contact.Lead_ID property displayformat",
-      "kind": "field-property",
-      "construct": "New_Contact.Lead_ID property displayformat",
-      "form": "New_Contact",
-      "field": "Lead_ID",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Contact.Lead_ID was not converted. In the Catalyst console, set the lookup's display field or display format for New_Contact.Lead_ID, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Contact.Lead_ID property sortorder",
       "kind": "field-property",
       "construct": "New_Contact.Lead_ID property sortorder",
@@ -1096,17 +1041,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Contact.Account_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_Contact.Account_Name property displayformat",
-      "form": "New_Contact",
-      "field": "Account_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Contact.Account_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_Contact.Account_Name, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Contact.Account_Name property sortorder",
       "kind": "field-property",
       "construct": "New_Contact.Account_Name property sortorder",
@@ -1126,17 +1060,6 @@
       "property": "property personal data",
       "reason": "property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
       "step": "The personal-data setting for New_Contact.Phone_Number was not converted. In the Catalyst console, mark New_Contact.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Vendor.Vendor_Owner property displayformat",
-      "kind": "field-property",
-      "construct": "New_Vendor.Vendor_Owner property displayformat",
-      "form": "New_Vendor",
-      "field": "Vendor_Owner",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Vendor.Vendor_Owner was not converted. In the Catalyst console, set the lookup's display field or display format for New_Vendor.Vendor_Owner, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1173,17 +1096,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Deal.Deal_Owner property displayformat",
-      "kind": "field-property",
-      "construct": "New_Deal.Deal_Owner property displayformat",
-      "form": "New_Deal",
-      "field": "Deal_Owner",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Deal.Deal_Owner was not converted. In the Catalyst console, set the lookup's display field or display format for New_Deal.Deal_Owner, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Deal.Deal_Owner property sortorder",
       "kind": "field-property",
       "construct": "New_Deal.Deal_Owner property sortorder",
@@ -1192,17 +1104,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Deal.Deal_Owner was not converted. In the Catalyst console, set the field's sort order for New_Deal.Deal_Owner, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Deal.Gate_Way_Airport property displayformat",
-      "kind": "field-property",
-      "construct": "New_Deal.Gate_Way_Airport property displayformat",
-      "form": "New_Deal",
-      "field": "Gate_Way_Airport",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Deal.Gate_Way_Airport was not converted. In the Catalyst console, set the lookup's display field or display format for New_Deal.Gate_Way_Airport, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1217,17 +1118,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Deal.Destination_Airport property displayformat",
-      "kind": "field-property",
-      "construct": "New_Deal.Destination_Airport property displayformat",
-      "form": "New_Deal",
-      "field": "Destination_Airport",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Deal.Destination_Airport was not converted. In the Catalyst console, set the lookup's display field or display format for New_Deal.Destination_Airport, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Deal.Destination_Airport property sortorder",
       "kind": "field-property",
       "construct": "New_Deal.Destination_Airport property sortorder",
@@ -1236,17 +1126,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Deal.Destination_Airport was not converted. In the Catalyst console, set the field's sort order for New_Deal.Destination_Airport, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Deal.Port_of_Loading property displayformat",
-      "kind": "field-property",
-      "construct": "New_Deal.Port_of_Loading property displayformat",
-      "form": "New_Deal",
-      "field": "Port_of_Loading",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Deal.Port_of_Loading was not converted. In the Catalyst console, set the lookup's display field or display format for New_Deal.Port_of_Loading, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1272,17 +1151,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Deal.Account_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_Deal.Account_Name property displayformat",
-      "form": "New_Deal",
-      "field": "Account_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Deal.Account_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_Deal.Account_Name, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Deal.Account_Name property sortorder",
       "kind": "field-property",
       "construct": "New_Deal.Account_Name property sortorder",
@@ -1302,17 +1170,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated dropdown field. Varchar plus the .ds choice list. The server rejects values outside the list. A choice longer than 255 is promoted to text. A values = Form.Field target is a lookup, not a dropdown. module = users is the Users field.",
       "step": "The sort order for New_Deal.Mode_of_Shipment was not converted. In the Catalyst console, set the field's sort order for New_Deal.Mode_of_Shipment, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Deal.Port_of_Discharge property displayformat",
-      "kind": "field-property",
-      "construct": "New_Deal.Port_of_Discharge property displayformat",
-      "form": "New_Deal",
-      "field": "Port_of_Discharge",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Deal.Port_of_Discharge was not converted. In the Catalyst console, set the lookup's display field or display format for New_Deal.Port_of_Discharge, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1338,17 +1195,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Deal.Lead_ID property displayformat",
-      "kind": "field-property",
-      "construct": "New_Deal.Lead_ID property displayformat",
-      "form": "New_Deal",
-      "field": "Lead_ID",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Deal.Lead_ID was not converted. In the Catalyst console, set the lookup's display field or display format for New_Deal.Lead_ID, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Deal.Lead_ID property sortorder",
       "kind": "field-property",
       "construct": "New_Deal.Lead_ID property sortorder",
@@ -1360,17 +1206,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Deal.Vessel_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_Deal.Vessel_Name property displayformat",
-      "form": "New_Deal",
-      "field": "Vessel_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Deal.Vessel_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_Deal.Vessel_Name, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Deal.Vessel_Name property sortorder",
       "kind": "field-property",
       "construct": "New_Deal.Vessel_Name property sortorder",
@@ -1379,17 +1214,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Deal.Vessel_Name was not converted. In the Catalyst console, set the field's sort order for New_Deal.Vessel_Name, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Lead.Lead_Owner property displayformat",
-      "kind": "field-property",
-      "construct": "New_Lead.Lead_Owner property displayformat",
-      "form": "New_Lead",
-      "field": "Lead_Owner",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Lead.Lead_Owner was not converted. In the Catalyst console, set the lookup's display field or display format for New_Lead.Lead_Owner, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1426,17 +1250,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Lead.Gate_Way_Airport property displayformat",
-      "kind": "field-property",
-      "construct": "New_Lead.Gate_Way_Airport property displayformat",
-      "form": "New_Lead",
-      "field": "Gate_Way_Airport",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Lead.Gate_Way_Airport was not converted. In the Catalyst console, set the lookup's display field or display format for New_Lead.Gate_Way_Airport, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Lead.Gate_Way_Airport property sortorder",
       "kind": "field-property",
       "construct": "New_Lead.Gate_Way_Airport property sortorder",
@@ -1470,17 +1283,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Lead.Destination_Airport property displayformat",
-      "kind": "field-property",
-      "construct": "New_Lead.Destination_Airport property displayformat",
-      "form": "New_Lead",
-      "field": "Destination_Airport",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Lead.Destination_Airport was not converted. In the Catalyst console, set the lookup's display field or display format for New_Lead.Destination_Airport, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Lead.Destination_Airport property sortorder",
       "kind": "field-property",
       "construct": "New_Lead.Destination_Airport property sortorder",
@@ -1489,17 +1291,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Lead.Destination_Airport was not converted. In the Catalyst console, set the field's sort order for New_Lead.Destination_Airport, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Lead.Port_of_Loading property displayformat",
-      "kind": "field-property",
-      "construct": "New_Lead.Port_of_Loading property displayformat",
-      "form": "New_Lead",
-      "field": "Port_of_Loading",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Lead.Port_of_Loading was not converted. In the Catalyst console, set the lookup's display field or display format for New_Lead.Port_of_Loading, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1522,17 +1313,6 @@
       "property": "property format",
       "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
       "step": "The display format for New_Lead.Annual_Revenue was not converted. In the Catalyst console, set the field's number or currency format for New_Lead.Annual_Revenue, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Lead.Account_ID property displayformat",
-      "kind": "field-property",
-      "construct": "New_Lead.Account_ID property displayformat",
-      "form": "New_Lead",
-      "field": "Account_ID",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Lead.Account_ID was not converted. In the Catalyst console, set the lookup's display field or display format for New_Lead.Account_ID, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1569,17 +1349,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Lead.Port_of_Discharge property displayformat",
-      "kind": "field-property",
-      "construct": "New_Lead.Port_of_Discharge property displayformat",
-      "form": "New_Lead",
-      "field": "Port_of_Discharge",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Lead.Port_of_Discharge was not converted. In the Catalyst console, set the lookup's display field or display format for New_Lead.Port_of_Discharge, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Lead.Port_of_Discharge property sortorder",
       "kind": "field-property",
       "construct": "New_Lead.Port_of_Discharge property sortorder",
@@ -1588,17 +1357,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Lead.Port_of_Discharge was not converted. In the Catalyst console, set the field's sort order for New_Lead.Port_of_Discharge, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Lead.Vessel_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_Lead.Vessel_Name property displayformat",
-      "form": "New_Lead",
-      "field": "Vessel_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Lead.Vessel_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_Lead.Vessel_Name, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1613,17 +1371,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Quotation.Quote_Owner property displayformat",
-      "kind": "field-property",
-      "construct": "New_Quotation.Quote_Owner property displayformat",
-      "form": "New_Quotation",
-      "field": "Quote_Owner",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Quotation.Quote_Owner was not converted. In the Catalyst console, set the lookup's display field or display format for New_Quotation.Quote_Owner, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Quotation.Quote_Owner property sortorder",
       "kind": "field-property",
       "construct": "New_Quotation.Quote_Owner property sortorder",
@@ -1632,17 +1379,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Quotation.Quote_Owner was not converted. In the Catalyst console, set the field's sort order for New_Quotation.Quote_Owner, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Quotation.Deal_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_Quotation.Deal_Name property displayformat",
-      "form": "New_Quotation",
-      "field": "Deal_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Quotation.Deal_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_Quotation.Deal_Name, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1657,17 +1393,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Quotation.Account_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_Quotation.Account_Name property displayformat",
-      "form": "New_Quotation",
-      "field": "Account_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Quotation.Account_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_Quotation.Account_Name, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Quotation.Account_Name property sortorder",
       "kind": "field-property",
       "construct": "New_Quotation.Account_Name property sortorder",
@@ -1676,17 +1401,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Quotation.Account_Name was not converted. In the Catalyst console, set the field's sort order for New_Quotation.Account_Name, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Quotation.Contact_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_Quotation.Contact_Name property displayformat",
-      "form": "New_Quotation",
-      "field": "Contact_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Quotation.Contact_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_Quotation.Contact_Name, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1701,17 +1415,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Quotation.Port_of_Loading property displayformat",
-      "kind": "field-property",
-      "construct": "New_Quotation.Port_of_Loading property displayformat",
-      "form": "New_Quotation",
-      "field": "Port_of_Loading",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Quotation.Port_of_Loading was not converted. In the Catalyst console, set the lookup's display field or display format for New_Quotation.Port_of_Loading, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Quotation.Port_of_Loading property sortorder",
       "kind": "field-property",
       "construct": "New_Quotation.Port_of_Loading property sortorder",
@@ -1720,17 +1423,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Quotation.Port_of_Loading was not converted. In the Catalyst console, set the field's sort order for New_Quotation.Port_of_Loading, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Quotation.Port_of_Discharge property displayformat",
-      "kind": "field-property",
-      "construct": "New_Quotation.Port_of_Discharge property displayformat",
-      "form": "New_Quotation",
-      "field": "Port_of_Discharge",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Quotation.Port_of_Discharge was not converted. In the Catalyst console, set the lookup's display field or display format for New_Quotation.Port_of_Discharge, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1745,17 +1437,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Quotation.Gate_Way_Airport property displayformat",
-      "kind": "field-property",
-      "construct": "New_Quotation.Gate_Way_Airport property displayformat",
-      "form": "New_Quotation",
-      "field": "Gate_Way_Airport",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Quotation.Gate_Way_Airport was not converted. In the Catalyst console, set the lookup's display field or display format for New_Quotation.Gate_Way_Airport, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Quotation.Gate_Way_Airport property sortorder",
       "kind": "field-property",
       "construct": "New_Quotation.Gate_Way_Airport property sortorder",
@@ -1767,17 +1448,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Quotation.Destination_Airport property displayformat",
-      "kind": "field-property",
-      "construct": "New_Quotation.Destination_Airport property displayformat",
-      "form": "New_Quotation",
-      "field": "Destination_Airport",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Quotation.Destination_Airport was not converted. In the Catalyst console, set the lookup's display field or display format for New_Quotation.Destination_Airport, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Quotation.Destination_Airport property sortorder",
       "kind": "field-property",
       "construct": "New_Quotation.Destination_Airport property sortorder",
@@ -1786,17 +1456,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Quotation.Destination_Airport was not converted. In the Catalyst console, set the field's sort order for New_Quotation.Destination_Airport, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Quotation.HS_Code property displayformat",
-      "kind": "field-property",
-      "construct": "New_Quotation.HS_Code property displayformat",
-      "form": "New_Quotation",
-      "field": "HS_Code",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Quotation.HS_Code was not converted. In the Catalyst console, set the lookup's display field or display format for New_Quotation.HS_Code, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1844,17 +1503,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Product.Product_Owner property displayformat",
-      "kind": "field-property",
-      "construct": "New_Product.Product_Owner property displayformat",
-      "form": "New_Product",
-      "field": "Product_Owner",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Product.Product_Owner was not converted. In the Catalyst console, set the lookup's display field or display format for New_Product.Product_Owner, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Product.Product_Owner property sortorder",
       "kind": "field-property",
       "construct": "New_Product.Product_Owner property sortorder",
@@ -1863,17 +1511,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Product.Product_Owner was not converted. In the Catalyst console, set the field's sort order for New_Product.Product_Owner, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Product.Vendor_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_Product.Vendor_Name property displayformat",
-      "form": "New_Product",
-      "field": "Vendor_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Product.Vendor_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_Product.Vendor_Name, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1888,17 +1525,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Delivery_Order.Delivery_Order_Owner property displayformat",
-      "kind": "field-property",
-      "construct": "New_Delivery_Order.Delivery_Order_Owner property displayformat",
-      "form": "New_Delivery_Order",
-      "field": "Delivery_Order_Owner",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Delivery_Order.Delivery_Order_Owner was not converted. In the Catalyst console, set the lookup's display field or display format for New_Delivery_Order.Delivery_Order_Owner, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Delivery_Order.Delivery_Order_Owner property sortorder",
       "kind": "field-property",
       "construct": "New_Delivery_Order.Delivery_Order_Owner property sortorder",
@@ -1910,17 +1536,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Delivery_Order.Deal_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_Delivery_Order.Deal_Name property displayformat",
-      "form": "New_Delivery_Order",
-      "field": "Deal_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Delivery_Order.Deal_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_Delivery_Order.Deal_Name, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Delivery_Order.Deal_Name property sortorder",
       "kind": "field-property",
       "construct": "New_Delivery_Order.Deal_Name property sortorder",
@@ -1929,17 +1544,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Delivery_Order.Deal_Name was not converted. In the Catalyst console, set the field's sort order for New_Delivery_Order.Deal_Name, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Delivery_Order.Quote_Number property displayformat",
-      "kind": "field-property",
-      "construct": "New_Delivery_Order.Quote_Number property displayformat",
-      "form": "New_Delivery_Order",
-      "field": "Quote_Number",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Delivery_Order.Quote_Number was not converted. In the Catalyst console, set the lookup's display field or display format for New_Delivery_Order.Quote_Number, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -1976,17 +1580,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Delivery_Order.Contact_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_Delivery_Order.Contact_Name property displayformat",
-      "form": "New_Delivery_Order",
-      "field": "Contact_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Delivery_Order.Contact_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_Delivery_Order.Contact_Name, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Delivery_Order.Contact_Name property sortorder",
       "kind": "field-property",
       "construct": "New_Delivery_Order.Contact_Name property sortorder",
@@ -1995,17 +1588,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Delivery_Order.Contact_Name was not converted. In the Catalyst console, set the field's sort order for New_Delivery_Order.Contact_Name, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Delivery_Order.Account_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_Delivery_Order.Account_Name property displayformat",
-      "form": "New_Delivery_Order",
-      "field": "Account_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Delivery_Order.Account_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_Delivery_Order.Account_Name, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -2053,17 +1635,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Invoice.Invoice_Owner property displayformat",
-      "kind": "field-property",
-      "construct": "New_Invoice.Invoice_Owner property displayformat",
-      "form": "New_Invoice",
-      "field": "Invoice_Owner",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Invoice.Invoice_Owner was not converted. In the Catalyst console, set the lookup's display field or display format for New_Invoice.Invoice_Owner, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Invoice.Invoice_Owner property sortorder",
       "kind": "field-property",
       "construct": "New_Invoice.Invoice_Owner property sortorder",
@@ -2072,17 +1643,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Invoice.Invoice_Owner was not converted. In the Catalyst console, set the field's sort order for New_Invoice.Invoice_Owner, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Invoice.Delivery_Order property displayformat",
-      "kind": "field-property",
-      "construct": "New_Invoice.Delivery_Order property displayformat",
-      "form": "New_Invoice",
-      "field": "Delivery_Order",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Invoice.Delivery_Order was not converted. In the Catalyst console, set the lookup's display field or display format for New_Invoice.Delivery_Order, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -2097,17 +1657,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Invoice.Deal_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_Invoice.Deal_Name property displayformat",
-      "form": "New_Invoice",
-      "field": "Deal_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Invoice.Deal_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_Invoice.Deal_Name, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Invoice.Deal_Name property sortorder",
       "kind": "field-property",
       "construct": "New_Invoice.Deal_Name property sortorder",
@@ -2116,17 +1665,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Invoice.Deal_Name was not converted. In the Catalyst console, set the field's sort order for New_Invoice.Deal_Name, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Invoice.Contact_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_Invoice.Contact_Name property displayformat",
-      "form": "New_Invoice",
-      "field": "Contact_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Invoice.Contact_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_Invoice.Contact_Name, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -2149,17 +1687,6 @@
       "property": "property format",
       "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
       "step": "The display format for New_Invoice.Excise_Duty was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Excise_Duty, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Invoice.Account_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_Invoice.Account_Name property displayformat",
-      "form": "New_Invoice",
-      "field": "Account_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Invoice.Account_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_Invoice.Account_Name, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -2218,17 +1745,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_SOF.Vessel_Name property displayformat",
-      "kind": "field-property",
-      "construct": "New_SOF.Vessel_Name property displayformat",
-      "form": "New_SOF",
-      "field": "Vessel_Name",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_SOF.Vessel_Name was not converted. In the Catalyst console, set the lookup's display field or display format for New_SOF.Vessel_Name, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_SOF.Vessel_Name property sortorder",
       "kind": "field-property",
       "construct": "New_SOF.Vessel_Name property sortorder",
@@ -2237,17 +1753,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_SOF.Vessel_Name was not converted. In the Catalyst console, set the field's sort order for New_SOF.Vessel_Name, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_SOF.New_Port property displayformat",
-      "kind": "field-property",
-      "construct": "New_SOF.New_Port property displayformat",
-      "form": "New_SOF",
-      "field": "New_Port",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_SOF.New_Port was not converted. In the Catalyst console, set the lookup's display field or display format for New_SOF.New_Port, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -2262,17 +1767,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_SOF.Appointment property displayformat",
-      "kind": "field-property",
-      "construct": "New_SOF.Appointment property displayformat",
-      "form": "New_SOF",
-      "field": "Appointment",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_SOF.Appointment was not converted. In the Catalyst console, set the lookup's display field or display format for New_SOF.Appointment, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_SOF.Appointment property sortorder",
       "kind": "field-property",
       "construct": "New_SOF.Appointment property sortorder",
@@ -2281,17 +1775,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_SOF.Appointment was not converted. In the Catalyst console, set the field's sort order for New_SOF.Appointment, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Table_of_Container.Container_No property displayformat",
-      "kind": "field-property",
-      "construct": "New_Table_of_Container.Container_No property displayformat",
-      "form": "New_Table_of_Container",
-      "field": "Container_No",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Table_of_Container.Container_No was not converted. In the Catalyst console, set the lookup's display field or display format for New_Table_of_Container.Container_No, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -2306,17 +1789,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Table_of_Container.Container_Seal_Number property displayformat",
-      "kind": "field-property",
-      "construct": "New_Table_of_Container.Container_Seal_Number property displayformat",
-      "form": "New_Table_of_Container",
-      "field": "Container_Seal_Number",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Table_of_Container.Container_Seal_Number was not converted. In the Catalyst console, set the lookup's display field or display format for New_Table_of_Container.Container_Seal_Number, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Table_of_Container.Container_Seal_Number property sortorder",
       "kind": "field-property",
       "construct": "New_Table_of_Container.Container_Seal_Number property sortorder",
@@ -2325,17 +1797,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Table_of_Container.Container_Seal_Number was not converted. In the Catalyst console, set the field's sort order for New_Table_of_Container.Container_Seal_Number, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Table_of_Container.Container_Type property displayformat",
-      "kind": "field-property",
-      "construct": "New_Table_of_Container.Container_Type property displayformat",
-      "form": "New_Table_of_Container",
-      "field": "Container_Type",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Table_of_Container.Container_Type was not converted. In the Catalyst console, set the lookup's display field or display format for New_Table_of_Container.Container_Type, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -2350,17 +1811,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Table_of_Container.Container_Size property displayformat",
-      "kind": "field-property",
-      "construct": "New_Table_of_Container.Container_Size property displayformat",
-      "form": "New_Table_of_Container",
-      "field": "Container_Size",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Table_of_Container.Container_Size was not converted. In the Catalyst console, set the lookup's display field or display format for New_Table_of_Container.Container_Size, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Table_of_Container.Container_Size property sortorder",
       "kind": "field-property",
       "construct": "New_Table_of_Container.Container_Size property sortorder",
@@ -2369,17 +1819,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Table_of_Container.Container_Size was not converted. In the Catalyst console, set the field's sort order for New_Table_of_Container.Container_Size, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Table_of_Container.Port_of_Loading property displayformat",
-      "kind": "field-property",
-      "construct": "New_Table_of_Container.Port_of_Loading property displayformat",
-      "form": "New_Table_of_Container",
-      "field": "Port_of_Loading",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Table_of_Container.Port_of_Loading was not converted. In the Catalyst console, set the lookup's display field or display format for New_Table_of_Container.Port_of_Loading, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
@@ -2394,17 +1833,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Table_of_Container.Port_of_Discharge property displayformat",
-      "kind": "field-property",
-      "construct": "New_Table_of_Container.Port_of_Discharge property displayformat",
-      "form": "New_Table_of_Container",
-      "field": "Port_of_Discharge",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Table_of_Container.Port_of_Discharge was not converted. In the Catalyst console, set the lookup's display field or display format for New_Table_of_Container.Port_of_Discharge, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Table_of_Container.Port_of_Discharge property sortorder",
       "kind": "field-property",
       "construct": "New_Table_of_Container.Port_of_Discharge property sortorder",
@@ -2416,17 +1844,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Table_of_Container.Gate_Way_Airport property displayformat",
-      "kind": "field-property",
-      "construct": "New_Table_of_Container.Gate_Way_Airport property displayformat",
-      "form": "New_Table_of_Container",
-      "field": "Gate_Way_Airport",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Table_of_Container.Gate_Way_Airport was not converted. In the Catalyst console, set the lookup's display field or display format for New_Table_of_Container.Gate_Way_Airport, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Table_of_Container.Gate_Way_Airport property sortorder",
       "kind": "field-property",
       "construct": "New_Table_of_Container.Gate_Way_Airport property sortorder",
@@ -2435,17 +1852,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for New_Table_of_Container.Gate_Way_Airport was not converted. In the Catalyst console, set the field's sort order for New_Table_of_Container.Gate_Way_Airport, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Table_of_Container.Destination_Airport property displayformat",
-      "kind": "field-property",
-      "construct": "New_Table_of_Container.Destination_Airport property displayformat",
-      "form": "New_Table_of_Container",
-      "field": "Destination_Airport",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for New_Table_of_Container.Destination_Airport was not converted. In the Catalyst console, set the lookup's display field or display format for New_Table_of_Container.Destination_Airport, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {

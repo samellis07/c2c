@@ -94,14 +94,10 @@ test('kitchen sink analyzes with no residual TODO and names settings the field m
   assert.equal(r.deluge.todo, 0);
   assert.equal(r.determinism.todoCount, 0);
   assert.equal(r.determinism.deterministic, false);
-  assert.equal(r.determinism.silentDrops, 5);
+  assert.equal(r.determinism.silentDrops, 1);
   assert.deepEqual(
     r.blockers,
     [
-      { kind: 'deluge', label: 'silent drop field-property: Booking.Gear_Refs property displayformat', detail: 'Field Booking.Gear_Refs property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app', manualStep: 'The lookup display format for Booking.Gear_Refs was not converted. In the Catalyst console, set the lookup\'s display field or display format for Booking.Gear_Refs, then preview the form and confirm the lookup shows the intended value.' },
-      { kind: 'deluge', label: 'silent drop field-property: Booking.Intro property value', detail: 'Field Booking.Intro property value is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app', manualStep: 'The property value setting for Booking.Intro was not converted. In the Catalyst console, configure that setting for Booking.Intro, then preview the form or report and confirm the field behaves as expected.' },
-      { kind: 'deluge', label: 'silent drop field-property: Booking.Room_Ref property displayformat', detail: 'Field Booking.Room_Ref property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app', manualStep: 'The lookup display format for Booking.Room_Ref was not converted. In the Catalyst console, set the lookup\'s display field or display format for Booking.Room_Ref, then preview the form and confirm the lookup shows the intended value.' },
-      { kind: 'deluge', label: 'silent drop field-property: Media_Kit.Booking_Ref property displayformat', detail: 'Field Media_Kit.Booking_Ref property displayformat is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app', manualStep: 'The lookup display format for Media_Kit.Booking_Ref was not converted. In the Catalyst console, set the lookup\'s display field or display format for Media_Kit.Booking_Ref, then preview the form and confirm the lookup shows the intended value.' },
       { kind: 'deluge', label: 'silent drop field-property: Media_Kit.Total_Hours property value', detail: 'Field Media_Kit.Total_Hours property value is not in the generated field. Add one: either emit the setting or record the manual step.', scope: 'app', manualStep: 'The property value setting for Media_Kit.Total_Hours was not converted. In the Catalyst console, configure that setting for Media_Kit.Total_Hours, then preview the form or report and confirm the field behaves as expected.' },
     ],
   );

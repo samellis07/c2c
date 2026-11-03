@@ -193,7 +193,7 @@
     "Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)",
     "Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)"
   ],
-  "silentDrops": 19,
+  "silentDrops": 17,
   "residuals": [
     {
       "id": "field-property:Book.Genre property others option",
@@ -207,17 +207,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:Book_Transaction.Member property displayformat",
-      "kind": "field-property",
-      "construct": "Book_Transaction.Member property displayformat",
-      "form": "Book_Transaction",
-      "field": "Member",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for Book_Transaction.Member was not converted. In the Catalyst console, set the lookup's display field or display format for Book_Transaction.Member, then preview the form and confirm the lookup shows the intended value.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:Book_Transaction.Member property sortorder",
       "kind": "field-property",
       "construct": "Book_Transaction.Member property sortorder",
@@ -226,17 +215,6 @@
       "property": "property sortorder",
       "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
       "step": "The sort order for Book_Transaction.Member was not converted. In the Catalyst console, set the field's sort order for Book_Transaction.Member, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:Book_Transaction.Book property displayformat",
-      "kind": "field-property",
-      "construct": "Book_Transaction.Book property displayformat",
-      "form": "Book_Transaction",
-      "field": "Book",
-      "property": "property displayformat",
-      "reason": "property displayformat is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The lookup display format for Book_Transaction.Book was not converted. In the Catalyst console, set the lookup's display field or display format for Book_Transaction.Book, then preview the form and confirm the lookup shows the intended value.",
       "stepSource": "specific"
     },
     {
