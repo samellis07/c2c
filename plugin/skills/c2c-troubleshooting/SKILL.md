@@ -165,6 +165,7 @@ Name only the services the app uses; never ask for a service the app does not us
 
 ## Where to look
 
+- Support bundle (first thing to attach when escalating an error): `c2c support-bundle --out support-bundle.json [--force] [--app <name>] [--stderr-file <file>]` — offline, read-only allow-listed bundle of doctor JSON (or its refusal), `c2c-out/<app>/` deploy/provision/verify/proof reports, CLI + plugin + Node versions, and redacted stderr. `--out` must not already exist unless `--force` is passed, and its parent directory must exist with no symlinked component.
 - c2c reports: `c2c-out/<app>/c2c-deploy-report.json`, `provision/state.json`, `state/*.json`, `verify/report.json`.
 - Function logs: MCP `CatalystbyZoho_Get_Logs` (resource = `c2c_api`, level error, date range). If you only see "Execution started", the handler did not log.
 - Browser console of the Slate app (ask the user to copy the red lines): `project-user/current 401` = not signed in; "blocked by CORS policy" = Authorized Domain missing.

@@ -11,6 +11,7 @@
  * script or a CI job — can validate it without a network call or a login.
  */
 import { provisionArgsProblem, readFunctionEnv, seedMigrateArgsProblem, smokeArgsProblems, sourceCsvArgsProblem, statusArgsProblem } from '../../deploy/src/index.js';
+import { supportBundleArgsProblem } from './support-bundle.js';
 
 type Arity = 'value' | 'bool';
 
@@ -267,6 +268,15 @@ export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
       '--table-budget': 'value',
     },
   },
+  'support-bundle': {
+    positional: 'none',
+    flags: {
+      '--app': 'value',
+      '--force': 'bool',
+      '--out': 'value',
+      '--stderr-file': 'value',
+    },
+  },
   doctor: {
     positional: 'optional',
     flags: {
@@ -399,6 +409,10 @@ export function argvProblems(cmd: string, args: readonly string[]): string[] {
   }
   if (cmd === 'status') {
     const problem = trimmed(statusArgsProblem(args));
+    if (problem) problems.push(problem);
+  }
+  if (cmd === 'support-bundle') {
+    const problem = trimmed(supportBundleArgsProblem(args));
     if (problem) problems.push(problem);
   }
   return problems;

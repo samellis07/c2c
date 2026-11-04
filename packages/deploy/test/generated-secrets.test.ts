@@ -109,8 +109,8 @@ test('sample and synthetic app generation keeps secrets and real identifiers out
 });
 
 test('generated-output scanner catches a planted token', () => {
-  const planted = 'const leaked = "sk_live_planted-secret-value-012345";';
-  assert.ok(generatedSecretFindings(planted).includes('provider token'));
+  const planted = 'const leaked = "Authorization: Bearer c2cfaketokenvalue12345";';
+  assert.ok(generatedSecretFindings(planted).includes('bearer token'));
   assert.throws(() => assertSecretFree('planted output', planted), /credential or real identifier/);
 });
 
