@@ -470,7 +470,7 @@ export function canListUsers(principal: Principal | undefined, policy?: AccessPo
  * the same denials as a plain post.
  */
 export function canImport(principal: Principal | undefined, policy?: AccessPolicy): boolean {
-  return canListUsers(principal, policy);
+  return !!principal?.profile && (policy?.admins?.includes(principal.profile) ?? false);
 }
 
 export function authorizeUserListing(principal: Principal | undefined, policy?: AccessPolicy): void {
@@ -923,8 +923,8 @@ export function projectFields(
 function asPrincipal(value: unknown): Principal | null {
   if (!value || typeof value !== 'object') return null;
   const record = value as Record<string, unknown>;
-  const profile = text(record.profile ?? record.profileName ?? record.profile_name);
-  if (!profile) return null;
+  const profile = record.profile ?? record.profileName ?? record.profile_name;
+  if (typeof profile !== 'string' || !profile.trim()) return null;
   const role = text(record.role ?? record.roleName ?? record.role_name);
   const userId = text(record.userId ?? record.user_id ?? record.email ?? record.id);
   const loginUser = text(record.loginUser ?? record.login_user);
