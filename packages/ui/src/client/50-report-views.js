@@ -27,21 +27,20 @@ const reportViewsRuntime = (() => {
 let viewsModel = null;
 const wrappedWindows = new WeakSet();
 const watchedDocs = new WeakSet();
-const detailRowsBySection = new WeakMap();
+// Only the record of the section's current render is held, so a breakpoint
+// swap can redraw it without a fetch. Nothing is retained across records or
+// across renders: leaving the detail route drops the hold, and opening a
+// record always goes through the caller-facing record endpoint.
+const detailRowBySection = new WeakMap();
 let enhancing = false;
 
-function getCachedDetailRow(section, id) {
-  const map = detailRowsBySection.get(section);
-  return map ? map.get(String(id)) : null;
+function getHeldDetailRow(section, id) {
+  const held = detailRowBySection.get(section);
+  return held && held.id === String(id) && section.getAttribute('data-detail') === String(id) ? held.row : null;
 }
 
-function setCachedDetailRow(section, id, row) {
-  let map = detailRowsBySection.get(section);
-  if (!map) {
-    map = new Map();
-    detailRowsBySection.set(section, map);
-  }
-  map.set(String(id), row);
+function setHeldDetailRow(section, id, row) {
+  detailRowBySection.set(section, { id: String(id), row });
 }
 
 function reportOf(name) {
@@ -387,7 +386,7 @@ function drawDetail(doc, section, report, id, row) {
   }
   if (section.getAttribute('data-detail') === id && section.hasAttribute('data-detail-error')) return;
   if (!row) {
-    const cached = getCachedDetailRow(section, id) || reportViewRow(report.name, id);
+    const cached = reportViewRow(report.name, id);
     if (cached) {
       row = cached;
     } else {
@@ -443,7 +442,7 @@ function drawDetail(doc, section, report, id, row) {
       return;
     }
   }
-  setCachedDetailRow(section, id, row);
+  setHeldDetailRow(section, id, row);
   const host = section.querySelector('[data-rows]') || section;
   host.removeAttribute('data-grouped');
   host.textContent = '';
@@ -506,8 +505,7 @@ function drawDetail(doc, section, report, id, row) {
 }
 
 function retryDetail(doc, section, report, id) {
-  const map = detailRowsBySection.get(section);
-  if (map) map.delete(String(id));
+  detailRowBySection.delete(section);
   section.removeAttribute('data-detail-ready');
   section.removeAttribute('data-detail-error');
   section.removeAttribute('data-detail-loading');
@@ -534,6 +532,7 @@ function enhance(doc) {
       drawDetail(doc, section, report, route.row, null);
       return;
     }
+    detailRowBySection.delete(section);
     drawList(doc, section, report);
   } finally {
     enhancing = false;
@@ -592,7 +591,7 @@ function watch(doc) {
           const report = reportOf(name);
           const id = section.getAttribute('data-detail');
           if (report && id) {
-            const cached = getCachedDetailRow(section, id) || reportViewRow(name, id);
+            const cached = getHeldDetailRow(section, id) || reportViewRow(name, id);
             drawDetail(doc, section, report, id, cached || null);
             return;
           }

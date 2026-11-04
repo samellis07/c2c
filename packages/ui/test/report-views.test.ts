@@ -1044,6 +1044,73 @@ test('vanilla detail retries a network failure and renders the record after reco
   assert.equal(attempt, 2);
 });
 
+test('vanilla detail re-reads the record endpoint when the rendered record is reopened', async () => {
+  let reply: Record<string, unknown> = { ROWID: '907', Product: 'Fetched at open' };
+  const { doc, recordReads } = await bootDecorated('Active_BOM', [], 'report', '907', async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ record: reply }),
+  }));
+  const section = doc.querySelector('section[data-detail]');
+  assert.ok(section);
+  assert.equal(recordReads.length, 1);
+  assert.match(doc.body.textContent ?? '', /Fetched at open/);
+
+  // The record was edited since the open; reopening it on the still-mounted
+  // section must ask the authorized record endpoint again, not reuse what was
+  // rendered before.
+  reply = { ROWID: '907', Product: 'Fetched after the edit' };
+  section.removeAttribute('data-detail-ready');
+  doc.body.appendChild(doc.createElement('span'));
+  await until(() => recordReads.length === 2 && (doc.body.textContent ?? '').includes('Fetched after the edit'));
+  assert.equal(recordReads.length, 2, 'the reopen fetched the record again');
+  assert.doesNotMatch(doc.body.textContent ?? '', /Fetched at open/);
+});
+
+test('vanilla detail shows the fresh denial on reopen, not the previously rendered record', async () => {
+  let denied = false;
+  const { doc, recordReads } = await bootDecorated('Active_BOM', [], 'report', '907', async () =>
+    denied
+      ? { ok: false, status: 403, json: async () => ({}) }
+      : { ok: true, status: 200, json: async () => ({ record: { ROWID: '907', Product: 'Opened before lockdown' } }) },
+  );
+  const section = doc.querySelector('section[data-detail]');
+  assert.ok(section);
+  assert.match(doc.body.textContent ?? '', /Opened before lockdown/);
+  assert.equal(recordReads.length, 1);
+
+  // The session's rights changed since the open; a reopen must surface the
+  // denial, never the record rendered under the old grant.
+  denied = true;
+  section.removeAttribute('data-detail-ready');
+  doc.body.appendChild(doc.createElement('span'));
+  await until(() => recordReads.length === 2 && !!section?.querySelector('[data-detail-error]'));
+  assert.equal(recordReads.length, 2);
+  assert.equal(section?.querySelector('[data-detail-error]')?.textContent, "You can't open this record.");
+  assert.doesNotMatch(doc.body.textContent ?? '', /Opened before lockdown/);
+});
+
+test('a breakpoint swap redraws the open record without another record read', async () => {
+  const { doc, media, recordReads } = await bootDecorated(
+    'Active_BOM',
+    [],
+    'report',
+    '907',
+    async () => ({ ok: true, status: 200, json: async () => ({ record: { ROWID: '907', Product: 'Kept across the swap' } }) }),
+    { initialWidth: 375 },
+  );
+  assert.ok(media);
+  const section = doc.querySelector('section[data-report="Active_BOM"]');
+  assert.equal(section?.getAttribute('data-detail-device'), 'phone');
+  assert.match(doc.body.textContent ?? '', /Kept across the swap/);
+  assert.equal(recordReads.length, 1);
+
+  media.setWidth(1200);
+  await until(() => section?.getAttribute('data-detail-device') === 'web');
+  assert.match(doc.body.textContent ?? '', /Kept across the swap/);
+  assert.equal(recordReads.length, 1, 'the swap reused the current render with no extra fetch');
+});
+
 test('Stock Details groups by Warehouse Code in first-seen order and sorts by Product Name', async () => {
   const rows = [
     { ROWID: '1', Warehouse_Code: 'SOUTH', Product_Name: 'Bolt', Sales_Qty: '2' },
