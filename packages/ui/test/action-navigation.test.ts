@@ -167,6 +167,7 @@ test('an openUrl-only workflow to an own form, report or page is a navigation; a
   assert.ok(files.some((file) => file.path === 'functions/custom/mixed-body.mjs'));
   const actionTodos = model.todos.filter((todo) => todo.area === 'report' && /^Custom action /.test(todo.reason)).map((todo) => todo.reason);
   assert.deepEqual(actionTodos, Object.keys(COUNTED).map((name) => `Custom action "${name}" is not migrated; its button is turned off.`));
+  assert.ok(model.todos.filter((todo) => todo.area === 'report' && /^Custom action /.test(todo.reason)).every((todo) => todo.manualReasons?.includes('untranslated')));
   const migration = files.find((file) => file.path.endsWith('migration-report.json'));
   assert.equal((JSON.parse(String(migration?.data)) as { uiTodoCount: number }).uiTodoCount, model.todos.length);
 });
