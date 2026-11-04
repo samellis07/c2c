@@ -44,6 +44,13 @@ export const DEFAULT_EQUIVALENCE: readonly DefaultEquivalence[] = [
   {
     widget: 'image',
     accept: 'image/*',
+    key: 'preview duration',
+    value: '0',
+    why: 'Preview duration of 0 leaves dismissal to the user (no auto-closing timeout). The generated file and capture controls rely on native device confirmation and have no auto-dismiss preview timer.',
+  },
+  {
+    widget: 'image',
+    accept: 'image/*',
     key: 'switch camera',
     value: 'true',
     why: 'The user may switch cameras. The generated input hands capture to the device camera app, which offers the switch.',
