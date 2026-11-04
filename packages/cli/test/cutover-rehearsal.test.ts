@@ -28,14 +28,24 @@ function status(report: D10Report, id: string): string | undefined {
   return report.criteria.find((item) => item.id === id)?.status;
 }
 
-const GAPS = { 'D10.custom-domain': 'GAP', 'D10.link-map': 'GAP', 'D10.downtime': 'GAP' };
-const CHECKED = { 'D10.reverse-sync': 'PASS', 'D10.parallel-run': 'PASS', 'D10.final-delta': 'PASS', 'D10.freeze': 'PASS', 'D10.verify': 'PASS', 'D10.sequence': 'PASS', 'D10.rollback': 'PASS' };
+const GAPS = { 'D10.custom-domain': 'GAP' };
+const CHECKED = {
+  'D10.reverse-sync': 'PASS',
+  'D10.parallel-run': 'PASS',
+  'D10.final-delta': 'PASS',
+  'D10.freeze': 'PASS',
+  'D10.verify': 'PASS',
+  'D10.sequence': 'PASS',
+  'D10.rollback': 'PASS',
+  'D10.link-map': 'PASS',
+  'D10.downtime': 'PASS',
+};
 
 test('library: every checked criterion passes, the gaps are named and the app is not ready', async () => {
   const report = await run(LIBRARY);
   assert.deepEqual(statuses(report), { ...CHECKED, 'D10.rollback-complete': 'PASS', ...GAPS });
   assert.equal(report.status, 'FAIL');
-  assert.deepEqual(report.totals, { PASS: 8, FAIL: 0, GAP: 3 });
+  assert.deepEqual(report.totals, { PASS: 10, FAIL: 0, GAP: 1 });
   for (const item of report.criteria.filter((entry) => entry.status === 'GAP')) {
     assert.ok(item.reason && item.fix, `${item.id} names why and how`);
   }
@@ -58,6 +68,54 @@ test('kitchen-sink: subform rows and files are a rollback gap; the skipped form 
   assert.deepEqual(report.harnessLimits, []);
   assert.ok(report.exercised.includes('Booking'));
   assert.match(report.criteria.find((item) => item.id === 'D10.verify')!.evidence.join('\n'), /Booking__Lines: export 45, store 45/);
+});
+
+test('link map: every Creator URL the app exposes is mapped or listed as a manual step', async () => {
+  const report = await run(LIBRARY);
+  const evidence = report.criteria.find((item) => item.id === 'D10.link-map')!.evidence.join('\n');
+  assert.match(evidence, /\d+ of \d+ Creator URLs map to a generated route/);
+  const book = report.linkMap.find((entry) => entry.creator === '#Form:Book')!;
+  assert.deepEqual(book, { kind: 'form', creator: '#Form:Book', route: '#/form/Book', status: 'mapped' });
+  // Every exposed URL appears exactly once; a manual entry names its step and carries no route.
+  const urls = report.linkMap.map((entry) => entry.creator);
+  assert.equal(new Set(urls).size, urls.length);
+  for (const entry of report.linkMap) {
+    if (entry.status === 'mapped') assert.ok(entry.route?.startsWith('#/'), entry.creator);
+    else assert.ok(entry.note && !entry.route, entry.creator);
+  }
+  for (const rowLink of report.linkMap.filter((entry) => entry.kind === 'record' && entry.status === 'mapped')) {
+    assert.match(rowLink.route!, /^#\/report\/.+\/row\/<ROWID>$/);
+  }
+  const md = rehearsalMarkdown(report);
+  assert.match(md, /## Link map/);
+  assert.match(md, /\| #Form:Book \| form \| #\/form\/Book \| mapped \|/);
+  // A map that loses a route or a whole URL fails the criterion.
+  const broken = await run(LIBRARY, {
+    linkMap: (entries) => {
+      delete entries[0]!.route;
+      entries.pop();
+    },
+  });
+  assert.equal(status(broken, 'D10.link-map'), 'FAIL');
+  assert.match(broken.criteria.find((item) => item.id === 'D10.link-map')!.reason!, /mapped entry carries no route|missing from the link map/);
+});
+
+test('downtime: the window is an estimate with measured phase inputs, not a promise', async () => {
+  const report = await run(LIBRARY);
+  const item = report.criteria.find((entry) => entry.id === 'D10.downtime')!;
+  const evidence = item.evidence.join('\n');
+  assert.match(evidence, /final delta sync: \d+ store call\(s\), \d+ row\(s\)/);
+  assert.match(evidence, /verify read-back: \d+ store call\(s\), \d+ row\(s\)/);
+  assert.match(evidence, /estimated window .+ – .+ — offline estimate/);
+  assert.match(evidence, /not a promise/);
+  assert.equal(report.downtime.phases.length, 4);
+  const [low, high] = report.downtime.estimateSeconds;
+  assert.ok(low > 0 && high > low, `${low}-${high}`);
+  assert.ok(rehearsalMarkdown(report).includes('## Downtime estimate'));
+  // Nothing measured, nothing to estimate.
+  const broken = await run(LIBRARY, { downtimePhases: (phases) => phases.splice(0) });
+  assert.equal(status(broken, 'D10.downtime'), 'FAIL');
+  assert.match(broken.criteria.find((entry) => entry.id === 'D10.downtime')!.reason!, /no measured phase/);
 });
 
 test('the report is the same on a second run', async () => {
