@@ -73,6 +73,39 @@ test('a produced construct is never listed as a drop', () => {
   assert.deepEqual(auditApp(coveredApp()), []);
 });
 
+test('carried field layout values emit; unknown values and nav layouts on a field stay drops', () => {
+  const layouts: [string, number][] = [
+    ['2', 2],
+    ['3', 3],
+    ['onecolumn', 1],
+    ['twocolumn', 2],
+  ];
+  for (const [value, columns] of layouts) {
+    const known = app({ forms: [{ name: 'Orders', properties: [], fields: [{ ...field('Status', 'radiobuttons'), properties: [{ key: 'layout', value, span: Z }], choices: ['Open', 'Closed'] }], actions: [], blocks: [], span: Z }] });
+    assert.deepEqual(auditApp(known), [], `layout ${value} should reach the generated field`);
+    // Mutation: a different option column count in generated output must not prove this value.
+    const outputs = collectOutputs(known);
+    const ui = outputs.model.forms[0].fields.find((item) => item.name === 'Status');
+    assert.equal(ui?.optionColumns, columns, `layout ${value} carried the wrong column count`);
+    ui!.optionColumns = columns === 2 ? 3 : 2;
+    assert.equal(
+      auditApp(known, outputs).filter((drop) => drop.property === 'property layout').length,
+      1,
+      `layout ${value} must not pass when the generated field lost its arrangement`,
+    );
+  }
+  const card = app({ forms: [{ name: 'Orders', properties: [], fields: [{ ...field('Status', 'radiobuttons'), properties: [{ key: 'layout', value: 'onecolumncard', span: Z }], choices: ['Open', 'Closed'] }], actions: [], blocks: [], span: Z }] });
+  assert.deepEqual(auditApp(card), [], 'layout onecolumncard should reach the generated field');
+  const cardOut = collectOutputs(card);
+  cardOut.model.forms[0].fields.find((item) => item.name === 'Status')!.optionCard = false;
+  assert.equal(auditApp(card, cardOut).filter((drop) => drop.property === 'property layout').length, 1, 'a lost card wrapper must not pass');
+
+  for (const value of ['fourcolumn', 'slidingpane', 'tabbar']) {
+    const unknown = app({ forms: [{ name: 'Orders', properties: [], fields: [{ ...field('Status', 'radiobuttons'), properties: [{ key: 'layout', value, span: Z }], choices: ['Open', 'Closed'] }], actions: [], blocks: [], span: Z }] });
+    assert.equal(auditApp(unknown).filter((drop) => drop.property === 'property layout').length, 1, `layout ${value} should remain a drop on a field`);
+  }
+});
+
 test('an unlisted translation fails until the manual step exists', () => {
   const withTranslation = app({
     ...coveredApp(),
