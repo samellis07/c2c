@@ -44,7 +44,6 @@ for (const row of DEFAULT_EQUIVALENCE) {
 }
 
 test('a non-default value of a listed property stays a drop', () => {
-  assert.equal(status(dsApp('image', ['source = public_url,file']), 'source'), 'dropped');
   assert.equal(status(dsApp('image', ['aspect ratio = square']), 'aspect ratio'), 'dropped');
   assert.equal(status(dsApp('image', ['camera = secondary']), 'camera'), 'dropped');
   assert.equal(status(dsApp('image', ['switch camera = false']), 'switch camera'), 'dropped');
@@ -53,7 +52,6 @@ test('a non-default value of a listed property stays a drop', () => {
 });
 
 test('a listed value on a widget the row does not name stays a drop', () => {
-  assert.equal(status(dsApp('upload file', ['source = file']), 'source'), 'dropped');
   assert.equal(status(dsApp('image', ['browse = local_drive']), 'browse'), 'dropped');
 });
 

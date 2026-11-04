@@ -35,7 +35,7 @@ import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreen
 import { Slot, useCustomization } from '../runtime/extend';
 import { FormContext } from './fields';
 import { applyHandlerActions, matchingHandlers, mergeScriptRecord, runHandlers, type FormHandlers, type HandlerCtx, type HandlerDraft } from './handlers';
-import { chosenFiles, firstErrorControl, readRecord, validate } from './record';
+import { chosenFiles, firstErrorControl, readRecord, resolveUrlSources, validate } from './record';
 import { subformRows, validateSubforms } from '../subform/rows';
 
 interface Banner {
@@ -423,7 +423,8 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
     const formEl = event.currentTarget;
     let next = readRecord(formEl, form);
     const files = chosenFiles(formEl, form);
-    const found = { ...validate(form, next, files), ...validateSubforms(formEl, form) };
+    const urlErrors = await resolveUrlSources(formEl, form, files);
+    const found = { ...urlErrors, ...validate(form, next, files), ...validateSubforms(formEl, form) };
     setErrors(found);
     if (Object.keys(found).length) {
       setBanner({ tone: 'danger', title: 'Check the highlighted fields.' });

@@ -416,3 +416,16 @@ test('React client handlers ship the exact modules the vanilla target emits', as
     assert.ok(String(emitted.data).endsWith(mod.source), `${key}: React handler diverges from the vanilla module`);
   }
 });
+
+test('the spec carries upload sources and the template draws the controls', () => {
+  const src = source().replace(`${field('Birthday', 'date')}`, `${field('Birthday', 'date')}\n${field('Photo', 'image', '\t\t\tsource = public_url,file,camera')}`);
+  const spec = reactAppSpec(appOf(src));
+  const photo = spec.forms.New_Contact!.fields.find((f) => f.name === 'Photo')!;
+  assert.deepEqual(photo.uploadSources, ['public_url', 'file', 'camera']);
+  const fields = readFileSync(join(TEMPLATE_DIR, 'lib/c2c-ui/form/fields.tsx'), 'utf8');
+  assert.match(fields, /__camera/);
+  assert.match(fields, /__url/);
+  assert.match(fields, /capture/);
+  const record = readFileSync(join(TEMPLATE_DIR, 'lib/c2c-ui/form/record.ts'), 'utf8');
+  assert.match(record, /resolveUrlSources/);
+});
