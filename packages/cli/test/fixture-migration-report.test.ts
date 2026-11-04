@@ -69,7 +69,7 @@ test('the five counted, one roadmap, and three out-of-scope features match the p
   assert.equal(ownerScope().length, 9);
 });
 
-test('every in-repo fixture has a migration-report golden, and nothing else', () => {
+test('every in-repo fixture has a migration-report golden, and nothing else', async () => {
   const fixtures = listInRepoFixtures(root);
   assert.ok(fixtures.length > 0);
   const ids = fixtures.map((fixture) => fixture.id);
@@ -78,7 +78,7 @@ test('every in-repo fixture has a migration-report golden, and nothing else', ()
   committed.sort();
   assert.deepEqual(committed, [...ids].sort());
   for (const fixture of fixtures) {
-    const report = buildFixtureMigrationReport(fixture);
+    const report = await buildFixtureMigrationReport(fixture);
     const base = join(goldenDir, fixture.id);
     assert.equal(fixtureMigrationReportAsJson(report), readFileSync(`${base}.json`, 'utf8'), fixture.id);
     assert.equal(fixtureMigrationReportAsMarkdown(report), readFileSync(`${base}.md`, 'utf8'), fixture.id);
@@ -90,10 +90,10 @@ test('every in-repo fixture has a migration-report golden, and nothing else', ()
   }
 });
 
-test('a rewritten payments label does not match the committed report', () => {
+test('a rewritten payments label does not match the committed report', async () => {
   const fixture = listInRepoFixtures(root)[0];
   assert.ok(fixture);
-  const report = buildFixtureMigrationReport(fixture);
+  const report = await buildFixtureMigrationReport(fixture);
   const tampered: FixtureMigrationReport = {
     ...report,
     scope: report.scope.map((item) => (item.feature === 'Payments' ? { ...item, label: 'not applicable (out of scope)' } : item)),
@@ -166,7 +166,7 @@ test('markdown report spells out an empty TODO list, no manual steps, and a name
     fixture: 'empty/app',
     app: null,
     scope: [],
-    converted: { forms: 0, reports: 0, pages: 0, functions: 0 },
+    converted: { forms: 0, reports: 0, pages: 0, functions: 0, catalyst: { tables: 0, nosqlCollections: 0, functions: 0, cronJobs: 0, slatePages: 0 }, deluge: { statements: 0, translated: 0, shimmed: 0 } },
     todoCount: 0,
     todoKinds: [],
     fieldGaps: [],
@@ -191,7 +191,7 @@ test('converted inventory section lists counts from IR and renders singular/plur
     fixture: 'test/converted',
     app: 'TestApp',
     scope: [],
-    converted: { forms: 4, reports: 1, pages: 1, functions: 2 },
+    converted: { forms: 4, reports: 1, pages: 1, functions: 2, catalyst: { tables: 2, nosqlCollections: 0, functions: 1, cronJobs: 0, slatePages: 6 }, deluge: { statements: 10, translated: 3, shimmed: 7 } },
     todoCount: 0,
     todoKinds: [],
     fieldGaps: [],
@@ -209,7 +209,7 @@ test('field gaps section lists unsupported field properties with matrixId, count
     fixture: 'test/gaps',
     app: 'TestApp',
     scope: [],
-    converted: { forms: 0, reports: 0, pages: 0, functions: 0 },
+    converted: { forms: 0, reports: 0, pages: 0, functions: 0, catalyst: { tables: 0, nosqlCollections: 0, functions: 0, cronJobs: 0, slatePages: 0 }, deluge: { statements: 0, translated: 0, shimmed: 0 } },
     todoCount: 0,
     todoKinds: [],
     fieldGaps: [
@@ -234,7 +234,7 @@ test('manual steps carry workaround text from the precheck fix or widget detail'
     fixture: 'test/manual',
     app: 'TestApp',
     scope: [],
-    converted: { forms: 0, reports: 0, pages: 0, functions: 0 },
+    converted: { forms: 0, reports: 0, pages: 0, functions: 0, catalyst: { tables: 0, nosqlCollections: 0, functions: 0, cronJobs: 0, slatePages: 0 }, deluge: { statements: 0, translated: 0, shimmed: 0 } },
     todoCount: 0,
     todoKinds: [],
     fieldGaps: [],
@@ -265,7 +265,7 @@ test('human steps section lists customer checklist steps', () => {
     fixture: 'test/human',
     app: 'TestApp',
     scope: [],
-    converted: { forms: 0, reports: 0, pages: 0, functions: 0 },
+    converted: { forms: 0, reports: 0, pages: 0, functions: 0, catalyst: { tables: 0, nosqlCollections: 0, functions: 0, cronJobs: 0, slatePages: 0 }, deluge: { statements: 0, translated: 0, shimmed: 0 } },
     todoCount: 0,
     todoKinds: [],
     fieldGaps: [],
@@ -280,21 +280,22 @@ test('human steps section lists customer checklist steps', () => {
   assert.match(md, /## Human steps\n\n- Accept invite: accept the app invite mail\n- Sign in once: sign in to the deployed app once\n/);
 });
 
-test('buildFixtureMigrationReport populates converted inventory, field gaps, workaround, and human steps for real fixtures', () => {
+test('buildFixtureMigrationReport populates converted inventory, field gaps, workaround, and human steps for real fixtures', async () => {
   const fixture = listInRepoFixtures(root).find((f) => f.id.endsWith('library_application'));
   assert.ok(fixture);
-  const report = buildFixtureMigrationReport(fixture);
-  assert.deepEqual(report.converted, { forms: 4, reports: 5, pages: 1, functions: 7 });
+  const report = await buildFixtureMigrationReport(fixture);
+  assert.deepEqual(report.converted, { forms: 4, reports: 5, pages: 1, functions: 7, catalyst: { tables: 4, nosqlCollections: 0, functions: 1, cronJobs: 0, slatePages: 10 }, deluge: { statements: 65, translated: 5, shimmed: 60 } });
   assert.equal(report.fieldGaps.length, 7);
   assert.equal(report.fieldGaps.reduce((sum, g) => sum + g.count, 0), 13);
-  assert.equal(report.humanSteps.length, 4);
+  assert.equal(report.humanSteps.length, 5);
+  assert.ok(report.humanSteps.some((step) => step.startsWith('console: cloudscale-enable')), 'console gate step listed');
   const md = fixtureMigrationReportAsMarkdown(report);
   assert.match(md, /## Converted inventory\n\n- 4 forms\n- 5 reports\n- 1 page\n- 7 functions\n/);
   assert.match(md, /## Field gaps\n\n- auto-number: 4 /);
   assert.match(md, /## Human steps\n\n- Accept invite: accept the app invite mail\n/);
 });
 
-test('writing the goldens replaces stale reports, keeps dotfiles, and is byte-stable', (t) => {
+test('writing the goldens replaces stale reports, keeps dotfiles, and is byte-stable', async (t) => {
   const repo = mkdtempSync(join(tmpdir(), 'c2c-fixture-reports-'));
   t.after(() => rmSync(repo, { recursive: true, force: true }));
   mkdirSync(join(repo, 'fixtures/one'), { recursive: true });
@@ -304,13 +305,13 @@ test('writing the goldens replaces stale reports, keeps dotfiles, and is byte-st
   writeFileSync(join(out, 'gone/old.json'), '{}\n');
   writeFileSync(join(out, 'gone/old.md'), '# old\n');
   writeFileSync(join(out, '.keep'), '');
-  assert.deepEqual(writeFixtureMigrationReports(repo), ['one/library']);
+  assert.deepEqual(await writeFixtureMigrationReports(repo), ['one/library']);
   const first = readFileSync(join(out, 'one/library.json'), 'utf8');
   assert.equal(JSON.parse(first).fixture, 'one/library');
   assert.ok(readFileSync(join(out, 'one/library.md'), 'utf8').startsWith('# Migration report: one/library\n'));
   assert.equal(existsSync(join(out, 'gone/old.json')), false);
   assert.equal(existsSync(join(out, 'gone/old.md')), false);
   assert.equal(existsSync(join(out, '.keep')), true);
-  writeFixtureMigrationReports(repo);
+  await writeFixtureMigrationReports(repo);
   assert.equal(readFileSync(join(out, 'one/library.json'), 'utf8'), first);
 });

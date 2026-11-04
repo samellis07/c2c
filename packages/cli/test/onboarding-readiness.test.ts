@@ -46,11 +46,21 @@ test('the default run covers the library and kitchen-sink exports with the same 
   assert.equal(first.counts.PASS + first.counts.FAIL + first.counts.GAP, all.length);
   // What c2c already does holds on both apps.
   for (const app of first.apps) {
-    for (const id of ['report-todos-match-analyze', 'report-manual-steps-match-precheck', 'report-deterministic', 'report-golden-current', 'guide-offline-steps-run']) {
+    for (const id of [
+      'report-todos-match-analyze',
+      'report-manual-steps-match-precheck',
+      'report-lists-field-gaps',
+      'report-lists-converted',
+      'report-carries-workaround',
+      'report-lists-human-steps',
+      'report-deterministic',
+      'report-golden-current',
+      'guide-offline-steps-run',
+    ]) {
       assert.equal(status(app.criteria, id).status, 'PASS', `${app.fixture} ${id}`);
     }
     // A live-only or not-yet-built criterion is a GAP, never a PASS.
-    for (const id of ['report-lists-converted', 'guide-live-steps-run', 'non-developer-under-one-day']) {
+    for (const id of ['guide-live-steps-run', 'non-developer-under-one-day']) {
       assert.equal(status(app.criteria, id).status, 'GAP', `${app.fixture} ${id}`);
     }
   }
@@ -89,6 +99,36 @@ test('a report that drops or miscounts a precheck finding fails the manual-steps
   const [first, ...rest] = inputs.report.manualSteps;
   const miscounted = { ...inputs, report: { ...inputs.report, manualSteps: [{ ...first!, count: first!.count + 1 }, ...rest] } };
   assert.equal(status(checkApp(miscounted).criteria, 'report-manual-steps-match-precheck').status, 'FAIL');
+});
+
+test('a report that drops or misrenders a field gap fails the field-gap check', async () => {
+  const inputs = await fresh();
+  assert.ok(inputs.analysis.fieldGaps.length > 0);
+  const dropped = { ...inputs, report: { ...inputs.report, fieldGaps: inputs.report.fieldGaps.slice(1) } };
+  assert.equal(status(checkApp(dropped).criteria, 'report-lists-field-gaps').status, 'FAIL');
+  const unlisted = { ...inputs, reportMd: inputs.reportMd.replace(/^- [a-z-]+: \d+/m, '- changed-row: 1') };
+  assert.equal(status(checkApp(unlisted).criteria, 'report-lists-field-gaps').status, 'FAIL');
+});
+
+test('a report that miscounts the generated Catalyst resources fails the converted check', async () => {
+  const inputs = await fresh();
+  const wrong = {
+    ...inputs,
+    report: { ...inputs.report, converted: { ...inputs.report.converted, catalyst: { ...inputs.report.converted.catalyst, tables: inputs.report.converted.catalyst.tables + 1 } } },
+  };
+  assert.equal(status(checkApp(wrong).criteria, 'report-lists-converted').status, 'FAIL');
+  const unlisted = { ...inputs, reportMd: inputs.reportMd.split('Data Store table').join('storage entity') };
+  assert.equal(status(checkApp(unlisted).criteria, 'report-lists-converted').status, 'FAIL');
+});
+
+test('a markdown report that drops a workaround or a console step fails', async () => {
+  const inputs = await fresh();
+  const step = inputs.report.manualSteps.find((item) => item.workaround?.trim()) ?? inputs.report.fieldGaps[0]!;
+  const withoutFix = { ...inputs, reportMd: inputs.reportMd.split((step as { workaround?: string; reason?: string }).workaround ?? (step as { reason: string }).reason).join('') };
+  assert.equal(status(checkApp(withoutFix).criteria, 'report-carries-workaround').status, 'FAIL');
+  const consoleId = inputs.plan.steps.find((item) => item.via === 'console' && !['sign-in-check', 'mail-sender'].includes(item.id))!.id;
+  const withoutStep = { ...inputs, reportMd: inputs.reportMd.split(consoleId).join('gone') };
+  assert.equal(status(checkApp(withoutStep).criteria, 'report-lists-human-steps').status, 'FAIL');
 });
 
 test('an unsupported item without workaround text fails', async () => {
