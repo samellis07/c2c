@@ -637,6 +637,24 @@ function groupLabel(key: string): string {
   return key === '' ? '(none)' : key;
 }
 
+/** The device the viewport matches: the Creator `phone`/`tablet` detail layouts swap in here. */
+function useDeviceLayout(): 'phone' | 'tablet' | 'web' {
+  const [device, setDevice] = useState<'phone' | 'tablet' | 'web'>('web');
+  useEffect(() => {
+    const phone = window.matchMedia('(max-width: 767px)');
+    const tablet = window.matchMedia('(min-width: 768px) and (max-width: 1024px)');
+    const update = () => setDevice(phone.matches ? 'phone' : tablet.matches ? 'tablet' : 'web');
+    update();
+    phone.addEventListener('change', update);
+    tablet.addEventListener('change', update);
+    return () => {
+      phone.removeEventListener('change', update);
+      tablet.removeEventListener('change', update);
+    };
+  }, []);
+  return device;
+}
+
 /** One record through the form's record endpoint: labelled values, the edit opener, and the way back. */
 function RecordDetail({ report, rowId }: { report: ReportSpec; rowId: string }) {
   const { api, spec, view } = useEnv();
@@ -668,6 +686,8 @@ function RecordDetail({ report, rowId }: { report: ReportSpec; rowId: string }) 
     };
   }, [api, deny, report.recordEndpoint, rowId, attempt]);
 
+  const device = useDeviceLayout();
+  const detailBlocks = (device !== 'web' && report.deviceDetailBlocks?.find((variant) => variant.device === device)?.blocks) || report.detailBlocks;
   const firstValue = report.columns.find((c) => !c.action)?.field ?? 'ROWID';
   const title = detail.state === 'ready' ? fieldText(report.titleField ?? firstValue, detail.record[report.titleField ?? firstValue]) : rowId;
   return (
@@ -686,7 +706,7 @@ function RecordDetail({ report, rowId }: { report: ReportSpec; rowId: string }) 
       ) : (
         <article className="c2c-record" aria-label={title === '–' ? `Record ${rowId}` : title}>
           <h2>{title === '–' ? `Record ${rowId}` : title}</h2>
-          {report.detailBlocks?.length ? report.detailBlocks.map((block, index) => {
+          {detailBlocks?.length ? detailBlocks.map((block, index) => {
             const related = block.relatedField ? detail.record[block.relatedField] : undefined;
             return (
               <section key={`${block.title}:${index}`} data-detail-block={block.title}>

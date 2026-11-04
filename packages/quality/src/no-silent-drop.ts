@@ -947,6 +947,7 @@ function reportBag(built: UiReport): ReportBag {
   for (const column of built.columns) columns.push(column.field);
   for (const column of built.phoneColumns ?? []) columns.push(column.field);
   for (const block of built.detailBlocks ?? []) for (const field of block.fields) columns.push(field.field);
+  for (const variant of built.deviceDetailBlocks ?? []) for (const block of variant.blocks) for (const field of block.fields) columns.push(field.field);
   const actions = [
     ...built.customActions.map((action) => action.name),
     ...built.columns.filter((column) => column.action).map((column) => column.field),
@@ -1013,11 +1014,25 @@ function viewProved(built: UiReport, view: ReportView): boolean {
   }
   if (!built.detail) return false;
   if (!view.blocks.length) return true;
+  // The layout the generator kept for this device: `detailBlocks` holds the
+  // `detailDevice` layout, `deviceDetailBlocks` the carried variants a
+  // responsive record view swaps in. Any other device is not emitted.
+  const layout =
+    (built.detailDevice ?? 'web') === (view.device ?? 'web')
+      ? (built.detailBlocks ?? [])
+      : (built.deviceDetailBlocks ?? []).find((variant) => variant.device === view.device)?.blocks;
+  if (!layout) return false;
   return view.blocks.every((block) => {
     const title = block.title || block.name;
-    const found = (built.detailBlocks ?? []).find((item) => item.title === title || item.title === block.name);
-    if (!found) return false;
-    return block.fields.every((field) => !field.field || found.fields.some((item) => item.field === field.field));
+    // Blocks can repeat a title (an "Overview" field section and an "Overview"
+    // related list): match the layout block with the same related field that
+    // holds every audited field.
+    return layout.some(
+      (item) =>
+        (item.title === title || item.title === block.name) &&
+        (item.relatedField ?? '') === (block.relatedField ?? '') &&
+        block.fields.every((field) => !field.field || item.fields.some((cell) => cell.field === field.field)),
+    );
   });
 }
 

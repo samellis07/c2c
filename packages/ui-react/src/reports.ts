@@ -90,6 +90,14 @@ export function reportSpec(app: App, ui: UiReport, forms: UiForm[] = []): Report
       ...(block.relatedField ? { relatedField: block.relatedField } : {}),
       fields: block.fields.map((field) => ({ field: field.field, label: field.label })),
     })) } : {}),
+    ...(ui.deviceDetailBlocks?.length ? { deviceDetailBlocks: ui.deviceDetailBlocks.map((variant) => ({
+      device: variant.device,
+      blocks: variant.blocks.map((block) => ({
+        title: block.title,
+        ...(block.relatedField ? { relatedField: block.relatedField } : {}),
+        fields: block.fields.map((field) => ({ field: field.field, label: field.label })),
+      })),
+    })) } : {}),
     ...(ui.titleField ? { titleField: ui.titleField } : {}),
     ...(ui.startField ? { startField: ui.startField } : {}),
     ...(ui.endField ? { endField: ui.endField } : {}),
