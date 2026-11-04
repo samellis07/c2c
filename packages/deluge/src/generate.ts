@@ -198,6 +198,52 @@ function runtimeReachesFormEvent(kind: string): boolean {
   return kind === 'success' || kind === 'validate' || kind === 'delete';
 }
 
+/** The submit scopes an event covers, parsed the same way submitBodyUnposted reads ownership. */
+function submitEventScopes(event: string): { add: boolean; edit: boolean } {
+  const e = event.toLowerCase();
+  const add = /\badd\b|\bcreate\b/.test(e);
+  const edit = /\bedit\b|\bupdate\b/.test(e);
+  if (add && !edit) return { add: true, edit: false };
+  if (edit && !add) return { add: false, edit: true };
+  return { add: true, edit: true };
+}
+
+/**
+ * Request state only a generated client posts (prefetch slots, a subform row
+ * loop element, the clicked element). A body reading it cannot run inside the
+ * on-success module: a form submit never carries that state, so the merge
+ * would silently change what the script sees. It stays an uninvoked TODO.
+ */
+const CLIENT_ONLY_REQUEST_STATE = /\bctx\.(?:subformRow|element|slots|rangeSlot|rangeFrom|rangeTo|rangeEmpty|prefetchPath|formNonce|onlyScript|args)\b|\bshim\.client\./;
+
+/** True when an emitted server body reads request state only a generated client posts. */
+export function submitBodyReadsClientState(body: string): boolean {
+  return CLIENT_ONLY_REQUEST_STATE.test(body);
+}
+
+/** One `on add`/`on edit`/`on add or edit` server body merged into the on-success module. */
+export interface MergedSubmitPart {
+  w: Workflow;
+  /** Scope-guarded body text appended after the success module's own scripts. */
+  text: string;
+}
+
+/**
+ * How a form's submit-kind server bodies merge into its on-success module.
+ * `moved` bodies run only inside the success module (every scope they cover
+ * is owned); `copied` bodies also stay in `/submit` for the posts a scope the
+ * success module does not own still sends there. `successPath` is the merged
+ * module's generated path, for coverage credit.
+ */
+export interface SubmitMergePlan {
+  parts: MergedSubmitPart[];
+  moved: Set<Workflow>;
+  copied: Set<Workflow>;
+  successPath: string;
+}
+
+const NO_SUBMIT_MERGE: SubmitMergePlan = { parts: [], moved: new Set(), copied: new Set(), successPath: '' };
+
 /** One visited statement and the stats bucket it counted into (translate.ts records rows; emitters shift them). */
 export interface CoverageEntry {
   /** The unit the statement belongs to: `workflow <name>`, `function <name>`, `blueprint <transition> / <phase>`, ... */
@@ -636,6 +682,9 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
   // server-only success registers no client handler and owns nothing.
   const successServerForms = new Map<string, SubmitOwnership>();
   const submitFixups: SubmitFixup[] = [];
+  // Submit bodies a form's on-success module absorbs, computed once per form
+  // by whichever of the submit or success group emits first.
+  const submitMerges = new Map<string, SubmitMergePlan>();
 
   put('runtime/limits.mjs', limitsModule());
 
@@ -665,7 +714,7 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
   const serverConditions: ServerConditionDef[] = [];
   const emitHandlers = (w: Workflow): void => {
     const group = handlerGroups.get(`${w.form || 'form'}${eventKind(w.event)}`);
-    if (group && group[0] === w) emitFormHandler(app, group, put, stats, todos, statementCoverage, alertDiagnostics, warnings, clientCalls.names, calledFunctions, options?.schema, !!options?.asyncOnSuccess, recordHandler, coverage, files, successServerForms, submitFixups, serverConditions);
+    if (group && group[0] === w) emitFormHandler(app, group, put, stats, todos, statementCoverage, alertDiagnostics, warnings, clientCalls.names, calledFunctions, options?.schema, !!options?.asyncOnSuccess, recordHandler, coverage, files, successServerForms, submitFixups, serverConditions, submitMerges);
   };
   const thisappEntries: ThisappEntry[] = [];
   const warnings: GenerateWarning[] = [];
@@ -981,6 +1030,94 @@ function handlerGroup(app: App, form: string, kind: string): Workflow[] {
 }
 
 const TAIL_EVENT_KINDS = new Set(['load', 'input', 'addrow', 'deleterow', 'click']);
+
+/**
+ * The submit scopes a form's on-success module owns, computed the way the
+ * emission fills `successServerForms`: the success group must write a server
+ * module (no module, no route, no ownership) and each client part's record
+ * event claims its scope. The scan translates without recording — the success
+ * emission re-runs the same pipeline and pushes the real stats and todos.
+ */
+function successOwnershipFor(app: App, group: readonly Workflow[], clientCallFunctions: ReadonlySet<string>): SubmitOwnership {
+  const owned: SubmitOwnership = { add: false, edit: false };
+  let hasServer = false;
+  for (const w of group) {
+    const translated = w.deluge ? translateInApp(app, w.deluge.text, { ...workflowScriptOptions(app, w), clientCallFunctions: [...clientCallFunctions] }) : emptyTranslate();
+    const guarded = gateAction(app, w, translated, []);
+    if (guarded.server.trim()) hasServer = true;
+    const subform = subformEventField(w.event);
+    const clientBody = [subformRowSource(subform, guarded.client), fieldRuleSource(app, w, []), guarded.client].filter((part) => part.trim()).join('\n');
+    if (!clientBody.trim()) continue;
+    const rec = (w.recordEvent ?? '').toLowerCase();
+    if (rec === 'on delete') continue;
+    if (rec !== 'on edit') owned.add = true;
+    if (rec !== 'on add') owned.edit = true;
+  }
+  return hasServer ? owned : { add: false, edit: false };
+}
+
+/**
+ * The server body one submit-kind workflow contributes, before the group's
+ * scope wrapping: system stamp, subform row binding, and the guarded script.
+ * The merge re-runs the pipeline because the owning success module may emit
+ * before the submit group is reached; the submit emission repeats it and
+ * pushes the stats and todos then.
+ */
+function submitServerBody(app: App, w: Workflow, clientCallFunctions: ReadonlySet<string>): string {
+  const translated = w.deluge ? translateInApp(app, w.deluge.text, { ...workflowScriptOptions(app, w), clientCallFunctions: [...clientCallFunctions] }) : emptyTranslate();
+  const guarded = gateAction(app, w, translated, [], true);
+  if (!guarded.server.trim()) return '';
+  return [systemStampSource(systemWriteKind(w)), subformRowSource(subformEventField(w.event), guarded.server), guarded.server].filter((part) => part.trim()).join('\n');
+}
+
+/**
+ * The submit bodies a form's on-success module absorbs. A submit post reaches
+ * `/forms/<form>/submit` only for a scope no success module owns, so an
+ * `on add`/`on edit` body whose every scope is owned moves into the success
+ * module; a partially covered body is copied under a scope guard for the
+ * owned posts and stays for the rest. A body reading client-only request
+ * state cannot move and stays a counted form-event-server-uninvoked todo.
+ * The plan is computed once per form, by whichever of the submit or success
+ * group emits first, and shared through `mergePlans`.
+ */
+function submitMergePlanFor(
+  app: App,
+  form: string,
+  successServerForms: Map<string, SubmitOwnership> | undefined,
+  mergePlans: Map<string, SubmitMergePlan> | undefined,
+  clientCallFunctions: ReadonlySet<string>,
+): SubmitMergePlan {
+  const cached = mergePlans?.get(form);
+  if (cached) return cached;
+  let plan = NO_SUBMIT_MERGE;
+  const successGroup = handlerGroup(app, form, 'success');
+  const submitGroup = handlerGroup(app, form, 'submit');
+  if (successGroup.length && submitGroup.length) {
+    let owned = successServerForms?.get(form);
+    if (!owned) {
+      owned = successOwnershipFor(app, successGroup, clientCallFunctions);
+      if (successServerForms && (owned.add || owned.edit)) successServerForms.set(form, owned);
+    }
+    if (owned.add || owned.edit) {
+      const next: SubmitMergePlan = { parts: [], moved: new Set(), copied: new Set(), successPath: `functions/aio/${slug(form)}/${handlerLeaf(successGroup)}.mjs` };
+      for (const w of submitGroup) {
+        const body = submitServerBody(app, w, clientCallFunctions);
+        if (!body.trim() || submitBodyReadsClientState(body)) continue;
+        const covered = submitEventScopes(w.event || '');
+        const ownedAdd = covered.add && owned.add;
+        const ownedEdit = covered.edit && owned.edit;
+        if (!ownedAdd && !ownedEdit) continue;
+        const cond = ownedAdd && !ownedEdit ? 'if (!ctx.rowId)' : ownedEdit && !ownedAdd ? 'if (ctx.rowId)' : '';
+        next.parts.push({ w, text: cond ? `${cond} {\n${indent(body)}\n}` : body });
+        (ownedAdd === covered.add && ownedEdit === covered.edit ? next.moved : next.copied).add(w);
+      }
+      if (next.parts.length) plan = next;
+    }
+  }
+  mergePlans?.set(form, plan);
+  return plan;
+}
+
 function workflowButtonName(w: Workflow): string {
   const text = w.event ?? '';
   const match = text.match(/button\s*=\s*([A-Za-z_][A-Za-z0-9_]*)/i);
@@ -1006,11 +1143,16 @@ function emitFormHandler(
   successServerForms?: Map<string, SubmitOwnership>,
   submitFixups?: SubmitFixup[],
   serverConditions?: ServerConditionDef[],
+  submitMerges?: Map<string, SubmitMergePlan>,
 ): void {
   const first = group[0]!;
   const form = first.form || 'form';
   const kind = eventKind(first.event);
   const base = `${slug(form)}/${handlerLeaf(group)}`;
+  // An `on add`/`on edit`/`on add or edit` server body a success module owns
+  // merges into that module instead of emitting a `/submit` route nothing
+  // posts. Whichever group emits first computes the plan; the other reuses it.
+  const merge = kind === 'submit' || kind === 'success' ? submitMergePlanFor(app, form, successServerForms, submitMerges, clientCallFunctions) : NO_SUBMIT_MERGE;
   // The route is one per form event kind, so every script of the group lands
   // in this module in export order. Each script keeps its own prefetch slot
   // namespace (slotStart chains) — the bodies cannot be concatenated raw.
@@ -1047,7 +1189,11 @@ function emitFormHandler(
     const server = guarded.server.trim()
       ? [systemStampSource(systemWrite), subformRowSource(subform, guarded.server), guarded.server].filter((part) => part.trim()).join('\n')
       : '';
-    if (server) writeKinds.add(systemWrite!);
+    // A body the success module absorbed keeps out of the `/submit` module:
+    // it runs there once, after the row write, on the posts the success route
+    // owns. A partially owned body stays for the posts `/submit` still gets.
+    const movedToSuccess = merge.moved.has(w);
+    if (server && !movedToSuccess) writeKinds.add(systemWrite!);
     const clientBody = [subformRowSource(subform, guarded.client), rules, guarded.client].filter((part) => part.trim()).join('\n');
     const prefetch = [subformRowSource(subform, translated.prefetch), translated.prefetch, zohoSlotLines(clientBody)].filter((part) => part.trim()).join('\n');
     if (!server.trim() && !prefetch.trim() && !clientBody.trim() && todos.length === todosBefore) {
@@ -1074,7 +1220,7 @@ function emitFormHandler(
     // record-scope guard there would skip every edit-scoped read. Prefetch is
     // read-only: it loads every script's slots and keeps only the subform guard.
     const wrapPrefetch = (part: string): string => (part.trim() && subformConds.length ? `if (${subformConds.join(' && ')}) {\n${indent(part)}\n}` : part);
-    if (server.trim()) {
+    if (server.trim() && !movedToSuccess) {
       serverScriptIndex.set(group.indexOf(w), serverParts.length);
       serverParts.push(wrap(server));
     }
@@ -1085,7 +1231,7 @@ function emitFormHandler(
     }
     const prefetchPath = prefetch.trim() ? `/forms/${encodeURIComponent(form)}/${kind}/prefetch` : '';
     if (clientBody.trim()) clientParts.push({ w, body: clientBody, prefetchPath, index: group.indexOf(w), server: serverScriptIndex.has(group.indexOf(w)) });
-    if (server.trim()) {
+    if (server.trim() && !movedToSuccess) {
       recordHandler?.({
         path: `functions/aio/${base}.mjs`,
         kind,
@@ -1126,6 +1272,13 @@ function emitFormHandler(
   const scriptEvents = group.length > 1 && serverParts.length > 1 && TAIL_EVENT_KINDS.has(kind)
     ? Object.fromEntries([...serverScriptIndex].sort((a, b) => a[1] - b[1]).map(([index, i]) => [runEventTokens.get(index)!, i]))
     : undefined;
+  // Orphaned `on add`/`on edit`/`on add or edit` bodies whose posts this
+  // success module owns run here, after its own on-success scripts, in the
+  // workflow order they were declared. Each keeps the scope guard for the
+  // posts it covers, so a merged body runs exactly once per successful
+  // add/edit the route serves. They are not named in scriptEvents: the
+  // submit pipeline calls the module, never one script of it.
+  if (kind === 'success') for (const part of merge.parts) serverParts.push(part.text);
   const serverBody = group.length > 1 && serverParts.length > 1
     ? serverParts.map((part, i) => `if (ctx.onlyScript == null || ctx.onlyScript === ${i}) await shim.__c2cScript(${i}, async () => {\n${indent(part)}\n});`).join('\n')
     : serverParts.join('\n');
@@ -1246,14 +1399,20 @@ function emitFormHandler(
       .map((p) => files.find((f) => f.path === p)?.source ?? '');
     const clientPosted = clientSources.some((source) => clientPostsServerPath(source, serverPath));
     for (const item of contributed) {
+      // A submit body the success module absorbed is invoked there on the
+      // posts the success route owns; a partially owned body also keeps its
+      // `/submit` copy for the posts the success route does not own.
+      const mergedInto = merge.moved.has(item.w) || merge.copied.has(item.w);
       let serverInvoked: boolean | undefined;
-      if (item.server && serverFile) {
+      if (item.server && mergedInto) serverInvoked = true;
+      else if (item.server && serverFile) {
         if (kind === 'submit' && !clientPosted) serverInvoked = !submitBodyUnposted(successServerForms?.get(form), item.w.event || '');
         else serverInvoked = clientPosted || runtimeReachesFormEvent(kind) || presuccessModule;
         if (!serverInvoked) todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: item.w.span.start, end: item.w.span.end, manualStep: formEventUninvokedStep(form, item.w.event || '', kind) });
       }
       const paths: string[] = [];
-      if (item.server && serverFile && serverInvoked !== false) paths.push(serverFile);
+      if (item.server && mergedInto && merge.successPath) paths.push(merge.successPath);
+      if (item.server && serverFile && serverInvoked !== false && !merge.moved.has(item.w)) paths.push(serverFile);
       if (item.prefetch && prefetchFile) paths.push(prefetchFile);
       const clientPath = clientFile.get(item.w);
       if (item.client && clientPath) paths.push(clientPath);
@@ -1269,7 +1428,7 @@ function emitFormHandler(
         ...(serverInvoked !== undefined ? { serverInvoked } : {}),
       };
       coverage.push(entry);
-      if (item.server && serverFile && kind === 'submit') submitFixups?.push({ entry, clientPosted, serverFile, form, event: item.w.event || '' });
+      if (item.server && serverFile && kind === 'submit' && !mergedInto) submitFixups?.push({ entry, clientPosted, serverFile, form, event: item.w.event || '' });
     }
   }
 }
