@@ -946,7 +946,7 @@ export default async function handler(req, res) {
     send(res, 401, { dryRun: true, error: "authenticated caller required" });
     return;
   }
-  if (!adminProfiles.some((name) => name.toLowerCase() === String(principal.profile).toLowerCase())) {
+  if (!adminProfiles.includes(String(principal.profile))) {
     send(res, 403, { dryRun: true, error: "the smoke endpoint requires an Administrator profile" });
     return;
   }

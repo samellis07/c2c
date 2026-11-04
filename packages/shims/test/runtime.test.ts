@@ -352,6 +352,11 @@ test('record reads use the profile grant and the report filter, and never return
     principalFromRequest({ user: { profile: 'Staff', email: 'ada@example.test', id: '123', loginUser: 'ada' } }),
     { profile: 'Staff', loginUser: 'ada', userId: 'ada@example.test' },
   );
+  // The profile survives verbatim (no trim, no case fold): admin and grant
+  // checks are exact matches against the generated policy.
+  assert.equal(principalFromRequest({ user: { profile: 'Administrator ' } })?.profile, 'Administrator ');
+  assert.equal(principalFromRequest({ user: { profile: 'administrator' } })?.profile, 'administrator');
+  assert.equal(principalFromRequest({ user: { profile: '  ' } }), null);
 });
 
 test('prepare copies stored Added_User through the read policy and does not stamp a hidden row', async () => {
@@ -2612,10 +2617,12 @@ test('matchRow NULL and blank handling characterization', () => {
   }
 });
 
-test('app.users and app.userEmailIds require admin or developer profile and refuse low-privilege callers', async () => {
+test('app.users and app.userEmailIds require an exact admin profile and refuse low-privilege callers', async () => {
+  const access = { profiles: {}, roles: [], admins: ['Administrator'] };
   const runtime = createRuntime({
     dryRun: false,
     appTimeZone: 'UTC',
+    access,
     appUsers: async () => [
       { user_id: '100', email: 'a@example.test' },
       { zuid: '200', email_id: 'b@example.test' },
@@ -2650,8 +2657,13 @@ test('app.users and app.userEmailIds require admin or developer profile and refu
   const unauthCtx = runtime.context({});
   await assert.rejects(() => runtime.shim.app.users(unauthCtx), (err: unknown) => (err as { code?: string }).code === 'RECORD_ACCESS_DENIED');
 
-  // Lookalike profile and role names do not grant user listing.
-  for (const profile of ['Non-Admin', 'Admin Assistant', 'Developer Support']) {
+  // Lookalike profile and role names do not grant user listing: matching is
+  // exact and case-sensitive, and only the generated policy.admins names count.
+  for (const profile of [
+    'Non-Admin', 'Admin Assistant', 'Developer Support',
+    'administrator', 'ADMINISTRATOR', 'Administrator ', ' Administrator',
+    'Developer', 'developer',
+  ]) {
     const ctx = runtime.context({ principal: { profile } });
     await assert.rejects(() => runtime.shim.app.users(ctx), (err: unknown) => (err as { code?: string }).code === 'RECORD_ACCESS_DENIED');
   }
@@ -2663,15 +2675,37 @@ test('app.users and app.userEmailIds require admin or developer profile and refu
   assert.deepEqual(await runtime.shim.app.users(adminCtx), ['100', '200', 'fallback']);
   assert.deepEqual(await runtime.shim.app.userEmailIds(adminCtx), ['a@example.test', 'b@example.test']);
 
-  // Developer gets list
-  const devCtx = runtime.context({ principal: { profile: 'Developer' } });
-  assert.deepEqual(await runtime.shim.app.users(devCtx), ['100', '200', 'fallback']);
-  assert.deepEqual(await runtime.shim.app.userEmailIds(devCtx), ['a@example.test', 'b@example.test']);
+  // A caller-controlled role claim cannot grant admin either: only the exact
+  // profile name in policy.admins counts.
+  const claimCtx = runtime.context({ principal: { profile: 'Employee', role: 'Administrator' } });
+  await assert.rejects(
+    () => runtime.shim.app.users(claimCtx),
+    (err: unknown) => (err as { code?: string }).code === 'RECORD_ACCESS_DENIED',
+  );
+
+  // No admin policy at all denies everyone, including a literal 'Administrator'.
+  const openRuntime = createRuntime({ dryRun: false, appTimeZone: 'UTC', appUsers: async () => [] });
+  const noPolicyAdmin = openRuntime.context({ principal: { profile: 'Administrator' } });
+  await assert.rejects(() => openRuntime.shim.app.users(noPolicyAdmin), (err: unknown) => (err as { code?: string }).code === 'RECORD_ACCESS_DENIED');
+  const emptyAdmins = createRuntime({ dryRun: false, appTimeZone: 'UTC', access: { profiles: {}, roles: [], admins: [] }, appUsers: async () => [] });
+  const emptyAdminCtx = emptyAdmins.context({ principal: { profile: 'Administrator' } });
+  await assert.rejects(() => emptyAdmins.shim.app.users(emptyAdminCtx), (err: unknown) => (err as { code?: string }).code === 'RECORD_ACCESS_DENIED');
+
+  // A custom exact admin name in policy.admins is allowed.
+  const customRuntime = createRuntime({
+    dryRun: false,
+    appTimeZone: 'UTC',
+    access: { profiles: {}, roles: [], admins: ['Site Owner'] },
+    appUsers: async () => [{ user_id: '7' }],
+  });
+  const customCtx = customRuntime.context({ principal: { profile: 'Site Owner' } });
+  assert.deepEqual(await customRuntime.shim.app.users(customCtx), ['7']);
 
   // Error in adapter does not leak sensitive information
   const failingRuntime = createRuntime({
     dryRun: false,
     appTimeZone: 'UTC',
+    access,
     appUsers: async () => {
       throw new Error('connection reset by peer for secret_user@internal.example.test (id 9999)');
     },
@@ -2687,7 +2721,7 @@ test('app.users and app.userEmailIds require admin or developer profile and refu
   );
 
   // Dry run behavior
-  const dry = createRuntime({ dryRun: true });
+  const dry = createRuntime({ dryRun: true, access });
   const dryAdminCtx = dry.context({ principal: { profile: 'Administrator' } });
   assert.deepEqual(await dry.shim.app.users(dryAdminCtx), []);
   const dryEmployeeCtx = dry.context({ principal: { profile: 'Employee' } });
