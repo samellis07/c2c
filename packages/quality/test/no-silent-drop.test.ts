@@ -1875,3 +1875,70 @@ test('a source list the generated controls draw is emitted; an undrawn source st
   delete missing.model.forms[0]!.fields.find((item) => item.name === 'Photo')!.uploadSources;
   assert.equal(rowStatus(source, missing, 'Profile.Photo property source'), 'dropped');
 });
+
+test('preview duration = 0 on an image field is emitted; non-zero stays a drop', () => {
+  const photo = (duration: string): string => `
+	form Profile
+	{
+		Photo
+		(
+			type = image
+			preview duration = ${duration}
+		)
+	}
+`;
+  const defaultZero = dsApp(photo('0'));
+  assert.equal(rowStatus(defaultZero, collectOutputs(defaultZero), 'Profile.Photo property preview duration'), 'emitted');
+
+  const nonZero = dsApp(photo('3'));
+  assert.equal(rowStatus(nonZero, collectOutputs(nonZero), 'Profile.Photo property preview duration'), 'dropped');
+
+  // Mutation test: breaking default equivalence makes preview duration = 0 a drop again.
+  const mutated = cloneOutputs(collectOutputs(defaultZero));
+  mutated.model.forms[0]!.fields.find((f) => f.name === 'Photo')!.widget = 'text';
+  assert.equal(rowStatus(defaultZero, mutated, 'Profile.Photo property preview duration'), 'dropped');
+});
+
+test('browse = local_drive is emitted; uncarried cloud docs emit counted UI todo; unknown stays drop', () => {
+  const fileField = (browse: string): string => `
+	form Attachment
+	{
+		File_Attachment
+		(
+			type = upload file
+			browse = ${browse}
+		)
+	}
+`;
+  const localOnly = dsApp(fileField('local_drive'));
+  assert.equal(rowStatus(localOnly, collectOutputs(localOnly), 'Attachment.File_Attachment property browse'), 'emitted');
+
+  const cloudSources = dsApp(fileField('local_drive, google_docs, zoho_docs'));
+  const cloudOut = collectOutputs(cloudSources);
+  assert.equal(rowStatus(cloudSources, cloudOut, 'Attachment.File_Attachment property browse'), 'counted');
+  const todo = cloudOut.model.todos.find((t) => t.name === 'Attachment.File_Attachment property browse');
+  assert.ok(todo, 'UI todo is emitted for uncarried cloud browse options');
+  assert.ok(todo.reason.includes('google_docs, zoho_docs'));
+  assert.ok(todo.manualStep?.includes('Google Drive, Zoho WorkDrive'));
+
+  // Unknown browse source stays a drop.
+  const unknown = dsApp(fileField('local_drive, dropbox'));
+  assert.equal(rowStatus(unknown, collectOutputs(unknown), 'Attachment.File_Attachment property browse'), 'dropped');
+
+  // Mutation test: removing the UI todo makes local_drive, google_docs, zoho_docs a drop again.
+  const mutated = cloneOutputs(cloudOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Attachment.File_Attachment property browse');
+  assert.equal(rowStatus(cloudSources, mutated, 'Attachment.File_Attachment property browse'), 'dropped');
+});
+
+test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is counted', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false }, () => {
+  const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
+  const contacts = parseProject(join(gallery, 'contacts')).ir;
+  assert.equal(rowStatus(contacts, collectOutputs(contacts), 'New_Contact.Picture property preview duration'), 'emitted');
+
+  const taskzdone = parseProject(join(gallery, 'taskzdone')).ir;
+  const taskzOut = collectOutputs(taskzdone);
+  assert.equal(rowStatus(taskzdone, taskzOut, 'Add_Attachment.File_Attachment property browse'), 'counted');
+  const todo = taskzOut.model.todos.find((t) => t.name === 'Add_Attachment.File_Attachment property browse');
+  assert.ok(todo, 'TaskzDone Add_Attachment.File_Attachment property browse has a counted UI todo');
+});

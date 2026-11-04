@@ -284,8 +284,9 @@ function auditFieldProperties(app: App, out: AuditOutputs, rows: CoverageRow[]):
     const columns = findColumns(out.schema, formName, field.name);
     for (const item of items) {
       const name = `${formName}.${field.name} ${item.label}`;
-      if (spanCovered(out, item.start, item.end)) {
-        rows.push({ kind: 'field-property', name, status: 'counted', via: 'todo' });
+      const propertyTodo = out.model.todos.find((t) => t.area === 'field' && (t.name === name || t.name === `${formName}.${field.name}.${item.label}`));
+      if (propertyTodo || spanCovered(out, item.start, item.end)) {
+        rows.push({ kind: 'field-property', name, status: 'counted', via: propertyTodo ? 'UI todo' : 'todo' });
         continue;
       }
       if (item.proved(ui, columns)) {
