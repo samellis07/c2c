@@ -3242,7 +3242,12 @@ ${requirePrincipal()}
     }
     const rowCriteria = { op: "==", field: "ROWID", value: rowId };
     const criteria = reportScope ? { op: "and", args: [rowCriteria, reportScope.criteria] } : rowCriteria;
-    ${needsResolve ? 'const flat = await resolveLookupCriteria(datastore, criteria, principal);' : 'const flat = criteria;'}
+    const datastore = live ? await liveDatastore() : null;
+    if (live && (!datastore || typeof datastore.query !== "function")) {
+      send(res, 500, { dryRun: false, error: "live datastore is not configured" });
+      return;
+    }
+    ${needsResolve ? 'const flat = live ? await resolveLookupCriteria(datastore, criteria, principal) : criteria;' : 'const flat = criteria;'}
     const scoped = authorizeRead(access, principal, formName, flat);
     const selectedFields = reportScope ? (scoped.fields ? reportScope.fields.filter((field) => scoped.fields.includes(field)) : reportScope.fields) : scoped.fields;
     // A criteria the record query cannot evaluate (an unmigrated clause in the
@@ -3264,11 +3269,6 @@ ${requirePrincipal()}
     if (!live) {
       authorizeRead(access, principal, formName, criteria);
       send(res, 200, { dryRun: true, record: { ROWID: rowId } });
-      return;
-    }
-    const datastore = await liveDatastore();
-    if (!datastore || typeof datastore.query !== "function") {
-      send(res, 500, { dryRun: false, error: "live datastore is not configured" });
       return;
     }
     const where = compileCriteria(applied);
