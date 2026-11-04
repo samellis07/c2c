@@ -14,7 +14,7 @@
  * --rollback-export). Nothing leaves the process; the same app gives the same
  * report.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { App } from '../../core/src/index.js';
 import { generateSeedRecords, type SeedRecordGrid } from '../../data/src/seed-import.js';
@@ -65,7 +65,7 @@ export interface D10Report {
   status: 'PASS' | 'FAIL';
   /** Every Creator URL the app exposes, mapped to the generated route or listed as a manual step. */
   linkMap: D10LinkEntry[];
-  /** Offline downtime estimate for the freeze -> switch window, with its measured inputs. */
+  /** Offline downtime estimate for the freeze -> switch window: measured phase counts priced at planning rates. */
   downtime: D10Downtime;
 }
 
@@ -89,16 +89,23 @@ export interface D10Phase {
   rows: number;
 }
 
+/** Seconds per unit in the downtime estimate: per store round-trip, per row written, for the human steps. */
+export type D10Rates = { perStoreCall: [number, number]; perRow: [number, number]; humanSteps: [number, number] };
+
 /**
- * The cut-over window estimated from what the rehearsal measured: store
- * round-trips and rows per phase, priced with the stated per-call and per-row
- * rates plus the human steps. An estimate from offline inputs, never a
- * promise; the live window depends on the project's real API latency.
+ * The cut-over window estimated from the phase counts the rehearsal measured
+ * offline (store round-trips and rows per phase), priced with the stated
+ * per-call and per-row rates plus the human steps. The rates are assumed
+ * planning rates unless the caller supplies its own; they are never timings
+ * measured from this rehearsal. An estimate, never a promise; the live window
+ * depends on the project's real API latency.
  */
 export interface D10Downtime {
   phases: D10Phase[];
   /** Seconds assumed per store round-trip, per row written and for the human steps: [low, high]. */
-  rates: { perStoreCall: [number, number]; perRow: [number, number]; humanSteps: [number, number] };
+  rates: D10Rates;
+  /** 'assumed': the built-in planning rates; 'supplied': rates the caller provided. */
+  ratesSource: 'assumed' | 'supplied';
   estimateSeconds: [number, number];
   /** One line: the window as a rounded minute range. */
   estimate: string;
@@ -134,7 +141,7 @@ export interface RehearsalHooks {
   conflictResolver?: ConflictResolver;
   /** Link-map entries before the criterion is judged (a test can break one). */
   linkMap?(entries: D10LinkEntry[]): void;
-  /** Measured downtime phases before the estimate is judged. */
+  /** Measured downtime phase counts before the estimate is judged. */
   downtimePhases?(phases: D10Phase[]): void;
 }
 
@@ -145,6 +152,13 @@ export interface RehearsalOptions {
   workDir: string;
   /** The app's .ds path or folder (the workspace the rollback export must sit outside of). */
   target: string;
+  /**
+   * Customer planning rates for the downtime estimate: a rates object, or a
+   * path to a JSON file of the same shape (`{ perStoreCall: [low, high],
+   * perRow: [low, high], humanSteps: [low, high] }`, seconds). Defaults to the
+   * assumed planning rates; when supplied the report says so.
+   */
+  downtimeRates?: D10Rates | string;
   hooks?: RehearsalHooks;
 }
 
@@ -534,16 +548,38 @@ export function linkMap(app: App): D10LinkEntry[] {
   return entries;
 }
 
-/** Seconds per measured unit in the downtime estimate: [low, high]. */
-const DOWNTIME_RATES: D10Downtime['rates'] = { perStoreCall: [0.5, 2], perRow: [0.05, 0.2], humanSteps: [60, 180] };
+/** Assumed planning rates, seconds per unit in the downtime estimate: [low, high]. Not timings measured from a rehearsal. */
+const DOWNTIME_RATES: D10Rates = { perStoreCall: [0.5, 2], perRow: [0.05, 0.2], humanSteps: [60, 180] };
 
-function downtimeEstimate(phases: D10Phase[]): D10Downtime {
+/** The rates the estimate uses: the caller's own when supplied (object or JSON file), else the assumed planning rates. */
+function downtimeRates(input: RehearsalOptions['downtimeRates']): { rates: D10Rates; source: 'assumed' | 'supplied' } {
+  const supplied = typeof input === 'string' ? (JSON.parse(readFileSync(input, 'utf8')) as D10Rates) : input;
+  if (!supplied) return { rates: DOWNTIME_RATES, source: 'assumed' };
+  for (const key of ['perStoreCall', 'perRow', 'humanSteps'] as const) {
+    const range = supplied[key];
+    if (!Array.isArray(range) || range.length !== 2 || range.some((n) => typeof n !== 'number' || !Number.isFinite(n) || n < 0) || range[0] > range[1]) {
+      throw new Error(`downtime rates: ${key} must be a [low, high] pair of non-negative seconds`);
+    }
+  }
+  return { rates: { perStoreCall: supplied.perStoreCall, perRow: supplied.perRow, humanSteps: supplied.humanSteps }, source: 'supplied' };
+}
+
+/** One honest sentence about where the rates come from; the rate list reads `<low>–<high> s per ...`. */
+function ratesSentence(downtime: D10Downtime): string {
+  const rates = downtime.rates;
+  const list = `${rates.perStoreCall[0]}–${rates.perStoreCall[1]} s per store call, ${rates.perRow[0]}–${rates.perRow[1]} s per row, and ${rates.humanSteps[0]}–${rates.humanSteps[1]} s per human step`;
+  return downtime.ratesSource === 'supplied'
+    ? `The rates (${list}) are project-specific rates supplied for this estimate, not timings measured from this rehearsal.`
+    : `The rates (${list}) are assumed planning rates, not timings measured from this rehearsal. Replace them with your own measurements: time representative store round-trips and row writes during a rehearsal, record the human-step duration, then rerun the estimate with those project-specific rates.`;
+}
+
+function downtimeEstimate(phases: D10Phase[], rates: D10Rates, ratesSource: D10Downtime['ratesSource']): D10Downtime {
   const calls = phases.reduce((sum, phase) => sum + phase.storeCalls, 0);
   const rows = phases.reduce((sum, phase) => sum + phase.rows, 0);
-  const low = Math.round(calls * DOWNTIME_RATES.perStoreCall[0] + rows * DOWNTIME_RATES.perRow[0] + DOWNTIME_RATES.humanSteps[0]);
-  const high = Math.round(calls * DOWNTIME_RATES.perStoreCall[1] + rows * DOWNTIME_RATES.perRow[1] + DOWNTIME_RATES.humanSteps[1]);
+  const low = Math.round(calls * rates.perStoreCall[0] + rows * rates.perRow[0] + rates.humanSteps[0]);
+  const high = Math.round(calls * rates.perStoreCall[1] + rows * rates.perRow[1] + rates.humanSteps[1]);
   const minutes = (seconds: number) => (seconds < 90 ? `${seconds} s` : `${(seconds / 60).toFixed(1).replace(/\.0$/, '')} min`);
-  return { phases, rates: DOWNTIME_RATES, estimateSeconds: [low, high], estimate: `${minutes(low)} – ${minutes(high)}` };
+  return { phases, rates, ratesSource, estimateSeconds: [low, high], estimate: `${minutes(low)} – ${minutes(high)}` };
 }
 
 function rowCount(body: string | undefined): number {
@@ -902,7 +938,8 @@ export async function rehearseCutover(app: App, options: RehearsalOptions): Prom
     { phase: 'switch (redirect + sign-in, human)', storeCalls: 0, rows: 0 },
   ];
   hooks.downtimePhases?.(downtimePhases);
-  const downtime = downtimeEstimate(downtimePhases);
+  const { rates, source: ratesSource } = downtimeRates(options.downtimeRates);
+  const downtime = downtimeEstimate(downtimePhases, rates, ratesSource);
   {
     const failures = downtime.phases.length
       ? []
@@ -916,7 +953,7 @@ export async function rehearseCutover(app: App, options: RehearsalOptions): Prom
         failures,
         [
           ...downtime.phases.map((phase) => `${phase.phase}: ${phase.storeCalls} store call(s), ${phase.rows} row(s)`),
-          `estimated window ${downtime.estimate} — offline estimate: ${totalCalls} store call(s) at ${DOWNTIME_RATES.perStoreCall[0]}-${DOWNTIME_RATES.perStoreCall[1]} s, ${totalRows} row(s) at ${DOWNTIME_RATES.perRow[0]}-${DOWNTIME_RATES.perRow[1]} s, plus ${DOWNTIME_RATES.humanSteps[0]}-${DOWNTIME_RATES.humanSteps[1]} s human steps; an estimate, not a promise`,
+          `estimated window ${downtime.estimate} — an offline planning estimate over ${totalCalls} store call(s) and ${totalRows} row(s) counted by this rehearsal. ${ratesSentence(downtime)} An estimate, not a promise.`,
         ],
         'Price the live API latency of a rehearsal project into the estimate so it reflects the real cut-over window.',
       ),
@@ -969,9 +1006,9 @@ export function rehearsalMarkdown(report: D10Report): string {
     '',
     '## Downtime estimate',
     '',
-    `Estimated freeze-to-switch window: ${report.downtime.estimate} — an offline estimate from measured store calls and row counts, not a promise.`,
+    `Estimated freeze-to-switch window: ${report.downtime.estimate} — an offline planning estimate. ${ratesSentence(report.downtime)}`,
     ...report.downtime.phases.map((phase) => `- ${phase.phase}: ${phase.storeCalls} store call(s), ${phase.rows} row(s)`),
-    `- rates: ${report.downtime.rates.perStoreCall[0]}-${report.downtime.rates.perStoreCall[1]} s per store call, ${report.downtime.rates.perRow[0]}-${report.downtime.rates.perRow[1]} s per row, ${report.downtime.rates.humanSteps[0]}-${report.downtime.rates.humanSteps[1]} s human steps`,
+    `- rates (${report.downtime.ratesSource === 'supplied' ? 'supplied' : 'assumed'}): ${report.downtime.rates.perStoreCall[0]}–${report.downtime.rates.perStoreCall[1]} s per store call, ${report.downtime.rates.perRow[0]}–${report.downtime.rates.perRow[1]} s per row, ${report.downtime.rates.humanSteps[0]}–${report.downtime.rates.humanSteps[1]} s per human step`,
     '',
   );
   return lines.join('\n');

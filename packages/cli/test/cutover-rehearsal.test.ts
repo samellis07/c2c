@@ -106,16 +106,69 @@ test('downtime: the window is an estimate with measured phase inputs, not a prom
   const evidence = item.evidence.join('\n');
   assert.match(evidence, /final delta sync: \d+ store call\(s\), \d+ row\(s\)/);
   assert.match(evidence, /verify read-back: \d+ store call\(s\), \d+ row\(s\)/);
-  assert.match(evidence, /estimated window .+ – .+ — offline estimate/);
+  assert.match(evidence, /estimated window .+ – .+ — an offline planning estimate/);
   assert.match(evidence, /not a promise/);
   assert.equal(report.downtime.phases.length, 4);
+  assert.equal(report.downtime.ratesSource, 'assumed');
   const [low, high] = report.downtime.estimateSeconds;
   assert.ok(low > 0 && high > low, `${low}-${high}`);
-  assert.ok(rehearsalMarkdown(report).includes('## Downtime estimate'));
+  // The exact wording: counts are measured, the rates are assumed planning rates the customer can replace.
+  const md = rehearsalMarkdown(report);
+  assert.ok(md.includes('## Downtime estimate'));
+  assert.ok(
+    md.includes(
+      `Estimated freeze-to-switch window: ${report.downtime.estimate} — an offline planning estimate. ` +
+        'The rates (0.5–2 s per store call, 0.05–0.2 s per row, and 60–180 s per human step) are assumed planning rates, not timings measured from this rehearsal. ' +
+        'Replace them with your own measurements: time representative store round-trips and row writes during a rehearsal, record the human-step duration, then rerun the estimate with those project-specific rates.',
+    ),
+  );
+  // 'measured' is never attached to the rates or claimed for the estimate's inputs.
+  assert.doesNotMatch(md, /estimate from measured|measured (store call|row count|rate|timing|window)/i);
+  assert.doesNotMatch(evidence, /estimate from measured|measured (store call|row count|rate|timing|window)/i);
   // Nothing measured, nothing to estimate.
   const broken = await run(LIBRARY, { downtimePhases: (phases) => phases.splice(0) });
   assert.equal(status(broken, 'D10.downtime'), 'FAIL');
   assert.match(broken.criteria.find((entry) => entry.id === 'D10.downtime')!.reason!, /no measured phase/);
+});
+
+test('downtime: supplied rates change the window and the report says so', async () => {
+  const assumed = await run(LIBRARY);
+  const rates = { perStoreCall: [10, 30] as [number, number], perRow: [1, 2] as [number, number], humanSteps: [300, 600] as [number, number] };
+  const report = await rehearseCutover(loadApp(LIBRARY), {
+    workDir: mkdtempSync(join(tmpdir(), 'c2c-d10-')),
+    target: LIBRARY,
+    rows: 30,
+    downtimeRates: rates,
+  });
+  assert.equal(report.downtime.ratesSource, 'supplied');
+  assert.deepEqual(report.downtime.rates, rates);
+  assert.notDeepEqual(report.downtime.estimateSeconds, assumed.downtime.estimateSeconds);
+  const md = rehearsalMarkdown(report);
+  assert.match(md, /are project-specific rates supplied for this estimate, not timings measured from this rehearsal/);
+  assert.doesNotMatch(md, /assumed planning rates/);
+  assert.match(md, /10–30 s per store call, 1–2 s per row, and 300–600 s per human step/);
+  const evidence = report.criteria.find((entry) => entry.id === 'D10.downtime')!.evidence.join('\n');
+  assert.match(evidence, /project-specific rates supplied/);
+  // A rates JSON file is accepted too.
+  const file = join(mkdtempSync(join(tmpdir(), 'c2c-d10-')), 'rates.json');
+  writeFileSync(file, JSON.stringify({ perStoreCall: [1, 1], perRow: [1, 1], humanSteps: [1, 1] }));
+  const fromFile = await rehearseCutover(loadApp(LIBRARY), {
+    workDir: mkdtempSync(join(tmpdir(), 'c2c-d10-')),
+    target: LIBRARY,
+    rows: 30,
+    downtimeRates: file,
+  });
+  assert.equal(fromFile.downtime.ratesSource, 'supplied');
+  assert.deepEqual(fromFile.downtime.estimateSeconds, [
+    fromFile.downtime.phases.reduce((sum, phase) => sum + phase.storeCalls + phase.rows, 0) + 1,
+    fromFile.downtime.phases.reduce((sum, phase) => sum + phase.storeCalls + phase.rows, 0) + 1,
+  ]);
+  // A malformed rates file is refused, not silently assumed.
+  writeFileSync(file, JSON.stringify({ perStoreCall: [5, 1], perRow: [1, 2], humanSteps: [1, 2] }));
+  await assert.rejects(
+    rehearseCutover(loadApp(LIBRARY), { workDir: mkdtempSync(join(tmpdir(), 'c2c-d10-')), target: LIBRARY, rows: 30, downtimeRates: file }),
+    /downtime rates: perStoreCall must be a \[low, high\] pair/,
+  );
 });
 
 test('the report is the same on a second run', async () => {
