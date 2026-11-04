@@ -302,5 +302,5 @@ test('the shipped record module takes its upload cap from the shim definition', 
   // shim at generate time so a shipped app cannot carry a second cap.
   assert.equal(UPLOAD_SOURCE_MAX_BYTES, MAX_FILE_BYTES);
   const source = readFileSync(join(process.cwd(), 'packages/ui-react/template/lib/c2c-ui/form/record.ts'), 'utf8');
-  assert.match(stampUploadCap(source), new RegExp(`export const UPLOAD_SOURCE_MAX_BYTES = ${MAX_FILE_BYTES};`));
+  assert.match(stampUploadCap(source, 'lib/c2c-ui/form/record.ts'), new RegExp(`export const UPLOAD_SOURCE_MAX_BYTES = ${MAX_FILE_BYTES};`));
 });
