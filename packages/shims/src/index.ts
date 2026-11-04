@@ -204,6 +204,7 @@ export {
   FILE_NAME_MAX,
   FILE_OBJECT_KEY,
   FileReferenceError,
+  MAX_FILE_BYTES,
   SIGNED_URL_TTL_SECONDS,
   catalystFileStore,
   cleanFileName,
