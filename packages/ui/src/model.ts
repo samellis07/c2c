@@ -108,6 +108,10 @@ export interface UiField {
   visibility?: boolean;
   /** Web label placement for the form (`top`, `left`, `labelinplace`). */
   labelPlacement?: string;
+  /** Option columns for a radio or checkbox group (Creator field `layout`): 1, 2 or 3. */
+  optionColumns?: 1 | 2 | 3;
+  /** `onecolumncard` field layout: the options draw as a column of cards. */
+  optionCard?: boolean;
   /** False for an unnamed `Section` pseudo-field: it draws no heading. */
   titled?: boolean;
   /** ISO 4217 code the field stores: the field type (`USD`) when given, else the app `currency` setting. */
@@ -325,6 +329,9 @@ export function smokeNumberField(fields: readonly UiField[] | undefined, markerF
   return (fields ?? []).find((field) => field.widget === 'number' && !field.readonly && !field.unique && field.name !== markerField)?.name;
 }
 
+/** A device `customize { layout = ... }` value carried into the generated UI. */
+export type DeviceLayout = 'one-column' | 'two-column' | 'one-column-card' | 'sliding-pane' | 'tab-bar';
+
 export interface UiModel {
   dryRun: true;
   framework: 'vanilla';
@@ -342,6 +349,10 @@ export interface UiModel {
   dateFormat?: string;
   /** The app `time format` setting ("24-hr" / "12-hr"), used for date-time cells. */
   timeFormat?: string;
+  /** The phone `customize { layout }` arrangement: form columns, card, drawer or tab bar. */
+  phoneLayout?: DeviceLayout;
+  /** The tablet `customize { layout }` arrangement. */
+  tabletLayout?: DeviceLayout;
 }
 
 export interface UiForm {
@@ -360,6 +371,8 @@ export interface UiForm {
   handlers: UiHandler[];
   /** Form grid width. One column everywhere; wider on desktop when a layout pass asks for it. */
   layout?: 'one' | 'two' | 'three';
+  /** The phone `customize { layout }` arrangement, copied from the model for the form's data attribute. */
+  phoneLayout?: DeviceLayout;
   /**
    * Blueprint field settings governing this form: per stage and per
    * transition, which fields show and which may change. The record read

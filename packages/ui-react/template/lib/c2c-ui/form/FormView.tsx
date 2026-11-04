@@ -197,6 +197,10 @@ export function FormView({ form, edit, children, handlers, onSaved }: { form: Fo
   const [notes, setNotes] = useState<string[]>([]);
   const formRef = useRef<HTMLFormElement>(null);
   const mode = edit ? 'edit' : 'add';
+  // The device customize layout picks the form grid width: `twocolumn` draws
+  // the two-column grid, `onecolumn`/`onecolumncard` draw one column.
+  const formLayout =
+    form.phoneLayout === 'two-column' ? (form.layout === 'three' ? 'three' : 'two') : form.phoneLayout === 'one-column' || form.phoneLayout === 'one-column-card' ? 'one' : form.layout;
   // The live draft the handlers read and write between publishes.
   const live = useRef({ record: {} as Record<string, unknown>, old: {} as Record<string, unknown>, notes: [] as string[] });
   // The last record the controls mounted with: a script write that differs
@@ -551,7 +555,7 @@ export function FormView({ form, edit, children, handlers, onSaved }: { form: Fo
       <Slot>{custom?.slots?.before}</Slot>
       <FormContext.Provider value={{ form, errors, record, rowId: edit, hidden: fieldState.hidden, disabled: fieldState.disabled, versions, notify, rowEvent }}>
         <FormHandlersContext.Provider value={handlers}>
-        <form ref={formRef} data-form={form.name} data-layout={form.layout} data-mode={mode} noValidate onSubmit={onSubmit} onChange={onFieldChange} onReset={() => { setErrors({}); if (!submitReset.current) setBanner(null); }}>
+        <form ref={formRef} data-form={form.name} data-layout={formLayout} data-phone-layout={form.phoneLayout} data-mode={mode} noValidate onSubmit={onSubmit} onChange={onFieldChange} onReset={() => { setErrors({}); if (!submitReset.current) setBanner(null); }}>
           <div className="form-grid" key={loaded}>
             {children}
           </div>

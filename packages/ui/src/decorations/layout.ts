@@ -5,11 +5,28 @@
  * The remaining parts are text, or decimal for latitude and longitude.
  */
 import { unquote, type App, type Field } from '../../../core/src/ir.js';
-import type { UiField, UiModel, UiTodo } from '../model.js';
+import type { DeviceLayout, UiField, UiModel, UiTodo } from '../model.js';
+
+/** The named generated equivalent of a device `customize { layout }` value. */
+const DEVICE_LAYOUTS: Record<string, DeviceLayout> = {
+  onecolumn: 'one-column',
+  twocolumn: 'two-column',
+  onecolumncard: 'one-column-card',
+  slidingpane: 'sliding-pane',
+  tabbar: 'tab-bar',
+};
 
 export function layout(model: UiModel, app: App): void {
+  for (const device of app.devices) {
+    const value = textProp(device.customize?.properties ?? [], 'layout')?.toLowerCase();
+    const carried = value ? DEVICE_LAYOUTS[value] : undefined;
+    if (!carried) continue;
+    if (device.device === 'phone') model.phoneLayout = carried;
+    else if (device.device === 'tablet') model.tabletLayout = carried;
+  }
   const placement = webPlacement(app);
   for (const form of model.forms) {
+    if (model.phoneLayout) form.phoneLayout = model.phoneLayout;
     const ir = app.forms.find((item) => item.name === form.name);
     if (!ir) continue;
     copyLayout(form.fields, ir.fields, placement.get(form.name), form.name, model.todos, app);
@@ -97,6 +114,14 @@ function assignLayout(ui: UiField, ir: Field | undefined, placement: string | un
   if (column != null) ui.column = column;
   if (width) ui.width = width;
   if (height) ui.height = height;
+  const optionLayout = textProp(ir.properties, 'layout')?.toLowerCase();
+  if (optionLayout === '2' || optionLayout === 'twocolumn') ui.optionColumns = 2;
+  else if (optionLayout === '3') ui.optionColumns = 3;
+  else if (optionLayout === 'onecolumn') ui.optionColumns = 1;
+  else if (optionLayout === 'onecolumncard') {
+    ui.optionColumns = 1;
+    ui.optionCard = true;
+  }
   const visibility = visibilityOf(ir.properties);
   // A hidden field is recorded on every widget; a section also keeps `true`.
   if (visibility === false || (visibility != null && ui.widget === 'section')) ui.visibility = visibility;
