@@ -394,7 +394,7 @@ function templateFiles(): ReactFile[] {
         let data = withBuildEngines(rel, readFileSync(path));
         // The record module's upload cap is re-stamped from the shim's single
         // MAX_FILE_BYTES definition so the shipped template never drifts.
-        if (rel === 'lib/c2c-ui/form/record.ts') data = Buffer.from(stampUploadCap(data.toString('utf8')));
+        if (rel === 'lib/c2c-ui/form/record.ts') data = Buffer.from(stampUploadCap(data.toString('utf8'), rel));
         out.push({ path: rel, data, owner: rel.startsWith('src/custom/') ? 'custom' : 'platform' });
       }
     }

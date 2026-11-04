@@ -6,7 +6,7 @@ import { JSDOM } from 'jsdom';
 import { createRequire } from 'node:module';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
 import { MAX_FILE_BYTES } from '../../shims/src/index.js';
-import { buildUi, type UiModel } from '../src/index.js';
+import { buildUi, stampUploadCap, type UiModel } from '../src/index.js';
 
 const require = createRequire(import.meta.url);
 const { implForWrapper } = require('jsdom/lib/jsdom/living/generated/utils.js') as {
@@ -214,6 +214,23 @@ test('the shipped runtime takes its upload cap from the shim definition', async 
   assert.match(clientRuntimeSource(), new RegExp(`export const UPLOAD_SOURCE_MAX_BYTES = ${MAX_FILE_BYTES};`));
   const rt = await runtime();
   assert.equal(rt.UPLOAD_SOURCE_MAX_BYTES, MAX_FILE_BYTES);
+});
+
+test('stampUploadCap fails closed when the upload cap declaration is missing or duplicated', () => {
+  assert.throws(
+    () => stampUploadCap('export const OTHER = 1;', 'client-runtime.js'),
+    /Expected exactly one UPLOAD_SOURCE_MAX_BYTES declaration in client-runtime\.js, found 0/,
+  );
+  assert.throws(
+    () =>
+      stampUploadCap(
+        'export const UPLOAD_SOURCE_MAX_BYTES = 1;\nexport const UPLOAD_SOURCE_MAX_BYTES = 2;',
+        'client-runtime.js',
+      ),
+    /Expected exactly one UPLOAD_SOURCE_MAX_BYTES declaration in client-runtime\.js, found 2/,
+  );
+  const stamped = stampUploadCap('export const UPLOAD_SOURCE_MAX_BYTES = 100 * 1024 * 1024;', 'client-runtime.js');
+  assert.equal(stamped, `export const UPLOAD_SOURCE_MAX_BYTES = ${MAX_FILE_BYTES};`);
 });
 
 test('a picked file over the cap, or an SVG pick for an image field, is refused like a fetched source', async () => {

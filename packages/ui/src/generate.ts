@@ -50,13 +50,18 @@ export interface UiGenerateOptions {
  * (packages/shims/src/files.ts MAX_FILE_BYTES) so a generated app never
  * carries a cap that drifted from the repo's own.
  */
-const UPLOAD_CAP_LINE = /export const UPLOAD_SOURCE_MAX_BYTES = [^;]+;/;
-export function stampUploadCap(source: string): string {
+const UPLOAD_CAP_LINE = /export const UPLOAD_SOURCE_MAX_BYTES = [^;\r\n]+;/;
+export function stampUploadCap(source: string, fileName = 'client-runtime.js'): string {
+  const matches = source.match(new RegExp(UPLOAD_CAP_LINE, 'g'));
+  const count = matches ? matches.length : 0;
+  if (count !== 1) {
+    throw new Error(`Expected exactly one UPLOAD_SOURCE_MAX_BYTES declaration in ${fileName}, found ${count}`);
+  }
   return source.replace(UPLOAD_CAP_LINE, `export const UPLOAD_SOURCE_MAX_BYTES = ${MAX_FILE_BYTES};`);
 }
 
 export function clientRuntimeSource(): string {
-  return stampUploadCap(bundledClientRuntime());
+  return stampUploadCap(bundledClientRuntime(), 'client-runtime.js');
 }
 
 /**
