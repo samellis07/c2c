@@ -6,5 +6,5 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const ids = writeFixtureMigrationReports(repo);
+const ids = await writeFixtureMigrationReports(repo);
 process.stdout.write(`wrote ${ids.length} migration reports under packages/cli/test/golden/migration-reports\n`);

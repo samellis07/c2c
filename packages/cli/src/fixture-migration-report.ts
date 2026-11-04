@@ -7,12 +7,14 @@
  * after `npm run build`.
  */
 
-import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { listDsFiles, parseFileWithSidecars, widgetManualItems } from '../../core/src/index.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { decode } from '../../core/src/source.js';
-import { CUSTOMER_STEPS } from '../../deploy/src/customer-steps.js';
+import { CUSTOMER_STEPS, planCustomerSteps } from '../../deploy/src/customer-steps.js';
+import { planCli } from '../../deploy/src/index.js';
 import type { FieldGap } from '../../schema/src/index.js';
 import { analyze, guidedTodoSteps, type GuidedTodoStep } from './analyze.js';
 import type { GuidedResidual } from './guided-residual.js';
@@ -31,6 +33,16 @@ export interface ConvertedInventory {
   reports: number;
   pages: number;
   functions: number;
+  /** The Catalyst resources the conversion generates. */
+  catalyst: {
+    tables: number;
+    nosqlCollections: number;
+    functions: number;
+    cronJobs: number;
+    slatePages: number;
+  };
+  /** Deluge statements: how many translated, how many run through a compatibility shim. */
+  deluge: { statements: number; translated: number; shimmed: number };
 }
 
 export interface FixtureMigrationReport {
@@ -79,6 +91,64 @@ export function listInRepoFixtures(repoRoot: string): InRepoFixture[] {
     .sort((a, b) => compareEnUs(a.id, b.id));
 }
 
+export interface PlanStep {
+  id: string;
+  via: string;
+  command?: string;
+}
+
+export interface PlanRun {
+  code: number;
+  files: string[];
+  steps: PlanStep[];
+  connectionSecretKeys: string[];
+  stderr: string;
+}
+
+const refused = (what: string) => async (): Promise<never> => {
+  throw new Error(`migration report is offline: ${what} refused`);
+};
+
+/** `c2c plan` in-process, with spawn and fetch refused. Returns the written files and the plan steps. */
+export async function runOfflinePlan(file: string): Promise<PlanRun> {
+  const out = mkdtempSync(join(tmpdir(), 'c2c-migration-report-plan-'));
+  let stderr = '';
+  try {
+    const code = await planCli([file, '--out', out, '--dc', 'in'], {
+      stdout() {},
+      stderr: (text: string) => {
+        stderr += text;
+      },
+      env: {},
+      spawn: refused('spawn'),
+      fetch: refused('fetch'),
+    } as unknown as Parameters<typeof planCli>[1]);
+    const files = readdirSync(out).sort(compareEnUs);
+    let steps: PlanStep[] = [];
+    let connectionSecretKeys: string[] = [];
+    if (files.includes('plan.json')) {
+      const plan = JSON.parse(readFileSync(join(out, 'plan.json'), 'utf8')) as { steps?: PlanStep[]; connectionSecretKeys?: string[] };
+      steps = plan.steps ?? [];
+      connectionSecretKeys = plan.connectionSecretKeys ?? [];
+    }
+    return { code, files, steps, connectionSecretKeys, stderr };
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+}
+
+/** Console plan steps that are the same visit as a checklist item ("Sign in once", "Verify mail sender"), so they count once. */
+const SAME_VISIT_AS_CUSTOMER_STEP = new Set(['sign-in-check', 'mail-sender']);
+
+/** The customer's guided steps for a plan: the checklist items, then console steps that are a separate visit. */
+export function humanSteps(plan: Pick<PlanRun, 'steps' | 'connectionSecretKeys'>): string[] {
+  const checklist = planCustomerSteps(plan.steps, { connectionSecretKeys: plan.connectionSecretKeys });
+  const consoleSteps = plan.steps
+    .filter((step) => step.via === 'console' && !SAME_VISIT_AS_CUSTOMER_STEP.has(step.id))
+    .map((step) => `console: ${step.id}`);
+  return [...checklist, ...consoleSteps];
+}
+
 function manualStepsOf(ir: ReturnType<typeof parseFileWithSidecars>['ir'], source: string): ManualStep[] {
   const checked = precheck(ir, source);
   const rows = new Map<string, ManualStep>();
@@ -96,11 +166,23 @@ function manualStepsOf(ir: ReturnType<typeof parseFileWithSidecars>['ir'], sourc
   return [...rows.values()].sort((a, b) => (a.severity === b.severity ? compareEnUs(a.check, b.check) : a.severity === 'blocker' ? -1 : 1));
 }
 
-export function buildFixtureMigrationReport(fixture: InRepoFixture): FixtureMigrationReport {
+/** The customer's human steps for the report: checklist items, then console provision steps with the console text. */
+function reportHumanSteps(plan: PlanRun): string[] {
+  const commands = new Map(plan.steps.map((step) => [step.id, step.command ?? '']));
+  return humanSteps(plan).map((step) => {
+    if (!step.startsWith('console: ')) return step;
+    const command = commands.get(step.slice('console: '.length));
+    return command ? `${step} — ${command}` : step;
+  });
+}
+
+export async function buildFixtureMigrationReport(fixture: InRepoFixture): Promise<FixtureMigrationReport> {
   const ir = parseFileWithSidecars(fixture.file).ir;
   const source = decode(readFileSync(fixture.file)).text;
   const analysis = analyze(ir);
   const isEmpty = ir.forms.length === 0 && ir.reports.length === 0 && ir.pages.length === 0 && ir.functions.length === 0;
+  const plan = isEmpty ? null : await runOfflinePlan(fixture.file);
+  const steps = plan?.code === 0 ? reportHumanSteps(plan) : [...CUSTOMER_STEPS];
   return {
     schema: 'c2c-fixture-migration-report/1',
     fixture: fixture.id,
@@ -111,6 +193,14 @@ export function buildFixtureMigrationReport(fixture: InRepoFixture): FixtureMigr
       reports: ir.reports.length,
       pages: ir.pages.length,
       functions: ir.functions.length,
+      catalyst: {
+        tables: analysis.catalyst.tables,
+        nosqlCollections: analysis.catalyst.nosqlCollections,
+        functions: analysis.catalyst.functions,
+        cronJobs: analysis.catalyst.cronJobs,
+        slatePages: analysis.catalyst.slatePages,
+      },
+      deluge: { statements: analysis.deluge.statements, translated: analysis.deluge.translated, shimmed: analysis.deluge.shimmed },
     },
     todoCount: analysis.determinism.todoCount,
     todoKinds: analysis.determinism.todoKinds.map((kind) => ({ construct: kind.construct, count: kind.count })),
@@ -118,7 +208,7 @@ export function buildFixtureMigrationReport(fixture: InRepoFixture): FixtureMigr
     manualSteps: manualStepsOf(ir, source),
     hiddenParts: analysis.hiddenParts.map((part) => ({ location: part.location, reason: part.reason })),
     todoSteps: guidedTodoSteps(analysis),
-    humanSteps: isEmpty ? [] : [...CUSTOMER_STEPS],
+    humanSteps: isEmpty ? [] : steps,
     silentDrops: analysis.determinism.silentDrops,
     residuals: analysis.residuals,
   };
@@ -134,7 +224,20 @@ function convertedLinesOf(converted: ConvertedInventory): string[] {
   if (converted.reports > 0) items.push(`- ${converted.reports} report${converted.reports === 1 ? '' : 's'}`);
   if (converted.pages > 0) items.push(`- ${converted.pages} page${converted.pages === 1 ? '' : 's'}`);
   if (converted.functions > 0) items.push(`- ${converted.functions} function${converted.functions === 1 ? '' : 's'}`);
-  return items.length ? items : ['- none'];
+  if (!items.length) return ['- none'];
+  const c = converted.catalyst;
+  const parts = [`${c.tables} Data Store table${c.tables === 1 ? '' : 's'}`];
+  if (c.nosqlCollections > 0) parts.push(`${c.nosqlCollections} NoSQL collection${c.nosqlCollections === 1 ? '' : 's'}`);
+  parts.push(`${c.functions} Catalyst function${c.functions === 1 ? '' : 's'}`);
+  parts.push(`${c.cronJobs} scheduled job${c.cronJobs === 1 ? '' : 's'}`);
+  parts.push(`${c.slatePages} page${c.slatePages === 1 ? '' : 's'}`);
+  items.push(`- The generated Catalyst app carries ${parts.join(', ')}`);
+  if (converted.deluge.statements > 0) {
+    items.push(
+      `- Deluge: ${converted.deluge.translated} statement${converted.deluge.translated === 1 ? '' : 's'} translated, ${converted.deluge.shimmed} kept working through a compatibility shim, of ${converted.deluge.statements}`,
+    );
+  }
+  return items;
 }
 
 function fieldGapLinesOf(gaps: readonly FieldGap[]): string[] {
@@ -236,13 +339,13 @@ function relFiles(dir: string, prefix: string, out: string[]): void {
 }
 
 /** Rewrite the committed markdown and JSON goldens. Returns the fixture ids written. */
-export function writeFixtureMigrationReports(repoRoot: string): string[] {
+export async function writeFixtureMigrationReports(repoRoot: string): Promise<string[]> {
   const outDir = migrationReportGoldenDir(repoRoot);
   mkdirSync(outDir, { recursive: true });
   const fixtures = listInRepoFixtures(repoRoot);
   const keep = new Set<string>();
   for (const fixture of fixtures) {
-    const report = buildFixtureMigrationReport(fixture);
+    const report = await buildFixtureMigrationReport(fixture);
     const base = join(outDir, fixture.id);
     mkdirSync(dirname(base), { recursive: true });
     writeFileSync(`${base}.json`, fixtureMigrationReportAsJson(report));

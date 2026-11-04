@@ -13,25 +13,28 @@
  * its detail names exactly what is missing. A GAP is never counted as a pass.
  */
 
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { parseFileWithSidecars, widgetManualItems } from '../../core/src/index.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { decode } from '../../core/src/source.js';
-import { CUSTOMER_STEPS, planCustomerSteps } from '../../deploy/src/customer-steps.js';
-import { planCli } from '../../deploy/src/index.js';
+import { CUSTOMER_STEPS } from '../../deploy/src/customer-steps.js';
 import { analyze, analyzeAsJson, type AnalyzeReport } from './analyze.js';
 import { DISPATCH_COMMANDS } from './commands.js';
 import {
   buildFixtureMigrationReport,
   fixtureMigrationReportAsJson,
   fixtureMigrationReportAsMarkdown,
+  humanSteps,
   migrationReportGoldenDir,
+  runOfflinePlan,
   type FixtureMigrationReport,
   type InRepoFixture,
+  type PlanRun,
 } from './fixture-migration-report.js';
 import { precheck, precheckAsJson, type PrecheckReport } from './precheck.js';
+
+export { humanSteps, runOfflinePlan } from './fixture-migration-report.js';
 
 export type CriterionStatus = 'PASS' | 'FAIL' | 'GAP';
 
@@ -61,23 +64,6 @@ export const MAX_HUMAN_STEPS = 4;
 /** The fixtures the check runs on by default, as paths under fixtures/ without `.ds`. */
 export const DEFAULT_FIXTURES = ['redistributable/library-application-system/library_application', 'synthetic/kitchen-sink/kitchen_sink'] as const;
 
-/** Console plan steps that are the same visit as a checklist item ("Sign in once", "Verify mail sender"), so they count once. */
-const SAME_VISIT_AS_CUSTOMER_STEP = new Set(['sign-in-check', 'mail-sender']);
-
-interface PlanStep {
-  id: string;
-  via: string;
-  command?: string;
-}
-
-interface PlanRun {
-  code: number;
-  files: string[];
-  steps: PlanStep[];
-  connectionSecretKeys: string[];
-  stderr: string;
-}
-
 /** What the checks read for one app. Tests replace single fields to prove a criterion fails. */
 export interface AppInputs {
   fixture: InRepoFixture;
@@ -99,38 +85,6 @@ const pass = (id: string, title: string, detail: string): CriterionResult => ({ 
 const fail = (id: string, title: string, detail: string): CriterionResult => ({ id, title, status: 'FAIL', detail });
 const gap = (id: string, title: string, detail: string): CriterionResult => ({ id, title, status: 'GAP', detail });
 
-const refused = (what: string) => async (): Promise<never> => {
-  throw new Error(`onboarding check is offline: ${what} refused`);
-};
-
-/** `c2c plan` in-process, with spawn and fetch refused. Returns the written files and the plan steps. */
-export async function runOfflinePlan(file: string): Promise<PlanRun> {
-  const out = mkdtempSync(join(tmpdir(), 'c2c-onboarding-plan-'));
-  let stderr = '';
-  try {
-    const code = await planCli([file, '--out', out, '--dc', 'in'], {
-      stdout() {},
-      stderr: (text: string) => {
-        stderr += text;
-      },
-      env: {},
-      spawn: refused('spawn'),
-      fetch: refused('fetch'),
-    } as unknown as Parameters<typeof planCli>[1]);
-    const files = readdirSync(out).sort(compareEnUs);
-    let steps: PlanStep[] = [];
-    let connectionSecretKeys: string[] = [];
-    if (files.includes('plan.json')) {
-      const plan = JSON.parse(readFileSync(join(out, 'plan.json'), 'utf8')) as { steps?: PlanStep[]; connectionSecretKeys?: string[] };
-      steps = plan.steps ?? [];
-      connectionSecretKeys = plan.connectionSecretKeys ?? [];
-    }
-    return { code, files, steps, connectionSecretKeys, stderr };
-  } finally {
-    rmSync(out, { recursive: true, force: true });
-  }
-}
-
 function readIfPresent(path: string): string | undefined {
   return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
 }
@@ -138,8 +92,8 @@ function readIfPresent(path: string): string | undefined {
 export async function loadAppInputs(repoRoot: string, fixture: InRepoFixture): Promise<AppInputs> {
   const ir = parseFileWithSidecars(fixture.file).ir;
   const source = decode(readFileSync(fixture.file)).text;
-  const report = buildFixtureMigrationReport(fixture);
-  const rebuilt = buildFixtureMigrationReport(fixture);
+  const report = await buildFixtureMigrationReport(fixture);
+  const rebuilt = await buildFixtureMigrationReport(fixture);
   const base = join(migrationReportGoldenDir(repoRoot), fixture.id);
   return {
     fixture,
@@ -159,15 +113,6 @@ export async function loadAppInputs(repoRoot: string, fixture: InRepoFixture): P
 
 const kindsKey = (kinds: readonly { construct: string; count: number }[]) =>
   kinds.map((kind) => `${kind.construct}=${kind.count}`).sort(compareEnUs).join(', ');
-
-/** The customer's guided steps for a plan: the checklist items, then console steps that are a separate visit. */
-export function humanSteps(plan: Pick<PlanRun, 'steps' | 'connectionSecretKeys'>): string[] {
-  const checklist = planCustomerSteps(plan.steps, { connectionSecretKeys: plan.connectionSecretKeys });
-  const consoleSteps = plan.steps
-    .filter((step) => step.via === 'console' && !SAME_VISIT_AS_CUSTOMER_STEP.has(step.id))
-    .map((step) => `console: ${step.id}`);
-  return [...checklist, ...consoleSteps];
-}
 
 /** Precheck findings grouped by severity and check, as the report groups them. */
 function precheckRows(report: PrecheckReport): Map<string, number> {
@@ -210,29 +155,45 @@ export function checkApp(inputs: AppInputs): AppReadiness {
     );
   }
 
-  // 3. Field behavior analyze reports as partial or unsupported.
+  // 3. Field behavior analyze reports as partial or unsupported: the report lists the same gaps, rendered.
   {
     const id = 'report-lists-field-gaps';
     const title = 'Report lists partial and unsupported field behavior';
     const total = analysis.fieldGaps.reduce((sum, item) => sum + item.count, 0);
+    const missing = analysis.fieldGaps.filter((gap) => !inputs.reportMd.includes(`- ${gap.matrixId}: ${gap.count}`));
     criteria.push(
-      total === 0
-        ? pass(id, title, 'analyze reports no field gaps; nothing to list')
-        : gap(id, title, `analyze reports ${total} field gap(s) (${analysis.fieldGaps.map((item) => item.matrixId).join(', ')}); the per-app migration report has no field-gap section`),
+      JSON.stringify(report.fieldGaps) === JSON.stringify(analysis.fieldGaps) && missing.length === 0
+        ? pass(id, title, `${report.fieldGaps.length} gap rows (${total} field gap(s)) listed with reason`)
+        : fail(
+            id,
+            title,
+            `analyze reports ${total} field gap(s) across ${analysis.fieldGaps.length} rows; report carries ${report.fieldGaps.length} row(s)${missing.length ? ` and the markdown misses ${missing.map((gap) => gap.matrixId).join(', ')}` : ''}`,
+          ),
     );
   }
 
-  // 4. What converted: the business user's "what you get" inventory.
+  // 4. What converted: the business user's "what you get" inventory, source parts and generated Catalyst resources.
   {
     const id = 'report-lists-converted';
     const title = 'Report says what converted';
     const c = analysis.catalyst;
+    const want = { tables: c.tables, nosqlCollections: c.nosqlCollections, functions: c.functions, cronJobs: c.cronJobs, slatePages: c.slatePages };
+    const got = report.converted.catalyst;
+    const deluge = report.converted.deluge;
+    const delugeOk =
+      deluge.statements === analysis.deluge.statements && deluge.translated === analysis.deluge.translated && deluge.shimmed === analysis.deluge.shimmed;
     criteria.push(
-      gap(
-        id,
-        title,
-        `analyze knows ${c.tables} tables, ${c.functions} functions, ${c.cronJobs} cron jobs, ${c.slatePages} pages and ${analysis.deluge.translated} translated + ${analysis.deluge.shimmed} shimmed of ${analysis.deluge.statements} Deluge statements; the per-app migration report carries only TODOs and manual steps, no converted inventory`,
-      ),
+      JSON.stringify(got) === JSON.stringify(want) && delugeOk && inputs.reportMd.includes('Data Store table')
+        ? pass(
+            id,
+            title,
+            `${report.converted.forms} forms, ${report.converted.reports} reports, ${report.converted.pages} pages, ${report.converted.functions} functions; generated: ${c.tables} tables, ${c.functions} functions, ${c.cronJobs} scheduled jobs, ${c.slatePages} pages; Deluge ${deluge.translated} translated + ${deluge.shimmed} shimmed of ${deluge.statements}`,
+          )
+        : fail(
+            id,
+            title,
+            `analyze knows ${c.tables} tables, ${c.nosqlCollections} NoSQL collections, ${c.functions} functions, ${c.cronJobs} scheduled jobs, ${c.slatePages} pages and ${analysis.deluge.translated} translated + ${analysis.deluge.shimmed} shimmed of ${analysis.deluge.statements} Deluge statements; report carries ${JSON.stringify(got)} + deluge ${JSON.stringify(deluge)}`,
+          ),
     );
   }
 
@@ -252,11 +213,16 @@ export function checkApp(inputs: AppInputs): AppReadiness {
   {
     const id = 'report-carries-workaround';
     const title = 'Report shows the workaround beside each unsupported item';
+    const missing: string[] = [];
+    for (const step of report.manualSteps) if (step.workaround?.trim() && !inputs.reportMd.includes(step.workaround)) missing.push(`manual step ${step.check}`);
+    for (const gapItem of analysis.fieldGaps) if (!inputs.reportMd.includes(gapItem.reason)) missing.push(`field gap ${gapItem.matrixId}`);
     const withFix = inputs.precheck.findings.length + analysis.fieldGaps.length;
     criteria.push(
-      withFix === 0 && report.manualSteps.length === 0
-        ? pass(id, title, 'no unsupported item to explain')
-        : gap(id, title, `${withFix} item(s) have fix/reason text in precheck/analyze, but the per-app report lists manual steps by check name and count only`),
+      missing.length === 0
+        ? withFix === 0 && report.manualSteps.length === 0
+          ? pass(id, title, 'no unsupported item to explain')
+          : pass(id, title, `${withFix} item(s), each fix or reason rendered beside its row`)
+        : fail(id, title, `workaround text missing from the markdown: ${missing.join('; ')}`),
     );
   }
 
@@ -297,7 +263,11 @@ export function checkApp(inputs: AppInputs): AppReadiness {
   {
     const id = 'human-steps-within-limit';
     const title = `Customer has at most ${MAX_HUMAN_STEPS} guided steps`;
-    const detail = `${steps.length}: ${steps.join(' | ')}`;
+    const consoleSteps = steps.filter((step) => step.startsWith('console: '));
+    const note = consoleSteps.length
+      ? `; the console step(s) ${consoleSteps.map((step) => step.slice('console: '.length)).join(', ')} are Catalyst first-use gates — no API or CLI command opens a service, so they cannot be automated`
+      : '';
+    const detail = `${steps.length}${note}: ${steps.join(' | ')}`;
     if (inputs.plan.code !== 0) criteria.push(fail(id, title, `offline plan failed (exit ${inputs.plan.code}); no step list`));
     else criteria.push(steps.length <= MAX_HUMAN_STEPS ? pass(id, title, detail) : fail(id, title, detail));
   }
@@ -310,7 +280,7 @@ export function checkApp(inputs: AppInputs): AppReadiness {
     criteria.push(
       missing.length === 0
         ? pass(id, title, `${steps.length} step(s) listed`)
-        : gap(id, title, `${missing.length} of ${steps.length} human step(s) are only in plan.md (Human steps / console provision steps), not in the per-app migration report`),
+        : fail(id, title, `${missing.length} of ${steps.length} human step(s) missing from the per-app migration report: ${missing.join(' | ')}`),
     );
   }
 
