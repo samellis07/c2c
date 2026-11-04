@@ -25,7 +25,7 @@ interface DomWindow {
   };
   File: new (bits: unknown[], name: string, options?: { type?: string }) => FileLike;
   Blob: new (bits: unknown[], options?: { type?: string }) => object;
-  fetch?: (url: string) => Promise<{ ok: boolean; blob: () => Promise<object> }>;
+  fetch?: (url: string) => Promise<object>;
 }
 
 function dom(html: string): DomWindow {
@@ -103,7 +103,7 @@ test('submit uploads a camera capture under __camera and a fetched file under __
   view2.document.querySelector('input[name="Photo__url"]')!.value = 'https://cdn.example.com/pic.png';
   view2.fetch = async (url: string) => {
     assert.equal(url, 'https://cdn.example.com/pic.png');
-    return { ok: true, blob: async () => new view2.Blob(['img'], { type: 'image/png' }) };
+    return { ok: true, headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? 'image/png' : null) }, blob: async () => new view2.Blob(['img'], { type: 'image/png' }) };
   };
   const record2 = await rt.submitRecord(formEl2, form, async (_field, file) => {
     sent.push(file.name);
@@ -116,6 +116,65 @@ test('submit uploads a camera capture under __camera and a fetched file under __
   const formEl3 = view3.document.querySelector('form') ?? view3.document.body;
   view3.document.querySelector('input[name="Photo__url"]')!.value = 'javascript:alert(1)';
   await assert.rejects(rt.submitRecord(formEl3, form, async () => ({ key: 'never' })));
+});
+
+test('a public_url response that is oversized, non-image, or untyped never reaches the upload', async () => {
+  const rt = await runtime();
+  const form = imageApp('\t\t\tsource = public_url,file\n').forms[0]!;
+  const html = rt.renderForm(form);
+  const headers = (map: Record<string, string>) => ({ get: (name: string) => map[name.toLowerCase()] ?? null });
+  const cases: Array<[string, object]> = [
+    ['oversized', { ok: true, headers: headers({ 'content-type': 'image/png', 'content-length': String(50 * 1024 * 1024 + 1) }), blob: async () => ({ size: 4, type: 'image/png' }) }],
+    ['html', { ok: true, headers: headers({ 'content-type': 'text/html' }), blob: async () => ({ size: 4, type: 'text/html' }) }],
+    ['opaque', { ok: true, headers: headers({ 'content-type': 'application/octet-stream' }), blob: async () => ({ size: 4, type: 'application/octet-stream' }) }],
+    ['untyped', { ok: true, headers: headers({}), blob: async () => ({ size: 4, type: '' }) }],
+    ['redirected-to-html', { ok: true, redirected: true, headers: headers({ 'content-type': 'text/html' }), blob: async () => ({ size: 4, type: 'text/html' }) }],
+    ['read-past-cap', { ok: true, headers: headers({ 'content-type': 'image/png' }), blob: async () => ({ size: 50 * 1024 * 1024 + 1, type: 'image/png' }) }],
+  ];
+  for (const [name, res] of cases) {
+    const view = dom(html);
+    const formEl = view.document.querySelector('form') ?? view.document.body;
+    view.document.querySelector('input[name="Photo__url"]')!.value = 'https://cdn.example.com/pic.png';
+    view.fetch = async () => res;
+    let uploads = 0;
+    await assert.rejects(
+      rt.submitRecord(formEl, form, async () => {
+        uploads += 1;
+        return { key: 'never' };
+      }),
+      name,
+    );
+    assert.equal(uploads, 0, name);
+  }
+  // A refused network read (CORS) fails the same way.
+  const view = dom(html);
+  const formEl = view.document.querySelector('form') ?? view.document.body;
+  view.document.querySelector('input[name="Photo__url"]')!.value = 'https://cdn.example.com/pic.png';
+  view.fetch = async () => {
+    throw new TypeError('Failed to fetch');
+  };
+  let uploads = 0;
+  await assert.rejects(
+    rt.submitRecord(formEl, form, async () => {
+      uploads += 1;
+      return { key: 'never' };
+    }),
+  );
+  assert.equal(uploads, 0);
+});
+
+test('a fetched source error names the field so the form can flag it', async () => {
+  const rt = await runtime();
+  const form = imageApp('\t\t\tsource = public_url\n').forms[0]!;
+  const view = dom(rt.renderForm(form));
+  const formEl = view.document.querySelector('form') ?? view.document.body;
+  view.document.querySelector('input[name="Photo__url"]')!.value = 'https://cdn.example.com/pic.png';
+  view.fetch = async () => ({ ok: true, headers: { get: () => 'text/html' }, blob: async () => ({ size: 4, type: 'text/html' }) });
+  const err = await rt.submitRecord(formEl, form, async () => ({ key: 'never' })).then(
+    () => null,
+    (e: unknown) => e as { fieldName?: string },
+  );
+  assert.equal(err?.fieldName, 'Photo');
 });
 
 test('validateForm accepts a camera pick or a public URL for a required source field', async () => {
