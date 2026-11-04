@@ -7567,7 +7567,8 @@ test('a workflow aio module embeds the form field-rule denials and passes them t
   const server = g.files.find((f) => f.path === 'functions/aio/orders/on-success.mjs');
   assert.ok(server);
   assert.match(server.source, /export const fieldRuleDenied = \[\{"field":"Secret","action":"hide","ops":\["insert"\]\}\];/);
-  assert.match(server.source, /authorizeWrite\(access, principal, formName, record, \{ readonlyFields, fieldNames, fields, ruleDenied: fieldRuleDenied \}/);
+  assert.match(server.source, /const importWrite = req && req\.body && req\.body\.import === true;/);
+  assert.match(server.source, /authorizeWrite\(access, principal, formName, record, \{ readonlyFields, fieldNames, fields, ruleDenied: importWrite \? \[\] : fieldRuleDenied \}/);
 });
 
 test('handler wrappers inside a button or success actions block generate their scripts, not a task TODO', () => {
