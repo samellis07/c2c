@@ -3169,7 +3169,7 @@ function boundCriteria(criteria) {
             const granted = authorizeRead(access, principal, read.form, { op: "true" });
             const extra = compileCriteria(granted.criteria);
             allowed = Array.isArray(granted.fields) ? granted.fields : null;
-            parents = await fetchBound((table, where, limit, offset, order) => datastore.query(table, where, limit, offset, order), read.form, "ROWID", ids, extra === "true" ? "" : extra, "ORDER BY ROWID");
+            parents = await fetchBound((table, where, limit, offset, order) => datastore.query(table, where, limit, offset, order), read.form, "ROWID", ids, extra === "true" ? "" : extra, "ORDER BY ROWID", { idList: true });
             const order = new Map(ids.map((id, index) => [String(id), index]));
             parents.sort((a, b) => (order.get(String(a.ROWID)) ?? 0) - (order.get(String(b.ROWID)) ?? 0));
           } catch {

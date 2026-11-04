@@ -208,3 +208,55 @@ test('a record read hydrates the detail view related rows and dotted lookup fiel
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a stored hostile lookup id never reaches the parent table read', async () => {
+  const built = buildUi(deriveIr(parse(SOURCE)));
+  const dir = mkdtempSync(join(tmpdir(), 'c2c-record-detail-'));
+  const prevMode = process.env.C2C_DEPLOY_MODE;
+  try {
+    writeFileSync(join(dir, 'package.json'), '{"type":"module"}\n');
+    mkdirSync(join(dir, 'node_modules'), { recursive: true });
+    symlinkSync(process.cwd(), join(dir, 'node_modules/creator-to-catalyst'));
+    for (const file of built.files) {
+      const full = join(dir, file.path);
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, file.data);
+    }
+
+    const calls: { form: string; where: string }[] = [];
+    const datastore = {
+      async query(form: string, where: string) {
+        calls.push({ form, where });
+        if (form === 'Item') {
+          return [{ ROWID: '1', Name: 'own', Note: 'memo', Parent: ['1 OR 1=1', '12a', ''] }];
+        }
+        return [];
+      },
+    };
+    const store = (await import(pathToFileURL(join(dir, 'functions/c2c-store.mjs')).href)) as {
+      setDatastore(next: unknown): unknown;
+    };
+    store.setDatastore(datastore);
+    const rec = (await import(pathToFileURL(join(dir, 'functions/aio/item/record.mjs')).href)) as {
+      default: (req: unknown, res: unknown) => unknown;
+    };
+
+    process.env.C2C_DEPLOY_MODE = 'live';
+    const got = await invoke(rec.default, { ...staff, body: { ROWID: '1', REPORT: 'Item_Detail' } });
+    assert.equal(got.status, 200, JSON.stringify(got.body));
+    const record = got.body.record as Record<string, unknown>;
+
+    // Every stored id was dropped, so the parent form was never queried.
+    assert.deepEqual(record.Parent, []);
+    assert.equal(record['Parent.Name'], null);
+    assert.equal(
+      calls.filter((call) => call.form === 'Other').length,
+      0,
+      `parent table read ran: ${JSON.stringify(calls)}`,
+    );
+  } finally {
+    if (prevMode === undefined) delete process.env.C2C_DEPLOY_MODE;
+    else process.env.C2C_DEPLOY_MODE = prevMode;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
