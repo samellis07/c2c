@@ -34,6 +34,7 @@ import { formatConflict, withStoreFingerprints, type ConflictResolver, type Delt
 import { SOURCE_ID_COLUMN } from '../../schema/src/mapping.js';
 import { generateSchema } from '../../schema/src/index.js';
 import type { SchemaColumn, SchemaTable } from '../../schema/src/generator.js';
+import { buildModel, formStatus } from '../../ui/src/index.js';
 import { cutoverChecklist, proofReport, verifyRollbackEvidence, type CutoverInput } from './cutover.js';
 
 export type D10Status = 'PASS' | 'FAIL' | 'GAP';
@@ -62,6 +63,45 @@ export interface D10Report {
   totals: Record<D10Status, number>;
   /** PASS only when every criterion passes. */
   status: 'PASS' | 'FAIL';
+  /** Every Creator URL the app exposes, mapped to the generated route or listed as a manual step. */
+  linkMap: D10LinkEntry[];
+  /** Offline downtime estimate for the freeze -> switch window, with its measured inputs. */
+  downtime: D10Downtime;
+}
+
+/** One Creator URL the app exposes and where it lands in the generated app. */
+export interface D10LinkEntry {
+  kind: 'form' | 'report' | 'page' | 'record';
+  /** The in-app Creator link (`#Form:Name`, `#Report:Name/<record id>`, ...). */
+  creator: string;
+  /** The generated route (`#/form/Name`, `#/report/Name/row/<ROWID>`, ...) when the target is generated. */
+  route?: string;
+  /** 'mapped': the generated app serves it. 'manual': a human re-points or rebuilds it. */
+  status: 'mapped' | 'manual';
+  /** What a manual entry needs, or a caveat on a mapped one (partial page, record-id translation). */
+  note?: string;
+}
+
+/** Store round-trips and rows of one measured phase of the freeze -> switch window. */
+export interface D10Phase {
+  phase: string;
+  storeCalls: number;
+  rows: number;
+}
+
+/**
+ * The cut-over window estimated from what the rehearsal measured: store
+ * round-trips and rows per phase, priced with the stated per-call and per-row
+ * rates plus the human steps. An estimate from offline inputs, never a
+ * promise; the live window depends on the project's real API latency.
+ */
+export interface D10Downtime {
+  phases: D10Phase[];
+  /** Seconds assumed per store round-trip, per row written and for the human steps: [low, high]. */
+  rates: { perStoreCall: [number, number]; perRow: [number, number]; humanSteps: [number, number] };
+  estimateSeconds: [number, number];
+  /** One line: the window as a rounded minute range. */
+  estimate: string;
 }
 
 /** One form of a synthetic Creator report export. */
@@ -92,6 +132,10 @@ export interface RehearsalHooks {
   fetch?(inner: FetchLike): FetchLike;
   /** Resolver for the first both-sides sync, which must refuse (none by default). */
   conflictResolver?: ConflictResolver;
+  /** Link-map entries before the criterion is judged (a test can break one). */
+  linkMap?(entries: D10LinkEntry[]): void;
+  /** Measured downtime phases before the estimate is judged. */
+  downtimePhases?(phases: D10Phase[]): void;
 }
 
 export interface RehearsalOptions {
@@ -439,6 +483,69 @@ export function checkSequence(text: string): string[] {
   return failures;
 }
 
+/**
+ * Every Creator URL the app exposes — `#Form:`/`#Report:`/`#Page:` links and
+ * `#Report:Name/<record id>` record links — against the route the generated
+ * app serves. A component the UI model leaves todo keeps its entry as a
+ * manual step; a record link maps when its report is generated with a detail
+ * route, and the Creator record id resolves to the new ROWID through the
+ * store's source-id column.
+ */
+export function linkMap(app: App): D10LinkEntry[] {
+  const model = buildModel(app);
+  const entries: D10LinkEntry[] = [];
+  for (const form of app.forms) {
+    const ui = model.forms.find((item) => item.name === form.name);
+    const generated = ui !== undefined && formStatus(ui) === 'generated';
+    entries.push({
+      kind: 'form',
+      creator: `#Form:${form.name}`,
+      ...(generated ? { route: `#/form/${encodeURIComponent(form.name)}`, status: 'mapped' as const } : { status: 'manual' as const }),
+      ...(generated ? {} : { note: 'the form is not generated; re-point its links by hand' }),
+    });
+  }
+  for (const report of app.reports) {
+    const ui = model.reports.find((item) => item.name === report.name);
+    const generated = ui?.status === 'generated';
+    entries.push({
+      kind: 'report',
+      creator: `#Report:${report.name}`,
+      ...(generated ? { route: `#/report/${encodeURIComponent(report.name)}`, status: 'mapped' as const } : { status: 'manual' as const }),
+      ...(generated ? {} : { note: `the report is not generated${ui?.todo ? ` (${ui.todo})` : ''}; re-point its links by hand` }),
+    });
+    entries.push({
+      kind: 'record',
+      creator: `#Report:${report.name}/<record id>`,
+      ...(generated && ui!.detail
+        ? { route: `#/report/${encodeURIComponent(report.name)}/row/<ROWID>`, status: 'mapped' as const, note: 'the Creator record id resolves to the new row ROWID through the store source-id column' }
+        : { status: 'manual' as const, note: generated ? 'the report has no generated record detail route; deep links re-point to the list route' : 'the report is not generated; record links are rebuilt by hand' }),
+    });
+  }
+  for (const page of app.pages) {
+    const ui = model.pages.find((item) => item.name === page.name);
+    const generated = ui?.status === 'generated' || ui?.status === 'partial';
+    entries.push({
+      kind: 'page',
+      creator: `#Page:${page.name}`,
+      ...(generated ? { route: `#/page/${encodeURIComponent(page.name)}`, status: 'mapped' as const } : { status: 'manual' as const }),
+      ...(ui?.status === 'partial' ? { note: 'the page is partially generated; its todo elements need a manual step' } : generated ? {} : { note: `the page is not generated${ui?.todo ? ` (${ui.todo})` : ''}; re-point its links by hand` }),
+    });
+  }
+  return entries;
+}
+
+/** Seconds per measured unit in the downtime estimate: [low, high]. */
+const DOWNTIME_RATES: D10Downtime['rates'] = { perStoreCall: [0.5, 2], perRow: [0.05, 0.2], humanSteps: [60, 180] };
+
+function downtimeEstimate(phases: D10Phase[]): D10Downtime {
+  const calls = phases.reduce((sum, phase) => sum + phase.storeCalls, 0);
+  const rows = phases.reduce((sum, phase) => sum + phase.rows, 0);
+  const low = Math.round(calls * DOWNTIME_RATES.perStoreCall[0] + rows * DOWNTIME_RATES.perRow[0] + DOWNTIME_RATES.humanSteps[0]);
+  const high = Math.round(calls * DOWNTIME_RATES.perStoreCall[1] + rows * DOWNTIME_RATES.perRow[1] + DOWNTIME_RATES.humanSteps[1]);
+  const minutes = (seconds: number) => (seconds < 90 ? `${seconds} s` : `${(seconds / 60).toFixed(1).replace(/\.0$/, '')} min`);
+  return { phases, rates: DOWNTIME_RATES, estimateSeconds: [low, high], estimate: `${minutes(low)} – ${minutes(high)}` };
+}
+
 function rowCount(body: string | undefined): number {
   if (!body) return 0;
   return parseCsv(body).filter((row) => row.length > 1 || row[0] !== '').length - 1;
@@ -459,7 +566,13 @@ export async function rehearseCutover(app: App, options: RehearsalOptions): Prom
   ];
   const targets = pickTargets(app, initial);
   const memory = memoryStore();
-  const store = { tables: memory.tables, fetch: hooks.fetch ? hooks.fetch(memory.fetch) : memory.fetch };
+  let storeCalls = 0;
+  const innerFetch = hooks.fetch ? hooks.fetch(memory.fetch) : memory.fetch;
+  const counted: FetchLike = async (url, init) => {
+    storeCalls += 1;
+    return innerFetch(url, init);
+  };
+  const store = { tables: memory.tables, fetch: counted };
   const criteria: D10Criterion[] = [];
   const load = (name: string, exported: CreatorExport) => readSourceCsv(writeExport(app, join(work, name), exported), app, true);
 
@@ -525,7 +638,9 @@ export async function rehearseCutover(app: App, options: RehearsalOptions): Prom
   const finalForm = targets.change && final.find((form) => form.form === targets.change!.form);
   if (finalForm) finalForm.rows[1]![finalForm.header.indexOf(targets.change!.column)] = `${NEW_TEXT} final`;
   const finalLoad = load('export-final', final);
+  const callsBeforeDelta = storeCalls;
   const finalSync = await sync(app, store, finalLoad, round.next);
+  const deltaCalls = storeCalls - callsBeforeDelta;
   const finalStore = await storeDiff(
     app,
     store,
@@ -590,6 +705,7 @@ export async function rehearseCutover(app: App, options: RehearsalOptions): Prom
       ),
     );
   }
+  const verifyCalls = storeCalls - callsBeforeDelta - deltaCalls;
 
   // The documented sequence.
   const checklist = (hooks.checklist ?? ((text: string) => text))(cutoverChecklist(input, proof));
@@ -747,19 +863,65 @@ export async function rehearseCutover(app: App, options: RehearsalOptions): Prom
       'c2c does not configure or check a custom domain; the checklist only asks a human to record the hostname, DNS target and certificate (section 7)',
       'Add the Catalyst domain mapping steps to the deploy plan and a DNS + HTTPS check the checklist can verify.',
     ),
-    gap(
-      'D10.link-map',
-      'Old links and bookmarks: every Creator form, report and page URL maps to its new app URL',
-      'c2c produces no Creator-URL -> new-route map; the proof and checklist only say "replace Creator app links and bookmarks with the new app URL"',
-      'Generate a link map (Creator #Form:/#Report:/#Page: URL -> generated route) with the UI and print it in the checklist; optionally a redirect page.',
-    ),
-    gap(
-      'D10.downtime',
-      'Downtime estimate: the cut-over window is estimated before the freeze',
-      'c2c prints no downtime or freeze-window estimate; proof and checklist carry row counts and checksums but no timing from the final-delta size',
-      'Estimate the window from the final-delta plan (rows x measured write rate + smoke + sign-in steps) and print it in the proof and checklist.',
-    ),
   );
+
+  // The Creator-URL -> route map and the freeze -> switch downtime estimate.
+  const linkEntries = linkMap(app);
+  hooks.linkMap?.(linkEntries);
+  {
+    const failures: string[] = [];
+    for (const entry of linkEntries) {
+      if (entry.status === 'mapped' && !entry.route) failures.push(`mapped entry carries no route: ${entry.creator}`);
+      if (entry.status === 'manual' && entry.route) failures.push(`manual entry carries a route: ${entry.creator}`);
+    }
+    const expected = [
+      ...app.forms.map((form) => `#Form:${form.name}`),
+      ...app.reports.flatMap((report) => [`#Report:${report.name}`, `#Report:${report.name}/<record id>`]),
+      ...app.pages.map((page) => `#Page:${page.name}`),
+    ];
+    for (const url of expected.filter((url) => !linkEntries.some((entry) => entry.creator === url))) failures.push(`Creator URL missing from the link map: ${url}`);
+    const mapped = linkEntries.filter((entry) => entry.status === 'mapped');
+    const manual = linkEntries.filter((entry) => entry.status === 'manual');
+    criteria.push(
+      criterion(
+        'D10.link-map',
+        'Old links and bookmarks: every Creator form, report and page URL maps to its new app URL',
+        failures,
+        [
+          `${mapped.length} of ${linkEntries.length} Creator URLs map to a generated route; ${manual.length} listed as manual step(s)`,
+          ...manual.map((entry) => `manual: ${entry.creator}${entry.note ? ` — ${entry.note}` : ''}`),
+        ],
+        'Generate the missing components in the UI model so every Creator URL maps to a generated route without a manual step.',
+      ),
+    );
+  }
+  const downtimePhases: D10Phase[] = [
+    { phase: 'freeze re-export + re-plan', storeCalls: 0, rows: finalLoad.tables.reduce((sum, table) => sum + table.rows.length, 0) },
+    { phase: 'final delta sync', storeCalls: deltaCalls, rows: totals(finalSync.plan).added + totals(finalSync.plan).changed + totals(finalSync.plan).deleted },
+    { phase: 'verify read-back', storeCalls: verifyCalls, rows: [...stored.values()].reduce((sum, table) => sum + table.length, 0) },
+    { phase: 'switch (redirect + sign-in, human)', storeCalls: 0, rows: 0 },
+  ];
+  hooks.downtimePhases?.(downtimePhases);
+  const downtime = downtimeEstimate(downtimePhases);
+  {
+    const failures = downtime.phases.length
+      ? []
+      : ['no measured phase: the estimate needs at least the freeze re-plan and the final delta'];
+    const totalCalls = downtime.phases.reduce((sum, phase) => sum + phase.storeCalls, 0);
+    const totalRows = downtime.phases.reduce((sum, phase) => sum + phase.rows, 0);
+    criteria.push(
+      criterion(
+        'D10.downtime',
+        'Downtime estimate: the cut-over window is estimated before the freeze',
+        failures,
+        [
+          ...downtime.phases.map((phase) => `${phase.phase}: ${phase.storeCalls} store call(s), ${phase.rows} row(s)`),
+          `estimated window ${downtime.estimate} — offline estimate: ${totalCalls} store call(s) at ${DOWNTIME_RATES.perStoreCall[0]}-${DOWNTIME_RATES.perStoreCall[1]} s, ${totalRows} row(s) at ${DOWNTIME_RATES.perRow[0]}-${DOWNTIME_RATES.perRow[1]} s, plus ${DOWNTIME_RATES.humanSteps[0]}-${DOWNTIME_RATES.humanSteps[1]} s human steps; an estimate, not a promise`,
+        ],
+        'Price the live API latency of a rehearsal project into the estimate so it reflects the real cut-over window.',
+      ),
+    );
+  }
 
   const count = (status: D10Status) => criteria.filter((item) => item.status === status).length;
   return {
@@ -771,6 +933,8 @@ export async function rehearseCutover(app: App, options: RehearsalOptions): Prom
     criteria,
     totals: { PASS: count('PASS'), FAIL: count('FAIL'), GAP: count('GAP') },
     status: count('PASS') === criteria.length ? 'PASS' : 'FAIL',
+    linkMap: linkEntries,
+    downtime,
   };
 }
 
@@ -796,5 +960,19 @@ export function rehearsalMarkdown(report: D10Report): string {
   ];
   const open = report.criteria.filter((item) => item.fix);
   if (open.length) lines.push('## Fixes', '', ...open.map((item) => `- ${item.id}: ${mdCell(item.fix!)}`), '');
+  lines.push(
+    '## Link map',
+    '',
+    '| Creator URL | Kind | Route | Status |',
+    '| --- | --- | --- | --- |',
+    ...report.linkMap.map((entry) => `| ${mdCell(entry.creator)} | ${entry.kind} | ${mdCell(entry.route ?? '—')} | ${entry.status === 'mapped' ? 'mapped' : `manual${entry.note ? ` (${mdCell(entry.note)})` : ''}`} |`),
+    '',
+    '## Downtime estimate',
+    '',
+    `Estimated freeze-to-switch window: ${report.downtime.estimate} — an offline estimate from measured store calls and row counts, not a promise.`,
+    ...report.downtime.phases.map((phase) => `- ${phase.phase}: ${phase.storeCalls} store call(s), ${phase.rows} row(s)`),
+    `- rates: ${report.downtime.rates.perStoreCall[0]}-${report.downtime.rates.perStoreCall[1]} s per store call, ${report.downtime.rates.perRow[0]}-${report.downtime.rates.perRow[1]} s per row, ${report.downtime.rates.humanSteps[0]}-${report.downtime.rates.humanSteps[1]} s human steps`,
+    '',
+  );
   return lines.join('\n');
 }
