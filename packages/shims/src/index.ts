@@ -7,6 +7,7 @@ export {
   authorizeUserListing,
   authorizeWrite,
   canCreate,
+  canImport,
   canListUsers,
   expandCompositeWrites,
   principalFromRequest,
