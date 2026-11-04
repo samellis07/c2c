@@ -109,6 +109,8 @@ function fieldSpec(field: UiField): FieldSpec {
   // A credential field type, decided by the model — the draft keeps it out by flag, not by name.
   if (field.matrixId === 'encrypted' || (field.widget as string) === 'password') spec.secret = true;
   if (field.widget === 'section') spec.titled = field.titled !== false;
+  if (field.optionColumns !== undefined) spec.optionColumns = field.optionColumns;
+  if (field.optionCard) spec.optionCard = true;
   if (field.note !== undefined) spec.note = field.note;
   if (!drawn && LOOKUP_WIDGETS.has(field.widget) && field.status === 'generated') spec.todo = field.todo ?? 'the export names no parent form for this lookup';
   else if (!drawn) spec.todo = field.todo ?? `the ${field.widget} control is not generated yet`;
@@ -158,6 +160,7 @@ export function reactAppSpec(app: App, model: UiModel = generateUi(app).model, f
       name: form.name,
       label: form.label,
       layout: form.layout ?? 'one',
+      ...(form.phoneLayout ? { phoneLayout: form.phoneLayout } : {}),
       fields: form.fields.map(fieldSpec),
       submitEndpoint: form.submitEndpoint,
       ...(form.editSubmitEndpoint ? { editSubmitEndpoint: form.editSubmitEndpoint } : {}),
@@ -211,6 +214,8 @@ export function reactAppSpec(app: App, model: UiModel = generateUi(app).model, f
     theme: { accent: palette.accent, accentInk: '#ffffff', menu: palette.menu, ...(model.theme?.font ? { font: model.theme.font } : {}) },
     ...(model.dateFormat ? { dateFormat: model.dateFormat } : {}),
     ...(model.timeFormat ? { timeFormat: model.timeFormat } : {}),
+    ...(model.phoneLayout ? { phoneLayout: model.phoneLayout } : {}),
+    ...(model.tabletLayout ? { tabletLayout: model.tabletLayout } : {}),
     nav,
     ...(denied.length ? { denied } : {}),
     forms,
