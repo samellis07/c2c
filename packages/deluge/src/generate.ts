@@ -4716,7 +4716,7 @@ export function securityFidelity(app: App): SecurityFidelity {
   }
   if (staticRuleDenials) {
     notes.push(
-      `Fields hidden or disabled in forms are enforced on the server: ${staticRuleDenials} field${staticRuleDenials === 1 ? ' is' : 's are'} unconditionally hidden or disabled by field rules, and authorizeWrite refuses a client value for ${staticRuleDenials === 1 ? 'it' : 'them'} (a client in the covered record event could not have posted ${staticRuleDenials === 1 ? 'it' : 'them'}). The Creator REST API accepts such values; the app's own On Validate and On Success scripts still set them.`,
+      `Fields hidden or disabled in forms are enforced on the server: ${staticRuleDenials} field${staticRuleDenials === 1 ? ' is' : 's are'} unconditionally hidden or disabled by field rules, and authorizeWrite refuses a client value for ${staticRuleDenials === 1 ? 'it' : 'them'} (a client in the covered record event could not have posted ${staticRuleDenials === 1 ? 'it' : 'them'}). The Creator REST API accepts such values; the app's own On Validate and On Success scripts still set them. A bulk import post (body.import === true) skips the denial for those values, matching the REST API.`,
     );
   }
   if (conditionalRules) {
@@ -5229,6 +5229,9 @@ function aioModule(opts: {
   }
   if (schema?.ruleDenied.length) {
     lines.push('authorizeWrite also refuses fields an unconditional field rule hides or disables (fieldRuleDenied). Conditional rules depend on client state and are not enforced here.');
+    lines.push(
+      'body.import === true marks a bulk import write (the seed/migrate-data path): the field-rule denials are skipped — they are on-load UI state, not data rules — while the profile grant, hidden export fields, read-only fields, choice lists and required/type checks still apply.',
+    );
   }
   if (opts.systemWrite) {
     lines.push(
@@ -5275,8 +5278,12 @@ export const fields = ${JSON.stringify(schema.fields)};${schema.ruleDenied.lengt
       : 'reqRowId ? "update" : "insert"'
     : '';
   const writeCall = schema
-    ? `authorizeWrite(access, principal, formName, record, { readonlyFields, fieldNames, fields${schema.ruleDenied.length ? ', ruleDenied: fieldRuleDenied' : ''} }${writeOp ? `, ${writeOp}` : ''})`
+    ? `authorizeWrite(access, principal, formName, record, { readonlyFields, fieldNames, fields${schema.ruleDenied.length ? ', ruleDenied: importWrite ? [] : fieldRuleDenied' : ''} }${writeOp ? `, ${writeOp}` : ''})`
     : `authorizeWrite(access, principal, formName, record${writeOp ? `, undefined, ${writeOp}` : ''})`;
+  const importWriteDecl = schema?.ruleDenied.length
+    ? `  const importWrite = req && req.body && req.body.import === true;
+`
+    : '';
   const mailFrom = opts.body.includes('shim.mail.send') ? ', mailFrom: process.env.C2C_MAIL_FROM' : '';
   const subformFields = currentRowFields(opts.body);
   const usesSubformRow = subformFields.length > 0;
@@ -5496,7 +5503,7 @@ ${opts.systemWrite ? `  let loadedStore = null;
       send(res, denied ? 403 : 500, { dryRun: !live, error: denied ? err.message : "request failed" });
       return;
     }
-  }\n` : ''}  try {
+  }\n` : ''}${importWriteDecl}  try {
     if (req && req.body && req.body.op === "view") {
       authorizeRead(access, principal, formName, { op: "true" });
       send(res, 200, { dryRun: ${opts.systemWrite ? '!live' : 'true'}, view: true });
