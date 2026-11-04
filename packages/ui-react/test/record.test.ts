@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
-import { chosenFiles, readRecord, validate } from '../template/lib/c2c-ui/form/record.js';
+import { chosenFiles, readRecord, resolveUrlSources, UPLOAD_SOURCE_MAX_BYTES, validate } from '../template/lib/c2c-ui/form/record.js';
 import { canonicalNumber, fractionDigits, localDateTime, localDay, parseLocalDateTime, parseLocalDay, toCanonicalDecimal, toMinorUnits } from '../template/lib/c2c-ui/form/value.js';
 import type { FieldSpec, FormSpec } from '../template/lib/c2c-ui/types.js';
 
@@ -176,6 +176,48 @@ test('canonicalNumber keeps every digit and fixes the scale with string math', (
   assert.equal(canonicalNumber(' ', null), null);
   assert.equal(canonicalNumber('1e21', null), null);
   assert.equal(toCanonicalDecimal(1e21, 0), '1000000000000000000000');
+});
+
+test('public_url sources: only a bounded, accept-matching fetch uploads; failures flag the field and store nothing', async () => {
+  const form = spec([field('Photo', 'image', { required: true, uploadEndpoint: '/u', uploadSources: ['public_url'], accept: 'image/*' })]);
+  const { formEl } = jsdom('<input type="url" name="Photo__url" value="https://cdn.example.com/pic.png">');
+  const headers = (map: Record<string, string>) => ({ get: (name: string) => map[name.toLowerCase()] ?? null });
+  const saved = globalThis.fetch;
+  const cases: Array<[string, object]> = [
+    ['oversized', { ok: true, headers: headers({ 'content-type': 'image/png', 'content-length': String(UPLOAD_SOURCE_MAX_BYTES + 1) }), blob: async () => ({ size: 4, type: 'image/png' }) }],
+    ['html', { ok: true, headers: headers({ 'content-type': 'text/html' }), blob: async () => ({ size: 4, type: 'text/html' }) }],
+    ['opaque', { ok: true, headers: headers({ 'content-type': 'application/octet-stream' }), blob: async () => ({ size: 4, type: 'application/octet-stream' }) }],
+    ['untyped', { ok: true, headers: headers({}), blob: async () => ({ size: 4, type: '' }) }],
+    ['redirected-to-html', { ok: true, redirected: true, headers: headers({ 'content-type': 'text/html' }), blob: async () => ({ size: 4, type: 'text/html' }) }],
+    ['read-past-cap', { ok: true, headers: headers({ 'content-type': 'image/png' }), blob: async () => ({ size: UPLOAD_SOURCE_MAX_BYTES + 1, type: 'image/png' }) }],
+  ];
+  try {
+    for (const [name, res] of cases) {
+      (globalThis as { fetch: unknown }).fetch = async () => res;
+      const files = new Map();
+      const errors = await resolveUrlSources(formEl, form, files);
+      assert.ok(errors.Photo, name);
+      assert.equal(files.size, 0, name);
+    }
+    (globalThis as { fetch: unknown }).fetch = async () => {
+      throw new TypeError('Failed to fetch');
+    };
+    const files = new Map();
+    const errors = await resolveUrlSources(formEl, form, files);
+    assert.ok(errors.Photo);
+    assert.equal(files.size, 0);
+    // A small valid image resolves into the upload set.
+    (globalThis as { fetch: unknown }).fetch = async () => ({
+      ok: true,
+      headers: headers({ 'content-type': 'image/png' }),
+      blob: async () => new Blob(['img'], { type: 'image/png' }),
+    });
+    const good = new Map();
+    assert.deepEqual(await resolveUrlSources(formEl, form, good), {});
+    assert.equal(good.get(form.fields[0]!)?.name, 'pic.png');
+  } finally {
+    globalThis.fetch = saved;
+  }
 });
 
 test('a visibility = false field never posts, even with a stray named control', () => {
