@@ -1942,3 +1942,53 @@ test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is co
   const todo = taskzOut.model.todos.find((t) => t.name === 'Add_Attachment.File_Attachment property browse');
   assert.ok(todo, 'TaskzDone Add_Attachment.File_Attachment property browse has a counted UI todo');
 });
+
+test('allow new entries and its displayname dialog title are emitted through the lookup picker', () => {
+  const source = `application "Demo"
+{
+\tsection Main
+\t{
+\t\tform Department
+\t\t{
+\t\t\tDepartment_Name
+\t\t\t(
+\t\t\t\ttype = text
+\t\t\t)
+\t\t}
+\t\tform Course
+\t\t{
+\t\t\tDepartment
+\t\t\t(
+\t\t\t\ttype = picklist
+\t\t\t\tvalues = Department.ID
+\t\t\t\tdisplayformat = [Department_Name]
+\t\t\t\tallow new entries
+\t\t\t\t[
+\t\t\t\t\tdisplayname = "Add New Department"
+\t\t\t\t]
+\t\t\t)
+\t\t}
+\t}
+}
+`;
+  const appUnderTest = deriveIr(parse(source));
+  const out = collectOutputs(appUnderTest);
+  const rows = coverageLedger(appUnderTest, out);
+  assert.equal(
+    rows.find((row) => row.name === 'Course.Department flag allow new entries')?.status,
+    'emitted',
+    'the picker opens the parent form add screen and selects the new row',
+  );
+  assert.equal(
+    rows.find((row) => row.name.startsWith('Course.Department annotation'))?.status,
+    'emitted',
+    'the displayname annotation is the add-new dialog title',
+  );
+
+  // Mutation: remove the carried affordance and the same constructs drop again.
+  const without = cloneOutputs(out);
+  delete without.model.forms.find((form) => form.name === 'Course')!.fields.find((item) => item.name === 'Department')!.lookup!.addNew;
+  const names = dropNames(appUnderTest, without);
+  assert.ok(names.includes('Course.Department flag allow new entries'), names.join(', '));
+  assert.ok(names.some((name) => name.startsWith('Course.Department annotation')), names.join(', '));
+});

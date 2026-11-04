@@ -487,3 +487,77 @@ test('both lookup controls send the typed search to the endpoint through the ven
   }
   assert.match(readFileSync(join(TEMPLATE_DIR, 'lib/c2c-ui/ARC-UPSTREAM.md'), 'utf8'), /onQueryChange/);
 });
+
+test('allow new entries reaches the lookup spec with its dialog title', () => {
+  const src = `application "Demo"
+{
+\tsection Main
+\t{
+\t\tform Department
+\t\t{
+\t\t\tDepartment_Name
+\t\t\t(
+\t\t\t\ttype = text
+\t\t\t)
+\t\t}
+\t\tform Course
+\t\t{
+\t\t\tDepartment
+\t\t\t(
+\t\t\t\ttype = picklist
+\t\t\t\tvalues = Department.ID
+\t\t\t\tdisplayformat = [Department_Name]
+\t\t\t\tallow new entries
+\t\t\t\t[
+\t\t\t\t\tdisplayname = "Add New Department"
+\t\t\t\t]
+\t\t\t)
+\t\t\tTags
+\t\t\t(
+\t\t\t\ttype = list
+\t\t\t\tvalues = Department.ID
+\t\t\t\tallow new entries
+\t\t\t)
+\t\t}
+\t}
+}
+`;
+  const course = reactAppSpec(deriveIr(parse(src))).forms.Course!;
+  const department = fieldOf(course, 'Department');
+  assert.deepEqual(department.lookup, {
+    form: 'Department',
+    display: 'Department_Name',
+    endpoint: '/lookups/Department/Department_Name',
+    addNew: { label: 'Add New Department' },
+  });
+  const tags = fieldOf(course, 'Tags');
+  assert.equal(tags.widget, 'lookup-multi');
+  assert.deepEqual(tags.lookup?.addNew, {});
+});
+
+test('the lookup source reports the caller insert grant and adopts a saved record', async () => {
+  const get = async (url: string): Promise<ApiReply<unknown>> => {
+    const canAdd = url.includes('/lookups/Customer/Name');
+    return { ok: true, status: 200, body: { rows: [{ ROWID: '1000', Name: 'Acme' }], field: 'Name', canAdd } };
+  };
+  const source = new LookupSource(get, '/lookups/Customer/Name');
+  await source.open();
+  assert.equal(source.snapshot().canAdd, true, 'the endpoint grant reaches the snapshot');
+  source.adopt({ value: '2002', label: 'Science' });
+  const first = source.snapshot().options[0];
+  assert.deepEqual(first, { value: '2002', label: 'Science' });
+  source.adopt({ value: '2002', label: 'Science' });
+  assert.equal(source.snapshot().options.filter((o) => o.value === '2002').length, 1, 'no duplicate adopt');
+
+  const denied = new LookupSource(get, '/lookups/Other/Name');
+  await denied.open();
+  assert.equal(denied.snapshot().canAdd, undefined, 'a reply without canAdd leaves the grant unknown');
+});
+
+test('the lookup controls gate the add action on the endpoint grant and the parent form', () => {
+  const field = readFileSync(join(TEMPLATE_DIR, 'lib/c2c-ui/lookup/LookupField.tsx'), 'utf8');
+  assert.match(field, /snap\.canAdd !== true/, 'the add action waits for the endpoint insert grant');
+  assert.match(field, /spec\.forms\[lookup\.form\]/, 'the action needs a generated parent form');
+  assert.match(field, /LazyFormView form=\{parent\}/, 'the dialog is the parent form own FormView');
+  assert.match(field, /source\.adopt\(/, 'a saved row joins the options');
+});
