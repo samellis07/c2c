@@ -203,6 +203,10 @@ export interface UiReport {
   detail: boolean;
   /** Ordered Creator detail view blocks, including related subform rows. */
   detailBlocks?: UiReportDetailBlock[];
+  /** Device the `detailBlocks` layout came from; `web` covers an export view with no device. */
+  detailDevice?: string;
+  /** Detail layouts for devices other than `detailDevice`; the generated record view swaps them in at the device breakpoint. */
+  deviceDetailBlocks?: { device: string; blocks: UiReportDetailBlock[] }[];
   /** The report's `print template` selection resolved to its form's layout block. */
   printTemplate?: UiPrintTemplate;
   section?: string;
