@@ -2893,6 +2893,9 @@ ${discardDeferred}      if (err && err.code === "SUBMIT_REFUSED") {
     ...(deferSuccess
       ? ['Async on-success opt-in: in live mode this endpoint validates and stores the row, then replies without running the on-success modules. The after-commit event function (functions/events/after-commit.mjs) runs them when the record trigger fires; a failure dead-letters to C2CEventDeadLetter for the sweep Job (docs/event-deadletter.md).']
       : []),
+    ...(ruleDenied.length
+      ? ['body.import === true marks a bulk import write (the seed/migrate-data path): the field-rule denials are skipped — they are on-load UI state, not data rules — while the profile grant, hidden export fields, read-only fields, choice lists and required/type checks still apply.']
+      : []),
   ])}${policyPrelude('../../access-policy.json', false, `import { ${[...new Set(['applyInitialValues', 'createRuntime', 'postCommitWarning', 'projectReadable', 'replyStoreError', ...fieldStoreImports(storeShape)])].sort().join(', ')} } from "creator-to-catalyst/shims";\n${usesThisapp ? 'import { functions } from "../../thisapp.mjs";\n' : ''}`)}
 export const endpoint = { type: "advancedio", method: "POST", path: ${JSON.stringify(path)}, dryRun: true };
 export const formName = ${JSON.stringify(form.name)};
@@ -2969,13 +2972,13 @@ export default async function handler(req, res) {
   }
 ${requirePrincipal()}
   const record = req && req.body && req.body.record && typeof req.body.record === "object" && !Array.isArray(req.body.record) ? req.body.record : {};
-${hasPresuccess ? '  // The catch scope drops buffered presuccess effects, so the runtime is\n  // bound ahead of the try that creates it.\n  let runtime = null;\n' : ''}  try {
+${hasPresuccess ? '  // The catch scope drops buffered presuccess effects, so the runtime is\n  // bound ahead of the try that creates it.\n  let runtime = null;\n' : ''}${ruleDenied.length ? '  const importWrite = req && req.body && req.body.import === true;\n' : ''}  try {
     if (req && req.body && req.body.op === "view") {
       authorizeRead(access, principal, formName, { op: "true" });
       send(res, 200, { dryRun: !live, view: true });
       return;
     }
-    const decision = authorizeWrite(access, principal, formName, record, { readonlyFields, hiddenFields, fieldNames, fields${ruleDenied.length ? ', ruleDenied: fieldRuleDenied' : ''} }, requestRowId(req) ? "update" : "insert");
+    const decision = authorizeWrite(access, principal, formName, record, { readonlyFields, hiddenFields, fieldNames, fields${ruleDenied.length ? ', ruleDenied: importWrite ? [] : fieldRuleDenied' : ''} }, requestRowId(req) ? "update" : "insert");
     const submitted = Object.keys(decision.values);
     if (!live) {
       send(res, 200, { dryRun: true, wrote: false, values: decision.values, transcript: [] });
