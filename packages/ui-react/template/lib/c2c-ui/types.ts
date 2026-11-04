@@ -44,6 +44,10 @@ export interface FieldSpec {
   subfields?: FieldSpec[];
   /** Section heading shown, or not (an unnamed Creator section). */
   titled?: boolean;
+  /** Option columns for a radio or checkbox group (Creator field `layout`): 1, 2 or 3. */
+  optionColumns?: 1 | 2 | 3;
+  /** `onecolumncard` field layout: the options draw as a column of cards. */
+  optionCard?: boolean;
   /** Static text of a notes field. */
   note?: string;
   /** Why a field is not generated yet. */
@@ -76,10 +80,15 @@ export interface HandlerSpec {
   prefetch?: string;
 }
 
+/** A device `customize { layout }` arrangement carried into the generated app. */
+export type DeviceLayout = 'one-column' | 'two-column' | 'one-column-card' | 'sliding-pane' | 'tab-bar';
+
 export interface FormSpec {
   name: string;
   label: string;
   layout: 'one' | 'two' | 'three';
+  /** The phone `customize { layout }` arrangement (from the export). */
+  phoneLayout?: DeviceLayout;
   fields: FieldSpec[];
   submitEndpoint: string;
   editSubmitEndpoint?: string;
@@ -267,6 +276,10 @@ export interface AppSpec {
   dateFormat?: string;
   /** The app `time format` setting ("24-hr" / "12-hr"); date-time cells use its clock. */
   timeFormat?: string;
+  /** The phone `customize { layout }` arrangement: `sliding-pane` swaps the tab bar for a drawer; `tab-bar` keeps it. */
+  phoneLayout?: DeviceLayout;
+  /** The tablet `customize { layout }` arrangement. */
+  tabletLayout?: DeviceLayout;
   nav: NavSection[];
   /**
    * Screen names a `hide = true` section hides from this profile, minus any
