@@ -87,3 +87,61 @@ test('a translation string is data-only: markup renders as text, never HTML', as
   assert.equal(card?.querySelector('img'), null, 'the string renders as text, not an element');
   assert.match(label?.innerHTML ?? '', /&lt;img/, 'the markup is escaped in the rendered HTML');
 });
+
+test('a __proto__ language and prototype-named keys stay own data, never pollute', () => {
+  const block = `\ttranslation
+\t{
+{"__proto__":{"Form.Contact":"Proto Contact","constructor":"ctor","toString":"str","hasOwnProperty":"hop"}}
+\t}`;
+  const model = buildUi(appOf(`${FORM}\n${block}`)).model;
+  const i18n = model.i18n as Record<string, Record<string, string>>;
+  // `__proto__` is a language code like any other: an own entry, not a
+  // prototype write that would vanish from Object.keys.
+  assert.ok(Object.hasOwn(i18n, '__proto__'), 'the __proto__ language is an own i18n entry');
+  assert.equal(Object.getPrototypeOf(i18n), null, 'the i18n table has no prototype');
+  const table = i18n['__proto__']!;
+  assert.equal(Object.getPrototypeOf(table), null, 'the language table has no prototype');
+  assert.equal(table['Form.Contact'], 'Proto Contact');
+  assert.equal(table['constructor'], 'ctor', 'constructor is stored as a string, not the inherited function');
+  assert.equal(table['toString'], 'str');
+  assert.equal(table['hasOwnProperty'], 'hop');
+  // Building the table must not have written onto Object.prototype.
+  assert.equal(({} as Record<string, unknown>)['Form.Contact'], undefined, 'Object.prototype is unpolluted');
+  assert.equal(typeof ({} as Record<string, unknown>).toString, 'function');
+});
+
+test('inherited names are not reachable through strings[key]: a constructor key leaves the default text', async (t) => {
+  const block = `\ttranslation
+\t{
+{"de":{"constructor":"ctor","Form.Contact":"Kontakt"}}
+\t}`;
+  const model = buildUi(appOf(`${FORM}\n${block}`)).model;
+  const i18n = model.i18n as Record<string, unknown>;
+  const table = model.i18n?.de as Record<string, string>;
+  assert.equal(table['constructor'], 'ctor');
+  // Inherited names are not reachable through `map[name]`: a language or key
+  // the block did not declare resolves to undefined, not a prototype member.
+  assert.equal(i18n['toString'], undefined, 'toString is not an i18n language');
+  assert.equal(table['toString'], undefined, 'toString is not a stored label');
+  assert.equal(table['hasOwnProperty'], undefined, 'hasOwnProperty is not a stored label');
+  // A key the block did not translate — including an inherited name —
+  // resolves to nothing, so the field keeps its default text.
+  const doc = await booted(model, 'http://localhost/slate/index.html?lang=de#/form/Contact', t);
+  const card = doc.querySelector('section[data-form-card]');
+  assert.equal(card?.querySelector('h1')?.textContent, 'Kontakt');
+  assert.equal(card?.querySelector('label')?.textContent?.trim(), 'Name');
+  assert.equal(({} as Record<string, unknown>).constructor, Object, 'Object.prototype is unpolluted after applyLanguage');
+});
+
+test('the emitted slate/assets/model.js rebuilds the i18n table with null prototypes', async () => {
+  const bundle = buildUi(appOf(`${FORM}\n${TRANSLATION('Name')}`));
+  const file = bundle.files.find((f) => /^slate\/assets\/model\.[0-9a-f]+\.js$/.test(f.path));
+  assert.ok(file, 'the bundle emits slate/assets/model.<hash>.js');
+  const mod = (await import(`data:text/javascript;base64,${Buffer.from(file.data as string).toString('base64')}`)) as {
+    model: UiModel;
+  };
+  const i18n = mod.model.i18n as Record<string, Record<string, string>>;
+  assert.equal(Object.getPrototypeOf(i18n), null, 'the loaded i18n table has no prototype');
+  assert.equal(Object.getPrototypeOf(i18n.de), null, 'the loaded language table has no prototype');
+  assert.equal(i18n.de['Form.Contact'], ' Kontakt ');
+});
