@@ -589,6 +589,73 @@ test('detail view keeps the three block titles and their fields', () => {
   assert.equal(active.detailBlocks?.[2]?.relatedField, 'List_Of_Subassemblies');
 });
 
+test('a device detail view rides along for the record view breakpoint', () => {
+  const model = buildUi(appOf(`${FORM}
+\treport Booking_Report
+\t{
+\t\tshow all rows from Booking
+\t\t(
+\t\t\tGuest
+\t\t\tRoom
+\t\t)
+\t}
+\tweb
+\t{
+\t\treports
+\t\t{
+\t\t\treport Booking_Report
+\t\t\t{
+\t\t\t\tdetailview
+\t\t\t\t(
+\t\t\t\t\tlayout
+\t\t\t\t\t(
+\t\t\t\t\t\ttype = 2
+\t\t\t\t\t\tdatablock1
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\ttitle = "Overview"
+\t\t\t\t\t\t\tfields
+\t\t\t\t\t\t\t(
+\t\t\t\t\t\t\t\tGuest
+\t\t\t\t\t\t\t\tRoom
+\t\t\t\t\t\t\t)
+\t\t\t\t\t\t)
+\t\t\t\t\t)
+\t\t\t\t)
+\t\t\t}
+\t\t}
+\t}
+\tphone
+\t{
+\t\treports
+\t\t{
+\t\t\treport Booking_Report
+\t\t\t{
+\t\t\t\tdetailview
+\t\t\t\t(
+\t\t\t\t\tlayout
+\t\t\t\t\t(
+\t\t\t\t\t\ttype = 2
+\t\t\t\t\t\tdatablock1
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\ttitle = "Phone Card"
+\t\t\t\t\t\t\tfields
+\t\t\t\t\t\t\t(
+\t\t\t\t\t\t\t\tGuest
+\t\t\t\t\t\t\t)
+\t\t\t\t\t\t)
+\t\t\t\t\t)
+\t\t\t\t)
+\t\t\t}
+\t\t}
+\t}`)).model;
+  const report = model.reports.find((item) => item.name === 'Booking_Report');
+  assert.ok(report);
+  assert.equal(report.detailDevice, 'web');
+  assert.deepEqual((report.detailBlocks ?? []).map((block) => block.title), ['Overview']);
+  assert.deepEqual((report.deviceDetailBlocks ?? []).map((variant) => variant.device), ['phone']);
+  assert.deepEqual(report.deviceDetailBlocks?.[0]?.blocks.map((block) => block.title), ['Phone Card']);
+});
+
 test('an in-app pivotchart is a generated chart report, not an Analytics note', () => {
   const model = decoratedViews();
   for (const name of ['Report_Monthly', 'Report_Weekly', 'Report_Stock']) {

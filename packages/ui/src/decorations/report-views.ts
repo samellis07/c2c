@@ -52,16 +52,18 @@ function blocksOf(view: ReportView, app: App, source: Report): UiReportDetailBlo
 
 /**
  * The phone card's fields, in card order: the selection the scorer expects
- * (core phone-columns.ts). A related path (`Subform.Field`, `Lookup.Field`)
- * is left out; a report row carries only its own form's columns, so there is
- * no value to show for it.
+ * (core phone-columns.ts). A dotted path stays only when its prefix is a
+ * lookup field on the report's form — the query joins it (`Customer.Email`),
+ * so the row carries a value. A subform or unresolvable path (`Hours.Days`)
+ * has no value in a report row and stays off the card.
  */
 function phoneFields(app: App, source: Report): { field: string; label: string }[] {
   const form = source.form ? app.forms.find((item) => item.name === source.form) : undefined;
+  const lookupPrefix = new Set((form?.fields ?? []).filter((field) => field.lookup || field.type === 'lookup').map((field) => field.name));
   const columns = source.columns
     .filter((column) => column.field)
     .map((column) => ({ field: column.field, label: reportColumnLabel(form, column.field, column.label) }));
-  return phoneColumns(source, columns).filter((column) => !column.field.includes('.'));
+  return phoneColumns(source, columns).filter((column) => !column.field.includes('.') || lookupPrefix.has(column.field.split('.')[0]!));
 }
 
 function applyReportViews(model: UiModel, app: App): void {
@@ -100,7 +102,20 @@ function applyReportViews(model: UiModel, app: App): void {
       report.columns = merged;
     }
     const detail = pickView(source, 'detailview');
-    if (detail && detail.blocks.length) report.detailBlocks = blocksOf(detail, app, source);
+    if (detail) {
+      if (detail.blocks.length) report.detailBlocks = blocksOf(detail, app, source);
+      report.detailDevice = detail.device ?? 'web';
+      // Other device layouts ride along: the generated record view swaps them
+      // in at the matching breakpoint. The first layout per device wins; a
+      // second layout for the same device cannot render, so it is not carried.
+      const extras = new Map<string, UiReportDetailBlock[]>();
+      for (const view of source.views) {
+        if (view === detail || view.kind !== 'detailview' || !view.blocks.length) continue;
+        const device = view.device ?? 'web';
+        if (!extras.has(device)) extras.set(device, blocksOf(view, app, source));
+      }
+      if (extras.size) report.deviceDetailBlocks = [...extras.entries()].map(([device, blocks]) => ({ device, blocks }));
+    }
   }
 }
 
