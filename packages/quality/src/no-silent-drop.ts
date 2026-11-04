@@ -61,17 +61,20 @@
  *   `connections` block the literal is the connection's granted scope list,
  *   listed by the connections analysis diagnostic that names the declared
  *   scopes. Anything else has no consumer and must be listed.
- * - translation: nothing consumes translation blocks, so each one must be
- *   listed as an explicit manual step (a todo inside its span). The
- *   migration-report warning (construct 'translation-not-migrated') is not a
- *   counted manual item: a warning-only block is a drop.
+ * - translation: a block's string labels are produced when they all land in
+ *   the generated client's i18n table (buildModel → UiModel.i18n →
+ *   slate/assets/model.js, read by the client's language switch). A block
+ *   with no migratable strings must be listed as an explicit manual step (a
+ *   todo inside its span). The migration-report warning (construct
+ *   'translation-not-migrated') is not a counted manual item: a warning-only
+ *   block is a drop.
  *
  * A construct labelled 'manual' that the generator actually produces is a
  * false listing, not coverage: the produced check runs first and wins.
  */
 
 import type { App, Field, Property, PropertyBlock, Report, ReportView, Workflow } from '../../core/src/ir.js';
-import { formLink, unquote } from '../../core/src/ir.js';
+import { formLink, translationStrings, unquote } from '../../core/src/ir.js';
 import { authPlan, type AuthPlan } from '../../auth/src/plan.js';
 import { analyzeConnections, memberChain, permissionScopes, walk, type ConnectionsReport } from '../../deluge/src/connections.js';
 import type { Expr } from '../../deluge/src/ast.js';
@@ -1608,16 +1611,46 @@ export function assertCovered(app: App, outputs?: AuditOutputs): CoverageRow[] {
 }
 
 /**
- * Translation blocks are never produced; each one needs an explicit manual
- * step. A block is counted only by a todo inside its span — a migration-report
- * warning (`translation-not-migrated`) is never coverage: warnings are not
- * counted manual items, so a block that only carries a warning is a drop.
+ * Translation blocks: the string labels a block declares are produced when
+ * they all reach the client i18n table (UiModel.i18n → slate/assets/model.js;
+ * the client's language switch applies them to labels). A block with no
+ * migratable strings needs an explicit manual step, counted only by a todo
+ * inside its span — a migration-report warning (`translation-not-migrated`)
+ * is never coverage: warnings are not counted manual items, so a block that
+ * only carries a warning is a drop.
  */
 function auditTranslationDeclarations(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
+  // The merged table the client ships: a later block overrides an earlier
+  // one's key, so a shadowed entry is still migrated under its final value.
+  const expected: Record<string, Record<string, string>> = {};
+  for (const t of app.translations) {
+    for (const [l, labels] of Object.entries(translationStrings(t))) Object.assign((expected[l] ??= {}), labels);
+  }
   for (const t of app.translations) {
     const lang = translationLanguage(t);
+    const name = lang ? `translation ${lang}` : 'translation block';
+    const strings = translationStrings(t);
+    const count = Object.values(strings).reduce((n, table) => n + Object.keys(table).length, 0);
+    if (count) {
+      const shipped = Object.entries(strings).every(([l, labels]) => {
+        const table = out.model.i18n?.[l];
+        return table && Object.keys(labels).every((key) => table[key] === expected[l]?.[key]);
+      });
+      if (shipped) {
+        rows.push({ kind: 'translation', name, status: 'emitted', via: 'slate/assets/model.js i18n' });
+        continue;
+      }
+      rows.push({
+        kind: 'translation',
+        name,
+        status: 'dropped',
+        via: 'none',
+        note: `${lang ? `The ${lang} translation block` : 'A translation block'} declares ${count} string label(s) that never reached the generated client i18n table (slate/assets/model.js). Copy the block's labels into the client i18n table.`,
+      });
+      continue;
+    }
     if (out.todos.some((todo) => within(todo, t.span))) {
-      rows.push({ kind: 'translation', name: lang ? `translation ${lang}` : 'translation block', status: 'counted', via: 'todo' });
+      rows.push({ kind: 'translation', name, status: 'counted', via: 'todo' });
       continue;
     }
     const warned = out.warnings.some(
@@ -1625,10 +1658,10 @@ function auditTranslationDeclarations(app: App, out: AuditOutputs, rows: Coverag
     );
     rows.push({
       kind: 'translation',
-      name: lang ? `translation ${lang}` : 'translation block',
+      name,
       status: 'dropped',
       via: 'none',
-      note: `${lang ? `The ${lang} translation block` : 'A translation block'} is not migrated and has no manual step${warned ? ' — only a migration-report warning, which is not a counted manual item' : ''}. List the language, the string count, and what the user must copy into the generated client.`,
+      note: `${lang ? `The ${lang} translation block` : 'A translation block'} holds no string labels and has no manual step${warned ? ' — only a migration-report warning, which is not a counted manual item' : ''}. List the language, the string count, and what the user must copy into the generated client.`,
     });
   }
 }

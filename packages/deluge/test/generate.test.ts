@@ -1783,11 +1783,11 @@ test('a transition criterion on a removed field fails closed with 403 and is lis
   }
 });
 
-test('a removed-field transition criterion both denies and is a visible report row, beside the translation manual step', async () => {
+test('a removed-field transition criterion both denies and is a visible report row, beside the migrated translation', async () => {
   // Fail closed and nothing silently dropped hold together: the criterion
   // the generator cannot evaluate is denied at run time AND counted in the
-  // migration report, and the app's other unmigrated construct (a
-  // translation block) is still listed as a manual step. The `input.`
+  // migration report, and the app's translation block ships in the client
+  // i18n table instead of a warning. The `input.`
   // spelling is the one only the record-root check catches.
   const base = orderBlueprint([plainField('Amount')], {
     name: 'Send',
@@ -1812,7 +1812,7 @@ test('a removed-field transition criterion both denies and is a visible report r
   );
   assert.deepEqual(
     (report.warnings ?? []).filter((w) => w.construct === 'translation-not-migrated').map((w) => w.name),
-    ['translation:de'],
+    [],
   );
   const machine = g.files.find((f) => f.path.startsWith('functions/flow/'));
   assert.ok(machine);
@@ -6891,14 +6891,19 @@ test('requestSubformRow names only a row of this event subform in the screened r
   }
 });
 
-test('translation blocks are listed as explicit manual steps in migration-report warnings', () => {
+test('translation blocks migrate to the client i18n table; only a block with no strings stays a manual step', () => {
   const g = generate(
     app({
       translations: [
         {
           json: '{"de":{"FormField.Orders.Title":" Titel ","ReportField.Orders.Status":" Status "}}',
           data: { de: { 'FormField.Orders.Title': ' Titel ', 'ReportField.Orders.Status': ' Status ' } },
-          span: Z,
+          span: { start: 0, end: 10 },
+        },
+        {
+          json: '{"fr":{"Language Properties":{"Status":true}}}',
+          data: { fr: { 'Language Properties': { Status: true } } },
+          span: { start: 20, end: 30 },
         },
       ],
     }),
@@ -6908,11 +6913,15 @@ test('translation blocks are listed as explicit manual steps in migration-report
     name: string;
     note: string;
   }[];
+  // The migrated block is no warning and no todo; the string-less block is
+  // both the warning and a todo inside its own span.
   const rows = (warnings ?? []).filter((w) => w.construct === 'translation-not-migrated');
   assert.equal(rows.length, 1);
-  assert.match(rows[0]!.name, /de/);
-  assert.match(rows[0]!.note, /2 strings/);
-  assert.match(rows[0]!.note, /default-language/);
+  assert.match(rows[0]!.name, /fr/);
+  assert.deepEqual(
+    g.todos.filter((todo) => todo.construct === 'translation'),
+    [{ construct: 'translation', start: 20, end: 30 }],
+  );
 });
 
 test('a submit claim is per machine: two machines on one form write one submit history row', async () => {

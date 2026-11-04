@@ -1127,6 +1127,30 @@ function translation(ctx: Ctx, s: Statement): Translation {
   return t;
 }
 
+/**
+ * The migratable labels of one `translation` block: language code →
+ * `Form.*`/`FormField.*`/`Report.*`/… key → text. Values are data-only —
+ * only string entries migrate; non-string values (`Language Properties`,
+ * `CustomAction.<…>` button objects) are not labels. A block that yields no
+ * strings has nothing the client can render and stays a manual step.
+ */
+export function translationStrings(t: Translation): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  if (!t.data || typeof t.data !== 'object' || Array.isArray(t.data)) return out;
+  for (const [lang, table] of Object.entries(t.data as Record<string, unknown>)) {
+    // `Language_Settings` is a settings object (e.g. `LANGAGUE_WITH_LOGIN`),
+    // not a language's label table.
+    if (lang === 'Language_Settings') continue;
+    if (!table || typeof table !== 'object' || Array.isArray(table)) continue;
+    const strings: Record<string, string> = {};
+    for (const [key, value] of Object.entries(table as Record<string, unknown>)) {
+      if (typeof value === 'string') strings[key] = value;
+    }
+    if (Object.keys(strings).length) out[lang] = strings;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // forms
 

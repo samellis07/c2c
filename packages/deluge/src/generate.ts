@@ -14,7 +14,7 @@
  * Nothing here deploys or contacts Catalyst.
  */
 
-import { flowStatusColumn, formLink, isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleBranchWorkflow, isScheduleWorkflow, isUsersField, closedChoices, staticDefault, unquote, type App, type Field, type Form, type FunctionDef, type ModulePermission, type Profile, type Property, type PropertyBlock, type RawDeluge, type Report, type Translation, type Workflow } from '../../core/src/ir.js';
+import { flowStatusColumn, formLink, isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleBranchWorkflow, isScheduleWorkflow, isUsersField, closedChoices, staticDefault, translationStrings, unquote, type App, type Field, type Form, type FunctionDef, type ModulePermission, type Profile, type Property, type PropertyBlock, type RawDeluge, type Report, type Translation, type Workflow } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
@@ -813,8 +813,15 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
     put(`functions/job/${EVENT_SWEEPER_MODULE}.mjs`, eventSweeperModule({ app, banner }));
     warnings.push({ ...ASYNC_ON_SUCCESS_WARNING });
   }
-  // Translation blocks are not migrated: each one is an explicit manual step.
-  for (const t of app.translations) warnings.push(translationWarning(t));
+  // A translation block's string labels ship in the generated client's i18n
+  // table (buildModel → slate/assets/model.js). A block with no migratable
+  // strings — unparseable JSON or no label entries — stays an explicit manual
+  // step: a todo inside its span plus the migration-report warning.
+  for (const t of app.translations) {
+    if (Object.keys(translationStrings(t)).length) continue;
+    warnings.push(translationWarning(t));
+    todos.push({ construct: 'translation', start: t.span.start, end: t.span.end });
+  }
 
   // functions/thisapp.mjs is emitted whenever a module can call `thisapp.<fn>`
   // (its own body uses the shim) or the app declared functions at all, so an
@@ -6301,8 +6308,9 @@ ${map}
 }
 
 /**
- * One translation block as an explicit manual step: string catalogues are
- * not migrated. The generated app renders the default-language text only.
+ * One translation block with no migratable strings as an explicit manual
+ * step: the generated client ships every string label in its i18n table, so
+ * only a block whose JSON holds no label entries lands here.
  */
 function translationWarning(t: Translation): GenerateWarning {
   const data = t.data && typeof t.data === 'object' && !Array.isArray(t.data) ? (t.data as Record<string, unknown>) : undefined;
@@ -6316,7 +6324,7 @@ function translationWarning(t: Translation): GenerateWarning {
   return {
     construct: 'translation-not-migrated',
     name,
-    note: `${head}${sample ? ` (e.g. ${sample})` : ''} are not migrated. The generated app renders the default-language text only. To serve ${lang !== undefined ? `"${lang}"` : 'another language'}, copy these strings into the generated client's labels and add a language switch.`,
+    note: `${head}${sample ? ` (e.g. ${sample})` : ''} are not migrated: the block holds no string labels the client i18n table can carry. The generated app renders the default-language text only. To serve ${lang !== undefined ? `"${lang}"` : 'another language'}, list these entries as label strings in the translation block.`,
   };
 }
 
