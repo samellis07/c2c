@@ -14,7 +14,7 @@
  * Nothing here deploys or contacts Catalyst.
  */
 
-import { flowStatusColumn, formLink, isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleBranchWorkflow, isScheduleWorkflow, isUsersField, closedChoices, staticDefault, unquote, type App, type Field, type Form, type FunctionDef, type ModulePermission, type Profile, type Property, type PropertyBlock, type RawDeluge, type Report, type Translation, type Workflow } from '../../core/src/ir.js';
+import { flowStatusColumn, formLink, isApprovalWorkflow, isBlueprintWorkflow, isPaymentWorkflow, isScheduleBranchWorkflow, isScheduleWorkflow, isUsersField, closedChoices, staticDefault, translationStrings, unquote, type App, type Field, type Form, type FunctionDef, type ModulePermission, type Profile, type Property, type PropertyBlock, type RawDeluge, type Report, type Translation, type Workflow } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import { toolchainBannerLines } from '../../core/src/toolchain.js';
 import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
@@ -906,16 +906,16 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
     put(`functions/job/${EVENT_SWEEPER_MODULE}.mjs`, eventSweeperModule({ app, banner }));
     warnings.push({ ...ASYNC_ON_SUCCESS_WARNING });
   }
-  // Translation blocks are not migrated: each one is an explicit manual step.
-  // A block naming no single language (none, or several) only ever carried a
-  // warning, which no-silent-drop.ts does not count — pushing a todo too
-  // makes it a listed manual step instead of a silent drop.
+  // A translation block's string labels ship in the generated client's i18n
+  // table (buildModel → slate/assets/model.js). A block with no migratable
+  // strings — unparseable JSON, Language_Settings-only, or no label entries —
+  // stays an explicit manual step: a todo inside its span (so it is a listed
+  // manual item, not a silent drop) plus the migration-report warning.
   for (const t of app.translations) {
+    if (Object.keys(translationStrings(t)).length) continue;
     const warning = translationWarning(t);
     warnings.push(warning);
-    if (translationLanguage(t) === undefined) {
-      todos.push({ construct: 'translation-block', start: t.span.start, end: t.span.end, manualStep: warning.note });
-    }
+    todos.push({ construct: 'translation', start: t.span.start, end: t.span.end, manualStep: warning.note });
   }
 
   // functions/thisapp.mjs is emitted whenever a module can call `thisapp.<fn>`
@@ -6804,8 +6804,10 @@ function stringCount(table: unknown): number {
 }
 
 /**
- * One translation block as an explicit manual step: string catalogues are
- * not migrated. The generated app renders the default-language text only.
+ * One translation block with no migratable strings as an explicit manual
+ * step: the generated client ships every string label in its i18n table
+ * (see translationStrings), so only a block whose JSON holds no label
+ * entries — including a Language_Settings-only block — lands here.
  */
 function translationWarning(t: Translation): GenerateWarning {
   const data = t.data && typeof t.data === 'object' && !Array.isArray(t.data) ? (t.data as Record<string, unknown>) : undefined;
@@ -6816,7 +6818,7 @@ function translationWarning(t: Translation): GenerateWarning {
     return {
       construct: 'translation-not-migrated',
       name: `translation:${lang}`,
-      note: `Translation "${lang}": ${keys.length} strings${sample ? ` (e.g. ${sample})` : ''} are not migrated. The generated app renders the default-language text only. To serve "${lang}", copy these strings into the generated client's labels and add a language switch.`,
+      note: `Translation "${lang}": ${keys.length} strings${sample ? ` (e.g. ${sample})` : ''} are not migrated: the block holds no string labels the client i18n table can carry. The generated app renders the default-language text only. To serve "${lang}", list these entries as label strings in the translation block.`,
     };
   }
   // A block with no language key or several: list each one with its string
@@ -6830,7 +6832,7 @@ function translationWarning(t: Translation): GenerateWarning {
   return {
     construct: 'translation-not-migrated',
     name: 'translation block',
-    note: `${head} is not migrated. The generated app renders the default-language text only. List each language and copy its strings into the generated client's labels by hand.`,
+    note: `${head} is not migrated: the block holds no string labels the client i18n table can carry. List each language and copy its strings into the generated client's labels by hand.`,
   };
 }
 

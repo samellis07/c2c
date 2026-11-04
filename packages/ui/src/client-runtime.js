@@ -6607,6 +6607,11 @@ export function boot(appModel, doc) {
   if (!documentRef || !appModel) return;
   bootedModel = appModel;
   const view = documentRef.defaultView || globalThis;
+  // Migrated `translation` blocks: the selected language's labels replace the
+  // default wording before anything renders. The i18n part is a sibling
+  // script: absent when the base file runs alone.
+  const selectedLanguage = typeof i18nSelectedLanguage === 'function' ? i18nSelectedLanguage(appModel, view) : '';
+  if (selectedLanguage) applyLanguage(appModel, selectedLanguage);
   const main = documentRef.getElementById('main');
   const bulkSelections = new Map();
   const nav = documentRef.getElementById('nav');
@@ -6744,7 +6749,11 @@ export function boot(appModel, doc) {
     };
     run();
   }
-  if (nav) nav.innerHTML = renderNav(appModel);
+  if (nav) {
+    nav.innerHTML = renderNav(appModel);
+    const picker = typeof i18nLanguagePicker === 'function' ? i18nLanguagePicker(appModel, view, documentRef) : null;
+    if (picker) nav.appendChild(picker);
+  }
   // `slidingpane` moves the phone navigation into a slide-over drawer and
   // leaves the bottom tab bar empty (the CSS hides an empty #tabbar).
   const slidingPane = appModel && (appModel.phoneLayout === 'sliding-pane' || appModel.tabletLayout === 'sliding-pane');
