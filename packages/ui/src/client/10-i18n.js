@@ -42,16 +42,18 @@ export function i18nSelectedLanguage(appModel, view) {
 
 /** A `Languages List.<code>` label, else the code itself. */
 function i18nLanguageName(strings, code) {
-  const named = strings && strings[`Languages List.${code}`];
+  const key = `Languages List.${code}`;
+  const named = strings && Object.hasOwn(strings, key) ? strings[key] : undefined;
   return typeof named === 'string' && named.trim() ? named : code;
 }
 
 /** Rewrite the model's labels for `lang`, in place, before first render. */
 export function applyLanguage(appModel, lang) {
-  const strings = appModel && appModel.i18n && appModel.i18n[lang];
+  const i18n = appModel && appModel.i18n;
+  const strings = i18n && lang && Object.hasOwn(i18n, lang) ? i18n[lang] : undefined;
   if (!strings) return;
   const get = (key) => {
-    const value = strings[key];
+    const value = Object.hasOwn(strings, key) ? strings[key] : undefined;
     return typeof value === 'string' ? value : undefined;
   };
   const apply = (target, key, prop) => {
@@ -127,7 +129,7 @@ export function i18nLanguagePicker(appModel, view, doc) {
   const languages = i18nLanguages(appModel);
   if (!languages.length || !doc) return null;
   const selected = i18nSelectedLanguage(appModel, view);
-  const strings = (appModel.i18n && appModel.i18n[selected]) || {};
+  const strings = (appModel.i18n && Object.hasOwn(appModel.i18n, selected) && appModel.i18n[selected]) || {};
   const label = doc.createElement('label');
   label.setAttribute('data-i18n', '');
   const select = doc.createElement('select');

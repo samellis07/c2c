@@ -1622,9 +1622,11 @@ export function assertCovered(app: App, outputs?: AuditOutputs): CoverageRow[] {
 function auditTranslationDeclarations(app: App, out: AuditOutputs, rows: CoverageRow[]): void {
   // The merged table the client ships: a later block overrides an earlier
   // one's key, so a shadowed entry is still migrated under its final value.
-  const expected: Record<string, Record<string, string>> = {};
+  const expected: Record<string, Record<string, string>> = Object.create(null);
   for (const t of app.translations) {
-    for (const [l, labels] of Object.entries(translationStrings(t))) Object.assign((expected[l] ??= {}), labels);
+    for (const [l, labels] of Object.entries(translationStrings(t))) {
+      Object.assign((expected[l] ??= Object.create(null) as Record<string, string>), labels);
+    }
   }
   for (const t of app.translations) {
     const lang = translationLanguage(t);
@@ -1633,8 +1635,9 @@ function auditTranslationDeclarations(app: App, out: AuditOutputs, rows: Coverag
     const count = Object.values(strings).reduce((n, table) => n + Object.keys(table).length, 0);
     if (count) {
       const shipped = Object.entries(strings).every(([l, labels]) => {
-        const table = out.model.i18n?.[l];
-        return table && Object.keys(labels).every((key) => table[key] === expected[l]?.[key]);
+        const i18n = out.model.i18n;
+        const table = i18n && Object.hasOwn(i18n, l) ? i18n[l] : undefined;
+        return table && Object.keys(labels).every((key) => Object.hasOwn(table, key) && table[key] === expected[l]?.[key]);
       });
       if (shipped) {
         rows.push({ kind: 'translation', name, status: 'emitted', via: 'slate/assets/model.js i18n' });

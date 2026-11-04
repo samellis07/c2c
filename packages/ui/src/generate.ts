@@ -186,7 +186,13 @@ function publicSummary(summary: UiSummary) {
 
 function modelModule(model: UiModel): string {
   const json = JSON.stringify(model).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
-  return `export const model = ${json};\n`;
+  if (!model.i18n) return `export const model = ${json};\n`;
+  // The i18n table is keyed by `.ds`-controlled language codes and label
+  // names: a plain object would treat a `__proto__` language as a prototype
+  // write and expose inherited names (`constructor`, `toString`) through
+  // `strings[key]`. The emitted module rebuilds both levels as
+  // null-prototype maps so the loaded model keeps data-only lookups.
+  return `export const model = (() => { const m = ${json}; const t = Object.create(null); for (const l of Object.keys(m.i18n)) t[l] = Object.assign(Object.create(null), m.i18n[l]); m.i18n = t; return m; })();\n`;
 }
 
 function endpointPath(file: GeneratedFile): string | undefined {
