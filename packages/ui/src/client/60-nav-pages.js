@@ -151,6 +151,9 @@ export function applyNavPages(model, doc) {
   if (nav) {
     nav.innerHTML = navHtml(model);
     markCurrentNav(nav, doc);
+    // The language switch lives in the nav; re-render keeps it on repaint.
+    const picker = typeof i18nLanguagePicker === 'function' ? i18nLanguagePicker(model, doc.defaultView || globalThis, doc) : null;
+    if (picker) nav.appendChild(picker);
   }
   const article = doc.querySelector('article[data-page]');
   if (article) {
