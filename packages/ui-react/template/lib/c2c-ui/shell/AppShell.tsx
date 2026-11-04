@@ -99,14 +99,29 @@ export function AppShell({ title, sections, current, phoneLayout, children }: Ap
 
   // Arrow keys walk the phone tabs, left/right like the Creator tab bar.
   const onTabbarKey = (event: ReactKeyboardEvent<HTMLElement>) => {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
     const tabsAll = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]'));
     const at = tabsAll.indexOf(doc.activeElement as HTMLElement);
     if (at === -1) return;
     event.preventDefault();
-    const next = event.key === 'ArrowRight' ? (at + 1) % tabsAll.length : (at - 1 + tabsAll.length) % tabsAll.length;
+    const next =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? tabsAll.length - 1
+          : event.key === 'ArrowRight'
+            ? (at + 1) % tabsAll.length
+            : (at - 1 + tabsAll.length) % tabsAll.length;
     tabsAll[next].focus();
   };
+
+  // WAI-ARIA tabs: the tab on the current route is selected and tabbable; a
+  // route behind More selects the More tab. No match leaves the first tab
+  // tabbable with nothing selected.
+  const currentTab = tabs.findIndex(isCurrent);
+  const moreCurrent = overflow && rest.some(isCurrent);
+  const activeTab = currentTab >= 0 ? currentTab : moreCurrent ? tabs.length : -1;
+  const tabbableTab = activeTab >= 0 ? activeTab : 0;
 
   return (
     <div className="c2c-app">
@@ -179,8 +194,15 @@ export function AppShell({ title, sections, current, phoneLayout, children }: Ap
         </nav>
       ) : (
         <nav id="tabbar" aria-label="Tabs" role="tablist" onKeyDown={onTabbarKey}>
-          {tabs.map((item) => (
-            <a key={`${item.kind}/${item.name}`} href={item.href} role="tab" aria-current={isCurrent(item) ? 'page' : undefined}>
+          {tabs.map((item, index) => (
+            <a
+              key={`${item.kind}/${item.name}`}
+              href={item.href}
+              role="tab"
+              aria-selected={index === activeTab}
+              tabIndex={index === tabbableTab ? 0 : -1}
+              aria-current={isCurrent(item) ? 'page' : undefined}
+            >
               <ItemIcon kind={item.kind} />
               <span>{item.label}</span>
             </a>
@@ -191,6 +213,8 @@ export function AppShell({ title, sections, current, phoneLayout, children }: Ap
               type="button"
               role="tab"
               data-more=""
+              aria-selected={moreCurrent}
+              tabIndex={tabbableTab === tabs.length ? 0 : -1}
               aria-haspopup="dialog"
               aria-expanded={open}
               aria-controls="more-sheet"
