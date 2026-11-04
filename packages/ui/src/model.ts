@@ -823,7 +823,7 @@ export function buildModel(app: App, delugeFiles: readonly GeneratedFile[] = [])
 function mergedTranslations(app: App): Record<string, Record<string, string>> {
   const merged: Record<string, Record<string, string>> = Object.create(null);
   for (const t of app.translations) {
-    for (const [lang, strings] of Object.entries(translationStrings(t))) {
+    for (const [lang, strings] of Object.entries(translationStrings(t)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
       Object.assign((merged[lang] ??= Object.create(null) as Record<string, string>), strings);
     }
   }

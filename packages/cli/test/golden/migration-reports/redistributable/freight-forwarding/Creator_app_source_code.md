@@ -24,7 +24,7 @@ App: Freight Forwarding and Feeder Solution
 
 ## TODO counts
 
-47
+48
 
 - 11 client-condition-uses-server
 - 5 Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
@@ -55,6 +55,7 @@ App: Freight Forwarding and Feeder Solution
 - 1 Report Users has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
 - 1 Report Vendors has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
 - 1 Report Vessels has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.
+- 1 translation
 
 ## Field gaps
 
@@ -73,7 +74,7 @@ App: Freight Forwarding and Feeder Solution
 
 ## Manual steps
 
-- 11 warning converter-gap — Rewrite the construct into something the converter already translates, or leave it as a fill-todo. Precheck only lists it.
+- 12 warning converter-gap — Rewrite the construct into something the converter already translates, or leave it as a fill-todo. Precheck only lists it.
 - 12 warning duplicate-name — Optional: give each label its own text so migrated screens are not ambiguous.
 - 1 warning pivot-analytics — Before migrating, check the report renders and exportScript succeeds in Creator; if Analytics sync is broken, recreate the report.
 - 1 warning sendmail-sender — Use from : zoho.adminuserid and reply to : zoho.loginuserid, or verify the senders in the Catalyst org.
@@ -81,6 +82,8 @@ App: Freight Forwarding and Feeder Solution
 
 ## Residual TODO steps
 
+- `app` — translation
+  - Step: Translation "Language_Settings": 1 strings (e.g. "LANGAGUE_WITH_LOGIN") are not migrated: the block holds no string labels the client i18n table can carry. The generated app renders the default-language text only. To serve "Language_Settings", list these entries as label strings in the translation block.
 - `field New_Account.Email property personal data` — Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
   - Step: In the Catalyst console, apply the data-privacy protection Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
 - `field New_Account.Phone_Number property personal data` — Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
@@ -172,7 +175,7 @@ App: Freight Forwarding and Feeder Solution
 
 ## Not converted
 
-Silent drops: 18 (still counted; each has a guided step below)
+Silent drops: 17 (still counted; each has a guided step below)
 
 - `field-property:New_Account.Annual_Revenue property format` — not converted. property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.
   - Step: The display format for New_Account.Annual_Revenue was not converted. In the Catalyst console, set the field's number or currency format for New_Account.Annual_Revenue, then preview a record and confirm the value is displayed correctly.
@@ -208,5 +211,3 @@ Silent drops: 18 (still counted; each has a guided step below)
   - Step: The display format for New_Invoice.Tax_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Tax_Total, then preview a record and confirm the value is displayed correctly.
 - `field-property:New_Invoice.Grand_Total property format` — not converted. property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.
   - Step: The display format for New_Invoice.Grand_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Grand_Total, then preview a record and confirm the value is displayed correctly.
-- `translation:translation Language_Settings` — not converted. The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.
-  - Step: The translation Language_Settings was not converted. In the Catalyst console, add the language and copy the source translation strings into the generated app, then preview the translated text and verify it is correct.

@@ -662,7 +662,8 @@ test('an app with no todos is deterministic only when it also has no silent drop
   // equivalence -- see packages/quality/src/default-equivalence.ts). An
   // address field with adjust_using_map=true used to serve this role; it now
   // carries its own counted manual-step todo, so it no longer has zero
-  // residual todos.
+  // residual todos. The app has no translation blocks, so this fixture is
+  // unaffected by the i18n migration.
   const dropSource = 'application "Demo"\n{\n\tform Profile\n\t{\n\t\tName\n\t\t(\n\t\t\ttype = text\n\t\t)\n\t\tStart\n\t\t(\n\t\t\ttype = time\n\t\t\ttimedisplayoptions = "hh:mm:ss"\n\t\t)\n\t}\n}\n';
   const library = deriveIr(parse(dropSource));
   const clean: App = {
