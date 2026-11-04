@@ -61,7 +61,7 @@ export function applyLanguage(appModel, lang) {
     if (value !== undefined) target[prop || 'label'] = value;
   };
 
-  const appKey = Object.keys(strings).find((key) => key.startsWith('App.'));
+  const appKey = Object.keys(strings).sort().find((key) => key.startsWith('App.'));
   if (appKey) apply(appModel, appKey, 'name');
 
   const fieldLabel = (fields, formName) => {

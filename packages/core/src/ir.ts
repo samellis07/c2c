@@ -1180,13 +1180,13 @@ function translation(ctx: Ctx, s: Statement): Translation {
 export function translationStrings(t: Translation): Record<string, Record<string, string>> {
   const out: Record<string, Record<string, string>> = Object.create(null);
   if (!t.data || typeof t.data !== 'object' || Array.isArray(t.data)) return out;
-  for (const [lang, table] of Object.entries(t.data as Record<string, unknown>)) {
+  for (const [lang, table] of Object.entries(t.data as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
     // `Language_Settings` is a settings object (e.g. `LANGAGUE_WITH_LOGIN`),
     // not a language's label table.
     if (lang === 'Language_Settings') continue;
     if (!table || typeof table !== 'object' || Array.isArray(table)) continue;
     const strings: Record<string, string> = Object.create(null);
-    for (const [key, value] of Object.entries(table as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(table as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
       if (typeof value === 'string') strings[key] = value;
     }
     if (Object.keys(strings).length) out[lang] = strings;

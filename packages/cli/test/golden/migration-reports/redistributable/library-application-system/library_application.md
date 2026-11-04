@@ -25,7 +25,7 @@ App: Library_System_Application
 
 ## TODO counts
 
-11
+12
 
 - 1 Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
 - 1 Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
@@ -35,6 +35,7 @@ App: Library_System_Application
 - 1 Report All_Staff_Members has an `options` setting (icon = travel-world) that Catalyst does not carry into the generated list report.
 - 1 Report Book_by_Genre has an `options` setting (icon = tech-music) that Catalyst does not carry into the generated kanban report.
 - 1 Report Book_Report has an `options` setting (icon = education-books-46) that Catalyst does not carry into the generated list report.
+- 1 translation
 - 1 ZML <button> "All_Book_Transactions" click parameters "Overdue transactions" are not generated; wire them to the click handler by hand
 - 1 ZML <button> "Book_Report" click parameters "View all Books" are not generated; wire them to the click handler by hand
 - 1 ZML <search> "Book_Report" criteria "Title.contains(input.searchString)" is not generated; wire the search filter by hand
@@ -51,10 +52,12 @@ App: Library_System_Application
 
 ## Manual steps
 
-- none
+- 1 warning converter-gap — Rewrite the construct into something the converter already translates, or leave it as a fill-todo. Precheck only lists it.
 
 ## Residual TODO steps
 
+- `app` — translation
+  - Step: Translation "Language_Settings": 1 strings (e.g. "LANGAGUE_WITH_LOGIN") are not migrated: the block holds no string labels the client i18n table can carry. The generated app renders the default-language text only. To serve "Language_Settings", list these entries as label strings in the translation block.
 - `field Staff_Members.Staff_Name property personal data` — Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
   - Step: In the Catalyst console, apply the data-privacy protection Staff_Name needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
 - `field Staff_Members.Staff_Email property personal data` — Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
@@ -95,9 +98,7 @@ App: Library_System_Application
 
 ## Not converted
 
-Silent drops: 2 (still counted; each has a guided step below)
+Silent drops: 1 (still counted; each has a guided step below)
 
 - `field-property:Staff_Members.Phone_Number property defaultcountry` — not converted. property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
   - Step: The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected.
-- `translation:translation Language_Settings` — not converted. The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.
-  - Step: The translation Language_Settings was not converted. In the Catalyst console, add the language and copy the source translation strings into the generated app, then preview the translated text and verify it is correct.

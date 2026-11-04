@@ -58,7 +58,7 @@
       "shimmed": 486
     }
   },
-  "todoCount": 47,
+  "todoCount": 48,
   "todoKinds": [
     {
       "construct": "client-condition-uses-server",
@@ -174,6 +174,10 @@
     },
     {
       "construct": "Report Vessels has an `options` setting (icon = files-folder-add) that Catalyst does not carry into the generated list report.",
+      "count": 1
+    },
+    {
+      "construct": "translation",
       "count": 1
     }
   ],
@@ -935,7 +939,7 @@
     {
       "severity": "warning",
       "check": "converter-gap",
-      "count": 11,
+      "count": 12,
       "workaround": "Rewrite the construct into something the converter already translates, or leave it as a fill-todo. Precheck only lists it."
     },
     {
@@ -965,6 +969,11 @@
   ],
   "hiddenParts": [],
   "todoSteps": [
+    {
+      "location": "app",
+      "construct": "translation",
+      "step": "Translation \"Language_Settings\": 1 strings (e.g. \"LANGAGUE_WITH_LOGIN\") are not migrated: the block holds no string labels the client i18n table can carry. The generated app renders the default-language text only. To serve \"Language_Settings\", list these entries as label strings in the translation block."
+    },
     {
       "location": "field New_Account.Email property personal data",
       "construct": "Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
@@ -1155,7 +1164,7 @@
     "console: stratus-enable — Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket)",
     "console: connections — Catalyst console → Connections: connect zoho.books.* (the user consents to each OAuth flow)"
   ],
-  "silentDrops": 18,
+  "silentDrops": 17,
   "residuals": [
     {
       "id": "field-property:New_Account.Annual_Revenue property format",
@@ -1342,14 +1351,6 @@
       "property": "property format",
       "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
       "step": "The display format for New_Invoice.Grand_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Grand_Total, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "translation:translation Language_Settings",
-      "kind": "translation",
-      "construct": "translation Language_Settings",
-      "reason": "The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.",
-      "step": "The translation Language_Settings was not converted. In the Catalyst console, add the language and copy the source translation strings into the generated app, then preview the translated text and verify it is correct.",
       "stepSource": "specific"
     }
   ]

@@ -149,7 +149,7 @@ test('a translation block with no migratable strings stays a counted manual step
   // Without the listing the block is a drop; its warning is not coverage.
   const out = collectOutputs(untranslatable);
   assert.ok(out.warnings.some((w) => w.construct === 'translation-not-migrated'));
-  out.todos = [];
+  out.todos = out.todos.filter((t) => t.end <= 10 || t.start >= 200);
   const drops = auditApp(untranslatable, out);
   assert.deepEqual(
     drops.map((d) => `${d.kind}: ${d.name}`),

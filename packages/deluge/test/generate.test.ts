@@ -6926,19 +6926,23 @@ test('translation blocks migrate to the client i18n table; only a block with no 
   const rows = (warnings ?? []).filter((w) => w.construct === 'translation-not-migrated');
   assert.equal(rows.length, 1);
   assert.match(rows[0]!.name, /fr/);
-  assert.deepEqual(
-    g.todos.filter((todo) => todo.construct === 'translation'),
-    [{ construct: 'translation', start: 20, end: 30 }],
-  );
+  const translationTodos = g.todos.filter((todo) => todo.construct === 'translation');
+  assert.equal(translationTodos.length, 1);
+  assert.equal(translationTodos[0]!.start, 20);
+  assert.equal(translationTodos[0]!.end, 30);
+  assert.match(translationTodos[0]!.manualStep ?? '', /fr/);
 });
 
 test('a translation block naming no single language is listed as a manual step, not only a warning', () => {
+  // Non-string values (e.g. a button/`CustomAction.*` object) hold no label
+  // the client i18n table can carry, so this block stays a manual step even
+  // though it has 2 languages and 3 total entries.
   const g = generate(
     app({
       translations: [
         {
-          json: '{"de":{"FormField.Orders.Title":" Titel "},"fr":{"FormField.Orders.Title":" Titre ","FormField.Orders.Amount":" Montant "}}',
-          data: { de: { 'FormField.Orders.Title': ' Titel ' }, fr: { 'FormField.Orders.Title': ' Titre ', 'FormField.Orders.Amount': ' Montant ' } },
+          json: '{"de":{"CustomAction.Orders.Approve":{"label":"Genehmigen"}},"fr":{"CustomAction.Orders.Approve":{"label":"Approuver"},"CustomAction.Orders.Reject":{"label":"Rejeter"}}}',
+          data: { de: { 'CustomAction.Orders.Approve': { label: 'Genehmigen' } }, fr: { 'CustomAction.Orders.Approve': { label: 'Approuver' }, 'CustomAction.Orders.Reject': { label: 'Rejeter' } } },
           span: { start: 10, end: 200 },
         },
       ],
@@ -6948,8 +6952,8 @@ test('a translation block naming no single language is listed as a manual step, 
     deterministic: boolean;
     untranslated: { construct: string; count: number }[];
   };
-  const rows = report.untranslated.filter((u) => u.construct === 'translation-block');
-  assert.deepEqual(rows, [{ construct: 'translation-block', count: 1 }]);
+  const rows = report.untranslated.filter((u) => u.construct === 'translation');
+  assert.deepEqual(rows, [{ construct: 'translation', count: 1 }]);
   assert.equal(report.deterministic, false);
   const warnings = JSON.parse(g.files.find((file) => file.path === 'migration-report.json')!.source).warnings as {
     construct: string;
