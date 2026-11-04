@@ -606,6 +606,11 @@ export function FileDropzoneField({ form, field, error, value, rowId }: FieldPro
   };
   const [cleared, setCleared] = useState(false);
   const stored = text(value);
+  // The export's `source` lists the acquisition choices Creator offers; an
+  // unlisted source gets no control and an unknown token keeps the file default.
+  const declared = (field.uploadSources ?? []).filter((s) => s === 'file' || s === 'camera' || s === 'public_url');
+  const offers = new Set(declared.length ? declared : ['file']);
+  const singleSource = offers.size === 1;
   return (
     <Box field={field}>
       {stored && !cleared ? (
@@ -620,13 +625,21 @@ export function FileDropzoneField({ form, field, error, value, rowId }: FieldPro
             {field.required ? <span aria-hidden="true"> *</span> : null}
           </label>
           <Suspense fallback={<FieldLoading field={field} bare />}>
-            <FileDropzone
-              label="Choose a file or drop it here"
-              accept={field.accept}
-              onFilesChange={sync}
-            />
+            {offers.has('file') ? (
+              <FileDropzone
+                label="Choose a file or drop it here"
+                accept={field.accept}
+                onFilesChange={sync}
+              />
+            ) : null}
           </Suspense>
-          <input ref={mirror} id={mirrorId} type="file" name={field.name} accept={field.accept} hidden aria-hidden="true" tabIndex={-1} required={field.required || undefined} />
+          {offers.has('camera') ? (
+            <input type="file" name={`${field.name}__camera`} accept={field.accept} capture onChange={(e) => sync([...(e.target.files ?? [])])} />
+          ) : null}
+          {offers.has('public_url') ? (
+            <input type="url" name={`${field.name}__url`} placeholder="Paste a public URL" className={inputStyles.input} onChange={notify} aria-label={`${field.label} URL`} />
+          ) : null}
+          <input ref={mirror} id={mirrorId} type="file" name={field.name} accept={field.accept} hidden aria-hidden="true" tabIndex={-1} required={(field.required && singleSource) || undefined} />
         </>
       )}
       {cleared && <input type="hidden" name={`${field.name}_cleared`} value="true" />}

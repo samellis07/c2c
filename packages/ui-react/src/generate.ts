@@ -102,6 +102,7 @@ function fieldSpec(field: UiField): FieldSpec {
   if (field.currencyCode !== undefined) spec.currencyCode = field.currencyCode;
   if (field.accept !== undefined) spec.accept = field.accept;
   if (field.uploadEndpoint !== undefined) spec.uploadEndpoint = field.uploadEndpoint;
+  if (field.uploadSources !== undefined) spec.uploadSources = field.uploadSources;
   const lookup = lookupSpec(field);
   if (lookup) spec.lookup = lookup;
   if (field.subfields?.length) spec.subfields = field.subfields.map((sub) => fieldSpec(sub));

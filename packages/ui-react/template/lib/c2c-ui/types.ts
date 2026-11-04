@@ -38,6 +38,8 @@ export interface FieldSpec {
   currencyCode?: string;
   accept?: string;
   uploadEndpoint?: string;
+  /** Acquisition sources the `source` property allows (`file`, `public_url`, `camera`), in the export's order. */
+  uploadSources?: string[];
   /** Lookup and multi lookup fields (and subform columns). */
   lookup?: LookupSpec;
   /** Composite parts (name, address) and subform columns. */
