@@ -174,6 +174,7 @@ interface SubmitFixup {
   serverFile?: string;
   form: string;
   event: string;
+  w: Workflow;
 }
 
 /**
@@ -239,10 +240,52 @@ export interface SubmitMergePlan {
   parts: MergedSubmitPart[];
   moved: Set<Workflow>;
   copied: Set<Workflow>;
+  /** Bodies that may not move, keyed to the {@link submitMergeBlockers} reasons. */
+  blocked: Map<Workflow, string[]>;
   successPath: string;
 }
 
-const NO_SUBMIT_MERGE: SubmitMergePlan = { parts: [], moved: new Set(), copied: new Set(), successPath: '' };
+const NO_SUBMIT_MERGE: SubmitMergePlan = { parts: [], moved: new Set(), copied: new Set(), blocked: new Map(), successPath: '' };
+
+/**
+ * A bare `actions` script under `on add` / `on edit` / `on add or edit` is
+ * Creator's on-success action for that record event: the pre-save scripts in
+ * an export are always phase-qualified (`on load`, `on validate`), and the
+ * generated `/submit` route already runs such a body after `writeLive`.
+ * Anything else — a phase-qualified event that reached the submit group, or
+ * an event this table does not name — is not provably post-save and fails
+ * closed.
+ */
+const POST_SAVE_SUBMIT_EVENT = /^\s*on\s+(?:add|edit|add\s+or\s+edit)\s*$/i;
+
+/** `cancel submit` — only valid before the row commits. */
+const SUBMIT_CANCELS = /\bcancel\s+submit\b|\bshim\.validate\.cancelSubmit\b/;
+/** `input.X = ...` or `input.X:ui.add(...)` — values the row must save. */
+const SUBMIT_WRITES_INPUT = /\binput\.[A-Za-z_][\w.$]*\s*=(?!=)|\binput\.[A-Za-z_][\w.$]*\s*:\s*ui\.|\bshim\.input\.(?:set|insert)\b/;
+/** `alert` / `info` to the submitter — a response the success route no longer serves. */
+const SUBMIT_ALERTS = /\b(?:alert|info)\s+(?![=;:])/;
+
+/**
+ * Why a submit-kind server body may not move into the on-success module: the
+ * merged body runs after `writeLive` commits the row, so a body that is not
+ * provably a post-save script — its phase is not the bare record `on add` /
+ * `on edit` / `on add or edit` success slot, or it cancels the submit,
+ * writes `input` fields the saved row depends on, or alerts the submitter —
+ * would silently change behavior (and what gets persisted) if it ran there.
+ * The list is fail-closed: an unrecognized phase or statement shape returns
+ * a reason, never an empty list by default. `submitBodyReadsClientState`
+ * stays a blocker here so every merge decision goes through one predicate.
+ */
+export function submitMergeBlockers(w: Workflow, serverBody: string): string[] {
+  const source = w.deluge?.text ?? '';
+  const reasons: string[] = [];
+  if (!POST_SAVE_SUBMIT_EVENT.test(w.event ?? '')) reasons.push('pre-save-phase');
+  if (SUBMIT_CANCELS.test(source) || SUBMIT_CANCELS.test(serverBody)) reasons.push('cancels-submit');
+  if (SUBMIT_WRITES_INPUT.test(source) || SUBMIT_WRITES_INPUT.test(serverBody)) reasons.push('writes-input');
+  if (SUBMIT_ALERTS.test(source)) reasons.push('alerts');
+  if (submitBodyReadsClientState(serverBody)) reasons.push('reads-client-state');
+  return reasons;
+}
 
 /** One visited statement and the stats bucket it counted into (translate.ts records rows; emitters shift them). */
 export interface CoverageEntry {
@@ -746,7 +789,8 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
     if (!submitBodyUnposted(successServerForms.get(fix.form), fix.event)) continue;
     fix.entry.serverInvoked = false;
     if (fix.serverFile) fix.entry.paths = fix.entry.paths.filter((p) => p !== fix.serverFile);
-    todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: fix.entry.start, end: fix.entry.end, manualStep: formEventUninvokedStep(fix.form, fix.event, 'submit') });
+    const fixReasons = submitMerges.get(fix.form)?.blocked.get(fix.w);
+    todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: fix.entry.start, end: fix.entry.end, manualStep: formEventUninvokedStep(fix.form, fix.event, 'submit'), ...(fixReasons?.length ? { manualReasons: fixReasons } : {}) });
   }
   // Every Advanced I/O form handler imports the shared request helpers from
   // one app-local module. Emit it only when this app has at least one AIO file.
@@ -1075,8 +1119,10 @@ function submitServerBody(app: App, w: Workflow, clientCallFunctions: ReadonlySe
  * `/forms/<form>/submit` only for a scope no success module owns, so an
  * `on add`/`on edit` body whose every scope is owned moves into the success
  * module; a partially covered body is copied under a scope guard for the
- * owned posts and stays for the rest. A body reading client-only request
- * state cannot move and stays a counted form-event-server-uninvoked todo.
+ * owned posts and stays for the rest. A body {@link submitMergeBlockers}
+ * flags — a non-post-save phase, `cancel submit`, an `input` write the row
+ * saves, an alert to the submitter, or client-only request state — cannot
+ * move and stays a counted form-event-server-uninvoked todo naming why.
  * The plan is computed once per form, by whichever of the submit or success
  * group emits first, and shared through `mergePlans`.
  */
@@ -1099,10 +1145,15 @@ function submitMergePlanFor(
       if (successServerForms && (owned.add || owned.edit)) successServerForms.set(form, owned);
     }
     if (owned.add || owned.edit) {
-      const next: SubmitMergePlan = { parts: [], moved: new Set(), copied: new Set(), successPath: `functions/aio/${slug(form)}/${handlerLeaf(successGroup)}.mjs` };
+      const next: SubmitMergePlan = { parts: [], moved: new Set(), copied: new Set(), blocked: new Map(), successPath: `functions/aio/${slug(form)}/${handlerLeaf(successGroup)}.mjs` };
       for (const w of submitGroup) {
         const body = submitServerBody(app, w, clientCallFunctions);
-        if (!body.trim() || submitBodyReadsClientState(body)) continue;
+        if (!body.trim()) continue;
+        const blockers = submitMergeBlockers(w, body);
+        if (blockers.length) {
+          next.blocked.set(w, blockers);
+          continue;
+        }
         const covered = submitEventScopes(w.event || '');
         const ownedAdd = covered.add && owned.add;
         const ownedEdit = covered.edit && owned.edit;
@@ -1111,7 +1162,9 @@ function submitMergePlanFor(
         next.parts.push({ w, text: cond ? `${cond} {\n${indent(body)}\n}` : body });
         (ownedAdd === covered.add && ownedEdit === covered.edit ? next.moved : next.copied).add(w);
       }
-      if (next.parts.length) plan = next;
+      // Keep the plan when it carries only blocked bodies too: nothing
+      // merges, but their reasons still reach the counted todo.
+      if (next.parts.length || next.blocked.size) plan = next;
     }
   }
   mergePlans?.set(form, plan);
@@ -1408,7 +1461,10 @@ function emitFormHandler(
       else if (item.server && serverFile) {
         if (kind === 'submit' && !clientPosted) serverInvoked = !submitBodyUnposted(successServerForms?.get(form), item.w.event || '');
         else serverInvoked = clientPosted || runtimeReachesFormEvent(kind) || presuccessModule;
-        if (!serverInvoked) todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: item.w.span.start, end: item.w.span.end, manualStep: formEventUninvokedStep(form, item.w.event || '', kind) });
+        if (!serverInvoked) {
+          const reasons = kind === 'submit' ? merge.blocked.get(item.w) : undefined;
+          todos.push({ construct: FORM_EVENT_SERVER_UNINVOKED, start: item.w.span.start, end: item.w.span.end, manualStep: formEventUninvokedStep(form, item.w.event || '', kind), ...(reasons?.length ? { manualReasons: reasons } : {}) });
+        }
       }
       const paths: string[] = [];
       if (item.server && mergedInto && merge.successPath) paths.push(merge.successPath);
@@ -1428,7 +1484,7 @@ function emitFormHandler(
         ...(serverInvoked !== undefined ? { serverInvoked } : {}),
       };
       coverage.push(entry);
-      if (item.server && serverFile && kind === 'submit' && !mergedInto) submitFixups?.push({ entry, clientPosted, serverFile, form, event: item.w.event || '' });
+      if (item.server && serverFile && kind === 'submit' && !mergedInto) submitFixups?.push({ entry, clientPosted, serverFile, form, event: item.w.event || '', w: item.w });
     }
   }
 }

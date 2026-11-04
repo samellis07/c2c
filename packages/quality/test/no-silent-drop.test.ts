@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { deriveIr, emptyApp, parse, parseProject, type App, type Field, type Workflow } from '../../core/src/index.js';
-import { FORM_EVENT_SERVER_UNINVOKED, assertNoSkippedStatements, clientPostsServerPath, generate, submitBodyReadsClientState } from '../../deluge/src/generate.js';
+import { FORM_EVENT_SERVER_UNINVOKED, assertNoSkippedStatements, clientPostsServerPath, generate, submitBodyReadsClientState, submitMergeBlockers } from '../../deluge/src/generate.js';
 import { assertCovered, auditApp, collectOutputs, coverageLedger, groupDrops, renderNoSilentDrop, SilentDropError } from '../src/no-silent-drop.js';
 
 const Z = { start: 0, end: 0 };
@@ -1397,6 +1397,171 @@ test('a submit body reading client-only request state stays counted', () => {
   // posts; the predicate is the fail-closed gate the plan applies.
   assert.equal(submitBodyReadsClientState('const row = shim.subform.currentRow(ctx, "Sub");\nctx.subformRow;'), true);
   assert.equal(submitBodyReadsClientState('await shim.mail.send(ctx, {});'), false);
+});
+
+// An unsafe submit-kind body must never merge into the on-success module:
+// the merged body runs after `writeLive` commits the row, so a `cancel
+// submit`, an `input` write the saved row needs, or an alert to the
+// submitter would silently change behavior. Each case is its own .ds — one
+// marker per shape — so dropping a marker from submitMergeBlockers fails
+// exactly the case it guards. The add-scoped success owns every add post.
+const mergeGuardDs = (deluge: string): App =>
+  dsApp(`
+	form Orders
+	{
+		Title
+		(
+			type = text
+		)
+	}
+	workflow
+	{
+	form
+	{
+		Guard_W
+		{
+			type =  form
+			form = Orders
+			on add
+			{
+				actions
+				{
+					on success
+					(
+						openUrl("https://example.com", "same window");
+						sendmail
+						(
+							from : "zoho.loginuserid"
+							to : "a@b.c"
+							subject : "safe"
+							message : "hi"
+						)
+					)
+				}
+				actions
+				{
+					${deluge}
+				}
+			}
+		}
+	}
+	}
+`);
+
+for (const [label, deluge, reason] of [
+  [
+    'a `cancel submit` body',
+    `cancel submit;
+					sendmail
+					(
+						from : "zoho.loginuserid"
+						to : "u@b.c"
+						subject : "unsafe"
+						message : "hi"
+					)`,
+    'cancels-submit',
+  ],
+  [
+    'an `input` write the saved row needs',
+    `input.Title = "unsafe";
+					sendmail
+					(
+						from : "zoho.loginuserid"
+						to : "u@b.c"
+						subject : "unsafe"
+						message : "hi"
+					)`,
+    'writes-input',
+  ],
+  [
+    'an `alert` to the submitter',
+    `alert "careful";
+					sendmail
+					(
+						from : "zoho.loginuserid"
+						to : "u@b.c"
+						subject : "unsafe"
+						message : "hi"
+					)`,
+    'alerts',
+  ],
+  [
+    'an `info` to the submitter',
+    `info "note";
+					sendmail
+					(
+						from : "zoho.loginuserid"
+						to : "u@b.c"
+						subject : "unsafe"
+						message : "hi"
+					)`,
+    'alerts',
+  ],
+] as const) {
+  test(`a submit body with ${label} stays counted instead of merging post-commit`, () => {
+    const source = mergeGuardDs(deluge);
+    const out = collectOutputs(source);
+    const entry = out.coverage?.find((c) => c.name === 'Guard_W' && c.event === 'on add');
+    assert.ok(entry, 'the bare on add body is tracked');
+    assert.equal(entry.serverInvoked, false);
+    const todo = out.todos.find((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === entry.start);
+    assert.ok(todo, 'the body stays a counted uninvoked todo');
+    assert.deepEqual(todo.manualReasons, [reason]);
+    const success = out.files.find((f) => f.path === 'functions/aio/orders/on-success.mjs');
+    assert.ok(success, 'the owning success module is emitted');
+    // The unsafe body never reaches the post-commit module; the safe
+    // on-success script is still there.
+    assert.equal(success.source.split('"subject": "unsafe"').length - 1, 0);
+    assert.equal(success.source.split('"subject": "safe"').length - 1, 1);
+    assert.ok(!entry.paths.includes(success.path));
+  });
+}
+
+test('a clean post-save submit body still merges once, after the write', () => {
+  const source = mergeGuardDs(`sendmail
+					(
+						from : "zoho.loginuserid"
+						to : "u@b.c"
+						subject : "unsafe"
+						message : "hi"
+					)`);
+  const out = collectOutputs(source);
+  const entry = out.coverage?.find((c) => c.name === 'Guard_W' && c.event === 'on add');
+  assert.ok(entry);
+  assert.equal(entry.serverInvoked, true);
+  const todo = out.todos.find((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === entry.start);
+  assert.equal(todo, undefined);
+  const success = out.files.find((f) => f.path === 'functions/aio/orders/on-success.mjs')!;
+  assert.ok(success);
+  assert.equal(success.source.split('"subject": "unsafe"').length - 1, 1);
+  assert.ok(entry.paths.includes(success.path));
+  const handle = success.source.slice(success.source.indexOf('export async function handle'));
+  assert.ok(handle.indexOf('"subject": "unsafe"') > handle.indexOf('"subject": "safe"'), 'merged body runs after the on-success body');
+  assert.ok(success.source.indexOf('await handle(ctx)') > success.source.indexOf('await writeLive('), 'handle runs after the write');
+});
+
+test('the merge predicate fails closed on a non post-save or unknown phase', () => {
+  const mail = 'sendmail[from: zoho.loginuserid to: "a@b.c" subject: "s" message: "hi"];';
+  const serverMail = 'await shim.mail.send(ctx, {});';
+  // A phase-qualified event (on validate) and every event this model does
+  // not name as the post-save slot are not provably post-save: they stay.
+  for (const event of ['on validate', 'on submit', 'on load', 'on frobnicate']) {
+    const reasons = submitMergeBlockers(workflow({ name: 'W', event, deluge: { text: mail, span: Z } }), serverMail);
+    assert.deepEqual(reasons, ['pre-save-phase'], event);
+  }
+  // A bare `actions` script under `on add` / `on edit` / `on add or edit` is
+  // Creator's post-save slot; a clean body lists no blocker.
+  for (const event of ['on add', 'on edit', 'on add or edit']) {
+    assert.deepEqual(submitMergeBlockers(workflow({ name: 'W', event, deluge: { text: mail, span: Z } }), serverMail), [], event);
+  }
+  // Each unsafe marker alone is its own blocker; a body carrying several
+  // lists them all.
+  const w = (event: string, text: string) => workflow({ name: 'W', event, deluge: { text, span: Z } });
+  assert.deepEqual(submitMergeBlockers(w('on add', 'cancel submit;'), serverMail), ['cancels-submit']);
+  assert.deepEqual(submitMergeBlockers(w('on add', 'input.Title = "x";'), serverMail), ['writes-input']);
+  assert.deepEqual(submitMergeBlockers(w('on add', 'input.Tags:ui.add(tags);'), serverMail), ['writes-input']);
+  assert.deepEqual(submitMergeBlockers(w('on add', 'alert "no";'), serverMail), ['alerts']);
+  assert.deepEqual(submitMergeBlockers(w('on add', 'x = ctx.subformRow;'), 'ctx.subformRow;'), ['reads-client-state']);
 });
 
 function dsApp(body: string): App {
