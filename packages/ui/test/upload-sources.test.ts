@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { JSDOM } from 'jsdom';
 import { createRequire } from 'node:module';
 import { deriveIr, parse, type App } from '../../core/src/index.js';
+import { MAX_FILE_BYTES } from '../../shims/src/index.js';
 import { buildUi, type UiModel } from '../src/index.js';
 
 const require = createRequire(import.meta.url);
@@ -202,7 +203,17 @@ test('a streamed body stops at the first chunk past the cap and cancels the read
   assert.equal(reads, 2);
   assert.equal(cancelled, true);
   assert.equal(uploads, 0);
-  assert.ok(cap === 100 * 1024 * 1024);
+  assert.equal(cap, MAX_FILE_BYTES);
+});
+
+test('the shipped runtime takes its upload cap from the shim definition', async () => {
+  // Mutation guard: a drift between packages/shims MAX_FILE_BYTES and the
+  // runtime constant fails here, and the emitted bundle is re-stamped from
+  // the shim at generate time so a shipped app cannot carry a second cap.
+  const { clientRuntimeSource } = await import('../src/index.js');
+  assert.match(clientRuntimeSource(), new RegExp(`export const UPLOAD_SOURCE_MAX_BYTES = ${MAX_FILE_BYTES};`));
+  const rt = await runtime();
+  assert.equal(rt.UPLOAD_SOURCE_MAX_BYTES, MAX_FILE_BYTES);
 });
 
 test('a picked file over the cap, or an SVG pick for an image field, is refused like a fetched source', async () => {
