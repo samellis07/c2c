@@ -821,15 +821,15 @@ export function buildModel(app: App, delugeFiles: readonly GeneratedFile[] = [])
  * Creator re-import.
  */
 function mergedTranslations(app: App): Record<string, Record<string, string>> {
-  const merged: Record<string, Record<string, string>> = {};
+  const merged: Record<string, Record<string, string>> = Object.create(null);
   for (const t of app.translations) {
     for (const [lang, strings] of Object.entries(translationStrings(t))) {
-      Object.assign((merged[lang] ??= {}), strings);
+      Object.assign((merged[lang] ??= Object.create(null) as Record<string, string>), strings);
     }
   }
-  const sorted: Record<string, Record<string, string>> = {};
+  const sorted: Record<string, Record<string, string>> = Object.create(null);
   for (const lang of Object.keys(merged).sort(compareEnUs)) {
-    const table: Record<string, string> = {};
+    const table: Record<string, string> = Object.create(null);
     for (const key of Object.keys(merged[lang]!).sort(compareEnUs)) table[key] = merged[lang]![key]!;
     sorted[lang] = table;
   }

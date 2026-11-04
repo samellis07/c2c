@@ -1178,14 +1178,14 @@ function translation(ctx: Ctx, s: Statement): Translation {
  * strings has nothing the client can render and stays a manual step.
  */
 export function translationStrings(t: Translation): Record<string, Record<string, string>> {
-  const out: Record<string, Record<string, string>> = {};
+  const out: Record<string, Record<string, string>> = Object.create(null);
   if (!t.data || typeof t.data !== 'object' || Array.isArray(t.data)) return out;
   for (const [lang, table] of Object.entries(t.data as Record<string, unknown>)) {
     // `Language_Settings` is a settings object (e.g. `LANGAGUE_WITH_LOGIN`),
     // not a language's label table.
     if (lang === 'Language_Settings') continue;
     if (!table || typeof table !== 'object' || Array.isArray(table)) continue;
-    const strings: Record<string, string> = {};
+    const strings: Record<string, string> = Object.create(null);
     for (const [key, value] of Object.entries(table as Record<string, unknown>)) {
       if (typeof value === 'string') strings[key] = value;
     }
