@@ -643,13 +643,163 @@ test('a device detail view rides along for the record view breakpoint', () => {
 \t\t\t\t)
 \t\t\t}
 \t\t}
+\t}
+\ttablet
+\t{
+\t\treports
+\t\t{
+\t\t\treport Booking_Report
+\t\t\t{
+\t\t\t\tdetailview
+\t\t\t\t(
+\t\t\t\t\tlayout
+\t\t\t\t\t(
+\t\t\t\t\t\ttype = 2
+\t\t\t\t\t\tdatablock1
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\ttitle = "Tablet Card"
+\t\t\t\t\t\t\tfields
+\t\t\t\t\t\t\t(
+\t\t\t\t\t\t\t\tRoom
+\t\t\t\t\t\t\t)
+\t\t\t\t\t\t)
+\t\t\t\t\t)
+\t\t\t\t)
+\t\t\t}
+\t\t}
 \t}`)).model;
   const report = model.reports.find((item) => item.name === 'Booking_Report');
   assert.ok(report);
   assert.equal(report.detailDevice, 'web');
   assert.deepEqual((report.detailBlocks ?? []).map((block) => block.title), ['Overview']);
-  assert.deepEqual((report.deviceDetailBlocks ?? []).map((variant) => variant.device), ['phone']);
+  assert.deepEqual((report.deviceDetailBlocks ?? []).map((variant) => variant.device), ['phone', 'tablet']);
   assert.deepEqual(report.deviceDetailBlocks?.[0]?.blocks.map((block) => block.title), ['Phone Card']);
+  assert.deepEqual(report.deviceDetailBlocks?.[1]?.blocks.map((block) => block.title), ['Tablet Card']);
+});
+
+test('vanilla record view renders phone and tablet detail layouts and swaps them on change', async () => {
+  const model = buildUi(appOf(`${FORM}
+\treport Booking_Report
+\t{
+\t\tshow all rows from Booking
+\t\t(
+\t\t\tGuest
+\t\t\tRoom
+\t\t)
+\t}
+\tweb
+\t{
+\t\treports
+\t\t{
+\t\t\treport Booking_Report
+\t\t\t{
+\t\t\t\tdetailview
+\t\t\t\t(
+\t\t\t\t\tlayout
+\t\t\t\t\t(
+\t\t\t\t\t\ttype = 2
+\t\t\t\t\t\tdatablock1
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\ttitle = "Overview"
+\t\t\t\t\t\t\tfields
+\t\t\t\t\t\t\t(
+\t\t\t\t\t\t\t\tGuest
+\t\t\t\t\t\t\t\tRoom
+\t\t\t\t\t\t\t)
+\t\t\t\t\t\t)
+\t\t\t\t\t)
+\t\t\t\t)
+\t\t\t}
+\t\t}
+\t}
+\tphone
+\t{
+\t\treports
+\t\t{
+\t\t\treport Booking_Report
+\t\t\t{
+\t\t\t\tdetailview
+\t\t\t\t(
+\t\t\t\t\tlayout
+\t\t\t\t\t(
+\t\t\t\t\t\ttype = 2
+\t\t\t\t\t\tdatablock1
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\ttitle = "Phone Card"
+\t\t\t\t\t\t\tfields
+\t\t\t\t\t\t\t(
+\t\t\t\t\t\t\t\tGuest
+\t\t\t\t\t\t\t)
+\t\t\t\t\t\t)
+\t\t\t\t\t)
+\t\t\t\t)
+\t\t\t}
+\t\t}
+\t}
+\ttablet
+\t{
+\t\treports
+\t\t{
+\t\t\treport Booking_Report
+\t\t\t{
+\t\t\t\tdetailview
+\t\t\t\t(
+\t\t\t\t\tlayout
+\t\t\t\t\t(
+\t\t\t\t\t\ttype = 2
+\t\t\t\t\t\tdatablock1
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\ttitle = "Tablet Card"
+\t\t\t\t\t\t\tfields
+\t\t\t\t\t\t\t(
+\t\t\t\t\t\t\t\tRoom
+\t\t\t\t\t\t\t)
+\t\t\t\t\t\t)
+\t\t\t\t\t)
+\t\t\t\t)
+\t\t\t}
+\t\t}
+\t}`)).model;
+
+  const rows = [{ ROWID: '42', Guest: 'Sam Ellis', Room: 'Room 101' }];
+  // 1. Phone width (375px) renders phone detail layout
+  const { doc, media } = await bootDecorated('Booking_Report', rows, 'report', '42', undefined, { model, initialWidth: 375 });
+  assert.ok(media);
+  const section = doc.querySelector('section[data-report="Booking_Report"]');
+  assert.ok(section);
+  assert.equal(section?.getAttribute('data-detail-device'), 'phone');
+  assert.deepEqual(
+    Array.from(doc.querySelectorAll('[data-block] h3')).map((el) => el.textContent),
+    ['Phone Card'],
+  );
+  assert.match(doc.body.textContent ?? '', /Sam Ellis/);
+
+  // 2. Swapping to tablet width (800px) re-selects tablet detail layout
+  media.setWidth(800);
+  await until(() => section?.getAttribute('data-detail-device') === 'tablet');
+  assert.deepEqual(
+    Array.from(doc.querySelectorAll('[data-block] h3')).map((el) => el.textContent),
+    ['Tablet Card'],
+  );
+  assert.match(doc.body.textContent ?? '', /Room 101/);
+
+  // 3. Swapping to web width (1200px) falls back to default detailBlocks
+  media.setWidth(1200);
+  await until(() => section?.getAttribute('data-detail-device') === 'web');
+  assert.deepEqual(
+    Array.from(doc.querySelectorAll('[data-block] h3')).map((el) => el.textContent),
+    ['Overview'],
+  );
+  assert.match(doc.body.textContent ?? '', /Sam Ellis/);
+  assert.match(doc.body.textContent ?? '', /Room 101/);
+
+  // 4. Swapping back to phone width (500px) re-selects phone layout
+  media.setWidth(500);
+  await until(() => section?.getAttribute('data-detail-device') === 'phone');
+  assert.deepEqual(
+    Array.from(doc.querySelectorAll('[data-block] h3')).map((el) => el.textContent),
+    ['Phone Card'],
+  );
 });
 
 test('an in-app pivotchart is a generated chart report, not an Analytics note', () => {
@@ -729,21 +879,67 @@ async function loadViewsRuntime(): Promise<ViewsRuntime> {
   return (await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)) as ViewsRuntime;
 }
 
+function stubMatchMedia(win: { matchMedia?: unknown }, initialWidth: number) {
+  let width = initialWidth;
+  const allListeners = new Set<{ query: string; fn: () => void }>();
+
+  const checkMatch = (query: string, w: number) => {
+    if (query.includes('max-width: 767px')) return w <= 767;
+    if (query.includes('min-width: 768px') && query.includes('max-width: 1024px')) return w >= 768 && w <= 1024;
+    return w > 1024;
+  };
+
+  win.matchMedia = ((query: string) => {
+    return {
+      get matches() {
+        return checkMatch(query, width);
+      },
+      media: query,
+      addEventListener(_event: string, fn: () => void) {
+        allListeners.add({ query, fn });
+      },
+      removeEventListener(_event: string, fn: () => void) {
+        for (const item of allListeners) {
+          if (item.query === query && item.fn === fn) allListeners.delete(item);
+        }
+      },
+      addListener(fn: () => void) {
+        this.addEventListener('change', fn);
+      },
+      removeListener(fn: () => void) {
+        this.removeEventListener('change', fn);
+      },
+      dispatchEvent: () => true,
+    };
+  }) as unknown as typeof window.matchMedia;
+
+  return {
+    setWidth(newWidth: number) {
+      width = newWidth;
+      for (const { fn } of Array.from(allListeners)) {
+        fn();
+      }
+    },
+  };
+}
+
 async function bootDecorated(
   name: string,
   rows: Record<string, unknown>[],
   kind: 'report' | 'page' = 'report',
   recordIdOrRespond?: string | ((body: { op?: string; page?: number }) => unknown),
   recordReply?: () => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>,
+  options?: { model?: UiModel; initialWidth?: number },
 ) {
   const recordId = typeof recordIdOrRespond === 'string' ? recordIdOrRespond : undefined;
   const respond = typeof recordIdOrRespond === 'function' ? recordIdOrRespond : undefined;
   (globalThis as { CSS?: unknown }).CSS ??= { escape: (value: string) => value };
   const runtime = await loadViewsRuntime();
-  const model = decoratedViews();
+  const model = options?.model ?? decoratedViews();
   const win = new JSDOM(`<!doctype html><body><nav id="nav"></nav><main id="main"></main></body>`, {
     url: `http://localhost/slate/index.html#/${kind}/${name}${recordId ? `/row/${recordId}` : ''}`,
-  }).window as unknown as { document: Document; fetch: typeof fetch; location: { hash: string } };
+  }).window as unknown as { document: Document; fetch: typeof fetch; location: { hash: string }; matchMedia?: unknown };
+  const media = typeof options?.initialWidth === 'number' ? stubMatchMedia(win, options.initialWidth) : undefined;
   const recordReads: { url: string; body: Record<string, unknown> }[] = [];
   win.fetch = (async (url: string, init: { body: string }) => {
     const body = JSON.parse(init.body) as Record<string, unknown> & { op?: string; page?: number };
@@ -759,11 +955,14 @@ async function bootDecorated(
   runtime.installReportViews(model, win.document);
   await runtime.boot(model, win.document);
   await until(() => !recordId || docRecordLoaded(win.document));
-  return { doc: win.document, runtime, model, recordReads };
+  return { doc: win.document, runtime, model, recordReads, media };
 }
 
 function docRecordLoaded(doc: Document): boolean {
-  return (doc.body.textContent ?? '').includes('Off page record');
+  return (
+    doc.querySelector('section[data-detail-ready="1"]') !== null ||
+    (doc.body.textContent ?? '').includes('Off page record')
+  );
 }
 
 async function until(pred: () => boolean) {

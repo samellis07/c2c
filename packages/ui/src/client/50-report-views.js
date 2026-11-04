@@ -27,7 +27,22 @@ const reportViewsRuntime = (() => {
 let viewsModel = null;
 const wrappedWindows = new WeakSet();
 const watchedDocs = new WeakSet();
+const detailRowsBySection = new WeakMap();
 let enhancing = false;
+
+function getCachedDetailRow(section, id) {
+  const map = detailRowsBySection.get(section);
+  return map ? map.get(String(id)) : null;
+}
+
+function setCachedDetailRow(section, id, row) {
+  let map = detailRowsBySection.get(section);
+  if (!map) {
+    map = new Map();
+    detailRowsBySection.set(section, map);
+  }
+  map.set(String(id), row);
+}
 
 function reportOf(name) {
   const reports = viewsModel && viewsModel.reports;
@@ -340,68 +355,101 @@ function drawList(doc, section, report) {
   }
 }
 
+function activeDevice(view) {
+  if (!view || typeof view.matchMedia !== 'function') return 'web';
+  try {
+    const phone = view.matchMedia('(max-width: 767px)');
+    if (phone && phone.matches) return 'phone';
+    const tablet = view.matchMedia('(min-width: 768px) and (max-width: 1024px)');
+    if (tablet && tablet.matches) return 'tablet';
+  } catch (_) {}
+  return 'web';
+}
+
+function selectDetailBlocks(report, device) {
+  if (device && device !== 'web' && Array.isArray(report.deviceDetailBlocks)) {
+    const match = report.deviceDetailBlocks.find((variant) => variant && variant.device === device);
+    if (match && Array.isArray(match.blocks)) return match.blocks;
+  }
+  return report.detailBlocks || [];
+}
+
 function drawDetail(doc, section, report, id, row) {
-  const blocks = report.detailBlocks || [];
-  if (section.getAttribute('data-detail') === id && section.getAttribute('data-detail-ready') === '1') return;
-  if (section.getAttribute('data-detail') === id && section.hasAttribute('data-detail-error')) return;
-  if (!row) {
-    if (section.getAttribute('data-detail') === id && section.getAttribute('data-detail-loading') === '1') return;
-    section.setAttribute('data-detail', id);
-    section.setAttribute('data-detail-loading', '1');
-    const pending = doc.createElement('p');
-    pending.setAttribute('data-detail-loading', '');
-    pending.textContent = 'Loading record…';
-    const oldHost = section.querySelector('[data-rows]') || section;
-    oldHost.textContent = '';
-    oldHost.appendChild(pending);
-    const form = (viewsModel.forms || []).find((item) => item && item.name === report.form);
-    const view = doc.defaultView || globalThis;
-    const call = (view && view.fetch) || globalThis.fetch;
-    const endpoint = form && form.recordEndpoint;
-    if (!endpoint || typeof call !== 'function' || typeof apiCall !== 'function') {
-      pending.textContent = 'Record detail is unavailable.';
-      section.removeAttribute('data-detail-loading');
-      return;
-    }
-    apiCall(call, view, endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ROWID: id }),
-    }).then(async (res) => ({ res, body: res && res.ok && typeof readJson === 'function' ? await readJson(res) : null }))
-      .then(({ res, body }) => {
-        const route = hashRoute(doc);
-        const record = body && body.record;
-        if (route.row !== id || route.id !== report.name) return;
-        if (!res || !res.ok || !record || typeof record !== 'object' || Array.isArray(record)) {
-          pending.textContent = res && (res.status === 403 || res.status === 404) ? "You can't open this record." : 'Unable to load this record. Try again.';
-          pending.setAttribute('data-detail-error', '');
-          pending.setAttribute('role', 'alert');
-          pending.setAttribute('data-detail-retry', '');
-          section.setAttribute('data-detail-error', '');
-          section.removeAttribute('data-detail-loading');
-          return;
-        }
-        section.removeAttribute('data-detail-loading');
-        drawDetail(doc, section, report, id, record);
-      })
-      .catch(() => {
-        const route = hashRoute(doc);
-        if (section.getAttribute('data-detail') === id && route.row === id && route.id === report.name) {
-          pending.textContent = 'Unable to load this record. Try again.';
-          pending.setAttribute('data-detail-error', '');
-          pending.setAttribute('role', 'alert');
-          pending.setAttribute('data-detail-retry', '');
-          section.setAttribute('data-detail-error', '');
-          section.removeAttribute('data-detail-loading');
-        }
-      });
+  const view = doc.defaultView || globalThis;
+  const device = activeDevice(view);
+  const blocks = selectDetailBlocks(report, device);
+  if (
+    section.getAttribute('data-detail') === id &&
+    section.getAttribute('data-detail-ready') === '1' &&
+    section.getAttribute('data-detail-device') === device
+  ) {
     return;
   }
+  if (section.getAttribute('data-detail') === id && section.hasAttribute('data-detail-error')) return;
+  if (!row) {
+    const cached = getCachedDetailRow(section, id) || reportViewRow(report.name, id);
+    if (cached) {
+      row = cached;
+    } else {
+      if (section.getAttribute('data-detail') === id && section.getAttribute('data-detail-loading') === '1') return;
+      section.setAttribute('data-detail', id);
+      section.setAttribute('data-detail-loading', '1');
+      const pending = doc.createElement('p');
+      pending.setAttribute('data-detail-loading', '');
+      pending.textContent = 'Loading record…';
+      const oldHost = section.querySelector('[data-rows]') || section;
+      oldHost.textContent = '';
+      oldHost.appendChild(pending);
+      const form = (viewsModel.forms || []).find((item) => item && item.name === report.form);
+      const call = (view && view.fetch) || globalThis.fetch;
+      const endpoint = form && form.recordEndpoint;
+      if (!endpoint || typeof call !== 'function' || typeof apiCall !== 'function') {
+        pending.textContent = 'Record detail is unavailable.';
+        section.removeAttribute('data-detail-loading');
+        return;
+      }
+      apiCall(call, view, endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ROWID: id }),
+      }).then(async (res) => ({ res, body: res && res.ok && typeof readJson === 'function' ? await readJson(res) : null }))
+        .then(({ res, body }) => {
+          const route = hashRoute(doc);
+          const record = body && body.record;
+          if (route.row !== id || route.id !== report.name) return;
+          if (!res || !res.ok || !record || typeof record !== 'object' || Array.isArray(record)) {
+            pending.textContent = res && (res.status === 403 || res.status === 404) ? "You can't open this record." : 'Unable to load this record. Try again.';
+            pending.setAttribute('data-detail-error', '');
+            pending.setAttribute('role', 'alert');
+            pending.setAttribute('data-detail-retry', '');
+            section.setAttribute('data-detail-error', '');
+            section.removeAttribute('data-detail-loading');
+            return;
+          }
+          section.removeAttribute('data-detail-loading');
+          drawDetail(doc, section, report, id, record);
+        })
+        .catch(() => {
+          const route = hashRoute(doc);
+          if (section.getAttribute('data-detail') === id && route.row === id && route.id === report.name) {
+            pending.textContent = 'Unable to load this record. Try again.';
+            pending.setAttribute('data-detail-error', '');
+            pending.setAttribute('role', 'alert');
+            pending.setAttribute('data-detail-retry', '');
+            section.setAttribute('data-detail-error', '');
+            section.removeAttribute('data-detail-loading');
+          }
+        });
+      return;
+    }
+  }
+  setCachedDetailRow(section, id, row);
   const host = section.querySelector('[data-rows]') || section;
   host.removeAttribute('data-grouped');
   host.textContent = '';
   section.setAttribute('data-detail', id);
   section.setAttribute('data-detail-ready', '1');
+  section.setAttribute('data-detail-device', device);
   section.removeAttribute('data-detail-loading');
   section.setAttribute('data-view', 'detail');
   if (report.printTemplate) {
@@ -458,10 +506,13 @@ function drawDetail(doc, section, report, id, row) {
 }
 
 function retryDetail(doc, section, report, id) {
+  const map = detailRowsBySection.get(section);
+  if (map) map.delete(String(id));
   section.removeAttribute('data-detail-ready');
   section.removeAttribute('data-detail-error');
   section.removeAttribute('data-detail-loading');
   section.removeAttribute('data-detail');
+  section.removeAttribute('data-detail-device');
   drawDetail(doc, section, report, id, null);
 }
 
@@ -478,7 +529,8 @@ function enhance(doc) {
     if (!report) return;
     const route = hashRoute(doc);
     const blocks = report.detailBlocks || [];
-    if (route.row && route.id === name && (blocks.length || report.printTemplate)) {
+    const hasDetail = blocks.length || (report.deviceDetailBlocks && report.deviceDetailBlocks.length) || report.printTemplate;
+    if (route.row && route.id === name && hasDetail) {
       drawDetail(doc, section, report, route.row, null);
       return;
     }
@@ -508,7 +560,7 @@ function onActivate(doc, event) {
   const name = section.getAttribute('data-report');
   const id = tr.getAttribute('data-row-id');
   const report = name ? reportOf(name) : null;
-  if (!name || !id || !report || !((report.detailBlocks || []).length || report.printTemplate)) return;
+  if (!name || !id || !report || !((report.detailBlocks || []).length || (report.deviceDetailBlocks || []).length || report.printTemplate)) return;
   const view = doc.defaultView;
   if (!view || !view.location) return;
   view.location.hash = '#/report/' + encodeURIComponent(name) + '/row/' + encodeURIComponent(id);
@@ -529,6 +581,34 @@ function watch(doc) {
     }
   }
   if (view && view.addEventListener) view.addEventListener('hashchange', () => enhance(doc));
+  if (view && typeof view.matchMedia === 'function') {
+    try {
+      const phone = view.matchMedia('(max-width: 767px)');
+      const tablet = view.matchMedia('(min-width: 768px) and (max-width: 1024px)');
+      const onMediaChange = () => {
+        const section = doc.querySelector && doc.querySelector('section[data-report]');
+        if (section && section.getAttribute('data-detail') && section.getAttribute('data-detail-ready') === '1') {
+          const name = section.getAttribute('data-report') || '';
+          const report = reportOf(name);
+          const id = section.getAttribute('data-detail');
+          if (report && id) {
+            const cached = getCachedDetailRow(section, id) || reportViewRow(name, id);
+            drawDetail(doc, section, report, id, cached || null);
+            return;
+          }
+        }
+        enhance(doc);
+      };
+      if (phone) {
+        if (typeof phone.addEventListener === 'function') phone.addEventListener('change', onMediaChange);
+        else if (typeof phone.addListener === 'function') phone.addListener(onMediaChange);
+      }
+      if (tablet) {
+        if (typeof tablet.addEventListener === 'function') tablet.addEventListener('change', onMediaChange);
+        else if (typeof tablet.addListener === 'function') tablet.addListener(onMediaChange);
+      }
+    } catch (_) {}
+  }
   doc.addEventListener('click', (event) => onActivate(doc, event));
   doc.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') onActivate(doc, event);
