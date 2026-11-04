@@ -16,7 +16,7 @@ import { analyzeConnections } from '../../deluge/src/connections.js';
 import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, fileFieldsByForm, subformLinksFor, writeLiveSource } from '../../deluge/src/field-store.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { writeRuleDeniedAt, type FieldRuleDenial, type WriteField } from '../../shims/src/access.js';
-import { LIMITS } from '../../shims/src/index.js';
+import { LIMITS, MAX_FILE_BYTES } from '../../shims/src/index.js';
 import { criteriaHasRelative, criteriaHasTodo, type Criteria } from '../../shims/src/criteria.js';
 import { columnRenamesOf, generateSchema, type SchemaPlan } from '../../schema/src/generator.js';
 import { EXTENSION_KEY, limitValue, planReportQuery, planZcql, ZcqlLimitError } from '../../schema/src/limits.js';
@@ -45,8 +45,18 @@ export interface UiGenerateOptions {
   asyncOnSuccess?: boolean;
 }
 
+/**
+ * The shipped upload-cap line, re-stamped with the shim's single definition
+ * (packages/shims/src/files.ts MAX_FILE_BYTES) so a generated app never
+ * carries a cap that drifted from the repo's own.
+ */
+const UPLOAD_CAP_LINE = /export const UPLOAD_SOURCE_MAX_BYTES = [^;]+;/;
+export function stampUploadCap(source: string): string {
+  return source.replace(UPLOAD_CAP_LINE, `export const UPLOAD_SOURCE_MAX_BYTES = ${MAX_FILE_BYTES};`);
+}
+
 export function clientRuntimeSource(): string {
-  return bundledClientRuntime();
+  return stampUploadCap(bundledClientRuntime());
 }
 
 /**

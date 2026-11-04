@@ -144,9 +144,11 @@ export function chosenFiles(formEl: HTMLFormElement, form: FormSpec): Map<FieldS
 
 /**
  * Largest file a field uploads: 100 MiB — the repo's file-bytes cap,
- * packages/shims/src/files.ts MAX_FILE_BYTES (repeated here because the
- * template cannot import it). The file picker, camera capture, and public_url
- * fetch all enforce this one bound.
+ * packages/shims/src/files.ts MAX_FILE_BYTES. The template cannot import it,
+ * so the generator re-stamps this line from that definition when it emits an
+ * app (see stampUploadCap); the repo's tests assert the two stay equal. The
+ * file picker, camera capture, and public_url fetch all enforce this one
+ * bound.
  */
 export const UPLOAD_SOURCE_MAX_BYTES = 100 * 1024 * 1024;
 

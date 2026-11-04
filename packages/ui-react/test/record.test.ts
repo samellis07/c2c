@@ -5,8 +5,12 @@
  * carry custom-widget answers, real controls carry native answers.
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
+import { MAX_FILE_BYTES } from '../../shims/src/index.js';
+import { stampUploadCap } from '../../ui/src/generate.js';
 import { chosenFiles, readRecord, resolveUrlSources, UPLOAD_SOURCE_MAX_BYTES, validate } from '../template/lib/c2c-ui/form/record.js';
 import { canonicalNumber, fractionDigits, localDateTime, localDay, parseLocalDateTime, parseLocalDay, toCanonicalDecimal, toMinorUnits } from '../template/lib/c2c-ui/form/value.js';
 import type { FieldSpec, FormSpec } from '../template/lib/c2c-ui/types.js';
@@ -290,4 +294,13 @@ test('a required hidden field produces no validation error', () => {
   const record = readRecord(formEl, form);
   assert.equal('Secret' in record, false);
   assert.deepEqual(validate(form, record, chosenFiles(formEl, form)), {});
+});
+
+test('the shipped record module takes its upload cap from the shim definition', () => {
+  // Mutation guard: a drift between packages/shims MAX_FILE_BYTES and this
+  // module's constant fails here, and the emitted file is re-stamped from the
+  // shim at generate time so a shipped app cannot carry a second cap.
+  assert.equal(UPLOAD_SOURCE_MAX_BYTES, MAX_FILE_BYTES);
+  const source = readFileSync(join(process.cwd(), 'packages/ui-react/template/lib/c2c-ui/form/record.ts'), 'utf8');
+  assert.match(stampUploadCap(source), new RegExp(`export const UPLOAD_SOURCE_MAX_BYTES = ${MAX_FILE_BYTES};`));
 });
