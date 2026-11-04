@@ -20,6 +20,9 @@ export const SIGNED_URL_TTL_SECONDS = 600;
 /** Stratus object metadata and keys are text; keep a key comfortably short. */
 export const FILE_NAME_MAX = 80;
 
+/** Largest file a field or migration moves: 100 MiB. The generated client's file picker and public_url fetch enforce this same bound. */
+export const MAX_FILE_BYTES = 100 * 1024 * 1024;
+
 export type SignedAction = 'GET' | 'PUT';
 
 /** The Stratus operations the generated handlers need. Injected in tests. */

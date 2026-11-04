@@ -142,8 +142,26 @@ export function chosenFiles(formEl: HTMLFormElement, form: FormSpec): Map<FieldS
   return out;
 }
 
-/** Largest public_url fetch a field accepts: the same 50 MB cap Creator puts on the file picker. */
-export const UPLOAD_SOURCE_MAX_BYTES = 50 * 1024 * 1024;
+/**
+ * Largest file a field uploads: 100 MiB — the repo's file-bytes cap,
+ * packages/shims/src/files.ts MAX_FILE_BYTES (repeated here because the
+ * template cannot import it). The file picker, camera capture, and public_url
+ * fetch all enforce this one bound.
+ */
+export const UPLOAD_SOURCE_MAX_BYTES = 100 * 1024 * 1024;
+
+/** image/svg+xml and any image/*+xml type can carry active script; they are never an upload. */
+function refusedImageType(mime: string): boolean {
+  const type = mime.split(';')[0]!.trim().toLowerCase();
+  return type === 'image/svg+xml' || /^image\/[a-z0-9!#$&^_.+-]*\+xml$/.test(type);
+}
+
+/** A picked file answer too big or too active to upload, or null. */
+function uploadFileError(field: FieldSpec, file: File): string | null {
+  if (file.size > UPLOAD_SOURCE_MAX_BYTES) return `${field.label} is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB file limit.`;
+  if (field.widget === 'image' && refusedImageType(file.type)) return `${field.label} cannot be an SVG image.`;
+  return null;
+}
 
 /**
  * The file picker's `accept` rule applied to a fetched MIME: an `image/*`
@@ -194,8 +212,9 @@ async function uploadSourceBlob(res: Response): Promise<Blob> {
 
 /**
  * `source = …,public_url` fields: the `<name>__url` input's address is fetched
- * in the page and uploaded like a picked file — bounded to the picker's byte
- * cap and checked against the field's `accept` type before the bytes reach
+ * in the page and uploaded like a picked file — bounded to the shared
+ * file-size cap, refused when it is an SVG or script-bearing image type, and
+ * checked against the field's `accept` type before the bytes reach
  * the signed upload. Errors come back per field so the form can flag them;
  * only http(s) URLs are fetched, and a failed check stores nothing.
  */
@@ -214,12 +233,20 @@ export async function resolveUrlSources(formEl: HTMLFormElement, form: FormSpec,
       if (!res.ok) throw new Error('fetch');
       const contentType = res.headers?.get('content-type') ?? '';
       if (!uploadSourceTypeOk(contentType, field.accept)) throw new Error('type');
+      if (refusedImageType(contentType)) throw new Error('svg');
       const blob = await uploadSourceBlob(res);
       const type = blob.type || contentType.split(';')[0]!.trim().toLowerCase();
       if (!uploadSourceTypeOk(type, field.accept)) throw new Error('type');
+      if (refusedImageType(type)) throw new Error('svg');
       files.set(field, new File([blob], target.pathname.split('/').pop() || 'file', { type }));
-    } catch {
-      errors[field.name] = `Enter a reachable public http(s) URL for ${field.label}.`;
+    } catch (cause) {
+      const code = cause instanceof Error ? cause.message : '';
+      errors[field.name] =
+        code === 'svg'
+          ? `${field.label} cannot be an SVG image.`
+          : code === 'size'
+            ? `${field.label} is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB file limit.`
+            : `Enter a reachable public http(s) URL for ${field.label}.`;
     }
   }
   return errors;
@@ -234,6 +261,14 @@ export function validate(form: FormSpec, record: FormRecord, files: Map<FieldSpe
   const errors: Record<string, string> = {};
   for (const field of form.fields) {
     if (field.readonly || field.visibility === false || NOT_SENT.has(field.widget)) continue;
+    if (FILE_WIDGETS.has(field.widget)) {
+      const picked = files.get(field);
+      const refused = picked ? uploadFileError(field, picked) : null;
+      if (refused) {
+        errors[field.name] = refused;
+        continue;
+      }
+    }
     const value = record[field.name];
     const empty = FILE_WIDGETS.has(field.widget) ? !files.has(field) : value === undefined || value === null || value === '' || value === false || (Array.isArray(value) && !value.length);
     if (field.required && empty) {

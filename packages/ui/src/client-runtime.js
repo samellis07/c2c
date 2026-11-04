@@ -510,18 +510,28 @@ export function validateForm(form, values) {
   const errors = {};
   for (const field of form.fields || []) {
     let value = values ? values[field.name] : undefined;
-    if (field && values && FILE_WIDGETS.has(field.widget) && field.widget !== 'signature' && isEmpty(value, field.widget)) {
+    if (field && values && FILE_WIDGETS.has(field.widget) && field.widget !== 'signature') {
       // The `source` alternatives satisfy the field too: a camera capture or
       // a typed public URL. A URL that is not http(s) is an error, not a value.
       const camera = values[`${field.name}__camera`];
       const sourceUrl = values[`${field.name}__url`];
       const typed = typeof sourceUrl === 'string' ? sourceUrl.trim() : '';
-      if (typeof File !== 'undefined' && camera instanceof File && camera.size) value = camera;
-      else if (typed) {
-        if (/^https?:\/\/\S+$/i.test(typed)) value = typed;
-        else {
-          errors[field.name] = 'Enter a public http(s) URL.';
+      const chosen = typeof File !== 'undefined' ? (value instanceof File && value.size ? value : camera instanceof File && camera.size ? camera : null) : null;
+      if (chosen) {
+        const msg = uploadFileError(field, chosen);
+        if (msg) {
+          errors[field.name] = msg;
           continue;
+        }
+      }
+      if (isEmpty(value, field.widget)) {
+        if (chosen) value = chosen;
+        else if (typed) {
+          if (/^https?:\/\/\S+$/i.test(typed)) value = typed;
+          else {
+            errors[field.name] = 'Enter a public http(s) URL.';
+            continue;
+          }
         }
       }
     }
@@ -5325,8 +5335,26 @@ export async function uploadReference(viewRef, field, file) {
   return { key: reference.key };
 }
 
-/** Largest public_url fetch a field accepts: the same 50 MB cap Creator puts on the file picker. */
-const UPLOAD_SOURCE_MAX_BYTES = 50 * 1024 * 1024;
+/**
+ * Largest file a field uploads: 100 MiB — the repo's file-bytes cap,
+ * packages/shims/src/files.ts MAX_FILE_BYTES (ported here verbatim because the
+ * shipped runtime cannot import it). The file picker, camera capture, and
+ * public_url fetch all enforce this one bound.
+ */
+export const UPLOAD_SOURCE_MAX_BYTES = 100 * 1024 * 1024;
+
+/** image/svg+xml and any image/*+xml type can carry active script; they are never an upload. */
+function refusedImageType(mime) {
+  const type = String(mime || '').split(';')[0].trim().toLowerCase();
+  return type === 'image/svg+xml' || /^image\/[a-z0-9!#$&^_.+-]*\+xml$/.test(type);
+}
+
+/** A picked file answer too big or too active to upload, or null. */
+function uploadFileError(field, file) {
+  if (file && file.size > UPLOAD_SOURCE_MAX_BYTES) return `The file is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB limit.`;
+  if (field && field.widget === 'image' && refusedImageType(file && file.type)) return 'SVG images are not accepted; choose a different image.';
+  return null;
+}
 
 /**
  * The file picker's `accept` rule applied to a fetched MIME: an `image/*`
@@ -5348,7 +5376,7 @@ function uploadSourceTypeOk(mime, accept) {
 async function uploadSourceBlob(res, view) {
   const headers = res && res.headers;
   const declared = headers && typeof headers.get === 'function' ? Number(headers.get('content-length')) : NaN;
-  if (Number.isFinite(declared) && declared > UPLOAD_SOURCE_MAX_BYTES) throw new Error('upload source is larger than 50 MB');
+  if (Number.isFinite(declared) && declared > UPLOAD_SOURCE_MAX_BYTES) throw new Error(`upload source is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB limit`);
   const body = res && res.body;
   if (body && typeof body.getReader === 'function') {
     const reader = body.getReader();
@@ -5360,7 +5388,7 @@ async function uploadSourceBlob(res, view) {
         if (part.done) break;
         const chunk = part.value;
         size += chunk && (chunk.byteLength || chunk.length || 0);
-        if (size > UPLOAD_SOURCE_MAX_BYTES) throw new Error('upload source is larger than 50 MB');
+        if (size > UPLOAD_SOURCE_MAX_BYTES) throw new Error(`upload source is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB limit`);
         chunks.push(chunk);
       }
     } catch (err) {
@@ -5376,17 +5404,18 @@ async function uploadSourceBlob(res, view) {
   }
   if (!res || typeof res.blob !== 'function') throw new Error('upload source could not be read');
   const blob = await res.blob();
-  if (!blob || typeof blob.size !== 'number' || blob.size > UPLOAD_SOURCE_MAX_BYTES) throw new Error('upload source is larger than 50 MB');
+  if (!blob || typeof blob.size !== 'number' || blob.size > UPLOAD_SOURCE_MAX_BYTES) throw new Error(`upload source is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB limit`);
   return blob;
 }
 
 /**
  * A `public_url` acquisition source: the page fetches the bytes, then runs
  * them through the same signed upload as a picked file. Only http(s) targets;
- * the body is capped at the picker's byte limit and must answer the field's
- * `accept` type, so a redirected or lying endpoint cannot push arbitrary
- * content into the signed upload. A host whose CORS policy refuses the read
- * fails the submit's upload step.
+ * the body is capped at the shared file-size bound, an SVG or script-bearing
+ * image type is refused, and the bytes must answer the field's `accept` type,
+ * so a redirected or lying endpoint cannot push arbitrary content into the
+ * signed upload. A host whose CORS policy refuses the read fails the submit's
+ * upload step.
  */
 async function fetchUploadSource(url, formEl, field) {
   let target = null;
@@ -5404,9 +5433,11 @@ async function fetchUploadSource(url, formEl, field) {
   const accept = field && field.accept;
   const contentType = res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') : '';
   if (!uploadSourceTypeOk(contentType, accept)) throw new Error('upload source is not an accepted file type');
+  if (refusedImageType(contentType)) throw new Error('upload source is an SVG image, which is not accepted');
   const blob = await uploadSourceBlob(res, view);
   const type = (blob && blob.type) || String(contentType || '').split(';')[0].trim().toLowerCase();
   if (!uploadSourceTypeOk(type, accept)) throw new Error('upload source is not an accepted file type');
+  if (refusedImageType(type)) throw new Error('upload source is an SVG image, which is not accepted');
   const FileCtor = view.File || globalThis.File;
   const leaf = decodeURIComponent(target.pathname.split('/').pop() || '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'file';
   if (typeof FileCtor === 'function') return new FileCtor([blob], leaf, { type });
@@ -5551,6 +5582,14 @@ export async function submitRecord(formEl, form, upload) {
         const typed = typeof sourceUrl === 'string' ? sourceUrl.trim() : '';
         if (picked || typed) {
           if (typeof upload !== 'function') throw new Error('upload endpoint missing');
+          // A pick or capture over the shared bound, or an SVG into an image
+          // field, is refused the same way a fetched source is.
+          const refused = picked && uploadFileError(field, picked);
+          if (refused) {
+            const err = new Error(refused);
+            err.fieldName = field.name;
+            throw err;
+          }
           let source = picked;
           if (!source) {
             try {

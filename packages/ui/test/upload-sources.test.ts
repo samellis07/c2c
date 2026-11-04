@@ -51,6 +51,7 @@ async function runtime() {
       form: UiModel['forms'][number],
       upload: (field: unknown, file: FileLike) => Promise<unknown>,
     ) => Promise<Record<string, unknown>>;
+    UPLOAD_SOURCE_MAX_BYTES: number;
   };
 }
 
@@ -123,13 +124,16 @@ test('a public_url response that is oversized, non-image, or untyped never reach
   const form = imageApp('\t\t\tsource = public_url,file\n').forms[0]!;
   const html = rt.renderForm(form);
   const headers = (map: Record<string, string>) => ({ get: (name: string) => map[name.toLowerCase()] ?? null });
+  const cap = rt.UPLOAD_SOURCE_MAX_BYTES;
   const cases: Array<[string, object]> = [
-    ['oversized', { ok: true, headers: headers({ 'content-type': 'image/png', 'content-length': String(50 * 1024 * 1024 + 1) }), blob: async () => ({ size: 4, type: 'image/png' }) }],
+    ['oversized', { ok: true, headers: headers({ 'content-type': 'image/png', 'content-length': String(cap + 1) }), blob: async () => ({ size: 4, type: 'image/png' }) }],
     ['html', { ok: true, headers: headers({ 'content-type': 'text/html' }), blob: async () => ({ size: 4, type: 'text/html' }) }],
     ['opaque', { ok: true, headers: headers({ 'content-type': 'application/octet-stream' }), blob: async () => ({ size: 4, type: 'application/octet-stream' }) }],
     ['untyped', { ok: true, headers: headers({}), blob: async () => ({ size: 4, type: '' }) }],
     ['redirected-to-html', { ok: true, redirected: true, headers: headers({ 'content-type': 'text/html' }), blob: async () => ({ size: 4, type: 'text/html' }) }],
-    ['read-past-cap', { ok: true, headers: headers({ 'content-type': 'image/png' }), blob: async () => ({ size: 50 * 1024 * 1024 + 1, type: 'image/png' }) }],
+    ['read-past-cap', { ok: true, headers: headers({ 'content-type': 'image/png' }), blob: async () => ({ size: cap + 1, type: 'image/png' }) }],
+    ['svg', { ok: true, headers: headers({ 'content-type': 'image/svg+xml' }), blob: async () => ({ size: 4, type: 'image/svg+xml' }) }],
+    ['svg-xml-suffix', { ok: true, headers: headers({ 'content-type': 'image/svg+xml; charset=utf-8' }), blob: async () => ({ size: 4, type: 'image/svg+xml' }) }],
   ];
   for (const [name, res] of cases) {
     const view = dom(html);
@@ -161,6 +165,95 @@ test('a public_url response that is oversized, non-image, or untyped never reach
     }),
   );
   assert.equal(uploads, 0);
+});
+
+test('a streamed body stops at the first chunk past the cap and cancels the reader', async () => {
+  const rt = await runtime();
+  const form = imageApp('\t\t\tsource = public_url\n').forms[0]!;
+  const view = dom(rt.renderForm(form));
+  const formEl = view.document.querySelector('form') ?? view.document.body;
+  view.document.querySelector('input[name="Photo__url"]')!.value = 'https://cdn.example.com/pic.png';
+  const cap = rt.UPLOAD_SOURCE_MAX_BYTES;
+  // No Content-Length: the cumulative read check must catch it. Two 60 MiB
+  // chunks cross 100 MiB on the second read; the reader is cancelled then.
+  const chunks = [{ byteLength: 60 * 1024 * 1024 }, { byteLength: 60 * 1024 * 1024 }];
+  let reads = 0;
+  let cancelled = false;
+  view.fetch = async () => ({
+    ok: true,
+    headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? 'image/png' : null) },
+    body: {
+      getReader: () => ({
+        read: async () => (reads < chunks.length ? { done: false, value: chunks[reads++] } : { done: true, value: undefined }),
+        cancel: async () => {
+          cancelled = true;
+        },
+      }),
+    },
+  });
+  let uploads = 0;
+  await assert.rejects(
+    rt.submitRecord(formEl, form, async () => {
+      uploads += 1;
+      return { key: 'never' };
+    }),
+    /larger than/,
+  );
+  assert.equal(reads, 2);
+  assert.equal(cancelled, true);
+  assert.equal(uploads, 0);
+  assert.ok(cap === 100 * 1024 * 1024);
+});
+
+test('a picked file over the cap, or an SVG pick for an image field, is refused like a fetched source', async () => {
+  const rt = await runtime();
+  const form = imageApp('\t\t\tsource = file,public_url\n').forms[0]!;
+  const html = rt.renderForm(form);
+  const cap = rt.UPLOAD_SOURCE_MAX_BYTES;
+  // A File-typed value whose size lies past the cap without holding the bytes.
+  const sizedGlobal = (size: number, name: string, type: string): FileLike => {
+    const file = Object.create(File.prototype) as FileLike;
+    Object.defineProperties(file, { size: { value: size }, name: { value: name }, type: { value: type } });
+    return file;
+  };
+  const picked = (view: DomWindow, size: number, name: string, type: string): object => {
+    const impl = implForWrapper(new view.File(['x'], name, { type })) as unknown as { size: number };
+    Object.defineProperty(impl, 'size', { value: size });
+    return impl as object;
+  };
+  for (const [name, size, fileName, type] of [
+    ['too-big', cap + 1, 'big.png', 'image/png'],
+    ['svg', 4, 'icon.svg', 'image/svg+xml'],
+  ] as Array<[string, number, string, string]>) {
+    const view = dom(html);
+    const formEl = view.document.querySelector('form') ?? view.document.body;
+    const input = view.document.querySelector('input[name="Photo"]')!;
+    implForWrapper(input.files!).push(picked(view, size, fileName, type));
+    assert.ok(rt.validateForm(form, { Photo: sizedGlobal(size, fileName, type) }).Photo, name);
+    let uploads = 0;
+    const err = await rt
+      .submitRecord(formEl, form, async () => {
+        uploads += 1;
+        return { key: 'never' };
+      })
+      .then(
+        () => null,
+        (e: unknown) => e as { fieldName?: string },
+      );
+    assert.equal(err?.fieldName, 'Photo', name);
+    assert.equal(uploads, 0, name);
+  }
+  // A non-image field still accepts an SVG file pick as a plain attachment.
+  const docForm = buildUi(appOf('\tform Doc\n\t{\n\t\tAttachment\n\t\t(\n\t\t\ttype = file upload\n\t\t\tsource = file\n\t\t)\n\t}\n')).model.forms[0]!;
+  const docView = dom(rt.renderForm(docForm));
+  const docInput = docView.document.querySelector('input[name="Attachment"]')!;
+  implForWrapper(docInput.files!).push(implForWrapper(new docView.File(['<svg/>'], 'icon.svg', { type: 'image/svg+xml' })));
+  const sent: string[] = [];
+  await rt.submitRecord(docView.document.querySelector('form') ?? docView.document.body, docForm, async (_f, f) => {
+    sent.push(f.name);
+    return { key: `k/${f.name}` };
+  });
+  assert.deepEqual(sent, ['icon.svg']);
 });
 
 test('a fetched source error names the field so the form can flag it', async () => {

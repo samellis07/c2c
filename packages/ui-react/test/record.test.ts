@@ -190,6 +190,8 @@ test('public_url sources: only a bounded, accept-matching fetch uploads; failure
     ['untyped', { ok: true, headers: headers({}), blob: async () => ({ size: 4, type: '' }) }],
     ['redirected-to-html', { ok: true, redirected: true, headers: headers({ 'content-type': 'text/html' }), blob: async () => ({ size: 4, type: 'text/html' }) }],
     ['read-past-cap', { ok: true, headers: headers({ 'content-type': 'image/png' }), blob: async () => ({ size: UPLOAD_SOURCE_MAX_BYTES + 1, type: 'image/png' }) }],
+    ['svg', { ok: true, headers: headers({ 'content-type': 'image/svg+xml' }), blob: async () => ({ size: 4, type: 'image/svg+xml' }) }],
+    ['svg-xml-suffix', { ok: true, headers: headers({ 'content-type': 'image/svg+xml; charset=utf-8' }), blob: async () => ({ size: 4, type: 'image/svg+xml' }) }],
   ];
   try {
     for (const [name, res] of cases) {
@@ -215,9 +217,64 @@ test('public_url sources: only a bounded, accept-matching fetch uploads; failure
     const good = new Map();
     assert.deepEqual(await resolveUrlSources(formEl, form, good), {});
     assert.equal(good.get(form.fields[0]!)?.name, 'pic.png');
+    // The SVG refusal names why, not the generic reachable-URL message.
+    (globalThis as { fetch: unknown }).fetch = async () => ({
+      ok: true,
+      headers: headers({ 'content-type': 'image/svg+xml' }),
+      blob: async () => new Blob(['<svg/>'], { type: 'image/svg+xml' }),
+    });
+    const refused = await resolveUrlSources(formEl, form, new Map());
+    assert.match(refused.Photo ?? '', /SVG/);
   } finally {
     globalThis.fetch = saved;
   }
+});
+
+test('public_url: a streamed body past the cap cancels the reader at the crossing chunk', async () => {
+  const form = spec([field('Photo', 'image', { uploadEndpoint: '/u', uploadSources: ['public_url'], accept: 'image/*' })]);
+  const { formEl } = jsdom('<input type="url" name="Photo__url" value="https://cdn.example.com/pic.png">');
+  const chunks = [new Uint8Array(60 * 1024 * 1024), new Uint8Array(60 * 1024 * 1024)];
+  let reads = 0;
+  let cancelled = false;
+  const saved = globalThis.fetch;
+  try {
+    (globalThis as { fetch: unknown }).fetch = async () => ({
+      ok: true,
+      headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? 'image/png' : null) },
+      body: {
+        getReader: () => ({
+          read: async () => (reads < chunks.length ? { done: false, value: chunks[reads++] } : { done: true, value: undefined }),
+          cancel: async () => {
+            cancelled = true;
+          },
+        }),
+      },
+    });
+    const files = new Map();
+    const errors = await resolveUrlSources(formEl, form, files);
+    assert.match(errors.Photo ?? '', /100 MB/);
+    assert.equal(reads, 2);
+    assert.equal(cancelled, true);
+    assert.equal(files.size, 0);
+  } finally {
+    globalThis.fetch = saved;
+  }
+});
+
+test('a picked file over the cap, or an SVG pick for an image field, is a field error', () => {
+  const photo = field('Photo', 'image', { uploadEndpoint: '/u', uploadSources: ['file'], accept: 'image/*' });
+  const doc = field('Attachment', 'file', { uploadEndpoint: '/u', uploadSources: ['file'] });
+  const form = spec([photo, doc]);
+  const fake = (size: number, name: string, type: string): File => {
+    const file = Object.create(File.prototype) as File;
+    Object.defineProperties(file, { size: { value: size }, name: { value: name }, type: { value: type } });
+    return file;
+  };
+  assert.match(validate(form, {}, new Map([[photo, fake(UPLOAD_SOURCE_MAX_BYTES + 1, 'big.png', 'image/png')]])).Photo ?? '', /100 MB/);
+  assert.match(validate(form, {}, new Map([[photo, fake(4, 'icon.svg', 'image/svg+xml')]])).Photo ?? '', /SVG/);
+  // A non-image field still accepts an SVG pick as a plain attachment.
+  assert.equal(validate(form, {}, new Map([[doc, fake(4, 'icon.svg', 'image/svg+xml')]])).Attachment, undefined);
+  assert.equal(validate(form, {}, new Map([[doc, fake(4, 'a.xml', 'image/vnd.custom+xml')]])).Attachment, undefined);
 });
 
 test('a visibility = false field never posts, even with a stray named control', () => {
