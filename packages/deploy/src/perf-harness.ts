@@ -198,7 +198,10 @@ export async function runPerf(app: App, opts: PerfOptions): Promise<PerfRun> {
           continue;
         }
         const counted = i < CALL_SAMPLE;
-        const res = await post(route, { record }, counted);
+        // A perf seed is a bulk import write: import: true skips the on-load
+        // field-rule denials (UI state, not data rules); grants, required and
+        // type checks still apply.
+        const res = await post(route, { record, import: true }, counted);
         row.apiMs += res.ms;
         apiCalls += res.calls;
         if (counted) countedRows += 1;
