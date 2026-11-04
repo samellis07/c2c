@@ -176,6 +176,71 @@ test('phone tabs: the active tab carries aria-current', async () => {
   assert.equal(doc.querySelector('#tabbar [data-more]')?.getAttribute('aria-current'), 'page');
 });
 
+test('phone tabs: only the current tab is selected and tabbable', async () => {
+  const runtime = await loadRuntime();
+  const model = generateUi(appOf(BODY)).model;
+  const split = runtime.splitPhoneTabs(model);
+  const current = split.tabs[1];
+  assert.ok(current);
+  const doc = phoneDoc(runtime.renderTabbar(model), runtime.renderMoreSheet(model));
+  runtime.markPhoneCurrent(doc, current.href);
+  const tabs = Array.from(doc.querySelectorAll('#tabbar [role="tab"], #tabbar [data-more]'));
+  assert.equal(tabs.length, 5, 'four tabs plus the More tab');
+  for (const tab of tabs) {
+    const on = tab.getAttribute('href') === current.href;
+    assert.equal(tab.getAttribute('aria-selected'), on ? 'true' : 'false', `${tab.getAttribute('href') ?? 'more'} aria-selected`);
+    assert.equal(tab.getAttribute('tabindex'), on ? '0' : '-1', `${tab.getAttribute('href') ?? 'more'} tabindex`);
+  }
+  const leftover = split.moreSections.flatMap((entry) => entry.items)[0];
+  assert.ok(leftover);
+  runtime.markPhoneCurrent(doc, leftover.href);
+  const more = doc.getElementById('more-tab');
+  assert.equal(more?.getAttribute('aria-selected'), 'true');
+  assert.equal(more?.getAttribute('tabindex'), '0');
+  for (const tab of tabs) {
+    if (tab !== more) assert.equal(tab.getAttribute('aria-selected'), 'false');
+  }
+});
+
+test('phone tabs: no current route keeps the first tab tabbable', async () => {
+  const runtime = await loadRuntime();
+  const model = generateUi(appOf(BODY)).model;
+  const doc = phoneDoc(runtime.renderTabbar(model), runtime.renderMoreSheet(model));
+  runtime.markPhoneCurrent(doc, '#/nowhere');
+  const tabs = Array.from(doc.querySelectorAll('#tabbar [role="tab"], #tabbar [data-more]'));
+  assert.equal(tabs[0].getAttribute('tabindex'), '0');
+  for (const tab of tabs.slice(1)) assert.equal(tab.getAttribute('tabindex'), '-1');
+  for (const tab of tabs) assert.equal(tab.getAttribute('aria-selected'), 'false');
+});
+
+test('phone tabs: arrows wrap and Home/End jump to the ends', async () => {
+  const runtime = await loadRuntime();
+  const model = generateUi(appOf(BODY)).model;
+  const dom = new JSDOM(
+    '<!doctype html><body><nav id="nav"></nav><main id="main"></main><nav id="tabbar"></nav><div id="more-sheet" hidden></div></body>',
+    { url: 'http://localhost/slate/index.html' },
+  );
+  const doc = dom.window.document as unknown as Document;
+  runtime.boot(model, doc);
+  const tabs = Array.from(doc.querySelectorAll('#tabbar [role="tab"], #tabbar [data-more]'));
+  assert.ok(tabs.length >= 3);
+  const win = dom.window as unknown as { KeyboardEvent: typeof KeyboardEvent };
+  const press = (key: string) =>
+    (doc.activeElement as Element).dispatchEvent(new win.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  const last = tabs[tabs.length - 1];
+  (tabs[0] as HTMLElement).focus();
+  press('ArrowLeft');
+  assert.equal(doc.activeElement, last, 'ArrowLeft wraps to the last tab');
+  press('ArrowRight');
+  assert.equal(doc.activeElement, tabs[0], 'ArrowRight wraps back to the first tab');
+  press('ArrowRight');
+  assert.equal(doc.activeElement, tabs[1]);
+  press('End');
+  assert.equal(doc.activeElement, last, 'End jumps to the last tab');
+  press('Home');
+  assert.equal(doc.activeElement, tabs[0], 'Home jumps to the first tab');
+});
+
 test('phone tabs: no bottom bar reaches desktop widths and the drawer is gone', () => {
   const css = cssOf();
   assert.match(css, /#tabbar\s*\{\s*display\s*:\s*none/, 'bottom bar is not hidden on desktop');
