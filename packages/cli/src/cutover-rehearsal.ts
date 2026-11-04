@@ -156,7 +156,10 @@ export interface RehearsalOptions {
    * Customer planning rates for the downtime estimate: a rates object, or a
    * path to a JSON file of the same shape (`{ perStoreCall: [low, high],
    * perRow: [low, high], humanSteps: [low, high] }`, seconds). Defaults to the
-   * assumed planning rates; when supplied the report says so.
+   * assumed planning rates; when supplied the report says so. Supplied rates
+   * are bounded so the window stays a sane planning number: 0 < low <= high
+   * <= 600 s per store call and per row, 0 < low <= high <= 86400 s per human
+   * step; anything outside is rejected with a validation error.
    */
   downtimeRates?: D10Rates | string;
   hooks?: RehearsalHooks;
@@ -551,14 +554,30 @@ export function linkMap(app: App): D10LinkEntry[] {
 /** Assumed planning rates, seconds per unit in the downtime estimate: [low, high]. Not timings measured from a rehearsal. */
 const DOWNTIME_RATES: D10Rates = { perStoreCall: [0.5, 2], perRow: [0.05, 0.2], humanSteps: [60, 180] };
 
+/**
+ * Upper bounds for supplied rates, seconds: 600 per store call or per row
+ * (10 min), 86400 per human step (a day). Above them the 'rate' is not a
+ * plausible per-unit planning number and the estimate overflows into
+ * meaningless output, so the estimate refuses them.
+ */
+const RATE_BOUNDS: Record<keyof D10Rates, number> = { perStoreCall: 600, perRow: 600, humanSteps: 86400 };
+
 /** The rates the estimate uses: the caller's own when supplied (object or JSON file), else the assumed planning rates. */
 function downtimeRates(input: RehearsalOptions['downtimeRates']): { rates: D10Rates; source: 'assumed' | 'supplied' } {
   const supplied = typeof input === 'string' ? (JSON.parse(readFileSync(input, 'utf8')) as D10Rates) : input;
   if (!supplied) return { rates: DOWNTIME_RATES, source: 'assumed' };
   for (const key of ['perStoreCall', 'perRow', 'humanSteps'] as const) {
     const range = supplied[key];
-    if (!Array.isArray(range) || range.length !== 2 || range.some((n) => typeof n !== 'number' || !Number.isFinite(n) || n < 0) || range[0] > range[1]) {
-      throw new Error(`downtime rates: ${key} must be a [low, high] pair of non-negative seconds`);
+    const bound = RATE_BOUNDS[key];
+    if (
+      !Array.isArray(range) ||
+      range.length !== 2 ||
+      range.some((n) => typeof n !== 'number' || !Number.isFinite(n)) ||
+      range[0]! <= 0 ||
+      range[0]! > range[1]! ||
+      range[1]! > bound
+    ) {
+      throw new Error(`downtime rates: ${key} must be a [low, high] pair of seconds with 0 < low <= high <= ${bound}`);
     }
   }
   return { rates: { perStoreCall: supplied.perStoreCall, perRow: supplied.perRow, humanSteps: supplied.humanSteps }, source: 'supplied' };
@@ -570,7 +589,7 @@ function ratesSentence(downtime: D10Downtime): string {
   const list = `${rates.perStoreCall[0]}–${rates.perStoreCall[1]} s per store call, ${rates.perRow[0]}–${rates.perRow[1]} s per row, and ${rates.humanSteps[0]}–${rates.humanSteps[1]} s per human step`;
   return downtime.ratesSource === 'supplied'
     ? `The rates (${list}) are project-specific rates supplied for this estimate, not timings measured from this rehearsal.`
-    : `The rates (${list}) are assumed planning rates, not timings measured from this rehearsal. Replace them with your own measurements: time representative store round-trips and row writes during a rehearsal, record the human-step duration, then rerun the estimate with those project-specific rates.`;
+    : `The rates (${list}) are assumed planning rates, not timings measured from this rehearsal. Replace them with your own measurements: time representative store round-trips and row writes during a rehearsal, record the human-step duration, then rerun the estimate with those project-specific rates (accepted bounds: 0 < low <= high <= 600 s per store call or per row, 0 < low <= high <= 86400 s per human step).`;
 }
 
 function downtimeEstimate(phases: D10Phase[], rates: D10Rates, ratesSource: D10Downtime['ratesSource']): D10Downtime {

@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import { repoRoot } from '../../core/src/toolchain.js';
 import type { FetchLike } from '../../data/src/migrate.js';
 import { loadApp } from '../../deploy/src/index.js';
-import { checkSequence, rehearsalMarkdown, rehearseCutover, syntheticExport, type D10Report, type ExportForm, type RehearsalHooks } from '../src/cutover-rehearsal.js';
+import { checkSequence, rehearsalMarkdown, rehearseCutover, syntheticExport, type D10Report, type ExportForm, type RehearsalHooks, type RehearsalOptions, type D10Rates } from '../src/cutover-rehearsal.js';
 
 const LIBRARY = join(repoRoot(), 'fixtures/redistributable/library-application-system/library_application.ds');
 const KITCHEN_SINK = join(repoRoot(), 'fixtures/synthetic/kitchen-sink/kitchen_sink.ds');
@@ -119,7 +119,8 @@ test('downtime: the window is an estimate with measured phase inputs, not a prom
     md.includes(
       `Estimated freeze-to-switch window: ${report.downtime.estimate} — an offline planning estimate. ` +
         'The rates (0.5–2 s per store call, 0.05–0.2 s per row, and 60–180 s per human step) are assumed planning rates, not timings measured from this rehearsal. ' +
-        'Replace them with your own measurements: time representative store round-trips and row writes during a rehearsal, record the human-step duration, then rerun the estimate with those project-specific rates.',
+        'Replace them with your own measurements: time representative store round-trips and row writes during a rehearsal, record the human-step duration, then rerun the estimate with those project-specific rates ' +
+        '(accepted bounds: 0 < low <= high <= 600 s per store call or per row, 0 < low <= high <= 86400 s per human step).',
     ),
   );
   // 'measured' is never attached to the rates or claimed for the estimate's inputs.
@@ -169,6 +170,42 @@ test('downtime: supplied rates change the window and the report says so', async 
     rehearseCutover(loadApp(LIBRARY), { workDir: mkdtempSync(join(tmpdir(), 'c2c-d10-')), target: LIBRARY, rows: 30, downtimeRates: file }),
     /downtime rates: perStoreCall must be a \[low, high\] pair/,
   );
+});
+
+test('downtime: supplied rates are bounded and out-of-bounds rates are rejected', async () => {
+  const opts = (downtimeRates: RehearsalOptions['downtimeRates']) => ({
+    workDir: mkdtempSync(join(tmpdir(), 'c2c-d10-')),
+    target: LIBRARY,
+    rows: 30,
+    downtimeRates,
+  });
+  const good: D10Rates = { perStoreCall: [1, 2], perRow: [1, 2], humanSteps: [1, 2] };
+  const rejected: [keyof D10Rates, [number, number]][] = [
+    // Huge finite, zero, negative, inverted, and over-bound ranges are all refused, with the bound named.
+    ['perStoreCall', [1e300, 1e301]],
+    ['perStoreCall', [0, 1]],
+    ['perStoreCall', [-1, 1]],
+    ['perStoreCall', [5, 1]],
+    ['perStoreCall', [1, 601]],
+    ['perRow', [1e300, 1e301]],
+    ['perRow', [1, 601]],
+    ['humanSteps', [1, 86401]],
+    ['humanSteps', [0, 1]],
+    ['perStoreCall', [1, Infinity]],
+    ['perStoreCall', [Infinity, Infinity]],
+  ];
+  for (const [key, bad] of rejected) {
+    await assert.rejects(
+      rehearseCutover(loadApp(LIBRARY), opts({ ...good, [key]: bad })),
+      new RegExp(`downtime rates: ${key} must be a \\[low, high\\] pair of seconds with 0 < low <= high <=`),
+    );
+  }
+  // Boundary values are accepted: 600 s per call/row, 86400 s per human step.
+  const report = await rehearseCutover(
+    loadApp(LIBRARY),
+    opts({ perStoreCall: [600, 600] as [number, number], perRow: [600, 600] as [number, number], humanSteps: [86400, 86400] as [number, number] }),
+  );
+  assert.equal(report.downtime.ratesSource, 'supplied');
 });
 
 test('the report is the same on a second run', async () => {
