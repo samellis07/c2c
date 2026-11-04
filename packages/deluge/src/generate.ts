@@ -3464,9 +3464,7 @@ function appUsersHelper(admins: string[] = []): string {
   if (!principal?.profile) {
     throw new RecordAccessError("record access: user listing denied");
   }
-  const profileName = String(principal.profile).trim().toLowerCase();
-  const allowed = (adminProfiles.length > 0 && adminProfiles.some((a) => a.trim().toLowerCase() === profileName)) ||
-    profileName === "administrator" || profileName === "developer";
+  const allowed = adminProfiles.includes(String(principal.profile));
   if (!allowed) {
     throw new RecordAccessError(\`record access: profile \${principal.profile} cannot list users\`);
   }
@@ -4154,6 +4152,8 @@ function buildAccessPolicy(app: App): AccessPolicy {
   const policy: AccessPolicy = { profiles, roles: roleNames(app.roles) };
   const hidden = hiddenComponentNames(app);
   if (hidden.length) policy.hidden = hidden;
+  const admins = administratorProfiles(app);
+  if (admins.length) policy.admins = admins;
   return policy;
 }
 
@@ -6200,7 +6200,7 @@ export default async function handler(req, res) {
     send(res, 401, { dryRun: true, error: "authenticated caller required" });
     return;
   }
-  if (!adminProfiles.some((name) => name.toLowerCase() === String(principal.profile).toLowerCase())) {
+  if (!adminProfiles.includes(String(principal.profile))) {
     send(res, 403, { dryRun: true, error: "custom API functions require an Administrator profile" });
     return;
   }

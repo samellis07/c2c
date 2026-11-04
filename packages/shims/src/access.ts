@@ -124,7 +124,7 @@ export interface AccessPolicy {
    * Direct navigation is denied even when a profile could otherwise read them.
    */
   hidden?: string[];
-  /** Profiles allowed to list users (Administrator / Developer presets or custom admin profiles). */
+  /** Profiles allowed to list users: the exact generated Administrator-preset names. */
   admins?: string[];
 }
 
@@ -448,18 +448,14 @@ function ruleDeniedFor(list: readonly FieldRuleDenial[] | undefined, op: WriteOp
  */
 /**
  * User listing authorization for Creator's `app.users()` and `app.userEmailIds()`.
- * In Creator, only Administrator and Developer profiles are permitted to list
- * application users. Low-privilege profiles (e.g. Employee, Staff, Customer) are refused.
+ * Only a profile named in the generated `policy.admins` — the exact,
+ * case-sensitive Administrator-preset names — may list application users.
+ * Lookalikes ("administrator", "Administrator ") and low-privilege profiles
+ * (e.g. Employee, Staff, Customer, Developer) are refused.
  */
 export function canListUsers(principal: Principal | undefined, policy?: AccessPolicy): boolean {
-  if (!principal?.profile) return false;
-  const profileName = principal.profile.trim().toLowerCase();
-  if (policy?.admins && policy.admins.length > 0) {
-    if (policy.admins.some((admin) => admin.trim().toLowerCase() === profileName)) {
-      return true;
-    }
-  }
-  return profileName === 'administrator' || profileName === 'developer';
+  if (!principal?.profile || !policy?.admins?.length) return false;
+  return policy.admins.includes(principal.profile);
 }
 
 export function authorizeUserListing(principal: Principal | undefined, policy?: AccessPolicy): void {
@@ -912,7 +908,11 @@ export function projectFields(
 function asPrincipal(value: unknown): Principal | null {
   if (!value || typeof value !== 'object') return null;
   const record = value as Record<string, unknown>;
-  const profile = text(record.profile ?? record.profileName ?? record.profile_name);
+  // Profile names must survive verbatim: admin and grant checks are exact,
+  // case-sensitive matches against the generated policy. A verified profile
+  // literally named "Administrator " or "administrator" is not an admin.
+  const rawProfile = record.profile ?? record.profileName ?? record.profile_name;
+  const profile = typeof rawProfile === 'string' && rawProfile.trim() ? rawProfile : undefined;
   if (!profile) return null;
   const role = text(record.role ?? record.roleName ?? record.role_name);
   const userId = text(record.userId ?? record.user_id ?? record.email ?? record.id);

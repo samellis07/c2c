@@ -7667,12 +7667,26 @@ test('generated prefetch handler for app.users and app.userEmailIds refuses low-
   // No emails or IDs leaked in error text
   assert.equal(JSON.stringify(lowPriv.body).includes('example.test'), false);
 
-  for (const profile of ['Non-Admin', 'Admin Assistant', 'Developer Support']) {
+  for (const profile of [
+    'Non-Admin', 'Admin Assistant', 'Developer Support',
+    'administrator', 'ADMINISTRATOR', 'Administrator ', ' Administrator',
+    'Developer', 'developer',
+  ]) {
     const lookalike = await invoke(mod.default, {
       method: 'POST', user: { profile }, body: { record: {} },
     });
     assert.equal(lookalike.status, 403, `${profile} must not list users`);
   }
+
+  // A caller-controlled body or header claiming admin is refused: the
+  // principal comes only from the verified request user.
+  const spoof = await invoke(mod.default, {
+    method: 'POST',
+    user: { profile: 'Employee' },
+    headers: { 'x-profile': 'Administrator' },
+    body: { record: {}, profile: 'Administrator' },
+  });
+  assert.equal(spoof.status, 403, 'a body or header claiming admin must be refused');
 
   // Unauthenticated caller -> 401
   const unauth = await invoke(mod.default, {

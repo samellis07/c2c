@@ -5751,7 +5751,7 @@ function callExpr(e: Extract<Expr, { kind: 'call' }>, scope: Scope, cross = fals
   const zoho = zohoCall(e, args, scope);
   if (zoho) return zoho;
   // `app.users()` / `app.userEmailIds()` list the application's users, gated on
-  // an Administrator or Developer profile at run time. A local named `app`
+  // an exact Administrator-preset profile at run time. A local named `app`
   // shadows the namespace and keeps the method todo.
   if (rootName(e) === 'app' && !scope.local.has('app') && APP_USER_METHODS.has(method) && !args.length) {
     return mergeFx(`await shim.app.${method}(ctx)`, [], { shim: true, serverOnly: true, list: true });
