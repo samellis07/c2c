@@ -1444,7 +1444,7 @@ function sqlLit(value: unknown): string {
 }
 
 /** One bound IN list per ZCQL page, so a later stage pages the same rows as the first. */
-async function fetchBound(
+export async function fetchBound(
   query: PageQuery,
   table: string,
   column: string,
@@ -1452,11 +1452,21 @@ async function fetchBound(
   extraWhere: string,
   orderBy: string,
 ): Promise<Record<string, unknown>[]> {
-  if (ids.length === 0) return [];
+  // A row whose bind column is empty has nothing to join. `IN (null)` is not a
+  // value list, so empty and repeated ids are dropped before the statement.
+  const seen = new Set<string>();
+  const bound = ids.filter((id) => {
+    if (id === null || id === undefined || id === '') return false;
+    const key = String(id);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (bound.length === 0) return [];
   const out: Record<string, unknown>[] = [];
   const size = LIMITS.zcqlRowsPerQuery;
-  for (let index = 0; index < ids.length; index += size) {
-    const part = ids.slice(index, index + size);
+  for (let index = 0; index < bound.length; index += size) {
+    const part = bound.slice(index, index + size);
     const listed = `${column} IN (${part.map(sqlLit).join(', ')})`;
     const extra = extraWhere.trim();
     const where = extra && extra !== 'true' ? `(${listed}) AND (${extra})` : listed;

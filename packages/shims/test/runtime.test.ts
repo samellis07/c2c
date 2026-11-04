@@ -14,6 +14,7 @@ import {
   RangeIndexError,
   ZcqlRowCapError,
   createRuntime,
+  fetchBound,
   jobPoolName,
   needsExactRead,
   readMultiLookupValues,
@@ -39,6 +40,34 @@ test('multi lookup junction rows read back in row_order', async () => {
   }, { table: 'Team__Members', parentColumn: 'parent_id', valueColumn: 'Members', orderColumn: 'row_order' }, '900');
   assert.deepEqual(values, ['700', '500', '600']);
   assert.deepEqual(calls[0], ['Team__Members', "parent_id = '900'", 300, 0, 'ORDER BY row_order, ROWID']);
+});
+
+test('fetchBound short-circuits empty, undefined, null, or repeated ids and never queries IN () or IN (null)', async () => {
+  const calls: { table: string; where: string }[] = [];
+  const query = async (table: string, where: string) => {
+    calls.push({ table, where });
+    if (where.includes('IN ()') || where.includes('null')) {
+      throw new Error('ZCQL syntax error: IN needs values');
+    }
+    return [{ ROWID: '100', Name: 'Alice' }];
+  };
+
+  // 1. Empty id list short-circuits to [] without querying
+  const emptyRes = await fetchBound(query, 'Author', 'ROWID', [], '', 'ORDER BY ROWID');
+  assert.deepEqual(emptyRes, []);
+  assert.equal(calls.length, 0);
+
+  // 2. All null/undefined/empty string ids short-circuit to [] without querying
+  const nullRes = await fetchBound(query, 'Author', 'ROWID', [null, undefined, '', null], '', 'ORDER BY ROWID');
+  assert.deepEqual(nullRes, []);
+  assert.equal(calls.length, 0);
+
+  // 3. Valid ids with null/undefined and duplicates are filtered and deduplicated
+  const validRes = await fetchBound(query, 'Author', 'ROWID', [undefined, '100', null, '100', '200'], '', 'ORDER BY ROWID');
+  assert.deepEqual(validRes, [{ ROWID: '100', Name: 'Alice' }]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.table, 'Author');
+  assert.equal(calls[0]?.where, "ROWID IN ('100', '200')");
 });
 
 test('generated record reads hydrate multi lookups from ordered junction rows', async () => {
