@@ -770,6 +770,17 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       endpoint: `/lookups/${encodeURIComponent(field.lookup.form)}/${encodeURIComponent(field.lookup.field || field.lookup.form)}`,
     };
   }
+  // Creator's Users module is a project-user picker.  Catalyst exposes the
+  // same records through the system Users lookup endpoint; keep the submitted
+  // value as the user ROWID while showing the declared display attribute.
+  if (widget === 'users') {
+    const display = prop(field, 'displayformat')?.match(/[A-Za-z_][A-Za-z0-9_]*/)?.[0] ?? 'username';
+    ui.lookup = {
+      form: 'users',
+      field: display,
+      endpoint: `/lookups/users/${encodeURIComponent(display)}`,
+    };
+  }
   const max = intProp(field, ['maxchar', 'max char', 'max length']);
   const min = intProp(field, ['minchar', 'min char', 'min length']);
   if (min) ui.minLength = min;

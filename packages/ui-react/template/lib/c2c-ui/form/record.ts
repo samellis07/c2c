@@ -150,7 +150,7 @@ export function validate(form: FormSpec, record: FormRecord, files: Map<FieldSpe
       continue;
     }
     if (typeof value !== 'string' || value === '') continue;
-    if ((field.widget === 'email' || field.widget === 'users') && !EMAIL.test(value)) errors[field.name] = `Enter a valid email address for ${field.label}.`;
+    if (field.widget === 'email' && !EMAIL.test(value)) errors[field.name] = `Enter a valid email address for ${field.label}.`;
     else if (field.widget === 'url' && !URL_RE.test(value)) errors[field.name] = `Enter a web address starting with http:// or https:// for ${field.label}.`;
     else if (['number', 'decimal', 'percent', 'currency'].includes(field.widget) && !NUMBER.test(value)) errors[field.name] = `Enter a number for ${field.label}.`;
     else if (field.maxLength && value.length > field.maxLength) errors[field.name] = `${field.label} can be at most ${field.maxLength} characters.`;

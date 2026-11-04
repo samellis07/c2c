@@ -26,6 +26,6 @@ export function drawsLookup(field: UiField): boolean {
  */
 export function lookupSpec(field: UiField): LookupSpec | undefined {
   const lookup = field.lookup;
-  if (!LOOKUP_WIDGETS.has(field.widget) || !lookup || !lookup.form || !lookup.endpoint) return undefined;
+  if ((!LOOKUP_WIDGETS.has(field.widget) && field.widget !== 'users') || !lookup || !lookup.form || !lookup.endpoint) return undefined;
   return { form: lookup.form, display: lookup.field || lookup.form, endpoint: lookup.endpoint };
 }

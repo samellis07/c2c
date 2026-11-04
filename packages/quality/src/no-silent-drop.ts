@@ -423,7 +423,15 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
     const plain = unquote(raw);
     return ui?.label === plain || ui?.label === plain.trim();
   }
-  if (key === 'displayformat') return displayFormatProved(raw, field, ui);
+  if (key === 'displayformat') {
+    // System Users fields are backed by the Catalyst Users endpoint. Their
+    // display format is carried as the generated lookup's display field.
+    if (ui?.widget === 'users' && ui.lookup) {
+      const refs = unquote(raw).match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
+      return refs.length > 0 && refs.every((ref) => ref === ui.lookup?.field);
+    }
+    return displayFormatProved(raw, field, ui);
+  }
   if (key === 'value') return ui?.widget === 'notes' && ui.notesHtml === unquote(raw);
   if (key === 'searchable') return searchableProved(text, ui);
   if (key === 'values') return choicesProved(field, ui) || lookupProved(field.lookup, ui, columns, app);
