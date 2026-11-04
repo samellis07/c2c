@@ -459,6 +459,7 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   if (key === 'column') return intEqual(text, ui?.column);
   if (key === 'width') return ui?.width === text;
   if (key === 'height') return ui?.height === text;
+  if (key === 'layout') return fieldLayoutProved(text, ui);
   if (key === 'visibility') return visibilityProved(text, ui);
   if (key === 'alloweddays') return allowedDaysProved(text, ui);
   if (key === 'source') return sourceProved(text, ui);
@@ -480,6 +481,22 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
 function moduleProved(text: string, ui: UiField | undefined): boolean {
   if (text.toLowerCase() !== 'users') return false;
   return ui?.widget === 'users' && ui.lookup?.form === 'users' && (ui.lookup.endpoint ?? '').startsWith('/lookups/users/');
+}
+
+/**
+ * A field `layout` is proved only when the option arrangement it names is
+ * carried onto the generated field: column counts become `optionColumns` and
+ * `onecolumncard` also sets `optionCard`. `slidingpane` and `tabbar` are
+ * device `customize` layouts, not field settings — on a field they (and any
+ * unknown value) stay drops so a new export spelling cannot pass silently.
+ */
+function fieldLayoutProved(text: string, ui: UiField | undefined): boolean {
+  const value = text.toLowerCase();
+  if (value === '2' || value === 'twocolumn') return ui?.optionColumns === 2;
+  if (value === '3') return ui?.optionColumns === 3;
+  if (value === 'onecolumn') return ui?.optionColumns === 1;
+  if (value === 'onecolumncard') return ui?.optionColumns === 1 && ui?.optionCard === true;
+  return false;
 }
 
 /**
