@@ -467,6 +467,9 @@ function fieldLayoutProved(text: string, ui: UiField | undefined): boolean {
   if (value === 'onecolumn') return ui?.optionColumns === 1;
   if (value === 'onecolumncard') return ui?.optionColumns === 1 && ui?.optionCard === true;
   return false;
+}
+
+/**
  * `sortorder = ascending|descending`. On a lookup the generated
  * `/lookups/:form/:field` query emits `ORDER BY <stored column> DIR, ROWID`
  * (lookupOrderMap): proved only when that clause is in the emitted stub — when
