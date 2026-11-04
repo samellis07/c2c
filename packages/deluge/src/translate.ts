@@ -81,6 +81,13 @@ export interface TodoItem {
    * blocker's `step:` line.
    */
   manualStep?: string;
+  /**
+   * Why a body was left manual — short reason codes, one per blocker the
+   * checker found (e.g. a submit body the on-success merge refused:
+   * `pre-save-phase`, `cancels-submit`, `writes-input`, `alerts`,
+   * `reads-client-state`).
+   */
+  manualReasons?: string[];
 }
 
 export interface TranslateResult {
