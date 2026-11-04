@@ -678,8 +678,13 @@ export async function fileStore(req) {
 function lookupStub(app: App): string {
   const formats = lookupFormats(app);
   const parts = compositePartsOfParents(app, Object.fromEntries(app.forms.map((form) => [form.name, form.name])), schemaOf(app));
+  // The system Users lookup serves Catalyst project users, not a Data Store
+  // table — only when no app form itself is named "users".
+  const systemUsers = !app.forms.some((form) => form.name.toLowerCase() === 'users');
   return `${banner([
     'Lookup options for a form select. The path names the parent form and its display field.',
+    'form "users" is the system Users lookup: it lists the Catalyst project users for any authenticated caller,',
+    'keyed by the user id (as ROWID) with only the display attribute the path names.',
     `Page size ${LIMITS.zcqlRowsPerQuery} (measured ZCQL row cap).`,
     'authorizeRead applies functions/access-policy.json: only rows the caller can read,',
     'and only when the display field itself is readable. Hidden fields are not returned.',
@@ -693,6 +698,68 @@ const lookupFormats = ${JSON.stringify(formats)};
 /** Parent form -> stored part column of each composite part: "Name.first_name" -> "Name_first_name". */
 const parentParts = ${JSON.stringify(parts)};
 const SEARCH_MAX = 100;
+/** True when "users" names the system Users module, not an app form. */
+const systemUsers = ${systemUsers};
+
+// A Catalyst project-user row's id: the value the field stores and submits.
+const USER_ID_KEYS = ["ROWID", "user_id", "userId", "zuid", "id"];
+// Creator displayformat tokens name user attributes loosely. Catalyst user
+// rows carry snake_case attributes; Creator "username" is the sign-in name
+// Catalyst stores as the email id.
+const USER_ATTR_ALIASES = {
+  email: ["email", "email_id", "user_email"],
+  username: ["username", "user_name", "login_user", "display_name", "email_id"],
+};
+
+function userNorm(name) {
+  return String(name == null ? "" : name).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+// The display attribute's value on a project-user row: the key itself, then a
+// case/separator-insensitive key match (First_Name -> first_name), then the
+// known Catalyst spellings.
+function userAttr(user, display) {
+  if (Object.prototype.hasOwnProperty.call(user, display)) return user[display];
+  const wanted = userNorm(display);
+  for (const key of Object.keys(user)) {
+    if (userNorm(key) === wanted) return user[key];
+  }
+  const aliases = Object.prototype.hasOwnProperty.call(USER_ATTR_ALIASES, wanted) ? USER_ATTR_ALIASES[wanted] : [];
+  for (const alias of aliases) {
+    if (Object.prototype.hasOwnProperty.call(user, alias)) return user[alias];
+  }
+  return undefined;
+}
+
+// One picker option: the Catalyst user id under ROWID (the value the form
+// submits) and the display attribute under its own name. Sibling user
+// attributes — email, role, status — never leave this endpoint.
+function toUserOption(user, display) {
+  const source = user && typeof user === "object" ? user : {};
+  const out = {};
+  for (const key of USER_ID_KEYS) {
+    const id = source[key];
+    if (id != null && id !== "") {
+      out.ROWID = String(id);
+      break;
+    }
+  }
+  const value = userAttr(source, display);
+  if (value != null && typeof value !== "object") out[display] = String(value);
+  return out;
+}
+
+// The Catalyst project-user list. A host or test may inject rows on
+// req.appUsers; otherwise the live SDK lists every project user. A failure
+// propagates to the 500 reply — an empty picker must never hide it.
+async function projectUsers(req) {
+  if (req && Array.isArray(req.appUsers)) return req.appUsers;
+  const sdk = await import("zcatalyst-sdk-node");
+  const catalyst = (sdk.default || sdk).initialize(req, { scope: "admin" });
+  const reply = await catalyst.userManagement().getAllUsers();
+  const rows = Array.isArray(reply) ? reply : Array.isArray(reply && reply.data) ? reply.data : Array.isArray(reply && reply.users) ? reply.users : [];
+  return rows.filter((user) => user && typeof user === "object");
+}
 
 ${deployHelpers('../c2c-deploy.json', '../c2c-store.mjs')}
 // ZCQL has no boolean literal predicate: "WHERE true" is a syntax error. An always-true read sends no WHERE clause.
@@ -821,15 +888,27 @@ ${requirePrincipal()}
       return;
     }
     const deploy = deployConfig();
-    const scoped = authorizeRead(access, principal, route.form, { op: "true" }, route.field);
     const display = route.field;
-    const formats = Object.prototype.hasOwnProperty.call(lookupFormats, route.form) ? lookupFormats[route.form] : {};
-    const terms = Object.prototype.hasOwnProperty.call(formats, display) ? formats[display] : null;
     const search = searchText(pagingArgs.q);
     if (search && search.error) {
       send(res, 400, { dryRun: true, error: search.error });
       return;
     }
+    if (route.form === "users" && systemUsers) {
+      // The system Users lookup: Catalyst project users, not a table row, so
+      // authorizeRead's form grants do not apply — any authenticated caller
+      // may read it, and each option carries only the id and the display.
+      const { page, pageSize } = pagingArgs;
+      const listed = deploy.mode === "live" ? await projectUsers(req) : suppliedRows(req);
+      let options = listed.map((user) => toUserOption(user, display));
+      if (search) options = options.filter((row) => String(row[display] ?? "").toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+      options = options.slice(page * pageSize, page * pageSize + pageSize);
+      send(res, 200, { dryRun: deploy.mode !== "live", rows: options, field: display, page, pageSize, ...(search ? { q: search } : {}) });
+      return;
+    }
+    const scoped = authorizeRead(access, principal, route.form, { op: "true" }, route.field);
+    const formats = Object.prototype.hasOwnProperty.call(lookupFormats, route.form) ? lookupFormats[route.form] : {};
+    const terms = Object.prototype.hasOwnProperty.call(formats, display) ? formats[display] : null;
     const option = (row) => toOption(row, scoped.fields, display, terms, route.form);
     if (deploy.mode === "live") {
       const datastore = await liveDatastore();

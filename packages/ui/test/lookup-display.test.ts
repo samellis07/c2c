@@ -792,3 +792,75 @@ test('lookupFormats leaves out prototype keys and never touches Object.prototype
   assert.equal(Object.getPrototypeOf(formats), null);
   assert.equal(Object.getPrototypeOf(formats.Members), null);
 });
+
+const USERS_BODY = `\tsection Main
+\t{
+\t\tform Raise_an_Idea
+\t\t{
+${field('Idea', 'text')}
+\t\t\tApprover
+\t\t\t(
+\t\t\t\ttype = picklist
+\t\t\t\tmodule = users
+\t\t\t\tdisplayformat = [username]
+\t\t\t)
+\t\t}
+\t}
+`;
+
+test('module = users renders a picker bound to the system users endpoint', async () => {
+  const app = appOf(USERS_BODY);
+  const model = buildModel(app);
+  const approver = fieldOf(model, 'Raise_an_Idea', 'Approver');
+  assert.equal(approver.widget, 'users');
+  assert.deepEqual(approver.lookup, { form: 'users', field: 'username', endpoint: '/lookups/users/username' });
+
+  // The vanilla form renders a lookup select; the submitted value is the user id.
+  const runtime = (await import(pathToFileURL(join(process.cwd(), 'packages/ui/src/client-runtime.js')).href)) as {
+    renderForm(form: unknown): string;
+  };
+  const html = runtime.renderForm(model.forms[0]);
+  assert.match(html, /<select[^>]*data-lookup="\/lookups\/users\/username"/);
+});
+
+test('the users lookup serves project users as ROWID + the display attribute, to any authenticated caller', async () => {
+  const built = await writeBuilt(USERS_BODY);
+  try {
+    const lookup = await built.load('functions/lookups/lookup.mjs');
+    const users = [
+      { user_id: '101', email_id: 'ada@example.test', first_name: 'Ada', last_name: 'L', role_details: { role_name: 'App User' } },
+      { user_id: '102', zuid: '202', email_id: 'alan@example.test', first_name: 'Alan' },
+    ];
+    const staff = { user: { profile: 'Staff' } };
+    assert.equal((await invoke(lookup.default, { url: '/lookups/users/username' })).status, 401, 'anonymous is refused');
+
+    // Creator `username` is the sign-in name Catalyst stores as the email id.
+    const res = await invoke(lookup.default, { ...staff, url: '/lookups/users/username', body: { rows: users } });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.field, 'username');
+    assert.deepEqual(res.body.rows, [
+      { ROWID: '101', username: 'ada@example.test' },
+      { ROWID: '102', username: 'alan@example.test' },
+    ]);
+    for (const row of res.body.rows as Record<string, unknown>[]) {
+      assert.deepEqual(Object.keys(row).sort(), ['ROWID', 'username'], 'only the id and the display attribute leave');
+    }
+
+    // Another display attribute: the id plus that attribute only — email and
+    // role never appear when they are not the display.
+    const names = await invoke(lookup.default, { ...staff, url: '/lookups/users/first_name', body: { rows: users } });
+    assert.deepEqual(names.body.rows, [
+      { ROWID: '101', first_name: 'Ada' },
+      { ROWID: '102', first_name: 'Alan' },
+    ]);
+    assert.doesNotMatch(JSON.stringify(names.body.rows), /email|role/i);
+
+    // ?q= filters on the display text; paging slices the capped page.
+    const found = await invoke(lookup.default, { ...staff, url: '/lookups/users/username?q=alan', body: { rows: users } });
+    assert.deepEqual(found.body.rows, [{ ROWID: '102', username: 'alan@example.test' }]);
+    const page = await invoke(lookup.default, { ...staff, url: '/lookups/users/username?page=1&pageSize=1', body: { rows: users } });
+    assert.deepEqual(page.body.rows, [{ ROWID: '102', username: 'alan@example.test' }]);
+  } finally {
+    rmSync(built.dir, { recursive: true, force: true });
+  }
+});

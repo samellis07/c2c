@@ -432,6 +432,7 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
     }
     return displayFormatProved(raw, field, ui);
   }
+  if (key === 'module') return moduleProved(text, ui);
   if (key === 'value') return ui?.widget === 'notes' && ui.notesHtml === unquote(raw);
   if (key === 'searchable') return searchableProved(text, ui);
   if (key === 'values') return choicesProved(field, ui) || lookupProved(field.lookup, ui, columns, app);
@@ -454,6 +455,16 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
     });
   }
   return false;
+}
+
+/**
+ * `module = users` is the system Users lookup, not a named form. It is carried
+ * only when the generated field is the users widget bound to the Catalyst
+ * project-users endpoint — the picker the generated app actually serves.
+ */
+function moduleProved(text: string, ui: UiField | undefined): boolean {
+  if (text.toLowerCase() !== 'users') return false;
+  return ui?.widget === 'users' && ui.lookup?.form === 'users' && (ui.lookup.endpoint ?? '').startsWith('/lookups/users/');
 }
 
 function lengthProved(text: string, uiLength: number | undefined, columns: SchemaColumn[], bound: 'max' | 'min'): boolean {
