@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { deriveIr, emptyApp, parse, parseProject, type App, type Field, type Workflow } from '../../core/src/index.js';
-import { FORM_EVENT_SERVER_UNINVOKED, assertNoSkippedStatements, clientPostsServerPath, generate } from '../../deluge/src/generate.js';
+import { FORM_EVENT_SERVER_UNINVOKED, assertNoSkippedStatements, clientPostsServerPath, generate, submitBodyReadsClientState } from '../../deluge/src/generate.js';
 import { assertCovered, auditApp, collectOutputs, coverageLedger, groupDrops, renderNoSilentDrop, SilentDropError } from '../src/no-silent-drop.js';
 
 const Z = { start: 0, end: 0 };
@@ -1322,32 +1322,82 @@ function submitScopeApp(successes: { name: string; recordEvent?: string; client:
   });
 }
 
+// A submit body the success module owns merges into it: `moved` bodies leave
+// `/submit` entirely, `copied` bodies keep a `/submit` copy for the posts the
+// success route does not own, and `stay` bodies are never merged.
 for (const [label, successes, expected] of [
-  ['an add-only success with a client part owns add; edits post to the plain submit', [{ name: 'Succ', recordEvent: 'on add', client: true }], { AddBody: false, EditBody: true, BothBody: true }],
-  ['an edit-only success with a client part owns only edit posts', [{ name: 'Succ', recordEvent: 'on edit', client: true }], { AddBody: true, EditBody: false, BothBody: true }],
-  ['add- and edit-scoped successes own every submit post', [{ name: 'SuccA', recordEvent: 'on add', client: true }, { name: 'SuccE', recordEvent: 'on edit', client: true }], { AddBody: false, EditBody: false, BothBody: false }],
-  ['a server-only success registers no client handler and owns nothing', [{ name: 'Succ', client: false }], { AddBody: true, EditBody: true, BothBody: true }],
+  ['an add-only success with a client part owns add; edits post to the plain submit', [{ name: 'Succ', recordEvent: 'on add', client: true }], { AddBody: 'moved', EditBody: 'stay', BothBody: 'copied' }],
+  ['an edit-only success with a client part owns only edit posts', [{ name: 'Succ', recordEvent: 'on edit', client: true }], { AddBody: 'stay', EditBody: 'moved', BothBody: 'copied' }],
+  ['add- and edit-scoped successes own every submit post', [{ name: 'SuccA', recordEvent: 'on add', client: true }, { name: 'SuccE', recordEvent: 'on edit', client: true }], { AddBody: 'moved', EditBody: 'moved', BothBody: 'moved' }],
+  ['a server-only success registers no client handler and owns nothing', [{ name: 'Succ', client: false }], { AddBody: 'stay', EditBody: 'stay', BothBody: 'stay' }],
 ] as const) {
   test(`submit-scope credit: ${label}`, () => {
     const orders = submitScopeApp([...successes]);
     const out = collectOutputs(orders);
-    const form = out.model.forms.find((f) => f.name === 'Orders');
-    assert.ok(form);
-    const submitPath = '/forms/Orders/submit';
-    const addPostsSubmit = form.submitEndpoint === submitPath;
-    const editPostsSubmit = (form.editSubmitEndpoint ?? form.submitEndpoint) === submitPath;
-    const uiPosts = { AddBody: addPostsSubmit, EditBody: editPostsSubmit, BothBody: addPostsSubmit || editPostsSubmit };
-    for (const [name, invoked] of Object.entries(expected)) {
+    const successFile = out.files.find((f) => f.path === 'functions/aio/orders/on-success.mjs');
+    const submitFile = out.files.find((f) => f.path.startsWith('functions/aio/orders/') && f.source.includes('path: "/forms/Orders/submit"'));
+    const subjects = { AddBody: 'add', EditBody: 'edit', BothBody: 'both' } as const;
+    for (const [name, where] of Object.entries(expected)) {
       const entry = out.coverage?.find((c) => c.name === name);
       assert.ok(entry, name);
-      assert.equal(entry.serverInvoked, invoked, name);
-      assert.equal(entry.serverInvoked, uiPosts[name as keyof typeof uiPosts], `${name} credit matches the UI post`);
+      // Merged or not, the body runs: owned scopes inside the success module,
+      // the rest on the `/submit` posts the generated UI still sends.
+      assert.equal(entry.serverInvoked, true, name);
       const counted = out.todos.some((t) => t.construct === FORM_EVENT_SERVER_UNINVOKED && t.start === entry.start);
-      assert.equal(counted, !invoked, `${name} counted`);
+      assert.equal(counted, false, `${name} counted`);
+      const tag = `"subject": "${subjects[name as keyof typeof subjects]}"`;
+      const inSuccess = successFile ? successFile.source.split(tag).length - 1 : 0;
+      const inSubmit = submitFile ? submitFile.source.split(tag).length - 1 : 0;
+      if (where === 'moved') {
+        assert.ok(successFile, 'success module emitted');
+        assert.ok(entry.paths.includes(successFile!.path), `${name} credits the success module`);
+        assert.ok(!submitFile || !entry.paths.includes(submitFile.path), `${name} out of the submit module`);
+        assert.equal(inSuccess, 1, `${name} merged body runs exactly once on success`);
+        assert.equal(inSubmit, 0, `${name} absent from submit`);
+      } else if (where === 'copied') {
+        assert.ok(successFile && submitFile, 'both modules emitted');
+        assert.ok(entry.paths.includes(successFile!.path) && entry.paths.includes(submitFile!.path), `${name} credits both modules`);
+        assert.equal(inSuccess, 1, `${name} merged once on success`);
+        assert.equal(inSubmit, 1, `${name} kept once on submit`);
+      } else {
+        assert.ok(submitFile, 'submit module emitted');
+        assert.ok(entry.paths.includes(submitFile!.path), `${name} credits the submit module`);
+        assert.equal(inSuccess, 0, `${name} not in success`);
+        assert.equal(inSubmit, 1, `${name} once on submit`);
+      }
     }
     assert.equal(auditApp(orders, out).filter((d) => d.kind === 'workflow').length, 0);
   });
 }
+
+test('merged submit bodies run after the on-success body, under their owned scope, only after the write', () => {
+  const orders = submitScopeApp([{ name: 'Succ', recordEvent: 'on add', client: true }]);
+  const out = collectOutputs(orders);
+  const success = out.files.find((f) => f.path === 'functions/aio/orders/on-success.mjs')!;
+  assert.ok(success);
+  const handle = success.source.slice(success.source.indexOf('export async function handle'));
+  // The success script runs first; the merged `on add` body follows it.
+  const succAt = handle.indexOf('"subject": "Succ"');
+  const mergedAt = handle.indexOf('"subject": "add"');
+  assert.ok(succAt > -1 && mergedAt > succAt, 'merged body keeps the original order after the on-success body');
+  // Scope guard: the add-owned merge runs only on add posts.
+  const guardAt = handle.lastIndexOf('if (!ctx.rowId)', mergedAt);
+  assert.ok(guardAt > succAt && guardAt < mergedAt, 'merged add body is guarded to add posts');
+  // The body runs inside handle(ctx), which the handler calls only after
+  // writeLive commits the row and the validate siblings pass.
+  const callAt = success.source.indexOf('await handle(ctx)');
+  const writeAt = success.source.indexOf('await writeLive(');
+  const mergedFileAt = success.source.indexOf('"subject": "add"');
+  assert.ok(writeAt > -1 && callAt > writeAt, 'handle runs after the committed write');
+  assert.ok(mergedFileAt > success.source.indexOf('export async function handle'), 'merged body is inside handle');
+});
+
+test('a submit body reading client-only request state stays counted', () => {
+  // The merge must not lift a body that reads state only a generated client
+  // posts; the predicate is the fail-closed gate the plan applies.
+  assert.equal(submitBodyReadsClientState('const row = shim.subform.currentRow(ctx, "Sub");\nctx.subformRow;'), true);
+  assert.equal(submitBodyReadsClientState('await shim.mail.send(ctx, {});'), false);
+});
 
 function dsApp(body: string): App {
   return deriveIr(parse(`application "Demo"\n{\n${body}\n}\n`));
