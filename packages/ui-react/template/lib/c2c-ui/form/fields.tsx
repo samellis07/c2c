@@ -9,7 +9,7 @@
  * customization (runtime/extend.tsx); the generated forms only ever render
  * <Field name="..." />.
  */
-import { lazy, Suspense, useContext, useEffect, useId, useRef, useState, type ComponentType, type ReactNode } from 'react';
+import { lazy, Suspense, useContext, useEffect, useId, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from 'react';
 import { Input } from '../arc/components/input/input';
 import { Textarea } from '../arc/components/textarea/textarea';
 import { Button } from '../arc/components/button/button';
@@ -504,10 +504,15 @@ export function RadioCardsField({ field, error, value }: FieldProps) {
   const [otherText, setOtherText] = useState<string>(othersPicked(field, stored) ? stored : '');
   const otherOpen = !!field.othersOption && current === OTHERS_VALUE;
   const options = field.othersOption ? [...optionsOf(field), { value: OTHERS_VALUE, label: 'Others' }] : optionsOf(field);
+  // The field `layout` from the export sets the option columns; onecolumncard
+  // keeps one column of cards, a column count picks a fixed grid.
+  const columns = field.optionColumns;
+  const listLayout = field.optionCard || columns === 1 ? 'list' : 'grid';
+  const gridStyle = columns && columns > 1 ? ({ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } as CSSProperties) : undefined;
   return (
     <Box field={field}>
       <Suspense fallback={<FieldLoading field={field} />}>
-        <fieldset className="c2c-choices" aria-invalid={error ? true : undefined}>
+        <fieldset className="c2c-choices" data-option-columns={columns} data-option-style={field.optionCard ? 'card' : undefined} aria-invalid={error ? true : undefined}>
           <legend className={`${inputStyles.label} c2c-label`}>{field.label}</legend>
           <RadioCards
             name={otherOpen ? undefined : field.name}
@@ -515,6 +520,8 @@ export function RadioCardsField({ field, error, value }: FieldProps) {
             defaultValue={current}
             onValueChange={setCurrent}
             required={field.required}
+            layout={listLayout}
+            style={gridStyle}
           />
           {otherOpen ? <OthersText field={field} name={field.name} value={otherText} onChange={setOtherText} /> : null}
         </fieldset>
