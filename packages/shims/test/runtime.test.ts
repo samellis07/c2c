@@ -116,6 +116,43 @@ test('fetchBound hardens ROWID lists: digits only, dropping injection and non-di
   assert.equal(calls[3]?.where, "Status IN ('1 OR 1=1', 'Open', '12a')");
 });
 
+test('fetchBound id lists are declared by the caller, not guessed from the column name', async () => {
+  const calls: { table: string; where: string }[] = [];
+  const query = async (table: string, where: string) => {
+    calls.push({ table, where });
+    return [{ ROWID: '12', Name: 'Alice' }];
+  };
+
+  // A subform parent key and a lookup-stored id column have names the ROWID
+  // heuristic cannot see; the caller declares the list carries row ids.
+  for (const column of ['parent_id', 'Author']) {
+    calls.length = 0;
+    const dropped = await fetchBound(
+      query,
+      'Line',
+      column,
+      ['1 OR 1=1', '12a', ''],
+      '',
+      `ORDER BY ${column}`,
+      { idList: true },
+    );
+    assert.deepEqual(dropped, []);
+    assert.equal(calls.length, 0, `${column}: no query when every id is dropped`);
+
+    const kept = await fetchBound(query, 'Line', column, ['12a', '1 OR 1=1', '12', 34], '', `ORDER BY ${column}`, { idList: true });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.where, `${column} IN ('12', 34)`);
+    assert.deepEqual(kept, [{ ROWID: '12', Name: 'Alice' }]);
+  }
+
+  // The same values on a free-text column (no flag) keep the sqlLit behaviour.
+  calls.length = 0;
+  const free = await fetchBound(query, 'Line', 'Notes', ['1 OR 1=1', '12a', ''], '', 'ORDER BY Notes');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.where, "Notes IN ('1 OR 1=1', '12a')");
+  assert.deepEqual(free, [{ ROWID: '12', Name: 'Alice' }]);
+});
+
 test('generated record reads hydrate multi lookups from ordered junction rows', async () => {
   const runtime = createRuntime({
     dryRun: false,

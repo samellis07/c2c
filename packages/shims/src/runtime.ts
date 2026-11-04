@@ -1456,6 +1456,15 @@ function isRowIdValue(id: unknown): boolean {
   return ROWID_DIGITS.test(String(id));
 }
 
+export interface FetchBoundOptions {
+  /**
+   * The bound values are row ids (a ROWID, parent_id, or lookup-stored id
+   * column), so each must be a digit string. Declared by the caller: the
+   * column name alone cannot tell an id list from free text.
+   */
+  idList?: boolean;
+}
+
 /** One bound IN list per ZCQL page, so a later stage pages the same rows as the first. */
 export async function fetchBound(
   query: PageQuery,
@@ -1464,10 +1473,11 @@ export async function fetchBound(
   ids: readonly unknown[],
   extraWhere: string,
   orderBy: string,
+  options: FetchBoundOptions = {},
 ): Promise<Record<string, unknown>[]> {
   // A row whose bind column is empty has nothing to join. `IN (null)` is not a
   // value list, so empty and repeated ids are dropped before the statement.
-  const isRowId = isRowIdColumn(column);
+  const isRowId = options.idList === true || isRowIdColumn(column);
   const seen = new Set<string>();
   const bound = ids.filter((id) => {
     if (id === null || id === undefined || id === '') return false;
@@ -1538,7 +1548,10 @@ async function runStagedRead(
     // statements of its own) already returned these columns for these rows.
     // Re-reading them would copy the same values back: skip the stage.
     if (onBase && sourceColumn === 'ROWID' && merged.every((row) => stage.columns.every((name) => Object.hasOwn(row, name)))) continue;
-    const got = await fetchBound(query, stage.table, column, values, onBase ? where : '', stage.orderBy || 'ORDER BY ROWID');
+    // Every staged bind is a row-id join: the IN column is ROWID or the
+    // extension parent key, and the values are parent ROWIDs or lookup-stored
+    // ids, whatever their column is named.
+    const got = await fetchBound(query, stage.table, column, values, onBase ? where : '', stage.orderBy || 'ORDER BY ROWID', { idList: true });
     if (column === EXTENSION_KEY) {
       const byParent = new Map<string, Record<string, unknown>>();
       for (const row of got) byParent.set(String(row[EXTENSION_KEY]), row);
@@ -1988,7 +2001,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     }
     for (const ext of placed.extensions) {
       if (Object.keys(ext.values).length === 0) continue;
-      const found = await fetchBound(queryPage, ext.table, EXTENSION_KEY, parentIds, '', 'ORDER BY ROWID');
+      const found = await fetchBound(queryPage, ext.table, EXTENSION_KEY, parentIds, '', 'ORDER BY ROWID', { idList: true });
       const byParent = new Map<string, Record<string, unknown>>();
       for (const row of found) byParent.set(String(row[EXTENSION_KEY]), row);
       const updates: Record<string, unknown>[] = [];
