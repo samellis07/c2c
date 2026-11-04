@@ -58,7 +58,7 @@ function App({ spec, routes, custom }: { spec: AppSpec; routes: RouteTable; cust
   // a signed-out visit must paint not-signed-in, not wait at the sign-in gate.
   if (route.name === 'smoke') {
     return (
-      <AppShell title={spec.name} sections={sections} current="">
+      <AppShell title={spec.name} sections={sections} current="" phoneLayout={spec.phoneLayout}>
         <SmokePage />
       </AppShell>
     );
@@ -70,7 +70,7 @@ function App({ spec, routes, custom }: { spec: AppSpec; routes: RouteTable; cust
     (route.name === 'form' || route.name === 'report' || route.name === 'page' || route.name === 'record') && deniedTargets(spec).has(route.id);
   return (
     <AuthGate>
-      <AppShell title={spec.name} sections={sections} current={key}>
+      <AppShell title={spec.name} sections={sections} current={key} phoneLayout={spec.phoneLayout}>
         {denied ? (
           <p data-access-status="403">This page is not available.</p>
         ) : Screen ? (

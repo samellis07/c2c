@@ -569,14 +569,17 @@ function fieldControl(field, id, describedBy) {
     return `<input${idAttr} name="${name}" type="checkbox"${checked}${required}${described}>`;
   }
   if (field.matrixId === 'checkbox-multi') {
-    return (field.choices || [])
-      .map(
-        (choice, index) => {
-          const cid = `${id}-choice-${index}`;
-          return `<label class="choice" for="${cid}"><input id="${cid}" type="checkbox" name="${name}" value="${escapeHtml(choice)}" data-choice="true"${required}${described}> ${escapeHtml(choice)}</label>`;
-        },
-      )
-      .join('');
+    return choiceGroup(
+      field,
+      (field.choices || [])
+        .map(
+          (choice, index) => {
+            const cid = `${id}-choice-${index}`;
+            return `<label class="choice" for="${cid}"><input id="${cid}" type="checkbox" name="${name}" value="${escapeHtml(choice)}" data-choice="true"${required}${described}> ${escapeHtml(choice)}</label>`;
+          },
+        )
+        .join(''),
+    );
   }
   if (field.widget === 'select' || field.widget === 'multiselect' || field.widget === 'lookup' || field.widget === 'lookup-multi' || field.widget === 'users') {
     const multiple = field.widget === 'multiselect' || field.widget === 'lookup-multi' ? ' multiple' : '';
@@ -594,14 +597,17 @@ function fieldControl(field, id, describedBy) {
   }
   if (field.widget === 'radio') {
     const choices = field.choices || [];
-    return choices
-      .map(
-        (choice, index) => {
-          const cid = `${id}-choice-${index}`;
-          return `<label class="choice" for="${cid}"><input id="${cid}" type="radio" name="${name}" value="${escapeHtml(choice)}"${required}${described}> ${escapeHtml(choice)}</label>`;
-        },
-      )
-      .join('');
+    return choiceGroup(
+      field,
+      choices
+        .map(
+          (choice, index) => {
+            const cid = `${id}-choice-${index}`;
+            return `<label class="choice" for="${cid}"><input id="${cid}" type="radio" name="${name}" value="${escapeHtml(choice)}"${required}${described}> ${escapeHtml(choice)}</label>`;
+          },
+        )
+        .join(''),
+    );
   }
   if (field.widget === 'file' || field.widget === 'image' || field.widget === 'audio' || field.widget === 'video') {
     const accept = field.accept ? ` accept="${escapeHtml(field.accept)}"` : '';
@@ -653,6 +659,17 @@ function fieldControl(field, id, describedBy) {
   return `<input${idAttr} name="${name}" type="${type}"${inputMode}${placeholder}${required}${readOnly}${max}${pattern}${initial}${described}${field.scan ? ' data-scan="true"' : ''}>`;
 }
 
+/**
+ * The radio/checkbox option list. The field `layout` from the export sets the
+ * option columns (`2`, `3`, `onecolumn`, `twocolumn`); `onecolumncard` draws
+ * the options as a column of cards.
+ */
+function choiceGroup(field, items) {
+  const columns = field.optionColumns ? ` data-option-columns="${field.optionColumns}"` : '';
+  const card = field.optionCard ? ' data-option-style="card"' : '';
+  return `<span class="choices"${columns}${card}>${items}</span>`;
+}
+
 /** First choice id of a group control, so the field label pairs with a control. */
 function groupLabelFor(field, id) {
   if ((field.matrixId === 'checkbox-multi' || field.widget === 'radio') && field.choices && field.choices.length) return `${id}-choice-0`;
@@ -685,9 +702,15 @@ function fieldBlock(field, prefix) {
 }
 
 export function renderForm(form) {
-  const layout = form && (form.layout === 'two' || form.layout === 'three') ? form.layout : 'one';
+  let layout = form && (form.layout === 'two' || form.layout === 'three') ? form.layout : 'one';
+  // The device customize layout picks the form grid width: `twocolumn` draws
+  // the two-column grid, `onecolumn`/`onecolumncard` draw one column (the card
+  // modifier keeps its `data-phone-layout` hook for the phone CSS).
+  if (form && form.phoneLayout === 'two-column' && layout !== 'three') layout = 'two';
+  if (form && (form.phoneLayout === 'one-column' || form.phoneLayout === 'one-column-card')) layout = 'one';
   const fields = (form.fields || []).map((field) => fieldBlock(field)).join('');
-  return `<section class="card" data-form-card><h1>${escapeHtml(form.label || form.name)}</h1><form data-form="${escapeHtml(form.name)}" data-layout="${layout}" data-submit="${escapeHtml(form.submitEndpoint || '')}" novalidate><div class="form-grid">${fields}</div><p data-banner></p><button type="submit">Submit</button></form></section>`;
+  const phoneLayout = form && typeof form.phoneLayout === 'string' ? ` data-phone-layout="${escapeHtml(form.phoneLayout)}"` : '';
+  return `<section class="card" data-form-card><h1>${escapeHtml(form.label || form.name)}</h1><form data-form="${escapeHtml(form.name)}" data-layout="${layout}"${phoneLayout} data-submit="${escapeHtml(form.submitEndpoint || '')}" novalidate><div class="form-grid">${fields}</div><p data-banner></p><button type="submit">Submit</button></form></section>`;
 }
 
 const BOARD_VIEWS = new Set(['kanban', 'calendar', 'timeline']);
@@ -1694,7 +1717,7 @@ export function splitPhoneTabs(appModel) {
 }
 
 function tabLink(item) {
-  return `<a href="${escapeHtml(item.href)}" data-tab="${escapeHtml(item.name)}" aria-label="${escapeHtml(item.label)}" title="${escapeHtml(item.label)}">${tabIcon(item.kind)}<span class="tab-label">${escapeHtml(item.label)}</span></a>`;
+  return `<a href="${escapeHtml(item.href)}" data-tab="${escapeHtml(item.name)}" role="tab" aria-label="${escapeHtml(item.label)}" title="${escapeHtml(item.label)}">${tabIcon(item.kind)}<span class="tab-label">${escapeHtml(item.label)}</span></a>`;
 }
 
 /** Bottom tab bar: the first menu entries, plus a More tab when entries remain. */
@@ -1706,6 +1729,15 @@ export function renderTabbar(appModel) {
     ? `<button type="button" id="more-tab" data-more aria-haspopup="dialog" aria-expanded="false" aria-label="More" title="More">${MORE_ICON}<span class="tab-label">More</span></button>`
     : '';
   return tabs + more;
+}
+
+/**
+ * The `slidingpane` device layout: the menu slides over the screen from a
+ * labelled dialog instead of sitting in the bottom tab bar. The open button
+ * (#nav-drawer-open) is only revealed on the phone breakpoint by the CSS.
+ */
+export function renderDrawer(appModel) {
+  return `<div data-drawer-head><strong>Menu</strong><button type="button" data-drawer-close>Close</button></div><div data-drawer-body>${renderNav(appModel)}</div>`;
 }
 
 /** Full-screen More sheet: the remaining sections and items. */
@@ -6345,8 +6377,69 @@ export function boot(appModel, doc) {
     run();
   }
   if (nav) nav.innerHTML = renderNav(appModel);
+  // `slidingpane` moves the phone navigation into a slide-over drawer and
+  // leaves the bottom tab bar empty (the CSS hides an empty #tabbar).
+  const slidingPane = appModel && (appModel.phoneLayout === 'sliding-pane' || appModel.tabletLayout === 'sliding-pane');
   const tabbar = documentRef.getElementById('tabbar');
-  if (tabbar) tabbar.innerHTML = renderTabbar(appModel);
+  if (tabbar) {
+    tabbar.innerHTML = slidingPane ? '' : renderTabbar(appModel);
+    if (slidingPane) tabbar.removeAttribute('role');
+    else tabbar.setAttribute('role', 'tablist');
+    tabbar.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      const tabs = Array.from(tabbar.querySelectorAll('[role="tab"], [data-more]'));
+      const at = tabs.indexOf(documentRef.activeElement);
+      if (at === -1) return;
+      event.preventDefault();
+      const next = event.key === 'ArrowRight' ? (at + 1) % tabs.length : (at - 1 + tabs.length) % tabs.length;
+      tabs[next].focus();
+    });
+  }
+  const drawer = documentRef.getElementById('drawer');
+  const drawerOpen = documentRef.getElementById('nav-drawer-open');
+  if (slidingPane && drawer && drawerOpen) {
+    drawer.setAttribute('role', 'dialog');
+    drawer.setAttribute('aria-modal', 'true');
+    if (!drawer.getAttribute('aria-label')) drawer.setAttribute('aria-label', 'Menu');
+    drawer.innerHTML = renderDrawer(appModel);
+    drawerOpen.hidden = false;
+    const setDrawer = (open) => {
+      drawer.hidden = !open;
+      drawerOpen.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) {
+        const first = drawer.querySelector('a[href], button');
+        if (first && first.focus) first.focus();
+      } else {
+        drawerOpen.focus();
+      }
+    };
+    drawerOpen.addEventListener('click', () => setDrawer(drawer.hidden));
+    drawer.addEventListener('click', (event) => {
+      const target = event.target;
+      const nearby = target && target.closest ? target.closest('[data-drawer-close], a[href^="#"]') : null;
+      if (nearby) setDrawer(false);
+    });
+    documentRef.addEventListener('keydown', (event) => {
+      if (drawer.hidden) return;
+      if (event.key === 'Escape') {
+        setDrawer(false);
+        return;
+      }
+      if (event.key === 'Tab') {
+        const focusable = Array.from(drawer.querySelectorAll('a[href], button'));
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && documentRef.activeElement === first) {
+          last.focus();
+          event.preventDefault();
+        } else if (!event.shiftKey && documentRef.activeElement === last) {
+          first.focus();
+          event.preventDefault();
+        }
+      }
+    });
+  }
   const sheet = documentRef.getElementById('more-sheet');
   if (sheet) {
     sheet.innerHTML = renderMoreSheet(appModel);
