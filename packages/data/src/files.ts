@@ -20,7 +20,7 @@
  * Stratus acknowledged; nothing is invented. Bytes are held in memory for one
  * value at a time and never logged.
  */
-import { creatorFilePath, migratedObjectKey } from '../../shims/src/files.js';
+import { creatorFilePath, MAX_FILE_BYTES, migratedObjectKey } from '../../shims/src/files.js';
 import { assertAllowedHost, creatorUrl, readPage, type FetchLike } from './migrate.js';
 
 export interface FileBytesTable {
@@ -112,7 +112,7 @@ export interface FileBytesResult {
   tables: FileBytesTableResult[];
 }
 
-export const MAX_FILE_BYTES = 100 * 1024 * 1024;
+export { MAX_FILE_BYTES };
 
 export function emptyFileCheckpoint(): FileCheckpoint {
   return { version: 1, tables: {} };
