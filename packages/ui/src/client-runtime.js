@@ -5325,12 +5325,70 @@ export async function uploadReference(viewRef, field, file) {
   return { key: reference.key };
 }
 
+/** Largest public_url fetch a field accepts: the same 50 MB cap Creator puts on the file picker. */
+const UPLOAD_SOURCE_MAX_BYTES = 50 * 1024 * 1024;
+
+/**
+ * The file picker's `accept` rule applied to a fetched MIME: an `image/*`
+ * field only uploads image/* bytes. A field without an accept list behaves
+ * like the picker: any declared type is fine, but a missing Content-Type is
+ * still a refusal.
+ */
+function uploadSourceTypeOk(mime, accept) {
+  const wanted = (typeof accept === 'string' ? accept : '')
+    .split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter((token) => token.includes('/'));
+  const type = (typeof mime === 'string' ? mime.split(';')[0] : '').trim().toLowerCase();
+  if (!wanted.length) return type !== '' && type !== 'application/octet-stream';
+  return wanted.some((token) => (token.endsWith('/*') ? type.startsWith(token.slice(0, -1)) : type === token));
+}
+
+/** Read a fetched upload-source body under UPLOAD_SOURCE_MAX_BYTES. Streams when the engine can; otherwise trusts no declared length over the blob's own size. */
+async function uploadSourceBlob(res, view) {
+  const headers = res && res.headers;
+  const declared = headers && typeof headers.get === 'function' ? Number(headers.get('content-length')) : NaN;
+  if (Number.isFinite(declared) && declared > UPLOAD_SOURCE_MAX_BYTES) throw new Error('upload source is larger than 50 MB');
+  const body = res && res.body;
+  if (body && typeof body.getReader === 'function') {
+    const reader = body.getReader();
+    const chunks = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const part = await reader.read();
+        if (part.done) break;
+        const chunk = part.value;
+        size += chunk && (chunk.byteLength || chunk.length || 0);
+        if (size > UPLOAD_SOURCE_MAX_BYTES) throw new Error('upload source is larger than 50 MB');
+        chunks.push(chunk);
+      }
+    } catch (err) {
+      try {
+        await reader.cancel();
+      } catch {
+        /* the read already failed */
+      }
+      throw err;
+    }
+    const BlobCtor = view.Blob || globalThis.Blob;
+    return new BlobCtor(chunks, { type: '' });
+  }
+  if (!res || typeof res.blob !== 'function') throw new Error('upload source could not be read');
+  const blob = await res.blob();
+  if (!blob || typeof blob.size !== 'number' || blob.size > UPLOAD_SOURCE_MAX_BYTES) throw new Error('upload source is larger than 50 MB');
+  return blob;
+}
+
 /**
  * A `public_url` acquisition source: the page fetches the bytes, then runs
  * them through the same signed upload as a picked file. Only http(s) targets;
- * a host whose CORS policy refuses the read fails the submit's upload step.
+ * the body is capped at the picker's byte limit and must answer the field's
+ * `accept` type, so a redirected or lying endpoint cannot push arbitrary
+ * content into the signed upload. A host whose CORS policy refuses the read
+ * fails the submit's upload step.
  */
-async function fetchUploadSource(url, formEl) {
+async function fetchUploadSource(url, formEl, field) {
   let target = null;
   try {
     target = new URL(url);
@@ -5341,11 +5399,16 @@ async function fetchUploadSource(url, formEl) {
   const call = (viewOf(formEl) && viewOf(formEl).fetch) || globalThis.fetch;
   if (typeof call !== 'function') throw new Error('upload source fetch is unavailable');
   const res = await call(target.href);
-  if (!res || res.ok === false || typeof res.blob !== 'function') throw new Error('upload source could not be read');
-  const blob = await res.blob();
-  const FileCtor = viewOf(formEl).File || globalThis.File;
+  if (!res || res.ok === false) throw new Error('upload source could not be read');
+  const view = viewOf(formEl);
+  const accept = field && field.accept;
+  const contentType = res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') : '';
+  if (!uploadSourceTypeOk(contentType, accept)) throw new Error('upload source is not an accepted file type');
+  const blob = await uploadSourceBlob(res, view);
+  const type = (blob && blob.type) || String(contentType || '').split(';')[0].trim().toLowerCase();
+  if (!uploadSourceTypeOk(type, accept)) throw new Error('upload source is not an accepted file type');
+  const FileCtor = view.File || globalThis.File;
   const leaf = decodeURIComponent(target.pathname.split('/').pop() || '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'file';
-  const type = (blob && blob.type) || 'application/octet-stream';
   if (typeof FileCtor === 'function') return new FileCtor([blob], leaf, { type });
   return { name: leaf, type, size: (blob && blob.size) || 0, arrayBuffer: () => blob.arrayBuffer() };
 }
@@ -5488,7 +5551,19 @@ export async function submitRecord(formEl, form, upload) {
         const typed = typeof sourceUrl === 'string' ? sourceUrl.trim() : '';
         if (picked || typed) {
           if (typeof upload !== 'function') throw new Error('upload endpoint missing');
-          record[field.name] = await upload(field, picked || (await fetchUploadSource(typed, formEl)));
+          let source = picked;
+          if (!source) {
+            try {
+              source = await fetchUploadSource(typed, formEl, field);
+            } catch (cause) {
+              // A refused source is a field error, not a crashed submit: the
+              // caller flags the field and nothing reaches the signed upload.
+              const err = cause instanceof Error ? cause : new Error('upload source could not be read');
+              err.fieldName = field.name;
+              throw err;
+            }
+          }
+          record[field.name] = await upload(field, source);
         }
         continue;
       }
@@ -7310,7 +7385,8 @@ export function boot(appModel, doc) {
       let record;
       try {
         record = await submitRecord(formEl, form, (field, file) => uploadReference(viewRef, field, file));
-      } catch {
+      } catch (err) {
+        if (err && err.fieldName) showErrors(formEl, form, { [err.fieldName]: err.message });
         const banner = formEl.querySelector('[data-banner]');
         if (banner) banner.textContent = 'Upload failed. The form was not submitted.';
         return;

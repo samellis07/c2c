@@ -142,10 +142,62 @@ export function chosenFiles(formEl: HTMLFormElement, form: FormSpec): Map<FieldS
   return out;
 }
 
+/** Largest public_url fetch a field accepts: the same 50 MB cap Creator puts on the file picker. */
+export const UPLOAD_SOURCE_MAX_BYTES = 50 * 1024 * 1024;
+
+/**
+ * The file picker's `accept` rule applied to a fetched MIME: an `image/*`
+ * field only uploads image/* bytes. A field without an accept list behaves
+ * like the picker: any declared type is fine, but a missing or opaque
+ * Content-Type is still a refusal.
+ */
+function uploadSourceTypeOk(mime: string, accept?: string): boolean {
+  const wanted = (accept ?? '')
+    .split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter((token) => token.includes('/'));
+  const type = mime.split(';')[0]!.trim().toLowerCase();
+  if (!wanted.length) return type !== '' && type !== 'application/octet-stream';
+  return wanted.some((token) => (token.endsWith('/*') ? type.startsWith(token.slice(0, -1)) : type === token));
+}
+
+/** Read a fetched upload-source body under UPLOAD_SOURCE_MAX_BYTES: the declared length and the read length both must fit. */
+async function uploadSourceBlob(res: Response): Promise<Blob> {
+  const declared = Number(res.headers?.get('content-length'));
+  if (Number.isFinite(declared) && declared > UPLOAD_SOURCE_MAX_BYTES) throw new Error('size');
+  const reader = res.body?.getReader?.();
+  if (reader) {
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value?.byteLength ?? 0;
+        if (size > UPLOAD_SOURCE_MAX_BYTES) throw new Error('size');
+        chunks.push(value!);
+      }
+    } catch (err) {
+      try {
+        await reader.cancel();
+      } catch {
+        /* the read already failed */
+      }
+      throw err;
+    }
+    return new Blob(chunks as BlobPart[]);
+  }
+  const blob = await res.blob();
+  if (blob.size > UPLOAD_SOURCE_MAX_BYTES) throw new Error('size');
+  return blob;
+}
+
 /**
  * `source = …,public_url` fields: the `<name>__url` input's address is fetched
- * in the page and uploaded like a picked file. Errors come back per field so
- * the form can flag them; only http(s) URLs are fetched.
+ * in the page and uploaded like a picked file — bounded to the picker's byte
+ * cap and checked against the field's `accept` type before the bytes reach
+ * the signed upload. Errors come back per field so the form can flag them;
+ * only http(s) URLs are fetched, and a failed check stores nothing.
  */
 export async function resolveUrlSources(formEl: HTMLFormElement, form: FormSpec, files: Map<FieldSpec, File>): Promise<Record<string, string>> {
   const errors: Record<string, string> = {};
@@ -160,8 +212,12 @@ export async function resolveUrlSources(formEl: HTMLFormElement, form: FormSpec,
       if (target.protocol !== 'http:' && target.protocol !== 'https:') throw new Error('scheme');
       const res = await fetch(target.href);
       if (!res.ok) throw new Error('fetch');
-      const blob = await res.blob();
-      files.set(field, new File([blob], target.pathname.split('/').pop() || 'file', { type: blob.type || 'application/octet-stream' }));
+      const contentType = res.headers?.get('content-type') ?? '';
+      if (!uploadSourceTypeOk(contentType, field.accept)) throw new Error('type');
+      const blob = await uploadSourceBlob(res);
+      const type = blob.type || contentType.split(';')[0]!.trim().toLowerCase();
+      if (!uploadSourceTypeOk(type, field.accept)) throw new Error('type');
+      files.set(field, new File([blob], target.pathname.split('/').pop() || 'file', { type }));
     } catch {
       errors[field.name] = `Enter a reachable public http(s) URL for ${field.label}.`;
     }
