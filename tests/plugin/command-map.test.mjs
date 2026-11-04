@@ -15,7 +15,7 @@ const expected = {
   'data/cutover': { commands: ['commands/verify.md', 'commands/rollback.md'], skills: ['skills/c2c-schema-and-data/SKILL.md', 'skills/c2c-verify-and-cutover/SKILL.md'], verbs: ['schema', 'migrate-data', 'seed', 'sync-delta', 'smoke', 'proof', 'cutover-checklist', 'rollback-export', 'verify', 'verify-behavior'] },
   'doctor/preflight': { commands: ['commands/doctor.md'], skills: ['skills/c2c-preflight/SKILL.md'], verbs: ['doctor'] },
   'fill-todos': { commands: [], skills: ['skills/c2c-logic/SKILL.md'], verbs: ['fill-todos'] },
-  'status/troubleshoot': { commands: ['commands/troubleshoot.md'], skills: ['skills/c2c-troubleshooting/SKILL.md', 'skills/c2c-status/SKILL.md'], verbs: ['status'] },
+  'status/troubleshoot': { commands: ['commands/troubleshoot.md'], skills: ['skills/c2c-troubleshooting/SKILL.md', 'skills/c2c-status/SKILL.md'], verbs: ['status', 'support-bundle'] },
   'maintainer-only': { commands: [], skills: [], verbs: ['parse', 'corpus', 'features', 'iac-drift', 'schema-corpus', 'migration-report', 'deluge', 'score-ui', 'ui-corpus', '--verify-vendor'] },
 };
 function parseMap(markdown) {

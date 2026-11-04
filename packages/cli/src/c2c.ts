@@ -150,6 +150,14 @@
  *                                   Unanswered reads become console checklist steps.
  *                                   --fake runs a built-in demo, labelled as such.
  *                                   Exit 0 all answered, 1 checklist fallback, 2 usage.
+ *   c2c support-bundle --out <file> [--force] [--app <name>] [--stderr-file <file>]
+ *                                   offline, read-only diagnostics bundle: doctor JSON (or its
+ *                                   refusal), the allow-listed deploy/provision/proof reports in
+ *                                   c2c-out/<app>/, CLI + plugin + Node versions, and a saved
+ *                                   stderr transcript. Allow-listed fields only: no function-env
+ *                                   values, tokens, row data, or emails. The only write is <file>;
+ *                                   <file> must not exist unless --force is passed and its parent
+ *                                   directory must already exist with no symlinked component.
  */
 
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
@@ -186,6 +194,7 @@ import { precheck, precheckAsJson, precheckAsText } from './precheck.js';
 import { DISPATCH_COMMANDS } from './commands.js';
 
 import { CLI_EXIT, PRECHECK_EXIT } from './exit-codes.js';
+import { supportBundleCli } from './support-bundle.js';
 import { analyzeQuality, qualityAsText } from './analyze-quality.js';
 import { migrationReportAsJson, migrationReportAsText, migrationReportForDir } from './migration-report.js';
 import { readLock } from '../../deluge/src/index.js';
@@ -248,7 +257,10 @@ const USAGE =
       '       c2c fill-todos <file|dir> --lock <file> --report\n' +
       // (No trailing `doctor [--local] [--quiet]` / `--verify-vendor` repeats:
       // both are already covered above. The census test fails repeats.)
-      '       c2c status --project <id> [--org <id>] [--app <name>] [--json] [--fake] [--table-budget <n>]\n';
+      '       c2c status --project <id> [--org <id>] [--app <name>] [--json] [--fake] [--table-budget <n>]\n' +
+      '       c2c support-bundle --out <file> [--force] [--app <name>] [--stderr-file <file>]\n' +
+      '              (offline, read-only: allow-listed diagnostics bundle; the only write is <file>;\n' +
+      '               (<file> must not exist unless --force; its parent dir must exist, no symlinks)\n';
 
 function helpRequested(cmd: string, args: readonly string[]): boolean {
   const flags = ARGV_SPEC[cmd]?.flags;
@@ -589,6 +601,9 @@ function main(argv: string[]): number {
       },
     );
     return 0;
+  }
+  if (cmd === 'support-bundle') {
+    return supportBundleCli(restAll);
   }
   if (cmd === 'status') {
     statusCli(restAll, defaultIo()).then(

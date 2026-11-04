@@ -33,6 +33,7 @@ const ROOTS: Record<string, string[]> = {
   doctor: ['doctorCli'],
   precheck: ['precheck'],
   status: ['statusCli'],
+  'support-bundle': ['supportBundleCli'],
   verify: ['verifyCli'],
   'verify-behavior': ['verifyBehaviorCli'],
   'rollback-export': ['doctorGateForArgs', 'rollbackExportCli'],
@@ -95,8 +96,9 @@ for (const cmd of Object.keys(ROOTS)) {
   test(`${cmd}: ARGV_SPEC lists exactly the flags the implementation reads`, () => {
     const read = census(cmd, functionBodies());
     // precheck intentionally accepts only --json and iac-drift no flag at all;
-    // requiring four flags would reject their accurate census.
-    if (cmd !== 'precheck' && cmd !== 'iac-drift') assert.ok(read.size >= 4, `${cmd}: the census found the command's flags (${[...read].join(' ')})`);
+    // requiring four flags would reject their accurate census. support-bundle
+    // is likewise small on purpose: --out, --app and --stderr-file only.
+    if (cmd !== 'precheck' && cmd !== 'iac-drift' && cmd !== 'support-bundle') assert.ok(read.size >= 4, `${cmd}: the census found the command's flags (${[...read].join(' ')})`);
     const spec = new Set(Object.keys(ARGV_SPEC[cmd].flags));
     const missing = [...read].filter((name) => !spec.has(name)).sort();
     const unread = [...spec].filter((name) => !read.has(name)).sort();

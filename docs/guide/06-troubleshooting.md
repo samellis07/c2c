@@ -29,6 +29,19 @@ the chat and the AI takes it from there.)
 | 5 | Doctor gate: a `--confirm` command was refused because the environment check is not green, current, or same-scope | This is a safety stop, not a failure in your app: ask the AI to run the doctor check and follow the fix printed next to each failed check (see "The doctor is red" below). |
 | 6 | Node or plugin integrity problem | The tool installation itself has a problem (the wrong Node version or a damaged install). Tell the AI — it needs Node 20 or 22, or the plugin reinstalled. |
 
+## First thing to attach: `c2c support-bundle`
+
+When pasting an error or escalating a failed step, the **first thing to attach** is an offline diagnostics bundle:
+
+```bash
+c2c support-bundle --out support-bundle.json [--force] [--app <name>] [--stderr-file <file>]
+```
+
+- It is strictly **offline and read-only** (no creates, no account or network calls; the only write is `--out <file>`).
+- `--out <file>` must not already exist (pass `--force` to overwrite), and its parent directory must already exist with no symlinked component. `--stderr-file` is capped at 256 KB (marked `truncated` when it exceeds the cap).
+- It collects the workspace `c2c doctor` JSON (`c2c-out/.c2c/doctor.json`) or its gate refusal, the allow-listed deploy, plan, provision, verify, parity, fidelity, smoke, and proof reports under `c2c-out/<app>/`, the CLI + plugin + Node versions, and the failing command's stderr (from `--stderr-file <file>` or `c2c-out/.c2c/last-stderr.log`), then prints a manifest of every included item.
+- It redacts by **allow-list** (only named report files and named fields are included) plus a string redaction pass so the bundle never contains tokens, credentials, OAuth/refresh tokens, `~/.c2c/<app>-function-env.json` or `function-env.json` values, customer row data, or emails.
+
 ## The doctor is red
 
 The doctor prints the exact fix next to each failed check

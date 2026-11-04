@@ -57,7 +57,7 @@ These rules apply to every host (Claude Code, OpenAI Codex, Cursor) and every c2
 | `data/cutover` | `commands/verify.md` | `skills/c2c-verify-and-cutover/SKILL.md` | `smoke`, `proof`, `cutover-checklist`, `verify`, `verify-behavior` | Run the in-app check and paste its code |
 | `data/cutover` | `commands/rollback.md` | `skills/c2c-verify-and-cutover/SKILL.md` | `rollback-export` | none |
 | `fill-todos` | none | `skills/c2c-logic/SKILL.md` | `fill-todos` | none |
-| `status/troubleshoot` | `commands/troubleshoot.md` | `skills/c2c-troubleshooting/SKILL.md` | none | none |
+| `status/troubleshoot` | `commands/troubleshoot.md` | `skills/c2c-troubleshooting/SKILL.md` | `support-bundle` | none |
 | `status/troubleshoot` | none | `skills/c2c-status/SKILL.md` | `status` | none |
 | `maintainer-only` | none | none | `parse`, `corpus`, `features`, `iac-drift`, `schema-corpus`, `migration-report`, `deluge`, `score-ui`, `ui-corpus`, `--verify-vendor` | none |
 
