@@ -4369,6 +4369,8 @@ function buildAccessPolicy(app: App): AccessPolicy {
   const policy: AccessPolicy = { profiles, roles: roleNames(app.roles) };
   const hidden = hiddenComponentNames(app);
   if (hidden.length) policy.hidden = hidden;
+  const admins = administratorProfiles(app);
+  if (admins.length) policy.admins = admins;
   return policy;
 }
 
@@ -4501,7 +4503,7 @@ export function securityFidelity(app: App): SecurityFidelity {
   }
   if (staticRuleDenials) {
     notes.push(
-      `Fields hidden or disabled in forms are enforced on the server: ${staticRuleDenials} field${staticRuleDenials === 1 ? ' is' : 's are'} unconditionally hidden or disabled by field rules, and authorizeWrite refuses a client value for ${staticRuleDenials === 1 ? 'it' : 'them'} (a client in the covered record event could not have posted ${staticRuleDenials === 1 ? 'it' : 'them'}). The Creator REST API accepts such values; the app's own On Validate and On Success scripts still set them. A bulk import post (body.import === true) skips the denial for those values, matching the REST API.`,
+      `Fields hidden or disabled in forms are enforced on the server: ${staticRuleDenials} field${staticRuleDenials === 1 ? ' is' : 's are'} unconditionally hidden or disabled by field rules, and authorizeWrite refuses a client value for ${staticRuleDenials === 1 ? 'it' : 'them'} (a client in the covered record event could not have posted ${staticRuleDenials === 1 ? 'it' : 'them'}). The Creator REST API accepts such values; the app's own On Validate and On Success scripts still set them. A bulk import post (body.import === true) from an Administrator-profile caller skips the denial for those values, matching the REST API; the flag alone grants nothing — any other signed-in caller gets the same refusal as a plain post.`,
     );
   }
   if (conditionalRules) {
@@ -5015,7 +5017,7 @@ function aioModule(opts: {
   if (schema?.ruleDenied.length) {
     lines.push('authorizeWrite also refuses fields an unconditional field rule hides or disables (fieldRuleDenied). Conditional rules depend on client state and are not enforced here.');
     lines.push(
-      'body.import === true marks a bulk import write (the seed/migrate-data path): the field-rule denials are skipped — they are on-load UI state, not data rules — while the profile grant, hidden export fields, read-only fields, choice lists and required/type checks still apply.',
+      'body.import === true marks a bulk import write (the seed/migrate-data path): the field-rule denials are skipped — they are on-load UI state, not data rules — while the profile grant, hidden export fields, read-only fields, choice lists and required/type checks still apply. The flag is honoured only for an Administrator-profile caller; for anyone else the post is authorized exactly as without it.',
     );
   }
   if (opts.systemWrite) {
@@ -5066,7 +5068,7 @@ export const fields = ${JSON.stringify(schema.fields)};${schema.ruleDenied.lengt
     ? `authorizeWrite(access, principal, formName, record, { readonlyFields, fieldNames, fields${schema.ruleDenied.length ? ', ruleDenied: importWrite ? [] : fieldRuleDenied' : ''} }${writeOp ? `, ${writeOp}` : ''})`
     : `authorizeWrite(access, principal, formName, record${writeOp ? `, undefined, ${writeOp}` : ''})`;
   const importWriteDecl = schema?.ruleDenied.length
-    ? `  const importWrite = req && req.body && req.body.import === true;
+    ? `  const importWrite = req && req.body && req.body.import === true && canImport(principal, access);
 `
     : '';
   const mailFrom = opts.body.includes('shim.mail.send') ? ', mailFrom: process.env.C2C_MAIL_FROM' : '';
@@ -5215,6 +5217,7 @@ ${hasPresuccess ? '      // Presuccess effects buffered on a buffer-safe body ru
   const shimNames = opts.systemWrite
     ? ['authorizeRead', 'authorizeWrite', 'applyInitialValues', 'compileCriteria', 'createRuntime', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'postCommitWarning', 'principalFromRequest', 'projectFields', 'projectReadable', 'replyStoreError']
     : ['authorizeRead', 'authorizeWrite', 'createRuntime', ...(usesGetUrl ? ['outboundGetUrl'] : []), ...(usesOutbound ? ['outboundHttp'] : []), 'principalFromRequest'];
+  if (schema?.ruleDenied.length) shimNames.push('canImport');
   if (usesApp && !shimNames.includes('RecordAccessError')) shimNames.push('RecordAccessError');
   for (const name of fieldStoreImports(storeShape)) {
     if (!shimNames.includes(name)) shimNames.push(name);
