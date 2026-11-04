@@ -206,7 +206,7 @@
     "Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)",
     "console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)"
   ],
-  "silentDrops": 17,
+  "silentDrops": 15,
   "residuals": [
     {
       "id": "field-property:Book.Genre property others option",
@@ -217,28 +217,6 @@
       "property": "property others option",
       "reason": "property others option is not carried by the generated dropdown field. Varchar plus the .ds choice list. The server rejects values outside the list. A choice longer than 255 is promoted to text. A values = Form.Field target is a lookup, not a dropdown. module = users is the Users field.",
       "step": "The property others option setting for Book.Genre was not converted. In the Catalyst console, configure that setting for Book.Genre, then preview the form or report and confirm the field behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:Book_Transaction.Member property sortorder",
-      "kind": "field-property",
-      "construct": "Book_Transaction.Member property sortorder",
-      "form": "Book_Transaction",
-      "field": "Member",
-      "property": "property sortorder",
-      "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The sort order for Book_Transaction.Member was not converted. In the Catalyst console, set the field's sort order for Book_Transaction.Member, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:Book_Transaction.Book property sortorder",
-      "kind": "field-property",
-      "construct": "Book_Transaction.Book property sortorder",
-      "form": "Book_Transaction",
-      "field": "Book",
-      "property": "property sortorder",
-      "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The sort order for Book_Transaction.Book was not converted. In the Catalyst console, set the field's sort order for Book_Transaction.Book, then preview the form or report and confirm values appear in that order.",
       "stepSource": "specific"
     },
     {
