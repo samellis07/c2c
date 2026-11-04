@@ -389,6 +389,10 @@ function fieldListed(out: AuditOutputs, formName: string, field: Field): boolean
 function findUiField(model: UiModel, formName: string, fieldName: string): UiField | undefined {
   const form = model.forms.find((item) => item.name === formName);
   if (!form) return undefined;
+  // The audit names items `${form}.${field}` — a top-level match wins over a
+  // same-named subform column nested under an earlier field.
+  const top = form.fields.find((item) => item.name === fieldName);
+  if (top) return top;
   const walk = (fields: UiField[]): UiField | undefined => {
     for (const item of fields) {
       if (item.name === fieldName) return item;
