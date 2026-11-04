@@ -126,6 +126,7 @@ export {
   RangeIndexError,
   ZcqlRowCapError,
   createRuntime,
+  fetchBound,
   jobPoolName,
   needsExactRead,
   queryExact,
