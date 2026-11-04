@@ -1443,6 +1443,19 @@ function sqlLit(value: unknown): string {
   return `'${text.replace(/'/g, "''")}'`;
 }
 
+const ROWID_DIGITS = /^[0-9]{1,19}$/;
+const ROWID_COLUMN = /^(?:rowid|creatorid|parent_rowid)$/i;
+
+function isRowIdColumn(column: string): boolean {
+  return ROWID_COLUMN.test(column) || /(?:^|_)rowid$/i.test(column);
+}
+
+function isRowIdValue(id: unknown): boolean {
+  if (typeof id !== 'string' && typeof id !== 'number' && typeof id !== 'bigint') return false;
+  if (typeof id === 'number' && !Number.isInteger(id)) return false;
+  return ROWID_DIGITS.test(String(id));
+}
+
 /** One bound IN list per ZCQL page, so a later stage pages the same rows as the first. */
 export async function fetchBound(
   query: PageQuery,
@@ -1454,9 +1467,11 @@ export async function fetchBound(
 ): Promise<Record<string, unknown>[]> {
   // A row whose bind column is empty has nothing to join. `IN (null)` is not a
   // value list, so empty and repeated ids are dropped before the statement.
+  const isRowId = isRowIdColumn(column);
   const seen = new Set<string>();
   const bound = ids.filter((id) => {
     if (id === null || id === undefined || id === '') return false;
+    if (isRowId && !isRowIdValue(id)) return false;
     const key = String(id);
     if (seen.has(key)) return false;
     seen.add(key);
