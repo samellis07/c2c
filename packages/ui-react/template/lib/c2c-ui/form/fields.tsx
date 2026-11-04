@@ -768,7 +768,8 @@ export function defaultWidget(field: FieldSpec): ComponentType<FieldProps> {
     case 'time': return TimeFieldWrapper;
     case 'datetime': return TextField; // A native datetime-local input: it already posts the contract value.
     case 'subform': return SubformGrid;
-    case 'lookup': return LookupField;
+    case 'lookup':
+    case 'users': return LookupField;
     case 'lookup-multi': return LookupMultiField;
     case 'formula':
     case 'autonumber':
