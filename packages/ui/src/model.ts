@@ -1033,7 +1033,11 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   }));
   for (const action of actions) {
     if (!action.preview) continue;
-    todos.push({ area: 'report', name: report.name, reason: `Custom action "${action.name.trim()}" is not migrated; its button is turned off.` });
+    // Keep unsupported actions visible in the migration report with the same
+    // typed reason used by server-snippet guidance.  This is deliberately
+    // conservative: until the workflow is proven to be a generated function
+    // or a safe own-app navigation, its semantics are untranslated.
+    todos.push({ area: 'report', name: report.name, reason: `Custom action "${action.name.trim()}" is not migrated; its button is turned off.`, manualReasons: ['untranslated'] });
   }
   const builtColumns: UiReport['columns'] = columns.map((column) => ({
     ...column,
