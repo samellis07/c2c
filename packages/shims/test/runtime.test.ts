@@ -70,6 +70,52 @@ test('fetchBound short-circuits empty, undefined, null, or repeated ids and neve
   assert.equal(calls[0]?.where, "ROWID IN ('100', '200')");
 });
 
+test('fetchBound hardens ROWID lists: digits only, dropping injection and non-digits without a query', async () => {
+  const calls: { table: string; where: string }[] = [];
+  const query = async (table: string, where: string) => {
+    calls.push({ table, where });
+    return [{ ROWID: '12', Name: 'Alice' }];
+  };
+
+  // '1 OR 1=1', "')--", '12a', '', ' 12', a 30-digit string -> dropped, no query when all dropped
+  const dropped = await fetchBound(
+    query,
+    'Author',
+    'ROWID',
+    ['1 OR 1=1', "')--", '12a', '', ' 12', '123456789012345678901234567890'],
+    '',
+    'ORDER BY ROWID',
+  );
+  assert.deepEqual(dropped, []);
+  assert.equal(calls.length, 0);
+
+  // '12' and 12 kept
+  const keptStr = await fetchBound(query, 'Author', 'ROWID', ['12'], '', 'ORDER BY ROWID');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.where, "ROWID IN ('12')");
+
+  const keptNum = await fetchBound(query, 'Author', 'ROWID', [12], '', 'ORDER BY ROWID');
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1]?.where, 'ROWID IN (12)');
+
+  // A mixed list keeps only the valid ids
+  const mixed = await fetchBound(
+    query,
+    'Author',
+    'ROWID',
+    ['1 OR 1=1', "')--", '12a', '', ' 12', '123456789012345678901234567890', '12', 34],
+    '',
+    'ORDER BY ROWID',
+  );
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2]?.where, "ROWID IN ('12', 34)");
+
+  // Non-ROWID bound columns keep today's sqlLit behaviour
+  const nonRowid = await fetchBound(query, 'Author', 'Status', ['1 OR 1=1', 'Open', '12a'], '', 'ORDER BY Status');
+  assert.equal(calls.length, 4);
+  assert.equal(calls[3]?.where, "Status IN ('1 OR 1=1', 'Open', '12a')");
+});
+
 test('generated record reads hydrate multi lookups from ordered junction rows', async () => {
   const runtime = createRuntime({
     dryRun: false,
