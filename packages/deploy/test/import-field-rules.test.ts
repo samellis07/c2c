@@ -14,7 +14,7 @@
  */
 import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import Module, { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -153,7 +153,7 @@ interface PostReply {
   body: Record<string, unknown>;
 }
 
-test('a bulk import write skips the on-load field rule but keeps grant, required and on-validate checks', async () => {
+test('a bulk import write skips the on-load field rule but keeps grant, required and on-validate checks', async (context) => {
   const dir = mkdtempSync(join(tmpdir(), 'c2c-import-field-rules-'));
   const moduleAny = Module as unknown as { _resolveFilename: (request: string, ...rest: unknown[]) => string };
   const original = moduleAny._resolveFilename;
@@ -164,27 +164,64 @@ test('a bulk import write skips the on-load field rule but keeps grant, required
   let server: Server | undefined;
   try {
     const app = deriveIr(parse(DS));
+    const userProfile = app.profiles.find((profile) => profile.name === 'User')!;
+    const mutations = [
+      { session: 'trailing', role: 'Trailing administrator', profile: 'Administrator ' },
+      { session: 'case', role: 'Case administrator', profile: 'administrator' },
+      { session: 'developer', role: 'Developer', profile: 'Developer' },
+    ];
+    for (const { profile } of mutations) app.profiles.push({ ...userProfile, name: profile });
     writeDeployTree(dir, deployFiles(app, guardFor(app), false, { mode: 'live' }).files);
+    const policy = JSON.parse(readFileSync(join(dir, 'functions/c2c_api/access-policy.json'), 'utf8'));
+    assert.deepEqual(policy.admins, ['Administrator']);
+    const mapPath = join(dir, 'functions/c2c_api/principal-map.json');
+    const map = JSON.parse(readFileSync(mapPath, 'utf8'));
+    for (const { role, profile } of mutations) map.roles[role] = profile;
+    writeFileSync(mapPath, JSON.stringify(map));
     const req = createRequire(import.meta.url);
     const sdk = req(fake) as FakeSdk;
     sdk.setSession('admin', { user_id: '1', email_id: 'admin@example.test', role_details: { role_name: 'App Administrator' } });
     sdk.setSession('user', { user_id: '2', email_id: 'user@example.test', role_details: { role_name: 'App User' } });
+    for (const { session, role } of mutations) {
+      sdk.setSession(session, { user_id: session, email_id: `${session}@example.test`, role_details: { role_name: role } });
+    }
 
     const entry = req(join(dir, 'functions/c2c_api/index.js')) as (rq: IncomingMessage, rs: ServerResponse) => Promise<void>;
     server = createServer((rq, rs) => void entry(rq, rs));
     await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as { port: number }).port;
 
-    const post = async (body: Record<string, unknown>, session = 'admin'): Promise<PostReply> => {
+    const post = async (body: Record<string, unknown>, session = 'admin', headers: Record<string, string> = {}): Promise<PostReply> => {
       const res = await fetch(`http://127.0.0.1:${port}/server/c2c_api/forms/Booking_Form/submit`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...(session ? { cookie: `c2c-harness-session=${session}` } : {}) },
+        headers: { 'content-type': 'application/json', ...(session ? { cookie: `c2c-harness-session=${session}` } : {}), ...headers },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(10_000),
       });
       return { status: res.status, body: JSON.parse(await res.text()) as Record<string, unknown> };
     };
     const row = (title: string) => (sdk.state().tables.Booking_Form ?? []).find((r) => r.Title === title);
+
+    for (const { session, profile } of mutations) {
+      await context.test(`verified profile ${JSON.stringify(profile)} cannot import`, async () => {
+        for (const field of ['Official_Email', 'Status']) {
+          const title = `${session}-${field}`;
+          const result = await post({ record: { Title: title, [field]: 'blocked' }, import: true }, session);
+          assert.equal(result.status, 403, JSON.stringify(result.body));
+          assert.equal(row(title), undefined, 'a refused import must not write');
+        }
+      });
+    }
+    await context.test('body profile cannot promote a normal user', async () => {
+      const result = await post({ record: { Title: 'body-spoof', Official_Email: 'blocked' }, import: true, profile: 'Administrator' }, 'user');
+      assert.equal(result.status, 403, JSON.stringify(result.body));
+      assert.equal(row('body-spoof'), undefined);
+    });
+    await context.test('X-Profile and X-Admin cannot promote a normal user', async () => {
+      const result = await post({ record: { Title: 'header-spoof', Official_Email: 'blocked' }, import: true }, 'user', { 'X-Profile': 'Administrator', 'X-Admin': 'true' });
+      assert.equal(result.status, 403, JSON.stringify(result.body));
+      assert.equal(row('header-spoof'), undefined);
+    });
 
     // A plain client post of the hidden field is still refused.
     const client = await post({ record: { Title: 'client-sets', Official_Email: 'a@example.test' } });
@@ -211,11 +248,13 @@ test('a bulk import write skips the on-load field rule but keeps grant, required
     assert.equal(row('anon'), undefined, 'a refused import write must not write');
 
     // The same record as a bulk import write from an administrator stores the hidden field's value.
-    const imported = await post({ record: { Title: 'imported', Official_Email: 'a@example.test', Status: 'Open' }, import: true });
-    assert.equal(imported.status, 200, JSON.stringify(imported.body));
-    assert.equal(imported.body.wrote, true);
-    assert.equal(row('imported')?.Official_Email, 'a@example.test');
-    assert.equal(row('imported')?.Status, 'Open');
+    await context.test('exact Administrator imports and stores hidden and disabled fields', async () => {
+      const imported = await post({ record: { Title: 'imported', Official_Email: 'a@example.test', Status: 'Open' }, import: true });
+      assert.equal(imported.status, 200, JSON.stringify(imported.body));
+      assert.equal(imported.body.wrote, true);
+      assert.equal(row('imported')?.Official_Email, 'a@example.test');
+      assert.equal(row('imported')?.Status, 'Open');
+    });
 
     // A required column missing from an import write is still refused.
     const mandatory = await post({ record: { Official_Email: 'b@example.test' }, import: true });
