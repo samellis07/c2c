@@ -1818,8 +1818,8 @@ export function splitPhoneTabs(appModel) {
   return { tabs, moreSections, moreCount };
 }
 
-function tabLink(item) {
-  return `<a href="${escapeHtml(item.href)}" data-tab="${escapeHtml(item.name)}" role="tab" aria-label="${escapeHtml(item.label)}" title="${escapeHtml(item.label)}">${tabIcon(item.kind)}<span class="tab-label">${escapeHtml(item.label)}</span></a>`;
+function tabLink(item, index) {
+  return `<a href="${escapeHtml(item.href)}" data-tab="${escapeHtml(item.name)}" role="tab" aria-selected="false" tabindex="${index === 0 ? '0' : '-1'}" aria-label="${escapeHtml(item.label)}" title="${escapeHtml(item.label)}">${tabIcon(item.kind)}<span class="tab-label">${escapeHtml(item.label)}</span></a>`;
 }
 
 /** Bottom tab bar: the first menu entries, plus a More tab when entries remain. */
@@ -1828,7 +1828,7 @@ export function renderTabbar(appModel) {
   if (!split.tabs.length) return '';
   const tabs = split.tabs.map(tabLink).join('');
   const more = split.moreCount
-    ? `<button type="button" id="more-tab" data-more aria-haspopup="dialog" aria-expanded="false" aria-label="More" title="More">${MORE_ICON}<span class="tab-label">More</span></button>`
+    ? `<button type="button" id="more-tab" data-more role="tab" aria-selected="false" tabindex="-1" aria-haspopup="dialog" aria-expanded="false" aria-label="More" title="More">${MORE_ICON}<span class="tab-label">More</span></button>`
     : '';
   return tabs + more;
 }
@@ -1887,6 +1887,17 @@ export function markPhoneCurrent(doc, hash) {
   if (moreTab) {
     if (inMore && !inTabs) moreTab.setAttribute('aria-current', 'page');
     else moreTab.removeAttribute('aria-current');
+  }
+  if (tabbar) {
+    const items = Array.from(tabbar.querySelectorAll('[role="tab"], [data-more]'));
+    const active = items.findIndex(
+      (el) => el.getAttribute('href') === hash || (el.hasAttribute('data-more') && inMore && !inTabs),
+    );
+    const tabbable = active < 0 ? 0 : active;
+    items.forEach((el, i) => {
+      el.setAttribute('aria-selected', i === active ? 'true' : 'false');
+      el.setAttribute('tabindex', i === tabbable ? '0' : '-1');
+    });
   }
 }
 
@@ -6686,12 +6697,19 @@ export function boot(appModel, doc) {
     if (slidingPane) tabbar.removeAttribute('role');
     else tabbar.setAttribute('role', 'tablist');
     tabbar.addEventListener('keydown', (event) => {
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
       const tabs = Array.from(tabbar.querySelectorAll('[role="tab"], [data-more]'));
       const at = tabs.indexOf(documentRef.activeElement);
       if (at === -1) return;
       event.preventDefault();
-      const next = event.key === 'ArrowRight' ? (at + 1) % tabs.length : (at - 1 + tabs.length) % tabs.length;
+      const next =
+        event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? tabs.length - 1
+            : event.key === 'ArrowRight'
+              ? (at + 1) % tabs.length
+              : (at - 1 + tabs.length) % tabs.length;
       tabs[next].focus();
     });
   }
