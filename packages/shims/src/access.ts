@@ -461,9 +461,8 @@ export function canListUsers(principal: Principal | undefined, policy?: AccessPo
 /**
  * Bulk import authorization for `body.import === true` writes. The field-rule
  * skip is a server-side capability, never a client-supplied flag: only an
- * Administrator/Developer preset profile, or a profile named in
- * `policy.admins`, may post an import write. Any other signed-in caller gets
- * the same denials as a plain post.
+ * Administrator profile named in `policy.admins` may post an import write.
+ * Any other signed-in caller gets the same denials as a plain post.
  */
 export function canImport(principal: Principal | undefined, policy?: AccessPolicy): boolean {
   return canListUsers(principal, policy);
