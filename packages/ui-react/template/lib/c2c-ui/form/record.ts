@@ -126,12 +126,47 @@ export function chosenFiles(formEl: HTMLFormElement, form: FormSpec): Map<FieldS
       out.set(field, picked);
       continue;
     }
+    // A `source = …,camera` field's capture input posts under `<name>__camera`
+    // when the dropzone mirror could not copy the pick (no DataTransfer).
+    const cam = formEl.elements.namedItem(`${field.name}__camera`);
+    const shot = cam && 'files' in cam ? (cam as HTMLInputElement).files?.[0] : undefined;
+    if (shot) {
+      out.set(field, shot);
+      continue;
+    }
     if (field.widget === 'signature' && el && 'tagName' in el && el.tagName === 'INPUT') {
       const strokes = (el as HTMLInputElement).value;
       if (strokes) out.set(field, new File([strokes], `${field.name}.json`, { type: 'application/json' }));
     }
   }
   return out;
+}
+
+/**
+ * `source = …,public_url` fields: the `<name>__url` input's address is fetched
+ * in the page and uploaded like a picked file. Errors come back per field so
+ * the form can flag them; only http(s) URLs are fetched.
+ */
+export async function resolveUrlSources(formEl: HTMLFormElement, form: FormSpec, files: Map<FieldSpec, File>): Promise<Record<string, string>> {
+  const errors: Record<string, string> = {};
+  for (const field of form.fields) {
+    if (!FILE_WIDGETS.has(field.widget) || field.widget === 'signature' || files.has(field)) continue;
+    if (!field.uploadSources?.includes('public_url')) continue;
+    const el = formEl.elements.namedItem(`${field.name}__url`);
+    const typed = el && 'value' in el ? String((el as { value: string }).value).trim() : '';
+    if (!typed) continue;
+    try {
+      const target = new URL(typed);
+      if (target.protocol !== 'http:' && target.protocol !== 'https:') throw new Error('scheme');
+      const res = await fetch(target.href);
+      if (!res.ok) throw new Error('fetch');
+      const blob = await res.blob();
+      files.set(field, new File([blob], target.pathname.split('/').pop() || 'file', { type: blob.type || 'application/octet-stream' }));
+    } catch {
+      errors[field.name] = `Enter a reachable public http(s) URL for ${field.label}.`;
+    }
+  }
+  return errors;
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

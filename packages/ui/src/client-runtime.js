@@ -509,7 +509,23 @@ export function validateField(field, value) {
 export function validateForm(form, values) {
   const errors = {};
   for (const field of form.fields || []) {
-    const err = validateField(field, values ? values[field.name] : undefined);
+    let value = values ? values[field.name] : undefined;
+    if (field && values && FILE_WIDGETS.has(field.widget) && field.widget !== 'signature' && isEmpty(value, field.widget)) {
+      // The `source` alternatives satisfy the field too: a camera capture or
+      // a typed public URL. A URL that is not http(s) is an error, not a value.
+      const camera = values[`${field.name}__camera`];
+      const sourceUrl = values[`${field.name}__url`];
+      const typed = typeof sourceUrl === 'string' ? sourceUrl.trim() : '';
+      if (typeof File !== 'undefined' && camera instanceof File && camera.size) value = camera;
+      else if (typed) {
+        if (/^https?:\/\/\S+$/i.test(typed)) value = typed;
+        else {
+          errors[field.name] = 'Enter a public http(s) URL.';
+          continue;
+        }
+      }
+    }
+    const err = validateField(field, value);
     if (err) errors[field.name] = err;
   }
   return errors;
@@ -606,7 +622,25 @@ function fieldControl(field, id, describedBy) {
   if (field.widget === 'file' || field.widget === 'image' || field.widget === 'audio' || field.widget === 'video') {
     const accept = field.accept ? ` accept="${escapeHtml(field.accept)}"` : '';
     const verb = field.widget === 'image' ? 'Select Image' : field.widget === 'audio' ? 'Select Audio' : field.widget === 'video' ? 'Select Video' : 'Select File';
-    return `<span class="filepick"><label class="filepick-btn" for="${id}">${verb}</label><input${idAttr} name="${name}" type="file"${accept}${required}${described} data-upload="${escapeHtml(field.uploadEndpoint || '')}" class="visually-hidden"><span class="filepick-name"></span></span>`;
+    // The export's `source` lists the acquisition choices Creator offers: a
+    // file upload, a camera capture, or a fetched public URL. A source that is
+    // not listed gets no control; an unknown token falls back to file only.
+    const declared = Array.isArray(field.uploadSources) ? field.uploadSources.filter((token) => UPLOAD_SOURCES.has(token)) : [];
+    const sources = declared.length ? declared : ['file'];
+    // Native `required` fits only a single-source control: with several
+    // sources another one may hold the value, and validateForm checks them all.
+    const nativeRequired = sources.length === 1 ? required : '';
+    let inner = '';
+    if (sources.includes('file')) {
+      inner += `<label class="filepick-btn" for="${id}">${verb}</label><input${idAttr} name="${name}" type="file"${accept}${nativeRequired}${described} data-upload="${escapeHtml(field.uploadEndpoint || '')}" class="visually-hidden">`;
+    }
+    if (sources.includes('camera')) {
+      inner += `<label class="filepick-btn" for="${id}-cam">Take Photo</label><input id="${id}-cam" name="${name}__camera" type="file"${accept} capture class="visually-hidden">`;
+    }
+    if (sources.includes('public_url')) {
+      inner += `<input id="${id}-url" name="${name}__url" type="url" placeholder="Paste a public URL"${nativeRequired}${described}>`;
+    }
+    return `<span class="filepick">${inner}<span class="filepick-name"></span></span>`;
   }
   if (field.widget === 'signature') {
     return `<canvas data-signature="${name}" width="320" height="120"></canvas><button type="button" data-signature-save="${name}">Save signature</button><input${idAttr} name="${name}" type="hidden" data-upload="${escapeHtml(field.uploadEndpoint || '')}">`;
@@ -5183,6 +5217,9 @@ export async function runHandler(handler, ctx) {
 
 const FILE_WIDGETS = new Set(['file', 'image', 'audio', 'video', 'signature']);
 
+/** Acquisition sources a file widget's `source` property can name. */
+const UPLOAD_SOURCES = new Set(['file', 'camera', 'public_url']);
+
 function writableInput(field) {
   if (!field || field.readonly || field.status === 'todo') return false;
   if (field.widget === 'section' || field.widget === 'notes' || field.widget === 'unsupported') return false;
@@ -5286,6 +5323,31 @@ export async function uploadReference(viewRef, field, file) {
     if (!put || put.ok === false) throw new Error('upload to storage failed');
   }
   return { key: reference.key };
+}
+
+/**
+ * A `public_url` acquisition source: the page fetches the bytes, then runs
+ * them through the same signed upload as a picked file. Only http(s) targets;
+ * a host whose CORS policy refuses the read fails the submit's upload step.
+ */
+async function fetchUploadSource(url, formEl) {
+  let target = null;
+  try {
+    target = new URL(url);
+  } catch {
+    target = null;
+  }
+  if (!target || (target.protocol !== 'http:' && target.protocol !== 'https:')) throw new Error('upload source is not an http(s) URL');
+  const call = (viewOf(formEl) && viewOf(formEl).fetch) || globalThis.fetch;
+  if (typeof call !== 'function') throw new Error('upload source fetch is unavailable');
+  const res = await call(target.href);
+  if (!res || res.ok === false || typeof res.blob !== 'function') throw new Error('upload source could not be read');
+  const blob = await res.blob();
+  const FileCtor = viewOf(formEl).File || globalThis.File;
+  const leaf = decodeURIComponent(target.pathname.split('/').pop() || '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'file';
+  const type = (blob && blob.type) || 'application/octet-stream';
+  if (typeof FileCtor === 'function') return new FileCtor([blob], leaf, { type });
+  return { name: leaf, type, size: (blob && blob.size) || 0, arrayBuffer: () => blob.arrayBuffer() };
 }
 
 /** A canvas data URL (`data:image/png;base64,…`) as PNG bytes, or null. */
@@ -5417,6 +5479,19 @@ export async function submitRecord(formEl, form, upload) {
     if (!writableInput(field)) continue;
     const value = raw[field.name];
     if (FILE_WIDGETS.has(field.widget)) {
+      if (typeof FileCtor === 'function' && field.widget !== 'signature') {
+        // `source` alternatives feed the same upload: a camera capture posts
+        // under `<name>__camera`, a fetched public URL under `<name>__url`.
+        const camera = raw[`${field.name}__camera`];
+        const picked = value instanceof FileCtor && value.size ? value : camera instanceof FileCtor && camera.size ? camera : null;
+        const sourceUrl = raw[`${field.name}__url`];
+        const typed = typeof sourceUrl === 'string' ? sourceUrl.trim() : '';
+        if (picked || typed) {
+          if (typeof upload !== 'function') throw new Error('upload endpoint missing');
+          record[field.name] = await upload(field, picked || (await fetchUploadSource(typed, formEl)));
+        }
+        continue;
+      }
       if (typeof FileCtor === 'function' && value instanceof FileCtor) {
         if (!value.size) continue;
         if (typeof upload !== 'function') throw new Error('upload endpoint missing');

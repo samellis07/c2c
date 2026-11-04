@@ -88,6 +88,8 @@ export interface UiField {
   pattern?: string;
   accept?: string;
   uploadEndpoint?: string;
+  /** Acquisition sources the `source` property allows (`file`, `public_url`, `camera`), in the export's order. */
+  uploadSources?: string[];
   scan: boolean;
   initialValue?: string;
   note?: string;
@@ -789,6 +791,11 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
   }
   if (FILE_WIDGETS.has(widget)) {
     ui.uploadEndpoint = `/uploads/${encodeURIComponent(formName)}/${encodeURIComponent(field.name)}`;
+    const sources = widget !== 'signature' ? field.properties.find((p) => p.key.trim().toLowerCase() === 'source') : undefined;
+    if (sources) {
+      const tokens = unquote(sources.value).split(',').map((token) => token.trim().toLowerCase()).filter(Boolean);
+      if (tokens.length) ui.uploadSources = tokens;
+    }
     ui.accept = widget === 'image' || widget === 'signature' ? 'image/*' : widget === 'audio' ? 'audio/*' : widget === 'video' ? 'video/*' : undefined;
     ui.note =
       widget === 'signature'

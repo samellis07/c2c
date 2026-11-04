@@ -1792,3 +1792,33 @@ test('a report column naming the group field is emitted by the group headers', (
   for (const block of mutated.detailBlocks ?? []) block.fields = block.fields.filter((item) => item.field !== 'Status');
   assert.equal(rowStatus(source, gone, name), 'dropped');
 });
+
+test('a source list the generated controls draw is emitted; an undrawn source stays a drop', () => {
+  const photo = (value: string, type = 'image'): string => `
+	form Profile
+	{
+		Photo
+		(
+			type = ${type}
+			source = ${value}
+		)
+	}
+`;
+  for (const value of ['file', 'public_url,file', 'public_url,file,camera', 'file,camera', 'public_url']) {
+    const source = dsApp(photo(value));
+    assert.equal(rowStatus(source, collectOutputs(source), 'Profile.Photo property source'), 'emitted', value);
+  }
+  // `source` is honoured on the generic file widget too, not only image.
+  const fileField = dsApp(photo('file', 'upload file'));
+  assert.equal(rowStatus(fileField, collectOutputs(fileField), 'Profile.Photo property source'), 'emitted');
+
+  // A source token the controls do not draw keeps the whole property counted.
+  const unknown = dsApp(photo('web,file'));
+  assert.equal(rowStatus(unknown, collectOutputs(unknown), 'Profile.Photo property source'), 'dropped');
+
+  // The proof is the carried list: a field without it is a drop again.
+  const source = dsApp(photo('file'));
+  const missing = cloneOutputs(collectOutputs(source));
+  delete missing.model.forms[0]!.fields.find((item) => item.name === 'Photo')!.uploadSources;
+  assert.equal(rowStatus(source, missing, 'Profile.Photo property source'), 'dropped');
+});
