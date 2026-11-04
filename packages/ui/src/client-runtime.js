@@ -616,7 +616,16 @@ function fieldControl(field, id, describedBy) {
     // The export initial value is a real option even when it is not a listed choice.
     const extra = initialItems.filter((item) => !listed.has(item)).map((item) => `<option value="${escapeHtml(item)}" selected>${escapeHtml(item)}</option>`).join('');
     const blank = multiple ? '' : '<option value="">-Select-</option>';
-    return `<select${idAttr} name="${name}"${multiple}${required}${lookup}${described}>${blank}${extra}${options}</select>`;
+    const select = `<select${idAttr} name="${name}"${multiple}${required}${lookup}${described}>${blank}${extra}${options}</select>`;
+    // `allow new entries`: an "add" action beside the picker that opens the
+    // parent form's add screen. Hidden until the lookup endpoint confirms the
+    // caller may insert on the parent form (its canAdd answer).
+    if (field.lookup && field.lookup.addNew) {
+      const addLabel = escapeHtml(field.lookup.addNew.label || 'Add New');
+      const add = `<button type="button" class="c2c-lookup-add" data-lookup-add="${escapeHtml(field.name)}" data-add-form="${escapeHtml(field.lookup.form)}" data-add-display="${escapeHtml(field.lookup.field || field.lookup.form)}" hidden>${addLabel}</button>`;
+      return `${select}${add}`;
+    }
+    return select;
   }
   if (field.widget === 'radio') {
     const choices = field.choices || [];
@@ -5462,7 +5471,7 @@ function dataUrlBytes(value) {
  * The option value is the ROWID the submit sends back; the text is the
  * display value the report shows. Rows without a ROWID are not options.
  */
-export async function loadLookupOptions(viewRef, endpoint, query) {
+export async function loadLookupPage(viewRef, endpoint, query) {
   const call = (viewRef && viewRef.fetch) || globalThis.fetch;
   if (!endpoint || typeof call !== 'function') throw new Error('lookup endpoint missing');
   const separator = endpoint.includes('?') ? '&' : '?';
@@ -5481,7 +5490,37 @@ export async function loadLookupOptions(viewRef, endpoint, query) {
     const label = field && row[field] != null ? String(row[field]) : '';
     options.push({ value: String(row.ROWID), label });
   }
-  return options;
+  return { options, canAdd: !!(body && body.canAdd === true) };
+}
+
+export async function loadLookupOptions(viewRef, endpoint, query) {
+  return (await loadLookupPage(viewRef, endpoint, query)).options;
+}
+
+/**
+ * Select a freshly added parent record in a lookup `<select>`: the row the
+ * target form's submit reply carries (its ROWID and, when the caller may
+ * read it, the display value). The option is appended when the options page
+ * did not list it yet. No ROWID in the reply means nothing is selected.
+ */
+export function selectLookupNew(select, displayField, answer) {
+  if (!select || !answer || typeof answer !== 'object') return;
+  const values = answer.values && typeof answer.values === 'object' ? answer.values : {};
+  const raw = values.ROWID != null ? values.ROWID : values.ID != null ? values.ID : values.id;
+  if (raw == null || String(raw) === '') return;
+  const rowId = String(raw);
+  const label = displayField && values[displayField] != null ? String(values[displayField]) : '';
+  const doc = select.ownerDocument || (typeof document !== 'undefined' ? document : null);
+  if (!doc) return;
+  let option = [...select.options].find((item) => item.value === rowId);
+  if (!option) {
+    option = doc.createElement('option');
+    option.value = rowId;
+    option.textContent = label;
+    select.appendChild(option);
+  }
+  option.selected = true;
+  if (!select.multiple) select.value = rowId;
 }
 
 /**
@@ -5511,13 +5550,24 @@ export function fillLookupSelect(select, options) {
  * Fill every lookup select in the form. One endpoint failing (offline, denied)
  * leaves that select as rendered; it never blocks the rest of the form.
  */
+/** The "add new record" button beside a lookup select, when it renders one. */
+function lookupAddButton(select) {
+  const parent = select && select.parentNode;
+  return parent && typeof parent.querySelector === 'function' ? parent.querySelector('button[data-lookup-add]') : null;
+}
+
 export async function fillLookups(form, formEl, viewRef) {
   const selects = formEl && typeof formEl.querySelectorAll === 'function' ? formEl.querySelectorAll('select[data-lookup]') : [];
   for (const select of selects) {
     const endpoint = select.getAttribute && select.getAttribute('data-lookup');
     if (!endpoint) continue;
     try {
-      fillLookupSelect(select, await loadLookupOptions(viewRef, endpoint));
+      const page = await loadLookupPage(viewRef, endpoint);
+      fillLookupSelect(select, page.options);
+      // The endpoint's canAdd is the caller's own insert grant on the parent
+      // form: without it the "add new record" action stays hidden.
+      const add = lookupAddButton(select);
+      if (add && page.canAdd) add.hidden = false;
     } catch {
       /* the select keeps its rendered options */
     }
@@ -7303,9 +7353,53 @@ export function boot(appModel, doc) {
     return any ? record : null;
   }
 
+  /**
+   * The `allow new entries` flow: the "add" action beside a lookup select
+   * opens the parent form's own add screen in a modal card. The submit inside
+   * it is the target form's normal generated submit path — the same endpoint,
+   * the same caller access checks. A saved row is then selected in the
+   * lookup.
+   */
+  function openLookupAddNew(model, formEl, viewRef, button) {
+    const targetName = button.getAttribute('data-add-form') || '';
+    const target = (model.forms || []).find((item) => item && item.name === targetName);
+    if (!target) return;
+    const docRef = formEl.ownerDocument;
+    if (!docRef || !docRef.body) return;
+    const wrap = docRef.createElement('div');
+    wrap.className = 'modal';
+    wrap.setAttribute('data-modal-form', `add-${target.name}`);
+    const close = '<button type="button" class="modal-close" data-modal-close aria-label="Close">&times;</button>';
+    wrap.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-label="${escapeHtml(button.textContent || target.label || target.name)}">${close}${renderForm(target)}</div>`;
+    docRef.body.appendChild(wrap);
+    const fieldBox = button.closest && button.closest('.field');
+    const select = fieldBox ? fieldBox.querySelector('select[data-lookup]') : null;
+    const display = button.getAttribute('data-add-display') || '';
+    const targetEl = wrap.querySelector('form');
+    if (targetEl) {
+      wireForm(model, target, targetEl, viewRef, {
+        onSaved: (answer) => {
+          selectLookupNew(select, display, answer);
+          wrap.remove();
+        },
+      });
+    }
+    const closeButton = wrap.querySelector('[data-modal-close]');
+    if (closeButton) closeButton.addEventListener('click', () => wrap.remove());
+  }
+
+  function attachLookupAddNew(model, formEl, viewRef) {
+    for (const button of formEl.querySelectorAll('button[data-lookup-add]')) {
+      if (button.getAttribute('data-lookup-add-bound') === 'true') continue;
+      button.setAttribute('data-lookup-add-bound', 'true');
+      button.addEventListener('click', () => openLookupAddNew(model, formEl, viewRef, button));
+    }
+  }
+
   function wireForm(model, form, formEl, viewRef, open) {
     // Lookup selects render empty; their options arrive from /lookups/*.
     fillLookups(form, formEl, viewRef).catch(() => {});
+    attachLookupAddNew(model, formEl, viewRef);
     const mode = open && open.mode === 'edit' ? 'edit' : 'add';
     const rowId = mode === 'edit' && open && open.rowId ? String(open.rowId) : '';
     // Creator's edit screen submits with an Update button.
@@ -7475,6 +7569,9 @@ export function boot(appModel, doc) {
         const shown = banner && banner.textContent ? banner.textContent : '';
         showToast(formDoc, 'success', submitNotice({ ok: true, dryRun: !answerLive, message: shown || undefined }));
       }
+      // A host (the lookup add-new dialog) learns the stored row only when
+      // the write committed: a dry-run answer selects nothing.
+      if (answer && answer.wrote === true && open && typeof open.onSaved === 'function') open.onSaved(answer);
     }
   }
 }

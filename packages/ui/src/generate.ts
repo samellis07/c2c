@@ -760,8 +760,10 @@ function lookupStub(app: App): string {
     'authorizeRead applies functions/access-policy.json: only rows the caller can read,',
     'and only when the display field itself is readable. Hidden fields are not returned.',
     '?q= searches the display field(s) server-side (contains, ANDed with the caller scope, at most 100 characters).',
+    'canAdd reports whether the caller may insert on this form (the same grant',
+    'the submit endpoint checks), so an "add new record" affordance can hide itself.',
     'A live query runs only when functions/c2c-deploy.json mode is "live" and a datastore adapter is installed.',
-  ])}${policyPrelude('../access-policy.json', true, SCOPED_READ_IMPORT)}
+  ])}${policyPrelude('../access-policy.json', true, `${SCOPED_READ_IMPORT}import { canCreate } from "creator-to-catalyst/shims";\n`)}
 export const endpoint = { type: "advancedio", method: "GET", path: "/lookups/:form/:field", dryRun: true, pageSize: ${LIMITS.zcqlRowsPerQuery} };
 const parentDecimals = ${JSON.stringify(decimalColumnsOf(app))};
 /** Parent form -> lookup key field -> displayformat terms, for a format over several fields. */
@@ -999,6 +1001,7 @@ ${requirePrincipal()}
     const formats = Object.prototype.hasOwnProperty.call(lookupFormats, route.form) ? lookupFormats[route.form] : {};
     const terms = Object.prototype.hasOwnProperty.call(formats, display) ? formats[display] : null;
     const option = (row) => toOption(row, scoped.fields, display, terms, route.form);
+    const canAdd = canCreate(access, principal, route.form);
     if (deploy.mode === "live") {
       const datastore = await liveDatastore();
       if (!datastore || typeof datastore.query !== "function") {
@@ -1009,12 +1012,12 @@ ${requirePrincipal()}
       const criteria = search ? searchCriteria(scoped.criteria, searchColumns(route.form, display, terms, scoped.fields), search) : scoped.criteria;
       const queried = await readScoped(datastore, route.form, criteria, page * pageSize, pageSize);
       const rows = (Array.isArray(queried) ? queried : []).map(option);
-      send(res, 200, { dryRun: false, rows, field: display, page, pageSize, ...(search ? { q: search } : {}) });
+      send(res, 200, { dryRun: false, rows, field: display, page, pageSize, canAdd, ...(search ? { q: search } : {}) });
       return;
     }
     let rows = suppliedRows(req).map(option);
     if (search) rows = rows.filter((row) => String(row[display] ?? "").toLocaleLowerCase().includes(search.toLocaleLowerCase()));
-    send(res, 200, { dryRun: true, rows, field: display, pageSize: ${LIMITS.zcqlRowsPerQuery}, ...(search ? { q: search } : {}) });
+    send(res, 200, { dryRun: true, rows, field: display, pageSize: ${LIMITS.zcqlRowsPerQuery}, canAdd, ...(search ? { q: search } : {}) });
   } catch (err) {
     fail(res, err);
   }

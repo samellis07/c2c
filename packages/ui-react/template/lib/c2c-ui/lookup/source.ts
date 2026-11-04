@@ -111,6 +111,16 @@ export interface LookupSnapshot {
   pages: number;
   /** The failed page's HTTP status (0 for a dropped network), so the control can name or deny it. */
   status: number | null;
+  /**
+   * The endpoint's word on whether the caller may insert on the parent form
+   * (the same grant the submit checks). Undefined until a reply says so.
+   */
+  canAdd?: boolean;
+}
+
+/** Whether the reply marks the caller's insert grant on the parent form. */
+export function lookupCanAdd(body: unknown): boolean | undefined {
+  return body && typeof body === 'object' && (body as { canAdd?: unknown }).canAdd === true ? true : undefined;
 }
 
 type Get = (url: string) => Promise<ApiReply<unknown>>;
@@ -126,6 +136,7 @@ export class LookupSource {
   private pending: Promise<void> | undefined;
   private searched = new Set<string>();
   private listeners = new Set<() => void>();
+  private canAdd: boolean | undefined;
   private snap: LookupSnapshot = { state: 'idle', options: [], done: false, pages: 0, status: null };
 
   constructor(private readonly get: Get, readonly endpoint: string, readonly pageSize = LOOKUP_PAGE_SIZE) {}
@@ -170,6 +181,8 @@ export class LookupSource {
             return;
           }
           const rows = reply.body && typeof reply.body === 'object' && Array.isArray((reply.body as { rows?: unknown }).rows) ? (reply.body as { rows: unknown[] }).rows : [];
+          const canAdd = lookupCanAdd(reply.body);
+          if (canAdd !== undefined) this.canAdd = canAdd;
           for (const option of lookupOptions(reply.body)) {
             if (this.seen.has(option.value)) continue;
             this.seen.add(option.value);
@@ -206,6 +219,8 @@ export class LookupSource {
     return this.get(lookupSearchUrl(this.endpoint, text, this.pageSize)).then(
       (reply) => {
         if (!reply.ok) return;
+        const canAdd = lookupCanAdd(reply.body);
+        if (canAdd !== undefined) this.canAdd = canAdd;
         let added = false;
         for (const option of lookupOptions(reply.body)) {
           if (this.seen.has(option.value)) continue;
@@ -225,8 +240,23 @@ export class LookupSource {
     return this.more();
   }
 
+  /**
+   * Register a record the caller just added through the parent form: the
+   * option joins the list so the control shows its display text, never a
+   * bare ROWID. A `false` there marks the option id-chosen but unlabeled.
+   */
+  adopt(option: LookupOption): void {
+    if (this.seen.has(option.value)) {
+      this.emit();
+      return;
+    }
+    this.seen.add(option.value);
+    this.options.unshift(option);
+    this.emit();
+  }
+
   private emit(): void {
-    this.snap = { state: this.state, options: [...this.options], done: this.done, pages: this.pages, status: this.status };
+    this.snap = { state: this.state, options: [...this.options], done: this.done, pages: this.pages, status: this.status, ...(this.canAdd !== undefined ? { canAdd: this.canAdd } : {}) };
     for (const listener of this.listeners) listener();
   }
 }

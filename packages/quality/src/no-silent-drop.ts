@@ -617,6 +617,10 @@ function modifierProved(modifier: string, ui: UiField | undefined, columns: Sche
 
 function flagProved(flag: string, ui: UiField | undefined, field: Field): boolean {
   if (/scan|qr|barcode/i.test(flag)) return ui?.scan === true;
+  // `allow new entries` is carried as the picker's add-new action; the
+  // generated lookup opens the parent form's add screen and selects the new
+  // row (client-runtime selectLookupNew, wired in wireForm).
+  if (flag.trim().toLowerCase() === 'allow new entries') return !!ui?.lookup?.addNew;
   // `description` declares the field's help text. It is carried when the
   // field's `type = help_text` annotation message reaches ui.help
   // (decorations/labels.ts helpMessage); a bare flag with no such message is not.
@@ -645,15 +649,21 @@ function helpTextOf(annotation: PropertyBlock): string | undefined {
 }
 
 /**
- * A `type = help_text` annotation is carried as UiField.help
- * (decorations/labels.ts helpMessage). Proved only when the generated help
- * equals this annotation's message — a different or missing help means this
- * annotation was not the one carried. Any other annotation kind has no
- * generated consumer.
+ * A field annotation that reached the generated field:
+ * - A `type = help_text` annotation is carried as UiField.help
+ *   (decorations/labels.ts helpMessage). Proved only when the generated help
+ *   equals this annotation's message — a different or missing help means this
+ *   annotation was not the one carried.
+ * - The untyped `displayname` block beside `allow new entries` is the add-new
+ *   dialog's title; other annotations have no consumer yet.
  */
 function annotationProved(annotation: PropertyBlock, ui: UiField | undefined): boolean {
   const message = helpTextOf(annotation);
-  return message !== undefined && ui?.help === message;
+  if (message !== undefined) return ui?.help === message;
+  if (annotation.properties.some((p) => p.key.toLowerCase() === 'type')) return false;
+  const display = annotation.properties.find((p) => p.key.toLowerCase() === 'displayname');
+  if (!display) return false;
+  return ui?.lookup?.addNew?.label === unquote(display.value);
 }
 
 /**

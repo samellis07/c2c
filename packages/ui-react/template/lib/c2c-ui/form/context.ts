@@ -1,6 +1,7 @@
 /** The open form's spec, errors and loaded record, shared by its field widgets. */
 import { createContext } from 'react';
 import type { FormSpec } from '../types';
+import type { FormHandlers } from './handlers';
 
 export interface FormState {
   form: FormSpec;
@@ -20,3 +21,10 @@ export interface FormState {
 }
 
 export const FormContext = createContext<FormState | null>(null);
+
+/**
+ * The app's generated handler module registry, provided by an open FormView.
+ * A lookup's `allow new entries` dialog reuses it so the parent form's add
+ * screen runs the same client handlers as its own route.
+ */
+export const FormHandlersContext = createContext<FormHandlers | undefined>(undefined);
