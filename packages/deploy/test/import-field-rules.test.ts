@@ -4,8 +4,13 @@
  * state, not data rules. Everything else still binds the write: the profile
  * grant, a mandatory column, the on-validate scripts, and the posted shape.
  *
+ * The field-rule skip is a server-side capability: only an
+ * Administrator-profile caller may post an import write. A body flag alone
+ * grants nothing — a normal profile gets the same refusal as a plain post.
+ *
  * The export: Booking_Form.Title is mandatory; a field rule hides
- * Official_Email on add; On Validate cancels a Title of "reject".
+ * Official_Email on add; On Validate cancels a Title of "reject". The "User"
+ * profile may view, create and edit but is not an administrator.
  */
 import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -37,6 +42,22 @@ ${t(2)}{
 ${t(3)}name = "Administrator"
 ${t(3)}type = Users_Permissions
 ${t(3)}description = "This profile will have all the permissions."
+${t(2)}}
+${t(2)}"User"
+${t(2)}{
+${t(3)}name = "User"
+${t(3)}type = Users_Permissions
+${t(3)}ModulePermissions
+${t(3)}{
+${t(4)}Booking_Form
+${t(4)}{
+${t(5)}enabled = true
+${t(5)}ReportPermissions
+${t(5)}{
+${t(6)}All_Bookings = {"View","Create","Edit"}
+${t(5)}}
+${t(4)}}
+${t(3)}}
 ${t(2)}}
 ${t(1)}}
 ${t(1)}forms
@@ -83,6 +104,7 @@ ${t(4)}{
 ${t(5)}actions
 ${t(5)}{
 ${t(6)}hide Official_Email;
+${t(6)}disable Status;
 ${t(5)}}
 ${t(4)}}
 ${t(3)}}
@@ -146,16 +168,17 @@ test('a bulk import write skips the on-load field rule but keeps grant, required
     const req = createRequire(import.meta.url);
     const sdk = req(fake) as FakeSdk;
     sdk.setSession('admin', { user_id: '1', email_id: 'admin@example.test', role_details: { role_name: 'App Administrator' } });
+    sdk.setSession('user', { user_id: '2', email_id: 'user@example.test', role_details: { role_name: 'App User' } });
 
     const entry = req(join(dir, 'functions/c2c_api/index.js')) as (rq: IncomingMessage, rs: ServerResponse) => Promise<void>;
     server = createServer((rq, rs) => void entry(rq, rs));
     await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as { port: number }).port;
 
-    const post = async (body: Record<string, unknown>): Promise<PostReply> => {
+    const post = async (body: Record<string, unknown>, session = 'admin'): Promise<PostReply> => {
       const res = await fetch(`http://127.0.0.1:${port}/server/c2c_api/forms/Booking_Form/submit`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', cookie: 'c2c-harness-session=admin' },
+        headers: { 'content-type': 'application/json', ...(session ? { cookie: `c2c-harness-session=${session}` } : {}) },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(10_000),
       });
@@ -169,7 +192,25 @@ test('a bulk import write skips the on-load field rule but keeps grant, required
     assert.match(String(client.body.message), /Booking_Form\.Official_Email is hidden by a field rule/);
     assert.equal(row('client-sets'), undefined, 'a refused submit must not write');
 
-    // The same record as a bulk import write stores the hidden field's value.
+    // The flag alone grants nothing: a non-administrator principal posting
+    // import:true gets the same field-rule refusal as a plain post.
+    const userImport = await post({ record: { Title: 'user-import', Official_Email: 'a@example.test' }, import: true }, 'user');
+    assert.equal(userImport.status, 403, JSON.stringify(userImport.body));
+    assert.match(String(userImport.body.message), /Booking_Form\.Official_Email is hidden by a field rule/);
+    assert.equal(row('user-import'), undefined, 'a refused import write must not write');
+
+    // A disabled-by-rule field is refused the same way for a normal profile.
+    const userDisable = await post({ record: { Title: 'user-status', Status: 'Approved' }, import: true }, 'user');
+    assert.equal(userDisable.status, 403, JSON.stringify(userDisable.body));
+    assert.match(String(userDisable.body.message), /Booking_Form\.Status is disabled by a field rule/);
+    assert.equal(row('user-status'), undefined, 'a refused import write must not write');
+
+    // Anonymous is refused before the body flag is read.
+    const anonymous = await post({ record: { Title: 'anon', Official_Email: 'a@example.test' }, import: true }, '');
+    assert.equal(anonymous.status, 401, JSON.stringify(anonymous.body));
+    assert.equal(row('anon'), undefined, 'a refused import write must not write');
+
+    // The same record as a bulk import write from an administrator stores the hidden field's value.
     const imported = await post({ record: { Title: 'imported', Official_Email: 'a@example.test', Status: 'Open' }, import: true });
     assert.equal(imported.status, 200, JSON.stringify(imported.body));
     assert.equal(imported.body.wrote, true);
