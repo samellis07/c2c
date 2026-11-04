@@ -199,6 +199,8 @@ export interface ReportSpec {
   detail: boolean;
   /** Configured Creator detail view sections, in export order. */
   detailBlocks?: { title: string; relatedField?: string; fields: { field: string; label: string }[] }[];
+  /** Detail layouts for `phone`/`tablet`: RecordDetail swaps them in at the matching breakpoint. */
+  deviceDetailBlocks?: { device: string; blocks: { title: string; relatedField?: string; fields: { field: string; label: string }[] }[] }[];
   /** Kanban card or calendar entry title. */
   titleField?: string;
   /** Calendar and timeline placement columns. */
