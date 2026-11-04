@@ -20,7 +20,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { App } from '../../core/src/ir.js';
 import { REACT_BUILD_NODE_RANGE } from '../../core/src/toolchain.js';
-import { generateUi, serviceWorker, slateConfigSource, appTimeZone, clientRuntimeSource } from '../../ui/src/generate.js';
+import { generateUi, serviceWorker, slateConfigSource, appTimeZone, clientRuntimeSource, stampUploadCap } from '../../ui/src/generate.js';
 import { solidPng } from '../../ui/src/build.js';
 import type { UiField, UiHandler, UiModel } from '../../ui/src/model.js';
 import { iconColorRgb, paletteFor } from '../../ui/src/theme-map.js';
@@ -391,7 +391,11 @@ function templateFiles(): ReactFile[] {
       if (statSync(path).isDirectory()) walk(path);
       else {
         const rel = relative(TEMPLATE_DIR, path).split(sep).join('/');
-        out.push({ path: rel, data: withBuildEngines(rel, readFileSync(path)), owner: rel.startsWith('src/custom/') ? 'custom' : 'platform' });
+        let data = withBuildEngines(rel, readFileSync(path));
+        // The record module's upload cap is re-stamped from the shim's single
+        // MAX_FILE_BYTES definition so the shipped template never drifts.
+        if (rel === 'lib/c2c-ui/form/record.ts') data = Buffer.from(stampUploadCap(data.toString('utf8')));
+        out.push({ path: rel, data, owner: rel.startsWith('src/custom/') ? 'custom' : 'platform' });
       }
     }
   };
