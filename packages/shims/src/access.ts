@@ -7,7 +7,7 @@
  */
 
 import { criteriaHasRecordQuery, criteriaHasTodo, type Criteria } from './criteria.js';
-import { WriteRuleError } from './write-rules.js';
+import { WriteRuleError, normalizeDate, normalizeDateTime } from './write-rules.js';
 
 export class RecordAccessError extends Error {
   readonly code = 'RECORD_ACCESS_DENIED';
@@ -139,6 +139,17 @@ export type WriteFieldKind = 'lookup' | 'subform' | 'composite' | 'file';
  */
 export type WriteScalar = 'number' | 'decimal' | 'date' | 'datetime' | 'time';
 
+/**
+ * Posted JSON shape of a plain leaf field, screened on the client-facing
+ * write path before any store rule runs: a string (capped by `maxLength`)
+ * for `text`, a finite number or its exact decimal text for `number` and
+ * `decimal`, the date, datetime, and clock text the store's own format
+ * check accepts for `date`, `datetime` and `time`, and a boolean for
+ * `boolean` (decision box). Only the client-facing write schema carries
+ * it; values a script sets are not screened against it.
+ */
+export type WriteInput = 'text' | 'number' | 'decimal' | 'date' | 'datetime' | 'time' | 'boolean';
+
 export interface WriteField {
   /** Link name as stored on the form or subform. */
   name: string;
@@ -155,6 +166,26 @@ export interface WriteField {
   fields?: readonly WriteField[];
   /** Storage family of a plain leaf field; marks blank-to-null candidates. */
   scalar?: WriteScalar;
+  /**
+   * Posted JSON shape of a plain leaf field (see `WriteInput`). Carried by
+   * the client-facing write schema only, like `choices`.
+   */
+  input?: WriteInput;
+  /**
+   * A genuinely multi-valued field — multi select, checkbox list, multi
+   * lookup — takes a JSON array of plain scalars. Every other leaf refuses
+   * an array. Structural (not client-only): script-set values keep it so a
+   * Deluge list assignment to a multi column still screens the same way.
+   */
+  multi?: boolean;
+  /**
+   * Character cap on a `text` leaf: the field's `maxchar`, or the Creator
+   * default the column got when unset — 255 for a single-line text (the
+   * schema mapping's varchar default), 10_000 for a multi-line or URL text
+   * column (the Catalyst text cap). A posted value past it is refused as
+   * `text-length`.
+   */
+  maxLength?: number;
   /**
    * Closed choice list of a single-choice picklist or radio. A posted value
    * outside it is refused (400 INVALID_INPUT naming the field), as Creator
@@ -455,6 +486,9 @@ interface DepthField {
   hidden: boolean;
   kind?: WriteFieldKind;
   scalar?: WriteScalar;
+  input?: WriteInput;
+  multi?: boolean;
+  maxLength?: number;
   choices?: readonly string[];
   children: DepthField[];
 }
@@ -496,6 +530,9 @@ function toDepth(field: WriteField, readonlyNames: readonly string[]): DepthFiel
     hidden: !!field.hidden,
     ...(field.kind ? { kind: field.kind } : {}),
     ...(field.scalar ? { scalar: field.scalar } : {}),
+    ...(field.input ? { input: field.input } : {}),
+    ...(field.multi ? { multi: true } : {}),
+    ...(field.maxLength !== undefined ? { maxLength: field.maxLength } : {}),
     ...(field.choices?.length ? { choices: field.choices } : {}),
     children: (field.fields ?? []).map((child) => toDepth(child, readonlyNames)),
   };
@@ -661,7 +698,7 @@ function screenFieldValue(
 ): unknown {
   if (value == null) return value;
   if (field.kind === 'file') return screenFile(form, dotted, value, principal);
-  if (field.kind === 'lookup') return screenLookup(form, dotted, value, principal);
+  if (field.kind === 'lookup') return screenLookup(form, dotted, field.multi === true, value, principal);
   if (field.kind === 'subform') {
     if (!Array.isArray(value)) {
       throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
@@ -689,7 +726,7 @@ function screenFieldValue(
   if (field.choices && !(typeof value === 'string' && value === '') && !field.choices.includes(String(value))) {
     throw new WriteRuleError(form, [{ column: field.name, rule: 'not-a-choice' }]);
   }
-  return screenScalar(form, dotted, value, principal);
+  return screenLeaf(form, dotted, field, value, principal);
 }
 
 function screenFile(form: string, dotted: string, value: unknown, principal: Principal): { key: string } {
@@ -701,9 +738,13 @@ function screenFile(form: string, dotted: string, value: unknown, principal: Pri
   return { key };
 }
 
-function screenLookup(form: string, dotted: string, value: unknown, principal: Principal): unknown {
+function screenLookup(form: string, dotted: string, multi: boolean, value: unknown, principal: Principal): unknown {
   if (Array.isArray(value)) {
-    return value.map((item, index) => screenLookup(form, `${dotted}[${index}]`, item, principal));
+    // A list of ids is the multi lookup's shape; a single lookup refuses it.
+    if (!multi) {
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+    }
+    return value.map((item, index) => screenLookup(form, `${dotted}[${index}]`, true, item, principal));
   }
   if (!isPlainRecord(value)) return value;
   const accepted: Record<string, unknown> = {};
@@ -778,6 +819,82 @@ function screenScalar(form: string, dotted: string, value: unknown, principal: P
     throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
   }
   return value;
+}
+
+/**
+ * The posted JSON shape of a schema-listed leaf. A JSON array is the multi
+ * select / checkbox list / multi lookup shape and is refused for anything
+ * else; a plain object is refused everywhere. A leaf with an `input` mark
+ * then accepts only what its client control can send: a string inside the
+ * field's character cap for `text`; a finite number or its exact decimal
+ * text for `number` and `decimal` (digits and scale stay store rules); the
+ * date, datetime or clock text the store's own format check accepts for
+ * `date`, `datetime` and `time`; and a boolean for `boolean`. A shape
+ * mismatch is the same refusal a nested object gets; a value inside the
+ * shape but outside the field's rule answers with the store's
+ * WriteRuleError shape, naming the field and the rule — never the value.
+ */
+function screenLeaf(form: string, dotted: string, field: DepthField, value: unknown, principal: Principal): unknown {
+  if (Array.isArray(value)) {
+    if (!field.multi) {
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+    }
+    return value.map((item, index) => {
+      if (item != null && (isPlainRecord(item) || Array.isArray(item))) {
+        throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}[${index}]`);
+      }
+      return item;
+    });
+  }
+  if (isPlainRecord(value)) {
+    throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+  }
+  switch (field.input) {
+    case 'text':
+      if (typeof value !== 'string') {
+        throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+      }
+      if (field.maxLength !== undefined && value.length > field.maxLength) {
+        throw new WriteRuleError(form, [{ column: field.name, rule: 'text-length' }]);
+      }
+      return value;
+    case 'number':
+    case 'decimal':
+      // The control posts whole numbers as JS numbers and keeps decimal
+      // text exact; a non-finite number or any other type is not writable.
+      if (typeof value === 'number') {
+        if (!Number.isFinite(value)) {
+          throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+        }
+        return value;
+      }
+      if (typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value.trim())) return value;
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+    case 'date': {
+      const text = typeof value === 'string' ? value : '';
+      const serial = /^(\d{4}-\d{2}-\d{2})T00:00:00$/.exec(text.trim());
+      if (normalizeDate(serial ? serial[1]! : text).ok) return value;
+      throw new WriteRuleError(form, [{ column: field.name, rule: 'date-format' }]);
+    }
+    case 'datetime':
+      if (typeof value === 'string' && normalizeDateTime(value).ok) return value;
+      throw new WriteRuleError(form, [{ column: field.name, rule: 'date-format' }]);
+    case 'time':
+      if (typeof value === 'string' && validClock(value)) return value;
+      throw new WriteRuleError(form, [{ column: field.name, rule: 'date-format' }]);
+    case 'boolean':
+      if (typeof value === 'boolean') return value;
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+    default:
+      return value;
+  }
+}
+
+/** `HH:mm` or `HH:mm:ss`, the only clock text a `type = time` control posts. */
+function validClock(text: string): boolean {
+  const match = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(text.trim());
+  if (!match) return false;
+  return Number(match[1]) <= 23 && Number(match[2]) <= 59 && (match[3] === undefined || Number(match[3]) <= 59);
 }
 
 export function projectFields(

@@ -2382,6 +2382,41 @@ function scalarOf(widget: UiModel['forms'][number]['fields'][number]['widget']):
 }
 
 /**
+ * Posted JSON shape of a plain leaf field, keyed by Slate widget. The
+ * submit stub screens a posted value against it before the store rules
+ * run, so an array, object or wrong scalar type cannot reach a column it
+ * was never shaped for. Choice widgets stay out: a closed list already
+ * screens them, an open one takes any single string.
+ */
+function inputOf(widget: UiModel['forms'][number]['fields'][number]['widget']): WriteField['input'] {
+  switch (widget) {
+    case 'text':
+    case 'textarea':
+    case 'email':
+    case 'phone':
+    case 'url':
+    case 'richtext':
+      return 'text';
+    case 'number':
+      return 'number';
+    case 'decimal':
+    case 'percent':
+    case 'currency':
+      return 'decimal';
+    case 'date':
+      return 'date';
+    case 'datetime':
+      return 'datetime';
+    case 'time':
+      return 'time';
+    case 'decision':
+      return 'boolean';
+    default:
+      return undefined;
+  }
+}
+
+/**
  * Static Creator initial value from the already-unquoted Slate prefill text
  *. Anything shaped like a dynamic expression (a call, or a dotted
  * path such as zoho.currentdate or input.X) is left unset so the submit
@@ -2423,6 +2458,8 @@ function writeFieldOf(field: UiModel['forms'][number]['fields'][number], closed:
   };
   if (field.widget === 'lookup' || field.widget === 'lookup-multi') {
     node.kind = 'lookup';
+    // A list of ids is the multi lookup's shape; a single lookup refuses one.
+    if (field.widget === 'lookup-multi') node.multi = true;
   } else if (field.widget === 'file' || field.widget === 'image' || field.widget === 'audio' || field.widget === 'video' || field.widget === 'signature') {
     node.kind = 'file';
   } else if (field.widget === 'subform') {
@@ -2434,6 +2471,18 @@ function writeFieldOf(field: UiModel['forms'][number]['fields'][number], closed:
   } else {
     const scalar = scalarOf(field.widget);
     if (scalar) node.scalar = scalar;
+    const input = inputOf(field.widget);
+    if (input) node.input = input;
+    // A multi select (select list or checkboxes) is the plain leaf that
+    // takes a JSON array; every other leaf refuses one.
+    if (field.widget === 'multiselect') node.multi = true;
+    if (input === 'text') {
+      // The field's maxchar, or the Creator default the column got when
+      // unset: 255 for a single-line text (the schema mapping's varchar
+      // default), and 10_000 for a URL without maxchar, which the mapping
+      // stores as Catalyst text.
+      node.maxLength = field.maxLength ?? 10_000;
+    }
     const choices = closed.get(`${prefix}${field.name}`);
     if (choices) node.choices = choices;
     // A multi select initial value is already the stored JSON list text (model.ts).
@@ -2626,9 +2675,11 @@ export const readonlyFields = ${JSON.stringify(fields.readonlyNames)};
 export const hiddenFields = ${JSON.stringify(fields.hiddenNames)};
 export const fields = ${JSON.stringify(fields.fields)};${ruleDenied.length ? `\nexport const fieldRuleDenied = ${JSON.stringify(ruleDenied)};` : ''}
 function unhideField(field) {
-  // The closed choice list screens the client body only; values the
-  // on-validate scripts set are re-checked without it.
-  const { hidden, choices, ...rest } = field;
+  // The closed choice list and the posted-shape marks screen the client
+  // body only; values the on-validate scripts set are re-checked without
+  // them. multi stays: a Deluge list assignment to a multi column is the
+  // same shape.
+  const { hidden, choices, input, maxLength, ...rest } = field;
   return rest.fields ? { ...rest, fields: rest.fields.map(unhideField) } : rest;
 }
 const storeFields = fields.map(unhideField);
