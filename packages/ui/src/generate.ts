@@ -3063,11 +3063,11 @@ function recordStub(app: App, form: UiModel['forms'][number], path: string): str
         if (entry) entry.dots.add(field.field.slice(dot + 1));
       }
     }
-    const list = [...reads.entries()].map(([field, entry]) => ({
+    const list = [...reads.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([field, entry]) => ({
       field,
       form: entry.form,
-      ...(entry.rows.size ? { rows: [...entry.rows] } : {}),
-      ...(entry.dots.size ? { dots: [...entry.dots] } : {}),
+      ...(entry.rows.size ? { rows: [...entry.rows].sort() } : {}),
+      ...(entry.dots.size ? { dots: [...entry.dots].sort() } : {}),
     }));
     detailByReport.set(report.name, { own, reads: list });
   }
@@ -3118,7 +3118,7 @@ function boundCriteria(criteria) {
       ),
     ).map((profile) => profile.name);
     const detail = detailByReport.get(report.name);
-    const fields = [...new Set([...report.columns.map((column) => column.field), ...(detail?.own ?? []), ...(detail?.reads ?? []).map((read) => read.field)])];
+    const fields = [...new Set([...report.columns.map((column) => column.field), ...(detail?.own ?? []), ...(detail?.reads ?? []).map((read) => read.field)])].sort();
     return [[report.name, { criteria: scopeCriteria, fields, profiles, ...(detail?.reads.length ? { reads: detail.reads } : {}) }]];
   }));
   // A report scope whose criteria has a lookup-path leaf or a dependent record
