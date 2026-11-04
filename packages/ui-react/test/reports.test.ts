@@ -86,6 +86,31 @@ function source(): string {
 \t\t\t)
 \t\t)
 \t}
+\tphone
+\t{
+\t\treports
+\t\t{
+\t\t\treport Orders
+\t\t\t{
+\t\t\t\tdetailview
+\t\t\t\t(
+\t\t\t\t\tlayout
+\t\t\t\t\t(
+\t\t\t\t\t\ttype = 2
+\t\t\t\t\t\tdatablock1
+\t\t\t\t\t\t(
+\t\t\t\t\t\t\ttitle = "Phone Card"
+\t\t\t\t\t\t\tfields
+\t\t\t\t\t\t\t(
+\t\t\t\t\t\t\t\tTitle
+\t\t\t\t\t\t\t\tTotal
+\t\t\t\t\t\t\t)
+\t\t\t\t\t\t)
+\t\t\t\t\t)
+\t\t\t\t)
+\t\t\t}
+\t\t}
+\t}
 \tkanban Board
 \t{
 \t\tdisplayname = "Board"
@@ -127,6 +152,16 @@ test('the report spec carries the view options: sort, filters, grouping, detail,
       { field: 'Title', label: 'Title' },
       { field: 'Status', label: 'Status' },
     ],
+  }]);
+  assert.deepEqual(report.deviceDetailBlocks, [{
+    device: 'phone',
+    blocks: [{
+      title: 'Phone Card',
+      fields: [
+        { field: 'Title', label: 'Title' },
+        { field: 'Total', label: 'Total' },
+      ],
+    }],
   }]);
   const formats = report.conditionalFormats!;
   assert.equal(formats.length, 1);

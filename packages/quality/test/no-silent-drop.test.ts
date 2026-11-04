@@ -1072,6 +1072,66 @@ test('a report feature, page element, or field setting is emitted only when the 
   assert.equal(dropNames(source, counted).includes('All_Orders column Title'), false);
 });
 
+test('a detail view proves against the layout kept for its device', () => {
+  const block = (name: string, title: string, relatedField: string | undefined, fields: string[]) => ({
+    name,
+    title,
+    ...(relatedField ? { relatedField } : {}),
+    fields: fields.map((f) => ({ field: f, properties: [], subcolumns: [], span: Z })),
+    properties: [],
+    span: Z,
+  });
+  const view = (kind: 'quickview' | 'detailview', device: string | undefined, blocks: ReturnType<typeof block>[]) => ({
+    kind,
+    ...(device ? { device } : {}),
+    layoutProperties: [],
+    blocks,
+    menus: {},
+    actions: {},
+    properties: [],
+    span: Z,
+  });
+  const source = app({
+    forms: [{ name: 'Orders', properties: [], fields: [field('Title', 'text'), field('Name', 'text'), field('Qty', 'text')], actions: [], blocks: [], span: Z }],
+    reports: [
+      {
+        name: 'All_Orders',
+        type: 'list',
+        modifiers: [],
+        form: 'Orders',
+        flags: [],
+        properties: [],
+        columns: [{ field: 'Title', properties: [], subcolumns: [], span: Z }],
+        customActions: [],
+        conditionalFormats: [],
+        filters: [],
+        groupBy: [],
+        sortBy: [],
+        blocks: [],
+        views: [
+          // Two "Overview" blocks: a field section and a related list.
+          view('detailview', 'web', [block('datablock1', 'Overview', undefined, ['Title']), block('datablock2', 'Overview', 'Items', ['Name', 'Qty'])]),
+          view('detailview', 'phone', [block('datablock1', 'Phone Card', undefined, ['Title'])]),
+        ],
+        span: Z,
+      },
+    ],
+  });
+  const out = collectOutputs(source);
+  const built = out.model.reports.find((item) => item.name === 'All_Orders')!;
+  assert.equal(built.detailDevice, 'web');
+  assert.deepEqual((built.deviceDetailBlocks ?? []).map((variant) => variant.device), ['phone']);
+  const rows = coverageLedger(source, out);
+  // The related "Overview" block lands on the related layout block, not the first same-title block.
+  assert.equal(rows.find((row) => row.name === 'All_Orders detailview web')?.status, 'emitted');
+  assert.equal(rows.find((row) => row.name === 'All_Orders detailview phone')?.status, 'emitted');
+  assert.equal(dropNames(source, out).includes('All_Orders detailview phone'), false);
+  // Break the generated output: without the carried phone layout the drop returns.
+  const mutated = cloneOutputs(out);
+  delete mutated.model.reports.find((item) => item.name === 'All_Orders')!.deviceDetailBlocks;
+  assert.ok(dropNames(source, mutated).includes('All_Orders detailview phone'));
+});
+
 test('a page element whose payload was not generated is a drop even though the node exists', () => {
   const element = (tag: string, attributes: Record<string, string>) => ({ tag, attributes, children: [], start: 10, end: 20 });
   const source = app({
