@@ -3,8 +3,9 @@
  *
  * A lookup field becomes a searchable picker over the parent form's paged
  * lookup endpoint; a multi lookup a searchable multi-select over the same
- * endpoint; a users field an email control (Creator stores the user's email
- * address). Subform columns keep the Creator order and each column gets the
+ * endpoint; a users field the same picker over the system Users endpoint
+ * (Catalyst project users, keyed by the user id). Subform columns keep the
+ * Creator order and each column gets the
  * same widget a top-level field of its type gets, so a lookup column is a
  * picker too.
  */

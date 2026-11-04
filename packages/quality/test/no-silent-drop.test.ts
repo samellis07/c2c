@@ -1792,3 +1792,56 @@ test('a report column naming the group field is emitted by the group headers', (
   for (const block of mutated.detailBlocks ?? []) block.fields = block.fields.filter((item) => item.field !== 'Status');
   assert.equal(rowStatus(source, gone, name), 'dropped');
 });
+
+const USERS_LOOKUP_APP = `
+	form Raise_an_Idea
+	{
+		Idea
+		(
+			type = text
+		)
+		Approver
+		(
+			type = picklist
+			module = users
+			displayformat = [username]
+		)
+	}
+`;
+
+function approverUi(out: ReturnType<typeof collectOutputs>) {
+  return out.model.forms.find((f) => f.name === 'Raise_an_Idea')!.fields.find((f) => f.name === 'Approver')!;
+}
+
+test('module = users and its displayformat are emitted only by the generated users lookup', () => {
+  const source = dsApp(USERS_LOOKUP_APP);
+  const out = collectOutputs(source);
+  const moduleRow = 'Raise_an_Idea.Approver property module';
+  const formatRow = 'Raise_an_Idea.Approver property displayformat';
+  assert.equal(approverUi(out).widget, 'users');
+  assert.deepEqual(approverUi(out).lookup, { form: 'users', field: 'username', endpoint: '/lookups/users/username' });
+  assert.equal(rowStatus(source, out, moduleRow), 'emitted');
+  assert.equal(rowStatus(source, out, formatRow), 'emitted');
+
+  // Remove the generated lookup: both items return.
+  const gone = cloneOutputs(out);
+  delete approverUi(gone).lookup;
+  assert.equal(rowStatus(source, gone, moduleRow), 'dropped');
+  assert.equal(rowStatus(source, gone, formatRow), 'dropped');
+
+  // A lookup bound to an ordinary form is not the system Users module.
+  const wrong = cloneOutputs(out);
+  approverUi(wrong).lookup!.form = 'Employee';
+  approverUi(wrong).lookup!.endpoint = '/lookups/Employee/username';
+  assert.equal(rowStatus(source, wrong, moduleRow), 'dropped');
+
+  // The users widget without its endpoint serves nothing.
+  const noRoute = cloneOutputs(out);
+  delete (approverUi(noRoute).lookup as { endpoint?: string }).endpoint;
+  assert.equal(rowStatus(source, noRoute, moduleRow), 'dropped');
+
+  // A lookup resolving to a different display attribute did not carry the format.
+  const other = cloneOutputs(out);
+  approverUi(other).lookup!.field = 'email';
+  assert.equal(rowStatus(source, other, formatRow), 'dropped');
+});

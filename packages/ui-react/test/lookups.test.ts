@@ -102,10 +102,11 @@ test('lookup and multi lookup fields are generated with their parent, display fi
   assert.equal(watchers.widget, 'lookup-multi');
   assert.equal(watchers.generated, true);
   assert.deepEqual(watchers.lookup, { form: 'Customer', display: 'Email', endpoint: '/lookups/Customer/Email' });
-  // A users field is an email control, not a placeholder.
+  // A users field is the same picker over the system Users endpoint.
   const owner = fieldOf(form, 'Owner');
   assert.equal(owner.widget, 'users');
   assert.equal(owner.generated, true);
+  assert.deepEqual(owner.lookup, { form: 'users', display: 'username', endpoint: '/lookups/users/username' });
 });
 
 test('subform columns keep the Creator order and a lookup column carries its lookup', () => {
@@ -118,10 +119,9 @@ test('subform columns keep the Creator order and a lookup column carries its loo
 
 test('the widget table routes lookups, multi lookups and subforms to their controls', () => {
   const fields = readFileSync(join(TEMPLATE_DIR, 'lib/c2c-ui/form/fields.tsx'), 'utf8');
-  assert.match(fields, /case 'lookup': return LookupField;/);
+  assert.match(fields, /case 'lookup':\s*case 'users': return LookupField;/);
   assert.match(fields, /case 'lookup-multi': return LookupMultiField;/);
   assert.match(fields, /case 'subform': return SubformGrid;/);
-  assert.match(fields, /users: 'email'/);
 });
 
 type Calls = string[];
