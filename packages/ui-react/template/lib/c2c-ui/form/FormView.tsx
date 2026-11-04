@@ -34,6 +34,7 @@ import { useEnv } from '../runtime/env';
 import { failureText, retryable, useAccessDenied } from '../runtime/StatusScreens';
 import { Slot, useCustomization } from '../runtime/extend';
 import { FormContext } from './fields';
+import { FormHandlersContext } from './context';
 import { applyHandlerActions, matchingHandlers, mergeScriptRecord, runHandlers, type FormHandlers, type HandlerCtx, type HandlerDraft } from './handlers';
 import { chosenFiles, firstErrorControl, readRecord, resolveUrlSources, validate } from './record';
 import { subformRows, validateSubforms } from '../subform/rows';
@@ -65,6 +66,8 @@ interface WriteReply {
   message?: string;
   error?: string;
   record?: Record<string, unknown>;
+  /** The stored row's readable fields (ROWID included) after a committed write. */
+  values?: Record<string, unknown>;
   reference?: { key?: string };
   mail?: Array<{ status: string; reason: string; logged?: boolean }>;
 }
@@ -181,7 +184,7 @@ function newSubmitKey(): string {
   return `c2c-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
 }
 
-export function FormView({ form, edit, children, handlers }: { form: FormSpec; edit?: string; children?: ReactNode; handlers?: FormHandlers }) {
+export function FormView({ form, edit, children, handlers, onSaved }: { form: FormSpec; edit?: string; children?: ReactNode; handlers?: FormHandlers; onSaved?: (values: Record<string, unknown>) => void }) {
   const { view, api } = useEnv();
   const custom = useCustomization().forms?.[form.name];
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -509,6 +512,11 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
           setNotes((prev) => [...prev, ...mailNotes]);
         }
       }
+      // The stored row's readable values reach a host only when the write
+      // committed: a dry run or a refused submit selects nothing.
+      if (reply.body?.wrote === true && reply.body.values && typeof reply.body.values === 'object') {
+        onSaved?.(reply.body.values as Record<string, unknown>);
+      }
       await custom?.afterSubmit?.({ ok: committed, dryRun, body: reply.body }, ctx);
     } catch (error) {
       setBanner({ tone: 'danger', title: error instanceof Error && error.message === 'upload' ? 'Upload failed. The form was not submitted.' : 'The form was not submitted. Try again.' });
@@ -542,6 +550,7 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
       <h1>{form.label}</h1>
       <Slot>{custom?.slots?.before}</Slot>
       <FormContext.Provider value={{ form, errors, record, rowId: edit, hidden: fieldState.hidden, disabled: fieldState.disabled, versions, notify, rowEvent }}>
+        <FormHandlersContext.Provider value={handlers}>
         <form ref={formRef} data-form={form.name} data-layout={form.layout} data-mode={mode} noValidate onSubmit={onSubmit} onChange={onFieldChange} onReset={() => { setErrors({}); if (!submitReset.current) setBanner(null); }}>
           <div className="form-grid" key={loaded}>
             {children}
@@ -565,6 +574,7 @@ export function FormView({ form, edit, children, handlers }: { form: FormSpec; e
             )}
           </div>
         </form>
+        </FormHandlersContext.Provider>
       </FormContext.Provider>
       <Slot>{custom?.slots?.after}</Slot>
     </section>

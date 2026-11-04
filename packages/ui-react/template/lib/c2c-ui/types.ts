@@ -17,6 +17,8 @@ export interface LookupSpec {
   form: string;
   display: string;
   endpoint: string;
+  /** Creator `allow new entries`: the picker offers the parent form's add screen; `label` is that dialog's title. */
+  addNew?: { label?: string };
 }
 
 export interface FieldSpec {

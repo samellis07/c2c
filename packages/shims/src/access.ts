@@ -374,6 +374,21 @@ function pick(values: Record<string, unknown>, keys: readonly string[]): Record<
 }
 
 /**
+ * Whether the profile may insert a row on `form`: the form is granted, the
+ * write bit is set, and create is not refused. The same conditions
+ * `authorizeWrite` checks for an insert, answered without throwing — the
+ * lookups endpoint reports it so a "add new record" affordance renders only
+ * for a caller the server would accept.
+ */
+export function canCreate(policy: AccessPolicy, principal: Principal | undefined, form: string): boolean {
+  if (!principal?.profile) return false;
+  if (principal.role && policy.roles.length > 0 && !policy.roles.includes(principal.role)) return false;
+  const forms = own(policy.profiles, principal.profile);
+  const grant = forms ? own(forms, form) : undefined;
+  return !!grant && grant.write === true && grant.create !== false;
+}
+
+/**
  * Submit and upload authorization. The form must be viewable and editable.
  *
  * Policy is reject, not drop, at every depth. A key is accepted only when it

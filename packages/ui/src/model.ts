@@ -83,7 +83,7 @@ export interface UiField {
   readonly: boolean;
   status: 'generated' | 'todo';
   choices?: string[];
-  lookup?: { form: string; field?: string; endpoint: string };
+  lookup?: { form: string; field?: string; endpoint: string; addNew?: { label?: string } };
   maxLength?: number;
   minLength?: number;
   pattern?: string;
@@ -774,6 +774,12 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       ...(field.lookup.field ? { field: field.lookup.field } : {}),
       endpoint: `/lookups/${encodeURIComponent(field.lookup.form)}/${encodeURIComponent(field.lookup.field || field.lookup.form)}`,
     };
+    // `allow new entries` lets the picker offer the parent form's add screen
+    // inline; the `displayname` annotation is that dialog's title.
+    if (field.flags.some((flag) => flag.trim().toLowerCase() === 'allow new entries')) {
+      const label = addNewLabel(field);
+      ui.lookup.addNew = label !== undefined ? { label } : {};
+    }
   }
   // Creator's Users module is a project-user picker.  Catalyst exposes the
   // same records through the system Users lookup endpoint; keep the submitted
@@ -928,6 +934,20 @@ function wantsScan(field: Field): boolean {
 function prop(field: Field, key: string): string | undefined {
   const found = field.properties.find((p) => p.key.toLowerCase() === key);
   return found ? unquote(found.value) : undefined;
+}
+
+/**
+ * The `allow new entries` dialog title: the untyped `displayname` annotation
+ * a lookup carries next to the flag (`allow new entries [ displayname = "Add
+ * New X" ]`). Typed annotations (help_text, tooltip) are not the dialog title.
+ */
+function addNewLabel(field: Field): string | undefined {
+  for (const block of field.annotations) {
+    if (block.properties.some((p) => p.key.toLowerCase() === 'type')) continue;
+    const found = block.properties.find((p) => p.key.toLowerCase() === 'displayname');
+    if (found !== undefined) return unquote(found.value);
+  }
+  return undefined;
 }
 
 function intProp(field: Field, keys: string[]): number | undefined {
