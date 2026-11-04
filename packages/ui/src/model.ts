@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { App, Field, Form, FunctionDef, Property, Report } from '../../core/src/ir.js';
-import { hasOthersOption, unquote } from '../../core/src/ir.js';
+import { hasOthersOption, translationStrings, unquote } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import type { BlueprintFieldSpec } from '../../deluge/src/blueprint-rules.js';
 import { blueprintFieldSpecs, fnSignatureParams, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
@@ -357,6 +357,12 @@ export interface UiModel {
   phoneLayout?: DeviceLayout;
   /** The tablet `customize { layout }` arrangement. */
   tabletLayout?: DeviceLayout;
+  /**
+   * Migrated `translation` blocks: language code → Creator label key → text.
+   * The client swaps labels for the selected language; absent blocks leave no
+   * table and stay manual steps.
+   */
+  i18n?: Record<string, Record<string, string>>;
 }
 
 export interface UiForm {
@@ -787,6 +793,7 @@ export function buildModel(app: App, delugeFiles: readonly GeneratedFile[] = [])
   }
   const dateFormat = app.settings.find((item) => item.key.toLowerCase() === 'date format');
   const timeFormat = app.settings.find((item) => item.key.toLowerCase() === 'time format');
+  const i18n = mergedTranslations(app);
   const model: UiModel = {
     dryRun: true,
     framework: 'vanilla',
@@ -800,10 +807,33 @@ export function buildModel(app: App, delugeFiles: readonly GeneratedFile[] = [])
     todos,
     ...(dateFormat ? { dateFormat: unquote(dateFormat.value) } : {}),
     ...(timeFormat ? { timeFormat: unquote(timeFormat.value) } : {}),
+    ...(Object.keys(i18n).length ? { i18n } : {}),
   };
   Object.defineProperty(model, UI_SNIPPET_FILES, { value: snippetFiles, enumerable: false });
   applyDecorations(model, app);
   return model;
+}
+
+/**
+ * Every `translation` block's migratable labels merged into one table:
+ * language → key → text, keys and languages sorted so the emitted model is
+ * deterministic. A later block overrides an earlier one's key, matching a
+ * Creator re-import.
+ */
+function mergedTranslations(app: App): Record<string, Record<string, string>> {
+  const merged: Record<string, Record<string, string>> = {};
+  for (const t of app.translations) {
+    for (const [lang, strings] of Object.entries(translationStrings(t))) {
+      Object.assign((merged[lang] ??= {}), strings);
+    }
+  }
+  const sorted: Record<string, Record<string, string>> = {};
+  for (const lang of Object.keys(merged).sort(compareEnUs)) {
+    const table: Record<string, string> = {};
+    for (const key of Object.keys(merged[lang]!).sort(compareEnUs)) table[key] = merged[lang]![key]!;
+    sorted[lang] = table;
+  }
+  return sorted;
 }
 
 const requireDecoration = createRequire(import.meta.url);

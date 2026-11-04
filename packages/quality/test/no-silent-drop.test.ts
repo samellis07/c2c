@@ -106,23 +106,56 @@ test('carried field layout values emit; unknown values and nav layouts on a fiel
   }
 });
 
-test('an unlisted translation fails until the manual step exists', () => {
+test('a translation block is emitted when its strings ship in the client i18n table', () => {
   const withTranslation = app({
     ...coveredApp(),
     translations: [{ json: '{"de":{"FormField.Orders.Title":" Titel "}}', data: { de: { 'FormField.Orders.Title': ' Titel ' } }, span: { start: 10, end: 200 } }],
   });
-  // The generator's migration-report warning is not a manual step: the block
-  // is still a drop, and the note names the warning.
-  const drops = auditApp(withTranslation);
+  // The generated client's i18n table carries the label: the block is emitted,
+  // not a manual step.
+  assert.deepEqual(auditApp(withTranslation), []);
+  const rows = coverageLedger(withTranslation).filter((r) => r.kind === 'translation');
+  assert.deepEqual(
+    rows.map((r) => `${r.status}:${r.via}`),
+    ['emitted:slate/assets/model.js i18n'],
+  );
+  // Break the output — no i18n table on the model — and the drop returns.
+  const broken = collectOutputs(withTranslation);
+  delete broken.model.i18n;
+  const drops = auditApp(withTranslation, broken);
+  assert.deepEqual(
+    drops.map((d) => `${d.kind}: ${d.name}`),
+    ['translation: translation de'],
+  );
+  assert.match(drops[0]!.note, /never reached the generated client i18n table/);
+  // A wrong value under the key is not the block's label either.
+  const wrong = collectOutputs(withTranslation);
+  wrong.model.i18n = { de: { 'FormField.Orders.Title': ' falsch ' } };
+  assert.equal(auditApp(withTranslation, wrong).length, 1);
+});
+
+test('a translation block with no migratable strings stays a counted manual step', () => {
+  const untranslatable = app({
+    ...coveredApp(),
+    translations: [{ json: '{"de":{"Language Properties":{"Status":true}}}', data: { de: { 'Language Properties': { Status: true } } }, span: { start: 10, end: 200 } }],
+  });
+  // The generator lists the block as a manual step (a todo inside its span).
+  assert.deepEqual(auditApp(untranslatable), []);
+  const rows = coverageLedger(untranslatable).filter((r) => r.kind === 'translation');
+  assert.deepEqual(
+    rows.map((r) => `${r.status}:${r.via}`),
+    ['counted:todo'],
+  );
+  // Without the listing the block is a drop; its warning is not coverage.
+  const out = collectOutputs(untranslatable);
+  assert.ok(out.warnings.some((w) => w.construct === 'translation-not-migrated'));
+  out.todos = [];
+  const drops = auditApp(untranslatable, out);
   assert.deepEqual(
     drops.map((d) => `${d.kind}: ${d.name}`),
     ['translation: translation de'],
   );
   assert.match(drops[0]!.note, /migration-report warning/);
-  // A todo inside the block's span is the counted manual step.
-  const listed = collectOutputs(withTranslation);
-  listed.todos = [...listed.todos, { construct: 'manual', start: 20, end: 30 }];
-  assert.deepEqual(auditApp(withTranslation, listed), []);
 });
 
 test('an unsurfaced integration call fails until the connections report lists it', () => {
@@ -729,12 +762,14 @@ test('only a blank or fully commented script is vacuous', () => {
 });
 
 test('a translation block with several languages is named as a block and counted only by a todo', () => {
+  // Empty language tables migrate nothing: the generator's todo inside the
+  // block's span is the counted manual step.
   const multi = app({ translations: [{ json: '{}', data: { de: {}, fr: {} }, span: { start: 10, end: 200 } }] });
   const out = collectOutputs(multi);
   // Generation itself lists the block as a manual step, so nothing is dropped.
   assert.deepEqual(auditApp(multi, out), []);
   // Without that todo the block is a silent drop, named as a block.
-  const noTodo = { ...out, todos: out.todos.filter((t) => t.construct !== 'translation-block') };
+  const noTodo = { ...out, todos: out.todos.filter((t) => t.construct !== 'translation') };
   assert.deepEqual(auditApp(multi, noTodo).map((d) => d.name), ['translation block']);
   // A todo inside the span counts it once; a todo outside does not.
   const outsideOnly = { ...noTodo, todos: [{ construct: 'manual', start: 0, end: 5 }] };
@@ -745,6 +780,7 @@ test('a translation block with several languages is named as a block and counted
   const de = app({ translations: [{ json: '{}', data: { de: {} }, span: Z }] });
   const deOut = collectOutputs(de);
   deOut.warnings = [{ construct: 'translation-not-migrated', name: 'translation de' } as (typeof deOut.warnings)[number]];
+  deOut.todos = [];
   assert.deepEqual(auditApp(de, deOut).map((d) => d.name), ['translation de']);
 });
 
