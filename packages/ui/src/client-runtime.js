@@ -442,6 +442,30 @@ const CURRENCY_SYMBOLS = {
   EGP: 'E£', BRL: 'R$', PKR: '₨', BDT: '৳', THB: '฿', PHP: '₱', IDR: 'Rp', MYR: 'RM', VND: '₫',
 };
 
+/**
+ * The option value the "Others" entry of an `others option` field carries. It
+ * is never the posted value: choosing it reveals a text box, and the read step
+ * substitutes the typed text. A real choice could itself be named "Others", so
+ * the marker is an out-of-band token.
+ */
+const OTHERS_VALUE = '__c2c_others__';
+
+/**
+ * Show or hide an `others option` text box to follow its select or radio
+ * group: the box opens only while the Others entry is the chosen one.
+ */
+function syncOthers(target) {
+  const box = target && target.closest ? target.closest('.field[data-field]') : null;
+  const textInput = box && box.querySelector('input[data-others-text]');
+  if (!textInput) return;
+  const control = box.querySelector('select[data-others-choice]') || box.querySelector('input[type="radio"][data-others-choice]');
+  let open = false;
+  if (control && control.tagName === 'SELECT') open = control.value === OTHERS_VALUE;
+  else if (control) open = control.checked;
+  textInput.hidden = !open;
+  if (!open) textInput.value = '';
+}
+
 export function validateField(field, value) {
   if (!field || field.status === 'todo' || field.readonly || field.widget === 'section' || field.widget === 'notes') return null;
   if (field.widget === 'subform') {
@@ -497,7 +521,7 @@ export function validateField(field, value) {
     }
     if (!re.test(text)) return 'This value does not match the required pattern.';
   }
-  if (field.choices && field.choices.length && field.widget !== 'lookup' && field.widget !== 'lookup-multi') {
+  if (field.choices && field.choices.length && !field.othersOption && field.widget !== 'lookup' && field.widget !== 'lookup-multi') {
     const items = Array.isArray(value) ? value.map(String) : [text];
     for (const item of items) {
       if (!field.choices.includes(item)) return 'Choose a listed value.';
@@ -616,7 +640,17 @@ function fieldControl(field, id, describedBy) {
     // The export initial value is a real option even when it is not a listed choice.
     const extra = initialItems.filter((item) => !listed.has(item)).map((item) => `<option value="${escapeHtml(item)}" selected>${escapeHtml(item)}</option>`).join('');
     const blank = multiple ? '' : '<option value="">-Select-</option>';
-    const select = `<select${idAttr} name="${name}"${multiple}${required}${lookup}${described}>${blank}${extra}${options}</select>`;
+    let select;
+    if (field.othersOption && !multiple) {
+      // `others option = true`: an "Others" entry whose free text is the stored value.
+      // A stored value outside the list selects Others and pre-fills its text box.
+      const other = initialItems.find((item) => !listed.has(item));
+      const othersMark = other !== undefined ? ' selected' : '';
+      const text = `<input type="text" data-others-text maxlength="${field.maxLength ?? 255}"${other === undefined ? ' hidden' : ` value="${escapeHtml(String(other))}"`}>`;
+      select = `<select${idAttr} name="${name}"${required}${lookup}${described} data-others-choice>${blank}${options}<option value="${OTHERS_VALUE}"${othersMark}>Others</option></select>${text}`;
+    } else {
+      select = `<select${idAttr} name="${name}"${multiple}${required}${lookup}${described}>${blank}${extra}${options}</select>`;
+    }
     // `allow new entries`: an "add" action beside the picker that opens the
     // parent form's add screen. Hidden until the lookup endpoint confirms the
     // caller may insert on the parent form (its canAdd answer).
@@ -629,14 +663,19 @@ function fieldControl(field, id, describedBy) {
   }
   if (field.widget === 'radio') {
     const choices = field.choices || [];
-    return choices
-      .map(
-        (choice, index) => {
-          const cid = `${id}-choice-${index}`;
-          return `<label class="choice" for="${cid}"><input id="${cid}" type="radio" name="${name}" value="${escapeHtml(choice)}"${required}${described}> ${escapeHtml(choice)}</label>`;
-        },
-      )
-      .join('');
+    const parts = choices.map((choice, index) => {
+      const cid = `${id}-choice-${index}`;
+      return `<label class="choice" for="${cid}"><input id="${cid}" type="radio" name="${name}" value="${escapeHtml(choice)}"${required}${described}> ${escapeHtml(choice)}</label>`;
+    });
+    if (field.othersOption) {
+      // `others option = true`: an "Others" radio whose free text is the stored value.
+      const initial = field.initialValue != null ? String(field.initialValue) : '';
+      const other = initial !== '' && !new Set(choices.map((choice) => String(choice))).has(initial) ? initial : '';
+      const cid = `${id}-choice-others`;
+      parts.push(`<label class="choice" for="${cid}"><input id="${cid}" type="radio" name="${name}" value="${OTHERS_VALUE}" data-others-choice${other !== '' ? ' checked' : ''}${required}${described}> Others</label>`);
+      parts.push(`<input type="text" data-others-text maxlength="${field.maxLength ?? 255}"${other === '' ? ' hidden' : ` value="${escapeHtml(other)}"`}>`);
+    }
+    return parts.join('');
   }
   if (field.widget === 'file' || field.widget === 'image' || field.widget === 'audio' || field.widget === 'video') {
     const accept = field.accept ? ` accept="${escapeHtml(field.accept)}"` : '';
@@ -5745,6 +5784,16 @@ function readValues(formEl) {
     values[box.name] = box.checked;
   }
 
+  // Fourth pass: an `others option` field posts the typed text, never the
+  // Others entry's own marker value.
+  for (const el of formEl.querySelectorAll('[data-others-choice]')) {
+    const chosen = el.tagName === 'SELECT' ? el.value === OTHERS_VALUE : values[el.name] === OTHERS_VALUE;
+    if (!chosen) continue;
+    const box = el.closest('[data-field]');
+    const textInput = box && box.querySelector('input[data-others-text]');
+    values[el.name] = textInput ? textInput.value : '';
+  }
+
   return values;
 }
 
@@ -7439,6 +7488,7 @@ export function boot(appModel, doc) {
     run('load').catch(() => {});
     formEl.addEventListener('change', (event) => {
       const target = event.target;
+      syncOthers(target);
       const cell = target && target.closest ? target.closest('[data-subfield]') : null;
       const box = cell && cell.closest ? cell.closest('.subform[data-field]') : null;
       // A grid cell change fires the subform field input handler: `on user
