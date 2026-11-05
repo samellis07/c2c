@@ -47,10 +47,11 @@ A Catalyst Job function must close its context. The generated `default` export c
 
 ## Known gaps
 
-`job-scheduling.json` `knownGaps` carries these with their sources:
+See [docs/enterprise-caps.md](enterprise-caps.md) for the detailed Enterprise caps mapping (statements and schedules). `job-scheduling.json` `knownGaps` carries these with their sources:
 
-- **Creator custom-schedule quota.** Creator allows 90 / 300 / 600 custom schedules per user per month (Standard / Professional / Enterprise). Source: https://www.zoho.com/creator/pricing.html. Catalyst Job Scheduling states no cron-count limit.
-- **Form-schedule runs.** Creator counts a form schedule per record per run, and all account schedules stop when the quota runs out.
+- **Creator custom-schedule quota.** Creator allows 90 / 300 / 600 custom schedules per user per month (Standard / Professional / Enterprise). Source: https://www.zoho.com/creator/pricing.html. Catalyst Job Scheduling states no cron-count limit or monthly run quota.
+- **Form-schedule runs.** Creator counts a form schedule per record per run, and all account schedules stop when the quota runs out. The Catalyst sweeper has no monthly quota, but form schedules share a 4-minute execution budget per 5-minute tick.
+- **Deluge statement limit vs. function execution time.** Creator Enterprise caps Deluge execution at 50,000 statements per action (lower tiers cap at 5,000 to 20,000). Catalyst enforces no statement counter, but Advanced I/O functions have a hard 30-second request timeout (`function.timeout_seconds`). Actions approaching the 50k statement cap or running long compute must be offloaded to Job functions (15-minute timeout) via `runOrDefer` to avoid `408 EXECUTION_TIME_EXCEEDED`. Source: https://www.zoho.com/creator/pricing-comparison.html; Catalyst Function Execution Limits [DOC].
 - **Sweep granularity.** A form schedule can fire up to 5 minutes late. A repeating form schedule with several occurrences in one window fires once.
 - **Cron time zone.** Whether Catalyst evaluates a CronExpression in the project time zone is not verified. The Creator zone is kept in `c2c.timeZone`.
 - **Start date.** A repeating custom schedule starts at deploy, not at the Creator start date. A OneTime cron in the past never fires.

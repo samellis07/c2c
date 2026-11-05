@@ -405,6 +405,11 @@ export const KNOWN_GAPS: readonly { id: string; text: string; source: string }[]
     source: 'Creator counts a form schedule once per record per run and stops every account schedule when the monthly quota is used up.',
   },
   {
+    id: 'deluge-statement-limit',
+    text: 'Creator Enterprise caps Deluge execution at 50,000 statements per action (5,000 Free, 10,000 Standard, 20,000 Professional). Catalyst does not count statements, but Advanced I/O functions have a hard 30-second execution cutoff (function.timeout_seconds). Actions approaching the 50k statement cap or running long compute must be offloaded to Job functions (15-minute timeout) via runOrDefer to avoid 408 EXECUTION_TIME_EXCEEDED.',
+    source: 'https://www.zoho.com/creator/pricing-comparison.html; Catalyst Function Execution Limits [DOC]',
+  },
+  {
     id: 'sweeper-granularity',
     text: `A form schedule fires on the first sweep after its time, up to ${SWEEP_PERIOD_MINUTES} minutes late. A repeating form schedule with several occurrences inside one window fires once.`,
     source: 'Catalyst cron jobs run at least 1 min apart [DOC]',

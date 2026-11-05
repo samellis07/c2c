@@ -148,6 +148,8 @@ test('form schedules share one sweeper Job with a Periodic cron, a checkpoint ta
   const ids = cfg.knownGaps.map((k) => k.id);
   assert.ok(ids.includes('creator-schedule-quota'));
   assert.match(stripComments(cfg.knownGaps.find((k) => k.id === 'creator-schedule-quota')!.source), /zoho\.com\/creator\/pricing/);
+  assert.ok(ids.includes('deluge-statement-limit'));
+  assert.match(stripComments(cfg.knownGaps.find((k) => k.id === 'deluge-statement-limit')!.source), /zoho\.com\/creator\/pricing-comparison/);
   // byte-stable
   const again = generate(ir);
   assert.deepEqual(again.files.map((f) => [f.path, f.source]), g.files.map((f) => [f.path, f.source]));
