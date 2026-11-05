@@ -2493,7 +2493,7 @@
     "statements": 553,
     "translated": 56,
     "shimmed": 486,
-    "todo": 12,
+    "todo": 11,
     "todoLocations": [
       {
         "location": "workflow Zoho_Book_Customer_Update:13",
@@ -2549,11 +2549,6 @@
         "location": "workflow Zoho_Books_Quote_Updt:20",
         "construct": "client-condition-uses-server",
         "scope": "unit"
-      },
-      {
-        "location": "report Container_Movement_Tracking",
-        "construct": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
-        "scope": "ui"
       }
     ]
   },
@@ -3428,29 +3423,19 @@
       "label": "workflow Zoho_Books_Quote_Updt:20",
       "detail": "client-condition-uses-server",
       "scope": "unit"
-    },
-    {
-      "kind": "ui",
-      "label": "report Container_Movement_Tracking",
-      "detail": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
-      "scope": "ui"
     }
   ],
   "determinism": {
     "deterministic": false,
-    "todoCount": 12,
+    "todoCount": 11,
     "fillLockEntries": 0,
     "todoKinds": [
       {
         "construct": "client-condition-uses-server",
         "count": 11
-      },
-      {
-        "construct": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
-        "count": 1
       }
     ],
-    "uiTodoCount": 1,
+    "uiTodoCount": 0,
     "silentDrops": 115,
     "silentDropKinds": [
       {
