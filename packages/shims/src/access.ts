@@ -194,6 +194,19 @@ export interface WriteField {
    */
   choices?: readonly string[];
   /**
+   * `others option = true` on a single-choice field: the posted value is the
+   * typed free text, never a list member, so the choice list stays open and
+   * the value is screened as text instead — a plain string (no array or
+   * object), never the client's `__c2c_others__` marker itself, and at most
+   * `maxLength` characters. Only the client-facing write schema carries it.
+   */
+  othersOption?: boolean;
+  /**
+   * Creator-mandatory `othersOption` field: a posted blank text is refused as
+   * `mandatory-missing`, the same as any required field left empty.
+   */
+  required?: boolean;
+  /**
    * Static Creator initial value (unquoted literal text), applied by the
    * submit handler to fields absent from the request on insert.
    * Absent when the field has no initial value or a dynamic one.
@@ -255,6 +268,13 @@ const SYSTEM_WRITE_DENY = new Set([
   'modified_user',
   'owner',
 ]);
+
+/**
+ * The option value the generated client's "Others" entry carries; the real
+ * value is read from the sibling free-text input client-side, so the marker
+ * itself must never reach the store.
+ */
+const OTHERS_SENTINEL = '__c2c_others__';
 
 /** Platform-managed columns cannot be targeted by a single-field write. */
 export function isSystemWriteDenied(field: string): boolean {
@@ -501,6 +521,8 @@ interface DepthField {
   multi?: boolean;
   maxLength?: number;
   choices?: readonly string[];
+  othersOption?: boolean;
+  required?: boolean;
   children: DepthField[];
 }
 
@@ -545,6 +567,8 @@ function toDepth(field: WriteField, readonlyNames: readonly string[]): DepthFiel
     ...(field.multi ? { multi: true } : {}),
     ...(field.maxLength !== undefined ? { maxLength: field.maxLength } : {}),
     ...(field.choices?.length ? { choices: field.choices } : {}),
+    ...(field.othersOption ? { othersOption: true } : {}),
+    ...(field.required ? { required: true } : {}),
     children: (field.fields ?? []).map((child) => toDepth(child, readonlyNames)),
   };
 }
@@ -734,6 +758,25 @@ function screenFieldValue(
   // text is the empty string). This runs on insert and on update alike:
   // clearing a typed cell posts null either way.
   if (field.scalar && typeof value === 'string' && value.trim() === '') return null;
+  if (field.othersOption) {
+    // The client posts the typed free text for the "Others" entry. A direct
+    // post must meet the same bar: a plain string, never the marker option
+    // value itself, inside the field's character cap, and non-blank when the
+    // field is mandatory (an empty Others text is an empty field).
+    if (typeof value !== 'string') {
+      throw new RecordAccessError(`record access: profile ${principal.profile} cannot write ${form}.${dotted}`);
+    }
+    if (value === OTHERS_SENTINEL) {
+      throw new RecordAccessError(`record access: ${form}.${dotted} is not client-writable`);
+    }
+    if (field.required && value.trim() === '') {
+      throw new WriteRuleError(form, [{ column: field.name, rule: 'mandatory-missing' }]);
+    }
+    if (field.maxLength !== undefined && value.length > field.maxLength) {
+      throw new WriteRuleError(form, [{ column: field.name, rule: 'text-length' }]);
+    }
+    return value;
+  }
   if (field.choices && !(typeof value === 'string' && value === '') && !field.choices.includes(String(value))) {
     throw new WriteRuleError(form, [{ column: field.name, rule: 'not-a-choice' }]);
   }

@@ -2657,6 +2657,14 @@ function writeFieldOf(field: UiModel['forms'][number]['fields'][number], closed:
     }
     const choices = closed.get(`${prefix}${field.name}`);
     if (choices) node.choices = choices;
+    if (field.othersOption) {
+      // The server screens the posted Others text like the client's free-text
+      // box: plain string, never the marker value, capped at the field's
+      // character limit (Creator's 255 default), mandatory when the field is.
+      node.othersOption = true;
+      node.maxLength = field.maxLength ?? 255;
+      if (field.required) node.required = true;
+    }
     // A multi select initial value is already the stored JSON list text (model.ts).
     const initial = field.widget === 'multiselect' ? field.initialValue : staticDisplayDefault(field.initialValue);
     if (initial !== undefined) node.defaultValue = initial;
@@ -2847,11 +2855,11 @@ export const readonlyFields = ${JSON.stringify(fields.readonlyNames)};
 export const hiddenFields = ${JSON.stringify(fields.hiddenNames)};
 export const fields = ${JSON.stringify(fields.fields)};${ruleDenied.length ? `\nexport const fieldRuleDenied = ${JSON.stringify(ruleDenied)};` : ''}
 function unhideField(field) {
-  // The closed choice list and the posted-shape marks screen the client
-  // body only; values the on-validate scripts set are re-checked without
-  // them. multi stays: a Deluge list assignment to a multi column is the
-  // same shape.
-  const { hidden, choices, input, maxLength, ...rest } = field;
+  // The closed choice list, the Others text marks, and the posted-shape marks
+  // screen the client body only; values the on-validate scripts set are
+  // re-checked without them. multi stays: a Deluge list assignment to a multi
+  // column is the same shape.
+  const { hidden, choices, input, othersOption, maxLength, required, ...rest } = field;
   return rest.fields ? { ...rest, fields: rest.fields.map(unhideField) } : rest;
 }
 const storeFields = fields.map(unhideField);
