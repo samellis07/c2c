@@ -2039,6 +2039,195 @@ export function administratorProfiles(app: App): string[] {
     });
 }
 
+const OWN_APP_HOST = /^https:\/\/(?:app\.)?zohocreator\.[a-z]{2,3}(?:\.[a-z]{2})?$/;
+const isAppUri = (expr: Expr | undefined) => expr?.kind === 'member' && expr.object.kind === 'name' && expr.object.name === 'zoho' && expr.property === 'appuri';
+
+function concatParts(expr: Expr): Expr[] {
+  const parts: Expr[] = [];
+  const walk = (node: Expr) => {
+    if (node.kind === 'binary' && node.op === '+') {
+      walk(node.left);
+      walk(node.right);
+      return;
+    }
+    parts.push(node);
+  };
+  walk(expr);
+  return parts;
+}
+
+function formField(form: Form | undefined, fieldName: string): Field | undefined {
+  return form?.fields.find((item) => item.name.toLowerCase() === fieldName.toLowerCase());
+}
+
+interface ClientOpenUrlResult {
+  kind: 'supported' | 'unsupported';
+  target?: string;
+  reason?: string;
+}
+
+function classifyClientOpenUrl(app: App, fn: FunctionDef): ClientOpenUrlResult | undefined {
+  if (!fn.deluge?.length) return undefined;
+  let body: Stmt[];
+  try {
+    body = parse(fn.deluge.map((d) => d.text).join('\n')).body;
+  } catch {
+    return undefined;
+  }
+  let openUrlStmt: Stmt | undefined;
+  const argByParam = new Map<string, Expr>();
+  if (body.length === 1 && body[0]?.kind === 'openUrl') {
+    openUrlStmt = body[0];
+  } else if (body.length === 1 && body[0]?.kind === 'expr' && body[0].expr.kind === 'call') {
+    const callee = body[0].expr.callee;
+    const parts: string[] = [];
+    let curr: Expr | undefined = callee;
+    while (curr) {
+      if (curr.kind === 'name') {
+        parts.unshift(curr.name);
+        break;
+      }
+      if (curr.kind === 'member') {
+        parts.unshift(curr.property);
+        curr = curr.object;
+      } else {
+        return undefined;
+      }
+    }
+    if (parts.length > 1 && parts[0]?.toLowerCase() === 'thisapp') {
+      parts.shift();
+    }
+    const calleeName = parts.join('.');
+    const calleeFn = app.functions.find((f) => f.name.toLowerCase() === calleeName.toLowerCase());
+    if (!calleeFn) return undefined;
+    let calleeBody: Stmt[];
+    try {
+      calleeBody = parse(calleeFn.deluge.map((p) => p.text).join('\n')).body;
+    } catch {
+      return undefined;
+    }
+    if (calleeBody.length !== 1 || calleeBody[0]?.kind !== 'openUrl') return undefined;
+    openUrlStmt = calleeBody[0];
+    const params = fnSignatureParams(calleeFn.signature);
+    const callArgs = body[0].expr.args;
+    for (let i = 0; i < params.length; i++) {
+      if (callArgs[i]) argByParam.set(params[i]!.name.toLowerCase(), callArgs[i]!);
+    }
+  } else {
+    return undefined;
+  }
+
+  if (!openUrlStmt.args.length || openUrlStmt.args.length > 3) {
+    return { kind: 'unsupported', reason: 'openUrl invalid arguments count' };
+  }
+  if (openUrlStmt.args.slice(1).some((arg) => arg.kind !== 'string')) {
+    return { kind: 'unsupported', reason: 'openUrl target window must be a string' };
+  }
+
+  const rawParts = concatParts(openUrlStmt.args[0]!);
+  const parts: Expr[] = [];
+  for (const raw of rawParts) {
+    if (raw.kind === 'name' && argByParam.has(raw.name.toLowerCase())) {
+      parts.push(argByParam.get(raw.name.toLowerCase())!);
+    } else {
+      parts.push(raw);
+    }
+  }
+
+  if (parts[0]?.kind === 'string' && OWN_APP_HOST.test(parts[0].value) && isAppUri(parts[1])) {
+    parts.splice(0, 2);
+  } else if (isAppUri(parts[0])) {
+    parts.splice(0, 1);
+  }
+
+  if (parts[0]?.kind === 'string' && /^\s*javascript:/i.test(parts[0].value)) {
+    return { kind: 'unsupported', reason: 'javascript script URLs are not supported' };
+  }
+
+  const sigParams = new Set(fnSignatureParams(fn.signature).map((p) => p.name.toLowerCase()));
+  const sourceForm = fn.form ? app.forms.find((f) => f.name.toLowerCase() === fn.form?.toLowerCase()) : undefined;
+
+  const reads: string[] = [];
+  let text = '';
+  for (const part of parts) {
+    if (part.kind === 'string') {
+      if (part.value.includes('\u0000')) return { kind: 'unsupported', reason: 'null byte in url' };
+      text += part.value;
+    } else if (part.kind === 'name') {
+      if (sigParams.has(part.name.toLowerCase()) || part.name === 'ID' || (sourceForm && formField(sourceForm, part.name))) {
+        text += `\u0000${reads.length}\u0000`;
+        reads.push(part.name);
+      } else {
+        return { kind: 'unsupported', reason: `unknown identifier ${part.name}` };
+      }
+    } else if (part.kind === 'member' && part.object.kind === 'name' && part.object.name === 'input' && /^[A-Za-z_]\w*$/.test(part.property)) {
+      text += `\u0000${reads.length}\u0000`;
+      reads.push(part.property);
+    } else if (
+      part.kind === 'member' &&
+      part.property === 'ID' &&
+      part.object.kind === 'member' &&
+      part.object.object.kind === 'name' &&
+      part.object.object.name === 'input' &&
+      sourceForm &&
+      formField(sourceForm, part.object.property)?.lookup
+    ) {
+      text += `\u0000${reads.length}\u0000`;
+      reads.push(part.object.property);
+    } else {
+      return { kind: 'unsupported', reason: 'complex dynamic expression in openUrl' };
+    }
+  }
+
+  const m = /^#(Form|Report|Page):([A-Za-z_]\w*)(?:\?(.*))?$/.exec(text);
+  if (!m) {
+    return { kind: 'unsupported', target: text, reason: 'target is not an own-app #Form, #Report, or #Page route' };
+  }
+  const targetKind = m[1]!.toLowerCase() as 'form' | 'report' | 'page';
+  const targetName = m[2]!;
+  if (targetKind === 'form') {
+    const targetForm = app.forms.find((f) => f.name.toLowerCase() === targetName.toLowerCase());
+    if (!targetForm) {
+      return { kind: 'unsupported', target: text, reason: `target form ${targetName} does not exist` };
+    }
+    const query = m[3] ?? '';
+    for (const pair of query.split('&').filter(Boolean)) {
+      const eq = pair.indexOf('=');
+      const paramName = eq < 0 ? pair : pair.slice(0, eq);
+      if (/^zc_/i.test(paramName)) continue;
+      if (!formField(targetForm, paramName)) {
+        return { kind: 'unsupported', target: text, reason: `target form ${targetName} has no field ${paramName}` };
+      }
+    }
+  } else if (targetKind === 'report') {
+    const targetReport = app.reports.find((r) => r.name.toLowerCase() === targetName.toLowerCase());
+    if (!targetReport) {
+      return { kind: 'unsupported', target: text, reason: `target report ${targetName} does not exist` };
+    }
+    const query = m[3] ?? '';
+    for (const pair of query.split('&').filter(Boolean)) {
+      const eq = pair.indexOf('=');
+      const paramName = eq < 0 ? pair : pair.slice(0, eq);
+      if (/^zc_/i.test(paramName)) continue;
+      return { kind: 'unsupported', target: text, reason: 'query parameters on report links are not supported' };
+    }
+  } else if (targetKind === 'page') {
+    const targetPage = app.pages.find((p) => p.name.toLowerCase() === targetName.toLowerCase());
+    if (!targetPage) {
+      return { kind: 'unsupported', target: text, reason: `target page ${targetName} does not exist` };
+    }
+    const query = m[3] ?? '';
+    for (const pair of query.split('&').filter(Boolean)) {
+      const eq = pair.indexOf('=');
+      const paramName = eq < 0 ? pair : pair.slice(0, eq);
+      if (/^zc_/i.test(paramName)) continue;
+      return { kind: 'unsupported', target: text, reason: 'query parameters on page links are not supported' };
+    }
+  }
+
+  return { kind: 'supported', target: text };
+}
+
 function emitFunction(
   app: App,
   fn: FunctionDef,
@@ -2067,20 +2256,33 @@ function emitFunction(
   });
   // functionScriptOptions is serverOnly: a function has no client half, so
   // there is no client module, prefetch module, or client-call endpoint.
-  const server = parts.map((p) => p.server).filter((s) => s.trim()).join('\n');
+  let server = parts.map((p) => p.server).filter((s) => s.trim()).join('\n');
   const name = slug(fn.name || 'function');
   // A declared function with an empty body is still a function. Skipping it
   // leaves the declaration out of the tree and out of the readiness report.
   const declaredEmpty = !fn.deluge.some((d) => d.text.trim());
   if (!server.trim() && !declaredEmpty) {
-    if (!parts.some((p) => p.todos.length)) {
-      warnings.push({
-        construct: 'function-untranslated',
-        name: fn.name || name,
-        note: 'The function body produced no server, client, or prefetch code.',
+    const clientNav = classifyClientOpenUrl(app, fn);
+    if (clientNav?.kind === 'supported') {
+      server = '  // Client action openUrl: executed in client navigation.';
+    } else if (clientNav?.kind === 'unsupported') {
+      todos.push({
+        construct: 'openurl-unsupported-target',
+        start: fn.span.start,
+        end: fn.span.end,
+        manualStep: `Reconfigure function ${fn.name}: its openUrl target is not a supported own-app form, report, or page link.`,
       });
+      return;
+    } else {
+      if (!parts.some((p) => p.todos.length)) {
+        warnings.push({
+          construct: 'function-untranslated',
+          name: fn.name || name,
+          note: 'The function body produced no server, client, or prefetch code.',
+        });
+      }
+      return;
     }
-    return;
   }
   const params = fnParams(fn.signature);
   if (server.trim() || declaredEmpty) {
