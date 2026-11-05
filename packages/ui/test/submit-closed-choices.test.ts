@@ -67,5 +67,5 @@ test('the submit stub screens client values against the list and the re-check st
   assert.deepEqual(byName.get('Size')?.choices, ['S', 'M']);
   assert.equal(byName.get('Tags')?.choices, undefined);
   assert.equal(byName.get('Owner')?.choices, undefined);
-  assert.match(text, /const \{ hidden, choices, input, maxLength, \.\.\.rest \} = field;/);
+  assert.match(text, /const \{ hidden, choices, input, othersOption, maxLength, required, \.\.\.rest \} = field;/);
 });
