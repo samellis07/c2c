@@ -711,14 +711,14 @@ test('a translation block with several languages is named as a block and counted
   assert.deepEqual(auditApp(de, deOut).map((d) => d.name), ['translation de']);
 });
 
-/** A creator function whose body is only a client `openUrl`: the generator warns `function-untranslated` and writes no module. */
+/** A creator function whose body has no translatable statement: the generator warns `function-untranslated` and writes no module. A bare `openUrl(...)` body is excluded here — that now classifies (and is counted) as a navigation function with its own supported/unsupported outcome, not this generic path. */
 function warningOnlyFunctionApp(): App {
   return app({
     functions: [
       {
         name: 'Navi',
         kind: 'creator',
-        deluge: [{ text: 'openUrl("#Form:Orders", "same window");', span: { start: 0, end: 42 } }],
+        deluge: [{ text: '// not yet implemented', span: { start: 0, end: 23 } }],
         properties: [],
         span: { start: 0, end: 500 },
       },
