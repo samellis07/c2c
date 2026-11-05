@@ -9,6 +9,7 @@
  */
 
 import { closedChoices, scheduleAnchorFieldType, unquote, type App, type Field } from '../../core/src/ir.js';
+import { compareEnUs } from '../../core/src/order.js';
 import { clientRuntimeSource as bundledClientRuntime } from './client-runtime-parts.js';
 import { toolchainBannerLines, toolchainHeader } from '../../core/src/toolchain.js';
 import { accessPolicyFor, administratorProfiles, appUniqueColumnsOf, decimalColumnsOf, fieldRuleDenials, flowSpecs, functionRowBinding, generate as generateDeluge, blueprintFieldSpecs, schemaRuntimeOptions, type GeneratedFile } from '../../deluge/src/generate.js';
@@ -3063,7 +3064,7 @@ function recordStub(app: App, form: UiModel['forms'][number], path: string): str
         if (entry) entry.dots.add(field.field.slice(dot + 1));
       }
     }
-    const list = [...reads.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([field, entry]) => ({
+    const list = [...reads.entries()].sort(([a], [b]) => compareEnUs(a, b)).map(([field, entry]) => ({
       field,
       form: entry.form,
       ...(entry.rows.size ? { rows: [...entry.rows].sort() } : {}),
@@ -3071,7 +3072,7 @@ function recordStub(app: App, form: UiModel['forms'][number], path: string): str
     }));
     detailByReport.set(report.name, { own, reads: list });
   }
-  const anyReads = [...detailByReport.values()].some((detail) => detail.reads.length > 0);
+  const anyReads = [...detailByReport.values()].some((detail) => detail.reads.length > 0); // determinism-allow: .some() short-circuits on the first match regardless of iteration order
   const shimNames = ['bindRelativeCriteria', 'criteriaHasRelative', 'criteriaHasTodo', 'matchRow', ...(anyReads ? ['fetchBound'] : []), ...(subformLinks.length ? ['attachSubforms'] : [])];
   const shimImport = `import { ${shimNames.join(', ')} } from "creator-to-catalyst/shims";\n`;
   // A profile record filter or a report scope can hold a relative criteria
