@@ -67,6 +67,39 @@ Two Slate facts shape the build config:
 Slate sends `cache-control: public, max-age=31536000` on every file; the
 [offline](#offline-and-pwa) section covers how a redeploy still reaches users.
 
+Both generated shells include a meta Content-Security-Policy. `connect-src` is
+`'self'` plus the app's Advanced I/O function origin when that origin is known
+(the host Catalyst assigns, not every `catalystserverless` host). `script-src`
+allows only `'self'` and the pinned Catalyst SDK host. `style-src` allows
+`'unsafe-inline'` because the vanilla runtime sets style attributes and the
+React build injects CSS. Script inline execution and eval are not allowed.
+Object embedding is disabled, and the referrer policy is same-origin.
+Browsers ignore `frame-ancestors` in a meta policy, and no meta tag can set
+`X-Content-Type-Options` or `X-Frame-Options`. c2c found no per-file
+response-header setting for Slate [UNVERIFIED], so the static shells do not
+send those three controls.
+
+What the policy blocks:
+
+- `--api-base` on a host that is not the Advanced I/O function host (a custom
+  domain or an AppSail URL) leaves `connect-src` at `'self'`, so the browser
+  blocks every API call. `c2c deploy` prints a warning when the `--api-base`
+  host is not a function host, or is not the host the function deploy printed.
+- External images (`<img src="https://...">` in HTML pages) are blocked by
+  `img-src 'self' data:`, and ZML `embed` frames on another site are blocked by
+  `frame-src 'self'`. Such elements render empty.
+- `npm run dev` would block the inline Fast Refresh preamble that
+  `@vitejs/plugin-react` injects, so the dev server drops the meta policy from
+  the HTML it serves. The policy stays in `dist/index.html`, which Slate serves.
+
+Optional hardening in the Catalyst console (not one of the required human
+steps; whether these settings exist for a Slate app is [UNVERIFIED]):
+
+1. [ ] Open Authentication › Whitelisting › iFrame for the project.
+2. [ ] Allow framing only from your own domains.
+3. [ ] If the console offers response headers for the Slate app, add
+   `X-Content-Type-Options: nosniff`.
+
 ## Packages
 
 | path | what | owner |

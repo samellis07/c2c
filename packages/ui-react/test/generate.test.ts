@@ -225,6 +225,20 @@ test('generated modules: one per form and report, routes by key, Creator field o
   assert.match(html, /<a class="skip-link" href="#main">/);
   assert.match(html, /<main id="main">/);
   assert.match(html, /name="viewport" content="width=device-width/);
+  const csp = /http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(html)?.[1] ?? '';
+  assert.match(csp, /default-src 'self'/);
+  assert.match(csp, /script-src 'self' https:\/\/static\.zohocdn\.com/);
+  assert.match(csp, /connect-src 'self'/);
+  assert.doesNotMatch(csp, /catalystserverless/);
+  assert.doesNotMatch(csp, /script-src[^;]*unsafe-inline|script-src[^;]*unsafe-eval/);
+  const origin = 'https://c2c-widget-1001.development.catalystserverless.in';
+  const wired = /http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(text(generateReactApp(appOf(), { apiBase: `${origin}/server/c2c_api` }), 'index.html'))?.[1] ?? '';
+  assert.match(wired, new RegExp(`connect-src 'self' ${origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.doesNotMatch(wired, /\*\.catalystserverless/);
+  const foreign = /http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(text(generateReactApp(appOf(), { apiBase: 'https://evil.example/server/c2c_api' }), 'index.html'))?.[1] ?? '';
+  assert.equal(foreign, csp);
+  assert.match(html, /name="referrer" content="same-origin"/);
+  assert.match(html, /cannot enforce frame-ancestors/i);
   assert.match(html, /<script type="module" src="\/src\/main\.tsx"><\/script>/);
   // Sign-in by default; --no-auth leaves the SDK out.
   assert.match(text(files, 'public/c2c-config.js'), /catalystWebSDK/);
