@@ -193,7 +193,7 @@ test('bad fixture: no phone tab bar fails phone navigation and the phone bar; de
 
 test('bad fixture: unlabeled controls cost forms and accessibility on both viewports', async () => {
   const { bundle, result } = await good();
-  const bad = mutate(bundle, 'runtime', /<label for=/g, '<span data-for=');
+  const bad = mutate(bundle, 'runtime', /<label\$\{labelId\} for=/g, '<span data-for=');
   const scored = await scoreUi(app(), bad);
   for (const vp of ['desktop', 'phone'] as const) {
     assert.ok(points(scored, vp, 'forms') < points(result, vp, 'forms'), `${vp} forms`);
@@ -281,7 +281,7 @@ test('bad fixture: a menu link hidden by the stylesheet fails its navigation che
 
 test('bad fixture: an aria-label alone is not a rendered field label', async () => {
   const { bundle, result } = await good();
-  let runtime = bundle.runtime.replace('${label}${fieldControl(field, id)}', '${fieldControl(field, id)}');
+  let runtime = bundle.runtime.replace('${label}${fieldControl(field, id, errorId)}', '${fieldControl(field, id, errorId)}');
   assert.notEqual(runtime, bundle.runtime, 'the field label is dropped from the markup');
   const aria = 'const idAttr = ` id="${id}" aria-label="${escapeHtml(field.label)}"`;';
   runtime = runtime.replace('const idAttr = ` id="${id}"`;', aria);

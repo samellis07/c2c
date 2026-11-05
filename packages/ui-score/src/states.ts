@@ -69,7 +69,10 @@ export const OWNER: Record<string, string> = {
   empty: 'ux-loading-empty-not-found',
   'empty-filtered': 'ux-loading-empty-not-found',
   error: '',
-  invalid: 'ux-toasts-field-errors',
+  // The field-level invalid state (marker text, aria-invalid, focus moved to
+  // the first invalid control on submit) shipped; only the toast/
+  // server-field-error part of this issue remains open.
+  invalid: '',
   'server-field-error': 'ux-toasts-field-errors',
   submitting: 'ux-confirm-pending',
   'confirm-open': 'ux-confirm-pending',

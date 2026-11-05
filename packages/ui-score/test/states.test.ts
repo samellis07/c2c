@@ -66,7 +66,9 @@ test('the vanilla bundle passes the states it already ships and xfails the rest 
   // captureQuery cached [] on a failed answer, so drawList emptied [data-rows]
   // and the retry handler had no tbody; captureQuery now only caches ok
   // responses, so the table survives the error and the retry re-queries.
-  for (const state of ['loading', 'empty', 'error']) {
+  // invalid also shipped: a field error is the control's description, marks
+  // it aria-invalid, and an invalid submit moves focus to the first one.
+  for (const state of ['loading', 'empty', 'error', 'invalid']) {
     const v = byState(verdicts, state)!;
     assert.equal(v.status, 'pass', `${state}: ${v.evidence}`);
   }
@@ -79,7 +81,6 @@ test('the vanilla bundle passes the states it already ships and xfails the rest 
     toast: 'ux-toasts-field-errors',
     offline: 'ux-offline-session',
     'server-field-error': 'ux-toasts-field-errors',
-    invalid: 'ux-toasts-field-errors',
     'session-expired': 'ux-offline-session',
     denied: 'ux-offline-session',
     'not-found': 'ux-loading-empty-not-found',
