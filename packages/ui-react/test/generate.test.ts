@@ -429,3 +429,14 @@ test('the spec carries upload sources and the template draws the controls', () =
   const record = readFileSync(join(TEMPLATE_DIR, 'lib/c2c-ui/form/record.ts'), 'utf8');
   assert.match(record, /resolveUrlSources/);
 });
+
+test('a picklist with others option carries the flag into the React field spec', () => {
+  const src = source().replace(
+    `${field('Kind', 'picklist', '\t\t\tdisplayname = "Kind"\n\t\t\tvalues = {"Friend","Work"}')}`,
+    `${field('Kind', 'picklist', '\t\t\tdisplayname = "Kind"\n\t\t\tvalues = {"Friend","Work"}\n\t\t\tothers option = true')}`,
+  );
+  const spec = reactAppSpec(appOf(src));
+  const kind = spec.forms.New_Contact!.fields.find((f) => f.name === 'Kind')!;
+  assert.equal(kind.othersOption, true);
+  assert.deepEqual(kind.choices, ['Friend', 'Work']);
+});

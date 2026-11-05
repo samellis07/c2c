@@ -531,7 +531,19 @@ export function closedChoices(field: Field): string[] | undefined {
   if (field.properties.some((p) => p.key.toLowerCase() === 'module')) return undefined;
   const other = /^allow\s*other/i;
   if (field.properties.some((p) => other.test(p.key)) || field.flags.some((flag) => other.test(flag))) return undefined;
+  if (hasOthersOption(field)) return undefined;
   return field.choices;
+}
+
+/**
+ * `others option = true` on a single-choice picklist or radio: Creator appends
+ * an "Others" choice that reveals a free-text box, and the typed text is the
+ * stored value. The field is therefore open — its choice list does not close.
+ */
+export function hasOthersOption(field: Field): boolean {
+  const isKey = (key: string) => /^others?\s*option$/i.test(key.trim());
+  const on = (value: string) => unquote(value).trim().toLowerCase() !== 'false';
+  return field.properties.some((p) => isKey(p.key) && on(p.value)) || field.flags.some((flag) => isKey(flag));
 }
 
 export function staticDefault(raw: string | undefined): string | undefined {

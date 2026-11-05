@@ -304,3 +304,21 @@ test('the shipped record module takes its upload cap from the shim definition', 
   const source = readFileSync(join(process.cwd(), 'packages/ui-react/template/lib/c2c-ui/form/record.ts'), 'utf8');
   assert.match(stampUploadCap(source, 'lib/c2c-ui/form/record.ts'), new RegExp(`export const UPLOAD_SOURCE_MAX_BYTES = ${MAX_FILE_BYTES};`));
 });
+
+test('radio: an others-option group posts the free-text box while Others is chosen', () => {
+  const form = spec([field('Status', 'radio', { required: true, choices: ['Open', 'Closed'], othersOption: true })]);
+  // While Others is chosen the group hands the field name to its text box.
+  const { formEl } = jsdom('<input type="text" name="Status" value="Custom">');
+  assert.equal(readRecord(formEl, form).Status, 'Custom');
+  assert.equal(validate(form, readRecord(formEl, form), chosenFiles(formEl, form)).Status, undefined);
+});
+
+test('select: an others-option field posts the free-text box while Others is chosen', () => {
+  const form = spec([field('Kind', 'select', { choices: ['A', 'B'], othersOption: true, maxLength: 5 })]);
+  // The unnamed select is out of the record; the text box carries the name.
+  const { formEl } = jsdom('<select><option value="__c2c_others__" selected>Others</option></select><input type="text" name="Kind" value="Custom">');
+  assert.equal(readRecord(formEl, form).Kind, 'Custom');
+  // The free text is validated like a text value.
+  const long = jsdom('<input type="text" name="Kind" value="Toolong">');
+  assert.match(validate(form, readRecord(long.formEl, form), chosenFiles(long.formEl, form)).Kind ?? '', /at most 5/);
+});

@@ -63,6 +63,36 @@ function optionsOf(field: FieldSpec): { value: string; label: string }[] {
   return (field.choices ?? []).map((choice) => ({ value: choice, label: choice }));
 }
 
+/**
+ * The option value the "Others" entry of an `others option` field carries.
+ * It is never posted: while it is the chosen entry the control gives up the
+ * field name to a shown text box, so the record carries the typed text. A real
+ * choice could itself be named "Others", so the marker is an out-of-band token.
+ */
+const OTHERS_VALUE = '__c2c_others__';
+
+/** True when the stored value is the free text a previous "Others" entry saved. */
+function othersPicked(field: FieldSpec, value: string): boolean {
+  return !!field.othersOption && value !== '' && !(field.choices ?? []).includes(value);
+}
+
+/** The free-text box an `others option` field opens while Others is chosen. It carries the field name, so it is the posted value. */
+function OthersText({ field, name, value, onChange }: { field: FieldSpec; name: string; value: string; onChange: (next: string) => void }) {
+  return (
+    <input
+      type="text"
+      className={inputStyles.input}
+      name={name}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      maxLength={field.maxLength ?? 255}
+      required={field.required || undefined}
+      aria-required={field.required || undefined}
+      aria-label={`${field.label} (other)`}
+    />
+  );
+}
+
 function Box({ field, children, className }: { field: FieldSpec; children: ReactNode; className?: string }) {
   return (
     <div className={['c2c-field', className].filter(Boolean).join(' ')} data-field={field.name} data-widget={field.widget} data-required={field.required || undefined}>
@@ -361,8 +391,12 @@ export function TimeFieldWrapper({ field, error, value, path }: FieldProps) {
 
 export function SelectField({ field, error, value }: FieldProps) {
   const id = useId();
-  const [current, setCurrent] = useState<string>(text(value) ?? '');
-  // A native select: the control the user sees is the one that posts.
+  const stored = text(value) ?? '';
+  const [current, setCurrent] = useState<string>(othersPicked(field, stored) ? OTHERS_VALUE : stored);
+  const [otherText, setOtherText] = useState<string>(othersPicked(field, stored) ? stored : '');
+  const otherOpen = !!field.othersOption && current === OTHERS_VALUE;
+  // A native select: the control the user sees is the one that posts. While
+  // "Others" is chosen the select gives the field name to the free-text box.
   return (
     <Box field={field}>
       <div className={inputStyles.field}>
@@ -372,7 +406,7 @@ export function SelectField({ field, error, value }: FieldProps) {
         <select
           id={id}
           className={inputStyles.input}
-          name={field.name}
+          name={otherOpen ? undefined : field.name}
           value={current}
           onChange={(event) => setCurrent(event.target.value)}
           required={field.required || undefined}
@@ -385,7 +419,9 @@ export function SelectField({ field, error, value }: FieldProps) {
               {option.label}
             </option>
           ))}
+          {field.othersOption ? <option value={OTHERS_VALUE}>Others</option> : null}
         </select>
+        {otherOpen ? <OthersText field={field} name={field.name} value={otherText} onChange={setOtherText} /> : null}
       </div>
       <FieldError name={field.name} error={error} />
     </Box>
@@ -463,19 +499,24 @@ export function CheckboxField({ field, error, value, path }: FieldProps) {
 }
 
 export function RadioCardsField({ field, error, value }: FieldProps) {
-  const [current, setCurrent] = useState<string>(text(value) ?? '');
+  const stored = text(value) ?? '';
+  const [current, setCurrent] = useState<string>(othersPicked(field, stored) ? OTHERS_VALUE : stored);
+  const [otherText, setOtherText] = useState<string>(othersPicked(field, stored) ? stored : '');
+  const otherOpen = !!field.othersOption && current === OTHERS_VALUE;
+  const options = field.othersOption ? [...optionsOf(field), { value: OTHERS_VALUE, label: 'Others' }] : optionsOf(field);
   return (
     <Box field={field}>
       <Suspense fallback={<FieldLoading field={field} />}>
         <fieldset className="c2c-choices" aria-invalid={error ? true : undefined}>
           <legend className={`${inputStyles.label} c2c-label`}>{field.label}</legend>
           <RadioCards
-            name={field.name}
-            options={optionsOf(field)}
+            name={otherOpen ? undefined : field.name}
+            options={options}
             defaultValue={current}
             onValueChange={setCurrent}
             required={field.required}
           />
+          {otherOpen ? <OthersText field={field} name={field.name} value={otherText} onChange={setOtherText} /> : null}
         </fieldset>
         <FieldError name={field.name} error={error} />
       </Suspense>

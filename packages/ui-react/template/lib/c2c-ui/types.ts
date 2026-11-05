@@ -30,6 +30,8 @@ export interface FieldSpec {
   /** False when the generator has no control for this field yet; the field renders a visible placeholder. */
   generated: boolean;
   choices?: string[];
+  /** Creator `others option = true`: the field also offers an "Others" free-text entry. */
+  othersOption?: boolean;
   maxLength?: number;
   pattern?: string;
   /** Fraction digits the field stores at (Creator `decimalplace`), for exact decimal strings. */

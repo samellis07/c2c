@@ -42,7 +42,9 @@ function scalar(list: Control[], widget: string): RecordValue | undefined {
     const picked = (list as HTMLInputElement[]).find((el) => !isValueCarrier(el) && el.checked);
     if (picked) return picked.value;
     const carrier = list.find(isValueCarrier);
-    return carrier ? carrier.value : '';
+    // An `others option` group hands the field name to its free-text box
+    // while Others is chosen, leaving no carrier; the box is the value.
+    return carrier ? carrier.value : first.value;
   }
   return first.value;
 }

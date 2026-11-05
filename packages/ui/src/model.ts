@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { App, Field, Form, FunctionDef, Property, Report } from '../../core/src/ir.js';
-import { unquote } from '../../core/src/ir.js';
+import { hasOthersOption, unquote } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import type { BlueprintFieldSpec } from '../../deluge/src/blueprint-rules.js';
 import { blueprintFieldSpecs, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
@@ -83,6 +83,8 @@ export interface UiField {
   readonly: boolean;
   status: 'generated' | 'todo';
   choices?: string[];
+  /** Creator `others option = true`: the choice list also offers an "Others" free-text entry. */
+  othersOption?: boolean;
   lookup?: { form: string; field?: string; endpoint: string };
   maxLength?: number;
   minLength?: number;
@@ -768,6 +770,7 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
     ui.note = 'This grid points at another form. It is a multi lookup, not a second copy of that form.';
   }
   if (field.choices?.length && widget !== 'decision') ui.choices = field.choices;
+  if ((widget === 'select' || widget === 'radio') && hasOthersOption(field)) ui.othersOption = true;
   if (field.lookup && (widget === 'lookup' || widget === 'lookup-multi')) {
     ui.lookup = {
       form: field.lookup.form,

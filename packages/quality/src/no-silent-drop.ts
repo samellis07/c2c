@@ -437,6 +437,8 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   if (key === 'value') return ui?.widget === 'notes' && ui.notesHtml === unquote(raw);
   if (key === 'searchable') return searchableProved(text, ui);
   if (key === 'values') return choicesProved(field, ui) || lookupProved(field.lookup, ui, columns, app);
+  // `others option` lands as the generated select/radio "Others" free-text entry.
+  if (key === 'others option') return text.toLowerCase() !== 'true' || ui?.othersOption === true;
   if (key === 'initial value') return initialProved(raw, ui, columns);
   if (key === 'maxchar' || key === 'max char' || key === 'max length') return lengthProved(text, ui?.maxLength, columns, 'max');
   if (key === 'minchar' || key === 'min char' || key === 'min length') return lengthProved(text, ui?.minLength, columns, 'min');
