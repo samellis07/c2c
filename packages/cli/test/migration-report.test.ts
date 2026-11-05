@@ -61,25 +61,25 @@ test('committed fixtures carry the deterministic flag', () => {
     ff.todoKinds.reduce((sum, kind) => sum + kind.count, 0),
     11,
   );
-  // lib's stub custom actions now dispatch, so it has no todos — but its 17
+  // lib's stub custom actions now dispatch, so it has no todos — but its 15
   // silent drops (its Language_Settings translation now counts) keep it off the deterministic count under the drop rule.
   assert.equal(lib.deterministic, false);
   assert.equal(lib.todoCount, 0);
   assert.equal(lib.uiTodoCount, 0);
   assert.deepEqual(lib.todoKinds, []);
-  assert.equal(lib.silentDrops, 17);
-  assert.equal(ff.silentDrops, 161);
+  assert.equal(lib.silentDrops, 15);
+  assert.equal(ff.silentDrops, 109);
   assert.equal(report.aggregate.deterministicApps, 0);
-  assert.equal(report.aggregate.silentDrops, 178);
+  assert.equal(report.aggregate.silentDrops, 124);
   assert.equal(report.aggregate.todoTotal, 11);
   // lib has no todos but silent drops: it counts as a no-todo app, not a deterministic one.
   assert.equal(report.aggregate.noTodoApps, 1);
   for (const app of [lib, ff]) assert.equal(app.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), app.silentDrops);
-  assert.equal(report.aggregate.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), 178);
+  assert.equal(report.aggregate.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), 124);
   const text = migrationReportAsText(report);
   assert.match(text, /^apps with no residual todos: 1\/2$/m);
   assert.match(text, /^apps with no residual todos and no silent drops \(deterministic\): 0\/2$/m);
-  assert.match(text, /^silent drops \(total\): 178$/m);
+  assert.match(text, /^silent drops \(total\): 124$/m);
 });
 
 test('aggregate counts only deterministic apps toward the 95%/100% targets', () => {
