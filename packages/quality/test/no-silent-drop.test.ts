@@ -1805,37 +1805,6 @@ const USERS_LOOKUP_APP = `
 			type = picklist
 			module = users
 			displayformat = [username]
-const CARRY_REPORT = `
-	form Appointment_Booking
-	{
-		Customer_Name
-		(
-			type = name
-			displayname = "Customer Name"
-			first_name
-			(
-				type = first_name
-			)
-			last_name
-			(
-				type = last_name
-			)
-		)
-		Phone_Number
-		(
-			type = text
-		)
-	}
-	list All_Appointments
-	{
-		show all rows from Appointment_Booking
-		(
-			Phone_Number
-			Customer_Name
-			(
-				first_name
-				last_name
-			)
 		)
 	}
 `;
@@ -1875,6 +1844,43 @@ test('module = users and its displayformat are emitted only by the generated use
   const other = cloneOutputs(out);
   approverUi(other).lookup!.field = 'email';
   assert.equal(rowStatus(source, other, formatRow), 'dropped');
+});
+
+const CARRY_REPORT = `
+	form Appointment_Booking
+	{
+		Customer_Name
+		(
+			type = name
+			displayname = "Customer Name"
+			first_name
+			(
+				type = first_name
+			)
+			last_name
+			(
+				type = last_name
+			)
+		)
+		Phone_Number
+		(
+			type = text
+		)
+	}
+	list All_Appointments
+	{
+		show all rows from Appointment_Booking
+		(
+			Phone_Number
+			Customer_Name
+			(
+				first_name
+				last_name
+			)
+		)
+	}
+`;
+
 test('composite report subcolumns are carried as view columns, unknown columns stay dropped', () => {
   const source = dsApp(CARRY_REPORT);
   const out = collectOutputs(source);
