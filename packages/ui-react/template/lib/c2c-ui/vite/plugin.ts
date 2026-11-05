@@ -18,7 +18,12 @@
  * 4. index.html. The build input is src/main.tsx (an HTML entry would hide the
  *    entry's exports behind a facade module), so the plugin writes
  *    dist/index.html from the source index.html: the dev script tag becomes the
- *    hashed runtime and the stylesheet link is added.
+ *    hashed runtime and the stylesheet link is added. The meta
+ *    Content-Security-Policy is copied as written, so dist/index.html keeps it.
+ * 5. Dev server. `npm run dev` serves index.html with the Fast Refresh preamble
+ *    that @vitejs/plugin-react injects as an inline module script. The shell
+ *    policy allows no inline script, so a serve-only plugin drops the CSP meta
+ *    from the dev HTML. It never runs in a build.
  *
  * Everything here is deterministic: no clock, no randomness, sorted lists.
  */
@@ -64,7 +69,27 @@ function publicFiles(dir: string): string[] {
   return out;
 }
 
-export function c2cBuild(opts: { budget?: Budget; swTemplate: string }): Plugin {
+const CSP_META = /[ \t]*<meta\s+http-equiv="Content-Security-Policy"\s+content="[^"]*"\s*\/?>[ \t]*\r?\n?/gi;
+
+/** Dev HTML without the meta CSP, which would block the inline Fast Refresh preamble. */
+export function devShellHtml(html: string): string {
+  return html.replace(CSP_META, '');
+}
+
+/** The build plugin plus the serve-only shell plugin. Vite flattens the array in `plugins`. */
+export function c2cBuild(opts: { budget?: Budget; swTemplate: string }): Plugin[] {
+  return [c2cBundle(opts), c2cDevShell()];
+}
+
+function c2cDevShell(): Plugin {
+  return {
+    name: 'c2c-dev-shell',
+    apply: 'serve',
+    transformIndexHtml: { order: 'pre', handler: devShellHtml },
+  };
+}
+
+function c2cBundle(opts: { budget?: Budget; swTemplate: string }): Plugin {
   const budget = opts.budget ?? DEFAULT_BUDGET;
   let config: ResolvedConfig;
   return {

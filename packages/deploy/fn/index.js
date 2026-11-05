@@ -126,7 +126,8 @@ function send(res, status, body, err) {
     if (!res.writableEnded) res.end();
     return;
   }
-  res.writeHead(status, { 'Content-Type': 'application/json' });
+  // JSON function replies can contain record data and must never be sniffed or cached.
+  res.writeHead(status, { 'Content-Type': 'application/json', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(body, jsonReplacer));
 }
 
@@ -358,6 +359,10 @@ function matchRoute(method, path) {
 }
 
 module.exports = async function c2cApi(req, res) {
+  // Set before any handler runs: writeHead merges these, so every reply path,
+  // including handlers that write only Content-Type, is neither sniffed nor cached.
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-store');
   try {
     const path = routePath(req.url);
     const method = String(req.method || 'GET').toUpperCase();

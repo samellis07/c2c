@@ -121,6 +121,14 @@ Rule: [UNVERIFIED] an AppSail app without auth middleware is reachable by anyone
 - Deploy: `catalyst appsail:add`, then `catalyst deploy --only appsail:<name>` (respecting each app's `app-config.json`). Both work with the token; the URL `https://<name>-<zaid>.development.catalystappsail.<dc>` is publicly reachable at once.
 - Budget ~30 s per request and ~100 simultaneous requests; at scale the bottleneck moves to Data Store — size reads accordingly.
 
+### Advanced I/O function host
+
+Rule: [DOC] an Advanced I/O function is served at `https://<project_domain_name>.development.catalystserverless.<dc>/server/<function_name>/` in Development and at `https://<project_domain_name>.catalystserverless.<dc>/server/<function_name>/` in Production. `<project_domain_name>` is the single label Catalyst assigns; it is not synthesized from the project name. `<dc>` is one of com, eu, in, com.au, jp, ca, sa, ae. The generated Slate shell's connect-src allows that exact origin plus 'self', not every catalystserverless host.
+
+Recipe: [CLI] `catalyst deploy --only functions:<name>` prints the function URL; the origin of that URL is the connect-src entry.
+
+See also: https://docs.catalyst.zoho.com/en/serverless/help/functions/advanced-io/
+
 ### Outbound HTTPS from a function is unrestricted
 
 Recipe: [UNVERIFIED] `fetch` to arbitrary external hosts answers normally; the only ceiling is the function's own ~30 s budget — a slow upstream is cut with the function, not by an egress proxy.

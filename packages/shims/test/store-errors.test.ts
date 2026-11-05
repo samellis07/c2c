@@ -4,6 +4,7 @@
  * error shapes.
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
   classifyStoreError,
@@ -68,10 +69,10 @@ test('reply sends the mapped status with dryRun of the real mode and logs struct
   const original = console.error;
   console.error = (...args: unknown[]) => void logged.push(args.map(String).join(' '));
   try {
-    const sent: { status: number; body: Record<string, unknown> }[] = [];
+    const sent: { status: number; headers?: Record<string, string>; body: Record<string, unknown> }[] = [];
     const res = {
-      writeHead(status: number) {
-        sent.push({ status, body: {} });
+      writeHead(status: number, headers?: Record<string, string>) {
+        sent.push({ status, headers, body: {} });
       },
       end(raw: string) {
         sent[0]!.body = JSON.parse(raw) as Record<string, unknown>;
@@ -81,6 +82,8 @@ test('reply sends the mapped status with dryRun of the real mode and logs struct
     assert.equal(replyStoreError(res, err, { live: true, table: 'Product', wrote: false }), true);
     assert.equal(sent[0]!.status, 409);
     assert.equal(sent[0]!.body.code, 'DUPLICATE_VALUE');
+    assert.equal(sent[0]!.headers?.['X-Content-Type-Options'], 'nosniff');
+    assert.equal(sent[0]!.headers?.['Cache-Control'], 'no-store');
     assert.equal(sent[0]!.body.dryRun, false, 'dryRun reflects the live mode');
     assert.equal(sent[0]!.body.field, 'SKU');
     assert.match(String(sent[0]!.body.message), /SKU/);
@@ -97,6 +100,16 @@ test('reply sends the mapped status with dryRun of the real mode and logs struct
   } finally {
     console.error = original;
   }
+});
+
+test('replyStoreError keeps nosniff and no-store in the compiled helper', () => {
+  const source = readFileSync(new URL('../src/store-errors.js', import.meta.url), 'utf8');
+  const start = source.indexOf('function replyStoreError');
+  assert.ok(start >= 0);
+  const body = source.slice(start, start + 1200);
+  assert.match(body, /writeHead\(/);
+  assert.match(body, /'X-Content-Type-Options': 'nosniff'/);
+  assert.match(body, /'Cache-Control': 'no-store'/);
 });
 
 test('reply returns false for non-store errors and sends nothing', () => {

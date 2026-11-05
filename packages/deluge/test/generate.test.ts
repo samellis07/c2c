@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -91,6 +91,32 @@ test('AIO handlers share one app library and import its common request helpers',
     assert.match(handler.source, /from "\.\.\/_lib\.mjs"/);
     assert.doesNotMatch(handler.source, /function requestRowId\(/);
   }
+});
+
+test('generated function response helpers set nosniff and no-store on every status path', () => {
+  const g = generate(app({ workflows: [workflow({ name: 'Success', form: 'Orders', event: 'on success', deluge: { text: 'x = 1;', span: Z } })] }));
+  const sources = g.files.filter((file) => file.path.startsWith('functions/') && /writeHead\(/.test(file.source)).map((file) => file.source);
+  assert.ok(sources.length > 0);
+  for (const source of sources) {
+    for (const line of source.split('\n').filter((row) => /writeHead\(/.test(row))) {
+      assert.match(line, /"X-Content-Type-Options": "nosniff"/);
+      assert.match(line, /"Cache-Control": "no-store"/);
+    }
+  }
+});
+
+test('every generator writeHead template sets nosniff and no-store, including 401, 403, 400 and 404', () => {
+  const source = readFileSync(new URL('../src/generate.js', import.meta.url), 'utf8');
+  const lines = source.split('\n').filter((row) => /res\.writeHead\(/.test(row));
+  assert.ok(lines.length >= 11, `expected every template writeHead, found ${lines.length}`);
+  for (const line of lines) {
+    assert.match(line, /"X-Content-Type-Options": "nosniff"/, line);
+    assert.match(line, /"Cache-Control": "no-store"/, line);
+  }
+  assert.ok(lines.filter((line) => /writeHead\(401\b/.test(line)).length >= 1, '401 caller gate');
+  assert.ok(lines.filter((line) => /writeHead\(403\b|writeHead\(denied \? 403\b/.test(line)).length >= 2, '403 paths');
+  assert.ok(lines.filter((line) => /writeHead\(400\b/.test(line)).length >= 2, '400 paths');
+  assert.ok(lines.filter((line) => /writeHead\(404\b/.test(line)).length >= 1, '404 path');
 });
 
 test('generated handlers include schema-derived multi-lookup hydration metadata', () => {

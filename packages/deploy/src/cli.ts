@@ -32,6 +32,7 @@ import { mailSenderEvidenceFor, mailSenderEvidenceVerified, observeMailSenders, 
 import { humanChecklist } from './human-steps.js';
 import { applyFunctionEnvSecrets, functionIdFromList, readConnectionSecretKeys } from './function-env.js';
 import { CONSOLE_SERVICES, formatPostDeploySteps, postDeploySteps, servicesTouched, type ConsoleService, type PostDeployStep } from './post-deploy.js';
+import { applyFunctionConnectSrc, functionOriginFromApiBase, SHELL_CONTENT_SECURITY_POLICY } from '../../ui/src/csp.js';
 import { appTimeZone, authBridgeUrl, generateUi, slateConfigSource } from '../../ui/src/generate.js';
 import { emptyRegistry, type ProjectRegistry } from './registry.js';
 import { catalystRestCall, listCatalystProjects, readCliAccessToken } from './rest.js';
@@ -560,17 +561,41 @@ export interface DeployState {
 export const STATE_FILE = '.c2c-deploy-state.json';
 
 
-/** sha256 over every written file except the runtime config the deploy itself rewrites. */
+const SHELL_CSP_META = /(<meta\s+http-equiv="Content-Security-Policy"\s+content=")[^"]*(")/;
+
+/**
+ * sha256 over every written file except the runtime config the deploy itself
+ * rewrites. The shell CSP connect-src is normalized to the default before
+ * hashing: only the function origin changes there, and deploy rewrites it
+ * when the function URL is learned. The service worker's cache id and
+ * INDEX_HASH move with that origin and are normalized the same way. Any
+ * other change to index.html or the worker still changes the digest.
+ */
 export function bundleDigest(files: readonly DeployFile[]): string {
   const hash = createHash('sha256');
   const sorted = [...files].filter((file) => file.path !== 'slate/c2c-config.js' && file.path !== 'web/public/c2c-config.js').sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   for (const file of sorted) {
     hash.update(file.path);
     hash.update('\0');
-    hash.update(file.data);
+    hash.update(digestBytes(file));
     hash.update('\0');
   }
   return hash.digest('hex');
+}
+
+function digestBytes(file: DeployFile): string | Buffer {
+  const text = typeof file.data === 'string' ? file.data : file.data.toString('utf8');
+  if (file.path === 'slate/index.html' || file.path === 'web/index.html') {
+    return text.replace(SHELL_CSP_META, `$1${SHELL_CONTENT_SECURITY_POLICY}$2`);
+  }
+  // buildSlate folds the index.html hash into the cache id and INDEX_HASH.
+  // A connect-src edit moves only those two tokens; any other worker edit remains.
+  if (file.path === 'slate/sw.js') {
+    return text
+      .replace(/const CACHE = "c2c-[0-9a-f]{10}"/, 'const CACHE = "c2c-0000000000"')
+      .replace(/const INDEX_HASH = "[0-9a-f]{10}"/, 'const INDEX_HASH = "0000000000"');
+  }
+  return file.data;
 }
 
 function readSlateEntries(dir: string): unknown[] {
@@ -764,6 +789,37 @@ export function functionBaseFrom(output: string): string | undefined {
   return match?.[0];
 }
 
+function hostOf(url: string): string | undefined {
+  try {
+    return new URL(url).host;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Write connect-src for the function origin into a shell that already carries the CSP meta. */
+function rewriteShellConnectSrc(file: string, apiBase: string | undefined): void {
+  if (!apiBase || !existsSync(file)) return;
+  const html = readFileSync(file, 'utf8');
+  const next = applyFunctionConnectSrc(html, apiBase);
+  if (next !== html) writeFileSync(file, next);
+}
+
+/**
+ * The function URL is often unknown when the shell is generated and is learned
+ * from the functions deploy. Patch the source before `npm run build` copies it,
+ * and patch dist again at the Slate steps (a skipped or clean build can leave
+ * the previous bytes).
+ */
+function rewriteDeployShells(cwd: string, ui: DeployUi, apiBase: string | undefined): void {
+  if (ui === 'react') {
+    rewriteShellConnectSrc(join(cwd, 'web', 'index.html'), apiBase);
+    rewriteShellConnectSrc(join(cwd, 'web', 'dist', 'index.html'), apiBase);
+  } else {
+    rewriteShellConnectSrc(join(cwd, 'slate', 'index.html'), apiBase);
+  }
+}
+
 /**
  * --function-env: the c2c_api function's current console environment, which `catalyst deploy`
  * would otherwise replace with catalyst-config.json env_variables. A JSON object of strings,
@@ -886,6 +942,10 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     const apiBaseFlag = flag(rest, '--api-base');
     if (apiBaseFlag !== undefined && !/^(https:\/\/[^\s]+|\/server\/[A-Za-z0-9_-]+)$/.test(apiBaseFlag)) {
       throw new Error('--api-base must be an https URL or /server/<function>');
+    }
+    // The shell CSP adds only an Advanced I/O function origin to connect-src.
+    if (apiBaseFlag?.startsWith('https://') && !functionOriginFromApiBase(apiBaseFlag)) {
+      io.stdout(`warning: --api-base ${apiBaseFlag} is not an Advanced I/O function URL (https://<host>.catalystserverless.<dc>/server/...); the app's Content-Security-Policy keeps connect-src 'self', so browsers block every API call to it\n`);
     }
     const slateDomainFlag = flag(rest, '--slate-domain');
     if (slateDomainFlag !== undefined && !slateHost(slateDomainFlag)) throw new Error('--slate-domain must be a Slate app host — a bare hostname or the https App Url slate:link prints');
@@ -1268,6 +1328,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         }
       }
       if (command.id === 'slate-link' || command.id === 'slate') {
+        rewriteDeployShells(cwd, ui, apiBase);
         const config = slateConfigSource({ apiBase, auth: true, authBridge: authBridgeUrl(apiBase), appTimeZone: appTimeZone(app), smokePlan: smokePlanOf(app, guard), smokeProject: guard.projectId });
         if (ui === 'react') {
           // The built tree is what the Slate steps link and deploy, so the
@@ -1411,12 +1472,18 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
         }
         return await finish(result.code || 1);
       }
-      if (command.id === 'functions' && !apiBaseFlag) {
+      if (command.id === 'functions') {
         const found = functionBaseFrom(`${result.stdout}\n${result.stderr}`);
-        if (found) {
+        if (found && !apiBaseFlag) {
           apiBase = found;
           state.apiBase = found;
           io.stdout(`api base: ${found}\n`);
+        } else if (found && apiBaseFlag) {
+          const flagHost = hostOf(apiBaseFlag);
+          const fnHost = hostOf(found);
+          if (flagHost && fnHost && flagHost !== fnHost) {
+            io.stdout(`warning: --api-base host ${flagHost} is not the deployed function host ${fnHost}; the app calls ${flagHost}, and the Content-Security-Policy allows only that origin\n`);
+          }
         }
       }
       // Secret --function-env values were written to catalyst-config.json as
@@ -1438,6 +1505,8 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
           return await finish(1);
         }
       }
+      // Source HTML must name the function origin before ui-build copies it into dist.
+      if (command.id === 'functions') rewriteDeployShells(cwd, ui, apiBase);
       // The crons target c2c_jobs by id, which exists only once it is deployed:
       // read it back now, so a deploy that did not land it stops here.
       if (command.id === 'functions-jobs') {
