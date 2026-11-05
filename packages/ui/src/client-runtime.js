@@ -9,6 +9,23 @@
 
 export const PAGE_SIZE = 300;
 
+// Declared name and address composite part order (schema/src/generator.ts's
+// NAME_PARTS/ADDRESS_PARTS). Disjoint key sets, so one list covers both.
+const COMPOSITE_PART_ORDER = [
+  'prefix',
+  'first_name',
+  'last_name',
+  'suffix',
+  'address_line_1',
+  'address_line_2',
+  'district_city',
+  'state_province',
+  'postal_code',
+  'country',
+  'latitude',
+  'longitude',
+];
+
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function escapeHtml(value) {
@@ -443,10 +460,14 @@ function reportCellText(report, row, fieldName) {
     }
   }
   if (raw == null) return '';
-  // A composite cell (a name or address object) joins its non-empty scalar parts.
+  // A composite cell (a name or address object) joins its non-empty scalar
+  // parts in the declared part order (reading order matters: first name
+  // before last name, address lines before city/state/postal/country), never
+  // the object's own key enumeration order.
   if (typeof raw === 'object') {
     const parts = [];
-    for (const key of Object.keys(raw)) {
+    for (const key of COMPOSITE_PART_ORDER) {
+      if (!Object.prototype.hasOwnProperty.call(raw, key)) continue;
       const part = raw[key];
       if (part != null && part !== '' && typeof part !== 'object') parts.push(String(part));
     }

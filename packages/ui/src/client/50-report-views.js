@@ -53,10 +53,14 @@ function viewCell(row, field, report) {
     }
   }
   if (value == null) return '';
-  // A composite cell (a name or address object) joins its non-empty scalar parts.
+  // A composite cell (a name or address object) joins its non-empty scalar
+  // parts in the declared part order (reading order matters: first name
+  // before last name, address lines before city/state/postal/country), never
+  // the object's own key enumeration order.
   if (typeof value === 'object') {
     const parts = [];
-    for (const key of Object.keys(value)) {
+    for (const key of COMPOSITE_PART_ORDER) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
       const part = value[key];
       if (part != null && part !== '' && typeof part !== 'object') parts.push(String(part));
     }
