@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { App, Field, Form, FunctionDef, Property, Report } from '../../core/src/ir.js';
 import { unquote } from '../../core/src/ir.js';
+import { compareEnUs } from '../../core/src/order.js';
 import type { BlueprintFieldSpec } from '../../deluge/src/blueprint-rules.js';
 import { blueprintFieldSpecs, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
 import type { Expr } from '../../deluge/src/ast.js';
@@ -1487,7 +1488,7 @@ function criteriaReadGuidance(src: string): string {
       if (head.kind === 'name' && head.name === 'thisapp' && !calls.includes(name)) calls.push(name);
     }
     if (expr.kind === 'criteria' && expr.object.kind === 'name' && !fetches.includes(expr.object.name)) fetches.push(expr.object.name);
-    for (const [key, value] of Object.entries(node)) if (key !== 'span') visit(value);
+    for (const key of Object.keys(node).sort((a, b) => compareEnUs(a, b))) if (key !== 'span') visit((node as Record<string, unknown>)[key]);
   };
   visit(parseExpression(src, true));
   let out = '';
