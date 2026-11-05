@@ -173,16 +173,21 @@ test('a web quick view narrows the report columns to the configured set, like va
 }\n`);
   const spec = reactAppSpec(appOf(src));
   const report = spec.reports.All_Contacts!;
+  // The quickview order leads; every declared column the quickview left out
+  // (Kind, Owner_Ref) still follows in show-columns order — nothing declared
+  // is silently dropped.
   assert.deepEqual(
     report.columns.map((c) => [c.field, c.label]),
     [
       ['Full_Name', 'Contact Name'],
       ['Email', 'Email'],
       ['Birthday', 'Birthday'],
+      ['Kind', 'Kind'],
+      ['Owner_Ref', 'Owner_Ref'],
     ],
   );
   // With no phone quick view the first four configured columns are the phone card's.
-  assert.deepEqual(report.columns.map((c) => c.phone), [true, true, true]);
+  assert.deepEqual(report.columns.map((c) => c.phone), [true, true, true, true, false]);
 });
 
 test('the report template keeps vanilla parity: search, pagination, and headers that wrap', () => {
