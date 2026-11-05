@@ -22,10 +22,9 @@ App: Freight Forwarding and Feeder Solution
 
 ## TODO counts
 
-12
+11
 
 - 11 client-condition-uses-server
-- 1 Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.
 
 ## Field gaps
 
