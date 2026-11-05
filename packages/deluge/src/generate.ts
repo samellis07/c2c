@@ -6071,7 +6071,7 @@ export async function call(ctx, ...args) {
 }
 
 export default async function handler(req, res) {
-  res.writeHead(404, { "Content-Type": "application/json" });
+  res.writeHead(404, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
   res.end('{"error":"no such endpoint"}');
 }
 `;
