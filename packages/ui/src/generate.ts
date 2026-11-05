@@ -20,7 +20,7 @@ import { LIMITS } from '../../shims/src/index.js';
 import { criteriaHasRelative, criteriaHasTodo, type Criteria } from '../../shims/src/criteria.js';
 import { columnRenamesOf, generateSchema, type SchemaPlan } from '../../schema/src/generator.js';
 import { EXTENSION_KEY, limitValue, planReportQuery, planZcql, ZcqlLimitError } from '../../schema/src/limits.js';
-import { fieldTypeRow } from '../../schema/src/mapping.js';
+import { fieldTypeRow, normalizeType } from '../../schema/src/mapping.js';
 import { buildSlate, type OutFile } from './build.js';
 import { lookupFormats } from './decorations/lookups.js';
 import { actionDispatchTarget, buildModel, slug, smokeMarkerField, smokeNumberField, summarize, uiSnippetFiles, type UiModel, type UiSummary } from './model.js';
@@ -675,15 +675,60 @@ export async function fileStore(req) {
 `;
 }
 
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function fieldProp(field: Field, key: string): string | undefined {
+  const found = field.properties.find((p) => p.key.toLowerCase() === key);
+  return found ? unquote(found.value) : undefined;
+}
+
+function isUsersField(field: Field): boolean {
+  const token = normalizeType(field.type);
+  if (token === 'users' || token === 'user') return true;
+  const mod = fieldProp(field, 'module');
+  return mod !== undefined && normalizeType(mod) === 'users';
+}
+
+function usersFieldDisplay(field: Field): string {
+  const raw = fieldProp(field, 'displayformat');
+  return (raw ? raw.match(/[A-Za-z_][A-Za-z0-9_]*/)?.[0] : undefined) ?? 'username';
+}
+
+/** Form names (sorted) per display attribute for fields declaring module = users. */
+function usersLookupForms(app: App): Record<string, string[]> {
+  const byDisplay = new Map<string, Set<string>>();
+  const visit = (formName: string, fields: readonly Field[]): void => {
+    for (const field of fields) {
+      if (isUsersField(field)) {
+        const display = usersFieldDisplay(field);
+        if (!UNSAFE_KEYS.has(display) && !UNSAFE_KEYS.has(formName)) {
+          let set = byDisplay.get(display);
+          if (!set) byDisplay.set(display, (set = new Set()));
+          set.add(formName);
+        }
+      }
+      if (field.subfields?.length) visit(formName, field.subfields);
+    }
+  };
+  for (const form of app.forms) visit(form.name, form.fields);
+  const out: Record<string, string[]> = Object.create(null);
+  for (const display of [...byDisplay.keys()].sort()) {
+    out[display] = [...byDisplay.get(display)!].sort();
+  }
+  return out;
+}
+
 function lookupStub(app: App): string {
   const formats = lookupFormats(app);
   const parts = compositePartsOfParents(app, Object.fromEntries(app.forms.map((form) => [form.name, form.name])), schemaOf(app));
   // The system Users lookup serves Catalyst project users, not a Data Store
   // table — only when no app form itself is named "users".
   const systemUsers = !app.forms.some((form) => form.name.toLowerCase() === 'users');
+  const usersForms = usersLookupForms(app);
   return `${banner([
     'Lookup options for a form select. The path names the parent form and its display field.',
-    'form "users" is the system Users lookup: it lists the Catalyst project users for any authenticated caller,',
+    'form "users" is the system Users lookup: it lists Catalyst project users only for callers',
+    'with add or edit on at least one form declaring a Users field with that display,',
     'keyed by the user id (as ROWID) with only the display attribute the path names.',
     `Page size ${LIMITS.zcqlRowsPerQuery} (measured ZCQL row cap).`,
     'authorizeRead applies functions/access-policy.json: only rows the caller can read,',
@@ -700,6 +745,8 @@ const parentParts = ${JSON.stringify(parts)};
 const SEARCH_MAX = 100;
 /** True when "users" names the system Users module, not an app form. */
 const systemUsers = ${systemUsers};
+/** Display attribute -> forms declaring a system Users field with that display. */
+const usersForms = ${JSON.stringify(usersForms)};
 
 // A Catalyst project-user row's id: the value the field stores and submits.
 const USER_ID_KEYS = ["ROWID", "user_id", "userId", "zuid", "id"];
@@ -870,6 +917,17 @@ function toOption(row, fields, display, terms, form) {
   return out;
 }
 
+// Caller is permitted to list users for this form if their profile grants add or edit.
+function canAddOrEdit(principal, form) {
+  if (isHidden(form)) return false;
+  if (!principal || !principal.profile) return false;
+  if (principal.role && Array.isArray(access.roles) && access.roles.length > 0 && !access.roles.includes(principal.role)) return false;
+  const profileGrants = access.profiles && Object.prototype.hasOwnProperty.call(access.profiles, principal.profile) ? access.profiles[principal.profile] : null;
+  if (!profileGrants || !Object.prototype.hasOwnProperty.call(profileGrants, form)) return false;
+  const grant = profileGrants[form];
+  return Boolean(grant && grant.write && (grant.create !== false || grant.edit !== false));
+}
+
 export default async function handler(req, res) {
   const route = routeOf(req, "lookups");
   if (!route) {
@@ -895,9 +953,14 @@ ${requirePrincipal()}
       return;
     }
     if (route.form === "users" && systemUsers) {
-      // The system Users lookup: Catalyst project users, not a table row, so
-      // authorizeRead's form grants do not apply — any authenticated caller
-      // may read it, and each option carries only the id and the display.
+      // The system Users lookup: Catalyst project users, served only to callers
+      // whose generated access policy grants add or edit on at least one form
+      // that declares a field with module = users and that display.
+      const allowedForms = Object.prototype.hasOwnProperty.call(usersForms, display) ? usersForms[display] : null;
+      if (!Array.isArray(allowedForms) || !allowedForms.some((form) => canAddOrEdit(principal, form))) {
+        send(res, 403, { dryRun: true, error: "forbidden" });
+        return;
+      }
       const { page, pageSize } = pagingArgs;
       const listed = deploy.mode === "live" ? await projectUsers(req) : suppliedRows(req);
       let options = listed.map((user) => toUserOption(user, display));
