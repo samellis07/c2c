@@ -413,7 +413,7 @@ function convert(ctx: Ctx, node: ZmlElement): PageElement[] {
     if (html || links.length) out.push({ kind: 'html', html, links });
     // Keep the same sanitizer loss details and precedence as the vanilla model.
     for (const tag of ui.droppedTags ?? []) {
-      if (tag === 'style' && (ui.droppedStyleRules ?? 0) > 0) continue;
+      if (tag === 'style' && ui.staticCss !== undefined) continue;
       out.push({ kind: 'todo', tag: node.tag, reason: `The <${tag}> element is removed from this page snippet by the sanitizer` });
     }
     if (carried.droppedRules > 0) {

@@ -274,6 +274,12 @@ test('a page without <style> CSS gets no style TODO', () => {
   assert.deepEqual(styleTodos, []);
 });
 
+test('a <style> element with no CSS rules is not a counted removal', () => {
+  const { model } = pageModel(['<style></style><p>Hi</p>', '<style>/* nothing here */</style><p>Ok</p>']);
+  const removed = model.todos.filter((t) => /removed from this page snippet/.test(t.reason));
+  assert.deepEqual(removed, [], JSON.stringify(model.todos));
+});
+
 test('style rule counting: top-level blocks and @ statements, comments and islands masked', () => {
   assert.equal(droppedStyleRules('<p>no stylesheet</p>'), 0);
   assert.equal(droppedStyleRules('<style></style>'), 0);
@@ -285,14 +291,13 @@ test('style rule counting: top-level blocks and @ statements, comments and islan
   assert.equal(droppedStyleRules('<style>color: red</style>'), 1, 'stray CSS text is still lost CSS');
 });
 
-test('a page snippet lists each removed script, style, SVG, and template tag once in sorted order', () => {
+test('a page snippet lists each removed script, SVG, and template tag once in sorted order', () => {
   const zml = `<zml><dsp id='html_snippet'><![CDATA[<script>bad()</script><svg><script>nested()</script></svg><style></style><template><b>hidden</b></template>]]></dsp></zml>`;
   const app: App = deriveIr(parse(`application "Demo"\n{\n\tpages\n\t{\n\t\tpage Home\n\t\t{\n\t\t\tdisplayname = "Home"\n\t\t\tContent="${delugeString(zml)}"\n\t\t}\n\t}\n}\n`));
   const model = buildModel(app);
   const todos = model.todos.filter((todo) => todo.area === 'zml' && /removed from this page snippet/.test(todo.reason));
   assert.deepEqual(todos.map((todo) => todo.reason), [
     'The <script> element is removed from this page snippet by the sanitizer',
-    'The <style> element is removed from this page snippet by the sanitizer',
     'The <svg> element is removed from this page snippet by the sanitizer',
     'The <template> element is removed from this page snippet by the sanitizer',
   ]);
