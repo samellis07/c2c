@@ -74,6 +74,12 @@ test('injectSelectColumnCap refuses a source with no selectColumns entry', () =>
   assert.throws(() => injectSelectColumnCap('export const LIMITS = {};'), /no selectColumns entry/);
 });
 
+test('the shared function entry sends no-store and nosniff headers', () => {
+  const entry = readFileSync(join(root, 'packages/deploy/fn/index.js'), 'utf8');
+  assert.match(entry, /'X-Content-Type-Options': 'nosniff'/);
+  assert.match(entry, /'Cache-Control': 'no-store'/);
+});
+
 function mockSdk() {
   const calls: [string, string, unknown][] = [];
   let id = 100;
@@ -1350,6 +1356,42 @@ test('deploy runs install, functions, slate in order and --resume skips finished
   } finally {
     rmSync(dsDir, { recursive: true, force: true });
     rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('deploy warns when --api-base is not the deployed function host', async (t) => {
+  const dsDir = mkdtempSync(join(tmpdir(), 'c2c-apibase-ds-'));
+  const ds = join(dsDir, 'app.ds');
+  writeFileSync(ds, await sampleSourceText());
+  const projects = join(dsDir, 'projects.json');
+  writeFileSync(projects, JSON.stringify({ org: FIXTURE_ORG, dc: 'in', env: 'Development', projects: { 'c2c-sample-app': '1001' } }));
+  const run = async (apiBase: string) => {
+    const out = mkdtempSync(join(tmpdir(), 'c2c-apibase-out-'));
+    try {
+      const io = resumeIo('slate:link');
+      const args = [ds, '--project', '1001', '--org', FIXTURE_ORG, '--projects', projects, '--out', out, '--confirm', '--function-env', 'new', '--ui', 'vanilla', '--api-base', apiBase];
+      return { code: await deployCli(args, io.io), out: io.out(), err: io.err() };
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  };
+  try {
+    const foreign = await run('https://api.example.com/server/c2c_api');
+    if (foreign.code === 2) {
+      t.skip(`guard refused: ${foreign.err}`);
+      return;
+    }
+    assert.equal(foreign.code, 3, foreign.err);
+    assert.match(foreign.out, /warning: --api-base https:\/\/api\.example\.com\/server\/c2c_api is not an Advanced I\/O function URL[^\n]*browsers block every API call/);
+    assert.match(foreign.out, /warning: --api-base host api\.example\.com is not the deployed function host c2c-sample-app-1\.development\.catalystserverless\.in/);
+    const own = await run('https://c2c-sample-app-1.development.catalystserverless.in/server/c2c_api');
+    assert.equal(own.code, 3, own.err);
+    assert.doesNotMatch(own.out, /warning: --api-base/);
+    const relative = await run('/server/c2c_api');
+    assert.equal(relative.code, 3, relative.err);
+    assert.doesNotMatch(relative.out, /warning: --api-base/);
+  } finally {
+    rmSync(dsDir, { recursive: true, force: true });
   }
 });
 
