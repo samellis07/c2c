@@ -19,6 +19,8 @@ App: c2c-conn-books
 - 2 forms
 - 2 reports
 - 1 function
+- The generated Catalyst app carries 2 Data Store tables, 1 Catalyst function, 0 scheduled jobs, 4 pages
+- Deluge: 2 statements translated, 11 kept working through a compatibility shim, of 13
 
 ## TODO counts
 
@@ -49,7 +51,8 @@ App: c2c-conn-books
 - Accept invite: accept the app invite mail
 - Sign in once: sign in to the deployed app once
 - Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
-- Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
+- console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)
+- console: connections — Catalyst console → Connections: connect zoho.books.* (the user consents to each OAuth flow)
 
 ## Not converted
 

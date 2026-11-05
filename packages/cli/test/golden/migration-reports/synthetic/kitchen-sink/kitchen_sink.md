@@ -19,6 +19,8 @@ App: Kitchen_Sink_Studio
 - 6 forms
 - 8 reports
 - 1 page
+- The generated Catalyst app carries 9 Data Store tables, 1 Catalyst function, 2 scheduled jobs, 15 pages
+- Deluge: 0 statements translated, 14 kept working through a compatibility shim, of 14
 
 ## TODO counts
 
@@ -73,7 +75,8 @@ App: Kitchen_Sink_Studio
 - Accept invite: accept the app invite mail
 - Sign in once: sign in to the deployed app once
 - Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)
-- Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)
+- console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)
+- console: stratus-enable — Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket)
 
 ## Not converted
 

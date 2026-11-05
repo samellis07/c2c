@@ -44,7 +44,19 @@
     "forms": 1,
     "reports": 1,
     "pages": 0,
-    "functions": 0
+    "functions": 0,
+    "catalyst": {
+      "tables": 1,
+      "nosqlCollections": 0,
+      "functions": 1,
+      "cronJobs": 0,
+      "slatePages": 2
+    },
+    "deluge": {
+      "statements": 0,
+      "translated": 0,
+      "shimmed": 0
+    }
   },
   "todoCount": 0,
   "todoKinds": [],
@@ -56,7 +68,7 @@
     "Accept invite: accept the app invite mail",
     "Sign in once: sign in to the deployed app once",
     "Run the in-app check and paste its code: open the app's #/admin/smoke page, wait for Done, press Copy and paste the code into your AI chat (Claude or any LLM)",
-    "Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)"
+    "console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)"
   ],
   "silentDrops": 0,
   "residuals": []
