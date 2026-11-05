@@ -126,12 +126,132 @@ export function chosenFiles(formEl: HTMLFormElement, form: FormSpec): Map<FieldS
       out.set(field, picked);
       continue;
     }
+    // A `source = …,camera` field's capture input posts under `<name>__camera`
+    // when the dropzone mirror could not copy the pick (no DataTransfer).
+    const cam = formEl.elements.namedItem(`${field.name}__camera`);
+    const shot = cam && 'files' in cam ? (cam as HTMLInputElement).files?.[0] : undefined;
+    if (shot) {
+      out.set(field, shot);
+      continue;
+    }
     if (field.widget === 'signature' && el && 'tagName' in el && el.tagName === 'INPUT') {
       const strokes = (el as HTMLInputElement).value;
       if (strokes) out.set(field, new File([strokes], `${field.name}.json`, { type: 'application/json' }));
     }
   }
   return out;
+}
+
+/**
+ * Largest file a field uploads: 100 MiB — the repo's file-bytes cap,
+ * packages/shims/src/files.ts MAX_FILE_BYTES. The template cannot import it,
+ * so the generator re-stamps this line from that definition when it emits an
+ * app (see stampUploadCap); the repo's tests assert the two stay equal. The
+ * file picker, camera capture, and public_url fetch all enforce this one
+ * bound.
+ */
+export const UPLOAD_SOURCE_MAX_BYTES = 100 * 1024 * 1024;
+
+/** image/svg+xml and any image/*+xml type can carry active script; they are never an upload. */
+function refusedImageType(mime: string): boolean {
+  const type = mime.split(';')[0]!.trim().toLowerCase();
+  return type === 'image/svg+xml' || /^image\/[a-z0-9!#$&^_.+-]*\+xml$/.test(type);
+}
+
+/** A picked file answer too big or too active to upload, or null. */
+function uploadFileError(field: FieldSpec, file: File): string | null {
+  if (file.size > UPLOAD_SOURCE_MAX_BYTES) return `${field.label} is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB file limit.`;
+  if (field.widget === 'image' && refusedImageType(file.type)) return `${field.label} cannot be an SVG image.`;
+  return null;
+}
+
+/**
+ * The file picker's `accept` rule applied to a fetched MIME: an `image/*`
+ * field only uploads image/* bytes. A field without an accept list behaves
+ * like the picker: any declared type is fine, but a missing or opaque
+ * Content-Type is still a refusal.
+ */
+function uploadSourceTypeOk(mime: string, accept?: string): boolean {
+  const wanted = (accept ?? '')
+    .split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter((token) => token.includes('/'));
+  const type = mime.split(';')[0]!.trim().toLowerCase();
+  if (!wanted.length) return type !== '' && type !== 'application/octet-stream';
+  return wanted.some((token) => (token.endsWith('/*') ? type.startsWith(token.slice(0, -1)) : type === token));
+}
+
+/** Read a fetched upload-source body under UPLOAD_SOURCE_MAX_BYTES: the declared length and the read length both must fit. */
+async function uploadSourceBlob(res: Response): Promise<Blob> {
+  const declared = Number(res.headers?.get('content-length'));
+  if (Number.isFinite(declared) && declared > UPLOAD_SOURCE_MAX_BYTES) throw new Error('size');
+  const reader = res.body?.getReader?.();
+  if (reader) {
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value?.byteLength ?? 0;
+        if (size > UPLOAD_SOURCE_MAX_BYTES) throw new Error('size');
+        chunks.push(value!);
+      }
+    } catch (err) {
+      try {
+        await reader.cancel();
+      } catch {
+        /* the read already failed */
+      }
+      throw err;
+    }
+    return new Blob(chunks as BlobPart[]);
+  }
+  const blob = await res.blob();
+  if (blob.size > UPLOAD_SOURCE_MAX_BYTES) throw new Error('size');
+  return blob;
+}
+
+/**
+ * `source = …,public_url` fields: the `<name>__url` input's address is fetched
+ * in the page and uploaded like a picked file — bounded to the shared
+ * file-size cap, refused when it is an SVG or script-bearing image type, and
+ * checked against the field's `accept` type before the bytes reach
+ * the signed upload. Errors come back per field so the form can flag them;
+ * only http(s) URLs are fetched, and a failed check stores nothing.
+ */
+export async function resolveUrlSources(formEl: HTMLFormElement, form: FormSpec, files: Map<FieldSpec, File>): Promise<Record<string, string>> {
+  const errors: Record<string, string> = {};
+  for (const field of form.fields) {
+    if (!FILE_WIDGETS.has(field.widget) || field.widget === 'signature' || files.has(field)) continue;
+    if (!field.uploadSources?.includes('public_url')) continue;
+    const el = formEl.elements.namedItem(`${field.name}__url`);
+    const typed = el && 'value' in el ? String((el as { value: string }).value).trim() : '';
+    if (!typed) continue;
+    try {
+      const target = new URL(typed);
+      if (target.protocol !== 'http:' && target.protocol !== 'https:') throw new Error('scheme');
+      const res = await fetch(target.href);
+      if (!res.ok) throw new Error('fetch');
+      const contentType = res.headers?.get('content-type') ?? '';
+      if (!uploadSourceTypeOk(contentType, field.accept)) throw new Error('type');
+      if (refusedImageType(contentType)) throw new Error('svg');
+      const blob = await uploadSourceBlob(res);
+      const type = blob.type || contentType.split(';')[0]!.trim().toLowerCase();
+      if (!uploadSourceTypeOk(type, field.accept)) throw new Error('type');
+      if (refusedImageType(type)) throw new Error('svg');
+      files.set(field, new File([blob], target.pathname.split('/').pop() || 'file', { type }));
+    } catch (cause) {
+      const code = cause instanceof Error ? cause.message : '';
+      errors[field.name] =
+        code === 'svg'
+          ? `${field.label} cannot be an SVG image.`
+          : code === 'size'
+            ? `${field.label} is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB file limit.`
+            : `Enter a reachable public http(s) URL for ${field.label}.`;
+    }
+  }
+  return errors;
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -143,6 +263,14 @@ export function validate(form: FormSpec, record: FormRecord, files: Map<FieldSpe
   const errors: Record<string, string> = {};
   for (const field of form.fields) {
     if (field.readonly || field.visibility === false || NOT_SENT.has(field.widget)) continue;
+    if (FILE_WIDGETS.has(field.widget)) {
+      const picked = files.get(field);
+      const refused = picked ? uploadFileError(field, picked) : null;
+      if (refused) {
+        errors[field.name] = refused;
+        continue;
+      }
+    }
     const value = record[field.name];
     const empty = FILE_WIDGETS.has(field.widget) ? !files.has(field) : value === undefined || value === null || value === '' || value === false || (Array.isArray(value) && !value.length);
     if (field.required && empty) {

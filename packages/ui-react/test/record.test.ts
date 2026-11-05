@@ -5,9 +5,13 @@
  * carry custom-widget answers, real controls carry native answers.
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { JSDOM } from 'jsdom';
-import { chosenFiles, readRecord, validate } from '../template/lib/c2c-ui/form/record.js';
+import { MAX_FILE_BYTES } from '../../shims/src/index.js';
+import { stampUploadCap } from '../../ui/src/generate.js';
+import { chosenFiles, readRecord, resolveUrlSources, UPLOAD_SOURCE_MAX_BYTES, validate } from '../template/lib/c2c-ui/form/record.js';
 import { canonicalNumber, fractionDigits, localDateTime, localDay, parseLocalDateTime, parseLocalDay, toCanonicalDecimal, toMinorUnits } from '../template/lib/c2c-ui/form/value.js';
 import type { FieldSpec, FormSpec } from '../template/lib/c2c-ui/types.js';
 
@@ -178,6 +182,105 @@ test('canonicalNumber keeps every digit and fixes the scale with string math', (
   assert.equal(toCanonicalDecimal(1e21, 0), '1000000000000000000000');
 });
 
+test('public_url sources: only a bounded, accept-matching fetch uploads; failures flag the field and store nothing', async () => {
+  const form = spec([field('Photo', 'image', { required: true, uploadEndpoint: '/u', uploadSources: ['public_url'], accept: 'image/*' })]);
+  const { formEl } = jsdom('<input type="url" name="Photo__url" value="https://cdn.example.com/pic.png">');
+  const headers = (map: Record<string, string>) => ({ get: (name: string) => map[name.toLowerCase()] ?? null });
+  const saved = globalThis.fetch;
+  const cases: Array<[string, object]> = [
+    ['oversized', { ok: true, headers: headers({ 'content-type': 'image/png', 'content-length': String(UPLOAD_SOURCE_MAX_BYTES + 1) }), blob: async () => ({ size: 4, type: 'image/png' }) }],
+    ['html', { ok: true, headers: headers({ 'content-type': 'text/html' }), blob: async () => ({ size: 4, type: 'text/html' }) }],
+    ['opaque', { ok: true, headers: headers({ 'content-type': 'application/octet-stream' }), blob: async () => ({ size: 4, type: 'application/octet-stream' }) }],
+    ['untyped', { ok: true, headers: headers({}), blob: async () => ({ size: 4, type: '' }) }],
+    ['redirected-to-html', { ok: true, redirected: true, headers: headers({ 'content-type': 'text/html' }), blob: async () => ({ size: 4, type: 'text/html' }) }],
+    ['read-past-cap', { ok: true, headers: headers({ 'content-type': 'image/png' }), blob: async () => ({ size: UPLOAD_SOURCE_MAX_BYTES + 1, type: 'image/png' }) }],
+    ['svg', { ok: true, headers: headers({ 'content-type': 'image/svg+xml' }), blob: async () => ({ size: 4, type: 'image/svg+xml' }) }],
+    ['svg-xml-suffix', { ok: true, headers: headers({ 'content-type': 'image/svg+xml; charset=utf-8' }), blob: async () => ({ size: 4, type: 'image/svg+xml' }) }],
+  ];
+  try {
+    for (const [name, res] of cases) {
+      (globalThis as { fetch: unknown }).fetch = async () => res;
+      const files = new Map();
+      const errors = await resolveUrlSources(formEl, form, files);
+      assert.ok(errors.Photo, name);
+      assert.equal(files.size, 0, name);
+    }
+    (globalThis as { fetch: unknown }).fetch = async () => {
+      throw new TypeError('Failed to fetch');
+    };
+    const files = new Map();
+    const errors = await resolveUrlSources(formEl, form, files);
+    assert.ok(errors.Photo);
+    assert.equal(files.size, 0);
+    // A small valid image resolves into the upload set.
+    (globalThis as { fetch: unknown }).fetch = async () => ({
+      ok: true,
+      headers: headers({ 'content-type': 'image/png' }),
+      blob: async () => new Blob(['img'], { type: 'image/png' }),
+    });
+    const good = new Map();
+    assert.deepEqual(await resolveUrlSources(formEl, form, good), {});
+    assert.equal(good.get(form.fields[0]!)?.name, 'pic.png');
+    // The SVG refusal names why, not the generic reachable-URL message.
+    (globalThis as { fetch: unknown }).fetch = async () => ({
+      ok: true,
+      headers: headers({ 'content-type': 'image/svg+xml' }),
+      blob: async () => new Blob(['<svg/>'], { type: 'image/svg+xml' }),
+    });
+    const refused = await resolveUrlSources(formEl, form, new Map());
+    assert.match(refused.Photo ?? '', /SVG/);
+  } finally {
+    globalThis.fetch = saved;
+  }
+});
+
+test('public_url: a streamed body past the cap cancels the reader at the crossing chunk', async () => {
+  const form = spec([field('Photo', 'image', { uploadEndpoint: '/u', uploadSources: ['public_url'], accept: 'image/*' })]);
+  const { formEl } = jsdom('<input type="url" name="Photo__url" value="https://cdn.example.com/pic.png">');
+  const chunks = [new Uint8Array(60 * 1024 * 1024), new Uint8Array(60 * 1024 * 1024)];
+  let reads = 0;
+  let cancelled = false;
+  const saved = globalThis.fetch;
+  try {
+    (globalThis as { fetch: unknown }).fetch = async () => ({
+      ok: true,
+      headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? 'image/png' : null) },
+      body: {
+        getReader: () => ({
+          read: async () => (reads < chunks.length ? { done: false, value: chunks[reads++] } : { done: true, value: undefined }),
+          cancel: async () => {
+            cancelled = true;
+          },
+        }),
+      },
+    });
+    const files = new Map();
+    const errors = await resolveUrlSources(formEl, form, files);
+    assert.match(errors.Photo ?? '', /100 MB/);
+    assert.equal(reads, 2);
+    assert.equal(cancelled, true);
+    assert.equal(files.size, 0);
+  } finally {
+    globalThis.fetch = saved;
+  }
+});
+
+test('a picked file over the cap, or an SVG pick for an image field, is a field error', () => {
+  const photo = field('Photo', 'image', { uploadEndpoint: '/u', uploadSources: ['file'], accept: 'image/*' });
+  const doc = field('Attachment', 'file', { uploadEndpoint: '/u', uploadSources: ['file'] });
+  const form = spec([photo, doc]);
+  const fake = (size: number, name: string, type: string): File => {
+    const file = Object.create(File.prototype) as File;
+    Object.defineProperties(file, { size: { value: size }, name: { value: name }, type: { value: type } });
+    return file;
+  };
+  assert.match(validate(form, {}, new Map([[photo, fake(UPLOAD_SOURCE_MAX_BYTES + 1, 'big.png', 'image/png')]])).Photo ?? '', /100 MB/);
+  assert.match(validate(form, {}, new Map([[photo, fake(4, 'icon.svg', 'image/svg+xml')]])).Photo ?? '', /SVG/);
+  // A non-image field still accepts an SVG pick as a plain attachment.
+  assert.equal(validate(form, {}, new Map([[doc, fake(4, 'icon.svg', 'image/svg+xml')]])).Attachment, undefined);
+  assert.equal(validate(form, {}, new Map([[doc, fake(4, 'a.xml', 'image/vnd.custom+xml')]])).Attachment, undefined);
+});
+
 test('a visibility = false field never posts, even with a stray named control', () => {
   const form = spec([field('Name', 'text'), field('Secret', 'text', { visibility: false })]);
   // No <Field> mounts for a hidden spec field; a forged control is ignored anyway.
@@ -191,4 +294,13 @@ test('a required hidden field produces no validation error', () => {
   const record = readRecord(formEl, form);
   assert.equal('Secret' in record, false);
   assert.deepEqual(validate(form, record, chosenFiles(formEl, form)), {});
+});
+
+test('the shipped record module takes its upload cap from the shim definition', () => {
+  // Mutation guard: a drift between packages/shims MAX_FILE_BYTES and this
+  // module's constant fails here, and the emitted file is re-stamped from the
+  // shim at generate time so a shipped app cannot carry a second cap.
+  assert.equal(UPLOAD_SOURCE_MAX_BYTES, MAX_FILE_BYTES);
+  const source = readFileSync(join(process.cwd(), 'packages/ui-react/template/lib/c2c-ui/form/record.ts'), 'utf8');
+  assert.match(stampUploadCap(source, 'lib/c2c-ui/form/record.ts'), new RegExp(`export const UPLOAD_SOURCE_MAX_BYTES = ${MAX_FILE_BYTES};`));
 });

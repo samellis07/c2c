@@ -284,8 +284,9 @@ function auditFieldProperties(app: App, out: AuditOutputs, rows: CoverageRow[]):
     const columns = findColumns(out.schema, formName, field.name);
     for (const item of items) {
       const name = `${formName}.${field.name} ${item.label}`;
-      if (spanCovered(out, item.start, item.end)) {
-        rows.push({ kind: 'field-property', name, status: 'counted', via: 'todo' });
+      const propertyTodo = out.model.todos.find((t) => t.area === 'field' && (t.name === name || t.name === `${formName}.${field.name}.${item.label}`));
+      if (propertyTodo || spanCovered(out, item.start, item.end)) {
+        rows.push({ kind: 'field-property', name, status: 'counted', via: propertyTodo ? 'UI todo' : 'todo' });
         continue;
       }
       if (item.proved(ui, columns)) {
@@ -438,6 +439,7 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   if (key === 'height') return ui?.height === text;
   if (key === 'visibility') return visibilityProved(text, ui);
   if (key === 'alloweddays') return allowedDaysProved(text, ui);
+  if (key === 'source') return sourceProved(text, ui);
   if (key === 'start index') {
     const rawTrim = raw.trim();
     return columns.some((column) => {
@@ -473,6 +475,24 @@ function visibilityProved(text: string, ui: UiField | undefined): boolean {
   const shown = text.toLowerCase() !== 'false';
   if (!shown) return ui?.visibility === false;
   return ui?.visibility !== false;
+}
+
+/**
+ * `source` lists the acquisition choices a file, image, audio or video field
+ * offers. The generated controls cover `file` (the file input or drop zone),
+ * `camera` (a capture input) and `public_url` (a URL the page fetches and
+ * uploads) in both the vanilla runtime (`fieldControl`, `submitRecord`,
+ * `fetchUploadSource` in packages/ui/src/client-runtime.js) and the React app
+ * (`FileDropzoneField`, `resolveUrlSources` in lib/c2c-ui/form). A source the
+ * controls do not draw keeps the whole property counted.
+ */
+const UPLOAD_SOURCE_TOKENS = new Set(['file', 'camera', 'public_url']);
+
+function sourceProved(text: string, ui: UiField | undefined): boolean {
+  const sources = ui?.uploadSources;
+  if (!sources?.length) return false;
+  const tokens = text.split(',').map((token) => token.trim().toLowerCase()).filter(Boolean);
+  return tokens.length > 0 && tokens.length === sources.length && tokens.every((token, i) => sources[i] === token && UPLOAD_SOURCE_TOKENS.has(token));
 }
 
 /**

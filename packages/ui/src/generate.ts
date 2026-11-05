@@ -16,7 +16,7 @@ import { analyzeConnections } from '../../deluge/src/connections.js';
 import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, fileFieldsByForm, subformLinksFor, writeLiveSource } from '../../deluge/src/field-store.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { writeRuleDeniedAt, type FieldRuleDenial, type WriteField } from '../../shims/src/access.js';
-import { LIMITS } from '../../shims/src/index.js';
+import { LIMITS, MAX_FILE_BYTES } from '../../shims/src/index.js';
 import { criteriaHasRelative, criteriaHasTodo, type Criteria } from '../../shims/src/criteria.js';
 import { columnRenamesOf, generateSchema, type SchemaPlan } from '../../schema/src/generator.js';
 import { EXTENSION_KEY, limitValue, planReportQuery, planZcql, ZcqlLimitError } from '../../schema/src/limits.js';
@@ -45,8 +45,34 @@ export interface UiGenerateOptions {
   asyncOnSuccess?: boolean;
 }
 
+/**
+ * The shipped upload-cap line, re-stamped with the shim's single definition
+ * (packages/shims/src/files.ts MAX_FILE_BYTES) so a generated app never
+ * carries a cap that drifted from the repo's own.
+ */
+const UPLOAD_CAP_PREFIX = 'export const UPLOAD_SOURCE_MAX_BYTES = ';
+export function stampUploadCap(source: string, fileName = 'client-runtime.js'): string {
+  let count = 0;
+  let from = 0;
+  while (true) {
+    const start = source.indexOf(UPLOAD_CAP_PREFIX, from);
+    if (start === -1) break;
+    count += 1;
+    from = start + UPLOAD_CAP_PREFIX.length;
+  }
+  if (count !== 1) {
+    throw new Error(`Expected exactly one UPLOAD_SOURCE_MAX_BYTES declaration in ${fileName}, found ${count}`);
+  }
+  const start = source.indexOf(UPLOAD_CAP_PREFIX);
+  const terminator = source.indexOf(';', start + UPLOAD_CAP_PREFIX.length);
+  if (terminator === -1) {
+    throw new Error(`Unterminated UPLOAD_SOURCE_MAX_BYTES declaration in ${fileName}`);
+  }
+  return source.slice(0, start) + `${UPLOAD_CAP_PREFIX}${MAX_FILE_BYTES};` + source.slice(terminator + 1);
+}
+
 export function clientRuntimeSource(): string {
-  return bundledClientRuntime();
+  return stampUploadCap(bundledClientRuntime(), 'client-runtime.js');
 }
 
 /**

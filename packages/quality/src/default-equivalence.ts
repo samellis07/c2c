@@ -7,8 +7,8 @@ import type { UiField, Widget } from '../../ui/src/model.js';
  * field without it (packages/quality/test/default-equivalence.test.ts), and
  * the reason column says why that output behaves as Creator does for that
  * value. Only the exact listed value is proved; any other value of the same
- * property (for example `source = public_url,file`, which offers a URL entry
- * the generated widget does not draw) stays a silent drop.
+ * property (for example `aspect ratio = square`, which the generated widget
+ * does not draw) stays a silent drop.
  *
  * Not listed on purpose: `timedisplayoptions = "hh:mm:ss"` (the generated
  * datetime-local input shows hours and minutes, not seconds) and
@@ -30,13 +30,6 @@ export const DEFAULT_EQUIVALENCE: readonly DefaultEquivalence[] = [
   {
     widget: 'image',
     accept: 'image/*',
-    key: 'source',
-    value: 'file',
-    why: 'Image comes from an uploaded file only. The generated field offers only a device file picker (a file input in the static UI, a drop zone in the React app) and uploads one chosen image; it has no URL entry.',
-  },
-  {
-    widget: 'image',
-    accept: 'image/*',
     key: 'aspect ratio',
     value: 'original',
     why: 'The image keeps its original proportions. The generated upload sends the chosen file unchanged; it never crops or resizes.',
@@ -47,6 +40,13 @@ export const DEFAULT_EQUIVALENCE: readonly DefaultEquivalence[] = [
     key: 'camera',
     value: 'primary',
     why: 'Capture uses the device default camera. The generated input sets no capture attribute, so a phone opens its own camera on its default (primary) lens.',
+  },
+  {
+    widget: 'image',
+    accept: 'image/*',
+    key: 'preview duration',
+    value: '0',
+    why: 'Preview duration of 0 leaves dismissal to the user (no auto-closing timeout). The generated file and capture controls rely on native device confirmation and have no auto-dismiss preview timer.',
   },
   {
     widget: 'image',

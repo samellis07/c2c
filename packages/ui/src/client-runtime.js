@@ -509,7 +509,33 @@ export function validateField(field, value) {
 export function validateForm(form, values) {
   const errors = {};
   for (const field of form.fields || []) {
-    const err = validateField(field, values ? values[field.name] : undefined);
+    let value = values ? values[field.name] : undefined;
+    if (field && values && FILE_WIDGETS.has(field.widget) && field.widget !== 'signature') {
+      // The `source` alternatives satisfy the field too: a camera capture or
+      // a typed public URL. A URL that is not http(s) is an error, not a value.
+      const camera = values[`${field.name}__camera`];
+      const sourceUrl = values[`${field.name}__url`];
+      const typed = typeof sourceUrl === 'string' ? sourceUrl.trim() : '';
+      const chosen = typeof File !== 'undefined' ? (value instanceof File && value.size ? value : camera instanceof File && camera.size ? camera : null) : null;
+      if (chosen) {
+        const msg = uploadFileError(field, chosen);
+        if (msg) {
+          errors[field.name] = msg;
+          continue;
+        }
+      }
+      if (isEmpty(value, field.widget)) {
+        if (chosen) value = chosen;
+        else if (typed) {
+          if (/^https?:\/\/\S+$/i.test(typed)) value = typed;
+          else {
+            errors[field.name] = 'Enter a public http(s) URL.';
+            continue;
+          }
+        }
+      }
+    }
+    const err = validateField(field, value);
     if (err) errors[field.name] = err;
   }
   return errors;
@@ -606,7 +632,25 @@ function fieldControl(field, id, describedBy) {
   if (field.widget === 'file' || field.widget === 'image' || field.widget === 'audio' || field.widget === 'video') {
     const accept = field.accept ? ` accept="${escapeHtml(field.accept)}"` : '';
     const verb = field.widget === 'image' ? 'Select Image' : field.widget === 'audio' ? 'Select Audio' : field.widget === 'video' ? 'Select Video' : 'Select File';
-    return `<span class="filepick"><label class="filepick-btn" for="${id}">${verb}</label><input${idAttr} name="${name}" type="file"${accept}${required}${described} data-upload="${escapeHtml(field.uploadEndpoint || '')}" class="visually-hidden"><span class="filepick-name"></span></span>`;
+    // The export's `source` lists the acquisition choices Creator offers: a
+    // file upload, a camera capture, or a fetched public URL. A source that is
+    // not listed gets no control; an unknown token falls back to file only.
+    const declared = Array.isArray(field.uploadSources) ? field.uploadSources.filter((token) => UPLOAD_SOURCES.has(token)) : [];
+    const sources = declared.length ? declared : ['file'];
+    // Native `required` fits only a single-source control: with several
+    // sources another one may hold the value, and validateForm checks them all.
+    const nativeRequired = sources.length === 1 ? required : '';
+    let inner = '';
+    if (sources.includes('file')) {
+      inner += `<label class="filepick-btn" for="${id}">${verb}</label><input${idAttr} name="${name}" type="file"${accept}${nativeRequired}${described} data-upload="${escapeHtml(field.uploadEndpoint || '')}" class="visually-hidden">`;
+    }
+    if (sources.includes('camera')) {
+      inner += `<label class="filepick-btn" for="${id}-cam">Take Photo</label><input id="${id}-cam" name="${name}__camera" type="file"${accept} capture class="visually-hidden">`;
+    }
+    if (sources.includes('public_url')) {
+      inner += `<input id="${id}-url" name="${name}__url" type="url" placeholder="Paste a public URL"${nativeRequired}${described}>`;
+    }
+    return `<span class="filepick">${inner}<span class="filepick-name"></span></span>`;
   }
   if (field.widget === 'signature') {
     return `<canvas data-signature="${name}" width="320" height="120"></canvas><button type="button" data-signature-save="${name}">Save signature</button><input${idAttr} name="${name}" type="hidden" data-upload="${escapeHtml(field.uploadEndpoint || '')}">`;
@@ -5183,6 +5227,9 @@ export async function runHandler(handler, ctx) {
 
 const FILE_WIDGETS = new Set(['file', 'image', 'audio', 'video', 'signature']);
 
+/** Acquisition sources a file widget's `source` property can name. */
+const UPLOAD_SOURCES = new Set(['file', 'camera', 'public_url']);
+
 function writableInput(field) {
   if (!field || field.readonly || field.status === 'todo') return false;
   if (field.widget === 'section' || field.widget === 'notes' || field.widget === 'unsupported') return false;
@@ -5286,6 +5333,117 @@ export async function uploadReference(viewRef, field, file) {
     if (!put || put.ok === false) throw new Error('upload to storage failed');
   }
   return { key: reference.key };
+}
+
+/**
+ * Largest file a field uploads: 100 MiB — the repo's file-bytes cap,
+ * packages/shims/src/files.ts MAX_FILE_BYTES. The shipped runtime cannot
+ * import it, so the generator re-stamps this line from that definition when
+ * it emits an app (see stampUploadCap); the repo's tests assert the two stay
+ * equal. The file picker, camera capture, and public_url fetch all enforce
+ * this one bound.
+ */
+export const UPLOAD_SOURCE_MAX_BYTES = 100 * 1024 * 1024;
+
+/** image/svg+xml and any image/*+xml type can carry active script; they are never an upload. */
+function refusedImageType(mime) {
+  const type = String(mime || '').split(';')[0].trim().toLowerCase();
+  return type === 'image/svg+xml' || /^image\/[a-z0-9!#$&^_.+-]*\+xml$/.test(type);
+}
+
+/** A picked file answer too big or too active to upload, or null. */
+function uploadFileError(field, file) {
+  if (file && file.size > UPLOAD_SOURCE_MAX_BYTES) return `The file is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB limit.`;
+  if (field && field.widget === 'image' && refusedImageType(file && file.type)) return 'SVG images are not accepted; choose a different image.';
+  return null;
+}
+
+/**
+ * The file picker's `accept` rule applied to a fetched MIME: an `image/*`
+ * field only uploads image/* bytes. A field without an accept list behaves
+ * like the picker: any declared type is fine, but a missing Content-Type is
+ * still a refusal.
+ */
+function uploadSourceTypeOk(mime, accept) {
+  const wanted = (typeof accept === 'string' ? accept : '')
+    .split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter((token) => token.includes('/'));
+  const type = (typeof mime === 'string' ? mime.split(';')[0] : '').trim().toLowerCase();
+  if (!wanted.length) return type !== '' && type !== 'application/octet-stream';
+  return wanted.some((token) => (token.endsWith('/*') ? type.startsWith(token.slice(0, -1)) : type === token));
+}
+
+/** Read a fetched upload-source body under UPLOAD_SOURCE_MAX_BYTES. Streams when the engine can; otherwise trusts no declared length over the blob's own size. */
+async function uploadSourceBlob(res, view) {
+  const headers = res && res.headers;
+  const declared = headers && typeof headers.get === 'function' ? Number(headers.get('content-length')) : NaN;
+  if (Number.isFinite(declared) && declared > UPLOAD_SOURCE_MAX_BYTES) throw new Error(`upload source is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB limit`);
+  const body = res && res.body;
+  if (body && typeof body.getReader === 'function') {
+    const reader = body.getReader();
+    const chunks = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const part = await reader.read();
+        if (part.done) break;
+        const chunk = part.value;
+        size += chunk && (chunk.byteLength || chunk.length || 0);
+        if (size > UPLOAD_SOURCE_MAX_BYTES) throw new Error(`upload source is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB limit`);
+        chunks.push(chunk);
+      }
+    } catch (err) {
+      try {
+        await reader.cancel();
+      } catch {
+        /* the read already failed */
+      }
+      throw err;
+    }
+    const BlobCtor = view.Blob || globalThis.Blob;
+    return new BlobCtor(chunks, { type: '' });
+  }
+  if (!res || typeof res.blob !== 'function') throw new Error('upload source could not be read');
+  const blob = await res.blob();
+  if (!blob || typeof blob.size !== 'number' || blob.size > UPLOAD_SOURCE_MAX_BYTES) throw new Error(`upload source is larger than the ${UPLOAD_SOURCE_MAX_BYTES / (1024 * 1024)} MB limit`);
+  return blob;
+}
+
+/**
+ * A `public_url` acquisition source: the page fetches the bytes, then runs
+ * them through the same signed upload as a picked file. Only http(s) targets;
+ * the body is capped at the shared file-size bound, an SVG or script-bearing
+ * image type is refused, and the bytes must answer the field's `accept` type,
+ * so a redirected or lying endpoint cannot push arbitrary content into the
+ * signed upload. A host whose CORS policy refuses the read fails the submit's
+ * upload step.
+ */
+async function fetchUploadSource(url, formEl, field) {
+  let target = null;
+  try {
+    target = new URL(url);
+  } catch {
+    target = null;
+  }
+  if (!target || (target.protocol !== 'http:' && target.protocol !== 'https:')) throw new Error('upload source is not an http(s) URL');
+  const call = (viewOf(formEl) && viewOf(formEl).fetch) || globalThis.fetch;
+  if (typeof call !== 'function') throw new Error('upload source fetch is unavailable');
+  const res = await call(target.href);
+  if (!res || res.ok === false) throw new Error('upload source could not be read');
+  const view = viewOf(formEl);
+  const accept = field && field.accept;
+  const contentType = res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') : '';
+  if (!uploadSourceTypeOk(contentType, accept)) throw new Error('upload source is not an accepted file type');
+  if (refusedImageType(contentType)) throw new Error('upload source is an SVG image, which is not accepted');
+  const blob = await uploadSourceBlob(res, view);
+  const type = (blob && blob.type) || String(contentType || '').split(';')[0].trim().toLowerCase();
+  if (!uploadSourceTypeOk(type, accept)) throw new Error('upload source is not an accepted file type');
+  if (refusedImageType(type)) throw new Error('upload source is an SVG image, which is not accepted');
+  const FileCtor = view.File || globalThis.File;
+  const leaf = decodeURIComponent(target.pathname.split('/').pop() || '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'file';
+  if (typeof FileCtor === 'function') return new FileCtor([blob], leaf, { type });
+  return { name: leaf, type, size: (blob && blob.size) || 0, arrayBuffer: () => blob.arrayBuffer() };
 }
 
 /** A canvas data URL (`data:image/png;base64,…`) as PNG bytes, or null. */
@@ -5417,6 +5575,39 @@ export async function submitRecord(formEl, form, upload) {
     if (!writableInput(field)) continue;
     const value = raw[field.name];
     if (FILE_WIDGETS.has(field.widget)) {
+      if (typeof FileCtor === 'function' && field.widget !== 'signature') {
+        // `source` alternatives feed the same upload: a camera capture posts
+        // under `<name>__camera`, a fetched public URL under `<name>__url`.
+        const camera = raw[`${field.name}__camera`];
+        const picked = value instanceof FileCtor && value.size ? value : camera instanceof FileCtor && camera.size ? camera : null;
+        const sourceUrl = raw[`${field.name}__url`];
+        const typed = typeof sourceUrl === 'string' ? sourceUrl.trim() : '';
+        if (picked || typed) {
+          if (typeof upload !== 'function') throw new Error('upload endpoint missing');
+          // A pick or capture over the shared bound, or an SVG into an image
+          // field, is refused the same way a fetched source is.
+          const refused = picked && uploadFileError(field, picked);
+          if (refused) {
+            const err = new Error(refused);
+            err.fieldName = field.name;
+            throw err;
+          }
+          let source = picked;
+          if (!source) {
+            try {
+              source = await fetchUploadSource(typed, formEl, field);
+            } catch (cause) {
+              // A refused source is a field error, not a crashed submit: the
+              // caller flags the field and nothing reaches the signed upload.
+              const err = cause instanceof Error ? cause : new Error('upload source could not be read');
+              err.fieldName = field.name;
+              throw err;
+            }
+          }
+          record[field.name] = await upload(field, source);
+        }
+        continue;
+      }
       if (typeof FileCtor === 'function' && value instanceof FileCtor) {
         if (!value.size) continue;
         if (typeof upload !== 'function') throw new Error('upload endpoint missing');
@@ -7235,7 +7426,8 @@ export function boot(appModel, doc) {
       let record;
       try {
         record = await submitRecord(formEl, form, (field, file) => uploadReference(viewRef, field, file));
-      } catch {
+      } catch (err) {
+        if (err && err.fieldName) showErrors(formEl, form, { [err.fieldName]: err.message });
         const banner = formEl.querySelector('[data-banner]');
         if (banner) banner.textContent = 'Upload failed. The form was not submitted.';
         return;

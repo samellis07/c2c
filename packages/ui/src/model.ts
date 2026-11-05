@@ -88,6 +88,8 @@ export interface UiField {
   pattern?: string;
   accept?: string;
   uploadEndpoint?: string;
+  /** Acquisition sources the `source` property allows (`file`, `public_url`, `camera`), in the export's order. */
+  uploadSources?: string[];
   scan: boolean;
   initialValue?: string;
   note?: string;
@@ -421,6 +423,8 @@ const WIDGET: Record<string, Widget> = {
 
 const READONLY = new Set<Widget>(['formula', 'autonumber', 'zia', 'barcode', 'section', 'notes', 'unsupported']);
 const FILE_WIDGETS = new Set<Widget>(['file', 'image', 'audio', 'video', 'signature']);
+/** Known remote document browsing sources for file fields that have no Catalyst equivalent. */
+const BROWSE_REMOTE_SOURCES = new Set(['google_docs', 'zoho_docs']);
 
 const REPORT_VIEW: Record<string, UiReport['view']> = {
   list: 'list',
@@ -789,6 +793,27 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
   }
   if (FILE_WIDGETS.has(widget)) {
     ui.uploadEndpoint = `/uploads/${encodeURIComponent(formName)}/${encodeURIComponent(field.name)}`;
+    const sources = widget !== 'signature' ? field.properties.find((p) => p.key.trim().toLowerCase() === 'source') : undefined;
+    if (sources) {
+      const tokens = unquote(sources.value).split(',').map((token) => token.trim().toLowerCase()).filter(Boolean);
+      if (tokens.length) ui.uploadSources = tokens;
+    }
+    const browseProp = widget === 'file' ? field.properties.find((p) => p.key.trim().toLowerCase() === 'browse') : undefined;
+    if (browseProp && depth === 0) {
+      const tokens = unquote(browseProp.value).split(',').map((token) => token.trim().toLowerCase()).filter(Boolean);
+      const uncarried = tokens.filter((t) => t !== 'local_drive');
+      if (uncarried.length && uncarried.every((t) => BROWSE_REMOTE_SOURCES.has(t))) {
+        const name = `${formName}.${field.name} property browse`;
+        if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+          todos.push({
+            area: 'field',
+            name,
+            reason: `Browse option(s) ${uncarried.join(', ')} have no Catalyst equivalent; file uploads are supported from local drive only.`,
+            manualStep: `In Catalyst, remote file browsing (${uncarried.join(', ')}) is not supported out of the box. Configure third-party integrations (e.g. Google Drive, Zoho WorkDrive) or Catalyst Cloud Scale functions to attach remote documents, or rely on local device uploads.`,
+          });
+        }
+      }
+    }
     ui.accept = widget === 'image' || widget === 'signature' ? 'image/*' : widget === 'audio' ? 'audio/*' : widget === 'video' ? 'video/*' : undefined;
     ui.note =
       widget === 'signature'
