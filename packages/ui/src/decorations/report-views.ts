@@ -7,6 +7,7 @@ import type { App, Report, ReportView } from '../../../core/src/ir.js';
 import { phoneColumns, reportColumnLabel } from '../../../core/src/phone-columns.js';
 import type { UiModel, UiReport, UiReportDetailBlock } from '../model.js';
 import { reportFieldLabel } from './labels.js';
+import { compareEnUs } from '../../../core/src/order.js';
 
 function isModel(value: unknown): value is UiModel {
   return !!value && typeof value === 'object' && (value as UiModel).dryRun === true && Array.isArray((value as UiModel).reports);
@@ -114,7 +115,11 @@ function applyReportViews(model: UiModel, app: App): void {
         const device = view.device ?? 'web';
         if (!extras.has(device)) extras.set(device, blocksOf(view, app, source));
       }
-      if (extras.size) report.deviceDetailBlocks = [...extras.entries()].map(([device, blocks]) => ({ device, blocks }));
+      if (extras.size) {
+        report.deviceDetailBlocks = [...extras.entries()]
+          .sort(([a], [b]) => compareEnUs(a, b))
+          .map(([device, blocks]) => ({ device, blocks }));
+      }
     }
   }
 }
