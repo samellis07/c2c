@@ -805,6 +805,49 @@ ${field('Idea', 'text')}
 \t\t\t\tdisplayformat = [username]
 \t\t\t)
 \t\t}
+\t\tlist All_Ideas
+\t\t{
+\t\t\tshow all rows from Raise_an_Idea
+\t\t\t(
+\t\t\t\tIdea
+\t\t\t\tApprover
+\t\t\t)
+\t\t}
+\t}
+\tshare_settings
+\t{
+\t\t"Staff"
+\t\t{
+\t\t\tname = "Staff"
+\t\t\ttype = Users_Permissions
+\t\t\tModulePermissions
+\t\t\t{
+\t\t\t\tRaise_an_Idea
+\t\t\t\t{
+\t\t\t\t\tenabled = true
+\t\t\t\t\tReportPermissions
+\t\t\t\t\t{
+\t\t\t\t\t\tAll_Ideas = {"View", "Add"}
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
+\t\t"Viewer"
+\t\t{
+\t\t\tname = "Viewer"
+\t\t\ttype = Users_Permissions
+\t\t\tModulePermissions
+\t\t\t{
+\t\t\t\tRaise_an_Idea
+\t\t\t\t{
+\t\t\t\t\tenabled = true
+\t\t\t\t\tReportPermissions
+\t\t\t\t\t{
+\t\t\t\t\t\tAll_Ideas = {"View"}
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+\t\t}
 \t}
 `;
 
@@ -823,7 +866,7 @@ test('module = users renders a picker bound to the system users endpoint', async
   assert.match(html, /<select[^>]*data-lookup="\/lookups\/users\/username"/);
 });
 
-test('the users lookup serves project users as ROWID + the display attribute, to any authenticated caller', async () => {
+test('the users lookup serves project users only to callers with add or edit on a form declaring that users field', async () => {
   const built = await writeBuilt(USERS_BODY);
   try {
     const lookup = await built.load('functions/lookups/lookup.mjs');
@@ -846,20 +889,55 @@ test('the users lookup serves project users as ROWID + the display attribute, to
       assert.deepEqual(Object.keys(row).sort(), ['ROWID', 'username'], 'only the id and the display attribute leave');
     }
 
-    // Another display attribute: the id plus that attribute only — email and
-    // role never appear when they are not the display.
-    const names = await invoke(lookup.default, { ...staff, url: '/lookups/users/first_name', body: { rows: users } });
-    assert.deepEqual(names.body.rows, [
-      { ROWID: '101', first_name: 'Ada' },
-      { ROWID: '102', first_name: 'Alan' },
-    ]);
-    assert.doesNotMatch(JSON.stringify(names.body.rows), /email|role/i);
-
     // ?q= filters on the display text; paging slices the capped page.
     const found = await invoke(lookup.default, { ...staff, url: '/lookups/users/username?q=alan', body: { rows: users } });
     assert.deepEqual(found.body.rows, [{ ROWID: '102', username: 'alan@example.test' }]);
     const page = await invoke(lookup.default, { ...staff, url: '/lookups/users/username?page=1&pageSize=1', body: { rows: users } });
     assert.deepEqual(page.body.rows, [{ ROWID: '102', username: 'alan@example.test' }]);
+
+    // Signed-in caller with no such grant -> 403, zero user-listing calls.
+    let listingCalls = 0;
+    const viewerReq = {
+      user: { profile: 'Viewer' },
+      url: '/lookups/users/username',
+      get appUsers() {
+        listingCalls++;
+        return users;
+      },
+      body: {
+        get rows() {
+          listingCalls++;
+          return users;
+        },
+      },
+    };
+    const denied = await invoke(lookup.default, viewerReq);
+    assert.equal(denied.status, 403, 'signed-in caller with no such grant -> 403');
+    assert.equal(listingCalls, 0, 'zero user-listing calls');
+
+    // Signed-in caller whose profile has no grant on the form -> 403.
+    const stranger = await invoke(lookup.default, { user: { profile: 'Stranger' }, url: '/lookups/users/username', body: { rows: users } });
+    assert.equal(stranger.status, 403, 'signed-in caller with no grant -> 403');
+
+    // Display not declared by any form -> 403/404 (no listing).
+    let undeclaredListingCalls = 0;
+    const undeclaredReq = {
+      ...staff,
+      url: '/lookups/users/first_name',
+      get appUsers() {
+        undeclaredListingCalls++;
+        return users;
+      },
+      body: {
+        get rows() {
+          undeclaredListingCalls++;
+          return users;
+        },
+      },
+    };
+    const undeclared = await invoke(lookup.default, undeclaredReq);
+    assert.ok(undeclared.status === 403 || undeclared.status === 404, 'display not declared by any form -> 403/404');
+    assert.equal(undeclaredListingCalls, 0, 'no listing calls when display is undeclared');
   } finally {
     rmSync(built.dir, { recursive: true, force: true });
   }
