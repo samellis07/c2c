@@ -6474,12 +6474,17 @@ test('for each over the selected records — by binding or form name — is a re
 test('a function has no client half: no client module, prefetch or call endpoint, and no client-split todos', () => {
   // Neither UI target loads client/handlers/functions/*, so a function's
   // client half never runs. Its condition and loop run in the server module.
+  // A single raw openUrl(...) body is now classified by classifyClientOpenUrl
+  // (always either supported client navigation or a counted unsupported-target
+  // todo, never silently absent) — so this fixture, whose target form does not
+  // exist in the app below, uses a comment-only body to keep exercising the
+  // generic "no client/server/prefetch code produced" no-split path.
   const fn: FunctionDef = {
     name: 'OpenForm.Review',
     kind: 'creator',
     signature: 'void OpenForm.Review(int recID)',
     properties: [],
-    deluge: [{ text: 'openUrl("#Form:Add_Review?recID=" + recID, "popup window");', span: Z }],
+    deluge: [{ text: '// not yet implemented', span: Z }],
     span: Z,
   };
   const reads: FunctionDef = {
