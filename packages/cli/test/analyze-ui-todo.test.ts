@@ -311,3 +311,50 @@ Content="<zml><layout><row><column width='100%'><dsp id='snippet'><![CDATA[<div 
   assert.equal(report.determinism.todoKinds.some((kind) => kind.construct.includes('Inline style declarations')), true);
   assert.equal(report.determinism.deterministic, false);
 });
+
+const VOTE_DOWNVOTE_APP = `application "Approval_App"
+{
+\tforms
+\t{
+\t\tform Idea_Form
+\t\t{
+\t\t\tTitle
+\t\t\t(
+\t\t\t\ttype = text
+\t\t\t\tdisplayname = "Title"
+\t\t\t)
+\t\t}
+\t}
+\tpages
+\t{
+\t\tpage Voting_Page(Idea)
+\t\t{
+\t\t\tdisplayname = "Voting Page"
+\t\t\tContent="<zml><layout><row><column width='100%'><dspZml id='zml_snippet1' elementName='ZML Snippet'><![CDATA[htmlpage zml_snippet1()\\ndisplayname = \\"zml_snippet\\"\\ncontent\\n<%{\\nif(input.Idea != null) {\\n%>\\n<panel><pr><pc><image color=\\"#FFFFFF\\" width='30px' height='30px' imageType='icon' value='zc-li-solid emoticons-like-no' action='Function' functionName='Vote.downvote' parameters='Idea' successMsg=\\"Done\\" /></pc></pr></panel>\\n<%\\n}\\n}%>]]></dspZml></column></row></layout></zml>"
+\t\t}
+\t}
+\tfunctions
+\t{
+\t\tDeluge
+\t\t{
+\t\t\tvoid Vote.downvote(string record_id)
+\t\t\t{
+\t\t\t\trec = Idea_Form[ID == record_id.toLong()];
+\t\t\t\trec.Title = "downvoted";
+\t\t\t}
+\t\t}
+\t}
+}
+`;
+
+test('ZML <image> click action Function calling function Vote.downvote is not counted as a residual TODO', () => {
+  const ir = deriveIr(parse(VOTE_DOWNVOTE_APP));
+  const report = analyze(ir);
+  const status = statusFromReport(buildMigrationReport([{ name: 'approval-app', ir }], 'inline'));
+  const residualConstruct = 'ZML <image> (app identifier) click action Function calling function Vote.downvote is not generated; wire the click to the function by hand';
+  assert.equal(status.kinds.some((kind) => kind.construct === residualConstruct), false);
+  assert.equal(report.determinism.todoKinds.some((kind) => kind.construct.includes('Vote.downvote')), false);
+  assert.equal(report.determinism.todoCount, 0);
+  assert.equal(report.determinism.deterministic, true);
+});
+

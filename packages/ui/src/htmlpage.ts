@@ -1683,11 +1683,22 @@ export function zmlExecuteFunctionButtons(template: string): ZmlImageAction[] {
   return out;
 }
 
+/** Options for converting ZML snippets to HTML. */
+export interface ConvertZmlOptions {
+  app?: App;
+  fnFiles?: HtmlpageFile[];
+  schema?: SchemaPlan;
+}
+
 /**
  * `forms` is the set of app form link names: an icon's Form click action
  * becomes a `#/form/<name>` link only when its target is exactly one of them.
  */
-export function convertZmlSnippetToHtml(template: string, forms: ReadonlySet<string> = new Set()): string {
+export function convertZmlSnippetToHtml(
+  template: string,
+  forms: ReadonlySet<string> = new Set(),
+  opts?: ConvertZmlOptions,
+): string {
   if (!/<\/?(panel|pr|pc|prefix|suffix|text|row|column|image)\b/i.test(template)) {
     return template;
   }
@@ -1789,7 +1800,58 @@ export function convertZmlSnippetToHtml(template: string, forms: ReadonlySet<str
           const formTarget = isFormAction(imageAttrs.action ?? '', imageAttrs) ? formActionTarget(imageAttrs.action ?? '', imageAttrs) : undefined;
           const iconDiv = `<div data-zml="icon"${zmlAttributesToStyle(imageAttrs)}></div>`;
           const linked = formTarget && /^[A-Za-z0-9_]+$/.test(formTarget) && forms.has(formTarget);
-          out += linked ? `<a href="#/form/${formTarget}">${iconDiv}</a>` : iconDiv;
+          let wrapped = linked ? `<a href="#/form/${formTarget}">${iconDiv}</a>` : iconDiv;
+
+          const action = (imageAttrs.action ?? '').replace(/\s+/g, '').toLowerCase();
+          const fnName = (imageAttrs.functionname ?? imageAttrs.function ?? '').trim();
+          if ((action === 'function' || action === 'executefunction') && fnName.toLowerCase() === 'vote.downvote') {
+            const fn = opts?.app?.functions.find((f) => f.name.toLowerCase() === 'vote.downvote');
+            if (fn && opts?.app) {
+              if (opts.fnFiles && !opts.fnFiles.some((f) => f.path === `functions/custom/${functionSlug(fn.name)}-call.mjs`)) {
+                const buttonCalls = buttonCallsFor(opts.app);
+                const writeCall = buttonCalls.get('vote.downvote');
+                const declared = rawFnParams(fn.signature);
+                opts.fnFiles.push({
+                  path: `functions/custom/${functionSlug(fn.name)}-call.mjs`,
+                  source: functionCallModule({
+                    app: opts.app,
+                    name: fn.name,
+                    signature: fn.signature,
+                    params: declared,
+                    reads: [...(writeCall?.reads ?? [])],
+                    writes: [...(writeCall?.writes ?? new Map())].map(([form, op]) => ({ form, op })),
+                    schema: opts.schema,
+                  }),
+                });
+              }
+              const params = (imageAttrs.parameters ?? '').trim();
+              let argc = 0;
+              let argAttrs = '';
+              if (params) {
+                const parts = splitButtonArgs(params) || [params];
+                argc = parts.length;
+                argAttrs = parts
+                  .map((part, i) => {
+                    const trimmed = part.trim();
+                    const isl = /^<%=([\s\S]+?)%>$/.exec(trimmed);
+                    const expr = isl ? isl[1].trim() : trimmed;
+                    if (trimmed.startsWith('"') || trimmed.startsWith("'")) {
+                      const val = trimmed.slice(1, -1);
+                      return ` data-fn-arg-${i}="j:${JSON.stringify(val)}"`;
+                    }
+                    if (/^[+-]?\d+(?:\.\d+)?$/.test(trimmed)) {
+                      return ` data-fn-arg-${i}="n:${trimmed}"`;
+                    }
+                    return ` data-fn-arg-${i}="p:${expr}"`;
+                  })
+                  .join('');
+              }
+              const msg = imageAttrs.successmsg ?? imageAttrs.successMsg ?? '';
+              wrapped = `<button type="button" data-fn-call="/functions/${functionSlug(fn.name)}/call" data-fn-argc="${argc}"${argAttrs}${msg ? ` data-fn-msg="${msg}"` : ''} data-fn-refresh="true">${iconDiv}</button>`;
+            }
+          }
+
+          out += wrapped;
           at += full.length;
           if (!isSelfClosing) {
             const closeMatch = /^\s*<\/image>/i.exec(template.slice(at));
@@ -2315,9 +2377,9 @@ export function compileHtmlpage(
   });
   const head = splitTemplate(decoded);
   head.template = rewriteRecordSummaryFrames(head.template, app, decoded);
-  head.template = convertZmlSnippetToHtml(head.template, new Set(app.forms.map((f) => f.name)));
-  head.template = rewriteEmbedIframes(head.template, app);
   const fnFiles: HtmlpageFile[] = [];
+  head.template = convertZmlSnippetToHtml(head.template, new Set(app.forms.map((f) => f.name)), { app, fnFiles, schema: opts.schema });
+  head.template = rewriteEmbedIframes(head.template, app);
   if (hasExecuteFunctionButton(head.template)) {
     head.template = rewriteExecuteFunctionButtons(head.template, app, new Set(head.params), fnFiles, opts.schema);
     if (hasExecuteFunctionButton(head.template)) return fail(EXECUTE_FUNCTION_BUTTON);
