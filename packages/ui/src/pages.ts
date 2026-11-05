@@ -807,25 +807,42 @@ function maskTemplateIslands(text: string, fill: string): string {
   }
 }
 
+/** The text of every `<style>` element in `raw`, as the sanitizer's parse sees it. */
+function styleSheets(raw: string): string[] {
+  if (!/<\s*style/i.test(String(raw ?? ''))) return [];
+  const win = domWindow();
+  const parsed = new win.DOMParser().parseFromString(String(raw ?? ''), 'text/html');
+  const sheets: string[] = [];
+  const walk = (node: DomNode) => {
+    if (node.nodeType !== 1) return;
+    if ((node.tagName || '').toLowerCase() === 'style') {
+      sheets.push(node.textContent ?? '');
+      return;
+    }
+    for (const child of listOf(node.childNodes)) walk(child);
+  };
+  walk(parsed.documentElement);
+  return sheets;
+}
+
+/**
+ * `raw` holds a `<style>` element the sanitizer removes. An element with no
+ * CSS rules loses nothing, but its presence still suppresses the generic
+ * dropped-tag TODO: the loss, when there is one, is counted by the page's
+ * dropped-CSS TODO instead.
+ */
+export function hasStyleElement(raw: string): boolean {
+  return styleSheets(raw).length > 0;
+}
+
 /**
  * Static CSS rules inside the `<style>` elements of `raw`. The sanitizer drops
  * every `<style>` element whole, so this is the CSS a page loses. Template
  * islands inside the stylesheet are masked before counting.
  */
 export function droppedStyleRules(raw: string): number {
-  if (!/<\s*style/i.test(String(raw ?? ''))) return 0;
-  const win = domWindow();
-  const parsed = new win.DOMParser().parseFromString(String(raw ?? ''), 'text/html');
   let rules = 0;
-  const walk = (node: DomNode) => {
-    if (node.nodeType !== 1) return;
-    if ((node.tagName || '').toLowerCase() === 'style') {
-      rules += cssRuleCount(maskTemplateIslands(node.textContent ?? '', 'x'));
-      return;
-    }
-    for (const child of listOf(node.childNodes)) walk(child);
-  };
-  walk(parsed.documentElement);
+  for (const sheet of styleSheets(raw)) rules += cssRuleCount(maskTemplateIslands(sheet, 'x'));
   return rules;
 }
 
@@ -1104,7 +1121,7 @@ export function elementFromZml(
       const compiled = env ? compileHtmlpage(env.app, env.page, name ?? tag, decoded, { id, schema: env.schema }) : null;
       if (compiled?.ok) for (const extra of compiled.files ?? []) env?.emit?.(extra);
       const styleRules = droppedStyleRules(decoded);
-      const lostCss = styleRules ? { droppedStyleRules: styleRules, staticCss: decoded } : {};
+      const lostCss = hasStyleElement(decoded) ? { droppedStyleRules: styleRules, staticCss: decoded } : {};
 // A compiled snippet wired every ExecuteFunction button to its generated
       // client-call endpoint (any unwired one refuses the compile), so only
       // the image actions remain manual steps.
@@ -1184,7 +1201,7 @@ export function elementFromZml(
     const droppedTags: string[] = [];
     const html = sanitizeSnippet(convertZmlSnippetToHtml(source, new Set((env?.app?.forms ?? []).map((f) => f.name))), undefined, droppedTags);
     const styleRules = droppedStyleRules(source);
-    const lostCss = styleRules ? { droppedStyleRules: styleRules, staticCss: source } : {};
+    const lostCss = hasStyleElement(source) ? { droppedStyleRules: styleRules, staticCss: source } : {};
     const actionItems = imageActionTodos(imageActions, undefined, env?.app);
     return {
       tag,
