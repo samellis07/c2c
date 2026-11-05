@@ -68,18 +68,18 @@ test('committed fixtures carry the deterministic flag', () => {
   assert.equal(lib.uiTodoCount, 0);
   assert.deepEqual(lib.todoKinds, []);
   assert.equal(lib.silentDrops, 16);
-  assert.equal(ff.silentDrops, 158);
+  assert.equal(ff.silentDrops, 112);
   assert.equal(report.aggregate.deterministicApps, 0);
-  assert.equal(report.aggregate.silentDrops, 174);
+  assert.equal(report.aggregate.silentDrops, 128);
   assert.equal(report.aggregate.todoTotal, 11);
   // lib has no todos but silent drops: it counts as a no-todo app, not a deterministic one.
   assert.equal(report.aggregate.noTodoApps, 1);
   for (const app of [lib, ff]) assert.equal(app.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), app.silentDrops);
-  assert.equal(report.aggregate.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), 174);
+  assert.equal(report.aggregate.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), 128);
   const text = migrationReportAsText(report);
   assert.match(text, /^apps with no residual todos: 1\/2$/m);
   assert.match(text, /^apps with no residual todos and no silent drops \(deterministic\): 0\/2$/m);
-  assert.match(text, /^silent drops \(total\): 174$/m);
+  assert.match(text, /^silent drops \(total\): 128$/m);
 });
 
 test('aggregate counts only deterministic apps toward the 95%/100% targets', () => {
