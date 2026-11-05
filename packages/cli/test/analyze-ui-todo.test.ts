@@ -9,9 +9,10 @@ import { analyze } from '../src/analyze.js';
 import { buildMigrationReport } from '../src/migration-report.js';
 
 /**
- * A pivot with no group-by renders as a list with a note plus ONE counted
- * manual item (the shelves must be rebuilt). A plain list report has none.
- * Both are parsed from the excerpt.
+ * A pivot with no group-by renders as a list with a note and no counted
+ * manual item (the shelves cannot be reconstructed from the export, so the
+ * rebuild stays a human step but is not a residual blocker). A plain list
+ * report has none. Both are parsed from the excerpt.
  */
 const PIVOT_REASON = 'Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over Item.';
 
@@ -128,23 +129,19 @@ const CLEAN_LIST = `application "Ui_Clean"
 }
 `;
 
-test('a pivot report without a group-by renders as a list with a note and one counted manual item', () => {
+test('a pivot report without a group-by renders as a list with a note and no counted manual item', () => {
   const report = analyze(deriveIr(parse(PIVOT_STUB)));
   const stubs = report.deluge.todoLocations.filter((item) => item.scope === 'ui');
   const stubBlockers = report.blockers.filter((blocker) => blocker.scope === 'ui');
-  assert.equal(report.determinism.uiTodoCount, 1);
-  assert.equal(report.determinism.deterministic, false);
-  assert.equal(stubs.length, 1);
-  assert.equal(stubBlockers.length, 1);
-  assert.equal(stubs[0]?.location, 'report Totals');
-  assert.equal(stubs[0]?.construct, PIVOT_REASON);
-  assert.equal(stubBlockers[0]?.label, stubs[0]?.location);
-  assert.equal(stubBlockers[0]?.detail, stubs[0]?.construct);
-  assert.equal(stubBlockers[0]?.kind, 'ui');
+  assert.equal(report.determinism.uiTodoCount, 0);
+  assert.equal(report.determinism.todoCount, 0);
+  assert.equal(report.determinism.deterministic, true);
+  assert.equal(stubs.length, 0);
+  assert.equal(stubBlockers.length, 0);
+  assert.equal(report.determinism.todoKinds.some((kind) => kind.construct === PIVOT_REASON), false);
   assert.equal(report.deluge.todo, report.determinism.todoCount);
   assert.equal(report.deluge.todoLocations.length, report.deluge.todo);
   assert.equal(report.blockers.filter((blocker) => blocker.kind !== 'feature').length, report.determinism.todoCount);
-  assert.equal(report.determinism.todoKinds.find((kind) => kind.construct === PIVOT_REASON)?.count, 1);
 });
 
 test('a pivot report without a group-by falls back to a generated list view with a note', () => {
@@ -228,12 +225,12 @@ function generatedReport(text: string): GeneratedReport {
   return JSON.parse(String(file.data)) as GeneratedReport;
 }
 
-test('a UI-stub-only app writes deterministic:false todoCount:1 into the generated migration-report.json', () => {
+test('a pivot-stub-only app writes deterministic:true todoCount:0 into the generated migration-report.json', () => {
   const report = analyze(deriveIr(parse(PIVOT_STUB)));
   const generated = generatedReport(PIVOT_STUB);
-  assert.equal(generated.deterministic, false);
-  assert.equal(generated.todoCount, 1);
-  assert.equal(generated.uiTodoCount, 1);
+  assert.equal(generated.deterministic, true);
+  assert.equal(generated.todoCount, 0);
+  assert.equal(generated.uiTodoCount, 0);
   assert.equal(generated.deterministic, report.determinism.deterministic);
   assert.equal(generated.todoCount, report.determinism.todoCount);
   assert.equal(generated.uiTodoCount, report.determinism.uiTodoCount);
@@ -266,8 +263,8 @@ test('analyze, the generated migration-report.json and the determinism status ag
     assert.equal(row.todoCount, a.determinism.todoCount, `${entry.name} report todoCount`);
     assert.equal(row.uiTodoCount, a.determinism.uiTodoCount, `${entry.name} report uiTodoCount`);
   }
-  assert.equal(status.todoTotal, 1);
-  assert.equal(status.deterministicApps, 1);
+  assert.equal(status.todoTotal, 0);
+  assert.equal(status.deterministicApps, 2);
 });
 
 const INLINE_STYLES_APP = `application "Inline_Styles_App"
