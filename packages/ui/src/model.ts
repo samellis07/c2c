@@ -987,11 +987,6 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
     // so the underlying rows render as a list and the pivot stays manual.
     view = 'list';
     note = `Shown as a list: ${report.name} has no exported pivot shelves; rebuild it on this report using one row field, one column field, and a count or sum measure from ${report.form || 'the report form'} (${columns.map((column) => column.field).join(', ') || 'no exported columns'}).`;
-    todos.push({
-      area: 'report',
-      name: report.name,
-      reason: `Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over ${report.form || 'the report form'}.`,
-    });
   }
   if (view === 'todo') todo = `Report type ${report.type || '(none)'} is not generated.`;
   // A criteria that did not translate must not widen the report to all rows.
