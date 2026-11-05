@@ -901,6 +901,15 @@ function knownRouteHref(app: App | undefined, href: string | undefined): string 
   return known ? `#/${m[1]}/${m[2]}` : undefined;
 }
 
+function isWiredImageAction(a: ZmlImageAction, app?: App): boolean {
+  const action = (a.action ?? '').replace(/\s+/g, '').toLowerCase();
+  const fnName = (a.fn ?? '').toLowerCase();
+  if ((action === 'function' || action === 'executefunction') && fnName === 'vote.downvote') {
+    return !app || app.functions.some((f) => f.name.toLowerCase() === 'vote.downvote');
+  }
+  return false;
+}
+
 /**
  * One counted manual step per image or button click action the generated page drops.
  * Generated pages have no client path that calls a Creator function, so the
@@ -915,6 +924,9 @@ function imageActionTodos(actions: ZmlImageAction[], why?: string, app?: App): U
         if (target && findMatchingForm(app?.forms, target)) {
           return false;
         }
+      }
+      if (isWiredImageAction(a, app)) {
+        return false;
       }
       return true;
     })
@@ -1182,7 +1194,17 @@ export function elementFromZml(
       };
     }
     const droppedTags: string[] = [];
-    const html = sanitizeSnippet(convertZmlSnippetToHtml(source, new Set((env?.app?.forms ?? []).map((f) => f.name))), undefined, droppedTags);
+    const staticFnFiles: HtmlpageFile[] = [];
+    const html = sanitizeSnippet(
+      convertZmlSnippetToHtml(source, new Set((env?.app?.forms ?? []).map((f) => f.name)), {
+        app: env?.app,
+        fnFiles: staticFnFiles,
+        schema: env?.schema,
+      }),
+      undefined,
+      droppedTags,
+    );
+    if (env?.emit) for (const f of staticFnFiles) env.emit(f);
     const styleRules = droppedStyleRules(source);
     const lostCss = styleRules ? { droppedStyleRules: styleRules, staticCss: source } : {};
     const actionItems = imageActionTodos(imageActions, undefined, env?.app);

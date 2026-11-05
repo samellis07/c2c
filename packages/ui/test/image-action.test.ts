@@ -121,3 +121,45 @@ test('ExecuteFunction buttons inside Deluge islands are not counted as literal m
     { action: 'ExecuteFunction', siteId: 'button-0', fn: 'save', label: 'Save', element: 'button' },
   ]);
 });
+
+test('a ZML image with action Function calling Vote.downvote is wired to a call button', () => {
+  const app = deriveIr(parse(`application "Vote_App"
+{
+\tforms
+\t{
+\t\tform Idea
+\t\t{
+\t\t\tTitle
+\t\t\t(
+\t\t\t\ttype = text
+\t\t\t\tdisplayname = "Title"
+\t\t\t)
+\t\t}
+\t}
+\tpages
+\t{
+\t\tpage Voting_Page(Idea)
+\t\t{
+\t\t\tdisplayname = "Voting Page"
+\t\t\tContent="<zml><layout><row><column width='100%'><dspZml id='zml_snippet1' elementName='ZML Snippet'><![CDATA[htmlpage zml_snippet1()\\ndisplayname = \\"zml_snippet\\"\\ncontent\\n<%{\\nif(input.Idea != null) {\\n%>\\n<panel><pr><pc><image color=\\"#FFFFFF\\" width='30px' height='30px' imageType='icon' value='zc-li-solid emoticons-like-no' action='Function' functionName='Vote.downvote' parameters='Idea' successMsg=\\"Done\\" /></pc></pr></panel>\\n<%\\n}\\n}%>]]></dspZml></column></row></layout></zml>"
+\t\t}
+\t}
+\tfunctions
+\t{
+\t\tDeluge
+\t\t{
+\t\t\tvoid Vote.downvote(string record_id)
+\t\t\t{
+\t\t\t\trec = Idea[ID == record_id.toLong()];
+\t\t\t\trec.Title = "voted";
+\t\t\t}
+\t\t}
+\t}
+}
+`));
+  const { model, files } = generateUi(app);
+  const todos = model.todos.filter((t) => t.reason.includes('Vote.downvote'));
+  assert.equal(todos.length, 0);
+  assert.ok(files.some((f) => f.path === 'functions/custom/vote-downvote-call.mjs'));
+});
+
