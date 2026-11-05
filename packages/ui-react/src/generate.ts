@@ -595,12 +595,20 @@ export function writeReactApp(out: string, files: readonly ReactFile[], opts: { 
   }
   for (const file of files) {
     const dest = join(out, file.path);
-    const present = existsSync(dest);
-    if (present && (file.owner === 'custom' || (file.owner === 'platform' && !opts.upgradePlatform))) {
-      result.kept.push(file.path);
+    mkdirSync(dirname(dest), { recursive: true });
+    if (file.owner === 'custom' || (file.owner === 'platform' && !opts.upgradePlatform)) {
+      // Create-only: a file present here must have existed when this write
+      // started, not a moment captured by an earlier, separate check that the
+      // file's state could have outrun (CodeQL js/file-system-race).
+      try {
+        writeFileSync(dest, file.data, { flag: 'wx' });
+        result.written.push(file.path);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+        result.kept.push(file.path);
+      }
       continue;
     }
-    mkdirSync(dirname(dest), { recursive: true });
     writeFileSync(dest, file.data);
     result.written.push(file.path);
   }
