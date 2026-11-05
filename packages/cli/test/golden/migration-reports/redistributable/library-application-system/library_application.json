@@ -206,19 +206,8 @@
     "Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)",
     "console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)"
   ],
-  "silentDrops": 17,
+  "silentDrops": 16,
   "residuals": [
-    {
-      "id": "field-property:Book.Genre property others option",
-      "kind": "field-property",
-      "construct": "Book.Genre property others option",
-      "form": "Book",
-      "field": "Genre",
-      "property": "property others option",
-      "reason": "property others option is not carried by the generated dropdown field. Varchar plus the .ds choice list. The server rejects values outside the list. A choice longer than 255 is promoted to text. A values = Form.Field target is a lookup, not a dropdown. module = users is the Users field.",
-      "step": "The property others option setting for Book.Genre was not converted. In the Catalyst console, configure that setting for Book.Genre, then preview the form or report and confirm the field behaves as expected.",
-      "stepSource": "specific"
-    },
     {
       "id": "field-property:Book_Transaction.Member property sortorder",
       "kind": "field-property",
