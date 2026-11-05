@@ -1369,40 +1369,81 @@ export async function scoreUi(app: App, bundle: UiBundle, opts: { rubric?: Rubri
   }
 
   // Phone tab bar and More. A tab bar the stylesheet hides at phone width
-  // offers nothing there.
+  // offers nothing there. The `slidingpane` device layout is a declared
+  // alternative: it deliberately leaves the tab bar empty and instead reveals
+  // a drawer-opening control (#nav-drawer-open) that slides #drawer over the
+  // screen. Both are valid, so the checks below branch on which one the
+  // stylesheet actually enables at phone width.
   const allItems = exp.sections.flatMap((s) => s.items);
   const tabbarVisible = tabbarShown(W.phone) && !!tabbar && tabbar.children.length > 0 && shown(tabbar, 'phone');
-  add('responsive', 'phone', 'phone-tabbar', !menuShown(W.phone) && tabbarVisible, `at ${W.phone}px: menu ${menuShown(W.phone) ? 'shown' : 'hidden'}, tab bar ${tabbarVisible ? 'shown' : tabbar?.children.length ? 'hidden' : 'absent or empty'}`);
-  const tabEntries = tabbarVisible ? Array.from(tabbar.querySelectorAll('a[href], button')).filter((t) => shown(t, 'phone')) : [];
-  add('navigation', 'phone', 'tab-count', tabEntries.length >= 1 && tabEntries.length <= 5, tabbarVisible ? `${tabEntries.length} tab bar entries` : `no tab bar at ${W.phone}px`);
-  const unnamedTabs = tabEntries.filter((t) => accessibleName(t, doc) === '');
-  add('navigation', 'phone', 'tab-names', tabEntries.length > 0 && unnamedTabs.length === 0, `${unnamedTabs.length} tab bar entries without a name`);
+  const drawerOpen = doc.getElementById('nav-drawer-open');
+  const drawer = doc.getElementById('drawer');
+  // #nav-drawer-open's CSS rule is unconditional in every generated app (it
+  // only ever positions the control); whether the drawer pattern is actually
+  // in play is a runtime decision (client-runtime.js sets `.hidden = false`
+  // on it only when the phone/tablet device layout is `sliding-pane`), so
+  // this reads the booted DOM's actual visibility, not the stylesheet.
+  const slidingPane = !tabbarVisible && !!drawerOpen && !!drawer && shown(drawerOpen, 'phone');
+  add(
+    'responsive',
+    'phone',
+    'phone-tabbar',
+    !menuShown(W.phone) && (tabbarVisible || slidingPane),
+    `at ${W.phone}px: menu ${menuShown(W.phone) ? 'shown' : 'hidden'}, tab bar ${tabbarVisible ? 'shown' : slidingPane ? 'replaced by a sliding-pane drawer' : tabbar?.children.length ? 'hidden' : 'absent or empty'}`,
+  );
   const reachable = new Set<string>();
-  const tabLinks = tabEntries.filter((t) => t.tagName === 'A');
-  for (const a of tabLinks) {
-    const r = routeOf(a.getAttribute('href'));
-    if (r) reachable.add(r);
-  }
-  const more = tabEntries.find((t) => t.matches('[data-more], [aria-haspopup], [aria-controls="more-sheet"]')) ?? null;
-  if (allItems.length > tabLinks.length) {
+  if (slidingPane) {
     let opened = false;
     let closed = false;
-    if (more && sheet) {
-      (more as HTMLElement).click();
-      opened = !sheet.hidden && more.getAttribute('aria-expanded') === 'true';
-      // The sheet's links count only behind a More control that opens it, and
-      // only while it is open: a hidden sheet hides its links.
-      if (opened) {
-        for (const a of Array.from(sheet.querySelectorAll('a[href]'))) {
-          const r = routeOf(a.getAttribute('href'));
-          if (r && shown(a, 'phone')) reachable.add(r);
-        }
+    (drawerOpen as HTMLElement).click();
+    opened = !drawer!.hidden && drawerOpen!.getAttribute('aria-expanded') === 'true';
+    if (opened) {
+      for (const a of Array.from(drawer!.querySelectorAll('a[href]'))) {
+        const r = routeOf(a.getAttribute('href'));
+        if (r && shown(a, 'phone')) reachable.add(r);
       }
-      doc.dispatchEvent(new rowsS.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      closed = sheet.hidden && more.getAttribute('aria-expanded') !== 'true';
     }
-    add('navigation', 'phone', 'more', opened && closed, !more ? 'no More control for the destinations beyond the tab bar' : `More opens ${opened ? 'yes' : 'no'}, Escape closes ${closed ? 'yes' : 'no'}`);
-    add('accessibility', 'phone', 'more-aria', !!more && more.hasAttribute('aria-haspopup') && more.hasAttribute('aria-expanded') && !!sheet && (sheet.getAttribute('role') === 'dialog' || sheet.tagName === 'DIALOG'), 'More control states its popup; the sheet is a dialog');
+    doc.dispatchEvent(new rowsS.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    closed = drawer!.hidden && drawerOpen!.getAttribute('aria-expanded') !== 'true';
+    add('navigation', 'phone', 'more', opened && closed, `sliding-pane drawer opens ${opened ? 'yes' : 'no'}, Escape closes ${closed ? 'yes' : 'no'}`);
+    add(
+      'accessibility',
+      'phone',
+      'more-aria',
+      drawerOpen!.hasAttribute('aria-haspopup') && drawerOpen!.hasAttribute('aria-expanded') && (drawer!.getAttribute('role') === 'dialog' || drawer!.tagName === 'DIALOG'),
+      'drawer control states its popup; the drawer is a dialog',
+    );
+  } else {
+    const tabEntries = tabbarVisible ? Array.from(tabbar.querySelectorAll('a[href], button')).filter((t) => shown(t, 'phone')) : [];
+    add('navigation', 'phone', 'tab-count', tabEntries.length >= 1 && tabEntries.length <= 5, tabbarVisible ? `${tabEntries.length} tab bar entries` : `no tab bar at ${W.phone}px`);
+    const unnamedTabs = tabEntries.filter((t) => accessibleName(t, doc) === '');
+    add('navigation', 'phone', 'tab-names', tabEntries.length > 0 && unnamedTabs.length === 0, `${unnamedTabs.length} tab bar entries without a name`);
+    const tabLinks = tabEntries.filter((t) => t.tagName === 'A');
+    for (const a of tabLinks) {
+      const r = routeOf(a.getAttribute('href'));
+      if (r) reachable.add(r);
+    }
+    const more = tabEntries.find((t) => t.matches('[data-more], [aria-haspopup], [aria-controls="more-sheet"]')) ?? null;
+    if (allItems.length > tabLinks.length) {
+      let opened = false;
+      let closed = false;
+      if (more && sheet) {
+        (more as HTMLElement).click();
+        opened = !sheet.hidden && more.getAttribute('aria-expanded') === 'true';
+        // The sheet's links count only behind a More control that opens it, and
+        // only while it is open: a hidden sheet hides its links.
+        if (opened) {
+          for (const a of Array.from(sheet.querySelectorAll('a[href]'))) {
+            const r = routeOf(a.getAttribute('href'));
+            if (r && shown(a, 'phone')) reachable.add(r);
+          }
+        }
+        doc.dispatchEvent(new rowsS.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        closed = sheet.hidden && more.getAttribute('aria-expanded') !== 'true';
+      }
+      add('navigation', 'phone', 'more', opened && closed, !more ? 'no More control for the destinations beyond the tab bar' : `More opens ${opened ? 'yes' : 'no'}, Escape closes ${closed ? 'yes' : 'no'}`);
+      add('accessibility', 'phone', 'more-aria', !!more && more.hasAttribute('aria-haspopup') && more.hasAttribute('aria-expanded') && !!sheet && (sheet.getAttribute('role') === 'dialog' || sheet.tagName === 'DIALOG'), 'More control states its popup; the sheet is a dialog');
+    }
   }
   for (const item of allItems) {
     const key = `${item.kind}/${item.name}`;
