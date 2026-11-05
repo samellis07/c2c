@@ -75,10 +75,11 @@ test('a web-only quick view: the phone card shows the first four report columns,
   const app = appOf(WEB_ONLY);
   const report = buildUi(app).model.reports.find((item) => item.name === 'All_Appointments');
   assert.ok(report);
-  // Desktop keeps the web quick view's columns, in its order.
+  // Desktop keeps the web quick view's columns, in its order; every declared
+  // column the quickview left out still follows in show-columns order.
   assert.deepEqual(
     report.columns.map((column) => column.field),
-    ['Booking_Id', 'Address', 'Branch', 'Service', 'Customer_Name'],
+    ['Booking_Id', 'Address', 'Branch', 'Service', 'Customer_Name', 'Staff_Name', 'Schedule_Date', 'Schedule_Upto', 'Customer_Email'],
   );
   assert.deepEqual(
     report.phoneColumns?.map((column) => column.field),
@@ -97,7 +98,7 @@ test('a six-field phone quick view shows every field on the card in its order; a
   assert.ok(report);
   assert.deepEqual(
     report.columns.map((column) => column.field),
-    ['Name', 'Code', 'City'],
+    ['Name', 'Code', 'City', 'Phone', 'Email', 'Branch', 'Notes'],
   );
   // The selection is the scorer's, minus the related path no row carries.
   assert.deepEqual(
@@ -132,11 +133,13 @@ test('the painted row keeps the desktop cells first and orders the card by the p
     ['Code', '0', false],
     ['City', '1', false],
   ]);
+  // Phone/Email/Branch/Notes are now desktop columns too (report-columns-carry
+  // appends every declared column the quickview left out), not phone-only cells.
   assert.deepEqual(cells.slice(3, 7), [
-    ['Phone', '2', true],
-    ['Email', '3', true],
-    ['Branch', '4', true],
-    ['Notes', '5', true],
+    ['Phone', '2', false],
+    ['Email', '3', false],
+    ['Branch', '4', false],
+    ['Notes', '5', false],
   ]);
 });
 
@@ -190,7 +193,7 @@ test('a calendar card shows the phone fields on a phone only', async () => {
   const app = appOf(CALENDAR);
   const report = buildUi(app).model.reports.find((item) => item.name === 'Visits');
   assert.equal(report?.view, 'calendar', report?.todo);
-  assert.deepEqual(report.columns.map((column) => column.field), ['Booking_Id', 'Branch']);
+  assert.deepEqual(report.columns.map((column) => column.field), ['Booking_Id', 'Branch', 'Staff_Name', 'Starts', 'Customer_Email']);
   assert.deepEqual(report.phoneColumns?.map((column) => column.field), ['Staff_Name', 'Starts', 'Customer_Email', 'Branch']);
   const { pcol, col } = await phoneChecks(app);
   assert.equal(pcol.length, 4);
