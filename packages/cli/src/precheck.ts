@@ -2303,7 +2303,10 @@ function statementExecutionRisk(parsedScripts: { script: ScriptSrc; ast: Script 
 }
 
 /**
- * Creator Enterprise custom schedule quota: 600 schedules/user/month.
+ * Static definition-count proxy. Creator Enterprise allows 600 custom-schedule
+ * executions per user per month. This check counts schedule definitions in
+ * app.workflows. A count at or above the threshold is not evidence that the
+ * per-user monthly execution quota has been or will be hit.
  */
 export const ENTERPRISE_SCHEDULE_QUOTA = 600;
 
@@ -2315,8 +2318,8 @@ function scheduleQuotaRisk(app: App, source: string, findings: PrecheckFinding[]
     check: 'schedule-quota-risk',
     severity: 'warning',
     location: loc(source, first?.span.start, first?.form ? baseForm(first.form) : null, null),
-    message: `Application defines ${schedules.length} schedules, reaching or exceeding the Creator Enterprise quota of 600 custom schedules per user per month. On Catalyst, all form schedules share a single 5-minute sweeper Job with a 4-minute execution budget.`,
-    fix: 'Consolidate frequent schedules or verify that the 5-minute sweeper Job with 4-minute time budget can process due records across all form schedules.',
+    message: `Application defines ${schedules.length} schedule definitions. This is a static definition-count proxy against a threshold of ${ENTERPRISE_SCHEDULE_QUOTA}, not evidence that Creator's per-user monthly execution quota of 600 custom schedules per user per month has been or will be hit. On Catalyst, all form schedules share a single 5-minute sweeper Job with a 4-minute execution budget.`,
+    fix: 'Consolidate frequent schedules or verify that the 5-minute sweeper Job with 4-minute time budget can process due records across all form schedules. The definition count alone does not show that the monthly execution quota is exhausted.',
   });
 }
 

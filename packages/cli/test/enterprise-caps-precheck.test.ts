@@ -47,8 +47,11 @@ test('precheck flags apps defining at or above the Enterprise schedule quota (60
   const found = report.findings.filter((f) => f.check === 'schedule-quota-risk');
   assert.equal(found.length, 1);
   assert.equal(found[0]!.severity, 'warning');
-  assert.match(found[0]!.message, /600 schedules/);
+  assert.match(found[0]!.message, /static definition-count proxy/);
+  assert.match(found[0]!.message, /not evidence/);
+  assert.match(found[0]!.message, /per-user monthly execution quota/);
   assert.match(found[0]!.message, /600 custom schedules per user per month/);
+  assert.match(found[0]!.message, /has been or will be hit/);
   assert.match(found[0]!.message, /4-minute execution budget/);
 });
 
