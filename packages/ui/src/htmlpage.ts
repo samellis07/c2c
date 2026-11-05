@@ -1572,6 +1572,8 @@ export interface ZmlImageAction {
   siteId?: string;
   fn?: string;
   form?: string;
+  /** Report link name of an icon `OpenReport` click. */
+  report?: string;
   label?: string;
   element?: 'button';
 }
@@ -1639,6 +1641,45 @@ export function formActionTarget(action: string, attributes?: Record<string, str
   return undefined;
 }
 
+export function isReportAction(action: string, attributes?: Record<string, string>): boolean {
+  const act = (action || '').trim().toLowerCase().replace(/\s+/g, '');
+  if (act === 'report' || act === 'openreport' || act.startsWith('#report:')) return true;
+  if (/openUrl\s*\(\s*(?:&quot;|["'])#Report:/i.test(action || '')) return true;
+  if (attributes) {
+    const href = (getZmlAttr(attributes, ['url', 'href']) || '').toLowerCase();
+    if (href.startsWith('#report:') || /openUrl\s*\(\s*(?:&quot;|["'])#Report:/i.test(href)) return true;
+  }
+  return false;
+}
+
+export function reportActionTarget(action: string, attributes?: Record<string, string>): string | undefined {
+  const act = (action || '').trim();
+  const lower = act.toLowerCase();
+  const compact = lower.replace(/\s+/g, '');
+  if (lower.startsWith('#report:')) {
+    return act.slice('#report:'.length).trim().split(/[?&,"') ]/)[0] || undefined;
+  }
+  const openUrlMatch = /openUrl\s*\(\s*(?:&quot;|["'])#Report:([A-Za-z_]\w*)/i.exec(act);
+  if (openUrlMatch) return openUrlMatch[1];
+  if (attributes) {
+    const href = (getZmlAttr(attributes, ['url', 'href']) || '').trim();
+    if (href.toLowerCase().startsWith('#report:')) {
+      return href.slice('#report:'.length).trim().split(/[?&,"') ]/)[0] || undefined;
+    }
+    const openUrlHref = /openUrl\s*\(\s*(?:&quot;|["'])#Report:([A-Za-z_]\w*)/i.exec(href);
+    if (openUrlHref) return openUrlHref[1];
+  }
+  if (compact === 'report' || compact === 'openreport') {
+    if (attributes) {
+      const explicit = getZmlAttr(attributes, ['componentLinkName', 'reportLinkName', 'linkName', 'formLinkName']);
+      if (explicit) return explicit;
+      const rawTarget = getZmlAttr(attributes, ['target']);
+      if (rawTarget && !WINDOW_TARGETS.has(rawTarget.toLowerCase())) return rawTarget;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Click actions on the ZML `<image>` elements of a snippet, in source order.
  * The HTML parser reads `<image>` as `<img>` and the sanitizer keeps no
@@ -1656,12 +1697,15 @@ export function zmlImageActions(template: string): ZmlImageAction[] {
     const fn = (attrs.functionname ?? attrs.function ?? '').trim();
     const label = ['elementname', 'name', 'id', 'value', 'src', 'alt'].map((k) => (attrs[k] ?? '').trim()).find(Boolean);
     const form = isFormAction(action, attrs) ? formActionTarget(action, attrs) : undefined;
+    const imgType = (attrs.type ?? attrs.imagetype ?? '').trim().toLowerCase();
+    const report = imgType === 'icon' && isReportAction(action, attrs) ? reportActionTarget(action, attrs) : undefined;
     out.push({
       action,
       siteId: `image-${m.index}`,
       ...(fn ? { fn } : {}),
       ...(label ? { label } : {}),
       ...(form ? { form } : {}),
+      ...(report ? { report } : {}),
     });
   }
   return out;
@@ -1686,8 +1730,9 @@ export function zmlExecuteFunctionButtons(template: string): ZmlImageAction[] {
 /**
  * `forms` is the set of app form link names: an icon's Form click action
  * becomes a `#/form/<name>` link only when its target is exactly one of them.
+ * `reports` is the same for an icon OpenReport click and `#/report/<name>`.
  */
-export function convertZmlSnippetToHtml(template: string, forms: ReadonlySet<string> = new Set()): string {
+export function convertZmlSnippetToHtml(template: string, forms: ReadonlySet<string> = new Set(), reports: ReadonlySet<string> = new Set()): string {
   if (!/<\/?(panel|pr|pc|prefix|suffix|text|row|column|image)\b/i.test(template)) {
     return template;
   }
@@ -1786,10 +1831,14 @@ export function convertZmlSnippetToHtml(template: string, forms: ReadonlySet<str
         const imageAttrs = parseZmlAttributes(attrStr);
         const imgType = (imageAttrs.type ?? imageAttrs.imagetype ?? '').trim().toLowerCase();
         if (tag === 'image' && !isClosing && imgType === 'icon') {
-          const formTarget = isFormAction(imageAttrs.action ?? '', imageAttrs) ? formActionTarget(imageAttrs.action ?? '', imageAttrs) : undefined;
+          const actionText = imageAttrs.action ?? '';
+          const formTarget = isFormAction(actionText, imageAttrs) ? formActionTarget(actionText, imageAttrs) : undefined;
+          const reportTarget = isReportAction(actionText, imageAttrs) ? reportActionTarget(actionText, imageAttrs) : undefined;
           const iconDiv = `<div data-zml="icon"${zmlAttributesToStyle(imageAttrs)}></div>`;
-          const linked = formTarget && /^[A-Za-z0-9_]+$/.test(formTarget) && forms.has(formTarget);
-          out += linked ? `<a href="#/form/${formTarget}">${iconDiv}</a>` : iconDiv;
+          const formLinked = !!formTarget && /^[A-Za-z0-9_]+$/.test(formTarget) && forms.has(formTarget);
+          const reportLinked = !!reportTarget && /^[A-Za-z0-9_]+$/.test(reportTarget) && reports.has(reportTarget);
+          const href = formLinked ? `#/form/${formTarget}` : reportLinked ? `#/report/${reportTarget}` : '';
+          out += href ? `<a href="${href}">${iconDiv}</a>` : iconDiv;
           at += full.length;
           if (!isSelfClosing) {
             const closeMatch = /^\s*<\/image>/i.exec(template.slice(at));
@@ -2315,7 +2364,11 @@ export function compileHtmlpage(
   });
   const head = splitTemplate(decoded);
   head.template = rewriteRecordSummaryFrames(head.template, app, decoded);
-  head.template = convertZmlSnippetToHtml(head.template, new Set(app.forms.map((f) => f.name)));
+  head.template = convertZmlSnippetToHtml(
+    head.template,
+    new Set(app.forms.map((f) => f.name)),
+    new Set(app.reports.map((r) => r.name)),
+  );
   head.template = rewriteEmbedIframes(head.template, app);
   const fnFiles: HtmlpageFile[] = [];
   if (hasExecuteFunctionButton(head.template)) {
