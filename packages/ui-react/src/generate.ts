@@ -15,7 +15,7 @@
  * network, sorted file lists.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { App } from '../../core/src/ir.js';
@@ -385,10 +385,11 @@ function withBuildEngines(rel: string, data: Buffer): Buffer {
 function templateFiles(): ReactFile[] {
   const out: ReactFile[] = [];
   const walk = (dir: string) => {
-    for (const name of readdirSync(dir).sort()) {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      const name = entry.name;
       if (name === 'node_modules' || name === 'dist') continue;
       const path = join(dir, name);
-      if (statSync(path).isDirectory()) walk(path);
+      if (entry.isDirectory()) walk(path);
       else {
         const rel = relative(TEMPLATE_DIR, path).split(sep).join('/');
         let data = withBuildEngines(rel, readFileSync(path));
