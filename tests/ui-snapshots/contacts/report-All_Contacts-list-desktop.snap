@@ -214,8 +214,8 @@ div class="c2c-app"
                             span class="labelPhase"
                               "Delete"
           p class="srOnly" role="status"
-  nav aria-label="Tabs"
-    a href="#/form/New_Contact"
+  nav aria-label="Tabs" role="tablist"
+    a aria-selected="false" href="#/form/New_Contact" role="tab" tabindex="-1"
       svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
         path
         path
@@ -224,7 +224,7 @@ div class="c2c-app"
         path
       span
         "New Contact"
-    a href="#/form/Person"
+    a aria-selected="false" href="#/form/Person" role="tab" tabindex="-1"
       svg aria-hidden="true" class="lucide lucide-file-text c2c-icon"
         path
         path
@@ -233,7 +233,7 @@ div class="c2c-app"
         path
       span
         "Person"
-    a aria-current="page" href="#/report/All_Contacts"
+    a aria-current="page" aria-selected="true" href="#/report/All_Contacts" role="tab" tabindex="0"
       svg aria-hidden="true" class="lucide lucide-table c2c-icon"
         path
         rect
