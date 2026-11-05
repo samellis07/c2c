@@ -96,6 +96,7 @@ function fieldSpec(field: UiField): FieldSpec {
   // An empty choice is a list Creator fills from a script at run time; it is not an option.
   const choices = (field.choices ?? []).filter((choice) => choice !== '');
   if (choices.length) spec.choices = choices;
+  if (field.othersOption) spec.othersOption = true;
   if (field.maxLength !== undefined) spec.maxLength = field.maxLength;
   if (field.pattern !== undefined) spec.pattern = field.pattern;
   if (field.decimalPlaces !== undefined) spec.decimalPlaces = field.decimalPlaces;
