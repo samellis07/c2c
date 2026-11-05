@@ -70,10 +70,8 @@ App: Library_System_Application
 
 ## Not converted
 
-Silent drops: 17 (still counted; each has a guided step below)
+Silent drops: 16 (still counted; each has a guided step below)
 
-- `field-property:Book.Genre property others option` — not converted. property others option is not carried by the generated dropdown field. Varchar plus the .ds choice list. The server rejects values outside the list. A choice longer than 255 is promoted to text. A values = Form.Field target is a lookup, not a dropdown. module = users is the Users field.
-  - Step: The property others option setting for Book.Genre was not converted. In the Catalyst console, configure that setting for Book.Genre, then preview the form or report and confirm the field behaves as expected.
 - `field-property:Book_Transaction.Member property sortorder` — not converted. property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type "foreign key" and on_delete "ON-DELETE-SET-NULL" (optional) or "ON-DELETE-CASCADE" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says "FK needs console". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).
   - Step: The sort order for Book_Transaction.Member was not converted. In the Catalyst console, set the field's sort order for Book_Transaction.Member, then preview the form or report and confirm values appear in that order.
 - `field-property:Book_Transaction.Book property sortorder` — not converted. property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type "foreign key" and on_delete "ON-DELETE-SET-NULL" (optional) or "ON-DELETE-CASCADE" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says "FK needs console". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).

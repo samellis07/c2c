@@ -1292,28 +1292,6 @@
   "hiddenParts": [],
   "residuals": [
     {
-      "id": "field-property:New_Airport.Country property others option",
-      "kind": "field-property",
-      "construct": "New_Airport.Country property others option",
-      "form": "New_Airport",
-      "field": "Country",
-      "property": "property others option",
-      "reason": "property others option is not carried by the generated dropdown field. Varchar plus the .ds choice list. The server rejects values outside the list. A choice longer than 255 is promoted to text. A values = Form.Field target is a lookup, not a dropdown. module = users is the Users field.",
-      "step": "The property others option setting for New_Airport.Country was not converted. In the Catalyst console, configure that setting for New_Airport.Country, then preview the form or report and confirm the field behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Port.Country property others option",
-      "kind": "field-property",
-      "construct": "New_Port.Country property others option",
-      "form": "New_Port",
-      "field": "Country",
-      "property": "property others option",
-      "reason": "property others option is not carried by the generated dropdown field. Varchar plus the .ds choice list. The server rejects values outside the list. A choice longer than 255 is promoted to text. A values = Form.Field target is a lookup, not a dropdown. module = users is the Users field.",
-      "step": "The property others option setting for New_Port.Country was not converted. In the Catalyst console, configure that setting for New_Port.Country, then preview the form or report and confirm the field behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:Map_Dependency_Mode.Sub_Mode_of_Shipment property sortorder",
       "kind": "field-property",
       "construct": "Map_Dependency_Mode.Sub_Mode_of_Shipment property sortorder",
@@ -1674,17 +1652,6 @@
       "property": "property personal data",
       "reason": "property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
       "step": "The personal-data setting for New_Lead.Phone_Number was not converted. In the Catalyst console, mark New_Lead.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Lead.Lead_Status property others option",
-      "kind": "field-property",
-      "construct": "New_Lead.Lead_Status property others option",
-      "form": "New_Lead",
-      "field": "Lead_Status",
-      "property": "property others option",
-      "reason": "property others option is not carried by the generated dropdown field. Varchar plus the .ds choice list. The server rejects values outside the list. A choice longer than 255 is promoted to text. A values = Form.Field target is a lookup, not a dropdown. module = users is the Users field.",
-      "step": "The property others option setting for New_Lead.Lead_Status was not converted. In the Catalyst console, configure that setting for New_Lead.Lead_Status, then preview the form or report and confirm the field behaves as expected.",
       "stepSource": "specific"
     },
     {
@@ -2861,7 +2828,7 @@
     "statements": 553,
     "translated": 56,
     "shimmed": 486,
-    "todo": 11,
+    "todo": 12,
     "todoLocations": [
       {
         "location": "workflow Zoho_Book_Customer_Update:13",
@@ -2917,6 +2884,11 @@
         "location": "workflow Zoho_Books_Quote_Updt:20",
         "construct": "client-condition-uses-server",
         "scope": "unit"
+      },
+      {
+        "location": "report Container_Movement_Tracking",
+        "construct": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
+        "scope": "ui"
       }
     ]
   },
@@ -2969,13 +2941,6 @@
       "detail": "Field New_Account.Website flag enable  linkname is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
       "manualStep": "The flag enable  linkname setting for New_Account.Website was not converted. In the Catalyst console, configure that setting for New_Account.Website, then preview the form or report and confirm the field behaves as expected."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Airport.Country property others option",
-      "detail": "Field New_Airport.Country property others option is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The property others option setting for New_Airport.Country was not converted. In the Catalyst console, configure that setting for New_Airport.Country, then preview the form or report and confirm the field behaves as expected."
     },
     {
       "kind": "deluge",
@@ -3301,13 +3266,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Lead.Lead_Status property others option",
-      "detail": "Field New_Lead.Lead_Status property others option is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The property others option setting for New_Lead.Lead_Status was not converted. In the Catalyst console, configure that setting for New_Lead.Lead_Status, then preview the form or report and confirm the field behaves as expected."
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_Lead.Mobile property personal data",
       "detail": "Field New_Lead.Mobile property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
@@ -3354,13 +3312,6 @@
       "detail": "Field New_Lead.Website flag enable  linkname is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
       "manualStep": "The flag enable  linkname setting for New_Lead.Website was not converted. In the Catalyst console, configure that setting for New_Lead.Website, then preview the form or report and confirm the field behaves as expected."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Port.Country property others option",
-      "detail": "Field New_Port.Country property others option is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The property others option setting for New_Port.Country was not converted. In the Catalyst console, configure that setting for New_Port.Country, then preview the form or report and confirm the field behaves as expected."
     },
     {
       "kind": "deluge",
@@ -4113,24 +4064,34 @@
       "label": "workflow Zoho_Books_Quote_Updt:20",
       "detail": "client-condition-uses-server",
       "scope": "unit"
+    },
+    {
+      "kind": "ui",
+      "label": "report Container_Movement_Tracking",
+      "detail": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
+      "scope": "ui"
     }
   ],
   "determinism": {
     "deterministic": false,
-    "todoCount": 11,
+    "todoCount": 12,
     "fillLockEntries": 0,
     "todoKinds": [
       {
         "construct": "client-condition-uses-server",
         "count": 11
+      },
+      {
+        "construct": "Rebuild the pivot table manually: the export carries no pivot shelves, so pick the row, column and measure (aggregation) fields again over New_Table_of_Container.",
+        "count": 1
       }
     ],
-    "uiTodoCount": 0,
-    "silentDrops": 161,
+    "uiTodoCount": 1,
+    "silentDrops": 158,
     "silentDropKinds": [
       {
         "construct": "field-property",
-        "count": 92
+        "count": 89
       },
       {
         "construct": "report-feature",

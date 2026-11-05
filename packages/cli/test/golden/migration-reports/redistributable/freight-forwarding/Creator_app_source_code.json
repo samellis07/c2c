@@ -862,30 +862,8 @@
     "console: stratus-enable — Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket)",
     "console: connections — Catalyst console → Connections: connect zoho.books.* (the user consents to each OAuth flow)"
   ],
-  "silentDrops": 161,
+  "silentDrops": 158,
   "residuals": [
-    {
-      "id": "field-property:New_Airport.Country property others option",
-      "kind": "field-property",
-      "construct": "New_Airport.Country property others option",
-      "form": "New_Airport",
-      "field": "Country",
-      "property": "property others option",
-      "reason": "property others option is not carried by the generated dropdown field. Varchar plus the .ds choice list. The server rejects values outside the list. A choice longer than 255 is promoted to text. A values = Form.Field target is a lookup, not a dropdown. module = users is the Users field.",
-      "step": "The property others option setting for New_Airport.Country was not converted. In the Catalyst console, configure that setting for New_Airport.Country, then preview the form or report and confirm the field behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Port.Country property others option",
-      "kind": "field-property",
-      "construct": "New_Port.Country property others option",
-      "form": "New_Port",
-      "field": "Country",
-      "property": "property others option",
-      "reason": "property others option is not carried by the generated dropdown field. Varchar plus the .ds choice list. The server rejects values outside the list. A choice longer than 255 is promoted to text. A values = Form.Field target is a lookup, not a dropdown. module = users is the Users field.",
-      "step": "The property others option setting for New_Port.Country was not converted. In the Catalyst console, configure that setting for New_Port.Country, then preview the form or report and confirm the field behaves as expected.",
-      "stepSource": "specific"
-    },
     {
       "id": "field-property:Map_Dependency_Mode.Sub_Mode_of_Shipment property sortorder",
       "kind": "field-property",
@@ -1247,17 +1225,6 @@
       "property": "property personal data",
       "reason": "property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
       "step": "The personal-data setting for New_Lead.Phone_Number was not converted. In the Catalyst console, mark New_Lead.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Lead.Lead_Status property others option",
-      "kind": "field-property",
-      "construct": "New_Lead.Lead_Status property others option",
-      "form": "New_Lead",
-      "field": "Lead_Status",
-      "property": "property others option",
-      "reason": "property others option is not carried by the generated dropdown field. Varchar plus the .ds choice list. The server rejects values outside the list. A choice longer than 255 is promoted to text. A values = Form.Field target is a lookup, not a dropdown. module = users is the Users field.",
-      "step": "The property others option setting for New_Lead.Lead_Status was not converted. In the Catalyst console, configure that setting for New_Lead.Lead_Status, then preview the form or report and confirm the field behaves as expected.",
       "stepSource": "specific"
     },
     {
