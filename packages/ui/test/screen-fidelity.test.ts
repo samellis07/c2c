@@ -1118,6 +1118,68 @@ test('G18: a snippet <image> with Form action referencing an existing form rende
   assert.match(dsp.html ?? '', /<a href="#\/form\/Vendor"/);
 });
 
+function reportApp(zml: string): App {
+  return appOf(`application "SalesApp" {
+    section Main {
+      form Vendor {
+        must have Vendor_Name ( type = text )
+      }
+      list Customers {
+        show all rows from Vendor
+      }
+    }
+    pages {
+      page Home {
+        Content = "${zml}"
+      }
+    }
+  }`);
+}
+
+test('G18: ZML <image> with an OpenReport click action referencing an existing report generates a report route and 0 TODOs', async () => {
+  const zml = `<zml><layout><row><column width='100%'><panel><pr><pc><image type = 'icon' value = 'users-single' action = 'OpenReport' componentLinkName = 'Customers' target = 'new-window'/></pc></pr></panel></column></row></layout></zml>`;
+  const model = buildModel(reportApp(zml));
+  const home = model.pages.find((p) => p.name === 'Home');
+  assert.ok(home, 'Home page exists');
+  const todoItems = model.todos.filter((t) => t.name.startsWith('Home.'));
+  assert.equal(todoItems.length, 0, `OpenReport image is still a counted residual: ${todoItems.map((t) => t.reason).join(' | ')}`);
+  assert.equal(home.status, 'generated');
+  const icon = findUiElement(home.elements, (el) => el.icon === 'users-single');
+  assert.ok(icon, 'icon element found');
+  assert.equal(icon.name, 'Customers');
+  assert.equal(icon.href, '#/report/Customers');
+
+  const client = await loadClient();
+  const view = dom(shell('#/page/Home'), 'http://127.0.0.1/slate/index.html#/page/Home');
+  const win = view.window as unknown as { document: Doc };
+  await client.boot(model, win.document);
+  const anchor = win.document.querySelector('a[href="#/report/Customers"]');
+  assert.ok(anchor, 'rendered icon is wrapped in anchor linking to #/report/Customers');
+});
+
+test('G18: ZML <image> OpenReport for an unknown report stays a counted manual step', () => {
+  const { home, todos } = homeOf(`<zml><layout><row><column width='100%'><panel><pr><pc><image type='icon' value='users-single' action='OpenReport' componentLinkName='Missing_Report' target='new-window'/></pc></pr></panel></column></row></layout></zml>`);
+  const icon = findUiElement(home.elements, (el) => el.icon === 'users-single');
+  assert.ok(icon, 'icon element found');
+  assert.equal(icon.href, undefined);
+  assert.equal(todos.length, 1);
+  assert.equal(todos[0].reason, 'ZML <image> "users-single" click action OpenReport is not generated; wire the click to the function by hand');
+});
+
+test('G18: a snippet <image> with OpenReport referencing an existing report renders a link and 0 TODOs', () => {
+  const snippet = "<image type='icon' action='OpenReport' componentLinkName='Customers' target='new-window' value='users-single' />";
+  const zml = `<zml><layout><row><column width='100%'><dspZml id='zml_snippet1'><![CDATA[${snippet}]]></dspZml></column></row></layout></zml>`;
+  const model = buildModel(reportApp(zml));
+  const home = model.pages.find((p) => p.name === 'Home');
+  assert.ok(home, 'Home page exists');
+  const todos = model.todos.filter((t) => t.name.startsWith('Home.'));
+  assert.equal(todos.length, 0, `OpenReport image is still a counted residual: ${todos.map((t) => t.reason).join(' | ')}`);
+  assert.equal(home.status, 'generated');
+  const dsp = findUiElement(home.elements, (el) => el.tag === 'dspZml');
+  assert.ok(dsp, 'dsp element found');
+  assert.match(dsp.html ?? '', /<a href="#\/report\/Customers"/);
+});
+
 test('G18: a button with declarative Form action produces an active route button rather than a TODO stub', async () => {
   const zml = `<zml><layout><row><column width='100%'><button action='Form' componentLinkName='Vendor' text='Add Vendor'/></column></row></layout></zml>`;
   const app = appOf(`application "SalesApp" {

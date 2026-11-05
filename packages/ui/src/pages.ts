@@ -18,6 +18,8 @@ import {
   EXECUTE_FUNCTION_BUTTON,
   formActionTarget,
   isFormAction,
+  isReportAction,
+  reportActionTarget,
   zmlExecuteFunctionButtons,
   zmlImageActions,
   type HtmlpageFile,
@@ -907,6 +909,12 @@ function findMatchingForm(forms: Form[] | undefined, target: string | undefined)
   return forms.find((f) => f.name === target);
 }
 
+/** The app report whose link name is exactly `target`; any other target stays a manual step. */
+function findMatchingReport(reports: { name: string }[] | undefined, target: string | undefined): { name: string } | undefined {
+  if (!reports || !target || !ROUTE_LINK_NAME.test(target)) return undefined;
+  return reports.find((r) => r.name === target);
+}
+
 /**
  * A free-text `#` href survives only as a generated route to a form or report
  * the app has: `#/form/<name>` or `#/report/<name>` with an exact link name.
@@ -930,8 +938,9 @@ function isWiredImageAction(a: ZmlImageAction, app?: App): boolean {
 /**
  * One counted manual step per image or button click action the generated page drops.
  * Generated pages have no client path that calls a Creator function, so the
- * action is never rewired or relabelled here. Declarative Form navigation actions
- * targeting forms in app.forms are emitted as client routes and omitted here.
+ * action is never rewired or relabelled here. Declarative Form and OpenReport
+ * navigation actions whose target is a form or report in the app are emitted
+ * as client routes and omitted here.
  */
 function imageActionTodos(actions: ZmlImageAction[], why?: string, app?: App): UiElement[] {
   return actions
@@ -944,6 +953,12 @@ function imageActionTodos(actions: ZmlImageAction[], why?: string, app?: App): U
       }
       if (isWiredImageAction(a, app)) {
         return false;
+      }
+      if (a.report || isReportAction(a.action)) {
+        const target = a.report ?? reportActionTarget(a.action);
+        if (target && findMatchingReport(app?.reports, target)) {
+          return false;
+        }
       }
       return true;
     })
@@ -1060,14 +1075,21 @@ export function elementFromZml(
     const isForm = isFormAction(action, attributes);
     const formTarget = isForm ? formActionTarget(action, attributes) : undefined;
     const matchingForm = formTarget ? findMatchingForm(env?.app?.forms, formTarget) : undefined;
-    const href = matchingForm ? `#/form/${matchingForm.name}` : undefined;
-    const dropped = action && !matchingForm
+    const isReport = isReportAction(action, attributes);
+    const reportTarget = isReport ? reportActionTarget(action, attributes) : undefined;
+    const matchingReport = reportTarget ? findMatchingReport(env?.app?.reports, reportTarget) : undefined;
+    const href = matchingForm ? `#/form/${matchingForm.name}` : matchingReport ? `#/report/${matchingReport.name}` : undefined;
+    const dropped = action && !matchingForm && !matchingReport
       ? imageActionTodos([{ action, ...(fn ? { fn } : {}), ...(icon ? { label: icon } : {}) }], undefined, env?.app)
       : [];
+    // The export names this image by the report it opens. The icon glyph stays
+    // on `icon`; the element name is that report so the click target is the
+    // same link the page refers to.
+    const identity = matchingReport ? { name: matchingReport.name, ...(icon ? { icon } : {}) } : icon ? { name: icon, icon } : {};
     return {
       tag,
       kind: 'text',
-      ...(icon ? { name: icon, icon } : {}),
+      ...identity,
       ...(href ? { href } : {}),
       text: '',
       ...(Object.keys(tile).length ? { style: tile } : {}),
@@ -1217,6 +1239,7 @@ export function elementFromZml(
         app: env?.app,
         fnFiles: staticFnFiles,
         schema: env?.schema,
+        reports: new Set((env?.app?.reports ?? []).map((r) => r.name)),
       }),
       undefined,
       droppedTags,
