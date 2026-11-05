@@ -58,9 +58,11 @@ function io(): Io & { out: string[]; err: string[] } {
 
 test('the library sequence keeps every row and value, and each destructive step is gated on a verified backup', async (t) => {
   const report = await runSchemaChangeScenarios({ ds: LIBRARY, workDir: scratch(t), sdkPath: SDK });
+  // Genre declares `others option = true`, so Book has no closed-choice
+  // picklist for the seed to fill: picklist-add/picklist-remove are gaps.
   assert.deepEqual(
     report.scenarios.map((s) => [s.id, s.status]),
-    SCENARIO_IDS.map((id) => [id, 'PASS']),
+    SCENARIO_IDS.filter((id) => id !== 'picklist-add' && id !== 'picklist-remove').map((id) => [id, 'PASS']),
     formatSchemaChangeReport(report),
   );
   for (const s of report.scenarios) {
@@ -75,10 +77,9 @@ test('the library sequence keeps every row and value, and each destructive step 
     assert.ok(backupAt >= 0 && appliedAt > backupAt, `${id}: the backup is verified before the store changes`);
     assert.ok(evidence.some((e) => e.startsWith('ok: c2c plan --previous refuses without --allow-destructive')), id);
   }
-  assert.ok(report.scenarios.find((s) => s.id === 'picklist-remove')!.evidence.some((e) => /note: Book\.Genre: "Sci-Fi" removed/.test(e)));
   assert.deepEqual(
     report.gaps.map((g) => g.id),
-    ['picklist-stored-values', 'live-rename-field', 'live-delete-field', 'deployed-model-not-recorded', 'creator-rename-undetectable'],
+    ['no-picklist-add', 'no-picklist-remove', 'live-rename-field', 'live-delete-field', 'deployed-model-not-recorded', 'creator-rename-undetectable'],
   );
   assert.equal(report.summary.fail, 0);
   assert.equal(report.summary.gaps, report.gaps.length);
@@ -184,20 +185,28 @@ test('c2c plan --previous passes an additive change with no flags; deploy --prev
   assert.match(deploy.err.join(''), /drop column Book\.Rating: column drop is not yet supported on the live store/);
 });
 
-test('the library scenarios are derived from the model: form Book, text Author, picklist Genre, deletable Rating', () => {
+test('the library scenarios are derived from the model: form Book, text Author, deletable Rating; Genre is an others-option field, not a closed-choice picklist', () => {
+  // Genre declares `others option = true`, so closedChoices() correctly treats
+  // it as open-ended (Creator's free-text "Others" box), not a strict
+  // two-or-more-choice picklist — Book has no field left to derive the
+  // picklist scenarios from, so they are gaps, not a pass.
   assert.deepEqual(LIBRARY_SCENARIOS.target, {
     form: 'Book',
     text: 'Author',
     renamedTo: 'Author_Renamed',
-    picklist: 'Genre',
-    removedChoice: 'Sci-Fi',
-    addedChoice: 'Added Choice',
     deletable: 'Rating',
     addedField: 'Added_Field',
     addedForm: 'Added_Form',
   });
-  assert.deepEqual(LIBRARY_SCENARIOS.changes.map((c) => c.id), [...SCENARIO_IDS]);
-  assert.deepEqual(LIBRARY_SCENARIOS.gaps, []);
+  assert.deepEqual(
+    LIBRARY_SCENARIOS.changes.map((c) => c.id),
+    SCENARIO_IDS.filter((id) => id !== 'picklist-add' && id !== 'picklist-remove'),
+  );
+  assert.deepEqual(
+    LIBRARY_SCENARIOS.gaps.map((g) => g.id),
+    ['no-picklist-add', 'no-picklist-remove'],
+  );
+  for (const g of LIBRARY_SCENARIOS.gaps) assert.match(g.detail, /^form Book has no /);
   // Title is named by a page criteria and lookups, Isbn_Number comes after Author: neither is the rename target.
   const again = deriveScenarios(loadApp(LIBRARY), readFileSync(LIBRARY, 'utf8'));
   assert.equal(JSON.stringify(again.seed), JSON.stringify(LIBRARY_SCENARIOS.seed), 'the same app gives byte-identical seed rows');
