@@ -11,8 +11,8 @@ import type { App, Field, Form, FunctionDef, Property, Report } from '../../core
 import { unquote } from '../../core/src/ir.js';
 import { compareEnUs } from '../../core/src/order.js';
 import type { BlueprintFieldSpec } from '../../deluge/src/blueprint-rules.js';
-import { blueprintFieldSpecs, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
-import type { Expr } from '../../deluge/src/ast.js';
+import { blueprintFieldSpecs, fnSignatureParams, functionRowBinding, slug as delugeSlug, type GeneratedFile } from '../../deluge/src/generate.js';
+import type { Expr, Stmt } from '../../deluge/src/ast.js';
 import { parse as parseDeluge, parseExpression } from '../../deluge/src/parser.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
 import { requiredCompositePart } from '../../schema/src/composite-parts.js';
@@ -463,10 +463,34 @@ export function uiSnippetFiles(model: UiModel): HtmlpageFile[] {
  * generate.ts) and the button state in the model both read this one
  * predicate, so a button is enabled exactly when its endpoint can run.
  */
+function isPureClientFunction(app: App, fn: FunctionDef): boolean {
+  let body: Stmt[];
+  try {
+    body = parseDeluge(fn.deluge.map((part) => part.text).join('\n')).body;
+  } catch {
+    return false;
+  }
+  if (body.length === 1 && body[0]?.kind === 'openUrl') return true;
+  if (body.length === 1 && body[0]?.kind === 'expr' && body[0].expr.kind === 'call') {
+    const calleeName = calleeFunctionName(body[0].expr.callee);
+    if (!calleeName) return false;
+    const calleeFn = app.functions.find((f) => f.name.toLowerCase() === calleeName.toLowerCase());
+    if (!calleeFn) return false;
+    try {
+      const calleeBody = parseDeluge(calleeFn.deluge.map((p) => p.text).join('\n')).body;
+      return calleeBody.length === 1 && calleeBody[0]?.kind === 'openUrl';
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 export function actionDispatchTarget(app: App, workflow: string | undefined, delugeFiles: readonly GeneratedFile[]): FunctionDef | undefined {
   const wanted = (workflow ?? '').trim();
   const fn = wanted ? app.functions.find((item) => item.kind === 'creator' && item.name === wanted) : undefined;
   if (!fn || !functionRowBinding(fn)) return undefined;
+  if (isPureClientFunction(app, fn)) return undefined;
   const module = `functions/custom/${delugeSlug(fn.name || 'function')}.mjs`;
   const registered = delugeFiles.some((file) => file.path === 'functions/thisapp.mjs') && delugeFiles.some((file) => file.path === module);
   return registered ? fn : undefined;
@@ -484,10 +508,32 @@ function concatParts(expr: Expr): Expr[] {
 
 const isAppUri = (expr: Expr | undefined) => expr?.kind === 'member' && expr.object.kind === 'name' && expr.object.name === 'zoho' && expr.property === 'appuri';
 
+function calleeFunctionName(expr: Expr): string | undefined {
+  const parts: string[] = [];
+  let curr: Expr | undefined = expr;
+  while (curr) {
+    if (curr.kind === 'name') {
+      parts.unshift(curr.name);
+      break;
+    }
+    if (curr.kind === 'member') {
+      parts.unshift(curr.property);
+      curr = curr.object;
+    } else {
+      return undefined;
+    }
+  }
+  if (parts.length > 1 && parts[0]?.toLowerCase() === 'thisapp') {
+    parts.shift();
+  }
+  return parts.length ? parts.join('.') : undefined;
+}
+
 /**
  * The client navigation a custom action's workflow stands for, or none. The
  * workflow (a Creator `type = functions` record workflow on the report's
- * form) must hold exactly one statement, `openUrl(url[, window[, features]])`,
+ * form) must hold exactly one statement, `openUrl(url[, window[, features]])`
+ * (or delegate to a function whose body is such an `openUrl`),
  * whose url is this app's own `#Form:` / `#Report:` / `#Page:` link, written
  * as literals and `input.<Field>` (or `input.<Lookup>.ID`) reads, optionally after the app's own
  * address (`zoho.appuri`). The target must be a form, report or page of the
@@ -509,11 +555,47 @@ export function actionNavigation(app: App, report: Report, workflow: string | un
     return undefined;
   }
   const stmt = body.length === 1 ? body[0] : undefined;
-  if (!stmt || stmt.kind !== 'openUrl' || !stmt.args.length || stmt.args.length > 3) return undefined;
-  if (stmt.args.slice(1).some((arg) => arg.kind !== 'string')) return undefined;
-  const parts = concatParts(stmt.args[0]!);
+  if (!stmt) return undefined;
+  let openUrlStmt: Stmt | undefined;
+  const argByParam = new Map<string, Expr>();
+  if (stmt.kind === 'openUrl') {
+    openUrlStmt = stmt;
+  } else if (stmt.kind === 'expr' && stmt.expr.kind === 'call') {
+    const calleeName = calleeFunctionName(stmt.expr.callee);
+    if (!calleeName) return undefined;
+    const calleeFn = app.functions.find((f) => f.name.toLowerCase() === calleeName.toLowerCase());
+    if (!calleeFn) return undefined;
+    let calleeBody: Stmt[];
+    try {
+      calleeBody = parseDeluge(calleeFn.deluge.map((p) => p.text).join('\n')).body;
+    } catch {
+      return undefined;
+    }
+    if (calleeBody.length !== 1 || calleeBody[0]?.kind !== 'openUrl') return undefined;
+    openUrlStmt = calleeBody[0];
+    const params = fnSignatureParams(calleeFn.signature);
+    const callArgs = stmt.expr.args;
+    for (let i = 0; i < params.length; i++) {
+      if (callArgs[i]) argByParam.set(params[i]!.name.toLowerCase(), callArgs[i]!);
+    }
+  } else {
+    return undefined;
+  }
+
+  if (!openUrlStmt.args.length || openUrlStmt.args.length > 3) return undefined;
+  if (openUrlStmt.args.slice(1).some((arg) => arg.kind !== 'string')) return undefined;
+  const rawParts = concatParts(openUrlStmt.args[0]!);
+  const parts: Expr[] = [];
+  for (const part of rawParts) {
+    if (part.kind === 'name' && argByParam.has(part.name.toLowerCase())) {
+      parts.push(argByParam.get(part.name.toLowerCase())!);
+    } else {
+      parts.push(part);
+    }
+  }
   if (parts[0]?.kind === 'string' && OWN_APP_HOST.test(parts[0].value) && isAppUri(parts[1])) parts.splice(0, 2);
   else if (isAppUri(parts[0])) parts.splice(0, 1);
+  if (parts[0]?.kind === 'string' && /^\s*javascript:/i.test(parts[0].value)) return undefined;
   const source = app.forms.find((form) => form.name === fn.form);
   // The url as text with each row read as a numbered placeholder.
   const reads: string[] = [];
@@ -522,6 +604,9 @@ export function actionNavigation(app: App, report: Report, workflow: string | un
     if (part.kind === 'string') {
       if (part.value.includes('\u0000')) return undefined;
       text += part.value;
+    } else if (part.kind === 'name' && (part.name === 'ID' || (source && formField(source, part.name)))) {
+      text += `\u0000${reads.length}\u0000`;
+      reads.push(part.name);
     } else if (part.kind === 'member' && part.object.kind === 'name' && part.object.name === 'input' && /^[A-Za-z_]\w*$/.test(part.property)) {
       text += `\u0000${reads.length}\u0000`;
       reads.push(part.property);
@@ -1058,17 +1143,17 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   // counted. A dispatchable action runs through the thisapp registry. An
   // action whose workflow is only an openUrl to this app's own screen is a
   // client navigation instead (actionNavigation): no endpoint runs.
-  const navigationOf = (workflow: string | undefined): { navigate: UiActionNav } | { preview: true } => {
-    const navigate = actionNavigation(app, report, workflow);
-    return navigate ? { navigate } : { preview: true as const };
-  };
-  const actions: UiAction[] = report.customActions.map((action) => ({
-    name: action.name,
-    ...(action.workflow ? { workflow: action.workflow } : {}),
-    endpoint: `/reports/${encodeURIComponent(report.name)}/actions/${slug(action.name)}`,
-    ...(reportProp(action.properties, 'show action in view header') === 'true' ? { header: true as const } : {}),
-    ...(actionDispatchTarget(app, action.workflow, delugeFiles) ? {} : navigationOf(action.workflow)),
-  }));
+  const actions: UiAction[] = report.customActions.map((action) => {
+    const nav = actionNavigation(app, report, action.workflow);
+    const dispatch = !nav && actionDispatchTarget(app, action.workflow, delugeFiles);
+    return {
+      name: action.name,
+      ...(action.workflow ? { workflow: action.workflow } : {}),
+      endpoint: `/reports/${encodeURIComponent(report.name)}/actions/${slug(action.name)}`,
+      ...(reportProp(action.properties, 'show action in view header') === 'true' ? { header: true as const } : {}),
+      ...(nav ? { navigate: nav } : dispatch ? {} : { preview: true as const }),
+    };
+  });
   for (const action of actions) {
     if (!action.preview) continue;
     // Keep unsupported actions visible in the migration report with the same
