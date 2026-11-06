@@ -680,8 +680,9 @@ function flagProved(flag: string, ui: UiField | undefined, field: Field): boolea
   // row (client-runtime selectLookupNew, wired in wireForm).
   if (flag.trim().toLowerCase() === 'allow new entries') return !!ui?.lookup?.addNew;
   // `description` declares the field's help text. It is carried when the
-  // field's `type = help_text` annotation message reaches ui.help
-  // (decorations/labels.ts helpMessage); a bare flag with no such message is not.
+  // field's `type = help_text` or `type = tooltip` annotation message reaches
+  // ui.help (decorations/labels.ts helpMessage); a bare flag with no such
+  // message is not.
   if (flag === 'description') {
     const message = helpTextMessage(field);
     return message !== undefined && ui?.help === message;
@@ -689,7 +690,7 @@ function flagProved(flag: string, ui: UiField | undefined, field: Field): boolea
   return false;
 }
 
-/** Message of the field's first `type = help_text` annotation, decoded. */
+/** Message of the field's first `type = help_text` or `type = tooltip` annotation, decoded. */
 function helpTextMessage(field: Field): string | undefined {
   for (const annotation of field.annotations) {
     const message = helpTextOf(annotation);
@@ -698,20 +699,21 @@ function helpTextMessage(field: Field): string | undefined {
   return undefined;
 }
 
-/** Message of one annotation when it is `type = help_text`, else undefined. */
+/** Message of one annotation when it is `type = help_text` or `type = tooltip`, else undefined. */
 function helpTextOf(annotation: PropertyBlock): string | undefined {
   const kind = annotation.properties.find((p) => p.key.trim().toLowerCase() === 'type');
-  if (!kind || unquote(kind.value).trim().toLowerCase() !== 'help_text') return undefined;
+  const kindValue = kind ? unquote(kind.value).trim().toLowerCase() : undefined;
+  if (kindValue !== 'help_text' && kindValue !== 'tooltip') return undefined;
   const message = annotation.properties.find((p) => p.key.trim().toLowerCase() === 'message');
   return message === undefined ? undefined : unquote(message.value);
 }
 
 /**
  * A field annotation that reached the generated field:
- * - A `type = help_text` annotation is carried as UiField.help
- *   (decorations/labels.ts helpMessage). Proved only when the generated help
- *   equals this annotation's message — a different or missing help means this
- *   annotation was not the one carried.
+ * - A `type = help_text` or `type = tooltip` annotation is carried as
+ *   UiField.help (decorations/labels.ts helpMessage). Proved only when the
+ *   generated help equals this annotation's message — a different or missing
+ *   help means this annotation was not the one carried.
  * - The untyped `displayname` block beside `allow new entries` is the add-new
  *   dialog's title; other annotations have no consumer yet.
  */

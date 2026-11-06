@@ -16,7 +16,7 @@ import { droppedStyleReason, droppedStyles } from '../pages.js';
 
 declare module '../model.js' {
   interface UiField {
-    /** Hint from a `type = help_text` annotation, shown under the control. */
+    /** Hint from a `type = help_text` or `type = tooltip` annotation, shown under the control. */
     help?: string;
     /** Input hint from the field's `placeholder` property. */
     placeholder?: string;
@@ -119,11 +119,13 @@ function decorateField(source: Field, field: UiField): void {
   }
 }
 
-/** Message of the first `type = help_text` annotation, decoded. */
+/** Message of the first `type = help_text` or `type = tooltip` annotation, decoded. */
 function helpMessage(source: Field): string | undefined {
   for (const block of source.annotations) {
     const kind = block.properties.find((p) => p.key.toLowerCase() === 'type');
-    if (!kind || unquote(kind.value).toLowerCase() !== 'help_text') continue;
+    if (!kind) continue;
+    const kindValue = unquote(kind.value).toLowerCase();
+    if (kindValue !== 'help_text' && kindValue !== 'tooltip') continue;
     const message = block.properties.find((p) => p.key.toLowerCase() === 'message');
     if (message !== undefined) return unquote(message.value);
   }
