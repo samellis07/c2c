@@ -1374,12 +1374,18 @@ test('options display rows, records per row and label width clear only when the 
   assert.deepEqual(dropNames(withBlock([prop('display rows', 'many')]), collectOutputs(withBlock([prop('display rows', 'many')]))), [
     'All_Orders block options',
   ]);
-  assert.deepEqual(dropNames(withBlock([prop('record count', 'enable')]), collectOutputs(withBlock([prop('record count', 'enable')]))), [
-    'All_Orders block options',
-  ]);
-  // A board view never draws the rows table: the density stays a drop.
+  // `record count = enable` on a report that draws the rows table is carried
+  // as the list header's row count, so it clears like the other density options.
+  const counted = withBlock([prop('record count', 'enable')]);
+  const countedOut = collectOutputs(counted);
+  assert.equal(countedOut.model.reports[0]!.showRecordCount, true);
+  assert.deepEqual(dropNames(counted, countedOut), []);
+  assert.deepEqual(dropNames(withBlock([prop('record count', 'disable')]), collectOutputs(withBlock([prop('record count', 'disable')]))), []);
+  // A board view never draws the rows table: the density and record count stay a drop.
   const board = app({ ...source, reports: [{ ...source.reports[0]!, type: 'kanban', groupBy: [{ field: 'Title' }] }] });
   assert.deepEqual(dropNames(board, collectOutputs(board)), ['All_Orders block options']);
+  const boardCounted = app({ ...source, reports: [{ ...board.reports[0]!, blocks: [{ name: 'options', properties: [prop('record count', 'enable')], blocks: [], items: [], span: Z }] }] });
+  assert.deepEqual(dropNames(boardCounted, collectOutputs(boardCounted)), ['All_Orders block options']);
 });
 
 // A submit-kind body on /forms/<form>/submit runs only for the posts the

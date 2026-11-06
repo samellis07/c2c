@@ -204,6 +204,8 @@ export interface UiReport {
   recordsPerRow?: number;
   /** `options { label width = 20% }`: the record-card label column width (only meaningful with `recordsPerRow`). */
   labelWidth?: string;
+  /** `options { record count = enable }`: the list header shows how many rows are shown. */
+  showRecordCount?: boolean;
   queryEndpoint: string;
   /** Scoped single-row endpoint used by this report's detail route. */
   recordEndpoint?: string;
@@ -1264,6 +1266,9 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
   const recordsPerRow = status === 'generated' && DENSITY_VIEWS.has(view) ? recordsPerRowOption(options.get('display records per row')) : undefined;
   // The card label column exists only when records draw as cards.
   const labelWidth = recordsPerRow !== undefined ? labelWidthOption(options.get('label width')) : undefined;
+  // `record count` is a header toggle on the same rows table as the density
+  // options above: carried only when the report actually draws that table.
+  const showRecordCount = status === 'generated' && DENSITY_VIEWS.has(view) && options.get('record count')?.toLowerCase() === 'enable';
   return {
     name: report.name,
     label: report.displayName || report.name,
@@ -1289,6 +1294,7 @@ function buildReport(app: App, report: Report, todos: UiTodo[], delugeFiles: rea
     pageSize,
     ...(recordsPerRow !== undefined ? { recordsPerRow } : {}),
     ...(labelWidth ? { labelWidth } : {}),
+    ...(showRecordCount ? { showRecordCount: true } : {}),
     queryEndpoint: `/reports/${encodeURIComponent(report.name)}`,
     ...(form ? { recordEndpoint: `/forms/${encodeURIComponent(form.name)}/record` } : {}),
     ...(view === 'spreadsheet' ? { editEndpoint: `/reports/${encodeURIComponent(report.name)}/rows` } : {}),
