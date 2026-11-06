@@ -25,7 +25,12 @@ export function parse(source: string): Document {
 export { print };
 
 export function parseFile(path: string, relName?: string): ParsedFile {
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  return parseOpened(path, constants.O_RDONLY | constants.O_NONBLOCK, relName);
+}
+
+/** Read `path` through one descriptor opened with `flags`, check it is a regular file, and parse it. */
+function parseOpened(path: string, flags: number, relName?: string): ParsedFile {
+  const fd = openSync(path, flags);
   let bytes: Buffer;
   try {
     if (!fstatSync(fd).isFile()) throw new NotFileError(path);
@@ -289,7 +294,17 @@ export function parseFileWithSidecars(path: string): ParsedFile {
 }
 
 export function parseProject(dir: string): { files: ParsedFile[]; ir: App } {
-  const files = listDsFiles(dir).map((p) => parseFile(p, relative(dir, p).split(sep).join('/')));
+  // Each listed file is opened without following links, so an entry swapped
+  // for a symlink after the listing is skipped, as the walk would skip it.
+  const files: ParsedFile[] = [];
+  for (const p of listDsFiles(dir)) {
+    try {
+      files.push(parseOpened(p, NO_FOLLOW_READ_FLAGS, relative(dir, p).split(sep).join('/')));
+    } catch (err) {
+      if (isSymlinkRefusedError(err)) continue;
+      throw err;
+    }
+  }
   const ir = mergeIr(files.map((f) => f.ir));
   ir.files = files.map((f) => relative(dir, f.path).split(sep).join('/'));
   const widgets = listWidgetSidecars(dir);

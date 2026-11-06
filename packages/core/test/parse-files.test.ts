@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import fs, { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -102,6 +103,35 @@ test('listDsFiles and parseProject do not follow symlinks: a loop does not crash
   assert.deepEqual(files.map((f) => f.ir.name), ['Demo']);
   assert.deepEqual(ir.files, ['app.ds']);
   assert.equal(ir.widgets, undefined);
+});
+
+test('parseProject skips a listed .ds file that is swapped for a symlink before it is read', (t) => {
+  const root = tempDir(t);
+  const project = join(root, 'project');
+  mkdirSync(project);
+  writeFileSync(join(project, 'app.ds'), APP);
+  writeFileSync(join(project, 'swapped.ds'), APP);
+  writeFileSync(join(root, 'secret.ds'), 'application "Secret"\n{\n}\n');
+  const readdir = fs.readdirSync;
+  t.after(() => {
+    fs.readdirSync = readdir;
+    syncBuiltinESMExports();
+  });
+  // Swap the file for a link right after the walk lists the project.
+  fs.readdirSync = ((...args: Parameters<typeof readdir>) => {
+    const entries = readdir(...args);
+    if (args[0] === project) {
+      fs.readdirSync = readdir;
+      syncBuiltinESMExports();
+      rmSync(join(project, 'swapped.ds'));
+      symlinkSync(join(root, 'secret.ds'), join(project, 'swapped.ds'));
+    }
+    return entries;
+  }) as typeof readdir;
+  syncBuiltinESMExports();
+  const { files, ir } = parseProject(project);
+  assert.deepEqual(files.map((f) => f.ir.name), ['Demo']);
+  assert.deepEqual(ir.files, ['app.ds']);
 });
 
 test('widget sidecars: manifest names are read from BOM, nested and valid json; bad, oversized or dot entries add none', (t) => {
