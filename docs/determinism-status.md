@@ -27,25 +27,26 @@ TODO item per untranslated construct occurrence.
 | | |
 |---|---:|
 | corpus apps | 67 |
-| apps with no residual todos | 23/67 |
+| apps with no residual todos | 14/67 |
 | apps with no residual todos and no silent drops (deterministic) | 0/67 (0%) |
-| silent drops (total) | 4134 |
-| residual TODO items | 234 |
-| distinct TODO kinds | 19 |
+| silent drops (total) | 861 |
+| residual TODO items | 370 |
+| distinct TODO kinds | 17 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
-## Top 19 TODO kinds
+## Top 17 TODO kinds
 
 | construct | count |
 |---|---:|
 | `Server-side Deluge snippet requires manual translation` | 96 |
+| `Custom action (app identifier) is not migrated; its button is turned off.` | 89 |
+| `openurl-unsupported-target` | 71 |
 | `client-condition-uses-server` | 63 |
-| `Static <style> CSS not carried over:(app identifier)` | 28 |
-| `Custom action (app identifier) is not migrated; its button is turned off.` | 18 |
-| `form-event-server-uninvoked` | 6 |
+| `Static <style> CSS not carried over:(app identifier)` | 27 |
 | `pushnotification` | 6 |
+| `function-untranslated` | 4 |
 | `client-loop-uses-server` | 3 |
-| `Rebuild the pivot table manually:(app identifier)` | 2 |
+| `Browse option(s) google_docs, zoho_docs have no Catalyst equivalent; file uploads are supported from local drive only.` | 2 |
 | `report-conditional-format` | 2 |
 | `Embedded zc-component form (app identifier) has no generated view` | 1 |
 | `Embedded zc-component report (app identifier) has no generated view` | 1 |
@@ -53,20 +54,16 @@ TODO item per untranslated construct occurrence.
 | `report-criteria` | 1 |
 | `sendmail-attachment:view` | 1 |
 | `The <script> element is removed from this page snippet by the sanitizer` | 1 |
-| `The <style> element is removed from this page snippet by the sanitizer` | 1 |
-| `ZML <image> (app identifier) click action Function calling function Vote.downvote is not generated; wire the click to the function by hand` | 1 |
 | `ZML <image> (app identifier) click action Function calling function Vote.upvote is not generated; wire the click to the function by hand` | 1 |
-| `ZML <image> (app identifier) click action OpenReport is not generated; wire the click to the function by hand` | 1 |
 
-## Top 5 silent-drop kinds
+## Top 4 silent-drop kinds
 
 | construct | count |
 |---|---:|
-| `field-property` | 2983 |
-| `report-feature` | 744 |
-| `function` | 191 |
+| `field-property` | 581 |
 | `page-element` | 149 |
 | `translation` | 67 |
+| `report-feature` | 64 |
 
 ## Sole-kind unblocks
 
@@ -75,10 +72,12 @@ clears the app. The count is apps, not items.
 
 | construct | apps |
 |---|---:|
-| `Server-side Deluge snippet requires manual translation` | 9 |
-| `client-condition-uses-server` | 3 |
+| `Server-side Deluge snippet requires manual translation` | 5 |
 | `pushnotification` | 3 |
-| `Custom action (app identifier) is not migrated; its button is turned off.` | 1 |
+| `client-condition-uses-server` | 2 |
+| `Browse option(s) google_docs, zoho_docs have no Catalyst equivalent; file uploads are supported from local drive only.` | 1 |
+| `function-untranslated` | 1 |
+| `ZML <image> (app identifier) click action Function calling function Vote.upvote is not generated; wire the click to the function by hand` | 1 |
 
 ## Machine-readable
 
@@ -95,31 +94,35 @@ clears the app. The count is apps, not items.
       "count": 96
     },
     {
+      "construct": "Custom action (app identifier) is not migrated; its button is turned off.",
+      "count": 89
+    },
+    {
+      "construct": "openurl-unsupported-target",
+      "count": 71
+    },
+    {
       "construct": "client-condition-uses-server",
       "count": 63
     },
     {
       "construct": "Static <style> CSS not carried over:(app identifier)",
-      "count": 28
-    },
-    {
-      "construct": "Custom action (app identifier) is not migrated; its button is turned off.",
-      "count": 18
-    },
-    {
-      "construct": "form-event-server-uninvoked",
-      "count": 6
+      "count": 27
     },
     {
       "construct": "pushnotification",
       "count": 6
     },
     {
+      "construct": "function-untranslated",
+      "count": 4
+    },
+    {
       "construct": "client-loop-uses-server",
       "count": 3
     },
     {
-      "construct": "Rebuild the pivot table manually:(app identifier)",
+      "construct": "Browse option(s) google_docs, zoho_docs have no Catalyst equivalent; file uploads are supported from local drive only.",
       "count": 2
     },
     {
@@ -151,23 +154,11 @@ clears the app. The count is apps, not items.
       "count": 1
     },
     {
-      "construct": "The <style> element is removed from this page snippet by the sanitizer",
-      "count": 1
-    },
-    {
-      "construct": "ZML <image> (app identifier) click action Function calling function Vote.downvote is not generated; wire the click to the function by hand",
-      "count": 1
-    },
-    {
       "construct": "ZML <image> (app identifier) click action Function calling function Vote.upvote is not generated; wire the click to the function by hand",
-      "count": 1
-    },
-    {
-      "construct": "ZML <image> (app identifier) click action OpenReport is not generated; wire the click to the function by hand",
       "count": 1
     }
   ],
-  "noTodoApps": 23,
+  "noTodoApps": 14,
   "perAppConstructSets": [
     {
       "constructs": [],
@@ -226,46 +217,18 @@ clears the app. The count is apps, not items.
       "items": 0
     },
     {
-      "constructs": [],
-      "items": 0
-    },
-    {
-      "constructs": [],
-      "items": 0
-    },
-    {
-      "constructs": [],
-      "items": 0
-    },
-    {
-      "constructs": [],
-      "items": 0
-    },
-    {
-      "constructs": [],
-      "items": 0
-    },
-    {
-      "constructs": [],
-      "items": 0
-    },
-    {
-      "constructs": [],
-      "items": 0
-    },
-    {
-      "constructs": [],
-      "items": 0
-    },
-    {
-      "constructs": [],
-      "items": 0
+      "constructs": [
+        "Browse option(s) google_docs, zoho_docs have no Catalyst equivalent; file uploads are supported from local drive only."
+      ],
+      "items": 1
     },
     {
       "constructs": [
-        "client-condition-uses-server"
+        "Browse option(s) google_docs, zoho_docs have no Catalyst equivalent; file uploads are supported from local drive only.",
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target"
       ],
-      "items": 1
+      "items": 3
     },
     {
       "constructs": [
@@ -276,6 +239,16 @@ clears the app. The count is apps, not items.
     {
       "constructs": [
         "client-condition-uses-server"
+      ],
+      "items": 8
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "client-loop-uses-server",
+        "openurl-unsupported-target",
+        "Server-side Deluge snippet requires manual translation",
+        "Static <style> CSS not carried over:(app identifier)"
       ],
       "items": 8
     },
@@ -290,35 +263,84 @@ clears the app. The count is apps, not items.
     {
       "constructs": [
         "client-condition-uses-server",
-        "client-loop-uses-server",
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "Embedded zc-component form (app identifier) has no generated view",
+        "openurl-unsupported-target"
       ],
-      "items": 7
+      "items": 11
     },
     {
       "constructs": [
         "client-condition-uses-server",
         "Custom action (app identifier) is not migrated; its button is turned off.",
-        "sendmail-attachment:view",
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 14
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Custom action (app identifier) is not migrated; its button is turned off.",
-        "ZML <image> (app identifier) click action OpenReport is not generated; wire the click to the function by hand"
+        "openurl-unsupported-target"
       ],
       "items": 3
     },
     {
       "constructs": [
         "client-condition-uses-server",
-        "Embedded zc-component form (app identifier) has no generated view"
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target"
+      ],
+      "items": 10
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
+        "sendmail-attachment:view",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 20
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 5
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
+        "Server-side Deluge snippet requires manual translation"
       ],
       "items": 8
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 16
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
+        "Server-side Deluge snippet requires manual translation",
+        "Static <style> CSS not carried over:(app identifier)"
+      ],
+      "items": 21
+    },
+    {
+      "constructs": [
+        "client-condition-uses-server",
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
+        "Server-side Deluge snippet requires manual translation",
+        "Static <style> CSS not carried over:(app identifier)"
+      ],
+      "items": 23
     },
     {
       "constructs": [
@@ -326,14 +348,6 @@ clears the app. The count is apps, not items.
         "pushnotification"
       ],
       "items": 3
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Rebuild the pivot table manually:(app identifier)",
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 4
     },
     {
       "constructs": [
@@ -347,29 +361,7 @@ clears the app. The count is apps, not items.
         "client-condition-uses-server",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 5
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 7
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Server-side Deluge snippet requires manual translation"
-      ],
       "items": 12
-    },
-    {
-      "constructs": [
-        "client-condition-uses-server",
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
-      ],
-      "items": 7
     },
     {
       "constructs": [
@@ -389,21 +381,66 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
-        "client-condition-uses-server",
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target"
       ],
-      "items": 21
+      "items": 2
     },
     {
       "constructs": [
-        "Custom action (app identifier) is not migrated; its button is turned off."
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target"
+      ],
+      "items": 2
+    },
+    {
+      "constructs": [
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target"
       ],
       "items": 3
     },
     {
       "constructs": [
         "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target"
+      ],
+      "items": 3
+    },
+    {
+      "constructs": [
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target"
+      ],
+      "items": 4
+    },
+    {
+      "constructs": [
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target"
+      ],
+      "items": 5
+    },
+    {
+      "constructs": [
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target"
+      ],
+      "items": 6
+    },
+    {
+      "constructs": [
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
+        "pushnotification",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 7
+    },
+    {
+      "constructs": [
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
         "Server-side Deluge snippet requires manual translation"
       ],
       "items": 4
@@ -411,6 +448,39 @@ clears the app. The count is apps, not items.
     {
       "constructs": [
         "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 4
+    },
+    {
+      "constructs": [
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 5
+    },
+    {
+      "constructs": [
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 5
+    },
+    {
+      "constructs": [
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
+        "Server-side Deluge snippet requires manual translation"
+      ],
+      "items": 6
+    },
+    {
+      "constructs": [
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
         "Server-side Deluge snippet requires manual translation",
         "Static <style> CSS not carried over:(app identifier)"
       ],
@@ -419,18 +489,29 @@ clears the app. The count is apps, not items.
     {
       "constructs": [
         "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
         "Server-side Deluge snippet requires manual translation",
         "Static <style> CSS not carried over:(app identifier)"
       ],
-      "items": 9
+      "items": 15
+    },
+    {
+      "constructs": [
+        "Custom action (app identifier) is not migrated; its button is turned off.",
+        "openurl-unsupported-target",
+        "Server-side Deluge snippet requires manual translation",
+        "Static <style> CSS not carried over:(app identifier)"
+      ],
+      "items": 50
     },
     {
       "constructs": [
         "Embedded zc-component report (app identifier) has no generated view",
+        "openurl-unsupported-target",
         "Static <style> CSS not carried over:(app identifier)",
         "The <script> element is removed from this page snippet by the sanitizer"
       ],
-      "items": 3
+      "items": 4
     },
     {
       "constructs": [
@@ -442,37 +523,58 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
-        "form-event-server-uninvoked",
-        "pushnotification",
+        "function-untranslated"
+      ],
+      "items": 2
+    },
+    {
+      "constructs": [
+        "function-untranslated",
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 9
+      "items": 3
     },
     {
       "constructs": [
-        "pushnotification"
-      ],
-      "items": 1
-    },
-    {
-      "constructs": [
-        "pushnotification"
-      ],
-      "items": 1
-    },
-    {
-      "constructs": [
-        "pushnotification"
-      ],
-      "items": 1
-    },
-    {
-      "constructs": [
-        "Rebuild the pivot table manually:(app identifier)",
+        "function-untranslated",
         "Server-side Deluge snippet requires manual translation",
         "Static <style> CSS not carried over:(app identifier)"
       ],
-      "items": 14
+      "items": 6
+    },
+    {
+      "constructs": [
+        "openurl-unsupported-target",
+        "Server-side Deluge snippet requires manual translation",
+        "Static <style> CSS not carried over:(app identifier)"
+      ],
+      "items": 3
+    },
+    {
+      "constructs": [
+        "openurl-unsupported-target",
+        "Server-side Deluge snippet requires manual translation",
+        "Static <style> CSS not carried over:(app identifier)"
+      ],
+      "items": 15
+    },
+    {
+      "constructs": [
+        "pushnotification"
+      ],
+      "items": 1
+    },
+    {
+      "constructs": [
+        "pushnotification"
+      ],
+      "items": 1
+    },
+    {
+      "constructs": [
+        "pushnotification"
+      ],
+      "items": 1
     },
     {
       "constructs": [
@@ -497,30 +599,6 @@ clears the app. The count is apps, not items.
       "constructs": [
         "Server-side Deluge snippet requires manual translation"
       ],
-      "items": 1
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 2
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 2
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation"
-      ],
-      "items": 2
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation"
-      ],
       "items": 2
     },
     {
@@ -537,52 +615,15 @@ clears the app. The count is apps, not items.
     },
     {
       "constructs": [
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
-      ],
-      "items": 2
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
-      ],
-      "items": 5
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation",
-        "Static <style> CSS not carried over:(app identifier)"
-      ],
-      "items": 11
-    },
-    {
-      "constructs": [
-        "Server-side Deluge snippet requires manual translation",
-        "The <style> element is removed from this page snippet by the sanitizer"
-      ],
-      "items": 2
-    },
-    {
-      "constructs": [
-        "ZML <image> (app identifier) click action Function calling function Vote.downvote is not generated; wire the click to the function by hand",
         "ZML <image> (app identifier) click action Function calling function Vote.upvote is not generated; wire the click to the function by hand"
       ],
-      "items": 2
+      "items": 1
     }
   ],
   "silentDropKinds": [
     {
       "construct": "field-property",
-      "count": 2983
-    },
-    {
-      "construct": "report-feature",
-      "count": 744
-    },
-    {
-      "construct": "function",
-      "count": 191
+      "count": 581
     },
     {
       "construct": "page-element",
@@ -591,10 +632,14 @@ clears the app. The count is apps, not items.
     {
       "construct": "translation",
       "count": 67
+    },
+    {
+      "construct": "report-feature",
+      "count": 64
     }
   ],
-  "silentDropTotal": 4134,
-  "todoTotal": 234,
+  "silentDropTotal": 861,
+  "todoTotal": 370,
   "totalApps": 67
 }
 ```
