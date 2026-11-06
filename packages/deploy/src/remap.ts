@@ -76,12 +76,12 @@ export function assertSeedReferences(tables: readonly RemapTable[], keys: readon
     const table = tables.find((item) => item.table === key.table);
     if (!table) continue;
     const parents = ids.get(key.parent);
+    if (!parents) continue;
     for (const row of table.rows) {
       const value = row.columns[key.column];
       if (!value) continue;
       for (const source of sourceIds(value)) {
-        if (parents?.has(source)) continue;
-        if (!parents) throw new Error(`lookup ${key.table}.${key.column} row ${row.id} references ${key.parent}, which is not in the seed`);
+        if (parents.has(source)) continue;
         throw new Error(`lookup ${key.table}.${key.column} row ${row.id} source id ${source} is not in ${key.parent}`);
       }
     }

@@ -155,6 +155,43 @@ for (const mode of ['lossy', 'failing'] as const) {
   });
 }
 
+test('a lookup whose parent table is outside the seed resolves against the parent already live in the store', async () => {
+  const store = storeRefusing('');
+  store.stored.set('Parent', new Map([['p1', { rowid: 'rowid-Parent-1', columns: { Name: 'P' } }]]));
+  const result = await migrateSeed({
+    tables: [{ table: 'Child', rows: [{ id: 'c1', columns: { Title: 'C', Author: 'p1' } }] }],
+    foreignKeys: [{ table: 'Child', column: 'Author', parent: 'Parent' }],
+    dc: 'in',
+    catalystBase: 'https://api.catalyst.zoho.in',
+    dryRun: false,
+    fetch: store.fetch,
+    checkpoint: emptyCheckpoint(),
+    scope: SCOPE,
+  });
+  assert.equal(result.ok, true);
+  const child = result.tables.find((table) => table.table === 'Child');
+  assert.equal(child?.mismatch, false);
+  assert.equal(store.stored.get('Child')?.get('c1')?.columns.Author, 'rowid-Parent-1');
+});
+
+test('a lookup whose parent table is outside the seed and has no matching live row is reported, not thrown', async () => {
+  const store = storeRefusing('');
+  const result = await migrateSeed({
+    tables: [{ table: 'Child', rows: [{ id: 'c1', columns: { Title: 'C', Author: 'p1' } }] }],
+    foreignKeys: [{ table: 'Child', column: 'Author', parent: 'Parent' }],
+    dc: 'in',
+    catalystBase: 'https://api.catalyst.zoho.in',
+    dryRun: false,
+    fetch: store.fetch,
+    checkpoint: emptyCheckpoint(),
+    scope: SCOPE,
+  });
+  assert.equal(result.ok, false);
+  const child = result.tables.find((table) => table.table === 'Child');
+  assert.equal(child?.mismatch, true);
+  assert.match(child?.error ?? '', /source id p1 is not in Parent/);
+});
+
 test('a table no lookup points at is not read back, so its ROWIDs cannot fail the run', async () => {
   const store = storeRefusing('', { failing: 'Third' });
   const result = await migrateSeed({
