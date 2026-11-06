@@ -1,0 +1,169 @@
+{
+  "schema": "c2c-desk-aggregate-themes/1",
+  "note": "Closed Creator Desk aggregate themes. The order follows 12-month department category totals (aggregates only, not root causes and not forum frequencies), then the product axes that ranking does not already name. A forum case clusters from its existing category and read theme. Fields, forms, reports, Deluge language, integrations, limits, and billing stay unmapped.",
+  "method": "Match a listed read theme first, then a listed category, then a symptom phrase. The primary theme is the most specific match. Ties break by priority (lower number first). No match leaves the primary as none. Symptom phrases are whole words and are used only for Actions, which has no forum category.",
+  "unmappedForumCategories": [
+    "fields",
+    "forms",
+    "reports",
+    "deluge",
+    "integrations/connections",
+    "limits/performance",
+    "billing/licensing",
+    "none"
+  ],
+  "themes": [
+    {
+      "id": "form-workflow-scripting",
+      "label": "Form workflow scripting",
+      "priority": 1,
+      "productAxis": false,
+      "deskBasis": "Largest categorized Creator Desk bucket over the 12 months ending 2026-10-06: Form Workflow plus Script Assistance.",
+      "catalystShape": "Translate form workflow and script-assistance behaviour.",
+      "forumCategories": ["workflows"],
+      "forumReadThemes": ["form-script-on-load-validate", "deluge-statement-limit"],
+      "symptomPhrases": []
+    },
+    {
+      "id": "pages",
+      "label": "Pages and widgets",
+      "priority": 2,
+      "productAxis": false,
+      "deskBasis": "Page Creation plus Pages Components, second in that 12-month category order.",
+      "catalystShape": "Generate pages and widgets.",
+      "forumCategories": ["pages/widgets"],
+      "forumReadThemes": ["custom-widget-sdk-messaging"],
+      "symptomPhrases": []
+    },
+    {
+      "id": "custom-api",
+      "label": "Custom API compatibility",
+      "priority": 3,
+      "productAxis": true,
+      "deskBasis": "API and invokeurl, third in that 12-month category order.",
+      "catalystShape": "Keep custom API and invokeurl behaviour compatible.",
+      "forumCategories": ["apis"],
+      "forumReadThemes": [
+        "api-error-codes-2945-3001",
+        "api-rate-limits-throttling",
+        "api-oauth-v2-token-refresh",
+        "deluge-invokeurl-rest-api"
+      ],
+      "symptomPhrases": []
+    },
+    {
+      "id": "actions",
+      "label": "Actions",
+      "priority": 4,
+      "productAxis": false,
+      "deskBasis": "Actions, fourth in that 12-month category order. Forum text has no Actions category, so only an explicit symptom phrase joins.",
+      "catalystShape": "Carry custom, button, and workflow actions.",
+      "forumCategories": [],
+      "forumReadThemes": [],
+      "symptomPhrases": ["custom action", "custom actions", "button action", "button actions", "workflow action", "workflow actions"]
+    },
+    {
+      "id": "environments",
+      "label": "Environments and publish",
+      "priority": 5,
+      "productAxis": false,
+      "deskBasis": "Environments, fifth in that 12-month category order, and rising across the year.",
+      "catalystShape": "Publish across development, stage, and production.",
+      "forumCategories": ["environments/deploy"],
+      "forumReadThemes": ["version-control-git-cicd"],
+      "symptomPhrases": []
+    },
+    {
+      "id": "backup-export",
+      "label": "Backup and export",
+      "priority": 6,
+      "productAxis": true,
+      "deskBasis": "Backup and App IDE, sixth in that 12-month category order. Includes the forum import and export category.",
+      "catalystShape": "Back up, export, and import the app and its records.",
+      "forumCategories": ["data import/export"],
+      "forumReadThemes": ["report-export-backup-schedule", "csv-excel-import-migration"],
+      "symptomPhrases": []
+    },
+    {
+      "id": "schedule-cron",
+      "label": "Schedules to cron",
+      "priority": 7,
+      "productAxis": true,
+      "deskBasis": "Schedule workflow, in the tail of that 12-month category order.",
+      "catalystShape": "Run schedules as cron with retries and logs.",
+      "forumCategories": ["scheduling/timezones"],
+      "forumReadThemes": ["scheduled-function-dev-quota"],
+      "symptomPhrases": []
+    },
+    {
+      "id": "approval",
+      "label": "Approval workflow",
+      "priority": 8,
+      "productAxis": false,
+      "deskBasis": "Approval workflow, in the tail of that 12-month category order.",
+      "catalystShape": "Carry approval workflows.",
+      "forumCategories": ["approvals/blueprints"],
+      "forumReadThemes": ["approval-process-inline-preview"],
+      "symptomPhrases": []
+    },
+    {
+      "id": "payment",
+      "label": "Payment workflow",
+      "priority": 9,
+      "productAxis": false,
+      "deskBasis": "Payment workflow, in the tail of that 12-month category order.",
+      "catalystShape": "Carry payment workflows.",
+      "forumCategories": ["payments"],
+      "forumReadThemes": ["payment-gateway-webhook-ack"],
+      "symptomPhrases": []
+    },
+    {
+      "id": "portals-permissions",
+      "label": "Portals and permissions",
+      "priority": 10,
+      "productAxis": true,
+      "deskBasis": "Named product axis for portals and permissions. Not a separate line in the 12-month category ranking.",
+      "catalystShape": "Map portal users, roles, and permissions.",
+      "forumCategories": ["portals", "users/roles/permissions"],
+      "forumReadThemes": [
+        "portal-lookup-security-scoping",
+        "portal-login-domain-access",
+        "role-hierarchy-dynamic-sharing"
+      ],
+      "symptomPhrases": []
+    },
+    {
+      "id": "mobile-pwa-offline",
+      "label": "Mobile and PWA offline",
+      "priority": 11,
+      "productAxis": true,
+      "deskBasis": "Named product axis for mobile and offline use.",
+      "catalystShape": "Cover mobile and offline PWA behaviour.",
+      "forumCategories": ["mobile/offline"],
+      "forumReadThemes": ["mobile-offline-scripting-gap", "barcode-qr-validation-haptic"],
+      "symptomPhrases": []
+    },
+    {
+      "id": "pdf-record-templates",
+      "label": "PDF and record templates",
+      "priority": 12,
+      "productAxis": true,
+      "deskBasis": "Named product axis for PDF and record templates.",
+      "catalystShape": "Generate PDF and record templates.",
+      "forumCategories": ["pdf/print"],
+      "forumReadThemes": ["pdf-template-merge-styling"],
+      "symptomPhrases": []
+    },
+    {
+      "id": "notifications-email-sms",
+      "label": "Notifications, email, and SMS",
+      "priority": 13,
+      "productAxis": true,
+      "deskBasis": "Named product axis for email and SMS notifications.",
+      "catalystShape": "Send email and SMS notifications.",
+      "forumCategories": ["notifications/mail"],
+      "forumReadThemes": ["deluge-sendmail-attachments"],
+      "symptomPhrases": []
+    }
+  ]
+}
