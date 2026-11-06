@@ -2346,6 +2346,38 @@ test('browse = local_drive is emitted; uncarried cloud docs emit counted UI todo
   assert.equal(rowStatus(cloudSources, mutated, 'Attachment.File_Attachment property browse'), 'dropped');
 });
 
+test('private and personal data field flags emit a counted UI todo with a manual step, not a generated privacy control', () => {
+  const flaggedField = (flag: string): string => `
+	form Patient
+	{
+		SSN
+		(
+			type = text
+			${flag} = true
+		)
+	}
+`;
+  const privateField = dsApp(flaggedField('private'));
+  const privateOut = collectOutputs(privateField);
+  assert.equal(rowStatus(privateField, privateOut, 'Patient.SSN property private'), 'counted');
+  const privateTodo = privateOut.model.todos.find((t) => t.name === 'Patient.SSN property private');
+  assert.ok(privateTodo, 'UI todo is emitted for a private field');
+  assert.ok(privateTodo.manualStep, 'private field todo names a manual step');
+
+  const personalDataField = dsApp(flaggedField('personal data'));
+  const personalDataOut = collectOutputs(personalDataField);
+  assert.equal(rowStatus(personalDataField, personalDataOut, 'Patient.SSN property personal data'), 'counted');
+  const personalDataTodo = personalDataOut.model.todos.find((t) => t.name === 'Patient.SSN property personal data');
+  assert.ok(personalDataTodo, 'UI todo is emitted for a personal-data field');
+  assert.ok(personalDataTodo.manualStep, 'personal data field todo names a manual step');
+
+  // Mutation test: removing the UI todo makes the private flag a drop again — proving
+  // the flag is not silently carried by any generated widget.
+  const mutated = cloneOutputs(privateOut);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Patient.SSN property private');
+  assert.equal(rowStatus(privateField, mutated, 'Patient.SSN property private'), 'dropped');
+});
+
 test('gallery apps: Contacts preview duration is emitted, TaskzDone browse is counted', { skip: !process.env.C2C_FIXTURES_DIR ? 'C2C_FIXTURES_DIR is not set' : false }, () => {
   const gallery = join(process.env.C2C_FIXTURES_DIR!, 'gallery');
   const contacts = parseProject(join(gallery, 'contacts')).ir;
