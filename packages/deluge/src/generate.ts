@@ -907,7 +907,16 @@ export function generate(app: App, options?: GenerateOptions): GenerateResult {
     warnings.push({ ...ASYNC_ON_SUCCESS_WARNING });
   }
   // Translation blocks are not migrated: each one is an explicit manual step.
-  for (const t of app.translations) warnings.push(translationWarning(t));
+  // A block naming no single language (none, or several) only ever carried a
+  // warning, which no-silent-drop.ts does not count — pushing a todo too
+  // makes it a listed manual step instead of a silent drop.
+  for (const t of app.translations) {
+    const warning = translationWarning(t);
+    warnings.push(warning);
+    if (translationLanguage(t) === undefined) {
+      todos.push({ construct: 'translation-block', start: t.span.start, end: t.span.end, manualStep: warning.note });
+    }
+  }
 
   // functions/thisapp.mjs is emitted whenever a module can call `thisapp.<fn>`
   // (its own body uses the shim) or the app declared functions at all, so an
@@ -6777,22 +6786,50 @@ ${map}
 }
 
 /**
+ * The block's single language, when its JSON has exactly one top-level key.
+ * Any other shape (no keys, or several) has no one language to name, so the
+ * block is reported as a whole instead.
+ */
+export function translationLanguage(t: Translation): string | undefined {
+  if (t.data && typeof t.data === 'object' && !Array.isArray(t.data)) {
+    const keys = Object.keys(t.data);
+    if (keys.length === 1) return keys[0];
+  }
+  return undefined;
+}
+
+function stringCount(table: unknown): number {
+  return table && typeof table === 'object' && !Array.isArray(table) ? Object.keys(table).length : 0;
+}
+
+/**
  * One translation block as an explicit manual step: string catalogues are
  * not migrated. The generated app renders the default-language text only.
  */
 function translationWarning(t: Translation): GenerateWarning {
   const data = t.data && typeof t.data === 'object' && !Array.isArray(t.data) ? (t.data as Record<string, unknown>) : undefined;
+  const lang = translationLanguage(t);
+  if (lang !== undefined) {
+    const keys = Object.keys((data?.[lang] as Record<string, unknown> | undefined) ?? {}).sort(compareEnUs);
+    const sample = keys.slice(0, 2).map((k) => `"${k}"`).join(', ');
+    return {
+      construct: 'translation-not-migrated',
+      name: `translation:${lang}`,
+      note: `Translation "${lang}": ${keys.length} strings${sample ? ` (e.g. ${sample})` : ''} are not migrated. The generated app renders the default-language text only. To serve "${lang}", copy these strings into the generated client's labels and add a language switch.`,
+    };
+  }
+  // A block with no language key or several: list each one with its string
+  // count instead of guessing at a single language.
   const langs = data ? Object.keys(data).sort(compareEnUs) : [];
-  const lang = langs.length === 1 ? langs[0]! : undefined;
-  const table = lang !== undefined ? data?.[lang] : undefined;
-  const keys = table && typeof table === 'object' && !Array.isArray(table) ? Object.keys(table).sort(compareEnUs) : [];
-  const name = lang !== undefined ? `translation:${lang}` : 'translation block';
-  const head = lang !== undefined ? `Translation "${lang}": ${keys.length} strings` : `A translation block (${keys.length} strings)`;
-  const sample = keys.slice(0, 2).map((k) => `"${k}"`).join(', ');
+  const total = langs.reduce((sum, l) => sum + stringCount(data?.[l]), 0);
+  const breakdown = langs.map((l) => `${l} (${stringCount(data?.[l])})`).join(', ');
+  const head = langs.length
+    ? `A translation block with ${langs.length} languages — ${breakdown} — and ${total} total strings`
+    : 'A translation block with no recognizable language key';
   return {
     construct: 'translation-not-migrated',
-    name,
-    note: `${head}${sample ? ` (e.g. ${sample})` : ''} are not migrated. The generated app renders the default-language text only. To serve ${lang !== undefined ? `"${lang}"` : 'another language'}, copy these strings into the generated client's labels and add a language switch.`,
+    name: 'translation block',
+    note: `${head} is not migrated. The generated app renders the default-language text only. List each language and copy its strings into the generated client's labels by hand.`,
   };
 }
 
