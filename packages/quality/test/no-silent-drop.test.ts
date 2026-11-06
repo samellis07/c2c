@@ -1851,10 +1851,15 @@ test('alloweddays is emitted only for every weekday on a generated date widget',
   const datetime = dsApp(days('0,1,2,3,4,5,6', 'datetime'));
   assert.equal(rowStatus(datetime, collectOutputs(datetime), 'Visit.Day property alloweddays'), 'emitted');
 
-  // A restricted set is not enforced by the generated input.
+  // A restricted set is not enforced by the generated input, but it is recorded
+  // as a counted manual step instead of silently dropped.
   for (const value of ['1,2,3,4,5', '0', '0,1,2,3,4,5,5']) {
     const restricted = dsApp(days(value));
-    assert.equal(rowStatus(restricted, collectOutputs(restricted), 'Visit.Day property alloweddays'), 'dropped', value);
+    const restrictedOut = collectOutputs(restricted);
+    assert.equal(rowStatus(restricted, restrictedOut, 'Visit.Day property alloweddays'), 'counted', value);
+    const todo = restrictedOut.model.todos.find((t) => t.area === 'field' && t.name === 'Visit.Day property alloweddays');
+    assert.ok(todo, `expected a manual todo for alloweddays = ${value}`);
+    assert.match(todo!.reason, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
 
   // Not a native date input any more: the default is no longer shown to hold.

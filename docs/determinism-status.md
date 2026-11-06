@@ -29,9 +29,9 @@ TODO item per untranslated construct occurrence.
 | corpus apps | 67 |
 | apps with no residual todos | 3/67 |
 | apps with no residual todos and no silent drops (deterministic) | 0/67 (0%) |
-| silent drops (total) | 543 |
-| residual TODO items | 656 |
-| distinct TODO kinds | 202 |
+| silent drops (total) | 539 |
+| residual TODO items | 660 |
+| distinct TODO kinds | 205 |
 | deterministic apps with UI TODO stubs (included in the residual) | 0 (0 stubs) |
 
 ## Top 20 TODO kinds
@@ -63,7 +63,7 @@ TODO item per untranslated construct occurrence.
 
 | construct | count |
 |---|---:|
-| `field-property` | 289 |
+| `field-property` | 285 |
 | `page-element` | 149 |
 | `report-feature` | 64 |
 | `translation` | 41 |
@@ -172,6 +172,10 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "count": 2
+    },
+    {
+      "construct": "Field From_Date restricts selectable weekdays to `0`; the generated date input is a plain native control with no weekday restriction.",
       "count": 2
     },
     {
@@ -408,6 +412,10 @@ clears the app. The count is apps, not items.
     },
     {
       "construct": "Field Customer_Stats_ID is flagged `bidirectional = Previous_Bookings`; Catalyst only creates the reverse column from a linked grid side, and neither Customer_Stats_ID nor Add_Customer.Previous_Bookings is one.",
+      "count": 1
+    },
+    {
+      "construct": "Field Date_field restricts selectable weekdays to `1,2,3,4,5`; the generated date input is a plain native control with no weekday restriction.",
       "count": 1
     },
     {
@@ -827,6 +835,10 @@ clears the app. The count is apps, not items.
       "count": 1
     },
     {
+      "construct": "Field To_Date restricts selectable weekdays to `6`; the generated date input is a plain native control with no weekday restriction.",
+      "count": 1
+    },
+    {
       "construct": "Field Trainees is flagged `bidirectional = Classes`; Catalyst only creates the reverse column from a linked grid side, and neither Trainees nor Add_Trainee.Classes is one.",
       "count": 1
     },
@@ -935,12 +947,13 @@ clears the app. The count is apps, not items.
         "client-loop-uses-server",
         "Default row count is not carried; the generated subform starts with no pre-filled rows.",
         "Field Academic_Year is flagged `private = true`; Catalyst generates no privacy or access control for this field.",
+        "Field Date_field restricts selectable weekdays to `1,2,3,4,5`; the generated date input is a plain native control with no weekday restriction.",
         "Field Student_Absent_List is flagged `private = true`; Catalyst generates no privacy or access control for this field.",
         "Field Text_for_Attendance is flagged `private = true`; Catalyst generates no privacy or access control for this field.",
         "Server-side Deluge snippet requires manual translation",
         "Toolbar setting is not carried; the generated editor has no toolbar control."
       ],
-      "items": 20
+      "items": 21
     },
     {
       "constructs": [
@@ -1036,13 +1049,14 @@ clears the app. The count is apps, not items.
       "constructs": [
         "client-condition-uses-server",
         "Custom action (app identifier) is not migrated; its button is turned off.",
+        "Field From_Date restricts selectable weekdays to `0`; the generated date input is a plain native control with no weekday restriction.",
         "Field Jobs is flagged `bidirectional = Project`; Catalyst only creates the reverse column from a linked grid side, and neither Jobs nor Add_Job.Project is one.",
         "Field Project is flagged `bidirectional = Jobs`; Catalyst only creates the reverse column from a linked grid side, and neither Project nor Add_Project.Jobs is one.",
         "openurl-unsupported-target",
         "Server-side Deluge snippet requires manual translation",
         "translation-block"
       ],
-      "items": 19
+      "items": 20
     },
     {
       "constructs": [
@@ -1141,12 +1155,14 @@ clears the app. The count is apps, not items.
       "constructs": [
         "client-condition-uses-server",
         "Field Assignees_Admin is flagged `private = true`; Catalyst generates no privacy or access control for this field.",
+        "Field From_Date restricts selectable weekdays to `0`; the generated date input is a plain native control with no weekday restriction.",
         "Field Jobs is flagged `bidirectional = Project`; Catalyst only creates the reverse column from a linked grid side, and neither Jobs nor Add_Job.Project is one.",
         "Field Project is flagged `bidirectional = Jobs`; Catalyst only creates the reverse column from a linked grid side, and neither Project nor Add_Project.Jobs is one.",
+        "Field To_Date restricts selectable weekdays to `6`; the generated date input is a plain native control with no weekday restriction.",
         "Server-side Deluge snippet requires manual translation",
         "translation-block"
       ],
-      "items": 16
+      "items": 18
     },
     {
       "constructs": [
@@ -1624,7 +1640,7 @@ clears the app. The count is apps, not items.
   "silentDropKinds": [
     {
       "construct": "field-property",
-      "count": 289
+      "count": 285
     },
     {
       "construct": "page-element",
@@ -1639,8 +1655,8 @@ clears the app. The count is apps, not items.
       "count": 41
     }
   ],
-  "silentDropTotal": 543,
-  "todoTotal": 656,
+  "silentDropTotal": 539,
+  "todoTotal": 660,
   "totalApps": 67
 }
 ```
