@@ -82,6 +82,32 @@ ${field('Where', 'geolocation')}
   assert.equal(model.pageSize, LIMITS.zcqlRowsPerQuery);
 });
 
+test('a URL field with enable linkname emits a generated link-name flag', () => {
+  const model = oneField('url', '\t\t\tenable linkname');
+  assert.equal(model.forms[0].fields[0].linkName, true);
+  assert.equal(model.todos.length, 0);
+});
+
+test('a URL field without enable linkname carries no link-name flag', () => {
+  const model = oneField('url');
+  assert.equal(model.forms[0].fields[0].linkName, undefined);
+});
+
+test('a toolbar property is noted as a manual step, not silently dropped', () => {
+  const model = oneField('richtext', '\t\t\ttoolbar = enable');
+  const ui = model.forms[0].fields[0];
+  assert.equal(ui.status, 'generated');
+  assert.ok(model.todos.some((t) => t.area === 'field' && t.name === 'Item.F' && /toolbar/i.test(t.reason)));
+});
+
+test('a defaultrow property on a subform is noted as a manual step, not silently dropped', () => {
+  const extra = '\t\t\tdefaultrow = 1\n\t\t\tQty\n\t\t\t(\n\t\t\t\ttype = number\n\t\t\t)';
+  const model = oneField('subform', extra);
+  const ui = model.forms[0].fields[0];
+  assert.equal(ui.status, 'generated');
+  assert.ok(model.todos.some((t) => t.area === 'field' && t.name === 'Item.F' && /default row/i.test(t.reason)));
+});
+
 test('report types, custom actions, and ZML elements', () => {
   const model = buildUi(
     appOf(`\tform Item

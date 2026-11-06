@@ -2500,3 +2500,58 @@ test('allow new entries and its displayname dialog title are emitted through the
   assert.ok(names.includes('Course.Department flag allow new entries'), names.join(', '));
   assert.ok(names.some((name) => name.startsWith('Course.Department annotation')), names.join(', '));
 });
+
+function appWithField(f: Field): App {
+  return app({ forms: [{ name: 'Orders', properties: [], fields: [f], actions: [], blocks: [], span: Z }] });
+}
+
+test('a toolbar field property is listed through the generated field todo', () => {
+  const withToolbar = appWithField({ ...field('Notes', 'richtext'), properties: [{ key: 'toolbar', value: 'enable', span: Z }] });
+  // The generator always notes it, so the audit passes.
+  assert.deepEqual(
+    auditApp(withToolbar).filter((d) => d.name.includes('toolbar')),
+    [],
+  );
+  // Without the note, the same setting is a silent drop.
+  const unlisted = collectOutputs(withToolbar);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withToolbar, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Notes property toolbar'],
+  );
+});
+
+test('a defaultrow field property is listed through the generated field todo', () => {
+  const withDefaultRow = appWithField({ ...field('Lines', 'subform'), properties: [{ key: 'defaultrow', value: '1', span: Z }] });
+  assert.deepEqual(
+    auditApp(withDefaultRow).filter((d) => d.name.includes('defaultrow')),
+    [],
+  );
+  const unlisted = collectOutputs(withDefaultRow);
+  unlisted.model = { ...unlisted.model, todos: [] };
+  const drops = auditApp(withDefaultRow, unlisted);
+  assert.ok(drops.some((d) => d.name === 'Orders.Lines property defaultrow'));
+});
+
+test('an enable linkname flag is listed only when the generated field carries no link name', () => {
+  const withFlag = appWithField({ ...field('Website', 'url'), flags: ['enable linkname'] });
+  assert.deepEqual(
+    auditApp(withFlag).filter((d) => d.name.includes('linkname')),
+    [],
+  );
+  // Without the generated flag, the same declaration is a silent drop.
+  const unlisted = collectOutputs(withFlag);
+  const forms = unlisted.model.forms.map((f) => (f.name === 'Orders' ? { ...f, fields: f.fields.map((u) => (u.name === 'Website' ? { ...u, linkName: undefined } : u)) } : f));
+  unlisted.model = { ...unlisted.model, forms };
+  const drops = auditApp(withFlag, unlisted);
+  assert.deepEqual(
+    drops.map((d) => d.name),
+    ['Orders.Website flag enable linkname'],
+  );
+});
+
+test('a field with none of the toolbar/defaultrow/enable-linkname markers is never flagged by the field-property audit', () => {
+  const plain = appWithField(field('Title', 'text'));
+  assert.deepEqual(auditApp(plain), []);
+});
