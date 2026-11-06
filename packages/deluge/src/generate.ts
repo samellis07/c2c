@@ -2973,6 +2973,21 @@ function decimalFieldNames(app: App): string[] {
   return names;
 }
 
+const DATE_IDS = new Set(['date', 'date-time']);
+
+function dateFieldNames(app: App): string[] {
+  const names: string[] = [];
+  const walk = (fields: readonly Field[]): void => {
+    for (const field of fields) {
+      const row = fieldTypeRow(field.type);
+      if (row && DATE_IDS.has(row.id)) names.push(field.name);
+      if (field.subfields.length) walk(field.subfields);
+    }
+  };
+  for (const form of app.forms) walk(form.fields);
+  return names;
+}
+
 /** The app's form link names — a bare one is that form's collection, not a variable. */
 export function appFormNames(app: App): string[] {
   return app.forms.map((f) => f.name);
@@ -3020,8 +3035,8 @@ export function appFormFields(app: App): Record<string, string[]> {
  * exact-decimal field names. fill-todos walks through the same builder so the
  * two can never drift on which names are forms or decimals.
  */
-export function appTranslateOptions(app: App): Pick<TranslateOptions, 'formNames' | 'formFields' | 'decimalFields'> {
-  return { formNames: appFormNames(app), formFields: appFormFields(app), decimalFields: decimalFieldNames(app) };
+export function appTranslateOptions(app: App): Pick<TranslateOptions, 'formNames' | 'formFields' | 'decimalFields' | 'dateFields'> {
+  return { formNames: appFormNames(app), formFields: appFormFields(app), decimalFields: decimalFieldNames(app), dateFields: dateFieldNames(app) };
 }
 
 /** The one translate entry point for app deluge. fill-todos calls it too. */
