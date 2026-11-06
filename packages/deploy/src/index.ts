@@ -77,6 +77,8 @@ export {
   SOCIAL_PROVIDERS,
   userRefId,
   usersInvitesCsv,
+  mergeUsersPlans,
+  mergedUsersPlanJson,
   usersPlan,
   usersPlanJson,
   usersPlanMarkdown,
@@ -86,7 +88,7 @@ export {
   USERS_PLAN_MD,
   USERS_STATE_FILE,
 } from './users.js';
-export type { BackupUser, InviteTarget, ListedUser, ManageUserAction, ManageUserResult, PlanUser, RoleMapRow, SocialPlan, SocialProvider, UsersInviteResult, UsersListResult, UsersPlan, UsersState } from './users.js';
+export type { BackupUser, InviteTarget, ListedUser, ManageUserAction, ManageUserResult, MergedUsersPlan, PlanUser, RoleMapRow, SocialPlan, SocialProvider, UsersInviteResult, UsersListResult, UsersPlan, UsersPlanConflict, UsersState } from './users.js';
 export { readZip } from './zipfile.js';
 export type { ZipEntry, ZipLimits } from './zipfile.js';
 export { applyTablePlan, columnBody, columnDetailsOf, columnOf, compareColumnFlags, cyclicForeignKeyComponents, cyclicForeignKeys, foreignKeyId, formatMandatoryRelaxed, mandatoryRelaxedColumns, formatTableCreate, formatTableDiff, mandatoryRelaxedLine, nonDeferrableKeys, provisionedConstraints, provisionedConstraintsAndDrift, tableCreatePlan } from './tables.js';
