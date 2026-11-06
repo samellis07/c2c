@@ -290,8 +290,9 @@ export function planGuard(target: string, args: readonly string[], appLink: stri
   // Placeholders stand in for missing config, never for a project the registry
   // protects: a denylisted id or name is refused at plan time too.
   const registryPath = flag(args, '--projects');
+  let registry: ProjectRegistry | undefined;
   if (registryPath) {
-    const registry = loadRegistry(registryPath);
+    registry = loadRegistry(registryPath);
     const configPath = findDeployConfig(target, flag(args, '--config'));
     let raw: string | undefined;
     try {
@@ -309,13 +310,17 @@ export function planGuard(target: string, args: readonly string[], appLink: stri
     assertProtectedName(registry, raw);
     if (raw !== undefined && /^[0-9]+$/.test(raw)) assertProtectedProject(registry, { id: raw });
   }
+  // The registry can rename an app link (aliases), so a plan's printed
+  // project name matches --confirm's instead of always the derived slug.
+  const derivedProjectName = catalystProjectName(appLink);
+  const aliasedProjectName = registry?.aliases?.[appLink] ?? registry?.aliases?.[derivedProjectName];
   return {
     org: orgFlag || '<org-id>',
     ...(orgFlag ? { orgOrigin: '--org' } : {}),
     projectId: projectFlag || '<project-id>',
     ...(projectFlag ? { projectOrigin: '--project' } : {}),
     environment: ALLOWED_ENV,
-    projectName: catalystProjectName(appLink),
+    projectName: aliasedProjectName ? aliasedProjectName.trim().toLowerCase() : derivedProjectName,
     dc: located?.dc ?? '<dc>',
     ...(located ? { dcOrigin: located.origin } : {}),
     registry: { org: '', env: ALLOWED_ENV, projects: {} },
