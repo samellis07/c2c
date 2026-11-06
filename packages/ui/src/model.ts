@@ -457,6 +457,11 @@ const FILE_WIDGETS = new Set<Widget>(['file', 'image', 'audio', 'video', 'signat
 /** Known remote document browsing sources for file fields that have no Catalyst equivalent. */
 const BROWSE_REMOTE_SOURCES = new Set(['google_docs', 'zoho_docs']);
 
+// A field marked `private` or `personal data` is a data-privacy flag, not a widget
+// setting. Catalyst has no generated field-level privacy or access control, so each
+// is recorded as a manual step rather than invented as UI.
+const PRIVACY_PROPERTY_KEYS = ['private', 'personal data'];
+
 const REPORT_VIEW: Record<string, UiReport['view']> = {
   list: 'list',
   report: 'list',
@@ -918,6 +923,18 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
   }
   if (field.choices?.length && widget !== 'decision') ui.choices = field.choices;
   if ((widget === 'select' || widget === 'radio') && hasOthersOption(field)) ui.othersOption = true;
+  for (const key of PRIVACY_PROPERTY_KEYS) {
+    const value = prop(field, key);
+    if (value?.trim().toLowerCase() !== 'true') continue;
+    const name = `${formName}.${field.name} property ${key}`;
+    if (todos.some((t) => t.area === 'field' && t.name === name)) continue;
+    todos.push({
+      area: 'field',
+      name,
+      reason: `Field ${field.name} is flagged \`${key} = true\`; Catalyst generates no privacy or access control for this field.`,
+      manualStep: `In the Catalyst console, apply the data-privacy protection ${field.name} needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.`,
+    });
+  }
   if (field.lookup && (widget === 'lookup' || widget === 'lookup-multi')) {
     ui.lookup = {
       form: field.lookup.form,

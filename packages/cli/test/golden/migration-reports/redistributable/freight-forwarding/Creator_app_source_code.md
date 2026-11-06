@@ -24,9 +24,15 @@ App: Freight Forwarding and Feeder Solution
 
 ## TODO counts
 
-11
+25
 
 - 11 client-condition-uses-server
+- 5 Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+- 4 Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+- 2 Field Mobile is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+- 1 Field Assistant_Phone is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+- 1 Field Contact_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+- 1 Field Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
 
 ## Field gaps
 
@@ -53,7 +59,34 @@ App: Freight Forwarding and Feeder Solution
 
 ## Residual TODO steps
 
-- none
+- `field New_Account.Email property personal data` — Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field New_Account.Phone_Number property personal data` — Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field New_User.Email property personal data` — Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field New_Contact.Contact_Name property personal data` — Field Contact_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Contact_Name needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field New_Contact.Mobile property personal data` — Field Mobile is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Mobile needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field New_Contact.Assistant_Phone property personal data` — Field Assistant_Phone is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Assistant_Phone needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field New_Contact.Email property personal data` — Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field New_Contact.Phone_Number property personal data` — Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field New_Vendor.Phone_Number property personal data` — Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field New_Vendor.Email property personal data` — Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field New_Lead.Phone_Number property personal data` — Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field New_Lead.Name property personal data` — Field Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Name needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field New_Lead.Email property personal data` — Field Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field New_Lead.Mobile property personal data` — Field Mobile is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Mobile needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
 
 ## Hidden from end users
 
@@ -73,48 +106,20 @@ App: Freight Forwarding and Feeder Solution
 
 ## Not converted
 
-Silent drops: 56 (still counted; each has a guided step below)
+Silent drops: 42 (still counted; each has a guided step below)
 
 - `field-property:New_Account.Annual_Revenue property format` — not converted. property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.
   - Step: The display format for New_Account.Annual_Revenue was not converted. In the Catalyst console, set the field's number or currency format for New_Account.Annual_Revenue, then preview a record and confirm the value is displayed correctly.
-- `field-property:New_Account.Email property personal data` — not converted. property personal data is not carried by the generated email field. There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.
-  - Step: The personal-data setting for New_Account.Email was not converted. In the Catalyst console, mark New_Account.Email as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
-- `field-property:New_Account.Phone_Number property personal data` — not converted. property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
-  - Step: The personal-data setting for New_Account.Phone_Number was not converted. In the Catalyst console, mark New_Account.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
 - `field-property:New_Account.Website flag enable  linkname` — not converted. flag enable  linkname is not carried by the generated url field. URLs routinely exceed varchar 255, which truncates silently. Default storage is text. maxchar of 255 or less stays varchar of that length. Creator also stores link title; a second column is not invented here.
   - Step: The flag enable  linkname setting for New_Account.Website was not converted. In the Catalyst console, configure that setting for New_Account.Website, then preview the form or report and confirm the field behaves as expected.
-- `field-property:New_User.Email property personal data` — not converted. property personal data is not carried by the generated email field. There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.
-  - Step: The personal-data setting for New_User.Email was not converted. In the Catalyst console, mark New_User.Email as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
-- `field-property:New_Contact.Contact_Name property personal data` — not converted. property personal data is not carried by the generated name field. One varchar per part (prefix, first_name, last_name, suffix). Deluge sees one value; a shim joins the parts. Parts are not separate field-type rows.
-  - Step: The personal-data setting for New_Contact.Contact_Name was not converted. In the Catalyst console, mark New_Contact.Contact_Name as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
-- `field-property:New_Contact.Mobile property personal data` — not converted. property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
-  - Step: The personal-data setting for New_Contact.Mobile was not converted. In the Catalyst console, mark New_Contact.Mobile as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
-- `field-property:New_Contact.Assistant_Phone property personal data` — not converted. property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
-  - Step: The personal-data setting for New_Contact.Assistant_Phone was not converted. In the Catalyst console, mark New_Contact.Assistant_Phone as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
-- `field-property:New_Contact.Email property personal data` — not converted. property personal data is not carried by the generated email field. There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.
-  - Step: The personal-data setting for New_Contact.Email was not converted. In the Catalyst console, mark New_Contact.Email as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
-- `field-property:New_Contact.Phone_Number property personal data` — not converted. property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
-  - Step: The personal-data setting for New_Contact.Phone_Number was not converted. In the Catalyst console, mark New_Contact.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
-- `field-property:New_Vendor.Phone_Number property personal data` — not converted. property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
-  - Step: The personal-data setting for New_Vendor.Phone_Number was not converted. In the Catalyst console, mark New_Vendor.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
-- `field-property:New_Vendor.Email property personal data` — not converted. property personal data is not carried by the generated email field. There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.
-  - Step: The personal-data setting for New_Vendor.Email was not converted. In the Catalyst console, mark New_Vendor.Email as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
 - `field-property:New_Deal.Amount property format` — not converted. property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.
   - Step: The display format for New_Deal.Amount was not converted. In the Catalyst console, set the field's number or currency format for New_Deal.Amount, then preview a record and confirm the value is displayed correctly.
 - `field-property:New_Deal.Expected_Revenue property format` — not converted. property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.
   - Step: The display format for New_Deal.Expected_Revenue was not converted. In the Catalyst console, set the field's number or currency format for New_Deal.Expected_Revenue, then preview a record and confirm the value is displayed correctly.
-- `field-property:New_Lead.Phone_Number property personal data` — not converted. property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
-  - Step: The personal-data setting for New_Lead.Phone_Number was not converted. In the Catalyst console, mark New_Lead.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
-- `field-property:New_Lead.Name property personal data` — not converted. property personal data is not carried by the generated name field. One varchar per part (prefix, first_name, last_name, suffix). Deluge sees one value; a shim joins the parts. Parts are not separate field-type rows.
-  - Step: The personal-data setting for New_Lead.Name was not converted. In the Catalyst console, mark New_Lead.Name as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
 - `field-property:New_Lead.Website flag enable  linkname` — not converted. flag enable  linkname is not carried by the generated url field. URLs routinely exceed varchar 255, which truncates silently. Default storage is text. maxchar of 255 or less stays varchar of that length. Creator also stores link title; a second column is not invented here.
   - Step: The flag enable  linkname setting for New_Lead.Website was not converted. In the Catalyst console, configure that setting for New_Lead.Website, then preview the form or report and confirm the field behaves as expected.
 - `field-property:New_Lead.Annual_Revenue property format` — not converted. property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.
   - Step: The display format for New_Lead.Annual_Revenue was not converted. In the Catalyst console, set the field's number or currency format for New_Lead.Annual_Revenue, then preview a record and confirm the value is displayed correctly.
-- `field-property:New_Lead.Email property personal data` — not converted. property personal data is not carried by the generated email field. There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.
-  - Step: The personal-data setting for New_Lead.Email was not converted. In the Catalyst console, mark New_Lead.Email as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
-- `field-property:New_Lead.Mobile property personal data` — not converted. property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
-  - Step: The personal-data setting for New_Lead.Mobile was not converted. In the Catalyst console, mark New_Lead.Mobile as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
 - `field-property:New_Quotation.Sub_Total property format` — not converted. property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.
   - Step: The display format for New_Quotation.Sub_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Quotation.Sub_Total, then preview a record and confirm the value is displayed correctly.
 - `field-property:New_Quotation.Tax_Total property format` — not converted. property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.

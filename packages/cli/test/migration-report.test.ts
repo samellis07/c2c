@@ -54,32 +54,35 @@ test('committed fixtures carry the deterministic flag', () => {
   const lib = report.apps.find((app) => app.app === 'library-application-system');
   assert.ok(ff && lib);
   assert.equal(ff.deterministic, false);
-  assert.equal(ff.todoCount, 11);
+  assert.equal(ff.todoCount, 25);
   assert.equal(ff.fillLockEntries, 0);
-  assert.equal(ff.uiTodoCount, 0);
+  assert.equal(ff.uiTodoCount, 14);
   assert.equal(
     ff.todoKinds.reduce((sum, kind) => sum + kind.count, 0),
-    11,
+    25,
   );
-  // lib's stub custom actions now dispatch, so it has no todos — but its 14
-  // silent drops (its Language_Settings translation now counts) keep it off the deterministic count under the drop rule.
+  // Both apps now carry personal-data field flags as counted manual-step UI
+  // todos instead of silent drops, so lib has todos too (it did not before).
   assert.equal(lib.deterministic, false);
-  assert.equal(lib.todoCount, 0);
-  assert.equal(lib.uiTodoCount, 0);
-  assert.deepEqual(lib.todoKinds, []);
-  assert.equal(lib.silentDrops, 14);
-  assert.equal(ff.silentDrops, 56);
+  assert.equal(lib.todoCount, 3);
+  assert.equal(lib.uiTodoCount, 3);
+  assert.equal(
+    lib.todoKinds.reduce((sum, kind) => sum + kind.count, 0),
+    3,
+  );
+  assert.equal(lib.silentDrops, 11);
+  assert.equal(ff.silentDrops, 42);
   assert.equal(report.aggregate.deterministicApps, 0);
-  assert.equal(report.aggregate.silentDrops, 70);
-  assert.equal(report.aggregate.todoTotal, 11);
-  // lib has no todos but silent drops: it counts as a no-todo app, not a deterministic one.
-  assert.equal(report.aggregate.noTodoApps, 1);
+  assert.equal(report.aggregate.silentDrops, 53);
+  assert.equal(report.aggregate.todoTotal, 28);
+  // Neither app has zero todos anymore.
+  assert.equal(report.aggregate.noTodoApps, 0);
   for (const app of [lib, ff]) assert.equal(app.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), app.silentDrops);
-  assert.equal(report.aggregate.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), 70);
+  assert.equal(report.aggregate.silentDropKinds.reduce((sum, kind) => sum + kind.count, 0), 53);
   const text = migrationReportAsText(report);
-  assert.match(text, /^apps with no residual todos: 1\/2$/m);
+  assert.match(text, /^apps with no residual todos: 0\/2$/m);
   assert.match(text, /^apps with no residual todos and no silent drops \(deterministic\): 0\/2$/m);
-  assert.match(text, /^silent drops \(total\): 70$/m);
+  assert.match(text, /^silent drops \(total\): 53$/m);
 });
 
 test('aggregate counts only deterministic apps toward the 95%/100% targets', () => {

@@ -522,28 +522,6 @@
   ],
   "residuals": [
     {
-      "id": "field-property:Staff_Members.Staff_Name property personal data",
-      "kind": "field-property",
-      "construct": "Staff_Members.Staff_Name property personal data",
-      "form": "Staff_Members",
-      "field": "Staff_Name",
-      "property": "property personal data",
-      "reason": "property personal data is not carried by the generated name field. One varchar per part (prefix, first_name, last_name, suffix). Deluge sees one value; a shim joins the parts. Parts are not separate field-type rows.",
-      "step": "The personal-data setting for Staff_Members.Staff_Name was not converted. In the Catalyst console, mark Staff_Members.Staff_Name as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:Staff_Members.Staff_Email property personal data",
-      "kind": "field-property",
-      "construct": "Staff_Members.Staff_Email property personal data",
-      "form": "Staff_Members",
-      "field": "Staff_Email",
-      "property": "property personal data",
-      "reason": "property personal data is not carried by the generated email field. There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.",
-      "step": "The personal-data setting for Staff_Members.Staff_Email was not converted. In the Catalyst console, mark Staff_Members.Staff_Email as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:Staff_Members.Phone_Number property defaultcountry",
       "kind": "field-property",
       "construct": "Staff_Members.Phone_Number property defaultcountry",
@@ -552,17 +530,6 @@
       "property": "property defaultcountry",
       "reason": "property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
       "step": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:Staff_Members.Phone_Number property personal data",
-      "kind": "field-property",
-      "construct": "Staff_Members.Phone_Number property personal data",
-      "form": "Staff_Members",
-      "field": "Phone_Number",
-      "property": "property personal data",
-      "reason": "property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
-      "step": "The personal-data setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, mark Staff_Members.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
       "stepSource": "specific"
     },
     {
@@ -651,8 +618,27 @@
     "statements": 65,
     "translated": 5,
     "shimmed": 60,
-    "todo": 0,
-    "todoLocations": []
+    "todo": 3,
+    "todoLocations": [
+      {
+        "location": "field Staff_Members.Staff_Name property personal data",
+        "construct": "Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the data-privacy protection Staff_Name needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+      },
+      {
+        "location": "field Staff_Members.Staff_Email property personal data",
+        "construct": "Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the data-privacy protection Staff_Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+      },
+      {
+        "location": "field Staff_Members.Phone_Number property personal data",
+        "construct": "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+        "scope": "ui",
+        "manualStep": "In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+      }
+    ]
   },
   "blockers": [
     {
@@ -661,27 +647,6 @@
       "detail": "Field Staff_Members.Phone_Number property defaultcountry is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
       "manualStep": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: Staff_Members.Phone_Number property personal data",
-      "detail": "Field Staff_Members.Phone_Number property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The personal-data setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, mark Staff_Members.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: Staff_Members.Staff_Email property personal data",
-      "detail": "Field Staff_Members.Staff_Email property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The personal-data setting for Staff_Members.Staff_Email was not converted. In the Catalyst console, mark Staff_Members.Staff_Email as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: Staff_Members.Staff_Name property personal data",
-      "detail": "Field Staff_Members.Staff_Name property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The personal-data setting for Staff_Members.Staff_Name was not converted. In the Catalyst console, mark Staff_Members.Staff_Name as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled."
     },
     {
       "kind": "deluge",
@@ -752,27 +717,61 @@
       "detail": "The Language_Settings translation block is not migrated and has no manual step — only a migration-report warning, which is not a counted manual item. List the language, the string count, and what the user must copy into the generated client.",
       "scope": "app",
       "manualStep": "The translation Language_Settings was not converted. In the Catalyst console, add the language and copy the source translation strings into the generated app, then preview the translated text and verify it is correct."
+    },
+    {
+      "kind": "ui",
+      "label": "field Staff_Members.Phone_Number property personal data",
+      "detail": "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "field Staff_Members.Staff_Email property personal data",
+      "detail": "Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the data-privacy protection Staff_Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+    },
+    {
+      "kind": "ui",
+      "label": "field Staff_Members.Staff_Name property personal data",
+      "detail": "Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "scope": "ui",
+      "manualStep": "In the Catalyst console, apply the data-privacy protection Staff_Name needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
     }
   ],
   "determinism": {
     "deterministic": false,
-    "todoCount": 0,
+    "todoCount": 3,
     "fillLockEntries": 0,
-    "todoKinds": [],
-    "uiTodoCount": 0,
-    "silentDrops": 14,
+    "todoKinds": [
+      {
+        "construct": "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+        "count": 1
+      },
+      {
+        "construct": "Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+        "count": 1
+      },
+      {
+        "construct": "Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+        "count": 1
+      }
+    ],
+    "uiTodoCount": 3,
+    "silentDrops": 11,
     "silentDropKinds": [
       {
         "construct": "report-feature",
         "count": 5
       },
       {
-        "construct": "field-property",
+        "construct": "page-element",
         "count": 4
       },
       {
-        "construct": "page-element",
-        "count": 4
+        "construct": "field-property",
+        "count": 1
       },
       {
         "construct": "translation",
