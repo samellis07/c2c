@@ -432,8 +432,18 @@ function propertyProved(p: Property, field: Field, ui: UiField | undefined, colu
   if (key === 'type') return ui !== undefined || columns.length > 0;
   if (key === 'displayname') {
     const plain = unquote(raw);
+    // A blank override is a no-op: Creator falls back to the field's own name
+    // when `displayname` is empty, same as the generated label fallback
+    // (`field.displayName || field.name` in model.ts buildField).
+    if (plain.trim() === '') return ui?.label === field.name;
     return ui?.label === plain || ui?.label === plain.trim();
   }
+  // `qrcode = true` / `barcode = true` mark a scan-capable field the same way
+  // a bare `qr scan`/`barcode scan` flag does (wantsScan in model.ts reads
+  // both field.flags and field.properties for the same /scan|qr|barcode/i
+  // match). The generated input already carries that as `ui.scan`, which the
+  // static runtime renders as `data-scan="true"` (client-runtime.js fieldControl).
+  if (key === 'qrcode' || key === 'barcode') return ui?.scan === true;
   if (key === 'displayformat') {
     // System Users fields are backed by the Catalyst Users endpoint. Their
     // display format is carried as the generated lookup's display field.

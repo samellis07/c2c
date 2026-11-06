@@ -1837,6 +1837,59 @@ test('alloweddays is emitted only for every weekday on a generated date widget',
   assert.equal(rowStatus(all, notDate, 'Visit.Day property alloweddays'), 'dropped');
 });
 
+test('qrcode and barcode field properties are emitted only when the generated field marks scan', () => {
+  const source = dsApp(`
+	form Book
+	{
+		Code
+		(
+			type = text
+			qrcode = true
+		)
+		Isbn
+		(
+			type = text
+			barcode = true
+		)
+		Plain
+		(
+			type = text
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Book.Code property qrcode'), 'emitted');
+  assert.equal(rowStatus(source, out, 'Book.Isbn property barcode'), 'emitted');
+
+  // The generated field lost its scan marker: both properties return.
+  const unmarked = cloneOutputs(out);
+  const book = unmarked.model.forms.find((f) => f.name === 'Book')!;
+  book.fields.find((f) => f.name === 'Code')!.scan = false;
+  book.fields.find((f) => f.name === 'Isbn')!.scan = false;
+  assert.equal(rowStatus(source, unmarked, 'Book.Code property qrcode'), 'dropped');
+  assert.equal(rowStatus(source, unmarked, 'Book.Isbn property barcode'), 'dropped');
+});
+
+test('a blank displayname override is emitted only when the generated label falls back to the field name', () => {
+  const source = dsApp(`
+	form Lead
+	{
+		Industry
+		(
+			type = text
+			displayname = ""
+		)
+	}
+`);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Lead.Industry property displayname'), 'emitted');
+
+  // The generated label diverges from the field name: the blank override no longer proves equivalent.
+  const relabeled = cloneOutputs(out);
+  relabeled.model.forms[0]!.fields.find((item) => item.name === 'Industry')!.label = 'Something Else';
+  assert.equal(rowStatus(source, relabeled, 'Lead.Industry property displayname'), 'dropped');
+});
+
 const LOOKUP_APP = `
 	form Course
 	{
