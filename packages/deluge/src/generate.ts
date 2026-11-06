@@ -6792,6 +6792,7 @@ ${map}
  */
 export function translationLanguage(t: Translation): string | undefined {
   if (t.data && typeof t.data === 'object' && !Array.isArray(t.data)) {
+    // determinism-allow: only keys.length and keys[0] (the sole key when length is 1) are read -- insertion order never reaches generated output.
     const keys = Object.keys(t.data);
     if (keys.length === 1) return keys[0];
   }
