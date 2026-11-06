@@ -512,8 +512,13 @@ export function patchMail(source: string, importSpec: string): string {
   if (!source.includes('createRuntime(') || source.includes('c2cGuardedMail')) return source;
   const patched = source.replaceAll('createRuntime({', 'createRuntime({ mail: (message) => c2cGuardedMail(message, typeof req === "undefined" ? undefined : req), mailGuarded: true, ');
   const line = `import { c2cGuardedMail } from ${JSON.stringify(importSpec)};\n`;
-  const at = patched.indexOf('import ');
-  if (at < 0) return line + patched;
+  // A real import statement starts a line; a header comment can otherwise
+  // mention the word "import" first (e.g. "body.import === true marks a bulk
+  // import write"), which an unanchored search would splice the new import
+  // into, leaving it commented out and c2cGuardedMail undefined.
+  const match = /^import /m.exec(patched);
+  if (!match) return line + patched;
+  const at = match.index;
   return `${patched.slice(0, at)}${line}${patched.slice(at)}`;
 }
 

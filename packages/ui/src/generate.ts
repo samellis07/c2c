@@ -12,7 +12,7 @@ import { closedChoices, scheduleAnchorFieldType, unquote, type App, type Field }
 import { compareEnUs } from '../../core/src/order.js';
 import { clientRuntimeSource as bundledClientRuntime } from './client-runtime-parts.js';
 import { toolchainBannerLines, toolchainHeader } from '../../core/src/toolchain.js';
-import { accessPolicyFor, administratorProfiles, appUniqueColumnsOf, decimalColumnsOf, fieldRuleDenials, flowSpecs, functionRowBinding, generate as generateDeluge, blueprintFieldSpecs, schemaRuntimeOptions, type GeneratedFile } from '../../deluge/src/generate.js';
+import { accessPolicyFor, administratorProfiles, appUniqueColumnsOf, decimalColumnsOf, fieldRuleDenials, flowSpecs, functionRowBinding, generate as generateDeluge, blueprintFieldSpecs, multiLookupsOf, schemaRuntimeOptions, type GeneratedFile } from '../../deluge/src/generate.js';
 import { analyzeConnections } from '../../deluge/src/connections.js';
 import { fieldStoreImports, fieldStoreShape, fieldStoreWriteArg, fileFieldsByForm, subformLinksFor, writeLiveSource } from '../../deluge/src/field-store.js';
 import { reportCriteria } from '../../deluge/src/translate.js';
@@ -2842,6 +2842,11 @@ function submitStub(app: App, form: UiModel['forms'][number], path: string, delu
   const decimalLine = Object.keys(decimalMap).length ? `\n      decimalColumns: ${JSON.stringify(decimalMap)},` : '';
   const uniqueMap = appUniqueColumnsOf(app, schema);
   const uniqueLine = Object.keys(uniqueMap).length ? `\n      appUniqueColumns: ${JSON.stringify(uniqueMap)},` : '';
+  // A multi-lookup field is a junction table, never a column on this form;
+  // without this option the runtime insert has no spec to write it under and
+  // stores it as opaque text on the parent row instead.
+  const multiLookupMap = multiLookupsOf(app, schema);
+  const multiLookupLine = Object.keys(multiLookupMap).length ? `\n      multiLookups: ${JSON.stringify(multiLookupMap)},` : '';
   // A cancel submit in on validate refuses the write with 422 and the alert
   // text. The validate set follows the record event: `on add` and unscoped
   // when inserting, `on edit` and unscoped when the request's ROWID marks an
@@ -3047,7 +3052,7 @@ ${hasPresuccess ? '  // The catch scope drops buffered presuccess effects, so th
     }
     ${hasPresuccess ? '' : 'const '}runtime = createRuntime({
       dryRun: false,
-      appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined,${zoneLine}${decimalLine}${uniqueLine}
+      appTimeZone: process.env.C2C_APP_TIMEZONE || deploy.appTimeZone || undefined,${zoneLine}${decimalLine}${uniqueLine}${multiLookupLine}
       ...(datastore ? { datastore, ...(datastore.now ? { now: datastore.now } : {}) } : {}),
       access,${usesThisapp ? '\n      functions,' : ''}
       // writeLive -> datastore.update re-authorizes the screened values; the

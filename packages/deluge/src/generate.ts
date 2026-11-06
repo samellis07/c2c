@@ -4081,8 +4081,16 @@ export function schemaRuntimeOptions(app: App, schema?: SchemaPlan): string {
   return `${decimalColumnsOption(app)}${multiLookupsOption(app, schema)}${appUniqueOption(app, schema)}${writeRulesOption(app, schema)}${splitsOption(app, schema)}`;
 }
 
-function multiLookupsOption(app: App, schema?: SchemaPlan): string {
-  const map: Record<string, Record<string, { table: string; parentColumn: string; valueColumn: string; orderColumn: string }>> = {};
+export interface MultiLookupSpec {
+  table: string;
+  parentColumn: string;
+  valueColumn: string;
+  orderColumn: string;
+}
+
+/** form → multi-lookup field → the junction table that holds it (schema-derived, shared by the generated runtime and offline verification). */
+export function multiLookupsOf(app: App, schema?: SchemaPlan): Record<string, Record<string, MultiLookupSpec>> {
+  const map: Record<string, Record<string, MultiLookupSpec>> = {};
   for (const table of (schema ?? schemaOf(app)).tables) {
     if (table.role !== 'junction') continue;
     const parent = table.columns.find((column) => column.name === 'parent_id');
@@ -4092,6 +4100,11 @@ function multiLookupsOption(app: App, schema?: SchemaPlan): string {
     const field = value.field ?? value.name;
     (map[table.form] ??= {})[field] = { table: table.name, parentColumn: parent.name, valueColumn: value.name, orderColumn: order.name };
   }
+  return map;
+}
+
+function multiLookupsOption(app: App, schema?: SchemaPlan): string {
+  const map = multiLookupsOf(app, schema);
   return Object.keys(map).length ? `, multiLookups: ${JSON.stringify(map)}` : '';
 }
 

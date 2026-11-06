@@ -21,6 +21,7 @@ import {
   mailModuleSource,
   mailSenderTag,
   maskMailAddress,
+  patchMail,
   readMailSenderEvidence,
   recipientsOf,
   writeDeployTree,
@@ -1293,4 +1294,23 @@ test('the mail module initializes the SDK at admin scope: App User holds no tabl
   const source = mailModuleSource(['ops@example.test']);
   assert.match(source, /catalyst\.initialize\(req, \{ scope: "admin" \}\)/);
   assert.doesNotMatch(source, /initialize\(req\)/);
+});
+
+test('patchMail inserts its import before the first real import, not a false match inside the header comment', () => {
+  const source = `/**
+ * Not an HTTP route.
+ * body.import === true marks a bulk import write (the seed/migrate-data path).
+ */
+import { readFileSync } from "node:fs";
+
+export async function handler(req, res) {
+  const runtime = createRuntime({
+    dryRun: true,
+  });
+}
+`;
+  const patched = patchMail(source, '../../c2c-mail.mjs');
+  assert.doesNotMatch(patched, /body\.import \{ c2cGuardedMail \}/, 'the import must not be spliced into the comment text');
+  assert.match(patched, /^import \{ c2cGuardedMail \} from "\.\.\/\.\.\/c2c-mail\.mjs";\nimport \{ readFileSync \} from "node:fs";/m);
+  assert.match(patched, /mail: \(message\) => c2cGuardedMail\(/);
 });

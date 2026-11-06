@@ -1906,6 +1906,37 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     return undefined;
   }
 
+  /**
+   * The new row's id from a datastore.insert result: a bare array of rows
+   * (the generated adapter's own shape), or whatever {@link insertedId}
+   * already recognizes (a split base insert's `{ROWID}` or `{rows:[...]}}`).
+   */
+  function parentRowId(result: unknown): unknown {
+    const direct = insertedId(result);
+    if (direct !== undefined) return direct;
+    const row = firstRecord(result);
+    return row && typeof row === 'object' ? rowIdentity(row as Record<string, unknown>) : undefined;
+  }
+
+  /**
+   * The ordered junction rows a multi-lookup insert needs: one row per
+   * value, `row_order` 0-based, so a read in the same order (see
+   * {@link readMultiLookupValues}) returns what the caller sent. A parent
+   * insert that returned no id (a dry run already refused above) writes nothing.
+   */
+  async function writeMultiLookups(
+    parentId: unknown,
+    writes: readonly { spec: { table: string; parentColumn: string; valueColumn: string; orderColumn: string }; values: readonly unknown[] }[],
+  ): Promise<void> {
+    const insertRows = options.datastore?.insert;
+    if (!insertRows || parentId == null || parentId === '') return;
+    for (const { spec, values: list } of writes) {
+      if (!list.length) continue;
+      const rows = list.map((value, index) => ({ [spec.parentColumn]: parentId, [spec.valueColumn]: value, [spec.orderColumn]: index }));
+      for (const part of chunk(rows, LIMITS.insertRowsPerCall)) await insertRows(spec.table, part);
+    }
+  }
+
   /** A previous attempt stored this Creator id. Reuse that base row instead of inserting another. */
   async function baseIdForSource(table: string, sourceId: unknown): Promise<unknown> {
     const queryRows = options.datastore?.query;
@@ -3316,6 +3347,21 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         const fields = { ...values };
         stripColumnKeys(fields, 'both');
         warnLongStrings(form, fields);
+        // A multi-lookup field is a junction table, never a column on this
+        // form: the schema plan creates no such column, so sending it through
+        // would store it as opaque stringified text (or refuse live). It is
+        // written as junction rows once the parent ROWID exists, below.
+        const lookupSpecs = options.multiLookups?.[form];
+        const lookupWrites: { field: string; spec: NonNullable<RuntimeOptions['multiLookups']>[string][string]; values: unknown[] }[] = [];
+        if (lookupSpecs) {
+          for (const [field, spec] of Object.entries(lookupSpecs)) {
+            if (!Object.prototype.hasOwnProperty.call(fields, field)) continue;
+            const raw = fields[field];
+            delete fields[field];
+            const list = Array.isArray(raw) ? raw : raw == null ? [] : [raw];
+            lookupWrites.push({ field, spec, values: list });
+          }
+        }
         let storedValues: Record<string, unknown> = fields;
         // Only the page endpoints' setup-write runtime passes adminUserId —
         // those islands run as the request principal, so the insert is
@@ -3348,8 +3394,9 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
         if (appUniqueOf(form).length) await checkAppUnique(form, stored, [], 1);
         await assignAutonumbers(form, batches[0]![0]!);
         const layout = guardWrite(form, stored);
-        if (layout) return insertSplit(form, layout, stored);
-        return options.datastore.insert(form, batches[0]!);
+        const result = layout ? await insertSplit(form, layout, stored) : await options.datastore.insert(form, batches[0]!);
+        if (lookupWrites.length) await writeMultiLookups(parentRowId(result), lookupWrites);
+        return result;
       },
       async update(ctx, form, criteria, values) {
         if (deferredEffects?.active && form !== deferredEffects.form) {
