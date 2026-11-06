@@ -759,17 +759,13 @@ function warningOnlyFunctionApp(): App {
   });
 }
 
-test('a function warned about but not emitted is a silent drop, not coverage', () => {
+test('a function warned about but not emitted is listed as a todo, not a silent drop', () => {
   const a = warningOnlyFunctionApp();
   const out = collectOutputs(a);
   assert.ok(out.warnings.some((w) => w.construct === 'function-untranslated' && w.name === 'Navi'));
   assert.ok(!out.files.some((f) => f.path === 'functions/custom/navi.mjs'));
-  const drops = auditApp(a, out);
-  assert.deepEqual(
-    drops.map((d) => `${d.kind}: ${d.name}`),
-    ['function: Navi'],
-  );
-  assert.match(drops[0]!.note, /warning/);
+  assert.ok(out.todos.some((t) => t.construct === 'function-untranslated'));
+  assert.deepEqual(auditApp(a, out), []);
 });
 
 test('a todo inside a warned function counts it once — a warning alone never does', () => {

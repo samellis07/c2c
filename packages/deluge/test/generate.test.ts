@@ -6516,7 +6516,10 @@ test('a function has no client half: no client module, prefetch or call endpoint
   assert.match(stripComments(check.source), /shim\.log\.info\(ctx, shim\.record\.get\(o, "Code"\)\)/);
   assert.match(stripComments(check.source), /shim\.datastore\.insert\(/);
   assert.doesNotMatch(check.source, /actions\.push|client-condition-uses-server|client-loop-uses-server/);
-  assert.deepEqual(g.todos, []);
+  // OpenForm.Review's comment-only body produces no server, client, or
+  // prefetch code; the generator counts it as a todo instead of leaving it a
+  // silent drop.
+  assert.deepEqual(g.todos.map((t) => t.construct), ['function-untranslated']);
 });
 
 test('a form workflow keeps its client half and its client-split todos', () => {
