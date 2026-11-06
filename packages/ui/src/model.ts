@@ -97,6 +97,8 @@ export interface UiField {
   initialValue?: string;
   note?: string;
   todo?: string;
+  /** `enable linkname` flag on a URL field: the field also stores a link title. */
+  linkName?: boolean;
   subfields?: UiField[];
   /** Row from the export, when the field has one. */
   row?: number;
@@ -949,6 +951,7 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
   else if (widget === 'textarea' || widget === 'richtext') ui.maxLength = max ?? 10_000;
   else if (widget === 'url') ui.maxLength = max;
   else if (max) ui.maxLength = max;
+  if (widget === 'url' && wantsLinkName(field)) ui.linkName = true;
   const pattern = patternOf(field);
   if (pattern.bad) {
     ui.todo = 'Field regex did not compile; the pattern was not copied.';
@@ -1043,6 +1046,16 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
     todos.push({ area: 'field', name: `${formName}.${field.name}`, reason: row.reason });
   }
   if (ui.unique) ui.note = [ui.note, 'Unique is enforced on the server. The browser cannot see other rows.'].filter(Boolean).join(' ');
+  if (prop(field, 'toolbar') !== undefined) {
+    const reason = 'Toolbar setting is not carried; the generated editor has no toolbar control.';
+    ui.note = [ui.note, reason].filter(Boolean).join(' ');
+    todos.push({ area: 'field', name: `${formName}.${field.name}`, reason });
+  }
+  if (prop(field, 'defaultrow') !== undefined) {
+    const reason = 'Default row count is not carried; the generated subform starts with no pre-filled rows.';
+    ui.note = [ui.note, reason].filter(Boolean).join(' ');
+    todos.push({ area: 'field', name: `${formName}.${field.name}`, reason });
+  }
   return ui;
 }
 
@@ -1079,6 +1092,11 @@ function isUsers(field: Field, token: string): boolean {
 function wantsScan(field: Field): boolean {
   if (field.flags.some((flag) => /scan|qr|barcode/i.test(flag))) return true;
   return field.properties.some((p) => /scan|qr|barcode/i.test(p.key));
+}
+
+/** `enable linkname` on a URL field: Creator stores both the URL and a link title. */
+function wantsLinkName(field: Field): boolean {
+  return field.flags.some((flag) => /^enable\s+linkname$/i.test(flag.trim()));
 }
 
 function prop(field: Field, key: string): string | undefined {

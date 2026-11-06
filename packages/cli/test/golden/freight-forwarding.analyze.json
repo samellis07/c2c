@@ -1325,17 +1325,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Account.Website flag enable  linkname",
-      "kind": "field-property",
-      "construct": "New_Account.Website flag enable  linkname",
-      "form": "New_Account",
-      "field": "Website",
-      "property": "flag enable  linkname",
-      "reason": "flag enable  linkname is not carried by the generated url field. URLs routinely exceed varchar 255, which truncates silently. Default storage is text. maxchar of 255 or less stays varchar of that length. Creator also stores link title; a second column is not invented here.",
-      "step": "The flag enable  linkname setting for New_Account.Website was not converted. In the Catalyst console, configure that setting for New_Account.Website, then preview the form or report and confirm the field behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_User.Email property personal data",
       "kind": "field-property",
       "construct": "New_User.Email property personal data",
@@ -1465,17 +1454,6 @@
       "property": "property personal data",
       "reason": "property personal data is not carried by the generated name field. One varchar per part (prefix, first_name, last_name, suffix). Deluge sees one value; a shim joins the parts. Parts are not separate field-type rows.",
       "step": "The personal-data setting for New_Lead.Name was not converted. In the Catalyst console, mark New_Lead.Name as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Lead.Website flag enable  linkname",
-      "kind": "field-property",
-      "construct": "New_Lead.Website flag enable  linkname",
-      "form": "New_Lead",
-      "field": "Website",
-      "property": "flag enable  linkname",
-      "reason": "flag enable  linkname is not carried by the generated url field. URLs routinely exceed varchar 255, which truncates silently. Default storage is text. maxchar of 255 or less stays varchar of that length. Creator also stores link title; a second column is not invented here.",
-      "step": "The flag enable  linkname setting for New_Lead.Website was not converted. In the Catalyst console, configure that setting for New_Lead.Website, then preview the form or report and confirm the field behaves as expected.",
       "stepSource": "specific"
     },
     {
@@ -1927,13 +1905,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Account.Website flag enable  linkname",
-      "detail": "Field New_Account.Website flag enable  linkname is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The flag enable  linkname setting for New_Account.Website was not converted. In the Catalyst console, configure that setting for New_Account.Website, then preview the form or report and confirm the field behaves as expected."
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_Contact.Assistant_Phone property personal data",
       "detail": "Field New_Contact.Assistant_Phone property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
@@ -2085,13 +2056,6 @@
       "detail": "Field New_Lead.Phone_Number property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
       "manualStep": "The personal-data setting for New_Lead.Phone_Number was not converted. In the Catalyst console, mark New_Lead.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Lead.Website flag enable  linkname",
-      "detail": "Field New_Lead.Website flag enable  linkname is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The flag enable  linkname setting for New_Lead.Website was not converted. In the Catalyst console, configure that setting for New_Lead.Website, then preview the form or report and confirm the field behaves as expected."
     },
     {
       "kind": "deluge",
@@ -2374,11 +2338,11 @@
       }
     ],
     "uiTodoCount": 0,
-    "silentDrops": 56,
+    "silentDrops": 54,
     "silentDropKinds": [
       {
         "construct": "field-property",
-        "count": 33
+        "count": 31
       },
       {
         "construct": "report-feature",

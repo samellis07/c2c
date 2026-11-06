@@ -18,6 +18,10 @@
  *   value, required, or unique is emitted only when that setting is on the
  *   generated field or its schema column. A counted field counts every
  *   property. A dropped field adds no property rows.
+ *   `toolbar = enable` and `defaultrow = N` have no generated-field
+ *   equivalent, so each is listed through the field's UI todo; `enable
+ *   linkname` has a real equivalent (the generated field's `linkName` flag),
+ *   so it is listed only when that flag is actually set.
  * - report / page: a 'generated' UI model entry (packages/ui/src/model.ts
  *   buildReport/buildPage). Listed: a UI todo naming the report, or the page,
  *   or one of its ZML elements. buildReport/buildPage always push a todo when
@@ -689,6 +693,10 @@ function flagProved(flag: string, ui: UiField | undefined, field: Field): boolea
   // generated lookup opens the parent form's add screen and selects the new
   // row (client-runtime selectLookupNew, wired in wireForm).
   if (flag.trim().toLowerCase() === 'allow new entries') return !!ui?.lookup?.addNew;
+  // `enable linkname` on a URL field has a real generated-field equivalent:
+  // the field's `linkName` flag (Creator stores both the URL and a link
+  // title). Proved only when the generated field actually carries it.
+  if (/^enable\s+linkname$/i.test(flag.trim())) return ui?.linkName === true;
   // `description` declares the field's help text. It is carried when the
   // field's `type = help_text` or `type = tooltip` annotation message reaches
   // ui.help (decorations/labels.ts helpMessage); a bare flag with no such

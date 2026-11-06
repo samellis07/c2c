@@ -862,7 +862,7 @@
     "console: stratus-enable — Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket)",
     "console: connections — Catalyst console → Connections: connect zoho.books.* (the user consents to each OAuth flow)"
   ],
-  "silentDrops": 56,
+  "silentDrops": 54,
   "residuals": [
     {
       "id": "field-property:New_Account.Annual_Revenue property format",
@@ -895,17 +895,6 @@
       "property": "property personal data",
       "reason": "property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
       "step": "The personal-data setting for New_Account.Phone_Number was not converted. In the Catalyst console, mark New_Account.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Account.Website flag enable  linkname",
-      "kind": "field-property",
-      "construct": "New_Account.Website flag enable  linkname",
-      "form": "New_Account",
-      "field": "Website",
-      "property": "flag enable  linkname",
-      "reason": "flag enable  linkname is not carried by the generated url field. URLs routinely exceed varchar 255, which truncates silently. Default storage is text. maxchar of 255 or less stays varchar of that length. Creator also stores link title; a second column is not invented here.",
-      "step": "The flag enable  linkname setting for New_Account.Website was not converted. In the Catalyst console, configure that setting for New_Account.Website, then preview the form or report and confirm the field behaves as expected.",
       "stepSource": "specific"
     },
     {
@@ -1038,17 +1027,6 @@
       "property": "property personal data",
       "reason": "property personal data is not carried by the generated name field. One varchar per part (prefix, first_name, last_name, suffix). Deluge sees one value; a shim joins the parts. Parts are not separate field-type rows.",
       "step": "The personal-data setting for New_Lead.Name was not converted. In the Catalyst console, mark New_Lead.Name as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Lead.Website flag enable  linkname",
-      "kind": "field-property",
-      "construct": "New_Lead.Website flag enable  linkname",
-      "form": "New_Lead",
-      "field": "Website",
-      "property": "flag enable  linkname",
-      "reason": "flag enable  linkname is not carried by the generated url field. URLs routinely exceed varchar 255, which truncates silently. Default storage is text. maxchar of 255 or less stays varchar of that length. Creator also stores link title; a second column is not invented here.",
-      "step": "The flag enable  linkname setting for New_Lead.Website was not converted. In the Catalyst console, configure that setting for New_Lead.Website, then preview the form or report and confirm the field behaves as expected.",
       "stepSource": "specific"
     },
     {
