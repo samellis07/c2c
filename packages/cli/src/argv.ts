@@ -227,6 +227,7 @@ export const ARGV_SPEC: Readonly<Record<string, CommandSpec>> = {
       '--allow-empty': 'bool',
       '--data-parity': 'bool',
       '--ds': 'value',
+      '--e2e-report': 'value',
       '--json': 'bool',
       '--out': 'value',
       '--rows': 'value',
