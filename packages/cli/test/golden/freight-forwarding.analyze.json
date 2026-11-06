@@ -1336,17 +1336,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Account.Lead_ID property sortorder",
-      "kind": "field-property",
-      "construct": "New_Account.Lead_ID property sortorder",
-      "form": "New_Account",
-      "field": "Lead_ID",
-      "property": "property sortorder",
-      "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The sort order for New_Account.Lead_ID was not converted. In the Catalyst console, set the field's sort order for New_Account.Lead_ID, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_User.Email property personal data",
       "kind": "field-property",
       "construct": "New_User.Email property personal data",
@@ -1388,17 +1377,6 @@
       "property": "property personal data",
       "reason": "property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
       "step": "The personal-data setting for New_Contact.Assistant_Phone was not converted. In the Catalyst console, mark New_Contact.Assistant_Phone as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Contact.Lead_ID property sortorder",
-      "kind": "field-property",
-      "construct": "New_Contact.Lead_ID property sortorder",
-      "form": "New_Contact",
-      "field": "Lead_ID",
-      "property": "property sortorder",
-      "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The sort order for New_Contact.Lead_ID was not converted. In the Catalyst console, set the field's sort order for New_Contact.Lead_ID, then preview the form or report and confirm values appear in that order.",
       "stepSource": "specific"
     },
     {
@@ -1468,17 +1446,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Deal.Lead_ID property sortorder",
-      "kind": "field-property",
-      "construct": "New_Deal.Lead_ID property sortorder",
-      "form": "New_Deal",
-      "field": "Lead_ID",
-      "property": "property sortorder",
-      "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The sort order for New_Deal.Lead_ID was not converted. In the Catalyst console, set the field's sort order for New_Deal.Lead_ID, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Lead.Phone_Number property personal data",
       "kind": "field-property",
       "construct": "New_Lead.Phone_Number property personal data",
@@ -1520,17 +1487,6 @@
       "property": "property format",
       "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
       "step": "The display format for New_Lead.Annual_Revenue was not converted. In the Catalyst console, set the field's number or currency format for New_Lead.Annual_Revenue, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Lead.Account_ID property sortorder",
-      "kind": "field-property",
-      "construct": "New_Lead.Account_ID property sortorder",
-      "form": "New_Lead",
-      "field": "Account_ID",
-      "property": "property sortorder",
-      "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The sort order for New_Lead.Account_ID was not converted. In the Catalyst console, set the field's sort order for New_Lead.Account_ID, then preview the form or report and confirm values appear in that order.",
       "stepSource": "specific"
     },
     {
@@ -1964,13 +1920,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Account.Lead_ID property sortorder",
-      "detail": "Field New_Account.Lead_ID property sortorder is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The sort order for New_Account.Lead_ID was not converted. In the Catalyst console, set the field's sort order for New_Account.Lead_ID, then preview the form or report and confirm values appear in that order."
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_Account.Phone_Number property personal data",
       "detail": "Field New_Account.Phone_Number property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
@@ -2006,13 +1955,6 @@
     },
     {
       "kind": "deluge",
-      "label": "silent drop field-property: New_Contact.Lead_ID property sortorder",
-      "detail": "Field New_Contact.Lead_ID property sortorder is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The sort order for New_Contact.Lead_ID was not converted. In the Catalyst console, set the field's sort order for New_Contact.Lead_ID, then preview the form or report and confirm values appear in that order."
-    },
-    {
-      "kind": "deluge",
       "label": "silent drop field-property: New_Contact.Mobile property personal data",
       "detail": "Field New_Contact.Mobile property personal data is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
@@ -2038,13 +1980,6 @@
       "detail": "Field New_Deal.Expected_Revenue property format is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
       "manualStep": "The display format for New_Deal.Expected_Revenue was not converted. In the Catalyst console, set the field's number or currency format for New_Deal.Expected_Revenue, then preview a record and confirm the value is displayed correctly."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Deal.Lead_ID property sortorder",
-      "detail": "Field New_Deal.Lead_ID property sortorder is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The sort order for New_Deal.Lead_ID was not converted. In the Catalyst console, set the field's sort order for New_Deal.Lead_ID, then preview the form or report and confirm values appear in that order."
     },
     {
       "kind": "deluge",
@@ -2115,13 +2050,6 @@
       "detail": "Field New_Invoice.Tax_Total property format is not in the generated field. Add one: either emit the setting or record the manual step.",
       "scope": "app",
       "manualStep": "The display format for New_Invoice.Tax_Total was not converted. In the Catalyst console, set the field's number or currency format for New_Invoice.Tax_Total, then preview a record and confirm the value is displayed correctly."
-    },
-    {
-      "kind": "deluge",
-      "label": "silent drop field-property: New_Lead.Account_ID property sortorder",
-      "detail": "Field New_Lead.Account_ID property sortorder is not in the generated field. Add one: either emit the setting or record the manual step.",
-      "scope": "app",
-      "manualStep": "The sort order for New_Lead.Account_ID was not converted. In the Catalyst console, set the field's sort order for New_Lead.Account_ID, then preview the form or report and confirm values appear in that order."
     },
     {
       "kind": "deluge",
@@ -2446,11 +2374,11 @@
       }
     ],
     "uiTodoCount": 0,
-    "silentDrops": 60,
+    "silentDrops": 56,
     "silentDropKinds": [
       {
         "construct": "field-property",
-        "count": 37
+        "count": 33
       },
       {
         "construct": "report-feature",
