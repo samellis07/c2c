@@ -1,0 +1,22 @@
+# Message rules for the clean-repo cutover, applied to every commit and tag
+# message. Syntax is `git filter-repo --replace-msg`: each line is
+# `regex:<pattern>==><replacement>` (empty replacement deletes the match) and
+# `#` lines are comments. `(?m)` anchors a rule to a line start so prose that
+# merely mentions a trailer word mid-sentence is kept.
+#
+# Every trailer the source history carries was emitted by tooling, so the
+# rules are deliberately broad: all co-author trailers go, along with the
+# "Generated with [tool](url)" / "Generated with Claude Code" footers, a whole
+# line that is only `Generated with Tool` (one capitalized name), a
+# `Signed-off-by` line that names a `[bot]`, the robot-emoji trailer line, and
+# agent session trailers (Claude-Session and any other `<Vendor>-Session:`
+# line pointing at an agent session URL).
+# cutover.mjs re-checks the rewritten history against VENDOR_TRAILER_CHECKS in
+# strip.mjs and fails the cutover if any line survives these rules.
+regex:(?m)^[Cc]o-[Aa]uthored-[Bb]y:[^\n]*==>
+regex:(?m)^Generated with \[[^\n\]]*\]\([^\n)]*\)[^\n]*==>
+regex:(?m)^Generated (with|by) (Claude|Copilot|Cursor|Gemini|Aider|ChatGPT)\b[^\n]*==>
+regex:(?m)^Generated (with|by) [A-Z][A-Za-z0-9.+_-]*\.?[ \t]*$==>
+regex:(?m)^[A-Za-z]+-Session: [^\n]*==>
+regex:(?m)^🤖[^\n]*==>
+regex:(?m)^Signed-off-by:[^\n]*\[bot\][^\n]*==>
