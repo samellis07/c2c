@@ -1212,6 +1212,16 @@ function auditPageElements(app: App, out: AuditOutputs, rows: CoverageRow[]): vo
         rows.push({ kind: 'page-element', name, status: 'emitted', via: 'UI page element' });
         return;
       }
+      // A snippet (`dspZml`/`dsp`) that fails to compile still renders its own
+      // node with an empty payload, which reads as a dropped `content` gap —
+      // but the compiler already nested a same-tag TODO naming exactly that
+      // failure on the node itself. That TODO is keyed by tag, not by this
+      // element's export name (so same-tag siblings on the page keep distinct
+      // TODOs), so it never matches `namedTodo` below; check it directly.
+      if (found && gap === 'content' && found.children.some((child) => child.kind === 'todo' && child.tag === found.tag)) {
+        rows.push({ kind: 'page-element', name, status: 'counted', via: 'UI zml todo' });
+        return;
+      }
       const namedTodo = out.model.todos.some((todo) => todo.area === 'zml' && (todo.name === name || todo.name === `${page.name}.${zmlName(el.attributes)}`));
       const tagTodo = !found && out.model.todos.some((todo) => todo.area === 'zml' && todo.name === `${page.name}.${el.tag}`);
       const pageTodo = out.model.todos.some((todo) => todo.area === 'page' && todo.name === page.name);
