@@ -160,7 +160,7 @@
  *                                   directory must already exist with no symlinked component.
  */
 
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import {
   decode,
@@ -1008,9 +1008,41 @@ function main(argv: string[]): number {
     return 0;
   }
   if (cmd === 'score-ui') {
+    const waveFlag = flag('--wave');
+    if (waveFlag || (target && existsSync(join(target, 'evidence')))) {
+      const waveDir = waveFlag ?? target;
+      import('../../ui-score/src/wave.js').then(
+        async ({ scoreWave, waveReportMarkdown, loadRubric }) => {
+          const referenceDir = flag('--reference');
+          const uiMode = (flag('--ui') as 'vanilla' | 'react' | 'both' | undefined) ?? 'vanilla';
+          const out = flag('--out');
+          const write = rest.includes('--write');
+          const only = flag('--only')?.split(',').map((s) => s.trim());
+          const rubric = loadRubric();
+          try {
+            const report = await scoreWave(waveDir, { referenceDir, ui: uiMode, out, write, only, rubric });
+            if (rest.includes('--json')) {
+              process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+            } else {
+              process.stdout.write(waveReportMarkdown(report, rubric));
+            }
+            process.exitCode = report.pass ? 0 : 1;
+          } catch (err) {
+            process.stderr.write(`c2c score-ui --wave: ${err instanceof Error ? err.message : String(err)}\n`);
+            process.exitCode = 2;
+          }
+        },
+        (err: unknown) => {
+          process.stderr.write(`c2c score-ui: ${err instanceof Error ? err.message : String(err)}\n`);
+          process.exitCode = 2;
+        },
+      );
+      return 0;
+    }
     const { ir, locked } = loadIrOrLocked(target);
     if (locked) return CLI_EXIT.lockedExport;
     if (!ir) return CLI_EXIT.inputMissing;
+    const referenceDir = flag('--reference');
     const uiDir = flag('--ui');
     let bundle;
     try {
@@ -1021,13 +1053,34 @@ function main(argv: string[]): number {
     }
     const write = flag('--write');
     scoreUi(ir, bundle).then(
-      (result) => {
+      async (result) => {
+        let refReport;
+        if (referenceDir) {
+          const { loadAppReferenceCaptures, verifyReferenceCaptures } = await import('../../ui-score/src/wave.js');
+          const ref = loadAppReferenceCaptures(basename(target, '.ds'), referenceDir);
+          if (ref) {
+            refReport = verifyReferenceCaptures(ir, result, ref);
+          }
+        }
         if (write) {
           mkdirSync(dirname(write), { recursive: true });
-          writeFileSync(write, `${JSON.stringify(scoreFileOf(result), null, 2)}\n`);
+          const fileObj = {
+            ...scoreFileOf(result),
+            ...(refReport ? { reference: { totalCaptures: refReport.totalCaptures, matchedCaptures: refReport.matchedCaptures, coverage: refReport.coverageRatio } } : {}),
+          };
+          writeFileSync(write, `${JSON.stringify(fileObj, null, 2)}\n`);
         }
-        process.stdout.write(rest.includes('--json') ? `${JSON.stringify(result, null, 2)}\n` : uiScoreAsText(result));
-        process.exitCode = result.pass ? 0 : 1;
+        if (rest.includes('--json')) {
+          process.stdout.write(`${JSON.stringify({ ...result, ...(refReport ? { reference: refReport } : {}) }, null, 2)}\n`);
+        } else {
+          let text = uiScoreAsText(result);
+          if (refReport) {
+            text += `\nReference captures: ${refReport.matchedCaptures}/${refReport.totalCaptures} matched (${Math.round(refReport.coverageRatio * 100)}%)\n`;
+          }
+          process.stdout.write(text);
+        }
+        const pass = result.pass && (refReport ? refReport.coverageRatio >= 0.8 : true);
+        process.exitCode = pass ? 0 : 1;
       },
       (err: unknown) => {
         process.stderr.write(`c2c score-ui: ${err instanceof Error ? err.message : 'scoring failed'}\n`);

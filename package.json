@@ -36,6 +36,7 @@
     "tables:budget": "npm run build && node dist/determinism/src/table-budget.js",
     "smoke:gallery": "npm run build && node dist/quality/src/gallery.js",
     "score-ui:gallery": "npm run build && node dist/ui-score/src/gallery.js",
+    "score-ui:wave": "npm run build && node dist/ui-score/src/wave.js",
     "ui-react:check": "npm run build && node tools/ui-react-check.mjs",
     "golden:baseline": "npm run build && node tests/golden/baseline.mjs",
     "golden:offline-plan:update": "npm run build && node tests/golden/update-offline-plan.mjs",
