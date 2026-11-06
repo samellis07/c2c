@@ -82,7 +82,7 @@ import { authPlan, type AuthPlan } from '../../auth/src/plan.js';
 import { analyzeConnections, memberChain, permissionScopes, walk, type ConnectionsReport } from '../../deluge/src/connections.js';
 import type { Expr } from '../../deluge/src/ast.js';
 import { dispatchGet, ZOHO_ENV, ZOHO_PAYMENT } from '../../deluge/src/dispatch.js';
-import { flowSpecs, generate, slug, workflowKind, type CoverageEntry, type FlowSpec, type GeneratedFile, type GenerateResult, type GenerateWarning, type WorkflowCoverage } from '../../deluge/src/generate.js';
+import { flowSpecs, generate, slug, translationLanguage, workflowKind, type CoverageEntry, type FlowSpec, type GeneratedFile, type GenerateResult, type GenerateWarning, type WorkflowCoverage } from '../../deluge/src/generate.js';
 import { parse } from '../../deluge/src/parser.js';
 import type { Stmt } from '../../deluge/src/ast.js';
 import { planSchedules, type SchedulePlan } from '../../deluge/src/schedules.js';
@@ -1631,14 +1631,6 @@ function auditPermission(app: App, out: AuditOutputs, rows: CoverageRow[]): void
       note: `A permissions literal owned by ${p.owner ?? '(no owner)'} matches no profile or role, so the auth plan migrates none of it. List what it grants and the manual role or grant that reproduces it.`,
     });
   }
-}
-
-function translationLanguage(t: App['translations'][number]): string | undefined {
-  if (t.data && typeof t.data === 'object' && !Array.isArray(t.data)) {
-    const keys = Object.keys(t.data);
-    if (keys.length === 1) return keys[0];
-  }
-  return undefined;
 }
 
 /**

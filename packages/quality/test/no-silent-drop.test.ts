@@ -731,12 +731,16 @@ test('only a blank or fully commented script is vacuous', () => {
 test('a translation block with several languages is named as a block and counted only by a todo', () => {
   const multi = app({ translations: [{ json: '{}', data: { de: {}, fr: {} }, span: { start: 10, end: 200 } }] });
   const out = collectOutputs(multi);
-  assert.deepEqual(auditApp(multi, out).map((d) => d.name), ['translation block']);
-  // A todo inside the span counts it once; a todo outside does not.
-  out.todos = [{ construct: 'manual', start: 0, end: 5 }];
-  assert.deepEqual(auditApp(multi, out).map((d) => d.name), ['translation block']);
-  out.todos = [{ construct: 'manual', start: 20, end: 30 }];
+  // Generation itself lists the block as a manual step, so nothing is dropped.
   assert.deepEqual(auditApp(multi, out), []);
+  // Without that todo the block is a silent drop, named as a block.
+  const noTodo = { ...out, todos: out.todos.filter((t) => t.construct !== 'translation-block') };
+  assert.deepEqual(auditApp(multi, noTodo).map((d) => d.name), ['translation block']);
+  // A todo inside the span counts it once; a todo outside does not.
+  const outsideOnly = { ...noTodo, todos: [{ construct: 'manual', start: 0, end: 5 }] };
+  assert.deepEqual(auditApp(multi, outsideOnly).map((d) => d.name), ['translation block']);
+  const insideManual = { ...noTodo, todos: [{ construct: 'manual', start: 20, end: 30 }] };
+  assert.deepEqual(auditApp(multi, insideManual), []);
   // A single-language block is named by its language, warned or not.
   const de = app({ translations: [{ json: '{}', data: { de: {} }, span: Z }] });
   const deOut = collectOutputs(de);

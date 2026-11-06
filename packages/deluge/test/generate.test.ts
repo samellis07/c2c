@@ -6923,6 +6923,39 @@ test('translation blocks are listed as explicit manual steps in migration-report
   assert.match(rows[0]!.note, /default-language/);
 });
 
+test('a translation block naming no single language is listed as a manual step, not only a warning', () => {
+  const g = generate(
+    app({
+      translations: [
+        {
+          json: '{"de":{"FormField.Orders.Title":" Titel "},"fr":{"FormField.Orders.Title":" Titre ","FormField.Orders.Amount":" Montant "}}',
+          data: { de: { 'FormField.Orders.Title': ' Titel ' }, fr: { 'FormField.Orders.Title': ' Titre ', 'FormField.Orders.Amount': ' Montant ' } },
+          span: { start: 10, end: 200 },
+        },
+      ],
+    }),
+  );
+  const report = JSON.parse(g.files.find((file) => file.path === 'migration-report.json')!.source) as {
+    deterministic: boolean;
+    untranslated: { construct: string; count: number }[];
+  };
+  const rows = report.untranslated.filter((u) => u.construct === 'translation-block');
+  assert.deepEqual(rows, [{ construct: 'translation-block', count: 1 }]);
+  assert.equal(report.deterministic, false);
+  const warnings = JSON.parse(g.files.find((file) => file.path === 'migration-report.json')!.source).warnings as {
+    construct: string;
+    name: string;
+    note: string;
+  }[];
+  const warning = (warnings ?? []).find((w) => w.construct === 'translation-not-migrated');
+  assert.ok(warning);
+  assert.equal(warning!.name, 'translation block');
+  assert.match(warning!.note, /2 languages/);
+  assert.match(warning!.note, /de \(1\)/);
+  assert.match(warning!.note, /fr \(2\)/);
+  assert.match(warning!.note, /3 total strings/);
+});
+
 test('a submit claim is per machine: two machines on one form write one submit history row', async () => {
   const machine = (name: string) =>
     workflow({
