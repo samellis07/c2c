@@ -123,8 +123,10 @@ function planCustom(app: App, w: Workflow, name: string, pool: string, module: s
     job_meta: jobMeta(name, pool, module, 0),
     c2c,
   });
+  // Both cron types need the zone: OneTime for its instant, CronExpression for
+  // the job_detail.timezone that Catalyst evaluates the wall time in.
+  if (!zone) return { kind: 'custom', module, cron: null, gap: 'schedule-time-zone' };
   if (frequency === null || frequency === 'once') {
-    if (!zone) return { kind: 'custom', module, cron: null, gap: 'schedule-time-zone' };
     return { kind: 'custom', module, cron: def('OneTime', { time_of_execution: String(epochMillis(start, zone)) }), gap: null };
   }
   const expression = FORM_SCHEDULE_FREQUENCIES.has(frequency) ? cronExpression(start, frequency) : null;
@@ -411,8 +413,8 @@ export const KNOWN_GAPS: readonly { id: string; text: string; source: string }[]
   },
   {
     id: 'cron-time-zone',
-    text: 'A CronExpression copies the Creator wall time. Whether Catalyst evaluates it in the project time zone is not verified; the Creator zone is kept in c2c.timeZone and the expression is not shifted.',
-    source: '[UNVERIFIED] Catalyst cron time zone',
+    text: 'A CronExpression copies the Creator wall time and is not shifted. The cron POST sends the Creator zone as job_detail.timezone; a schedule with no resolvable zone gets no cron. Whether Catalyst accepts every IANA zone name there is not verified.',
+    source: 'Catalyst Job Scheduling API, Create a Cron Using Cron Expressions (job_detail.timezone, required); IANA acceptance [UNVERIFIED]',
   },
   {
     id: 'cron-start-date',

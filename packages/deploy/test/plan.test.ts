@@ -1293,6 +1293,7 @@ const SENDS_MAIL = `application "MailApp" {
         type = schedule
         start = "2020-01-01 10:00:00"
         frequency = daily
+        time zone = "Asia/Kolkata"
         on start {
           actions {
             on load ( sendmail [ from: zoho.adminuserid to: "test@example.com" subject: "hi" message: "hi" ] )
@@ -1592,6 +1593,7 @@ test('plan: record-relative schedules never become crons; absolute ones keep the
   assert.equal(daily.cron_type, 'CronExpression');
   assert.equal(daily.cron_expression, '0 6 * * *');
   assert.equal(daily.job_detail.time_of_execution, undefined);
+  assert.equal(daily.job_detail.timezone, 'Asia/Kolkata', 'Catalyst evaluates the cron expression in job_detail.timezone');
   // The same cron the generator writes to job-scheduling.json, so one mapping source.
   const scheduling = JSON.parse(generate(deriveIr(parse(DS_SCHEDULES))).files.find((f) => f.path === 'job-scheduling.json')!.source) as { crons: { cron_name: string; cron_type: string }[] };
   for (const cron of [once, daily]) {
