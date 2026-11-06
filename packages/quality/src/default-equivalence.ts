@@ -69,6 +69,13 @@ export const DEFAULT_EQUIVALENCE: readonly DefaultEquivalence[] = [
     value: 'local_drive',
     why: 'Files come from the local drive only. The generated field offers only a device file picker (a file input in the static UI, a drop zone in the React app) and has no cloud document picker.',
   },
+  {
+    widget: 'address',
+    accept: undefined,
+    key: 'adjust_using_map',
+    value: 'false',
+    why: 'The user cannot move the address pin on a map. The generated address field is plain text inputs and shows no map.',
+  },
 ];
 
 /** True when `key = text` is a listed default the generated widget `ui` already behaves as. */

@@ -7,7 +7,7 @@ import { generateReactApp } from '../../ui-react/src/generate.js';
 import { DEFAULT_EQUIVALENCE } from '../src/default-equivalence.js';
 import { collectOutputs, coverageLedger } from '../src/no-silent-drop.js';
 
-const TYPE: Record<string, string> = { image: 'image', file: 'upload file' };
+const TYPE: Record<string, string> = { image: 'image', file: 'upload file', address: 'address' };
 
 function dsApp(type: string, lines: string[]): App {
   const props = lines.map((line) => `\t\t\t${line}\n`).join('');
@@ -50,6 +50,7 @@ test('a non-default value of a listed property stays a drop', () => {
   assert.equal(status(dsApp('image', ['switch camera = false']), 'switch camera'), 'dropped');
   assert.equal(status(dsApp('image', ['show gallery = false']), 'show gallery'), 'dropped');
   assert.equal(status(dsApp('upload file', ['browse = unknown_cloud']), 'browse'), 'dropped');
+  assert.equal(status(dsApp('address', ['adjust_using_map = true']), 'adjust_using_map'), 'dropped');
 });
 
 test('browse with uncarried cloud document sources emits a counted UI todo', () => {
