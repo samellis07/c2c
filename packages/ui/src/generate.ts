@@ -1015,9 +1015,11 @@ ${requirePrincipal()}
     const canAdd = canCreate(access, principal, route.form);
     // A declared sortorder applies only while its display field is one the
     // caller can read — the same readable check the option text passes.
+    // ID is the row's own identifier, not a protectable column: it is always
+    // readable, the same exception the rest of the lookup machinery grants it.
     const sorts = Object.prototype.hasOwnProperty.call(lookupSort, route.form) ? lookupSort[route.form] : {};
     const entry = Object.prototype.hasOwnProperty.call(sorts, display) ? sorts[display] : undefined;
-    const sort = entry && !isHidden(entry.field) && (!Array.isArray(scoped.fields) || scoped.fields.includes(entry.field)) ? entry : undefined;
+    const sort = entry && !isHidden(entry.field) && (entry.field === "ID" || !Array.isArray(scoped.fields) || scoped.fields.includes(entry.field)) ? entry : undefined;
     if (deploy.mode === "live") {
       const datastore = await liveDatastore();
       if (!datastore || typeof datastore.query !== "function") {
@@ -1462,10 +1464,12 @@ function storedColumnsOfParents(app: App, parents: Record<string, string>, plan:
  * Parent form -> display field -> the ORDER BY a declared `sortorder` emits on
  * the lookup option read. The ref of {@link lookupSorts} resolves against the
  * generated schema: a composite part ref to its stored part column, an
- * exact-decimal field to its Double shadow, anything else to its stored
- * column. A ref with no stored column emits nothing (the read stays in ROWID
- * order and the audit still counts the setting as a drop — fail closed). Only
- * schema column names reach the clause, never `.ds` text.
+ * exact-decimal field to its Double shadow, the parent's own record id (`ID`)
+ * to ROWID (the same identity the rest of the generator already gives `ID`,
+ * see `readableField`/`orderByOf`), anything else to its stored column. A ref
+ * with no stored column emits nothing (the read stays in ROWID order and the
+ * audit still counts the setting as a drop — fail closed). Only schema column
+ * names reach the clause, never `.ds` text.
  */
 export function lookupOrderMap(app: App): Record<string, Record<string, { field: string; dir: SortDir; orderBy: string }>> {
   const plan = schemaOf(app);
@@ -1480,6 +1484,7 @@ export function lookupOrderMap(app: App): Record<string, Record<string, { field:
       const top = sort.ref.split('.')[0]!;
       let column: string | undefined;
       if (sort.ref.includes('.')) column = parts[sort.ref];
+      else if (top === 'ID') column = 'ROWID';
       else if (Object.hasOwn(formDecimals, top)) column = formDecimals[top]!.shadow;
       else column = table.columns.find((item) => !item.shadowFor && (item.field === top || item.name === top))?.name;
       if (!column || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(column)) continue;

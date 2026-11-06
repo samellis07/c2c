@@ -862,7 +862,7 @@
     "console: stratus-enable — Catalyst console → the project → Cloud Scale → Stratus → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale), then on Create your First Bucket create one bucket (any name) — done when it shows in the bucket list (click Create again if nothing happens after a few seconds) — then c2c verifies it: c2c provision --record stratus-enable (GET /baas/v1/project/<project>/bucket)",
     "console: connections — Catalyst console → Connections: connect zoho.books.* (the user consents to each OAuth flow)"
   ],
-  "silentDrops": 60,
+  "silentDrops": 56,
   "residuals": [
     {
       "id": "field-property:New_Account.Annual_Revenue property format",
@@ -909,17 +909,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Account.Lead_ID property sortorder",
-      "kind": "field-property",
-      "construct": "New_Account.Lead_ID property sortorder",
-      "form": "New_Account",
-      "field": "Lead_ID",
-      "property": "property sortorder",
-      "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The sort order for New_Account.Lead_ID was not converted. In the Catalyst console, set the field's sort order for New_Account.Lead_ID, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_User.Email property personal data",
       "kind": "field-property",
       "construct": "New_User.Email property personal data",
@@ -961,17 +950,6 @@
       "property": "property personal data",
       "reason": "property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
       "step": "The personal-data setting for New_Contact.Assistant_Phone was not converted. In the Catalyst console, mark New_Contact.Assistant_Phone as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Contact.Lead_ID property sortorder",
-      "kind": "field-property",
-      "construct": "New_Contact.Lead_ID property sortorder",
-      "form": "New_Contact",
-      "field": "Lead_ID",
-      "property": "property sortorder",
-      "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The sort order for New_Contact.Lead_ID was not converted. In the Catalyst console, set the field's sort order for New_Contact.Lead_ID, then preview the form or report and confirm values appear in that order.",
       "stepSource": "specific"
     },
     {
@@ -1041,17 +1019,6 @@
       "stepSource": "specific"
     },
     {
-      "id": "field-property:New_Deal.Lead_ID property sortorder",
-      "kind": "field-property",
-      "construct": "New_Deal.Lead_ID property sortorder",
-      "form": "New_Deal",
-      "field": "Lead_ID",
-      "property": "property sortorder",
-      "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The sort order for New_Deal.Lead_ID was not converted. In the Catalyst console, set the field's sort order for New_Deal.Lead_ID, then preview the form or report and confirm values appear in that order.",
-      "stepSource": "specific"
-    },
-    {
       "id": "field-property:New_Lead.Phone_Number property personal data",
       "kind": "field-property",
       "construct": "New_Lead.Phone_Number property personal data",
@@ -1093,17 +1060,6 @@
       "property": "property format",
       "reason": "property format is not carried by the generated currency field. Stored as a canonical decimal string in varchar 64, not Double and not bigint minor units. The ISO 4217 code on the field (type = INR) is column metadata, not a cell. Scale is the field decimal places (default 2). ZCQL orders the varchar as text.",
       "step": "The display format for New_Lead.Annual_Revenue was not converted. In the Catalyst console, set the field's number or currency format for New_Lead.Annual_Revenue, then preview a record and confirm the value is displayed correctly.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:New_Lead.Account_ID property sortorder",
-      "kind": "field-property",
-      "construct": "New_Lead.Account_ID property sortorder",
-      "form": "New_Lead",
-      "field": "Account_ID",
-      "property": "property sortorder",
-      "reason": "property sortorder is not carried by the generated lookup-single field. Foreign key is creatable by API: data_type \"foreign key\" and on_delete \"ON-DELETE-SET-NULL\" (optional) or \"ON-DELETE-CASCADE\" (mandatory). ZCQL INNER/LEFT joins need this FK. The parent column is ROWID. A missing target form becomes a bigint id column and the report says \"FK needs console\". Picklist, radio, and list fields with values = Form.Field use this row (list uses the multi row).",
-      "step": "The sort order for New_Lead.Account_ID was not converted. In the Catalyst console, set the field's sort order for New_Lead.Account_ID, then preview the form or report and confirm values appear in that order.",
       "stepSource": "specific"
     },
     {

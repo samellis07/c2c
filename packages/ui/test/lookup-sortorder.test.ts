@@ -41,6 +41,18 @@ ${fields.map((name) => `\t\t\t\t\t\t${name}\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tvisibi
 \t\t\t\t}`;
 }
 
+/** A grant with no FieldPermissions block: every field of the form is readable, Creator's record id included. */
+function grantAll(form: string, report: string): string {
+  return `\t\t\t\t${form}
+\t\t\t\t{
+\t\t\t\t\tenabled = true
+\t\t\t\t\tReportPermissions
+\t\t\t\t\t{
+\t\t\t\t\t\t${report} = {"View"}
+\t\t\t\t\t}
+\t\t\t\t}`;
+}
+
 const STAFF = { user: { profile: 'Staff' } };
 
 function hotelBody(): string {
@@ -185,6 +197,50 @@ ${field('Member', 'picklist', '\t\t\tvalues = Add_Member.ID\n\t\t\tdisplayformat
 \t\t\tModulePermissions
 \t\t\t{
 ${grant('Add_Member', 'All_Members', ['Member_ID'])}
+${grant('Book_Transaction', 'All_Book_Transactions', ['Title', 'Member'])}
+\t\t\t}
+\t\t}
+\t}`;
+}
+
+/** A sortorder whose display format names the parent's own record id, `[ID]`. */
+function idBody(): string {
+  return `\tsection Main
+\t{
+\t\tform Add_Member
+\t\t{
+${field('Member_ID', 'text')}
+\t\t}
+\t\tform Book_Transaction
+\t\t{
+${field('Title', 'text')}
+${field('Member', 'picklist', '\t\t\tvalues = Add_Member.ID\n\t\t\tdisplayformat = [ID]\n\t\t\tsortorder = descending')}
+\t\t}
+\t\tlist All_Members
+\t\t{
+\t\t\tshow all rows from Add_Member
+\t\t\t(
+\t\t\t\tMember_ID
+\t\t\t)
+\t\t}
+\t\tlist All_Book_Transactions
+\t\t{
+\t\t\tshow all rows from Book_Transaction
+\t\t\t(
+\t\t\t\tTitle
+\t\t\t\tMember
+\t\t\t)
+\t\t}
+\t}
+\tshare_settings
+\t{
+\t\t"Staff"
+\t\t{
+\t\t\tname = "Staff"
+\t\t\ttype = Users_Permissions
+\t\t\tModulePermissions
+\t\t\t{
+${grantAll('Add_Member', 'All_Members')}
 ${grant('Book_Transaction', 'All_Book_Transactions', ['Title', 'Member'])}
 \t\t\t}
 \t\t}
@@ -420,4 +476,35 @@ ${field('Ref', 'picklist', '\t\t\tvalues = Parent.ID\n\t\t\tdisplayformat = [Cod
   assert.equal(Object.keys(lookupOrderMap(app)).length, 0);
   const model = buildModel(app);
   assert.equal(fieldOf(model, 'Child', 'Ref').lookup?.sort, undefined);
+});
+
+test('a sortorder on the parent record id binds to ROWID, not a stored column', async () => {
+  const app = appOf(idBody());
+  const orders = lookupOrderMap(app);
+  assert.deepEqual(orders.Add_Member?.ID, { field: 'ID', dir: 'desc', orderBy: 'ORDER BY ROWID DESC, ROWID' });
+  const built = await writeBuilt(idBody());
+  try {
+    const stub = readFileSync(join(built.dir, 'functions/lookups/lookup.mjs'), 'utf8');
+    assert.match(stub, /ORDER BY ROWID DESC, ROWID/);
+    const lookup = await built.load('functions/lookups/lookup.mjs');
+    const orders: string[] = [];
+    await withStore(
+      (form, where, limit, offset, orderBy) => {
+        orders.push(orderBy);
+        return [];
+      },
+      async () => {
+        const res = await invoke(lookup.default, { ...STAFF, url: '/lookups/Add_Member/ID' });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+      },
+    );
+    assert.match(orders.at(-1)!, /ORDER BY ROWID DESC, ROWID/);
+    const drops = auditApp(app, collectOutputs(app, { model: buildModel(app), uiFiles: built.files }));
+    assert.ok(
+      !drops.some((drop) => drop.kind === 'field-property' && drop.property === 'property sortorder'),
+      `a sortorder on the record id must not drop: ${JSON.stringify(drops.filter((d) => d.name.includes('sortorder')))}`,
+    );
+  } finally {
+    rmSync(built.dir, { recursive: true, force: true });
+  }
 });
