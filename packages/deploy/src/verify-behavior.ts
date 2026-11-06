@@ -27,7 +27,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { App } from '../../core/src/ir.js';
 import { repoRoot } from '../../core/src/toolchain.js';
-import { fieldRuleDenials, slug } from '../../deluge/src/generate.js';
+import { fieldRuleDenials, multiLookupsOf, slug } from '../../deluge/src/generate.js';
 import { columnRenamesOf, generateSchema } from '../../schema/src/generator.js';
 import { generateUi, type UiModel } from '../../ui/src/index.js';
 import { appTimeZone } from '../../ui/src/generate.js';
@@ -491,6 +491,7 @@ export async function startOfflineBackend(app: App, opts: OfflineHarnessOptions 
   let server: Server | undefined;
   try {
     const generated = deployFiles(app, offlineGuard(app), false, { mode: opts.mode ?? 'live' });
+    const multiLookups = multiLookupsOf(app, generated.schema);
     writeDeployTree(dir, generated.files);
     const fnDir = join(dir, 'functions/c2c_api');
     const config = JSON.parse(readFileSync(join(fnDir, 'catalyst-config.json'), 'utf8')) as { deployment?: { env_variables?: Record<string, string> } };
@@ -537,7 +538,25 @@ export async function startOfflineBackend(app: App, opts: OfflineHarnessOptions 
         return { status: res.status, body: parsed };
       },
       async tableRows(table) {
-        return sdk.state().tables[table] ?? [];
+        const rows = sdk.state().tables[table] ?? [];
+        const specs = multiLookups[table];
+        if (!specs) return rows;
+        // A multi-lookup field is stored as a junction table, never a column
+        // on `table`; a golden names it by field (the API shape), so the row
+        // read back for comparison is hydrated from the junction the same
+        // way a live report read is.
+        const tables = sdk.state().tables;
+        return rows.map((row) => {
+          const id = String(row.ROWID ?? row.rowid ?? '');
+          const out = { ...row };
+          for (const [field, spec] of Object.entries(specs)) {
+            out[field] = (tables[spec.table] ?? [])
+              .filter((junctionRow) => String(junctionRow[spec.parentColumn]) === id)
+              .sort((a, b) => Number(a[spec.orderColumn]) - Number(b[spec.orderColumn]))
+              .map((junctionRow) => junctionRow[spec.valueColumn]);
+          }
+          return out;
+        });
       },
       async reset() {
         for (const table of Object.keys(sdk.state().tables)) await sdk.executeZCQLQuery(`DELETE FROM ${table}`);

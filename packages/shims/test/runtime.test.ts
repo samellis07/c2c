@@ -167,6 +167,34 @@ test('generated record reads hydrate multi lookups from ordered junction rows', 
   assert.deepEqual(runtime.shim.record.get(rows[0]!, 'Members'), ['700', '500']);
 });
 
+test('a live insert of a multi-lookup field writes ordered junction rows instead of a column on the parent table', async () => {
+  const inserted: { form: string; rows: Record<string, unknown>[] }[] = [];
+  const runtime = createRuntime({
+    dryRun: false,
+    appTimeZone: 'UTC',
+    multiLookups: { Team: { Members: { table: 'Team__Members', parentColumn: 'parent_id', valueColumn: 'Members', orderColumn: 'row_order' } } },
+    datastore: {
+      async insert(form, rows) {
+        inserted.push({ form, rows });
+        if (form === 'Team') return rows.map((row) => ({ ...row, ROWID: '900' }));
+        return rows.map((row, i) => ({ ...row, ROWID: String(901 + i) }));
+      },
+    },
+  });
+  const ctx = runtime.context({});
+  await runtime.shim.datastore.insert(ctx, 'Team', { Name: 'Core', Members: ['700', '500'] });
+  const teamWrite = inserted.find((call) => call.form === 'Team');
+  assert.equal(Object.hasOwn(teamWrite?.rows[0] ?? {}, 'Members'), false, 'Members is a junction, never a column on Team');
+  const junctionWrite = inserted.find((call) => call.form === 'Team__Members');
+  assert.deepEqual(
+    junctionWrite?.rows.map((row) => ({ parent_id: row.parent_id, Members: row.Members, row_order: row.row_order })),
+    [
+      { parent_id: '900', Members: '700', row_order: 0 },
+      { parent_id: '900', Members: '500', row_order: 1 },
+    ],
+  );
+});
+
 test('dry-run record reads hydrate multi lookups from seeded junction rows without datastore calls', async () => {
   let calls = 0;
   const runtime = createRuntime({
