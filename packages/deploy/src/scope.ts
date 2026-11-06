@@ -39,9 +39,19 @@ export function catalystScopeArgs(org: string, projectId: string): string[] {
 }
 
 export function scrubCatalystEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  // A host-refreshed one-time access token (CATALYST_TOKEN, pinned via
+  // CATALYST_ACTIVE_DC) is an alternative to the stored credential file, not an
+  // addition to it: when X_ZC_CREDENTIAL_PATH is present the CLI uses its own
+  // stored, refreshable credential, and any raw token in the ambient env must
+  // still be stripped like every other CATALYST_/ZC_ variable.
+  const oneTimeToken = env.X_ZC_CREDENTIAL_PATH === undefined;
   const next: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(env)) {
     if (key === 'X_ZC_CREDENTIAL_PATH') {
+      next[key] = value;
+      continue;
+    }
+    if (oneTimeToken && (key === 'CATALYST_TOKEN' || key === 'CATALYST_ACTIVE_DC')) {
       next[key] = value;
       continue;
     }

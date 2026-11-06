@@ -1027,7 +1027,7 @@ export async function deployCli(args: readonly string[], io: Io): Promise<number
     const deployedEnv = functionConfig ? JSON.parse(String(functionConfig.data))?.deployment?.env_variables as Record<string, unknown> : {};
     const deployedEnvKeys = Object.keys(deployedEnv);
     let secretsApplied = false;
-    const childEnv = scrubCatalystEnv(io.env);
+    const childEnv = scrubCatalystEnv({ ...io.env, CATALYST_ACTIVE_DC: guard.dc });
     const probe = await spawnWithRetry(
       () => io.spawn('catalyst', [...catalystScopeArgs(guard.org, guard.projectId), 'project:list'], { cwd, env: childEnv }),
       'catalyst project:list',
