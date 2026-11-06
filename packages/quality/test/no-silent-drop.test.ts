@@ -1782,7 +1782,7 @@ test('a same-named lookup on a child table never proves the reverse column of th
   assert.equal(rowStatus(source, out, 'Parent.Kids property bidirectional'), 'dropped');
 });
 
-test('a bidirectional pair without a linked grid side gets no reverse relation and stays a drop', () => {
+test('a bidirectional pair without a linked grid side gets no reverse relation and is recorded as a manual step', () => {
   const source = dsApp(`
 	form Company
 	{
@@ -1804,8 +1804,30 @@ test('a bidirectional pair without a linked grid side gets no reverse relation a
 	}
 `);
   const out = collectOutputs(source);
-  assert.equal(rowStatus(source, out, 'Company.Main_Site property bidirectional'), 'dropped');
-  assert.equal(rowStatus(source, out, 'Site.Owner property bidirectional'), 'dropped');
+  assert.equal(rowStatus(source, out, 'Company.Main_Site property bidirectional'), 'counted');
+  assert.equal(rowStatus(source, out, 'Site.Owner property bidirectional'), 'counted');
+
+  const mainSiteTodo = out.model.todos.find((t) => t.name === 'Company.Main_Site property bidirectional');
+  assert.ok(mainSiteTodo, 'UI todo is emitted for the ungenerated reverse lookup');
+  assert.ok(mainSiteTodo.manualStep, 'bidirectional todo names a manual step');
+  const ownerTodo = out.model.todos.find((t) => t.name === 'Site.Owner property bidirectional');
+  assert.ok(ownerTodo, 'UI todo is emitted for the ungenerated reverse lookup');
+  assert.ok(ownerTodo.manualStep, 'bidirectional todo names a manual step');
+
+  // Mutation test: removing the UI todo makes the pair a silent drop again — proving
+  // the reverse reference is not actually carried by any generated widget.
+  const mutated = cloneOutputs(out);
+  mutated.model.todos = mutated.model.todos.filter((t) => t.name !== 'Company.Main_Site property bidirectional');
+  assert.equal(rowStatus(source, mutated, 'Company.Main_Site property bidirectional'), 'dropped');
+});
+
+test('a bidirectional lookup still eligible through a linked grid side keeps the real generated relation, no extra todo', () => {
+  const source = dsApp(LINKED_PAIR);
+  const out = collectOutputs(source);
+  assert.equal(rowStatus(source, out, 'Company.Branches property bidirectional'), 'emitted');
+  assert.equal(rowStatus(source, out, 'Site.Owner property bidirectional'), 'emitted');
+  assert.equal(out.model.todos.some((t) => t.name === 'Company.Branches property bidirectional'), false);
+  assert.equal(out.model.todos.some((t) => t.name === 'Site.Owner property bidirectional'), false);
 });
 
 test('alloweddays is emitted only for every weekday on a generated date widget', () => {

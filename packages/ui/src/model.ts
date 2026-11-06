@@ -464,6 +464,25 @@ const BROWSE_REMOTE_SOURCES = new Set(['google_docs', 'zoho_docs']);
 // is recorded as a manual step rather than invented as UI.
 const PRIVACY_PROPERTY_KEYS = ['private', 'personal data'];
 
+/**
+ * A `bidirectional = Back` lookup pair gets a reverse column from the schema
+ * generator only when one side is a linked grid (packages/schema/src/generator.ts
+ * pendingRefs): a grid field pointing at the target, or a partner grid field on the
+ * target naming this field back. Mirrors the eligibility check
+ * packages/quality/src/no-silent-drop.ts bidirectionalProved makes against the real
+ * schema, at the declaration level the UI model can see before schema generation runs.
+ */
+function bidirectionalLinkedGrid(item: Field | undefined, to: string): boolean {
+  return item !== undefined && ['grid', 'subform', 'form'].includes((item.type ?? '').trim().toLowerCase()) && item.lookup?.form === to;
+}
+
+function bidirectionalReverseEligible(field: Field, formName: string, app: App, target: string, back: string): boolean {
+  if (bidirectionalLinkedGrid(field, target)) return true;
+  const partner = app.forms.find((form) => form.name === target)?.fields.find((item) => item.name === back);
+  const partnerBack = partner?.properties.find((item) => item.key.trim().toLowerCase() === 'bidirectional');
+  return bidirectionalLinkedGrid(partner, formName) && unquote(partnerBack?.value ?? '').trim() === field.name;
+}
+
 const REPORT_VIEW: Record<string, UiReport['view']> = {
   list: 'list',
   report: 'list',
@@ -936,6 +955,23 @@ function buildField(field: Field, todos: UiTodo[], formName: string, depth = 0, 
       reason: `Field ${field.name} is flagged \`${key} = true\`; Catalyst generates no privacy or access control for this field.`,
       manualStep: `In the Catalyst console, apply the data-privacy protection ${field.name} needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.`,
     });
+  }
+  const biProp = field.properties.find((item) => item.key.trim().toLowerCase() === 'bidirectional');
+  if (biProp && app) {
+    const target = field.lookup?.form;
+    const back = unquote(biProp.value).trim();
+    const eligible = !!target && !!back && bidirectionalReverseEligible(field, formName, app, target, back);
+    if (!eligible) {
+      const name = `${formName}.${field.name} property ${biProp.key}`;
+      if (!todos.some((t) => t.area === 'field' && t.name === name)) {
+        todos.push({
+          area: 'field',
+          name,
+          reason: `Field ${field.name} is flagged \`bidirectional = ${back || biProp.value}\`; Catalyst only creates the reverse column from a linked grid side, and neither ${field.name} nor ${target ? `${target}.${back || biProp.value}` : 'its target'} is one.`,
+          manualStep: `In the Catalyst console, if the two records should look each other up, add a grid field on one side pointing back at the other, or wire the lookup by hand — this reverse reference is not generated.`,
+        });
+      }
+    }
   }
   if (field.lookup && (widget === 'lookup' || widget === 'lookup-multi')) {
     ui.lookup = {
