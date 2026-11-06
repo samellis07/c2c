@@ -22,6 +22,7 @@ import { basename } from 'node:path';
 import { runDoctorChecks, type DoctorContext } from './checks.js';
 import { scrubCatalystEnv } from '../../deploy/src/scope.js';
 import { listCatalystProjects, peekCliTokenTag, refreshCliAccessToken } from '../../deploy/src/rest.js';
+import { withCliLock } from '../../deploy/src/cli-lock.js';
 import { EvidenceRejected, EvidenceStale, mcpRecord, parseEvidence, type McpEvidence } from './evidence.js';
 import { beginMcpRequest, closeMcpRequest, mcpRequestInstructions, ObservationRejected, parseObservation, readStdinBounded, type Observed } from './observed.js';
 import {
@@ -68,34 +69,40 @@ const USAGE =
 
 /** One spawn with a deadline; a killed child reports as code 124. */
 export function doctorSpawn(command: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }): Promise<SpawnResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: opts.cwd, env: scrubCatalystEnv(opts.env), stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    // Not spawn's own `timeout` option: that timer stays armed after an ENOENT
-    // and keeps the event loop alive. Our timer is unref'd and cleared.
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, 20_000);
-    timer.unref();
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdout += String(chunk);
+  const doSpawn = () =>
+    new Promise<SpawnResult>((resolve, reject) => {
+      const child = spawn(command, args, { cwd: opts.cwd, env: scrubCatalystEnv(opts.env), stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '';
+      let stderr = '';
+      let timedOut = false;
+      // Not spawn's own `timeout` option: that timer stays armed after an ENOENT
+      // and keeps the event loop alive. Our timer is unref'd and cleared.
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, 20_000);
+      timer.unref();
+      child.stdout?.on('data', (chunk: Buffer) => {
+        stdout += String(chunk);
+      });
+      child.stderr?.on('data', (chunk: Buffer) => {
+        stderr += String(chunk);
+      });
+      child.on('error', (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (timedOut) resolve({ code: 124, stdout, stderr: `${stderr}\ntimed out` });
+        else resolve({ code: code ?? 1, stdout, stderr });
+      });
     });
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += String(chunk);
-    });
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (timedOut) resolve({ code: 124, stdout, stderr: `${stderr}\ntimed out` });
-      else resolve({ code: code ?? 1, stdout, stderr });
-    });
-  });
+  const prog = basename(command);
+  if (prog === 'catalyst' || prog === 'catalyst.cmd') {
+    return withCliLock(opts.env, doSpawn, { work: opts.cwd });
+  }
+  return doSpawn();
 }
 
 export function defaultDoctorIo(): DoctorIo {

@@ -8,7 +8,8 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, sep } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
+import { withCliLock } from './cli-lock.js';
 import { LockedExportError, parseFileWithSidecars, parseProject, widgetCommandStatus, type App } from '../../core/src/index.js';
 import { seedCompositeMap } from '../../data/src/seed.js';
 import { stratusRestSink } from '../../data/src/files.js';
@@ -402,19 +403,25 @@ function stringMap(value: unknown, label: string): Record<string, string> {
 }
 
 export function catalystSpawn(command: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }): Promise<SpawnResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: opts.cwd, env: opts.env, stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdout += String(chunk);
+  const doSpawn = () =>
+    new Promise<SpawnResult>((resolve, reject) => {
+      const child = spawn(command, args, { cwd: opts.cwd, env: opts.env, stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '';
+      let stderr = '';
+      child.stdout?.on('data', (chunk: Buffer) => {
+        stdout += String(chunk);
+      });
+      child.stderr?.on('data', (chunk: Buffer) => {
+        stderr += String(chunk);
+      });
+      child.on('error', reject);
+      child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
     });
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += String(chunk);
-    });
-    child.on('error', reject);
-    child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
-  });
+  const prog = basename(command);
+  if (prog === 'catalyst' || prog === 'catalyst.cmd') {
+    return withCliLock(opts.env, doSpawn, { work: opts.cwd });
+  }
+  return doSpawn();
 }
 
 export function defaultIo(): Io {

@@ -158,3 +158,16 @@ export {
 export type { CapabilityMapping, McpRegistryEntry } from './mcp-registry.js';
 export { GOLDEN_VERSION, MARKERS, REPORT_VERSION, assertGolden, formatBehaviorJson, formatBehaviorMarkdown, liveBackend, loadGoldens, runBehavior, startOfflineBackend } from './verify-behavior.js';
 export type { BehaviorBackend, BehaviorCall, BehaviorFinding, BehaviorReport, BehaviorRunResult, GoldenCase, GoldenFile, GoldenStep, GoldenStepExpect, OfflineHarnessOptions } from './verify-behavior.js';
+export {
+  CLI_LOCK_DEFAULTS,
+  CliLockTimeout,
+  REFRESH_ERROR_RE,
+  acquireCliLock,
+  canonicalCred,
+  cliLockFallbackPath,
+  cliLockPath,
+  cliLockPaths,
+  withCliLock,
+} from './cli-lock.js';
+export type { CliLockHandle, CliLockHolder, CliLockOptions } from './cli-lock.js';
+
