@@ -25,7 +25,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync, writeSync } from 'node:fs';
 import { availableParallelism, loadavg } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { entryKind } from '../../core/src/index.js';
 import { digestOf, loadApp, manifestFor } from '../../determinism/src/tree.js';
@@ -95,23 +95,36 @@ export function listTargets(dir: string): string[] {
   return out;
 }
 
-const SOURCE_DIRS = ['packages/quality/src', 'packages/shims/src'];
+const SOURCE_DIRS = ['packages/quality/src', 'packages/shims/src', 'packages/ui/src'];
+
+/** Every `.ts` file under `dir`, at any depth, in sorted order (directories sort alongside their siblings). */
+function sourceFiles(dir: string): string[] {
+  const entries = readdirSync(dir, { withFileTypes: true }).filter((ent) => !ent.name.startsWith('.'));
+  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const out: string[] = [];
+  for (const ent of entries) {
+    const path = join(dir, ent.name);
+    // The entry kind comes from the directory read; a symlink is skipped.
+    if (ent.isSymbolicLink()) continue;
+    if (entryKind(ent) === 'directory') out.push(...sourceFiles(path));
+    else if (ent.name.endsWith('.ts')) out.push(path);
+  }
+  return out;
+}
 
 /**
  * What the committed summary was measured from: every generated tree in the
- * gallery (determinism manifests), the gate source and the shim source. A
- * change to any of them makes docs/quality-gate.md stale.
+ * gallery (determinism manifests), the gate source, the shim source and the
+ * UI source (buildUi feeds the generated tree, and the gate imports it
+ * directly). A change to any of them makes docs/quality-gate.md stale.
  */
 export function inputsDigest(galleryDir: string, root = REPO_ROOT): string {
   const h = createHash('sha256');
   for (const target of listTargets(galleryDir)) h.update(`tree ${digestOf(manifestFor(target))}\n`);
   for (const rel of SOURCE_DIRS) {
-    const names = readdirSync(join(root, rel))
-      .filter((n) => n.endsWith('.ts'))
-      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    for (const name of names) {
-      const text = readFileSync(join(root, rel, name), 'utf8');
-      h.update(`src ${rel}/${name} ${createHash('sha256').update(text).digest('hex')}\n`);
+    for (const path of sourceFiles(join(root, rel))) {
+      const text = readFileSync(path, 'utf8');
+      h.update(`src ${relative(root, path)} ${createHash('sha256').update(text).digest('hex')}\n`);
     }
   }
   return h.digest('hex');

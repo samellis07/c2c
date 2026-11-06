@@ -978,9 +978,10 @@ test('gallery inputs digest: a gate or shim source edit makes the cache stale; o
   const gallery = fixtureGallery();
   const fake = mkdtempSync(join(tmpdir(), 'c2c-gallery-digest-'));
   try {
-    for (const rel of ['packages/quality/src', 'packages/shims/src']) mkdirSync(join(fake, rel), { recursive: true });
+    for (const rel of ['packages/quality/src', 'packages/shims/src', 'packages/ui/src/decorations']) mkdirSync(join(fake, rel), { recursive: true });
     writeFileSync(join(fake, 'packages/quality/src/gate.ts'), 'export const a = 1;\n');
     writeFileSync(join(fake, 'packages/shims/src/date.ts'), 'export const b = 1;\n');
+    writeFileSync(join(fake, 'packages/ui/src/decorations/lookups.ts'), 'export const c = 1;\n');
     const base = inputsDigest(gallery, fake);
     assert.match(base, /^[0-9a-f]{64}$/);
     assert.equal(inputsDigest(gallery, fake), base, 'stable');
@@ -989,8 +990,11 @@ test('gallery inputs digest: a gate or shim source edit makes the cache stale; o
     writeFileSync(join(fake, 'packages/shims/src/date.ts'), 'export const b = 2;\n');
     const edited = inputsDigest(gallery, fake);
     assert.notEqual(edited, base, 'a shim edit is an input change');
+    writeFileSync(join(fake, 'packages/ui/src/decorations/lookups.ts'), 'export const c = 2;\n');
+    const decorationEdited = inputsDigest(gallery, fake);
+    assert.notEqual(decorationEdited, edited, 'a decorations edit (nested source dir) is an input change');
     copyFileSync(join(root, 'fixtures/dialects/d1-minimal.ds'), join(gallery, 'd3-minimal.ds'));
-    assert.notEqual(inputsDigest(gallery, fake), edited, 'a new gallery app is an input change');
+    assert.notEqual(inputsDigest(gallery, fake), decorationEdited, 'a new gallery app is an input change');
   } finally {
     rmSync(gallery, { recursive: true, force: true });
     rmSync(fake, { recursive: true, force: true });
