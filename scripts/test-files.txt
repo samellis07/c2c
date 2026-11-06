@@ -34,6 +34,7 @@ tests/plugin/rules-auth.test.mjs
 tests/plugin/rules-functions.test.mjs
 tests/plugin/rules-projects.test.mjs
 tests/licence-gate/licence-gate.test.mjs
+tools/clean-repo/test
 tools/security-gate/test
 tests/plugin/launcher-node-gate.test.mjs
 tools/ui-snapshot/test
