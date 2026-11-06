@@ -58,8 +58,21 @@
       "shimmed": 60
     }
   },
-  "todoCount": 0,
-  "todoKinds": [],
+  "todoCount": 3,
+  "todoKinds": [
+    {
+      "construct": "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "count": 1
+    },
+    {
+      "construct": "Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "count": 1
+    },
+    {
+      "construct": "Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "count": 1
+    }
+  ],
   "fieldGaps": [
     {
       "matrixId": "auto-number",
@@ -198,7 +211,23 @@
       "reason": "<button>: the Staff Activity Log button opens without its values (Staff Activity Log)"
     }
   ],
-  "todoSteps": [],
+  "todoSteps": [
+    {
+      "location": "field Staff_Members.Staff_Name property personal data",
+      "construct": "Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "step": "In the Catalyst console, apply the data-privacy protection Staff_Name needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+    },
+    {
+      "location": "field Staff_Members.Staff_Email property personal data",
+      "construct": "Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "step": "In the Catalyst console, apply the data-privacy protection Staff_Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+    },
+    {
+      "location": "field Staff_Members.Phone_Number property personal data",
+      "construct": "Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.",
+      "step": "In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated."
+    }
+  ],
   "humanSteps": [
     "Accept invite: accept the app invite mail",
     "Sign in once: sign in to the deployed app once",
@@ -206,30 +235,8 @@
     "Verify mail sender: confirm the Catalyst Mail sender email (only when the app sends mail)",
     "console: cloudscale-enable — Catalyst console → the project → Cloud Scale → Start Exploring (<console>/baas/<org>/project/<project>/Development#/cloudscale) — then c2c verifies it: c2c provision --record cloudscale-enable (GET /baas/v1/project/<project>/table)"
   ],
-  "silentDrops": 14,
+  "silentDrops": 11,
   "residuals": [
-    {
-      "id": "field-property:Staff_Members.Staff_Name property personal data",
-      "kind": "field-property",
-      "construct": "Staff_Members.Staff_Name property personal data",
-      "form": "Staff_Members",
-      "field": "Staff_Name",
-      "property": "property personal data",
-      "reason": "property personal data is not carried by the generated name field. One varchar per part (prefix, first_name, last_name, suffix). Deluge sees one value; a shim joins the parts. Parts are not separate field-type rows.",
-      "step": "The personal-data setting for Staff_Members.Staff_Name was not converted. In the Catalyst console, mark Staff_Members.Staff_Name as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:Staff_Members.Staff_Email property personal data",
-      "kind": "field-property",
-      "construct": "Staff_Members.Staff_Email property personal data",
-      "form": "Staff_Members",
-      "field": "Staff_Email",
-      "property": "property personal data",
-      "reason": "property personal data is not carried by the generated email field. There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.",
-      "step": "The personal-data setting for Staff_Members.Staff_Email was not converted. In the Catalyst console, mark Staff_Members.Staff_Email as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
-      "stepSource": "specific"
-    },
     {
       "id": "field-property:Staff_Members.Phone_Number property defaultcountry",
       "kind": "field-property",
@@ -239,17 +246,6 @@
       "property": "property defaultcountry",
       "reason": "property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
       "step": "The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected.",
-      "stepSource": "specific"
-    },
-    {
-      "id": "field-property:Staff_Members.Phone_Number property personal data",
-      "kind": "field-property",
-      "construct": "Staff_Members.Phone_Number property personal data",
-      "form": "Staff_Members",
-      "field": "Phone_Number",
-      "property": "property personal data",
-      "reason": "property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.",
-      "step": "The personal-data setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, mark Staff_Members.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.",
       "stepSource": "specific"
     },
     {
