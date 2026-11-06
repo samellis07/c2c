@@ -35,7 +35,7 @@ export interface ZipLimits {
   maxEntryBytes?: number;
   /** Refuse when declared uncompressed sizes total more than this. Default 512 MiB. */
   maxTotalBytes?: number;
-  /** Refuse a deflate member declaring more than this times its packed size. Default 100. */
+  /** Refuse a deflate member declaring more than this times its packed size. Default 1000. */
   maxInflateRatio?: number;
 }
 
@@ -69,7 +69,7 @@ const DEFAULT_MAX_ENTRIES = 4096;
 /** Default cap on one inflated member; also bounds other inflates of untrusted bytes. */
 export const DEFAULT_MAX_ENTRY = 64 * 1024 * 1024;
 const DEFAULT_MAX_TOTAL = 512 * 1024 * 1024;
-const DEFAULT_MAX_RATIO = 100;
+const DEFAULT_MAX_RATIO = 1000;
 
 const ZIP64 = 0xffffffff;
 const FLAG_ENCRYPTED = 0x1;
