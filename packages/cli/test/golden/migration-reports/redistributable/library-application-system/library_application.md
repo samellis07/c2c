@@ -25,9 +25,11 @@ App: Library_System_Application
 
 ## TODO counts
 
-0
+3
 
-- none
+- 1 Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+- 1 Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+- 1 Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
 
 ## Field gaps
 
@@ -45,7 +47,12 @@ App: Library_System_Application
 
 ## Residual TODO steps
 
-- none
+- `field Staff_Members.Staff_Name property personal data` — Field Staff_Name is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Staff_Name needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field Staff_Members.Staff_Email property personal data` — Field Staff_Email is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Staff_Email needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
+- `field Staff_Members.Phone_Number property personal data` — Field Phone_Number is flagged `personal data = true`; Catalyst generates no privacy or access control for this field.
+  - Step: In the Catalyst console, apply the data-privacy protection Phone_Number needs by hand (field-level masking, access restriction, or encryption, per your policy) — this is not generated.
 
 ## Hidden from end users
 
@@ -70,16 +77,10 @@ App: Library_System_Application
 
 ## Not converted
 
-Silent drops: 14 (still counted; each has a guided step below)
+Silent drops: 11 (still counted; each has a guided step below)
 
-- `field-property:Staff_Members.Staff_Name property personal data` — not converted. property personal data is not carried by the generated name field. One varchar per part (prefix, first_name, last_name, suffix). Deluge sees one value; a shim joins the parts. Parts are not separate field-type rows.
-  - Step: The personal-data setting for Staff_Members.Staff_Name was not converted. In the Catalyst console, mark Staff_Members.Staff_Name as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
-- `field-property:Staff_Members.Staff_Email property personal data` — not converted. property personal data is not carried by the generated email field. There is no email column (API type email returns PATTERN_NOT_MATCHED). Stored as varchar plus a generated format check. Creator’s exact rule is unpublished, so the check can differ on edge cases.
-  - Step: The personal-data setting for Staff_Members.Staff_Email was not converted. In the Catalyst console, mark Staff_Members.Staff_Email as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
 - `field-property:Staff_Members.Phone_Number property defaultcountry` — not converted. property defaultcountry is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
   - Step: The property defaultcountry setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, configure that setting for Staff_Members.Phone_Number, then preview the form or report and confirm the field behaves as expected.
-- `field-property:Staff_Members.Phone_Number property personal data` — not converted. property personal data is not carried by the generated phone field. There is no phone column. Stored as varchar. Country digit rules are a generated table and can drift from Creator.
-  - Step: The personal-data setting for Staff_Members.Phone_Number was not converted. In the Catalyst console, mark Staff_Members.Phone_Number as personal or sensitive data if required by your policy, then inspect the field settings and verify the protection is enabled.
 - `report-feature:Book_Report block options` — not converted. Report Book_Report block options is not in the generated report. Add one: either emit it or record the manual step.
   - Step: The options for the Book_Report report were not converted. In the Catalyst console, open the Book_Report report and configure its report options, then preview it and verify the filters, layout, and visible data match the source app.
 - `report-feature:Book_by_Genre block options` — not converted. Report Book_by_Genre block options is not in the generated report. Add one: either emit it or record the manual step.
