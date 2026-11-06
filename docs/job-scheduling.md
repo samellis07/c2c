@@ -52,7 +52,7 @@ A Catalyst Job function must close its context. The generated `default` export c
 - **Creator custom-schedule quota.** Creator allows 90 / 300 / 600 custom schedules per user per month (Standard / Professional / Enterprise). Source: https://www.zoho.com/creator/pricing.html. Catalyst Job Scheduling states no cron-count limit.
 - **Form-schedule runs.** Creator counts a form schedule per record per run, and all account schedules stop when the quota runs out.
 - **Sweep granularity.** A form schedule can fire up to 5 minutes late. A repeating form schedule with several occurrences in one window fires once.
-- **Cron time zone.** Whether Catalyst evaluates a CronExpression in the project time zone is not verified. The Creator zone is kept in `c2c.timeZone`.
+- **Cron time zone.** The cron POST body sends the Creator zone as `job_detail.timezone`, which the Catalyst Job Scheduling API requires. A custom schedule with no resolvable zone is a `schedule-time-zone` TODO with no cron. Whether Catalyst accepts every IANA zone name is not verified.
 - **Start date.** A repeating custom schedule starts at deploy, not at the Creator start date. A OneTime cron in the past never fires.
 - **Deploy.** The deploy table steps create `C2CJobCheckpoint` for an app with a form schedule. `c2c deploy` writes and deploys the `c2c_jobs` Job function (see Deploy tree below); the pool and the crons are `c2c provision` steps (`jobpool`, `crons`).
 

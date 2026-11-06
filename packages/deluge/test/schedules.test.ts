@@ -125,6 +125,13 @@ test('a schedule shape that does not convert is a TODO with no cron, never a gue
   assert.match(stripComments(file(g, 'functions/job/odd.mjs')!.source), /export const cron = null;/);
 });
 
+test('a repeating custom schedule with no time zone is a TODO, never a cron in an unknown zone', () => {
+  const g = generate(appWith([schedule('Daily', ['start = "2026-10-07 07:00:00"', 'frequency = daily'], 'x = 1;')]));
+  const report = JSON.parse(file(g, 'migration-report.json')!.source) as { untranslated: { construct: string }[] };
+  assert.deepEqual(report.untranslated.map((u) => u.construct), ['schedule-time-zone']);
+  assert.deepEqual(config(g).crons, []);
+});
+
 test('form schedules share one sweeper Job with a Periodic cron, a checkpoint table and sweep specs', () => {
   const ir = appWith([
     schedule('Due_Reminder', ['form = Invoice[Status != "Paid"]', 'start = before 1 days from Due_Date at "09:00:00"', ZONE], 'insert into Log[Note = input.Name];'),
